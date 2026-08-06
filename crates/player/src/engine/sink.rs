@@ -1,5 +1,5 @@
 use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+//use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::player::PlayerInitError;
@@ -219,7 +219,7 @@ impl AudioSink for CpalSink {
         let mut data_cb = make_cb(config);
         let on_event = self.on_event.clone();
         let loudness = self.loudness.clone();
-        let mut last_log = Instant::now();
+        //let mut last_log = Instant::now();
         let stream = self
             .device
             .build_output_stream(
@@ -248,14 +248,14 @@ impl AudioSink for CpalSink {
                         Ordering::Relaxed,
                     );
 
-                    if last_log.elapsed() >= Duration::from_secs(1) {
+                    /*if last_log.elapsed() >= Duration::from_secs(1) {
                         tracing::info!(
                             rms = %rms,
                             peak = %peak,
                             "audio loudness"
                         );
                         last_log = Instant::now();
-                    }
+                    }*/
                 },
                 move |err: cpal::Error| {
                     let event = match err.kind() {

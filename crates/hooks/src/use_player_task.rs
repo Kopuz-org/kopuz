@@ -303,8 +303,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                 interval.tick().await;
 
                 let is_playing = *ctrl.is_playing.read();
+                let ext_active = *ctrl.external_active.read();
 
-                let intensity = if is_playing {
+                let intensity = if is_playing && !ext_active {
                     let rms = loudness.rms();
                     let peak = loudness.peak();
                     (rms * 0.8 + peak * 0.2)
@@ -314,10 +315,10 @@ pub fn use_player_task(ctrl: PlayerController) {
                     0.0
                 };
 
-                tracing::info!(
+                /*tracing::info!(
                     intensity = %intensity,
                     "vib signal"
-                );
+                );*/
 
                 for device in client.devices().into_values() {
                     if device.output_available(OutputType::Vibrate) {

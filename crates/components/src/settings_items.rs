@@ -983,7 +983,7 @@ pub fn IntifaceSettings(
     let mut host_input = use_signal(move || host.clone());
     let mut port_input = use_signal(move || port.clone());
     let mut devices: Signal<Vec<String>> = use_signal(Vec::new);
-    let mut is_connected = use_signal(move || connected);
+    let is_connected = use_signal(move || connected);
 
     rsx! {
         div {
