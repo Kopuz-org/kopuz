@@ -22,7 +22,7 @@ pip install pipx
 
 pipx install git+https://github.com/flatpak/flatpak-builder-tools.git#subdirectory=node --force
 
-flatpak-node-generator npm "$CUR_DIR/package-lock.json" -o "pnpm-sources.json"
+flatpak-node-generator npm "$CUR_DIR/package-lock.json" -o "npm-sources.json"
 
 pip install flatpak-cargo-generator
 
@@ -80,7 +80,7 @@ make_asset_source \
 
 
 
-cp "pnpm-sources.json" "$CUR_DIR/packaging/flatpak/pnpm-sources.json"
+cp "npm-sources.json" "$CUR_DIR/packaging/flatpak/npm-sources.json"
 
 cp "cargo-sources.json" "$CUR_DIR/packaging/flatpak/cargo-sources.json"
 

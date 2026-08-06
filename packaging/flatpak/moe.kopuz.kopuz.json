@@ -74,7 +74,7 @@
         "dioxus-cli.json",
         "cargo-sources.json",
         "librusty.json",
-        "pnpm-sources.json"
+        "npm-sources.json"
       ]
     }
   ]
