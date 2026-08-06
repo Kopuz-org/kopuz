@@ -32,6 +32,7 @@
     "append-path": "/usr/lib/sdk/node24/bin:/usr/lib/sdk/rust-stable/bin"
   },
   "modules": [
+    "flathub-submodules/libayatana-appindicator/libayatana-appindicator-gtk3.json",
     "native-modules.json",
     {
       "name": "kopuz",
