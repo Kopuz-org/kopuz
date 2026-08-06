@@ -19,6 +19,7 @@
     "--filesystem=xdg-music:ro",
     "--filesystem=xdg-download:ro",
     "--filesystem=xdg-run/discord-ipc-0",
+    "--filesystem=xdg-run/tray-icon",
     "--talk-name=org.freedesktop.Notifications",
     "--talk-name=org.mpris.MediaPlayer2.*",
     "--own-name=org.mpris.MediaPlayer2.kopuz",

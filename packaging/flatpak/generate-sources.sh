@@ -9,9 +9,22 @@ if [[ "$CUR_DIR" == */packaging/flatpak ]]; then
     CUR_DIR="$(dirname "$(dirname "$CUR_DIR")")"
 fi
 
+if [[ -d "$CUR_DIR/packaging/flatpak" ]]; then
+    DIST_DIR="$CUR_DIR/packaging/flatpak"
+else
+    DIST_DIR="$CUR_DIR"
+fi
+
 WORKDIR="$(mktemp -d -t kopuz-flatpak-XXXXXX)"
 
 cd "$WORKDIR"
+
+if [[ -f "$CUR_DIR/Cargo.lock" ]]; then
+    REPO_DIR="$CUR_DIR"
+else
+    git clone https://github.com/Kopuz-org/kopuz.git
+    REPO_DIR="$WORKDIR/kopuz"
+fi
 
 
 python -m venv venv
@@ -22,11 +35,11 @@ pip install pipx
 
 pipx install git+https://github.com/flatpak/flatpak-builder-tools.git#subdirectory=node --force
 
-flatpak-node-generator npm "$CUR_DIR/package-lock.json" -o "npm-sources.json"
+flatpak-node-generator npm "$REPO_DIR/package-lock.json" -o "npm-sources.json"
 
 pip install flatpak-cargo-generator
 
-flatpak-cargo-generator "$CUR_DIR/Cargo.lock" -o "cargo-sources.json"
+flatpak-cargo-generator "$REPO_DIR/Cargo.lock" -o "cargo-sources.json"
 
 make_asset_source() {
     releases=$(curl -fsSL "$1")
@@ -71,7 +84,7 @@ make_asset_source \
 "librusty.json"
 
 make_asset_source \
-"https://api.github.com/repos/DioxusLabs/dioxus/releases/tags/v$(grep -oPm1 'cargo install dioxus-cli@\K[0-9]+([\.\d]+)' $CUR_DIR/.github/workflows/release.yml)" \
+"https://api.github.com/repos/DioxusLabs/dioxus/releases/tags/v$(grep -oPm1 'cargo install dioxus-cli@\K[0-9]+([\.\d]+)' $REPO_DIR/.github/workflows/release.yml)" \
 "dx-{@}-unknown-linux-gnu.zip" \
 "archive" \
 "dest" \
@@ -80,10 +93,10 @@ make_asset_source \
 
 
 
-cp "npm-sources.json" "$CUR_DIR/packaging/flatpak/npm-sources.json"
+cp "npm-sources.json" "$DIST_DIR/npm-sources.json"
 
-cp "cargo-sources.json" "$CUR_DIR/packaging/flatpak/cargo-sources.json"
+cp "cargo-sources.json" "$DIST_DIR/cargo-sources.json"
 
-cp "dioxus-cli.json" "$CUR_DIR/packaging/flatpak/dioxus-cli.json"
+cp "dioxus-cli.json" "$DIST_DIR/dioxus-cli.json"
 
-cp "librusty.json" "$CUR_DIR/packaging/flatpak/librusty.json"
+cp "librusty.json" "$DIST_DIR/librusty.json"
