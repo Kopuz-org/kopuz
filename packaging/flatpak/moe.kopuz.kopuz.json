@@ -54,10 +54,10 @@
       "build-commands": [
         "dx build --release --package kopuz",
         "install -Dm755 target/dx/kopuz/release/linux/app/kopuz /app/bin/kopuz",
-        "install -Dm644 data/com.temidaradev.kopuz.desktop -t /app/share/applications/",
-        "install -Dm644 data/com.temidaradev.kopuz.metainfo.xml -t /app/share/metainfo/",
-        "install -Dm644 crates/kopuz/assets/logo-512.png /app/share/icons/hicolor/512x512/apps/com.temidaradev.kopuz.png",
-        "install -Dm644 crates/kopuz/assets/logo-128.png /app/share/icons/hicolor/128x128/apps/com.temidaradev.kopuz.png"
+        "install -Dm644 data/moe.kopuz.kopuz.desktop -t /app/share/applications/",
+        "install -Dm644 data/moe.kopuz.kopuz.metainfo.xml -t /app/share/metainfo/",
+        "install -Dm644 crates/kopuz/assets/logo-512.png /app/share/icons/hicolor/512x512/apps/moe.kopuz.kopuz.png",
+        "install -Dm644 crates/kopuz/assets/logo-128.png /app/share/icons/hicolor/128x128/apps/moe.kopuz.kopuz.png"
       ],
       "sources": [
         {

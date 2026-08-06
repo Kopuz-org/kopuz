@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.temidaradev.kopuz</id>
+  <id>moe.kopuz.kopuz</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>Kopuz</name>
@@ -23,7 +23,7 @@
     </p>
   </description>
 
-  <launchable type="desktop-id">com.temidaradev.kopuz.desktop</launchable>
+  <launchable type="desktop-id">moe.kopuz.kopuz.desktop</launchable>
 
   <screenshots>
     <screenshot type="default">
