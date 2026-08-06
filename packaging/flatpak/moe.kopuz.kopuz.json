@@ -44,7 +44,7 @@
           "CARGO_NET_OFFLINE": "true",
           "NPM_CONFIG_LOGLEVEL": "info",
           "XDG_CACHE_HOME": "/run/build/kopuz/flatpak-node/npm-cache",
-          "npm_config_nodedir": "/usr/lib/sdk/node22",
+          "npm_config_nodedir": "/usr/lib/sdk/node24",
           "npm_config_cache": "/run/build/kopuz/flatpak-node/npm-cache",
           "npm_config_offline": "true",
           "RUSTY_V8_ARCHIVE": "/run/build/kopuz/librusty.a.gz",
