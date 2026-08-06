@@ -34,6 +34,9 @@ server = { workspace = true }
 tokio = { workspace = true, features = ["time", "fs"] }
 serde_json = { workspace = true }
 i18n = { workspace = true }
+buttplug_client = { workspace = true }
+buttplug_transport_websocket_tungstenite = { workspace = true }
+futures = { workspace = true }
 
 # Native file dialogs (folder/cover pickers). rfd doesn't work on Android
 # (which auto-detects the music dir via JNI instead).

@@ -791,6 +791,12 @@ pub struct AppConfig {
     pub prefer_local_lyrics: bool,
     #[serde(default)]
     pub enable_musixmatch_lyrics: bool,
+    #[serde(default)]
+    pub intiface_host: String,
+    #[serde(default)]
+    pub intiface_port: String,
+    #[serde(default)]
+    pub intiface_connected: Option<bool>
 }
 
 fn default_theme() -> String {
@@ -980,6 +986,9 @@ impl Default for AppConfig {
             pinned_stations: Vec::new(),
             prefer_local_lyrics: false,
             enable_musixmatch_lyrics: false,
+            intiface_host: String::new(),
+            intiface_port: String::new(),
+            intiface_connected: Some(false),
         }
     }
 }

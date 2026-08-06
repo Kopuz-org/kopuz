@@ -97,6 +97,11 @@ hex = "0.4"
 rookie = "0.5"
 color-thief = "0.2.2"
 time = "0.3"
+buttplug = "11.0.0"
+buttplug_client = "11.0.0"
+buttplug_transport_websocket_tungstenite = "11.0.0"
+buttplug_core = "11.0.0"
+futures = "0.3.33"
 # Headless JS for YouTube (desktop only). VERSION LOCK: rustypipe-botguard 0.1.2
 # pins deno_core ^0.331, so deno_core must stay on 0.331.x to share one V8 link.
 deno_core = "0.331"
