@@ -53,11 +53,11 @@
       },
       "build-commands": [
         "dx build --release --package kopuz",
-        "install -Dm755 target/dx/kopuz/release/linux/app/kopuz /app/bin/kopuz",
-        "install -Dm644 data/moe.kopuz.kopuz.desktop -t /app/share/applications/",
-        "install -Dm644 data/moe.kopuz.kopuz.metainfo.xml -t /app/share/metainfo/",
-        "install -Dm644 crates/kopuz/assets/logo-512.png /app/share/icons/hicolor/512x512/apps/moe.kopuz.kopuz.png",
-        "install -Dm644 crates/kopuz/assets/logo-128.png /app/share/icons/hicolor/128x128/apps/moe.kopuz.kopuz.png"
+        "install -Dm755 target/dx/kopuz/release/linux/app/kopuz $FLATPAK_DEST/bin/kopuz",
+        "install -Dm644 data/$FLATPAK_ID.desktop $FLATPAK_DEST/share/applications/$FLATPAK_ID.desktop",
+        "install -Dm644 data/$FLATPAK_ID.metainfo.xml $FLATPAK_DEST/share/metainfo/$FLATPAK_ID.metainfo.xml",
+        "install -Dm644 crates/kopuz/assets/logo-512.png $FLATPAK_DEST/share/icons/hicolor/512x512/apps/$FLATPAK_ID.png",
+        "install -Dm644 crates/kopuz/assets/logo-128.png $FLATPAK_DEST/share/icons/hicolor/128x128/apps/$FLATPAK_ID.png"
       ],
       "sources": [
         {
