@@ -7,21 +7,22 @@
       "name": "xdotool",
       "buildsystem": "simple",
       "build-commands": [
-        "make INSTALL_MAN=0 PREFIX=/app",
-        "make install INSTALL_MAN=0 PREFIX=/app"
+        "make INSTALL_MAN=0 PREFIX=$FLATPAK_DEST",
+        "make install INSTALL_MAN=0 PREFIX=$FLATPAK_DEST"
       ],
       "sources": [
         {
           "type": "git",
           "url": "https://github.com/jordansissel/xdotool.git",
-          "tag": "v3.20211022.1"
+          "tag": "v4.20260303.1",
+          "commit": "d37c16111dbe38ea29194f20ac9de03cff8dfc1c"
         }
       ]
     },
     {
       "name": "yt-dlp",
       "buildsystem": "simple",
-      "build-commands": ["install -Dm755 yt-dlp /app/bin/yt-dlp"],
+      "build-commands": ["install -Dm755 yt-dlp $FLATPAK_DEST/bin/yt-dlp"],
       "sources": [
         {
           "type": "file",

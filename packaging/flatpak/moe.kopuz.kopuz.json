@@ -11,7 +11,7 @@
   "separate-locales": false,
   "finish-args": [
     "--share=ipc",
-    "--socket=x11",
+    "--socket=fallback-x11",
     "--socket=wayland",
     "--socket=pulseaudio",
     "--device=dri",
@@ -23,7 +23,6 @@
     "--talk-name=org.freedesktop.Notifications",
     "--talk-name=org.mpris.MediaPlayer2.*",
     "--own-name=org.mpris.MediaPlayer2.kopuz",
-    "--talk-name=org.freedesktop.Flatpak",
     "--talk-name=org.freedesktop.secrets",
     "--talk-name=org.kde.StatusNotifierWatcher",
     "--env=LD_LIBRARY_PATH=/app/lib"
