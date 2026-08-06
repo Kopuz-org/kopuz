@@ -9,7 +9,7 @@
   {
     "type": "file",
     "url": "https://github.com/denoland/rusty_v8/releases/download/v130.0.7/librusty_v8_release_aarch64-unknown-linux-gnu.a.gz",
-    "sha256": "a6476cb94e9b0247081c465424eb793d77732b8db80848132d78cbb50f34b75d",
+    "sha256": "a53558004d7fe502065f5b9c42b50797930b30ce360e8913799dbec0aeeea40f",
     "dest-filename": "librusty.a.gz",
     "only-arches": ["aarch64"]
   }
