@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT payload FROM metadata_cache WHERE cache_key = 'legacy_import' AND kind = 'files'",
+  "describe": {
+    "columns": [
+      {
+        "name": "payload",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "89615addcad263e1b55cf4e418392ec177c1b8f81ceb56462566512f63f6112e"
+}

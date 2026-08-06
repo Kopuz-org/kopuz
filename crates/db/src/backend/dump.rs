@@ -114,7 +114,7 @@ pub async fn load_playlists(pool: &SqlitePool, source: &Source) -> Result<Playli
 pub async fn load_queue(pool: &SqlitePool) -> Result<QueueSnapshot, DbError> {
     let row = sqlx::query!(
         "SELECT version, queue_json, current_queue_index, progress_secs, \
-                shuffle_order_json, shuffle_enabled \
+                shuffle_order_json, shuffle_enabled, loop_mode \
          FROM queue_state WHERE id = 1"
     )
     .fetch_optional(pool)
@@ -129,5 +129,6 @@ pub async fn load_queue(pool: &SqlitePool) -> Result<QueueSnapshot, DbError> {
         progress_secs: row.progress_secs.max(0) as u64,
         shuffle_order: serde_json::from_str(&row.shuffle_order_json).unwrap_or_default(),
         shuffle_enabled: row.shuffle_enabled != 0,
+        loop_mode: row.loop_mode.clamp(0, u8::MAX as i64) as u8,
     })
 }

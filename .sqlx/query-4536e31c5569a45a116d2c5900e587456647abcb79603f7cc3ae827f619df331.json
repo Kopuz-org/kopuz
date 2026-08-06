@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ref FROM favorites WHERE server_id = ?1 AND dirty != 2 ORDER BY rank, rowid",
+  "describe": {
+    "columns": [
+      {
+        "name": "ref",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4536e31c5569a45a116d2c5900e587456647abcb79603f7cc3ae827f619df331"
+}

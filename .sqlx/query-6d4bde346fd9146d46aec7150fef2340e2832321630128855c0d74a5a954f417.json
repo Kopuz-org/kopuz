@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM playlist_tracks WHERE playlist_pk = ?1 AND epoch != ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "6d4bde346fd9146d46aec7150fef2340e2832321630128855c0d74a5a954f417"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO metadata_cache (cache_key, kind, payload) VALUES (?1, ?2, ?3) ON CONFLICT(cache_key, kind) DO UPDATE SET payload = ?3, fetched_at = unixepoch()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "e8032409a9e02b3cc85c8fc62d2cd9b97ecdb1c1e224030f7e94bacf4fd4756f"
+}

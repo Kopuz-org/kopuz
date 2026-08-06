@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO queue_state (id, version, queue_json, current_queue_index, progress_secs, shuffle_order_json, shuffle_enabled, loop_mode) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(id) DO UPDATE SET version=?1, queue_json=?2, current_queue_index=?3, progress_secs=?4, shuffle_order_json=?5, shuffle_enabled=?6, loop_mode=?7",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "362fcce50a891d3f6fbdbd02822bcd2dc3f77962ad171fde5a4d473a1652332f"
+}

@@ -546,6 +546,7 @@ async fn queue_round_trips() {
         progress_secs: 42,
         shuffle_order: vec![0],
         shuffle_enabled: true,
+        loop_mode: 2,
     };
     db.save_queue(&snap).await.unwrap();
     let q = db.load_queue().await.unwrap();
@@ -553,6 +554,7 @@ async fn queue_round_trips() {
     assert_eq!(q.queue[0].title, "Yt One");
     assert_eq!(q.progress_secs, 42);
     assert!(q.shuffle_enabled);
+    assert_eq!(q.loop_mode, 2);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM playlist_tracks WHERE playlist_pk = ?1 AND track_ref = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9ad9801efe8d089c884dc324c68bd0d3175ab1b2b035776e7d43f82d4809f0e7"
+}

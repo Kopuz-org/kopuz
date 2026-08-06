@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT track_key, count FROM listen_counts",
+  "describe": {
+    "columns": [
+      {
+        "name": "track_key",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "count",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d9388a0532bc126bd3283b0b02319c9ba6ef1e7c0cacc3ea139d5940faa0343b"
+}
