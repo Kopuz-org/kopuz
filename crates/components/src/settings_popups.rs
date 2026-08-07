@@ -75,8 +75,12 @@ pub fn AddServerPopup(
     let cancel_text = i18n::t("cancel").to_string();
     let save_text = i18n::t("save").to_string();
 
-    let saving_not_supported =
-        !host_access() && server_service().uses_browser_signin() && !yt_anonymous();
+    let saving_not_supported = {
+        let service = server_service();
+        !host_access()
+            && service.uses_browser_signin()
+            && (service != MusicService::YtMusic || !yt_anonymous())
+    };
 
     let flatpak_access_command =
         "flatpak override --user --talk-name=org.freedesktop.Flatpak moe.kopuz.kopuz";
