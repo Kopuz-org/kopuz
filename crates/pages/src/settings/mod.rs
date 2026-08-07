@@ -72,8 +72,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
     let host_access = use_signal(|| false);
 
-    let _ = use_resource(move || async move {
-        crate::settings_actions::ensure_host_access(host_access).await;
+    use_effect(move || {
+        spawn(async move {
+            crate::settings_actions::ensure_host_access(host_access).await;
+        });
     });
 
     let handle_add_registry = move |_| {
