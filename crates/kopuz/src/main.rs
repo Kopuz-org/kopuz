@@ -1561,6 +1561,8 @@ fn App() -> Element {
         }
     });
 
+    hooks::use_intiface::use_intiface_provider();
+
     provide_context(ctrl);
     provide_context(config);
     let discover_now_playing = use_signal(|| None::<String>);

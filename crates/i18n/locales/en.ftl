@@ -41,6 +41,10 @@ connect_to_lastfm = Connect to Last.fm
 lastfm_connected = Last.fm Connected
 connect_to_librefm = Connect to Libre.fm
 librefm_connected = Libre.fm Connected
+connect_to_intiface = Connect to Intiface
+intiface_connected = Intiface Connected
+intiface_warning = This defaults to an insecure ws connection.
+intiface_devices = Device list:
 server_details = Server Details
 server_name = Server Name
 server_url = Server URL
@@ -244,6 +248,8 @@ no_results_found = No results found for "{ $query }"
 listenbrainz_token_placeholder = Enter your ListenBrainz token
 lastfm_api_key_placeholder = Enter your Last.fm API Key
 lastfm_api_secret_placeholder = Enter your Last.fm API Secret
+intiface_host_placeholder = Enter your Intiface Central host
+intiface_port_placeholder = Enter your Intiface Central port
 
 # Empty States
 album_not_found = Album not found
@@ -348,6 +354,7 @@ tracing_warning = Adds runtime overhead and grows the trace file; takes effect a
 export_logs = Export Logs
 open_logs_folder = Open Logs Folder
 librefm = Libre.fm
+intiface = Intiface
 album_art_gradient = Album art gradient
 default_theme = Default
 gruvbox_material = Gruvbox Material

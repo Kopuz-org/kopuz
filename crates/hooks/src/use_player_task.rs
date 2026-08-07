@@ -6,7 +6,8 @@ use config::MusicService;
 use dioxus::logger::tracing::Instrument;
 use dioxus::prelude::*;
 use std::sync::Arc;
-
+use buttplug_client::device::ClientDeviceOutputCommand;
+use buttplug_core::message::OutputType;
 use discord_presence::Presence;
 use discord_presence::cover_art;
 
@@ -15,6 +16,7 @@ use player::systemint::set_background_handler;
 
 #[cfg(target_os = "macos")]
 use player::systemint::set_tokio_waker;
+use crate::use_intiface::IntifaceState;
 
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -172,6 +174,7 @@ fn nudge_event_loop() {
 }
 
 pub fn use_player_task(ctrl: PlayerController) {
+    let intiface = use_context::<IntifaceState>();
     let presence: Option<Arc<Presence>> = use_context();
     let mut config: Signal<AppConfig> = use_context();
 
@@ -277,6 +280,59 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
             }
         }
+    });
+
+    use_effect(move || {
+        let loudness = ctrl.player.read().loudness.clone();
+        let client = intiface.client.read().as_ref().cloned();
+
+        let Some(client) = client else {
+            return;
+        };
+
+        if !*intiface.connected.read() {
+            return;
+        }
+
+        spawn(async move {
+            let mut interval = tokio::time::interval(
+                std::time::Duration::from_millis(50)
+            );
+
+            loop {
+                interval.tick().await;
+
+                let is_playing = *ctrl.is_playing.read();
+                let ext_active = *ctrl.external_active.read();
+
+                let intensity = if is_playing && !ext_active {
+                    let rms = loudness.rms();
+                    let peak = loudness.peak();
+                    (rms * 0.8 + peak * 0.2)
+                        .sqrt()
+                        .clamp(0.0, 1.0) as f64
+                } else {
+                    0.0
+                };
+
+                /*tracing::info!(
+                    intensity = %intensity,
+                    "vib signal"
+                );*/
+
+                for device in client.devices().into_values() {
+                    if device.output_available(OutputType::Vibrate) {
+                        let _ = device
+                            .run_output(
+                                &ClientDeviceOutputCommand::Vibrate(
+                                    intensity.into()
+                                )
+                            )
+                            .await;
+                    }
+                }
+            }
+        });
     });
 
     // Android routes media-notification button taps through a JNI callback (no event

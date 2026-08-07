@@ -31,3 +31,5 @@ scrobble = { workspace = true }
 radio = { workspace = true }
 discord-presence = { workspace = true }
 tokio = { workspace = true, features = ["fs", "sync", "macros"] }
+buttplug_client = { workspace = true }
+buttplug_core = { workspace = true }

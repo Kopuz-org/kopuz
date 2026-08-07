@@ -11,7 +11,7 @@ use config::{ChannelMode, EqualizerSettings};
 
 use crate::engine::{
     ActorMsg, AudioSink, Command, CpalSink, EngineHandle, EngineStatus, Event, LoadReply,
-    LoadRequest, Phase, SinkEvent, SourceFactory, Transition,
+    LoadRequest, Phase, SinkEvent, SourceFactory, Transition, LoudnessMeter,
 };
 #[cfg(any(
     target_os = "macos",
@@ -64,6 +64,7 @@ pub struct LoadArgs {
 pub struct Player {
     engine: EngineHandle,
     now_playing: Option<NowPlayingMeta>,
+    pub loudness: Arc<LoudnessMeter>,
 }
 
 impl Player {
@@ -73,6 +74,8 @@ impl Player {
         #[cfg(target_os = "android")]
         systemint::init();
 
+        let loudness = Arc::new(LoudnessMeter::new());
+        let sink_loudness = loudness.clone();
         let engine = EngineHandle::spawn(|tx| {
             let tx = tx.clone();
             CpalSink::try_new(move |event| {
@@ -82,13 +85,14 @@ impl Player {
                     SinkEvent::DefaultDeviceChanged => ActorMsg::DefaultDeviceChanged,
                 };
                 let _ = tx.send(msg);
-            })
+            }, sink_loudness)
             .map(|sink| Box::new(sink) as Box<dyn AudioSink>)
         })?;
 
         Ok(Self {
             engine,
             now_playing: None,
+            loudness
         })
     }
 

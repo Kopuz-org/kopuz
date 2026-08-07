@@ -15,6 +15,7 @@ pub mod use_player_controller;
 pub mod use_player_task;
 pub mod use_search_data;
 pub mod use_sync_task;
+pub mod use_intiface;
 
 pub use use_player_controller::*;
 pub use use_player_task::*;

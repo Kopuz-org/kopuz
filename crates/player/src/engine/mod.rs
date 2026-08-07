@@ -15,7 +15,7 @@ mod worker;
 
 pub(crate) use actor::ActorMsg;
 pub use actor::EngineHandle;
-pub use sink::{AudioSink, CpalSink, DataCallback, DataCallbackFactory, SinkConfig, SinkEvent};
+pub use sink::{AudioSink, CpalSink, DataCallback, DataCallbackFactory, SinkConfig, SinkEvent, LoudnessMeter};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

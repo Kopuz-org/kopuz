@@ -1,6 +1,33 @@
+use std::sync::atomic::Ordering;
+//use std::time::{Duration, Instant};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::player::PlayerInitError;
+
+pub struct LoudnessMeter {
+    rms: std::sync::atomic::AtomicU32,
+    peak: std::sync::atomic::AtomicU32,
+}
+
+impl LoudnessMeter {
+    pub fn new() -> Self {
+        Self {
+            rms: std::sync::atomic::AtomicU32::new(0),
+            peak: std::sync::atomic::AtomicU32::new(0),
+        }
+    }
+    pub fn rms(&self) -> f32 {
+        f32::from_bits(
+            self.rms.load(std::sync::atomic::Ordering::Relaxed)
+        )
+    }
+
+    pub fn peak(&self) -> f32 {
+        f32::from_bits(
+            self.peak.load(std::sync::atomic::Ordering::Relaxed)
+        )
+    }
+}
 
 /// Channel count and sample rate of an opened output stream.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,11 +87,13 @@ pub struct CpalSink {
     config: Option<SinkConfig>,
     on_event: std::sync::Arc<dyn Fn(SinkEvent) + Send + Sync + 'static>,
     watcher_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub loudness: std::sync::Arc<LoudnessMeter>,
 }
 
 impl CpalSink {
     pub fn try_new(
         on_event: impl Fn(SinkEvent) + Send + Sync + 'static,
+        loudness: std::sync::Arc<LoudnessMeter>
     ) -> Result<Self, PlayerInitError> {
         let host = cpal::default_host();
         let device = host
@@ -81,6 +110,7 @@ impl CpalSink {
             config: None,
             on_event,
             watcher_stop,
+            loudness
         })
     }
 
@@ -188,11 +218,45 @@ impl AudioSink for CpalSink {
 
         let mut data_cb = make_cb(config);
         let on_event = self.on_event.clone();
+        let loudness = self.loudness.clone();
+        //let mut last_log = Instant::now();
         let stream = self
             .device
             .build_output_stream(
                 stream_config,
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| data_cb(data),
+                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    data_cb(data);
+
+                    let mut sum = 0.0f32;
+                    let mut peak = 0.0f32;
+
+                    for sample in data.iter() {
+                        let abs = sample.abs();
+                        peak = peak.max(abs);
+                        sum += sample * sample;
+                    }
+
+                    let rms = (sum / data.len() as f32).sqrt();
+
+                    loudness.rms.store(
+                        rms.to_bits(),
+                        Ordering::Relaxed,
+                    );
+
+                    loudness.peak.store(
+                        peak.to_bits(),
+                        Ordering::Relaxed,
+                    );
+
+                    /*if last_log.elapsed() >= Duration::from_secs(1) {
+                        tracing::info!(
+                            rms = %rms,
+                            peak = %peak,
+                            "audio loudness"
+                        );
+                        last_log = Instant::now();
+                    }*/
+                },
                 move |err: cpal::Error| {
                     let event = match err.kind() {
                         // Recovery will land on whatever device is default now;

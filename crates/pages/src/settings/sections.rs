@@ -1,8 +1,4 @@
-use components::settings_items::{
-    ChannelModeSelector, DeviceChangeBehaviorSelector, DiscordPresencePausedSettings,
-    DiscordPresenceSettings, EqualizerPanel, LastFmSettings, LibreFmSettings, MusicBrainzSettings,
-    SampleRateModeSelector, SettingItem, SettingsSection, ToggleSetting,
-};
+use components::settings_items::{ChannelModeSelector, DeviceChangeBehaviorSelector, DiscordPresencePausedSettings, DiscordPresenceSettings, EqualizerPanel, IntifaceSettings, LastFmSettings, LibreFmSettings, MusicBrainzSettings, SampleRateModeSelector, SettingItem, SettingsSection, ToggleSetting};
 use config::{AppConfig, FetchStrategy, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
@@ -80,6 +76,27 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                         on_session_key_save: move |value: String| {
                             config.write().librefm_session_key = value;
                         },
+                    }
+                }
+            }
+            if !cfg!(target_os = "android") {
+                SettingItem {
+                    title: i18n::t("intiface").to_string(),
+                    control: rsx! {
+                        IntifaceSettings {
+                            host: config.read().intiface_host.clone(),
+                            port: config.read().intiface_port.clone(),
+                            connected: config.read().intiface_connected.unwrap_or(false),
+                            on_host_save: move |value: String| {
+                                config.write().intiface_host = value;
+                            },
+                            on_port_save: move |value: String| {
+                                config.write().intiface_port = value;
+                            },
+                            on_connected_save: move |value: bool| {
+                                config.write().intiface_connected = Some(value);
+                            },
+                        }
                     }
                 }
             }

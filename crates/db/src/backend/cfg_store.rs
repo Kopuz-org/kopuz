@@ -75,6 +75,8 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
         .map(|r| (r.track_key, r.count.max(0) as u64))
         .collect();
 
+    cfg.intiface_connected = Some(false); // default to false cause we didn't connect yet
+    
     Ok(Some(cfg))
 }
 

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use config::{
     AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, EqPreset,
     EqualizerSettings as EqualizerConfig, MusicService, SampleRateMode, SavedLocalSource,
@@ -9,6 +10,12 @@ use rfd::AsyncFileDialog;
 use scrobble::lastfm;
 use scrobble::librefm;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use buttplug_client::{ButtplugClient, ButtplugClientEvent};
+use buttplug_client::connector::ButtplugRemoteClientConnector;
+use buttplug_client::serializer::ButtplugClientJSONSerializer;
+use buttplug_transport_websocket_tungstenite::ButtplugWebsocketClientTransport;
+use futures::StreamExt;
+use hooks::use_intiface::IntifaceState;
 use tracing::Instrument;
 
 static APP_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -955,6 +962,135 @@ pub fn LibreFmSettings(session_key: String, on_session_key_save: EventHandler<St
                     "{i18n::t(\"connect_to_librefm\")}"
                 } else {
                     "{i18n::t(\"librefm_connected\")}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn IntifaceSettings(
+    host: String,
+    port: String,
+    connected: bool,
+    on_host_save: EventHandler<String>,
+    on_port_save: EventHandler<String>,
+    on_connected_save: EventHandler<bool>,
+) -> Element {
+    let intiface = use_context::<IntifaceState>();
+    let mut client_sig = intiface.client;
+    let mut connected_sig = intiface.connected;
+    let mut host_input = use_signal(move || host.clone());
+    let mut port_input = use_signal(move || port.clone());
+    let mut devices: Signal<Vec<String>> = use_signal(Vec::new);
+    let is_connected = use_signal(move || connected);
+
+    rsx! {
+        div {
+            class: "flex flex-col gap-3 w-full max-w-xl",
+
+            div {
+                class: "bg-white/5 p-1 rounded-xl border border-white/5",
+                input {
+                    class: "bg-transparent w-full px-3 py-2 text-sm text-white placeholder:text-white/50 outline-none",
+                    placeholder: "{i18n::t(\"intiface_host_placeholder\")}",
+                    value: "{host_input()}",
+                    oninput: move |evt| {
+                        let value = evt.value();
+                        host_input.set(value.clone());
+                        on_host_save.call(value);
+                    },
+                }
+            }
+
+            div {
+                class: "bg-white/5 p-1 rounded-xl border border-white/5",
+                input {
+                    class: "bg-transparent w-full px-3 py-2 text-sm text-white placeholder:text-white/50 outline-none",
+                    placeholder: "{i18n::t(\"intiface_port_placeholder\")}",
+                    value: "{port_input()}",
+                    oninput: move |evt| {
+                        let value = evt.value();
+                        port_input.set(value.clone());
+                        on_port_save.call(value);
+                    },
+                }
+            }
+
+            p {
+                class: "text-xs text-white/40 px-1",
+                "{i18n::t(\"intiface_warning\")}"
+            }
+
+            button {
+                class: "bg-white/10 hover:bg-white/20 px-5 py-2 rounded text-sm text-white transition-colors self-start mx-auto w-fit",
+                onclick: move |_| {
+                    let host = host_input();
+                    let port = port_input();
+                    let on_connected_save = on_connected_save;
+
+                    spawn(async move {
+                        let client = ButtplugClient::new("Kopuz");
+                        let mut events = client.event_stream();
+                        let addr = format!("ws://{host}:{port}");
+                        let conn = ButtplugRemoteClientConnector::<
+                            ButtplugWebsocketClientTransport,
+                            ButtplugClientJSONSerializer,
+                        >::new(ButtplugWebsocketClientTransport::new_insecure_connector(&addr));
+
+                        match client.connect(conn).await {
+                            Ok(_) => {
+                                tracing::info!("Connected to Intiface Central at {addr}");
+                                let _ = client.start_scanning().await;
+                                utils::sleep(std::time::Duration::from_secs(3)).await;
+                                let _ = client.stop_scanning().await;
+                                devices.set(client.devices().into_values().map(|d| {
+                                    d.display_name().clone().unwrap_or_else(|| d.name().to_string())
+                                }).collect());
+
+                                client_sig.set(Some(Arc::new(client)));
+                                connected_sig.set(true);
+                                on_connected_save.call(true);
+
+                                spawn(async move {
+                                    while let Some(event) = events.next().await {
+                                        if let ButtplugClientEvent::ServerDisconnect = event {
+                                            tracing::warn!("Intiface server disconnected");
+                                            client_sig.set(None);
+                                            connected_sig.set(false);
+                                            on_connected_save.call(false);
+                                        }
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Failed to connect to Intiface Central");
+                                on_connected_save.call(false);
+                            }
+                        }
+                    }.instrument(tracing::info_span!("intiface.connect")));
+                },
+
+                if is_connected() {
+                    "{i18n::t(\"intiface_connected\")}"
+                } else {
+                    "{i18n::t(\"connect_to_intiface\")}"
+                }
+            }
+
+            if !devices().is_empty() {
+                div {
+                    class: "flex flex-col gap-1 mt-2",
+                    p {
+                        class: "text-xs text-white/50 px-1",
+                        "{i18n::t(\"intiface_devices\")}"
+                    }
+                    for device in devices() {
+                        div {
+                            class: "bg-white/5 px-3 py-2 rounded text-sm text-white/80",
+                            "{device}"
+                        }
+                    }
                 }
             }
         }
