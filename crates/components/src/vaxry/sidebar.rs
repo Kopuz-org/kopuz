@@ -149,21 +149,23 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
     };
     let root_style = if is_android {
         if *mobile_collapsed.read() {
-            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 0px; background: rgba(10,10,10,0.97);"
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 0px; background: rgba(10,10,10,0.97); --vaxry-sidebar-fg: #fff;"
                 .to_string()
         } else {
-            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 280px; background: rgba(10,10,10,0.97);".to_string()
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 280px; background: rgba(10,10,10,0.97); --vaxry-sidebar-fg: #fff;".to_string()
         }
     } else if config.read().theme == "album-art"
         || config.read().cover_art_background
         || !config.read().custom_background_path.is_empty()
     {
-        format!("width: {current_width}px; background: rgba(0, 0, 0, 0.4);")
+        format!("width: {current_width}px; background: rgba(0, 0, 0, 0.4); --vaxry-sidebar-fg: #fff;")
     } else {
         // Theme-following surface (not a fixed black overlay) so the Vaxry chrome
         // harmonises with the active palette and the switcher text stays readable
         // on light themes.
-        format!("width: {current_width}px; background: var(--color-neutral-900);")
+        format!(
+            "width: {current_width}px; background: var(--color-neutral-900); --vaxry-sidebar-fg: var(--color-white);"
+        )
     };
 
     rsx! {
@@ -227,7 +229,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                             div { class: "px-4 pt-3 pb-1",
                                 span {
                                     class: "text-[10px] font-bold",
-                                    style: "color: rgba(255,255,255,0.25);",
+                                    style: "color: color-mix(in oklab, var(--vaxry-sidebar-fg) 25%, transparent);",
                                     "{i18n::t(section_key)}"
                                 }
                             }
@@ -249,7 +251,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                     }
                 }
 
-                div { class: "mx-3 my-2 h-px", style: "background: rgba(255,255,255,0.06);" }
+                div { class: "mx-3 my-2 h-px", style: "background: color-mix(in oklab, var(--vaxry-sidebar-fg) 6%, transparent);" }
                 for item in TOOL_ITEMS {
                     VaxryNavItem {
                         key: "{item.key}",
@@ -295,7 +297,7 @@ fn VaxryNavItem(
                 style: if active {
                     "color: var(--color-indigo-500);"
                 } else {
-                    "color: rgba(255,255,255,0.4);"
+                    "color: color-mix(in oklab, var(--vaxry-sidebar-fg) 40%, transparent);"
                 },
                 i { class: "{item.icon}" }
             }
@@ -306,7 +308,7 @@ fn VaxryNavItem(
                     style: if active {
                         "color: var(--color-indigo-500); font-weight: 600;"
                     } else {
-                        "color: rgba(255,255,255,0.7);"
+                        "color: color-mix(in oklab, var(--vaxry-sidebar-fg) 70%, transparent);"
                     },
                     "{i18n::t(item.key)}"
                 }
