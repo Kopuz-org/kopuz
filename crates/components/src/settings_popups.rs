@@ -1,7 +1,6 @@
+use crate::settings_items::MultiDirectoryPicker;
 use config::{Browser, MusicService};
 use dioxus::prelude::*;
-
-use crate::settings_items::MultiDirectoryPicker;
 
 #[component]
 pub fn AddLocalSourcePopup(
@@ -56,6 +55,7 @@ pub fn AddServerPopup(
     /// YouTube Music anonymous mode — true = no sign-in, browse + play
     /// public surfaces only.
     yt_anonymous: Signal<bool>,
+    host_access: Signal<bool>,
     error: Signal<Option<String>>,
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
@@ -75,6 +75,16 @@ pub fn AddServerPopup(
     let cancel_text = i18n::t("cancel").to_string();
     let save_text = i18n::t("save").to_string();
 
+    let saving_not_supported = {
+        let service = server_service();
+        !host_access()
+            && service.uses_browser_signin()
+            && (service != MusicService::YtMusic || !yt_anonymous())
+    };
+
+    let flatpak_access_command =
+        "flatpak override --user --talk-name=org.freedesktop.Flatpak moe.kopuz.kopuz";
+
     rsx! {
         div {
             class: "overlay",
@@ -89,6 +99,25 @@ pub fn AddServerPopup(
                 if let Some(err) = error() {
                     p { class: "error", "{err}" }
                 }
+
+                if saving_not_supported {
+                    div { class: "warning",
+                        p {  "Browser Sign-in requires access to host.",  br {}, "Run the command below and restart kopuz to provide access." }
+                        button {
+                            class: "flatpak-command",
+                            title: "Click to copy",
+                            aria_label: "Click to copy",
+                            onclick: move |_| {
+                            let js = format!(
+                                "navigator.clipboard.writeText('{flatpak_access_command}').catch((e) => console.error('clipboard writeText failed', e));"
+                                );
+                            let _ = dioxus::document::eval(&js);
+                            },
+                            "{flatpak_access_command}"
+                        }
+                    }
+                }
+
 
                 input {
                     placeholder: "{server_name_label}",
@@ -156,6 +185,7 @@ pub fn AddServerPopup(
                         "{cancel_text}"
                     }
                     button {
+                        disabled: saving_not_supported,
                         onclick: move |_| on_save.call(()),
                         "{save_text}"
                     }

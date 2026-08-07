@@ -225,6 +225,18 @@ pub(crate) fn browser_command(bin: &BrowserBin) -> Command {
     }
 }
 
+pub async fn has_host_spawn() -> bool {
+    if !in_flatpak() {
+        return true;
+    }
+
+    Command::new("flatpak-spawn")
+        .args(["--host", "true"])
+        .status()
+        .await
+        .is_ok_and(|status| status.success())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

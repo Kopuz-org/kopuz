@@ -101,6 +101,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let registry_loading = use_signal(|| false);
     let mut registry_toggle_error = use_signal(|| Option::<String>::None);
 
+    let host_access = use_signal(|| false);
+
+    use_effect(move || {
+        spawn(async move {
+            crate::settings_actions::ensure_host_access(host_access).await;
+        });
+    });
+
     let handle_add_registry = move |_| {
         crate::settings_actions::add_registry(
             config,
@@ -744,6 +752,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         server_service,
                         yt_browser,
                         yt_anonymous,
+                        host_access,
                         error,
                         on_close: move |_| show_add_server.set(false),
                         on_save: handle_add_server

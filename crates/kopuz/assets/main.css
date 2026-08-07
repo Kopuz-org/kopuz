@@ -30,6 +30,7 @@
     0% {
         transform: translateX(-100%);
     }
+
     100% {
         transform: translateX(400%);
     }
@@ -38,6 +39,7 @@
 .animate-scan {
     animation: scan-slide 1.4s ease-in-out infinite;
 }
+
 @font-face {
     font-family: "nasin-nanpa";
     src: url(fonts/nasin-nanpa-4.0.2-UCSUR.otf);
@@ -196,10 +198,8 @@ body {
     font-family: inherit;
     transition-property: border-color, background-color;
     transition-duration: var(--default-transition-duration, 150ms);
-    transition-timing-function: var(
-        --default-transition-timing-function,
-        cubic-bezier(0.4, 0, 0.2, 1)
-    );
+    transition-timing-function: var(--default-transition-timing-function,
+            cubic-bezier(0.4, 0, 0.2, 1));
 }
 
 .popup input:focus {
@@ -222,11 +222,47 @@ body {
     border: 1px solid rgba(248, 113, 113, 0.3);
 }
 
+.popup .warning {
+    color: var(--color-amber-400, #f8be71);
+    font-size: var(--text-xs, 0.75rem);
+    margin-top: 3px;
+    padding: 8px 12px;
+    background-color: rgba(248, 185, 113, 0.1);
+    border-radius: var(--radius-md, 0.375rem);
+    border: 1px solid rgba(248, 212, 113, 0.3);
+    text-align: center;
+}
+
+.popup .flatpak-command {
+    color: var(--color-white, #ffffff);
+    background-color: rgba(31, 31, 31, 0.788);
+    margin-top: 0;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm, 0.156rem);
+    border: 1px solid rgba(155, 155, 155, 0.3);
+    font-size: var(--text-xxs, 0.571rem);
+    min-width: 100%;
+    max-width: 100%;
+    cursor: copy;
+    user-select: all;
+    -webkit-user-select: all;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-wrap: nowrap;
+
+}
+
 .popup .actions {
     display: flex;
     justify-content: flex-end;
     gap: 12px;
     margin-top: 8px;
+}
+
+.popup .actions button:disabled {
+    filter: saturate(0.5);
 }
 
 .popup .actions button {
@@ -238,10 +274,8 @@ body {
     cursor: pointer;
     transition-property: background-color, transform, color;
     transition-duration: var(--default-transition-duration, 150ms);
-    transition-timing-function: var(
-        --default-transition-timing-function,
-        cubic-bezier(0.4, 0, 0.2, 1)
-    );
+    transition-timing-function: var(--default-transition-timing-function,
+            cubic-bezier(0.4, 0, 0.2, 1));
     border: none;
 }
 
@@ -261,7 +295,7 @@ body {
     color: var(--color-white, #ffffff);
 }
 
-.popup .actions button:last-child:hover {
+.popup .actions button:last-child:hover:not(:disabled) {
     background-color: var(--color-indigo-400, #818cf8);
 }
 
