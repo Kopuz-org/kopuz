@@ -4,6 +4,12 @@ use dioxus::prelude::*;
 use hooks::ReadDb;
 use tracing::Instrument;
 
+pub(crate) async fn ensure_host_access(mut host_access: Signal<bool>) -> Option<()> {
+    let host = ::server::cookies::has_host_spawn().await;
+    host_access.set(host);
+    None
+}
+
 async fn validate_ytmusic(cookies: &str) -> bool {
     ::server::provider::validate_ytmusic_cookies(cookies).await
 }
