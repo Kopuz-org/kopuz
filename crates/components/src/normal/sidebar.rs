@@ -65,8 +65,8 @@ const TOP_MENU: &[SidebarItem] = &[
         icon: "fa-solid fa-chart-simple",
     },
     SidebarItem {
-        key: "ytdlp",
-        route: Route::Ytdlp,
+        key: "youtube_downloads",
+        route: Route::YoutubeDownloads,
         icon: "fa-solid fa-download",
     },
 ];

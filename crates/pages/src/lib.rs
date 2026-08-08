@@ -20,6 +20,6 @@ pub mod settings_actions;
 #[cfg(not(target_os = "android"))]
 pub mod theme_editor;
 #[cfg(not(target_os = "android"))]
-pub mod ytdlp;
+pub mod youtube_download_jobs;
 #[cfg(not(target_os = "android"))]
-pub mod ytdlp_jobs;
+pub mod youtube_downloads;

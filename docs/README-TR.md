@@ -126,12 +126,12 @@ kendi favorilerini taşır.
   anda normal parça geçişini kullanır.
 - **Channel Mode**: Switch between `Stereo`, `Mono`, `Left only`, `Right only`,
   ve `Swap L/R` çıkış modları.
-- **yt-dlp Integration**: yt-dlp aracılığıyla doğrudan YouTube ve desteklenen
-  diğer sitelerden ses indirin. Çıkış formatınızı seçin (Best Audio, MP3, FLAC,
-  WAV veya MP4 video). yt-dlp kayıpsız bir kaynaktan kod çözmek yerine kayıplı
-  sesi yeniden paketlediği (remux) için FLAC önerilmez. SponsorBlock, bölüm
-  bölme (chapter splitting), çerezler (cookies), hız sınırlama (rate limiting)
-  ve daha fazlasını destekler. Sisteminizde `yt-dlp` kurulu olmasını gerektirir.
+- **Yerel YouTube İndirmeleri**: Şarkı, sanatçı veya albüm adıyla arayın ve
+  sonucu doğrudan Kopuz'un yerleşik YouTube Music istemcisiyle indirin. Özgün
+  sesi koruyabilir veya MP3, FLAC, Opus ya da WAV biçimine dönüştürebilirsiniz;
+  çıktı klasörü, metadata, kapak, albüm klasörü ve üzerine yazma seçenekleri
+  vardır. Özgün indirmeler harici indirici gerektirmez; dönüştürme ve dosya
+  işleme için `ffmpeg` kullanılır.
 - **Metadata Settings**: Ayarlar'daki özel bir Metadata bölümü, sanatçı
   resimlerinin nasıl alınacağını kontrol etmenizi sağlar. **Album Cover**
   (sanatçı fotoğrafı olarak ilk albüm kapağını kullanır, varsayılan) veya
@@ -393,10 +393,9 @@ Kurulum iletişim kutusu iki yöntem sunar:
 
 ### Premium tracks
 
-Music Premium kilitli parçalar, birincil yol `UNPLAYABLE` döndürdüğünde yerel
-bir [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) resolve işlemine fallback
-yapar, bu nedenle `yt-dlp`'nin kurulu olması bunlar için yardımcı olur. Anonim
-mod, Premium-only içerikleri hiçbir şekilde oynatamaz.
+Oturum açılmış Music Premium hesaplarında yüksek kaliteli akışlar Kopuz'un
+yerel YouTube istemcisiyle çözümlenir. Anonim mod, yalnızca Premium'a açık
+içerikleri oynatamaz.
 
 ## SoundCloud Setup
 

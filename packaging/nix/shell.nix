@@ -11,7 +11,7 @@
   flatpak-builder,
   appstream,
   nodejs_22,
-  yt-dlp,
+  ffmpeg,
   glib-networking,
   glib,
   gtk3,
@@ -51,7 +51,7 @@ mkShell {
     bazelisk
 
     nodejs_22
-    yt-dlp
+    ffmpeg
   ]
   ++ lib.optionals stdenv.hostPlatform.isLinux [
     flatpak

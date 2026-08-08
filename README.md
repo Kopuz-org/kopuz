@@ -126,12 +126,12 @@ media source carries its own credentials and its own favorites.
   switching.
 - **Channel Mode**: Switch between `Stereo`, `Mono`, `Left only`, `Right only`,
   and `Swap L/R` output modes.
-- **yt-dlp Integration**: Download audio directly from YouTube and other
-  supported sites via yt-dlp. Choose your output format (Best Audio, MP3, FLAC,
-  Opus, WAV, or MP4 video). FLAC is not recommended since yt-dlp remuxes lossy
-  audio rather than decoding from a lossless source. Supports SponsorBlock,
-  chapter splitting, cookies, rate limiting, and more. Requires `yt-dlp`
-  installed on your system.
+- **Native YouTube Downloads**: Search by song, artist, or album and download a
+  result directly through Kopuz's built-in YouTube Music client. Keep the
+  original audio or convert it to MP3, FLAC, Opus, or WAV, with output-folder,
+  metadata, cover-art, album-folder, and overwrite options. Original downloads
+  need no external downloader; conversion and media-file post-processing use
+  `ffmpeg`.
 - **Metadata Settings**: A dedicated Metadata section in Settings lets you
   control how artist images are sourced. Choose between **Album Cover** (uses
   the first album artwork as the artist photo, default) or **Artist Photo**
@@ -499,10 +499,8 @@ The setup dialog offers two methods:
 
 ### Premium tracks
 
-Music Premium-locked tracks fall back to a local
-[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) resolve when the primary path
-returns `UNPLAYABLE`, so having `yt-dlp` installed helps for those. Anonymous
-mode can't play Premium-only content at all.
+Signed-in Music Premium accounts resolve their higher-quality streams through
+Kopuz's native YouTube client. Anonymous mode can't play Premium-only content.
 
 ## SoundCloud Setup
 

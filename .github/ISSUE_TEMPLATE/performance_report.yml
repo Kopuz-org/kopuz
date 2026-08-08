@@ -39,7 +39,7 @@ body:
         - Local artist / album page
         - Server library
         - Now playing / fullscreen
-        - Downloads / yt-dlp
+        - Downloads / YouTube
         - App startup
         - Other
     validations:
