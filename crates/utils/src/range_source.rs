@@ -1,6 +1,6 @@
 //! HTTP Range-backed seekable byte source.
 //!
-//! Used for YouTube Music (and any other URL where the server returns
+//! Used for remote media servers and YouTube Music when the URL returns
 //! `Accept-Ranges: bytes`). Unlike [`crate::stream_buffer::StreamBuffer`],
 //! this never downloads the file linearly — every miss in the rolling
 //! window cache becomes a `Range: bytes=N-M` request. Symphonia can seek
@@ -17,11 +17,13 @@
 //!   thread (`spawn_blocking` or similar).
 //!
 //! `byte_len()` is determined once upfront from `Content-Range` of the
-//! initial probe fetch. If the server doesn't include it, we fall back to
-//! a HEAD request. If both fail, this source can't be constructed.
+//! initial probe fetch. If the server ignores ranges or omits the total,
+//! this source can't be constructed and the caller can stream sequentially.
 
 use std::io::{Error as IoError, ErrorKind, Read, Result as IoResult, Seek, SeekFrom};
 use std::time::Duration;
+
+use crate::stream_buffer::BufferProgressCallback;
 
 const CHUNK: usize = 512 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -33,6 +35,7 @@ pub struct RangeStreamSource {
     pos: u64,
     chunk: Vec<u8>,
     chunk_start: u64,
+    progress: Option<BufferProgressCallback>,
 }
 
 impl RangeStreamSource {
@@ -40,6 +43,14 @@ impl RangeStreamSource {
     /// total size and confirm Range support. Returns the source positioned
     /// at byte 0 with an empty cache.
     pub fn new(url: String, user_agent: Option<String>) -> IoResult<Self> {
+        Self::new_with_progress(url, user_agent, None)
+    }
+
+    pub fn new_with_progress(
+        url: String,
+        user_agent: Option<String>,
+        progress: Option<BufferProgressCallback>,
+    ) -> IoResult<Self> {
         let ua =
             user_agent.unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());
         let client = reqwest::blocking::Client::builder()
@@ -57,11 +68,14 @@ impl RangeStreamSource {
             .send()
             .map_err(IoError::other)?;
         let status = resp.status();
-        if !status.is_success() {
-            return Err(IoError::other(format!("range probe HTTP {status}")));
+        if status != reqwest::StatusCode::PARTIAL_CONTENT {
+            return Err(IoError::new(
+                ErrorKind::Unsupported,
+                format!("server ignored range probe (HTTP {status})"),
+            ));
         }
         let total_size = parse_total_size(&resp)
-            .ok_or_else(|| IoError::other("server didn't expose total size on range probe"))?;
+            .ok_or_else(|| IoError::other("range response didn't expose total size"))?;
 
         Ok(Self {
             url,
@@ -70,6 +84,7 @@ impl RangeStreamSource {
             pos: 0,
             chunk: Vec::with_capacity(CHUNK),
             chunk_start: 0,
+            progress,
         })
     }
 
@@ -85,16 +100,29 @@ impl RangeStreamSource {
             .header("Range", format!("bytes={start}-{end}"))
             .send()
             .map_err(IoError::other)?;
-        if !resp.status().is_success() {
+        if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
             return Err(IoError::other(format!(
-                "range fetch {start}-{end} HTTP {}",
+                "range fetch {start}-{end} expected HTTP 206, got {}",
                 resp.status()
             )));
         }
         let bytes = resp.bytes().map_err(IoError::other)?;
+        let expected = (end - start + 1) as usize;
+        if bytes.len() != expected {
+            return Err(IoError::new(
+                ErrorKind::UnexpectedEof,
+                format!(
+                    "range fetch {start}-{end} returned {} bytes, expected {expected}",
+                    bytes.len()
+                ),
+            ));
+        }
         self.chunk.clear();
         self.chunk.extend_from_slice(&bytes);
         self.chunk_start = start;
+        if let Some(progress) = &self.progress {
+            progress(start, end + 1, Some(self.total_size));
+        }
         Ok(())
     }
 
@@ -144,20 +172,38 @@ impl Seek for RangeStreamSource {
 }
 
 fn parse_total_size(resp: &reqwest::blocking::Response) -> Option<u64> {
-    // Prefer Content-Range: "bytes 0-0/12345" — the part after '/' is the
-    // total. Fall back to Content-Length only if Range wasn't honoured (in
-    // which case the server gave us the whole body, and Content-Length is
-    // the full file size).
-    if let Some(v) = resp.headers().get("content-range")
-        && let Ok(s) = v.to_str()
-        && let Some(slash) = s.rfind('/')
-    {
-        let tail = &s[slash + 1..];
-        if tail != "*"
-            && let Ok(n) = tail.parse()
-        {
-            return Some(n);
-        }
+    // Content-Range: "bytes 0-0/12345" — the part after '/' is the total.
+    // Content-Length on this 206 response is only the one-byte probe length.
+    resp.headers()
+        .get("content-range")
+        .and_then(|value| value.to_str().ok())
+        .and_then(total_size_from_content_range)
+}
+
+fn total_size_from_content_range(value: &str) -> Option<u64> {
+    let (_, total) = value.rsplit_once('/')?;
+    if total == "*" {
+        return None;
     }
-    resp.content_length()
+    total.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::total_size_from_content_range;
+
+    #[test]
+    fn parses_total_from_content_range() {
+        assert_eq!(
+            total_size_from_content_range("bytes 0-0/123456"),
+            Some(123_456)
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_or_malformed_content_range_totals() {
+        assert_eq!(total_size_from_content_range("bytes 0-0/*"), None);
+        assert_eq!(total_size_from_content_range("bytes 0-0/not-a-size"), None);
+        assert_eq!(total_size_from_content_range("123456"), None);
+    }
 }
