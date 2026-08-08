@@ -247,14 +247,15 @@ pub fn use_tracks_by_keys(
 /// then resolves them, re-running on a source switch or a new play (`Recents`).
 pub fn use_recently_played(source: Memo<Source>) -> Resource<Vec<reader::Track>> {
     let db = use_context::<ReadDb>();
+    let active_source = use_context::<Signal<server::source::ActiveSource>>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Recents);
-        let (db, s) = (db.clone(), source());
+        let (db, s, source_handle) = (db.clone(), source(), active_source.read().clone());
         let span = tracing::info_span!("query.recently_played", source = s.as_str());
         offload(
             async move {
-                let keys = db.recently_played(&s, 50).await.unwrap_or_default();
+                let keys = source_handle.recently_played(50).await.unwrap_or_default();
                 if keys.is_empty() {
                     return Vec::new();
                 }
@@ -310,15 +311,14 @@ pub fn use_active_source() -> Memo<config::Source> {
 /// The playlist store for the active source, re-queried on a playlists/folders
 /// bump or a source switch. Resolves the in-memory active source itself.
 pub fn use_playlists() -> Resource<reader::PlaylistStore> {
-    let db = use_context::<ReadDb>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let gens = use_generations();
-    let source = use_active_source();
     use_resource(move || {
         let _ = gens.generation(Table::Playlists);
         let _ = gens.generation(Table::Folders);
-        let (db, src) = (db.clone(), source());
-        let span = tracing::info_span!("query.playlists", source = %src.as_str());
-        offload(async move { db.load_playlists(&src).await.unwrap_or_default() }.instrument(span))
+        let source = active_source.read().clone();
+        let span = tracing::info_span!("query.playlists", source = %source.source().as_str());
+        offload(async move { source.load_playlists().await.unwrap_or_default() }.instrument(span))
     })
 }
 

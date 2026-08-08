@@ -372,14 +372,19 @@ pub fn MultiDirectoryPicker(
 pub fn LocalSourceSettings(
     active_source: config::Source,
     default_directories: Vec<std::path::PathBuf>,
+    default_portable_metadata: bool,
     sources: Vec<SavedLocalSource>,
     on_add: EventHandler<()>,
     on_delete: EventHandler<String>,
     on_switch: EventHandler<config::Source>,
     on_add_folder: EventHandler<(config::Source, std::path::PathBuf)>,
     on_remove_folder: EventHandler<(config::Source, usize)>,
+    on_portable_metadata: EventHandler<(config::Source, bool)>,
 ) -> Element {
     let default_active = active_source == config::Source::Local;
+    let default_metadata_path = default_directories
+        .first()
+        .map(|root| root.join(server::source::PORTABLE_LIBRARY_DB_FILENAME));
     rsx! {
         div { class: "flex flex-col gap-3 w-full",
             div { class: "bg-white/5 p-3 rounded w-full space-y-2",
@@ -401,9 +406,24 @@ pub fn LocalSourceSettings(
                     }
                 }
                 MultiDirectoryPicker {
-                    current_paths: default_directories,
+                    current_paths: default_directories.clone(),
                     on_add: move |path| on_add_folder.call((config::Source::Local, path)),
                     on_remove: move |index| on_remove_folder.call((config::Source::Local, index)),
+                }
+                div { class: "flex items-center justify-between gap-4 border-t border-white/10 pt-2",
+                    div { class: "min-w-0",
+                        p { class: "text-xs font-medium text-white/80", "{i18n::t(\"shared_library_data\")}" }
+                        if let Some(path) = default_metadata_path.as_ref() {
+                            p { class: "text-[10px] text-white/45 font-mono truncate",
+                                "{i18n::t_with(\"shared_library_data_path\", &[(\"path\", path.display().to_string())])}"
+                            }
+                        }
+                    }
+                    ToggleSetting {
+                        enabled: default_portable_metadata,
+                        compact: true,
+                        on_change: move |enabled| on_portable_metadata.call((config::Source::Local, enabled)),
+                    }
                 }
             }
             for source in sources.iter().cloned() {
@@ -414,7 +434,12 @@ pub fn LocalSourceSettings(
                     let switch_key = source_key.clone();
                     let add_folder_key = source_key.clone();
                     let remove_folder_key = source_key.clone();
+                    let portable_key = source_key.clone();
                     let is_active = active_source.local_library_id() == Some(source.id.as_str());
+                    let metadata_path = source
+                        .directories
+                        .first()
+                        .map(|root| root.join(server::source::PORTABLE_LIBRARY_DB_FILENAME));
                     rsx! {
                         div { key: "{source.id}", class: "bg-white/5 p-3 rounded w-full space-y-2",
                             div { class: "flex items-center justify-between gap-3",
@@ -445,6 +470,21 @@ pub fn LocalSourceSettings(
                                 current_paths: source.directories.clone(),
                                 on_add: move |path| on_add_folder.call((add_folder_key.clone(), path)),
                                 on_remove: move |index| on_remove_folder.call((remove_folder_key.clone(), index)),
+                            }
+                            div { class: "flex items-center justify-between gap-4 border-t border-white/10 pt-2",
+                                div { class: "min-w-0",
+                                    p { class: "text-xs font-medium text-white/80", "{i18n::t(\"shared_library_data\")}" }
+                                    if let Some(path) = metadata_path.as_ref() {
+                                        p { class: "text-[10px] text-white/45 font-mono truncate",
+                                            "{i18n::t_with(\"shared_library_data_path\", &[(\"path\", path.display().to_string())])}"
+                                        }
+                                    }
+                                }
+                                ToggleSetting {
+                                    enabled: source.portable_metadata,
+                                    compact: true,
+                                    on_change: move |enabled| on_portable_metadata.call((portable_key.clone(), enabled)),
+                                }
                             }
                         }
                     }
@@ -740,7 +780,11 @@ pub fn DiscordPresencePausedSettings(enabled: bool, on_change: EventHandler<bool
 }
 
 #[component]
-pub fn ToggleSetting(enabled: bool, on_change: EventHandler<bool>) -> Element {
+pub fn ToggleSetting(
+    enabled: bool,
+    on_change: EventHandler<bool>,
+    #[props(default)] compact: bool,
+) -> Element {
     let slider_style = if enabled {
         "inset-inline-start: 4px; width: calc(50% - 4px);"
     } else {
@@ -758,10 +802,11 @@ pub fn ToggleSetting(enabled: bool, on_change: EventHandler<bool>) -> Element {
     } else {
         "text-slate-500 hover:text-slate-300"
     };
+    let width_class = if compact { "w-36" } else { "w-48" };
 
     rsx! {
         div {
-            class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 w-48",
+            class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 {width_class}",
             div {
                 class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
                 style: "{slider_style}"

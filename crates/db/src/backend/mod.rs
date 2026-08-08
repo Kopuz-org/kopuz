@@ -41,6 +41,20 @@ impl Native {
         })
     }
 
+    /// Open a database stored beside a portable music library. Rollback
+    /// journaling keeps the committed state in one file and works on shared
+    /// filesystems where WAL's shared-memory sidecar is not supported.
+    pub async fn open_portable(path: &Path) -> Result<Self, DbError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| DbError::Io(e.to_string()))?;
+        }
+        let pool = open_portable_pool(path).await?;
+        migrations::run_migrations(&pool).await?;
+        Ok(Self {
+            pool: ArcSwap::from_pointee(pool),
+        })
+    }
+
     fn pool(&self) -> Arc<SqlitePool> {
         self.pool.load_full()
     }
@@ -61,6 +75,21 @@ async fn open_pool(path: &Path) -> Result<SqlitePool, DbError> {
         .foreign_keys(true);
     SqlitePoolOptions::new()
         .max_connections(5)
+        .connect_with(opts)
+        .await
+        .map_err(Into::into)
+}
+
+async fn open_portable_pool(path: &Path) -> Result<SqlitePool, DbError> {
+    let opts = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Delete)
+        .synchronous(SqliteSynchronous::Full)
+        .busy_timeout(std::time::Duration::from_secs(10))
+        .foreign_keys(true);
+    SqlitePoolOptions::new()
+        .max_connections(1)
         .connect_with(opts)
         .await
         .map_err(Into::into)
@@ -133,6 +162,10 @@ impl ReadStore for Native {
         limit: u32,
     ) -> Result<Vec<String>, DbError> {
         cfg_store::recently_played(&self.pool(), source, limit).await
+    }
+
+    async fn listen_counts(&self) -> Result<Vec<(String, u64)>, DbError> {
+        cfg_store::listen_counts(&self.pool()).await
     }
 
     async fn artist_sample_tracks(
@@ -356,24 +389,43 @@ impl Storage for Native {
         writes::sweep_playlist_tracks(&self.pool(), source, pl_id, epoch).await
     }
 
-    async fn create_folder(&self, id: &str, name: &str) -> Result<(), DbError> {
-        writes::create_folder(&self.pool(), id, name).await
+    async fn replace_playlist_store(
+        &self,
+        source: &crate::Source,
+        store: &reader::PlaylistStore,
+    ) -> Result<(), DbError> {
+        writes::replace_playlist_store(&self.pool(), source, store).await
     }
 
-    async fn rename_folder(&self, id: &str, name: &str) -> Result<(), DbError> {
-        writes::rename_folder(&self.pool(), id, name).await
+    async fn create_folder(
+        &self,
+        source: &crate::Source,
+        id: &str,
+        name: &str,
+    ) -> Result<(), DbError> {
+        writes::create_folder(&self.pool(), source, id, name).await
     }
 
-    async fn delete_folder(&self, id: &str) -> Result<(), DbError> {
-        writes::delete_folder(&self.pool(), id).await
+    async fn rename_folder(
+        &self,
+        source: &crate::Source,
+        id: &str,
+        name: &str,
+    ) -> Result<(), DbError> {
+        writes::rename_folder(&self.pool(), source, id, name).await
+    }
+
+    async fn delete_folder(&self, source: &crate::Source, id: &str) -> Result<(), DbError> {
+        writes::delete_folder(&self.pool(), source, id).await
     }
 
     async fn set_playlist_folder(
         &self,
+        source: &crate::Source,
         playlist_ref: &str,
         folder_id: Option<&str>,
     ) -> Result<(), DbError> {
-        writes::set_playlist_folder(&self.pool(), playlist_ref, folder_id).await
+        writes::set_playlist_folder(&self.pool(), source, playlist_ref, folder_id).await
     }
 
     async fn bump_listen_count(
@@ -382,6 +434,14 @@ impl Storage for Native {
         track_uid: &str,
     ) -> Result<(), DbError> {
         cfg_store::bump_listen_count(&self.pool(), source, track_uid).await
+    }
+
+    async fn merge_listen_counts(
+        &self,
+        source: &crate::Source,
+        counts: &[(String, u64)],
+    ) -> Result<(), DbError> {
+        cfg_store::merge_listen_counts(&self.pool(), source, counts).await
     }
 
     async fn push_recent(&self, source: &crate::Source, track_key: &str) -> Result<(), DbError> {

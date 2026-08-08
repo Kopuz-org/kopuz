@@ -684,30 +684,118 @@ pub async fn sweep_playlist_tracks(
     Ok(())
 }
 
+pub async fn replace_playlist_store(
+    pool: &SqlitePool,
+    source: &Source,
+    store: &reader::PlaylistStore,
+) -> Result<(), DbError> {
+    let src = source.as_str();
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM playlists WHERE source = ?1")
+        .bind(src)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM folders WHERE source = ?1")
+        .bind(src)
+        .execute(&mut *tx)
+        .await?;
+
+    for (position, playlist) in store.playlists.iter().enumerate() {
+        let result = sqlx::query(
+            "INSERT INTO playlists \
+             (source, source_pl_id, name, cover_path, image_tag, position) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(src)
+        .bind(&playlist.id)
+        .bind(&playlist.name)
+        .bind(
+            playlist
+                .cover_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+        )
+        .bind(&playlist.image_tag)
+        .bind(position as i64)
+        .execute(&mut *tx)
+        .await?;
+        let playlist_pk = result.last_insert_rowid();
+        for (track_position, reference) in playlist.tracks.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO playlist_tracks (playlist_pk, position, track_ref) \
+                 VALUES (?1, ?2, ?3)",
+            )
+            .bind(playlist_pk)
+            .bind(track_position as i64)
+            .bind(reference)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    for folder in &store.folders {
+        sqlx::query("INSERT INTO folders (id, source, name) VALUES (?1, ?2, ?3)")
+            .bind(&folder.id)
+            .bind(src)
+            .bind(&folder.name)
+            .execute(&mut *tx)
+            .await?;
+        for (position, playlist_id) in folder.playlist_ids.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO folder_playlists (folder_id, playlist_ref, position) \
+                 VALUES (?1, ?2, ?3)",
+            )
+            .bind(&folder.id)
+            .bind(playlist_id)
+            .bind(position as i64)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 #[tracing::instrument(skip(pool), fields(id = %id))]
-pub async fn create_folder(pool: &SqlitePool, id: &str, name: &str) -> Result<(), DbError> {
-    sqlx::query!(
-        "INSERT INTO folders (id, source, name) VALUES (?1, 'local', ?2) \
-         ON CONFLICT(id) DO UPDATE SET name = excluded.name",
-        id,
-        name
+pub async fn create_folder(
+    pool: &SqlitePool,
+    source: &Source,
+    id: &str,
+    name: &str,
+) -> Result<(), DbError> {
+    sqlx::query(
+        "INSERT INTO folders (id, source, name) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(id) DO UPDATE SET source = excluded.source, name = excluded.name",
     )
+    .bind(id)
+    .bind(source.as_str())
+    .bind(name)
     .execute(pool)
     .await?;
     Ok(())
 }
 
 #[tracing::instrument(skip(pool), fields(id = %id))]
-pub async fn rename_folder(pool: &SqlitePool, id: &str, name: &str) -> Result<(), DbError> {
-    sqlx::query!("UPDATE folders SET name = ?2 WHERE id = ?1", id, name)
+pub async fn rename_folder(
+    pool: &SqlitePool,
+    source: &Source,
+    id: &str,
+    name: &str,
+) -> Result<(), DbError> {
+    sqlx::query("UPDATE folders SET name = ?3 WHERE id = ?1 AND source = ?2")
+        .bind(id)
+        .bind(source.as_str())
+        .bind(name)
         .execute(pool)
         .await?;
     Ok(())
 }
 
 #[tracing::instrument(skip(pool), fields(id = %id))]
-pub async fn delete_folder(pool: &SqlitePool, id: &str) -> Result<(), DbError> {
-    sqlx::query!("DELETE FROM folders WHERE id = ?1", id)
+pub async fn delete_folder(pool: &SqlitePool, source: &Source, id: &str) -> Result<(), DbError> {
+    sqlx::query("DELETE FROM folders WHERE id = ?1 AND source = ?2")
+        .bind(id)
+        .bind(source.as_str())
         .execute(pool)
         .await?;
     Ok(())
@@ -719,24 +807,29 @@ pub async fn delete_folder(pool: &SqlitePool, id: &str) -> Result<(), DbError> {
 #[tracing::instrument(skip(pool), fields(playlist_ref = %playlist_ref))]
 pub async fn set_playlist_folder(
     pool: &SqlitePool,
+    source: &Source,
     playlist_ref: &str,
     folder_id: Option<&str>,
 ) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    sqlx::query!(
-        "DELETE FROM folder_playlists WHERE playlist_ref = ?1",
-        playlist_ref
+    sqlx::query(
+        "DELETE FROM folder_playlists WHERE playlist_ref = ?1 AND folder_id IN \
+         (SELECT id FROM folders WHERE source = ?2)",
     )
+    .bind(playlist_ref)
+    .bind(source.as_str())
     .execute(&mut *tx)
     .await?;
     if let Some(fid) = folder_id {
-        sqlx::query!(
+        sqlx::query(
             "INSERT OR IGNORE INTO folder_playlists (folder_id, playlist_ref, position) \
-             SELECT ?1, ?2, COALESCE(MAX(position) + 1, 0) \
-             FROM folder_playlists WHERE folder_id = ?1",
-            fid,
-            playlist_ref
+             SELECT ?1, ?2, COALESCE( \
+                 (SELECT MAX(position) + 1 FROM folder_playlists WHERE folder_id = ?1), 0) \
+             WHERE EXISTS (SELECT 1 FROM folders WHERE id = ?1 AND source = ?3)",
         )
+        .bind(fid)
+        .bind(playlist_ref)
+        .bind(source.as_str())
         .execute(&mut *tx)
         .await?;
     }
