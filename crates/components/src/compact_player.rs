@@ -2,6 +2,7 @@ use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
+use crate::player_controls::PlaybackBufferIndicator;
 use crate::shared::fmt_time;
 
 /// Global flag toggling the compact mini-player overlay. Provided via context
@@ -78,6 +79,8 @@ pub fn CompactPlayer() -> Element {
 
     let cover = ctrl.current_song_cover_url.read().clone();
     let is_playing = *ctrl.is_playing.read();
+    let is_loading = *ctrl.is_loading.read();
+    let buffered_ranges = ctrl.buffered_ranges.read().clone();
 
     let macos_top = cfg!(target_os = "macos");
 
@@ -154,8 +157,13 @@ pub fn CompactPlayer() -> Element {
             }
 
             div {
-                class: format!("relative z-10 h-[3px] w-full bg-white/10 shrink-0 {}", if is_radio { "" } else { "group cursor-pointer" }),
+                class: format!("relative z-10 h-[3px] w-full bg-white/10 shrink-0 overflow-hidden {}", if is_radio || is_loading { "" } else { "group cursor-pointer" }),
                 onmousedown: move |evt| evt.stop_propagation(),
+                PlaybackBufferIndicator {
+                    ranges: buffered_ranges,
+                    played_percent: progress_percent,
+                    loading: is_loading,
+                }
                 div {
                     class: format!("absolute top-0 left-0 h-full pointer-events-none {}", skin.progress_fill),
                     style: "width: {progress_percent}%",
@@ -165,8 +173,8 @@ pub fn CompactPlayer() -> Element {
                     min: "0",
                     max: "{duration}",
                     value: "{display_progress}",
-                    class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
-                    disabled: is_radio,
+                    class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio || is_loading { "pointer-events-none" } else { "cursor-pointer" }),
+                    disabled: is_radio || is_loading,
                     onchange: move |evt| {
                         if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
                             ctrl.seek(std::time::Duration::from_secs(val));
