@@ -98,6 +98,7 @@ pub struct Capabilities {
     pub downloads: bool,
     pub discover: bool,
     pub radio: bool,
+    pub play_queue: bool,
     pub playlists: PlaylistOps,
     pub artist_view: ArtistView,
     pub albums: AlbumType,
@@ -149,4 +150,17 @@ impl From<crate::ytmusic::discover::YtAlbum> for RemoteAlbum {
             tracks: a.tracks,
         }
     }
+}
+
+/// A server's saved play queue (Subsonic `getPlayQueue`), resolved to tracks.
+pub struct RemotePlayQueue {
+    pub tracks: Vec<reader::Track>,
+    /// The playing track's item id, matched against `tracks[i].id.key()`.
+    pub current_id: Option<String>,
+    pub position_ms: u64,
+    /// When the server last saved this queue (server-clock ISO 8601).
+    pub changed: Option<String>,
+    /// The client name that last saved it — lets a caller tell its own writes
+    /// apart from another client's.
+    pub changed_by: Option<String>,
 }

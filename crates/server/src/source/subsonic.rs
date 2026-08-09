@@ -6,7 +6,8 @@ use crate::{server_ops::ServerConn, subsonic::SubsonicClient};
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, LibrarySnapshot, MediaSource,
-    PlaylistMeta, PlaylistOps, SourceError, StreamInfo, mirror_added, mirror_created,
+    PlaylistMeta, PlaylistOps, RemotePlayQueue, SourceError, StreamInfo, mirror_added,
+    mirror_created,
 };
 
 pub(super) struct SubsonicSource {
@@ -186,6 +187,7 @@ impl MediaSource for SubsonicSource {
             downloads: true,
             discover: false,
             radio: false,
+            play_queue: true,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
@@ -362,6 +364,75 @@ impl MediaSource for SubsonicSource {
             }
         }
         Ok(out)
+    }
+
+    async fn save_play_queue(
+        &self,
+        item_ids: &[String],
+        current_id: Option<&str>,
+        position_ms: u64,
+    ) -> Result<(), SourceError> {
+        let ids: Vec<&str> = item_ids.iter().map(String::as_str).collect();
+        self.client
+            .save_play_queue(&ids, current_id, Some(position_ms))
+            .await
+            .map_err(SourceError::from)
+    }
+
+    async fn get_play_queue(&self) -> Result<Option<RemotePlayQueue>, SourceError> {
+        let Some(queue) = self.client.get_play_queue().await? else {
+            return Ok(None);
+        };
+        let tracks = queue
+            .entry
+            .into_iter()
+            .map(|item| {
+                // Same mapping as fetch_playlist_entries: the urlhex_ cover tag
+                // the cover resolver expects, album_id carrying it (or :none).
+                let cover_tag = item
+                    .cover_art
+                    .as_ref()
+                    .and_then(|id| self.client.cover_art_url(id, Some(512)).ok())
+                    .map(|url| reader::CoverRef::encode_url(&url));
+                let album_id = reader::CoverRef::stored_item_ref(
+                    self.service,
+                    item.album_id.as_deref().unwrap_or(&item.id),
+                    Some(cover_tag.as_deref().unwrap_or(reader::CoverRef::NO_COVER)),
+                );
+                let artist = item.artist.clone().unwrap_or_default();
+                reader::models::Track {
+                    id: reader::models::TrackId::Server {
+                        service: self.service,
+                        item_id: item.id.clone(),
+                    },
+                    cover: Some(
+                        cover_tag.unwrap_or_else(|| reader::CoverRef::NO_COVER.to_string()),
+                    ),
+                    album_id,
+                    title: item.title,
+                    artist: artist.clone(),
+                    album: item.album.unwrap_or_default(),
+                    duration: item.duration.unwrap_or(0),
+                    khz: item.sampling_rate.unwrap_or(0),
+                    bitrate: item.bit_rate.unwrap_or(0).min(u16::MAX as u32) as u16,
+                    track_number: item.track,
+                    disc_number: item.disc_number,
+                    musicbrainz_release_id: None,
+                    musicbrainz_recording_id: None,
+                    musicbrainz_track_id: None,
+                    playlist_item_id: None,
+                    artists: vec![artist],
+                }
+            })
+            .collect();
+
+        Ok(Some(RemotePlayQueue {
+            tracks,
+            current_id: queue.current,
+            position_ms: queue.position.unwrap_or(0),
+            changed: queue.changed,
+            changed_by: queue.changed_by,
+        }))
     }
 }
 

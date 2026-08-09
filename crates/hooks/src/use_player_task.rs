@@ -716,6 +716,7 @@ pub fn use_player_task(ctrl: PlayerController) {
         let mut last_progress_report = std::time::Instant::now();
         let mut last_discord_enabled = false;
         let mut last_jellyfin_id: Option<String> = None;
+        let mut last_queue_push_id: Option<String> = None;
         #[cfg(target_os = "macos")]
         let mut last_now_playing_refresh = std::time::Instant::now();
         let mut last_lyrics_prefetch_track: Option<String> = None;
@@ -1027,6 +1028,26 @@ pub fn use_player_task(ctrl: PlayerController) {
                             .instrument(tracing::info_span!("playback.report")),
                         );
                     }
+                }
+
+                // Play-queue sync (Subsonic savePlayQueue): push on track change
+                // and on pause. No-ops via capabilities() for every other backend.
+                {
+                    let current_idx = *ctrl.current_queue_index.read();
+                    let current_item_id = ctrl.get_track_at(current_idx).and_then(|t| {
+                        matches!(
+                            t.id.service(),
+                            Some(MusicService::Subsonic) | Some(MusicService::Custom)
+                        )
+                        .then(|| t.id.key().into_owned())
+                    });
+                    let track_changed = last_queue_push_id != current_item_id;
+                    let just_paused = is_playing != prev_playing && !is_playing;
+
+                    if current_item_id.is_some() && (track_changed || just_paused) {
+                        crate::play_queue_sync::push(ctrl);
+                    }
+                    last_queue_push_id = current_item_id;
                 }
 
                 #[cfg(target_os = "macos")]

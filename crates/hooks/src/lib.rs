@@ -5,6 +5,7 @@ pub mod artist_images;
 pub mod db_reactivity;
 pub mod debug_db;
 pub mod favorites;
+pub mod play_queue_sync;
 pub mod playback_ref;
 mod player_controller_queue;
 pub mod scrobble_scheduler;

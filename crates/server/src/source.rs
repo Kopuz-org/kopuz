@@ -147,6 +147,25 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("playlist radio"))
     }
 
+    /// Save the play queue to the remote (Subsonic `savePlayQueue`): the full
+    /// item id order, the playing item's id, and its position in milliseconds.
+    /// Only sources whose [`Capabilities::play_queue`] is set override this.
+    async fn save_play_queue(
+        &self,
+        _item_ids: &[String],
+        _current_id: Option<&str>,
+        _position_ms: u64,
+    ) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("play queue sync"))
+    }
+
+    /// Fetch the remote's saved play queue (Subsonic `getPlayQueue`), if it has
+    /// one. Shares [`Capabilities::play_queue`] with
+    /// [`save_play_queue`](Self::save_play_queue).
+    async fn get_play_queue(&self) -> Result<Option<RemotePlayQueue>, SourceError> {
+        Err(SourceError::unsupported("play queue sync"))
+    }
+
     /// The track's canonical public web URL, when this source has shareable web
     /// pages (e.g. a YouTube Music watch link or Spotify track link). `None` otherwise — callers fall
     /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.

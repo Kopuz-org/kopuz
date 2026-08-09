@@ -180,6 +180,24 @@ struct PlaylistCreationData {
     playlist: Option<SubsonicPlaylist>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubsonicPlayQueue {
+    pub current: Option<String>,
+    pub position: Option<u64>,
+    pub changed: Option<String>,
+    pub changed_by: Option<String>,
+    #[serde(default)]
+    pub entry: Vec<SubsonicSong>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetPlayQueueData {
+    #[serde(default)]
+    play_queue: Option<SubsonicPlayQueue>,
+}
+
 /// Build a Subsonic `getCoverArt` URL without the caller holding a client — the
 /// player's synchronous cover path needs it but must not construct a client.
 pub fn cover_art_url(
@@ -443,6 +461,38 @@ impl SubsonicClient {
         Ok(url.to_string())
     }
 
+    /// The server's saved play queue for this user, if it has one.
+    pub async fn get_play_queue(&self) -> Result<Option<SubsonicPlayQueue>, String> {
+        let data = self
+            .call::<GetPlayQueueData>("getPlayQueue.view", vec![])
+            .await?;
+        Ok(data.play_queue)
+    }
+
+    /// Save the play queue: one `id` param per song, `current` the playing
+    /// song's id, `position` its position in milliseconds. An empty `item_ids`
+    /// with no `current` clears the saved queue.
+    pub async fn save_play_queue(
+        &self,
+        item_ids: &[&str],
+        current_id: Option<&str>,
+        position_ms: Option<u64>,
+    ) -> Result<(), String> {
+        let mut params: Vec<(String, String)> = item_ids
+            .iter()
+            .map(|id| ("id".to_string(), (*id).to_string()))
+            .collect();
+        if let Some(current) = current_id {
+            params.push(("current".to_string(), current.to_string()));
+        }
+        if let Some(position) = position_ms {
+            params.push(("position".to_string(), position.to_string()));
+        }
+        self.call::<EmptyData>("savePlayQueue.view", params)
+            .await
+            .map(|_| ())
+    }
+
     fn auth_params(&self) -> Vec<(String, String)> {
         let salt = self.random_salt();
         let token_input = format!("{}{}", self.password, salt);
@@ -503,5 +553,65 @@ impl SubsonicClient {
         }
 
         Err("Subsonic request failed with unknown error".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Shape verified against a live Navidrome 0.63.2 (OpenSubsonic) instance's
+    // getPlayQueue response, trimmed to the fields this crate reads.
+    #[test]
+    fn play_queue_deserializes_from_a_live_shaped_response() {
+        let envelope: SubsonicEnvelope<GetPlayQueueData> =
+            serde_json::from_value(serde_json::json!({
+                "subsonic-response": {
+                    "status": "ok",
+                    "version": "1.16.1",
+                    "playQueue": {
+                        "entry": [
+                            {
+                                "id": "BgdZpTKEu8u6xLGYsZCCXq",
+                                "title": "Expectation",
+                                "album": "Innerspeaker",
+                                "albumId": "7tbDxWiXuAInyHqxBR8ukM",
+                                "artist": "Tame Impala",
+                                "duration": 362,
+                                "bitRate": 901,
+                                "coverArt": "mf-BgdZpTKEu8u6xLGYsZCCXq_6a69cd29"
+                            }
+                        ],
+                        "current": "BgdZpTKEu8u6xLGYsZCCXq",
+                        "position": 45000,
+                        "username": "someone",
+                        "changed": "2026-08-09T18:08:10.49647068Z",
+                        "changedBy": "Arpeggi"
+                    }
+                }
+            }))
+            .expect("valid getPlayQueue response");
+
+        let queue = envelope
+            .response
+            .data
+            .play_queue
+            .expect("playQueue present");
+        assert_eq!(queue.current.as_deref(), Some("BgdZpTKEu8u6xLGYsZCCXq"));
+        assert_eq!(queue.position, Some(45000));
+        assert_eq!(queue.changed_by.as_deref(), Some("Arpeggi"));
+        assert_eq!(queue.entry.len(), 1);
+        assert_eq!(queue.entry[0].title, "Expectation");
+    }
+
+    #[test]
+    fn play_queue_absent_when_nothing_saved() {
+        let envelope: SubsonicEnvelope<GetPlayQueueData> =
+            serde_json::from_value(serde_json::json!({
+                "subsonic-response": { "status": "ok", "version": "1.16.1" }
+            }))
+            .expect("valid empty response");
+
+        assert!(envelope.response.data.play_queue.is_none());
     }
 }

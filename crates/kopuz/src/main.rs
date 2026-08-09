@@ -591,6 +591,20 @@ fn App() -> Element {
                     cfg.volume = *volume.peek();
                     cfg
                 });
+                // Same gate as the local flush above, plus the source actually
+                // keeping a server-side queue (Subsonic).
+                let queue_push = (*initial_load_done.peek() && *queue_loaded_ok.peek())
+                    .then(|| active_source.peek().clone())
+                    .filter(|source| source.capabilities().play_queue)
+                    .and_then(|source| {
+                        let state = pending_queue_state_snapshot.peek().clone()?;
+                        let payload = hooks::play_queue_sync::save_payload(
+                            &state.queue,
+                            state.current_queue_index,
+                            state.progress_secs,
+                        )?;
+                        Some((source, payload))
+                    });
                 let _ = std::thread::spawn(move || {
                     let Ok(rt) = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -606,6 +620,13 @@ fn App() -> Element {
                         }
                         if let Some(cfg) = cfg {
                             let _ = db.save_config(&cfg).await;
+                        }
+                        if let Some((source, (item_ids, current_id, position_ms))) = queue_push
+                            && let Err(e) = source
+                                .save_play_queue(&item_ids, current_id.as_deref(), position_ms)
+                                .await
+                        {
+                            tracing::warn!(error = %e, "play queue flush on close failed");
                         }
                     });
                 })
@@ -1259,6 +1280,13 @@ fn App() -> Element {
                         );
                     }
                 }
+
+                // If the active source keeps its own play queue (Subsonic) and
+                // it was last saved by another client, that's fresher than what
+                // we just restored locally — adopt it.
+                hooks::play_queue_sync::restore_if_changed_elsewhere(ctrl)
+                    .instrument(tracing::info_span!("startup.restore_play_queue"))
+                    .await;
 
                 initial_load_done.set(true);
                 // Kick one reconcile shortly after startup so pending offline
