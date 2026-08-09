@@ -42,6 +42,7 @@ mod types;
 mod youtube_music;
 use jellyfin::JellyfinSource;
 use local::LocalSource;
+pub use local::PORTABLE_LIBRARY_DB_FILENAME;
 use offline::OfflineServerSource;
 use soundcloud::SoundcloudSource;
 use spotify::SpotifySource;
@@ -63,6 +64,12 @@ pub trait MediaSource: Send + Sync {
     /// a call-site API — go through the operation methods, not the raw `Db`.
     #[doc(hidden)]
     fn db(&self) -> &Db;
+
+    /// The shared metadata database carried by a local library, if configured.
+    /// UI plumbing uses this only to notice commits made by another computer.
+    fn portable_metadata_path(&self) -> Option<std::path::PathBuf> {
+        None
+    }
 
     /// What this source supports — gated on by the UI (no `is_server()` split).
     fn capabilities(&self) -> Capabilities;
@@ -350,6 +357,32 @@ pub trait MediaSource: Send + Sync {
             .map_err(SourceError::from)
     }
 
+    /// This source's playlists and playlist folders. Local sources can back
+    /// this read with their folder-carried metadata DB; remotes use the app DB
+    /// cache populated by their sync implementation.
+    async fn load_playlists(&self) -> Result<reader::PlaylistStore, SourceError> {
+        self.db()
+            .load_playlists(self.source())
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// This source's recently-played refs, newest first. Local sources can
+    /// resolve this from their folder-carried database.
+    async fn recently_played(&self, limit: u32) -> Result<Vec<String>, SourceError> {
+        self.db()
+            .recently_played(self.source(), limit)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Import shared play counts into the app DB's source partition and return
+    /// the source-qualified keys needed by the live config cache. Non-portable
+    /// sources have nothing to import.
+    async fn sync_portable_activity(&self) -> Result<Vec<(String, u64)>, SourceError> {
+        Ok(Vec::new())
+    }
+
     /// Whether `ref_` is currently favorited for this source.
     async fn is_favorite(&self, ref_: &str) -> bool {
         self.db()
@@ -555,7 +588,7 @@ pub trait MediaSource: Send + Sync {
     /// Create a playlist folder (local organisation). DB-cache op.
     async fn create_folder(&self, id: &str, name: &str) -> Result<(), SourceError> {
         self.db()
-            .create_folder(id, name)
+            .create_folder(self.source(), id, name)
             .await
             .map_err(SourceError::from)
     }
@@ -563,14 +596,17 @@ pub trait MediaSource: Send + Sync {
     /// Rename a playlist folder. DB-cache op.
     async fn rename_folder(&self, id: &str, name: &str) -> Result<(), SourceError> {
         self.db()
-            .rename_folder(id, name)
+            .rename_folder(self.source(), id, name)
             .await
             .map_err(SourceError::from)
     }
 
     /// Delete a playlist folder (its playlists become unfiled). DB-cache op.
     async fn delete_folder(&self, id: &str) -> Result<(), SourceError> {
-        self.db().delete_folder(id).await.map_err(SourceError::from)
+        self.db()
+            .delete_folder(self.source(), id)
+            .await
+            .map_err(SourceError::from)
     }
 
     /// Move a playlist into a folder (or out of one with `None`). DB-cache op.
@@ -580,7 +616,7 @@ pub trait MediaSource: Send + Sync {
         folder_id: Option<&str>,
     ) -> Result<(), SourceError> {
         self.db()
-            .set_playlist_folder(playlist_ref, folder_id)
+            .set_playlist_folder(self.source(), playlist_ref, folder_id)
             .await
             .map_err(SourceError::from)
     }
@@ -816,7 +852,18 @@ pub fn configured_server(db: Db, config: &AppConfig) -> Option<Box<dyn MediaSour
 
 /// A local (filesystem) [`MediaSource`] using the supplied DB namespace.
 pub fn local(db: Db, source: Source) -> Box<dyn MediaSource> {
-    Box::new(LocalSource { db, source })
+    Box::new(LocalSource::new(db, source, Vec::new()))
+}
+
+/// A local source whose favorites and playlists travel with its configured
+/// folders. The first folder owns the database; refs encode their root index so
+/// each computer may mount those folders at different paths.
+pub fn local_with_directories(
+    db: Db,
+    source: Source,
+    directories: Vec<std::path::PathBuf>,
+) -> Box<dyn MediaSource> {
+    Box::new(LocalSource::new(db, source, directories))
 }
 
 /// The [`MediaSource`] backing a given [`Source`] key — the single factory.
@@ -826,7 +873,25 @@ pub fn local(db: Db, source: Source) -> Box<dyn MediaSource> {
 /// the result (the cached [`ActiveSource`]) rather than calling per render.
 pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSource> {
     match source {
-        Source::Local | Source::LocalLibrary(_) => local(db, source.clone()),
+        Source::Local => local_with_directories(
+            db,
+            source.clone(),
+            if config.local_portable_metadata {
+                config.music_directory.clone()
+            } else {
+                Vec::new()
+            },
+        ),
+        Source::LocalLibrary(id) => local_with_directories(
+            db,
+            source.clone(),
+            config
+                .local_sources
+                .iter()
+                .find(|local| local.id == *id && local.portable_metadata)
+                .map(|local| local.directories.clone())
+                .unwrap_or_default(),
+        ),
         Source::Server(id) => match ServerConn::resolve(config) {
             Some(conn) => remote_source(db, Source::Server(id.clone()), &conn),
             None => Box::new(OfflineServerSource {

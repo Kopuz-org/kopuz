@@ -131,10 +131,12 @@ async fn named_local_source_round_trips_as_active() {
         id: "local:test-library".into(),
         name: "Work music".into(),
         directories: vec![PathBuf::from("/music/work")],
+        portable_metadata: false,
     };
     let cfg = AppConfig {
         active_source: Source::LocalLibrary(local.id.clone()),
         local_sources: vec![local.clone()],
+        local_portable_metadata: false,
         ..Default::default()
     };
 
@@ -146,6 +148,7 @@ async fn named_local_source_round_trips_as_active() {
 
     assert_eq!(loaded.active_source, Source::LocalLibrary(local.id.clone()));
     assert_eq!(loaded.local_sources, vec![local]);
+    assert!(!loaded.local_portable_metadata);
     assert!(loaded.server.is_none());
     assert_eq!(
         loaded

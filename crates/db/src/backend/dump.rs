@@ -84,27 +84,32 @@ pub async fn load_playlists(pool: &SqlitePool, source: &Source) -> Result<Playli
         })
         .collect();
 
-    let folder_rows = sqlx::query!("SELECT id, name FROM folders")
-        .fetch_all(pool)
-        .await?;
-    let member_rows = sqlx::query!(
-        "SELECT folder_id, playlist_ref FROM folder_playlists ORDER BY folder_id, position"
+    let folder_rows =
+        sqlx::query_as::<_, (String, String)>("SELECT id, name FROM folders WHERE source = ?1")
+            .bind(src)
+            .fetch_all(pool)
+            .await?;
+    let member_rows = sqlx::query_as::<_, (String, String)>(
+        "SELECT fp.folder_id, fp.playlist_ref FROM folder_playlists fp \
+         JOIN folders f ON f.id = fp.folder_id WHERE f.source = ?1 \
+         ORDER BY fp.folder_id, fp.position",
     )
+    .bind(src)
     .fetch_all(pool)
     .await?;
     let mut members_by_folder: HashMap<String, Vec<String>> = HashMap::new();
-    for m in member_rows {
+    for (folder_id, playlist_ref) in member_rows {
         members_by_folder
-            .entry(m.folder_id)
+            .entry(folder_id)
             .or_default()
-            .push(m.playlist_ref);
+            .push(playlist_ref);
     }
     let folders = folder_rows
         .into_iter()
-        .map(|f| PlaylistFolder {
-            playlist_ids: members_by_folder.remove(&f.id).unwrap_or_default(),
-            id: f.id,
-            name: f.name,
+        .map(|(id, name)| PlaylistFolder {
+            playlist_ids: members_by_folder.remove(&id).unwrap_or_default(),
+            id,
+            name,
         })
         .collect();
 

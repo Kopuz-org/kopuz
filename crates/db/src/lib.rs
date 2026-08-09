@@ -192,6 +192,11 @@ pub trait ReadStore: Send + Sync {
     /// This source's recently-played track keys, newest first (capped).
     async fn recently_played(&self, source: &Source, limit: u32) -> Result<Vec<String>, DbError>;
 
+    /// Every persisted play count as its source-qualified key and count.
+    /// Portable local-library databases use this to remap filesystem refs onto
+    /// the current machine before merging them into the app database.
+    async fn listen_counts(&self) -> Result<Vec<(String, u64)>, DbError>;
+
     /// One representative (first-inserted) track per artist, artist A→Z — for
     /// artist tiles that need a cover without pulling the whole source.
     async fn artist_sample_tracks(
@@ -401,25 +406,43 @@ pub trait Storage: ReadStore {
         epoch: i64,
     ) -> Result<(), DbError>;
 
+    /// Atomically replace one source's playlists, ordered membership, folders,
+    /// and folder membership from a synchronized snapshot.
+    async fn replace_playlist_store(
+        &self,
+        source: &Source,
+        store: &reader::PlaylistStore,
+    ) -> Result<(), DbError>;
+
     /// Create one (local) playlist folder.
-    async fn create_folder(&self, id: &str, name: &str) -> Result<(), DbError>;
+    async fn create_folder(&self, source: &Source, id: &str, name: &str) -> Result<(), DbError>;
 
     /// Rename one folder.
-    async fn rename_folder(&self, id: &str, name: &str) -> Result<(), DbError>;
+    async fn rename_folder(&self, source: &Source, id: &str, name: &str) -> Result<(), DbError>;
 
     /// Delete one folder; its playlist memberships cascade away.
-    async fn delete_folder(&self, id: &str) -> Result<(), DbError>;
+    async fn delete_folder(&self, source: &Source, id: &str) -> Result<(), DbError>;
 
     /// Move one playlist into `folder_id`, or out of every folder when `None`.
     /// Folder membership is single-folder per playlist.
     async fn set_playlist_folder(
         &self,
+        source: &Source,
         playlist_ref: &str,
         folder_id: Option<&str>,
     ) -> Result<(), DbError>;
 
     /// Increment one track's play count in its source partition.
     async fn bump_listen_count(&self, source: &Source, track_uid: &str) -> Result<(), DbError>;
+
+    /// Merge absolute play counts into one source partition. Existing larger
+    /// counts win because listening activity is monotonic and another writer
+    /// may have incremented a row after the incoming snapshot was read.
+    async fn merge_listen_counts(
+        &self,
+        source: &Source,
+        counts: &[(String, u64)],
+    ) -> Result<(), DbError>;
 
     /// Record a play for this source's recently-played history (caps + trims).
     async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;
@@ -555,6 +578,16 @@ impl Db {
 /// this in `main()` before mounting.
 pub async fn init(db_path: &std::path::Path) -> Result<Db, DbError> {
     let native = backend::Native::open(db_path).await?;
+    Ok(Db(Arc::new(native)))
+}
+
+/// Open the metadata database carried inside a local music folder.
+///
+/// Unlike the main app database this uses SQLite's single-file rollback
+/// journal, which is suitable for a library on a shared filesystem and avoids
+/// persistent `-wal`/`-shm` files being synchronized independently.
+pub async fn init_portable(db_path: &std::path::Path) -> Result<Db, DbError> {
+    let native = backend::Native::open_portable(db_path).await?;
     Ok(Db(Arc::new(native)))
 }
 

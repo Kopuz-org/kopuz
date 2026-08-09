@@ -7,6 +7,7 @@ pub mod debug_db;
 pub mod favorites;
 pub mod playback_ref;
 mod player_controller_queue;
+pub mod portable_metadata;
 pub mod scrobble_scheduler;
 pub mod source_switch;
 pub mod toast;
