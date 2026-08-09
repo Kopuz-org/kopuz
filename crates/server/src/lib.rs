@@ -12,6 +12,7 @@ pub mod source;
 pub mod spotify;
 pub mod subsonic;
 pub mod sync;
+pub mod youtube_download;
 pub mod ytmusic;
 
 pub use download_queue::{DownloadItem, DownloadProgress, DownloadQueue, DownloadStatus};

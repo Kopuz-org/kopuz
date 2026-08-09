@@ -78,8 +78,8 @@ const SECTIONS: &[(&str, &[NavItem])] = &[
 #[cfg(not(target_os = "android"))]
 const TOOL_ITEMS: &[NavItem] = &[
     NavItem {
-        key: "ytdlp",
-        route: Route::Ytdlp,
+        key: "youtube_downloads",
+        route: Route::YoutubeDownloads,
         icon: "fa-solid fa-download",
     },
     NavItem {
