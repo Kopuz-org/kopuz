@@ -204,8 +204,8 @@ manifesto fonte:
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
-flatpak-builder --user --install --force-clean build-dir packaging/flatpak/com.temidaradev.kopuz.json
-flatpak run com.temidaradev.kopuz
+flatpak-builder --user --install --force-clean build-dir packaging/flatpak/moe.kopuz.kopuz.json
+flatpak run moe.kopuz.kopuz
 ```
 
 Também pode clicar no ficheiro e abri-lo com um fornecedor de aplicações, por

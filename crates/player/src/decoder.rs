@@ -67,7 +67,15 @@ pub fn from_stream_with_len(
     stream: impl Read + Seek + Send + Sync + 'static,
     len: Option<u64>,
 ) -> (Box<dyn MediaSource>, Hint) {
-    let source: Box<dyn MediaSource> = Box::new(ReadSeekSource::new(Box::new(stream), len));
+    let source: Box<dyn MediaSource> = match len {
+        Some(len) => Box::new(ReadSeekSource::new(Box::new(stream), Some(len))),
+        // Without a total length, end-relative seeks cannot be implemented
+        // correctly while the HTTP body is still arriving. Treat the source as
+        // progressive instead of making a probe wait for the full download.
+        None => Box::new(ReadOnlySource {
+            inner: Box::new(stream),
+        }),
+    };
     let hint = Hint::new();
     (source, hint)
 }
@@ -114,4 +122,25 @@ pub fn from_stream_with_hint(
     let mut hint = Hint::new();
     hint.with_extension(extension);
     (source, hint)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_with_known_length_is_seekable() {
+        let (source, _) = from_stream_with_len(std::io::Cursor::new(vec![0; 8]), Some(8));
+
+        assert!(source.is_seekable());
+        assert_eq!(source.byte_len(), Some(8));
+    }
+
+    #[test]
+    fn stream_without_length_is_progressive() {
+        let (source, _) = from_stream_with_len(std::io::Cursor::new(vec![0; 8]), None);
+
+        assert!(!source.is_seekable());
+        assert_eq!(source.byte_len(), None);
+    }
 }

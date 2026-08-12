@@ -4,6 +4,7 @@ use dioxus::{logger::tracing, prelude::*};
 use player::engine::{SourceFactory, Transition};
 use player::player::{LoadArgs, NowPlayingMeta, Player};
 use reader::Track;
+use std::sync::Arc;
 use std::time::Duration;
 use utils;
 
@@ -81,6 +82,10 @@ pub struct PlayerController {
     pub current_song_bitrate: Signal<u16>,
     pub current_song_duration: Signal<u64>,
     pub current_song_progress: Signal<u64>,
+    /// Byte ranges already fetched for the active network track. The UI draws
+    /// these behind playback position, like a browser media seek bar.
+    pub buffered_ranges: Signal<Vec<BufferedRange>>,
+    buffer_progress_tx: Signal<tokio::sync::mpsc::UnboundedSender<BufferProgressEvent>>,
     pub current_song_cover_url: Signal<String>,
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
@@ -171,7 +176,63 @@ pub struct PendingCrossfadeUiState {
     pub from_token: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BufferedRange {
+    pub start: u64,
+    pub end: u64,
+    pub total: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BufferProgressEvent {
+    token: u64,
+    start: u64,
+    end: u64,
+    total: Option<u64>,
+}
+
+fn merge_buffered_range(ranges: &mut Vec<BufferedRange>, incoming: BufferedRange) {
+    if incoming.total == 0 || incoming.start >= incoming.end {
+        return;
+    }
+    if ranges
+        .first()
+        .is_some_and(|range| range.total != incoming.total)
+    {
+        ranges.clear();
+    }
+    ranges.push(BufferedRange {
+        end: incoming.end.min(incoming.total),
+        ..incoming
+    });
+    ranges.sort_unstable_by_key(|range| range.start);
+
+    let mut merged: Vec<BufferedRange> = Vec::with_capacity(ranges.len());
+    for range in ranges.drain(..) {
+        if let Some(previous) = merged.last_mut()
+            && range.start <= previous.end
+        {
+            previous.end = previous.end.max(range.end);
+            continue;
+        }
+        merged.push(range);
+    }
+    *ranges = merged;
+}
+
 impl PlayerController {
+    fn buffer_progress_callback(&self, token: u64) -> utils::stream_buffer::BufferProgressCallback {
+        let progress_tx = self.buffer_progress_tx.peek().clone();
+        Arc::new(move |start, end, total| {
+            let _ = progress_tx.send(BufferProgressEvent {
+                token,
+                start,
+                end,
+                total,
+            });
+        })
+    }
+
     fn track_key(track: &Track) -> String {
         track.id.uid().to_string()
     }
@@ -365,6 +426,7 @@ impl PlayerController {
         self.current_song_bitrate.set(0);
         self.current_song_duration.set(0);
         self.current_song_progress.set(0);
+        self.buffered_ranges.set(Vec::new());
         self.current_song_cover_url.set(String::new());
         self.current_track_snapshot.set(None);
     }
@@ -583,6 +645,7 @@ impl PlayerController {
         }
         self.playback_error
             .set(Some(format!("Couldn't load this track:\n{error}")));
+        self.buffered_ranges.set(Vec::new());
         match intent {
             PlaybackIntent::Loading {
                 crossfade: true,
@@ -1091,6 +1154,7 @@ impl PlayerController {
             crossfade: use_crossfade,
             from_token,
         });
+        self.buffered_ranges.set(Vec::new());
 
         let cover_url: String = if offline_path.is_some() {
             self.cover_url_for_track(&track)
@@ -1141,6 +1205,8 @@ impl PlayerController {
                 } else {
                     (None, None)
                 };
+                let buffer_progress = (!is_radio_item)
+                    .then(|| ctrl.buffer_progress_callback(token));
 
                 let factory: SourceFactory = if let Some(path) = local_path {
                     Box::new(move || decoder::open_file(&path).map_err(|e| e.to_string()))
@@ -1164,6 +1230,7 @@ impl PlayerController {
                                 false,
                                 None,
                                 rt_handle.clone(),
+                                buffer_progress.clone(),
                             )()
                         }
                     })
@@ -1209,6 +1276,7 @@ impl PlayerController {
                         is_radio_item,
                         icy_tx,
                         rt_handle,
+                        buffer_progress,
                     )
                 };
 
@@ -1315,6 +1383,7 @@ fn network_factory(
     is_radio: bool,
     icy_tx: Option<tokio::sync::watch::Sender<utils::icy::IcyMeta>>,
     rt_handle: tokio::runtime::Handle,
+    buffer_progress: Option<utils::stream_buffer::BufferProgressCallback>,
 ) -> SourceFactory {
     Box::new(move || {
         let build = || -> std::io::Result<_> {
@@ -1332,8 +1401,11 @@ fn network_factory(
                     // YT: HTTP Range-backed source. Symphonia can seek freely
                     // (Matroska Cues at the end, scrub anywhere) and startup
                     // probes only fetch the ~512 KiB they need.
-                    let range =
-                        utils::range_source::RangeStreamSource::new(stream_url, yt_user_agent)?;
+                    let range = utils::range_source::RangeStreamSource::new_with_progress(
+                        stream_url,
+                        yt_user_agent,
+                        buffer_progress,
+                    )?;
                     let len = Some(range.total_size());
                     let (source, mut hint) = decoder::from_stream_with_len(range, len);
                     hint.with_extension(fmt.extension());
@@ -1342,14 +1414,15 @@ fn network_factory(
                     // No-pot fallback: googlevideo 403s deep ranges, and the
                     // probe reads the webm tail — stream sequentially instead of
                     // failing outright (issue #386). No scrubbing.
-                    let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                    let stream = utils::stream_buffer::StreamBuffer::with_user_agent_and_progress(
                         stream_url,
                         false,
                         yt_user_agent,
                         None,
                         rt_handle,
+                        buffer_progress,
                     );
-                    stream.wait_for_total_size();
+                    stream.wait_for_response_headers();
                     let len = stream.known_total_size();
                     let (source, mut hint) = decoder::from_stream_with_len(stream, len);
                     hint.with_extension(fmt.extension());
@@ -1367,16 +1440,35 @@ fn network_factory(
                 hint.with_extension("m4a");
                 Ok((source, hint))
             } else {
-                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
-                    stream_url,
-                    false,
-                    yt_user_agent,
-                    None,
-                    rt_handle,
-                );
-                stream.wait_for_total_size();
-                let len = stream.known_total_size();
-                Ok(decoder::from_stream_with_len(stream, len))
+                // Jellyfin and Subsonic/Navidrome normally support HTTP
+                // ranges. Let format probes jump straight to tail metadata
+                // instead of making a sequential buffer download everything
+                // between the start and end of the file.
+                match utils::range_source::RangeStreamSource::new_with_progress(
+                    stream_url.clone(),
+                    yt_user_agent.clone(),
+                    buffer_progress.clone(),
+                ) {
+                    Ok(range) => {
+                        let len = Some(range.total_size());
+                        Ok(decoder::from_stream_with_len(range, len))
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, "HTTP ranges unavailable; using progressive stream");
+                        let stream =
+                            utils::stream_buffer::StreamBuffer::with_user_agent_and_progress(
+                                stream_url,
+                                false,
+                                yt_user_agent,
+                                None,
+                                rt_handle,
+                                buffer_progress,
+                            );
+                        stream.wait_for_response_headers();
+                        let len = stream.known_total_size();
+                        Ok(decoder::from_stream_with_len(stream, len))
+                    }
+                }
             }
         };
         build().map_err(|e| e.to_string())
@@ -1406,6 +1498,39 @@ pub fn use_player_controller(
     let intent = use_signal(|| PlaybackIntent::Stopped);
     let next_token = use_signal(|| 0u64);
     let current_token = use_signal(|| 0u64);
+    let buffered_ranges = use_signal(Vec::<BufferedRange>::new);
+    let (progress_tx, progress_rx) = use_hook(|| {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<BufferProgressEvent>();
+        (tx, std::rc::Rc::new(std::cell::RefCell::new(Some(rx))))
+    });
+    let buffer_progress_tx = use_signal(move || progress_tx);
+    let progress_rx_slot = progress_rx.clone();
+    let mut buffered_ranges_sink = buffered_ranges;
+    use_effect(move || {
+        let Some(mut progress_rx) = progress_rx_slot.borrow_mut().take() else {
+            return;
+        };
+        spawn(async move {
+            while let Some(event) = progress_rx.recv().await {
+                if *current_token.peek() != event.token {
+                    continue;
+                }
+                let Some(total) = event.total.filter(|total| *total > 0) else {
+                    continue;
+                };
+                buffered_ranges_sink.with_mut(|ranges| {
+                    merge_buffered_range(
+                        ranges,
+                        BufferedRange {
+                            start: event.start,
+                            end: event.end,
+                            total,
+                        },
+                    );
+                });
+            }
+        });
+    });
     let armed_transition = use_signal(|| None);
     let browse_loading = use_signal(|| false);
     let is_loading = use_memo(move || intent.read().is_loading() || *browse_loading.read());
@@ -1482,6 +1607,8 @@ pub fn use_player_controller(
         current_song_bitrate,
         current_song_duration,
         current_song_progress,
+        buffered_ranges,
+        buffer_progress_tx,
         current_song_cover_url,
         current_track_snapshot,
         volume,
@@ -1510,5 +1637,73 @@ pub fn use_player_controller(
         spotify_commanded,
         external_active,
         spotify_device_chosen,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BufferedRange, merge_buffered_range};
+
+    #[test]
+    fn buffered_ranges_merge_adjacent_and_overlapping_chunks() {
+        let mut ranges = Vec::new();
+        for (start, end) in [(500, 750), (0, 250), (200, 500)] {
+            merge_buffered_range(
+                &mut ranges,
+                BufferedRange {
+                    start,
+                    end,
+                    total: 1_000,
+                },
+            );
+        }
+
+        assert_eq!(
+            ranges,
+            vec![BufferedRange {
+                start: 0,
+                end: 750,
+                total: 1_000,
+            }]
+        );
+    }
+
+    #[test]
+    fn buffered_ranges_preserve_gaps_and_reset_for_a_new_total() {
+        let mut ranges = Vec::new();
+        merge_buffered_range(
+            &mut ranges,
+            BufferedRange {
+                start: 0,
+                end: 100,
+                total: 1_000,
+            },
+        );
+        merge_buffered_range(
+            &mut ranges,
+            BufferedRange {
+                start: 900,
+                end: 1_000,
+                total: 1_000,
+            },
+        );
+        assert_eq!(ranges.len(), 2);
+
+        merge_buffered_range(
+            &mut ranges,
+            BufferedRange {
+                start: 0,
+                end: 50,
+                total: 500,
+            },
+        );
+        assert_eq!(
+            ranges,
+            vec![BufferedRange {
+                start: 0,
+                end: 50,
+                total: 500,
+            }]
+        );
     }
 }

@@ -26,7 +26,7 @@ flatpak:
 flatpak-install: flatpak
 
 flatpak-run:
-    flatpak run com.temidaradev.kopuz
+    flatpak run moe.kopuz.kopuz
 
 # --- Mobile -----------------------------------------------------------------
 

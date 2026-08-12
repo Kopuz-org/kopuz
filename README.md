@@ -221,7 +221,7 @@ pre-built Flatpak repository, or build it yourself from source.
 
 ```bash
 flatpak install --user --or-update \
-    https://kopuz-org.github.io/kopuz-flatpak/com.temidaradev.kopuz.flatpakref
+    https://kopuz-org.github.io/kopuz-flatpak/moe.kopuz.kopuz.flatpakref
 ```
 
 #### Option 2: Build from source manifest
@@ -243,8 +243,8 @@ git clone https://github.com/temidaradev/kopuz
 cd kopuz
 dx build --release --package kopuz
 flatpak-builder --user --install --force-clean \
-  build-dir packaging/flatpak/com.temidaradev.kopuz.json
-flatpak run com.temidaradev.kopuz
+  build-dir packaging/flatpak/moe.kopuz.kopuz.json
+flatpak run moe.kopuz.kopuz
 ```
 
 You can also click on the file and open it with an app provider, for example KDE
@@ -812,7 +812,3 @@ longer than needed.
 
 - Logo design by: Lucas Amorim -
   [His Instagram Account](https://www.instagram.com/yattets/)
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://www.star-history.com/?repos=Kopuz-org%2Fkopuz&type=date&legend=top-left)

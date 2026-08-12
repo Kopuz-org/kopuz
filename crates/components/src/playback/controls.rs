@@ -1,7 +1,7 @@
 use crate::shared::fmt_time;
 use config::AppConfig;
 use dioxus::prelude::*;
-use hooks::use_player_controller::{LoopMode, PlayerController};
+use hooks::use_player_controller::{BufferedRange, LoopMode, PlayerController};
 use player::player::Player;
 
 pub struct SeekDrag {
@@ -10,6 +10,61 @@ pub struct SeekDrag {
     pub is_radio: bool,
     pub on_commit: Callback<FormEvent>,
     pub on_input: Callback<FormEvent>,
+}
+
+/// Network bytes already fetched, drawn behind the played position. Before
+/// byte totals arrive, an indeterminate scan confirms that loading is active.
+#[component]
+pub(crate) fn PlaybackBufferIndicator(
+    ranges: Vec<BufferedRange>,
+    played_percent: f64,
+    loading: bool,
+) -> Element {
+    let visual_ranges = visual_buffer_ranges(&ranges, played_percent);
+    rsx! {
+        div {
+            class: "absolute inset-0 overflow-hidden rounded-full pointer-events-none",
+            "aria-hidden": "true",
+            for (left, right) in visual_ranges {
+                div {
+                    class: "absolute top-0 h-full bg-white/30 rounded-full",
+                    style: "left: {left}%; width: {right - left}%;"
+                }
+            }
+            if loading && ranges.is_empty() {
+                div {
+                    class: "h-full w-1/4 bg-[var(--color-primary,#6366f1)] animate-scan"
+                }
+            }
+        }
+    }
+}
+
+fn visual_buffer_ranges(ranges: &[BufferedRange], played_percent: f64) -> Vec<(f64, f64)> {
+    const MERGE_GAP_PERCENT: f64 = 0.75;
+    const PLAYHEAD_SNAP_PERCENT: f64 = 5.0;
+
+    let mut visual: Vec<(f64, f64)> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        let start = (range.start as f64 / range.total as f64 * 100.0).clamp(0.0, 100.0);
+        let end = (range.end as f64 / range.total as f64 * 100.0).clamp(start, 100.0);
+        if let Some(previous) = visual.last_mut()
+            && start - previous.1 <= MERGE_GAP_PERCENT
+        {
+            previous.1 = previous.1.max(end);
+        } else {
+            visual.push((start, end));
+        }
+    }
+
+    let played_percent = played_percent.clamp(0.0, 100.0);
+    if let Some(active) = visual.iter_mut().find(|(start, end)| {
+        *end >= played_percent && *start <= played_percent + PLAYHEAD_SNAP_PERCENT
+    }) && active.0 > played_percent
+    {
+        active.0 = played_percent;
+    }
+    visual
 }
 
 pub fn use_seek_drag(
@@ -260,12 +315,16 @@ pub fn SeekSlider(
     current_song_progress: Signal<u64>,
     variant: ControlsVariant,
 ) -> Element {
+    let ctrl = use_context::<PlayerController>();
     let seek = use_seek_drag(current_song_duration, current_song_progress);
     let display_progress = seek.display_progress;
     let progress_percent = seek.progress_percent;
     let is_radio = seek.is_radio;
     let on_commit = seek.on_commit;
     let on_input = seek.on_input;
+    let is_loading = *ctrl.is_loading.read();
+    let buffered_ranges = ctrl.buffered_ranges.read().clone();
+    let can_seek = !is_radio && !is_loading;
 
     match variant {
         ControlsVariant::Fullscreen => rsx! {
@@ -276,31 +335,42 @@ pub fn SeekSlider(
                     class: "flex items-center gap-3",
                     span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{fmt_time(display_progress)}" }
                     div {
-                        class: format!("flex-1 {} relative group", if is_radio { "" } else { "cursor-pointer" }),
+                        class: format!("flex-1 {} relative group", if can_seek { "cursor-pointer" } else { "" }),
                         style: "height: 20px;",
                         div {
                             class: "absolute bg-white/20 rounded-full",
                             style: "height: 4px; top: 8px; left: 0; right: 0;"
                         }
                         div {
+                            class: "absolute overflow-hidden rounded-full",
+                            style: "height: 4px; top: 8px; left: 0; right: 0;",
+                            PlaybackBufferIndicator {
+                                ranges: buffered_ranges.clone(),
+                                played_percent: progress_percent,
+                                loading: is_loading,
+                            }
+                        }
+                        div {
                             class: "absolute rounded-full pointer-events-none bg-white/90",
                             style: "height: 4px; top: 8px; left: 0; width: {progress_percent}%;"
                         }
-                        div {
-                            class: if cfg!(target_os = "android") {
-                                "absolute bg-white rounded-full pointer-events-none"
-                            } else {
-                                "absolute bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
-                            },
-                            style: "width: 12px; height: 12px; top: 4px; left: calc({progress_percent}% - 6px);"
+                        if !is_loading {
+                            div {
+                                class: if cfg!(target_os = "android") {
+                                    "absolute bg-white rounded-full pointer-events-none"
+                                } else {
+                                    "absolute bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+                                },
+                                style: "width: 12px; height: 12px; top: 4px; left: calc({progress_percent}% - 6px);"
+                            }
                         }
                         input {
                             r#type: "range",
                             min: "0",
                             max: "{*current_song_duration.read()}",
                             value: "{display_progress}",
-                            class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 {}", if is_radio { "" } else { "cursor-pointer" }),
-                            disabled: is_radio,
+                            class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 {}", if can_seek { "cursor-pointer" } else { "" }),
+                            disabled: !can_seek,
                             onchange: move |evt| on_commit.call(evt),
                             oninput: move |evt| on_input.call(evt),
                         }
@@ -314,19 +384,24 @@ pub fn SeekSlider(
                 class: "flex items-center gap-2 w-full",
                 span { class: "text-[10px] text-slate-500 w-8 text-right font-mono", "{fmt_time(display_progress)}" }
                 div {
-                    class: format!("flex-1 h-1 bg-white/10 rounded-full relative {}", if is_radio { "" } else { "group cursor-pointer" }),
+                    class: format!("flex-1 h-1 bg-white/10 rounded-full relative {}", if can_seek { "group cursor-pointer" } else { "" }),
+                    PlaybackBufferIndicator {
+                        ranges: buffered_ranges.clone(),
+                        played_percent: progress_percent,
+                        loading: is_loading,
+                    }
                     div {
                         class: "absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
                         style: "width: {progress_percent}%",
-                        div { class: "absolute -right-1.5 -top-1 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity" }
+                            div { class: "absolute -right-1.5 -top-1 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity" }
                     }
                     input {
                         r#type: "range",
                         min: "0",
                         max: "{*current_song_duration.read()}",
                         value: "{display_progress}",
-                        class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
-                        disabled: is_radio,
+                        class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if can_seek { "cursor-pointer" } else { "pointer-events-none" }),
+                        disabled: !can_seek,
                         onchange: move |evt| on_commit.call(evt),
                         oninput: move |evt| on_input.call(evt),
                     }
@@ -421,5 +496,49 @@ pub fn VolumeSlider(
                 }
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BufferedRange, visual_buffer_ranges};
+
+    #[test]
+    fn buffer_display_coalesces_small_gaps_and_attaches_to_playhead() {
+        let ranges = vec![
+            BufferedRange {
+                start: 680,
+                end: 700,
+                total: 1_000,
+            },
+            BufferedRange {
+                start: 704,
+                end: 720,
+                total: 1_000,
+            },
+        ];
+
+        assert_eq!(visual_buffer_ranges(&ranges, 65.0), vec![(65.0, 72.0)]);
+    }
+
+    #[test]
+    fn buffer_display_keeps_distant_seek_ranges_separate() {
+        let ranges = vec![
+            BufferedRange {
+                start: 100,
+                end: 200,
+                total: 1_000,
+            },
+            BufferedRange {
+                start: 800,
+                end: 900,
+                total: 1_000,
+            },
+        ];
+
+        assert_eq!(
+            visual_buffer_ranges(&ranges, 10.0),
+            vec![(10.0, 20.0), (80.0, 90.0)]
+        );
     }
 }

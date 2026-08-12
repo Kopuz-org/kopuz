@@ -1,5 +1,7 @@
 use crate::NavigationController;
-use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, VolumeSlider};
+use crate::player_controls::{
+    ControlsVariant, PlaybackBufferIndicator, SeekSlider, TransportButtons, VolumeSlider,
+};
 use config::PlayerBarPosition;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
@@ -33,6 +35,8 @@ pub fn BottombarNormal(
     let crate::CompactMode(mut compact_mode) = use_context::<crate::CompactMode>();
 
     if cfg!(target_os = "android") {
+        let is_loading = *ctrl.is_loading.read();
+        let buffered_ranges = ctrl.buffered_ranges.read().clone();
         let progress_percent = if *current_song_duration.read() > 0 {
             (*current_song_progress.read() as f64 / *current_song_duration.read() as f64) * 100.0
         } else {
@@ -43,7 +47,12 @@ pub fn BottombarNormal(
             div {
                 class: "shrink-0 mx-2 mb-[env(safe-area-inset-bottom)] h-[68px] bg-[#121212]/95 backdrop-blur-3xl border border-white/10 rounded-[24px] flex items-center px-3 gap-3 relative overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.8)]",
                 onclick: move |_| is_fullscreen.set(true),
-                div { class: "absolute top-0 left-0 h-[2px] bg-white/10 w-full",
+                div { class: "absolute top-0 left-0 h-[2px] bg-white/10 w-full overflow-hidden",
+                    PlaybackBufferIndicator {
+                        ranges: buffered_ranges,
+                        played_percent: progress_percent,
+                        loading: is_loading,
+                    }
                     div { class: "h-full bg-white transition-all duration-300", style: "width: {progress_percent}%" }
                 }
                 div { class: "w-11 h-11 bg-white/5 rounded-xl shrink-0 overflow-hidden flex items-center justify-center",

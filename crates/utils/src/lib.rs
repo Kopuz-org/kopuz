@@ -2,6 +2,7 @@
 //! and terminal logging.
 
 pub mod artist;
+pub mod build_info;
 pub mod color;
 pub mod db_cache;
 pub mod hls_source;
