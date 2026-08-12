@@ -629,6 +629,12 @@ pub struct AppConfig {
     pub active_source: Source,
     #[serde(default)]
     pub source_explicitly_set: bool,
+    /// Library roots per server id, for backends whose library is a folder tree
+    /// rather than a catalogue (Nextcloud/WebDAV). Lives here rather than on
+    /// `SavedServer` because the servers table holds creds and is stripped from
+    /// the config blob. No entry means "auto-detect".
+    #[serde(default)]
+    pub server_folders: HashMap<String, Vec<String>>,
     /// Browser id used to host Spotify playback (`chrome`/`edge`/`brave`/
     /// `chromium`/`vivaldi`/`safari`); `None` picks the first available.
     #[serde(default)]
@@ -940,6 +946,7 @@ impl Default for AppConfig {
             local_sources: Vec::new(),
             active_source: Source::Local,
             source_explicitly_set: false,
+            server_folders: HashMap::new(),
             spotify_browser: None,
             spotify_prefer_active_device: true,
             music_directory: vec![music_directory],
@@ -1119,6 +1126,43 @@ impl AppConfig {
 }
 
 impl AppConfig {
+    /// Library roots configured for a server, empty when it auto-detects.
+    pub fn folders_for(&self, server_id: &str) -> Vec<String> {
+        self.server_folders
+            .get(server_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Library roots of the active source, empty for a local one.
+    pub fn active_server_folders(&self) -> Vec<String> {
+        self.active_source
+            .server_id()
+            .map(|id| self.folders_for(id))
+            .unwrap_or_default()
+    }
+
+    /// Replace the active server's library roots. Does nothing when the active
+    /// source is local, since roots are keyed by server id.
+    pub fn edit_active_server_folders(&mut self, edit: impl FnOnce(&mut Vec<String>)) {
+        let Some(id) = self.active_source.server_id().map(String::from) else {
+            return;
+        };
+        let mut folders = self.folders_for(&id);
+        edit(&mut folders);
+        self.set_folders_for(&id, folders);
+    }
+
+    /// Replace a server's library roots, dropping the entry when the list empties
+    /// so the backend goes back to auto-detecting.
+    pub fn set_folders_for(&mut self, server_id: &str, folders: Vec<String>) {
+        if folders.is_empty() {
+            self.server_folders.remove(server_id);
+        } else {
+            self.server_folders.insert(server_id.to_string(), folders);
+        }
+    }
+
     pub fn clear_active_server(&mut self) {
         self.active_source = Source::Local;
         self.server = None;
@@ -1272,5 +1316,19 @@ mod tests {
                 anonymous: true,
             }
         );
+    }
+
+    #[test]
+    fn server_folders_round_trip_and_clear_when_emptied() {
+        let mut config = AppConfig::default();
+        assert!(config.folders_for("srv").is_empty());
+
+        config.set_folders_for("srv", vec!["/Music".to_string()]);
+        assert_eq!(config.folders_for("srv"), vec!["/Music".to_string()]);
+
+        // Emptying drops the entry, so the backend auto-detects again.
+        config.set_folders_for("srv", Vec::new());
+        assert!(config.folders_for("srv").is_empty());
+        assert!(!config.server_folders.contains_key("srv"));
     }
 }
