@@ -107,6 +107,7 @@ fn service_style(service: MusicService) -> (&'static str, &'static str) {
         MusicService::Spotify => ("fa-brands fa-spotify", "#1DB954"),
         MusicService::Jellyfin => ("fa-solid fa-server", "#b277ee"),
         MusicService::Subsonic | MusicService::Custom => ("fa-solid fa-compact-disc", "#f0a84b"),
+        MusicService::Nextcloud => ("fa-solid fa-cloud", "#0082c9"),
     }
 }
 

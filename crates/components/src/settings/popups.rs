@@ -76,6 +76,7 @@ pub fn AddServerPopup(
         MusicService::SoundCloud => "soundcloud",
         MusicService::AppleMusic => "applemusic",
         MusicService::Spotify => "spotify",
+        MusicService::Nextcloud => "nextcloud",
     };
 
     let server_name_label = i18n::t("server_name").to_string();
@@ -160,6 +161,7 @@ pub fn AddServerPopup(
                             "soundcloud" => MusicService::SoundCloud,
                             "applemusic" => MusicService::AppleMusic,
                             "spotify" => MusicService::Spotify,
+                            "nextcloud" => MusicService::Nextcloud,
                             _ => MusicService::Jellyfin,
                         };
                         server_service.set(service);
@@ -199,6 +201,11 @@ pub fn AddServerPopup(
                         value: "spotify",
                         selected: server_service() == MusicService::Spotify,
                         "Spotify (experimental)"
+                    }
+                    option {
+                        value: "nextcloud",
+                        selected: server_service() == MusicService::Nextcloud,
+                        "Nextcloud"
                     }
                 }
 

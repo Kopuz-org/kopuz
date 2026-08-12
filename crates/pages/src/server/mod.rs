@@ -48,6 +48,13 @@ pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, 
             )
             .ok()?
         }
+        MusicService::Nextcloud => {
+            // No transcode to ask for: quality only picks the fallback
+            // extension, corrected later from the response content type.
+            let username = server.user_id.as_deref()?;
+            let password = server.access_token.as_deref()?;
+            ::server::nextcloud::stream_url(&server.url, username, password, item_id).ok()?
+        }
         MusicService::YtMusic
         | MusicService::SoundCloud
         | MusicService::AppleMusic
