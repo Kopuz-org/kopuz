@@ -112,6 +112,7 @@ impl TrackId {
             ("soundcloud", config::MusicService::SoundCloud),
             ("applemusic", config::MusicService::AppleMusic),
             ("spotify", config::MusicService::Spotify),
+            ("nextcloud", config::MusicService::Nextcloud),
         ] {
             if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
                 let item_id = rest.split(':').next().unwrap_or("").to_string();
@@ -134,6 +135,7 @@ fn service_prefix(s: config::MusicService) -> &'static str {
         config::MusicService::SoundCloud => "soundcloud",
         config::MusicService::AppleMusic => "applemusic",
         config::MusicService::Spotify => "spotify",
+        config::MusicService::Nextcloud => "nextcloud",
     }
 }
 
@@ -200,7 +202,11 @@ impl CoverRef {
             // YT Music, SoundCloud and Apple Music refs only carry
             // self-contained artwork — a URL, or an Apple artwork template.
             // Their item identity is irrelevant to cover resolution.
-            "ytmusic" | "soundcloud" | "applemusic" => value.map_or(Self::None, Self::parse),
+            // Nextcloud too: an img tag won't send the Basic auth its previews
+            // need, so the sync caches art to disk and the ref carries a path.
+            "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" => {
+                value.map_or(Self::None, Self::parse)
+            }
             _ => Self::None,
         }
     }
@@ -235,7 +241,8 @@ impl CoverRef {
             MusicService::YtMusic
             | MusicService::SoundCloud
             | MusicService::AppleMusic
-            | MusicService::Spotify => cover.map_or(Self::None, Self::parse),
+            | MusicService::Spotify
+            | MusicService::Nextcloud => cover.map_or(Self::None, Self::parse),
         }
     }
 
@@ -243,6 +250,10 @@ impl CoverRef {
     /// form [`parse`](Self::parse) reads back — the one place a service prefix
     /// is written. Hand-rolled `format!`s are how a Subsonic row ended up
     /// carrying a `jellyfin:` ref.
+    ///
+    /// `parse` splits on the first two colons, so pass `None` for `cover` when
+    /// the item id can hold one itself (a remote path): the third segment would
+    /// otherwise start mid-id and resolve to nothing.
     pub fn stored_item_ref(service: MusicService, item_id: &str, cover: Option<&str>) -> String {
         let prefix = service_prefix(service);
         match cover {
@@ -281,9 +292,10 @@ impl CoverRef {
             MusicService::Subsonic | MusicService::Custom => {
                 Self::remote_item(service, &item_id, track.cover.as_deref())
             }
-            MusicService::SoundCloud | MusicService::AppleMusic | MusicService::Spotify => {
-                track.cover.as_deref().map_or(Self::None, Self::parse)
-            }
+            MusicService::SoundCloud
+            | MusicService::AppleMusic
+            | MusicService::Spotify
+            | MusicService::Nextcloud => track.cover.as_deref().map_or(Self::None, Self::parse),
         }
     }
 

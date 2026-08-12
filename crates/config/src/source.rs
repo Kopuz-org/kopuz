@@ -92,6 +92,7 @@ pub enum MusicService {
     AppleMusic,
     SoundCloud,
     Spotify,
+    Nextcloud,
 }
 
 impl MusicService {
@@ -104,6 +105,7 @@ impl MusicService {
             Self::AppleMusic => "Apple Music",
             Self::SoundCloud => "SoundCloud",
             Self::Spotify => "Spotify",
+            Self::Nextcloud => "Nextcloud",
         }
     }
 

@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 
 use crate::{DbError, QueueSnapshot, Source};
 
-fn service_str(s: config::MusicService) -> &'static str {
+pub(crate) fn service_str(s: config::MusicService) -> &'static str {
     match s {
         config::MusicService::Jellyfin => "Jellyfin",
         config::MusicService::Subsonic => "Subsonic",
@@ -16,6 +16,7 @@ fn service_str(s: config::MusicService) -> &'static str {
         config::MusicService::SoundCloud => "SoundCloud",
         config::MusicService::AppleMusic => "AppleMusic",
         config::MusicService::Spotify => "Spotify",
+        config::MusicService::Nextcloud => "Nextcloud",
     }
 }
 

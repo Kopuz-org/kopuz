@@ -82,6 +82,9 @@ impl From<AlbumRow> for Album {
     }
 }
 
+/// The inverse of `service_str`. Every variant needs an arm: a missing one
+/// reads that service's tracks back as Jellyfin, and their covers then resolve
+/// against the wrong server.
 pub fn parse_service(s: &str) -> config::MusicService {
     match s {
         "Subsonic" => config::MusicService::Subsonic,
@@ -90,6 +93,24 @@ pub fn parse_service(s: &str) -> config::MusicService {
         "SoundCloud" => config::MusicService::SoundCloud,
         "AppleMusic" => config::MusicService::AppleMusic,
         "Spotify" => config::MusicService::Spotify,
+        "Nextcloud" => config::MusicService::Nextcloud,
         _ => config::MusicService::Jellyfin,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_service_round_trips_through_the_column() {
+        use config::MusicService::*;
+
+        for service in [
+            Jellyfin, Subsonic, Custom, YtMusic, SoundCloud, Spotify, Nextcloud,
+        ] {
+            let stored = crate::backend::writes::service_str(service);
+            assert_eq!(parse_service(stored), service, "{stored} did not survive");
+        }
     }
 }
