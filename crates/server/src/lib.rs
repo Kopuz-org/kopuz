@@ -1,11 +1,12 @@
 //! Streaming server backends for Kopuz: Jellyfin, Subsonic/Navidrome,
-//! YouTube Music, and the local download queue manager.
+//! Nextcloud, YouTube Music, and the local download queue manager.
 
 pub mod applemusic;
 pub mod cookies;
 pub mod cover;
 pub mod download_queue;
 pub mod jellyfin;
+pub mod nextcloud;
 pub mod provider;
 pub mod server_ops;
 pub mod soundcloud;

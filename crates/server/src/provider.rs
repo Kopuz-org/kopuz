@@ -54,6 +54,17 @@ impl ProviderClient {
                     user_id: username.to_string(),
                 })
             }
+            MusicService::Nextcloud => {
+                // The password is expected to be an app password (Settings,
+                // Security), which is revocable and survives 2FA.
+                let client =
+                    crate::nextcloud::NextcloudClient::new(&self.server_url, username, password)?;
+                client.ping().await.map_err(|e| e.to_string())?;
+                Ok(AuthSession {
+                    access_token: password.to_string(),
+                    user_id: username.to_string(),
+                })
+            }
             MusicService::YtMusic => Err(
                 "YouTube Music uses OAuth device flow; call login_ytmusic_device() instead"
                     .to_string(),

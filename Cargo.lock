@@ -4495,6 +4495,7 @@ dependencies = [
  "m3u8-rs",
  "md5",
  "nextcloud-rs",
+ "percent-encoding",
  "quick-xml 0.37.5",
  "rand 0.10.2",
  "regex",

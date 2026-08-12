@@ -34,6 +34,7 @@ use crate::server_ops::ServerConn;
 pub mod capabilities;
 mod jellyfin;
 mod local;
+mod nextcloud;
 mod offline;
 mod soundcloud;
 mod spotify;
@@ -42,6 +43,7 @@ mod types;
 mod youtube_music;
 use jellyfin::JellyfinSource;
 use local::LocalSource;
+use nextcloud::NextcloudSource;
 use offline::OfflineServerSource;
 use soundcloud::SoundcloudSource;
 use spotify::SpotifySource;
@@ -825,6 +827,7 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
             })
         }
         MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
+        MusicService::Nextcloud => Box::new(NextcloudSource::new(db, source, conn)),
     }
 }
 
