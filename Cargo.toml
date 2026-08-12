@@ -45,6 +45,7 @@ cpal = "0.18.1"
 symphonia = { version = "0.6", features = ["all"] }
 quick-xml = "0.37"
 rtrb = "0.3"
+nextcloud-rs = "0.1"
 reqwest = { version = "0.13", default-features = false, features = [
   "rustls",
   "http2",

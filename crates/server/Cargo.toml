@@ -18,6 +18,7 @@ workspace = true
 [dependencies]
 tracing = { workspace = true }
 directories = { workspace = true }
+nextcloud-rs = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
