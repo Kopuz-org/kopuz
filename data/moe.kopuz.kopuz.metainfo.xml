@@ -4,12 +4,8 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>Kopuz</name>
+  <icon type="stock">moe.kopuz.kopuz</icon>
   <summary>Fast, modern music player with local library and Jellyfin support</summary>
-
-  <developer id="com.temidaradev">
-    <name>temidaradev</name>
-  </developer>
-
   <description>
     <p>
       Kopuz is a fast, modern music player built with Rust and the Dioxus framework.
@@ -23,19 +19,12 @@
     </p>
   </description>
 
-  <launchable type="desktop-id">moe.kopuz.kopuz.desktop</launchable>
-
   <screenshots>
     <screenshot type="default">
       <caption>The main interface</caption>
       <image>https://github.com/user-attachments/assets/8366b1ea-021f-4631-a97b-5ed6e5bf1562</image>
     </screenshot>
   </screenshots>
-
-  <url type="homepage">https://github.com/temidaradev/kopuz</url>
-  <url type="bugtracker">https://github.com/temidaradev/kopuz/issues</url>
-
-  <content_rating type="oars-1.1" />
 
   <releases>
     <release version="0.14.0" date="2026-08-04">
@@ -169,7 +158,24 @@
     <release version="0.1.0" date="2026-01-31" />
   </releases>
 
+  <developer id="rocks.temidara">
+    <name>temidaradev</name>
+  </developer>
+
+  <launchable type="desktop-id">moe.kopuz.kopuz.desktop</launchable>
+
+  <url type="homepage">https://kopuz.moe</url>
+  <url type="bugtracker">https://github.com/temidaradev/kopuz/issues</url>
+  <url type="donation">https://github.com/sponsors/temidaradev</url>
+  <url type="vcs-browser">https://github.com/Kopuz-org/kopuz.git</url>
+
+  <content_rating type="oars-1.1" />
+
   <provides>
     <binary>kopuz</binary>
   </provides>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
 </component>

@@ -1,7 +1,6 @@
 name: lint
 
 on:
-  workflow_dispatch:
   push:
     paths:
       - 'README.md'
@@ -21,21 +20,23 @@ on:
 
 jobs:
   deno-fmt:
-    runs-on: [self-hosted, linux, x64, morph, small]
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
 
       - name: Check README.md formatting
-        run: nix shell nixpkgs#deno --command deno fmt --check README.md
+        run: deno fmt --check README.md
 
   rust-lint:
-    runs-on: [self-hosted, linux, x64, morph, large]
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
@@ -50,11 +51,11 @@ jobs:
             libglib2.0-dev libpango1.0-dev \
             libcairo2-dev libgdk-pixbuf-2.0-dev
 
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+      - uses: Swatinem/rust-cache@v2
 
       - name: Check Rust formatting
         run: cargo fmt --all --check
