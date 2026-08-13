@@ -241,7 +241,7 @@ Then build and install Kopuz:
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
-dx build --release --package kopuz
+git submodule update --remote
 flatpak-builder --user --install --force-clean \
   build-dir packaging/flatpak/moe.kopuz.kopuz.json
 flatpak run moe.kopuz.kopuz

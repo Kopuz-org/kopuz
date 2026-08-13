@@ -204,6 +204,7 @@ manifesto fonte:
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
+git submodule update --remote
 flatpak-builder --user --install --force-clean build-dir packaging/flatpak/moe.kopuz.kopuz.json
 flatpak run moe.kopuz.kopuz
 ```
