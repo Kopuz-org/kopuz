@@ -573,9 +573,13 @@ fn App() -> Element {
         // Only the resolution-relevant slice of config; a volume/theme change
         // must not rebuild the client. `Memo`'s `PartialEq` dedup gates the effect.
         let identity = use_memo(move || {
+            let cfg = config.read();
             (
-                config.read().active_source.clone(),
-                config.read().server.clone(),
+                cfg.active_source.clone(),
+                cfg.server.clone(),
+                // Library roots define what a folder-tree backend scans, so
+                // editing them has to rebuild the source like a cred change.
+                cfg.active_server_folders(),
             )
         });
         let db_eff = db.clone();

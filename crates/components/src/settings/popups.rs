@@ -530,6 +530,17 @@ fn ServerServiceFields(
                 ", add your Spotify account under User Management, and paste its Client ID above. Saving opens Spotify's sign-in page in your default browser — kopuz never sees your password. Spotify Development Mode is limited to five authorized users and requires the app owner to have Premium. Playback also requires Premium; followed playlists may be listed but Spotify only exposes tracks for playlists you own or collaborate on."
             }
         },
+        MusicService::Nextcloud => rsx! {
+            input {
+                placeholder: "{server_url_placeholder}",
+                value: "{server_url()}",
+                oninput: move |e| server_url.set(e.value()),
+                onkeydown: move |e| e.stop_propagation()
+            }
+            p { class: "text-xs text-white/60",
+                "Sign in with your username and an app password (Nextcloud Settings, Security), which is revocable and works with two-factor auth. After signing in, pick which folders hold your music under this server in Settings; kopuz otherwise looks for a Music folder. If your server runs the Music app, adding it as Subsonic instead gives you real tags and playlists."
+            }
+        },
         _ => rsx! {
             input {
                 placeholder: "{server_url_placeholder}",
