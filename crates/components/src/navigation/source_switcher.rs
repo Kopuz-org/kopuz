@@ -34,6 +34,7 @@ const SWITCHER_CSS: &str = r#"
 .ss-tr.ss-open{background:color-mix(in oklab,var(--ss-fg) 6%,transparent);border-color:color-mix(in oklab,var(--ss-fg) 18%,transparent)}
 .ss-mini{width:40px;height:40px;padding:0;justify-content:center;border-radius:8px}
 .ss-ico{display:grid;place-items:center;width:18px;flex-shrink:0;color:var(--accent);font-size:15px}
+.ss-svg{width:1.05em;height:1.05em;display:block}
 .ss-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .ss-on{background:#3fb950}
 .ss-off{background:#e5534b}
@@ -107,7 +108,36 @@ fn service_style(service: MusicService) -> (&'static str, &'static str) {
         MusicService::Spotify => ("fa-brands fa-spotify", "#1DB954"),
         MusicService::Jellyfin => ("fa-solid fa-server", "#b277ee"),
         MusicService::Subsonic | MusicService::Custom => ("fa-solid fa-compact-disc", "#f0a84b"),
-        MusicService::Nextcloud => ("fa-solid fa-cloud", "#0082c9"),
+        MusicService::Nextcloud => (NEXTCLOUD_ICON, "#0082c9"),
+    }
+}
+
+/// Stands in for a Font Awesome class where the brand mark has to be drawn
+/// instead: the vendored Font Awesome 6 Free carries no Nextcloud glyph.
+const NEXTCLOUD_ICON: &str = "brand-nextcloud";
+
+/// The Nextcloud mark, from the Simple Icons set (CC0). Sized in `em` and
+/// filled with `currentColor`, so it takes the accent and scale of the font
+/// glyph it stands in for.
+const NEXTCLOUD_PATH: &str = "M12.018 6.537c-2.5 0-4.6 1.712-5.241 4.015-.56-1.232-1.793-2.105-3.225-2.105A3.569 3.569 0 0 0 0 12a3.569 3.569 0 0 0 3.552 3.553c1.432 0 2.664-.874 3.224-2.106.641 2.304 2.742 4.016 5.242 4.016 2.487 0 4.576-1.693 5.231-3.977.569 1.21 1.783 2.067 3.198 2.067A3.568 3.568 0 0 0 24 12a3.569 3.569 0 0 0-3.553-3.553c-1.416 0-2.63.858-3.199 2.067-.654-2.284-2.743-3.978-5.23-3.977zm0 2.085c1.878 0 3.378 1.5 3.378 3.378 0 1.878-1.5 3.378-3.378 3.378A3.362 3.362 0 0 1 8.641 12c0-1.878 1.5-3.378 3.377-3.378zm-8.466 1.91c.822 0 1.467.645 1.467 1.468s-.644 1.467-1.467 1.468A1.452 1.452 0 0 1 2.085 12c0-.823.644-1.467 1.467-1.467zm16.895 0c.823 0 1.468.645 1.468 1.468s-.645 1.468-1.468 1.468A1.452 1.452 0 0 1 18.98 12c0-.823.644-1.467 1.467-1.467z";
+
+/// A service icon: a font glyph, or the drawn mark for brands the font lacks.
+#[component]
+fn ServiceGlyph(icon: &'static str) -> Element {
+    if icon == NEXTCLOUD_ICON {
+        rsx! {
+            svg {
+                class: "ss-svg",
+                view_box: "0 0 24 24",
+                fill: "currentColor",
+                "aria-hidden": "true",
+                path { d: NEXTCLOUD_PATH }
+            }
+        }
+    } else {
+        rsx! {
+            i { class: "{icon}" }
+        }
     }
 }
 
@@ -156,7 +186,7 @@ pub fn SourceSwitcher(
                 },
                 title: "{active_label}",
                 onclick: move |_| open.set(!open()),
-                span { class: "ss-ico", i { class: "{active_icon}" } }
+                span { class: "ss-ico", ServiceGlyph { icon: active_icon } }
                 if !collapsed {
                     span { class: "ss-stk",
                         span { class: "ss-tname", "{active_label}" }
@@ -194,7 +224,7 @@ pub fn SourceSwitcher(
                                             switch(src.clone());
                                             open.set(false);
                                         },
-                                        span { class: "ss-ico", i { class: "{icon}" } }
+                                        span { class: "ss-ico", ServiceGlyph { icon } }
                                         span { class: "ss-meta",
                                             span { class: "ss-rname", "{label}" }
                                             if !collapsed {
