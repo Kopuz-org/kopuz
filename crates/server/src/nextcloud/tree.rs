@@ -14,15 +14,29 @@ const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "ogg", "oga", "opus", "m4a", "aac", "wav", "wma", "aiff", "alac",
 ];
 
+/// Playlists are served as "audio/mpegurl", so the mime check alone files one
+/// as a track of its own.
+const PLAYLIST_EXTENSIONS: &[&str] = &["m3u", "m3u8", "pls", "cue", "xspf", "wpl", "asx"];
+
+/// Sidecar art, most conventional name first: the earliest match wins.
 const COVER_NAMES: &[&str] = &[
     "cover.jpg",
     "cover.jpeg",
     "cover.png",
+    "cover.webp",
     "folder.jpg",
     "folder.jpeg",
     "folder.png",
+    "folder.webp",
     "front.jpg",
+    "front.jpeg",
     "front.png",
+    "front.webp",
+    "albumart.jpg",
+    "albumart.jpeg",
+    "albumart.png",
+    "album.jpg",
+    "album.png",
 ];
 
 pub(crate) struct NextcloudTrack {
@@ -39,8 +53,35 @@ pub(crate) struct NextcloudAlbum {
     pub path: String,
     pub title: String,
     pub artist: String,
-    /// Remote path, before the sync caches it.
+    /// Remote path of a sidecar image, before the sync caches it.
     pub cover_path: Option<String>,
+    /// Where to look for art when no image sits beside the files.
+    pub art_track: Option<ArtTrack>,
+}
+
+/// A track an album's art can be recovered from.
+#[derive(Clone)]
+pub(crate) struct ArtTrack {
+    pub path: String,
+    /// `oc:fileid`, which the preview endpoint addresses files by.
+    pub file_id: Option<u64>,
+}
+
+/// Whether a path sits under one of `roots`. No roots means no restriction.
+pub(super) fn within_roots(path: &str, roots: &[String]) -> bool {
+    if roots.is_empty() {
+        return true;
+    }
+    let path = dav_path::normalise(path);
+    roots.iter().any(|root| {
+        let root = dav_path::normalise(root);
+        // Segment boundary, so "/Music2" doesn't count as inside "/Music".
+        root == "/"
+            || path == root
+            || path
+                .strip_prefix(&root)
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
 }
 
 // Extension fallback: some storage backends label everything octet-stream.
@@ -48,12 +89,19 @@ pub(super) fn is_audio(entry: &FileEntry) -> bool {
     if entry.is_directory {
         return false;
     }
+    let ext = extension(entry.name());
+    if ext
+        .as_deref()
+        .is_some_and(|ext| PLAYLIST_EXTENSIONS.contains(&ext))
+    {
+        return false;
+    }
     if let Some(mime) = entry.content_type.as_deref()
         && mime.starts_with("audio/")
     {
         return true;
     }
-    extension(entry.name()).is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.as_str()))
+    ext.is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.as_str()))
 }
 
 fn is_cover_file(entry: &FileEntry) -> bool {
@@ -174,6 +222,10 @@ pub(super) fn group(
                     .get(&album_path)
                     .or_else(|| covers.get(&container))
                     .cloned(),
+                art_track: Some(ArtTrack {
+                    path: entry.path.clone(),
+                    file_id: entry.file_id,
+                }),
             });
 
         tracks.push(NextcloudTrack {
@@ -205,6 +257,12 @@ mod tests {
         }
     }
 
+    fn entry_with_id(path: &str, file_id: u64) -> FileEntry {
+        FileEntry {
+            file_id: Some(file_id),
+            ..entry(path, false, None)
+        }
+    }
     #[test]
     fn is_audio_checks_mime_then_extension() {
         assert!(is_audio(&entry("/Music/a/b/1.mp3", false, None)));
@@ -221,7 +279,6 @@ mod tests {
         assert!(!is_audio(&entry("/Music/a/b/notes.txt", false, None)));
         assert!(!is_audio(&entry("/Music/a/b", true, None)));
     }
-
     #[test]
     fn split_leading_number_strips_track_prefix() {
         assert_eq!(
@@ -246,7 +303,6 @@ mod tests {
         );
         assert_eq!(split_leading_number("01"), ("01".to_string(), Some(1)));
     }
-
     #[test]
     fn disc_of_parses_disc_folder_names() {
         assert_eq!(disc_of("Disc 2"), Some(2));
@@ -255,7 +311,6 @@ mod tests {
         assert_eq!(disc_of("Live in Tokyo"), None);
         assert_eq!(disc_of("Disc"), None);
     }
-
     #[test]
     fn group_builds_albums_and_tracks() {
         let entries = vec![
@@ -286,7 +341,6 @@ mod tests {
         assert_eq!(tracks[0].track_number, Some(1));
         assert!(tracks[0].disc_number.is_none());
     }
-
     #[test]
     fn group_folds_disc_folders() {
         let entries = vec![
@@ -301,7 +355,6 @@ mod tests {
         assert_eq!(tracks[1].disc_number, Some(2));
         assert_eq!(tracks[1].album, "Album");
     }
-
     #[test]
     fn group_leaves_root_albums_artistless() {
         let entries = vec![entry("/Music/Loose Album/01 - Track.mp3", false, None)];
@@ -311,7 +364,6 @@ mod tests {
         assert!(albums[0].artist.is_empty());
         assert!(tracks[0].artist.is_empty());
     }
-
     #[test]
     fn group_ranks_cover_names() {
         let entries = vec![
@@ -324,5 +376,60 @@ mod tests {
             albums[0].cover_path.as_deref(),
             Some("/Music/A/B/cover.jpg")
         );
+    }
+    #[test]
+    fn is_audio_rejects_playlists_the_server_calls_audio() {
+        assert!(!is_audio(&entry(
+            "/Music/No.m3u",
+            false,
+            Some("audio/mpegurl")
+        )));
+        assert!(!is_audio(&entry(
+            "/Music/list.m3u8",
+            false,
+            Some("audio/x-mpegurl")
+        )));
+        assert!(!is_audio(&entry("/Music/a/b.cue", false, None)));
+    }
+    #[test]
+    fn group_widens_sidecar_names_past_the_classics() {
+        for name in ["front.jpeg", "albumart.jpg", "folder.webp", "album.png"] {
+            let entries = vec![
+                entry(&format!("/Music/A/B/{name}"), false, None),
+                entry("/Music/A/B/01 - T.mp3", false, None),
+            ];
+            let (albums, _) = group("/Music", &entries);
+            assert_eq!(
+                albums[0].cover_path.as_deref(),
+                Some(format!("/Music/A/B/{name}").as_str()),
+                "{name} should count as sidecar art"
+            );
+        }
+    }
+    #[test]
+    fn group_names_a_track_to_take_art_from() {
+        let entries = vec![
+            entry_with_id("/Music/A/B/01 - T.mp3", 42),
+            entry_with_id("/Music/A/B/02 - U.mp3", 43),
+        ];
+        let (albums, _) = group("/Music", &entries);
+
+        // No sidecar image, so the album falls back to its first track.
+        assert!(albums[0].cover_path.is_none());
+        let art = albums[0].art_track.as_ref().expect("art track");
+        assert_eq!(art.path, "/Music/A/B/01 - T.mp3");
+        assert_eq!(art.file_id, Some(42));
+    }
+    #[test]
+    fn within_roots_matches_on_segment_boundaries() {
+        let roots = vec!["/Music".to_string(), "/Shared/Albums/".to_string()];
+        assert!(within_roots("/Music/a/b.mp3", &roots));
+        assert!(within_roots("/Music", &roots));
+        assert!(within_roots("/Shared/Albums/x.flac", &roots));
+        // A sibling with a shared prefix is outside.
+        assert!(!within_roots("/Music2/a.mp3", &roots));
+        assert!(!within_roots("/Documents/a.mp3", &roots));
+        // No configured roots means the whole account.
+        assert!(within_roots("/anywhere/a.mp3", &[]));
     }
 }

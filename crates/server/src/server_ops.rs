@@ -17,6 +17,8 @@ pub struct ServerConn {
     pub device_id: String,
     pub apple_music_storefront: String,
     pub apple_music_language: String,
+    /// Library roots for folder-tree backends (Nextcloud). Empty = auto-detect.
+    pub folders: Vec<String>,
 }
 
 impl ServerConn {
@@ -44,6 +46,11 @@ impl ServerConn {
             device_id: config.device_id.clone(),
             apple_music_storefront: server.apple_music_storefront.clone(),
             apple_music_language: server.apple_music_language.clone(),
+            folders: server
+                .id
+                .as_deref()
+                .map(|id| config.folders_for(id))
+                .unwrap_or_default(),
         })
     }
 }

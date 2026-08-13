@@ -1,8 +1,12 @@
 use async_trait::async_trait;
 use config::{MusicService, Source};
 use db::Db;
+use futures_util::StreamExt;
 
-use crate::{nextcloud::NextcloudClient, server_ops::ServerConn};
+use crate::{
+    nextcloud::{ArtTrack, NextcloudClient},
+    server_ops::ServerConn,
+};
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, LibrarySnapshot, MediaSource,
@@ -15,6 +19,7 @@ pub(super) struct NextcloudSource {
     db: Db,
     source: Source,
     client: Option<NextcloudClient>,
+    folders: Vec<String>,
 }
 
 impl NextcloudSource {
@@ -23,7 +28,12 @@ impl NextcloudSource {
         let client = NextcloudClient::new(&conn.url, &conn.user_id, &conn.token)
             .inspect_err(|e| tracing::warn!(error = %e, "nextcloud client unavailable"))
             .ok();
-        Self { db, source, client }
+        Self {
+            db,
+            source,
+            client,
+            folders: conn.folders.clone(),
+        }
     }
 
     fn client(&self) -> Result<&NextcloudClient, SourceError> {
@@ -45,6 +55,29 @@ const CAPABILITIES: Capabilities = Capabilities {
     albums: AlbumType::Standard,
     favorites_sync: FavoritesSync::Instant,
 };
+
+/// Art fetches in flight at once, enough to hide the round trips without
+/// loading someone's home instance like a scan.
+const ART_CONCURRENCY: usize = 8;
+
+/// Cache one album's art: a sidecar image if there is one, else the picture the
+/// tracks carry. Parts come by value because a future borrowing the album fails
+/// lifetime inference once buffered inside an `async_trait` method.
+async fn album_art(
+    client: &NextcloudClient,
+    sidecar: Option<String>,
+    art_track: Option<ArtTrack>,
+) -> Option<String> {
+    let cached = match &sidecar {
+        Some(remote) => client.cache_cover(remote).await,
+        None => None,
+    };
+    match (cached, &art_track) {
+        (None, Some(track)) => client.cache_track_art(track).await,
+        (cached, _) => cached,
+    }
+    .map(|path| path.to_string_lossy().into_owned())
+}
 
 /// Cached art, or the sentinel that stops the resolver guessing at a URL.
 fn cover_ref(cached: Option<&str>) -> &str {
@@ -68,31 +101,38 @@ impl MediaSource for NextcloudSource {
         use std::path::PathBuf;
 
         let client = self.client()?;
-        let (albums, tracks) = client.scan().await.map_err(SourceError::Backend)?;
+        let (albums, tracks) = client
+            .scan(&self.folders)
+            .await
+            .map_err(SourceError::Backend)?;
+
+        // Nothing persists until the snapshot is whole, so a serial pass here stalls the sync.
+        let mut jobs = Vec::with_capacity(albums.len());
+        for album in &albums {
+            jobs.push(album_art(
+                client,
+                album.cover_path.clone(),
+                album.art_track.clone(),
+            ));
+        }
+        let covers = futures_util::stream::iter(jobs)
+            .buffered(ART_CONCURRENCY)
+            .collect::<Vec<_>>()
+            .await;
 
         // Per album, before the tracks, so an album's tracks share one file.
         let mut cached_covers: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         let mut out_albums = Vec::with_capacity(albums.len());
 
-        for album in albums {
-            let cached = match &album.cover_path {
-                Some(remote) => client
-                    .cache_cover(remote)
-                    .await
-                    .map(|p| p.to_string_lossy().into_owned()),
-                None => None,
-            };
+        for (album, cached) in albums.into_iter().zip(covers) {
             if let Some(path) = &cached {
                 cached_covers.insert(album.path.clone(), path.clone());
             }
 
             out_albums.push(reader::Album {
-                id: reader::CoverRef::stored_item_ref(
-                    MusicService::Nextcloud,
-                    &album.path,
-                    Some(cover_ref(cached.as_deref())),
-                ),
+                // No cover segment: a remote path can hold the ':' the ref splits on.
+                id: reader::CoverRef::stored_item_ref(MusicService::Nextcloud, &album.path, None),
                 title: album.title,
                 artist: album.artist,
                 genre: String::new(),
@@ -115,12 +155,14 @@ impl MediaSource for NextcloudSource {
                     album_id: reader::CoverRef::stored_item_ref(
                         MusicService::Nextcloud,
                         &track.album_path,
-                        Some(cover_ref(cached)),
+                        None,
                     ),
                     title: track.title,
                     artist: track.artist.clone(),
                     album: track.album,
-                    duration: 0, // WebDAV has none of these; the decode probe fills them
+                    // WebDAV reports neither; the header probe in resolve_stream
+                    // stamps a duration when the track plays.
+                    duration: 0,
                     khz: 0,
                     bitrate: 0,
                     track_number: track.track_number,
@@ -142,11 +184,14 @@ impl MediaSource for NextcloudSource {
     }
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
+        let client = self.client()?;
         Ok(StreamInfo {
-            url: self.client()?.stream_url(item_id),
+            url: client.stream_url(item_id),
             format: None,
             user_agent: None,
-            duration_secs: None,
+            // The listing carries no duration, so the header is the only source
+            // of one; the player stamps it onto the track when it arrives.
+            duration_secs: client.probe_duration(item_id).await,
             bitrate: None,
             content_length: None,
         })
@@ -165,7 +210,7 @@ impl MediaSource for NextcloudSource {
 
     async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
         self.client()?
-            .favorites()
+            .favorites(&self.folders)
             .await
             .map_err(SourceError::Backend)
     }
@@ -214,6 +259,21 @@ mod tests {
         assert_eq!(
             reader::CoverRef::parse(cover_ref(None)),
             reader::CoverRef::None
+        );
+    }
+
+    /// A colon in the path would eat the cover segment of a three-part ref.
+    #[test]
+    fn album_ids_survive_a_colon_in_the_path() {
+        let path = "/Music/Artist/Vol 1: Deluxe";
+        let id = reader::CoverRef::stored_item_ref(MusicService::Nextcloud, path, None);
+        assert_eq!(id, "nextcloud:/Music/Artist/Vol 1: Deluxe");
+
+        // Art travels beside the id, as a path that parses on its own shape.
+        let cached = "/home/u/.cache/kopuz/nextcloud-covers/abc.jpg";
+        assert_eq!(
+            reader::CoverRef::parse(cached),
+            reader::CoverRef::Local(std::path::PathBuf::from(cached))
         );
     }
 
