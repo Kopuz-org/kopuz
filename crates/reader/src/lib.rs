@@ -5,6 +5,7 @@ pub mod cover_fetcher;
 pub mod cover_indexer;
 pub mod metadata;
 pub mod models;
+pub mod probe;
 pub mod scanner;
 pub mod sort;
 pub mod utils;
