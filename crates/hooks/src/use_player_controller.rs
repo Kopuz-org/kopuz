@@ -1,9 +1,10 @@
-use config::AppConfig;
+use config::{AppConfig, MusicService};
 use dioxus::logger::tracing::Instrument;
 use dioxus::{logger::tracing, prelude::*};
 use player::engine::{SourceFactory, Transition};
 use player::player::{LoadArgs, NowPlayingMeta, Player};
 use reader::Track;
+use std::sync::Arc;
 use std::time::Duration;
 use utils;
 
@@ -81,6 +82,10 @@ pub struct PlayerController {
     pub current_song_bitrate: Signal<u16>,
     pub current_song_duration: Signal<u64>,
     pub current_song_progress: Signal<u64>,
+    /// Byte ranges already fetched for the active network track. The UI draws
+    /// these behind playback position, like a browser media seek bar.
+    pub buffered_ranges: Signal<Vec<BufferedRange>>,
+    buffer_progress_tx: Signal<tokio::sync::mpsc::UnboundedSender<BufferProgressEvent>>,
     pub current_song_cover_url: Signal<String>,
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
@@ -117,6 +122,43 @@ pub struct PlayerController {
     /// Rendered as a banner by whoever subscribes — currently the
     /// settings popup error sink mirrors it on next open.
     pub playback_error: Signal<Option<String>>,
+    /// The Spotify playback host (a browser tab running the Web Playback SDK),
+    /// lazily started on the first Spotify play. `None` until then. Spotify audio
+    /// plays in the browser, not the Symphonia engine, so its transport is routed
+    /// here instead of to `player`.
+    pub spotify_host: Signal<Option<::server::spotify::host::SpotifyHost>>,
+    /// The SDK's Connect device id, set once the host reports `Ready`. Playback is
+    /// started against it via the Web API; the device picker hides it from the
+    /// remote-device list (it renders as the in-app entry).
+    pub spotify_device: Signal<Option<String>>,
+    /// A Spotify track URI waiting for the device to become ready (first play).
+    pub(crate) spotify_pending_uri: Signal<Option<String>>,
+    /// Whether the browser tab reported playback is allowed (autoplay probe or
+    /// the enable-playback click). Plays issued before this just storm autoplay
+    /// errors and can wedge the SDK, so the first play waits on it.
+    pub(crate) spotify_activated: Signal<bool>,
+    /// Spotify Connect device playback is routed to instead of the in-app SDK
+    /// device (`None`). While set, transport goes through the Web API and a
+    /// poll loop owns progress/auto-advance.
+    pub spotify_device_override: Signal<Option<String>>,
+    /// Millisecond-precision progress anchor for external playback: the last
+    /// reported position and when it arrived. Reads interpolate elapsed time on
+    /// top, so second-granular state ticks don't lag the lyric clock.
+    pub(crate) spotify_progress_anchor: Signal<Option<(u64, std::time::Instant)>>,
+    /// Whether a host launch is in flight — serializes rapid first plays so
+    /// they can't spawn multiple hosts (and browser tabs).
+    pub(crate) spotify_host_starting: Signal<bool>,
+    /// Latest Spotify start request, canceled when superseded.
+    pub(crate) spotify_start_task: Signal<Option<dioxus_core::Task>>,
+    /// Track id kopuz last asked Spotify to play, and when.
+    pub(crate) spotify_commanded: Signal<Option<(String, std::time::Instant)>>,
+    /// Whether the current track is playing through the Spotify host rather than
+    /// the engine — transport methods and the progress pump branch on this.
+    pub(crate) external_active: Signal<bool>,
+    /// Set once the user explicitly picks a playback target from the device
+    /// panel (including "this app"). Suppresses automatic adoption of an
+    /// externally active Connect device so it can't override a deliberate choice.
+    pub(crate) spotify_device_chosen: Signal<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,7 +176,63 @@ pub struct PendingCrossfadeUiState {
     pub from_token: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BufferedRange {
+    pub start: u64,
+    pub end: u64,
+    pub total: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BufferProgressEvent {
+    token: u64,
+    start: u64,
+    end: u64,
+    total: Option<u64>,
+}
+
+fn merge_buffered_range(ranges: &mut Vec<BufferedRange>, incoming: BufferedRange) {
+    if incoming.total == 0 || incoming.start >= incoming.end {
+        return;
+    }
+    if ranges
+        .first()
+        .is_some_and(|range| range.total != incoming.total)
+    {
+        ranges.clear();
+    }
+    ranges.push(BufferedRange {
+        end: incoming.end.min(incoming.total),
+        ..incoming
+    });
+    ranges.sort_unstable_by_key(|range| range.start);
+
+    let mut merged: Vec<BufferedRange> = Vec::with_capacity(ranges.len());
+    for range in ranges.drain(..) {
+        if let Some(previous) = merged.last_mut()
+            && range.start <= previous.end
+        {
+            previous.end = previous.end.max(range.end);
+            continue;
+        }
+        merged.push(range);
+    }
+    *ranges = merged;
+}
+
 impl PlayerController {
+    fn buffer_progress_callback(&self, token: u64) -> utils::stream_buffer::BufferProgressCallback {
+        let progress_tx = self.buffer_progress_tx.peek().clone();
+        Arc::new(move |start, end, total| {
+            let _ = progress_tx.send(BufferProgressEvent {
+                token,
+                start,
+                end,
+                total,
+            });
+        })
+    }
+
     fn track_key(track: &Track) -> String {
         track.id.uid().to_string()
     }
@@ -328,6 +426,7 @@ impl PlayerController {
         self.current_song_bitrate.set(0);
         self.current_song_duration.set(0);
         self.current_song_progress.set(0);
+        self.buffered_ranges.set(Vec::new());
         self.current_song_cover_url.set(String::new());
         self.current_track_snapshot.set(None);
     }
@@ -350,6 +449,78 @@ impl PlayerController {
             self.current_queue_index.set(0);
             self.clear_current_track_metadata();
         }
+    }
+
+    /// Adopt a Spotify Connect track started elsewhere. Upsert it into the
+    /// queue and select its logical position so the normal queue-state save can
+    /// restore it after restart instead of falling back to the last track
+    /// clicked in kopuz.
+    ///
+    /// Under shuffle, Spotify reports every track change — including the ones
+    /// kopuz itself commanded — so reshuffling on all of them tears up the run
+    /// mid-listen. A track the queue already held keeps its permutation
+    /// position; only a track the queue has never seen is a genuine pick from
+    /// another client, and that one starts a new run, because leaving a
+    /// just-appended index in the old permutation puts it at the end and makes
+    /// Next stop immediately.
+    pub(crate) fn hydrate_external_track_metadata(&mut self, track: Track, progress_secs: u64) {
+        let queued_idx = self
+            .queue
+            .peek()
+            .iter()
+            .position(|queued| queued.id == track.id);
+        let physical_idx = match queued_idx {
+            Some(idx) => {
+                self.queue.write()[idx] = track;
+                idx
+            }
+            None => {
+                let idx = self.queue.peek().len();
+                self.queue.write().push(track);
+                idx
+            }
+        };
+
+        let logical_idx = if *self.shuffle.peek() {
+            match queued_idx.and_then(|_| self.shuffle_position_of(physical_idx)) {
+                Some(position) => position,
+                None => {
+                    self.current_queue_index.set(physical_idx);
+                    self.rebuild_shuffle_order();
+                    0
+                }
+            }
+        } else {
+            physical_idx
+        };
+        self.hydrate_current_track_metadata(logical_idx, progress_secs);
+    }
+
+    /// Replace the provisional one-track external queue with the complete
+    /// Spotify playlist/album once its context finishes loading.
+    pub(crate) fn hydrate_external_context(
+        &mut self,
+        tracks: Vec<Track>,
+        current_track_id: &str,
+        progress_secs: u64,
+    ) {
+        let Some(physical_idx) = tracks
+            .iter()
+            .position(|track| track.id.key() == current_track_id)
+        else {
+            return;
+        };
+
+        self.queue.set(tracks);
+        self.history.write().clear();
+        self.current_queue_index.set(physical_idx);
+        let logical_idx = if *self.shuffle.peek() {
+            self.rebuild_shuffle_order();
+            0
+        } else {
+            physical_idx
+        };
+        self.hydrate_current_track_metadata(logical_idx, progress_secs);
     }
 
     fn pending_resume_seek(&self, track: &Track) -> (Option<u64>, bool) {
@@ -474,6 +645,7 @@ impl PlayerController {
         }
         self.playback_error
             .set(Some(format!("Couldn't load this track:\n{error}")));
+        self.buffered_ranges.set(Vec::new());
         match intent {
             PlaybackIntent::Loading {
                 crossfade: true,
@@ -489,8 +661,241 @@ impl PlayerController {
         }
     }
 
+    /// The current Spotify OAuth access token, if Spotify is the active server.
+    pub(crate) fn spotify_access(&self) -> Option<String> {
+        let cfg = self.config.peek();
+        let server = cfg.server.as_ref()?;
+        if server.service != MusicService::Spotify {
+            return None;
+        }
+        let packed = server.access_token.clone()?;
+        let access = ::server::spotify::auth::unpack_token(&packed).0;
+        (!access.is_empty()).then_some(access)
+    }
+
+    /// Start the browser playback host if it isn't running yet (first Spotify play).
+    fn ensure_spotify_host(&mut self) {
+        if self.spotify_host.peek().is_some() || *self.spotify_host_starting.peek() {
+            return;
+        }
+        let Some(access) = self.spotify_access() else {
+            return;
+        };
+        let browser = self.config.peek().spotify_browser.clone();
+        self.spotify_host_starting.set(true);
+        let mut host_sig = self.spotify_host;
+        let mut starting = self.spotify_host_starting;
+        let mut error = self.playback_error;
+        let mut external = self.external_active;
+        let mut playing = self.is_playing;
+        let mut pending = self.spotify_pending_uri;
+        spawn(async move {
+            match ::server::spotify::host::SpotifyHost::start(access, browser).await {
+                Ok(host) => host_sig.set(Some(host)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "spotify host failed to start");
+                    error.set(Some(e));
+                    if *external.peek() {
+                        external.set(false);
+                        playing.set(false);
+                        pending.set(None);
+                    }
+                }
+            }
+            starting.set(false);
+        });
+    }
+
+    /// Forget a closed Spotify browser host. The next explicit play reads the
+    /// current browser setting and starts a fresh host; closing a background
+    /// tab must not immediately reopen a browser the user no longer wants.
+    pub(crate) fn spotify_browser_disconnected(&mut self) {
+        self.spotify_host.set(None);
+        self.spotify_device.set(None);
+        self.spotify_activated.set(false);
+        if self.spotify_device_override.peek().is_some() {
+            return;
+        }
+        self.spotify_pending_uri.set(None);
+        self.spotify_commanded.set(None);
+        if let Some(task) = self.spotify_start_task.take() {
+            task.cancel();
+        }
+        self.spotify_progress_anchor.set(None);
+        self.external_active.set(false);
+        self.is_playing.set(false);
+    }
+
+    /// The Spotify access token for UI data fetches (Connect device list).
+    pub fn spotify_access_token(&self) -> Option<String> {
+        self.spotify_access()
+    }
+
+    /// Route Spotify playback to a Connect device (`None` = the in-app SDK
+    /// device), transferring the live session over when one is active.
+    pub fn spotify_select_device(&mut self, device_id: Option<String>) {
+        self.spotify_device_chosen.set(true);
+        self.spotify_device_override.set(device_id.clone());
+        if !*self.external_active.peek() {
+            return;
+        }
+        let Some(access) = self.spotify_access() else {
+            return;
+        };
+        let Some(target) = device_id.or_else(|| self.spotify_device.peek().clone()) else {
+            return;
+        };
+        let play = *self.is_playing.peek();
+        spawn(async move {
+            if let Err(e) = ::server::spotify::api::transfer_playback(&access, &target, play).await
+            {
+                tracing::warn!(error = %e, "spotify device transfer failed");
+            }
+        });
+    }
+
+    /// Adopt a Connect device that is already playing on its own — e.g. the user
+    /// started it from the Spotify app, possibly before this app launched.
+    /// Routes transport to it and flips `external_active` so the player-state
+    /// poller begins syncing progress and play/pause state, without transferring
+    /// or restarting the live session. No-op when the feature is disabled, a
+    /// target is already active, or the user has made an explicit choice.
+    pub fn spotify_adopt_external(&mut self, device_id: String) {
+        if *self.spotify_device_chosen.peek()
+            || self.spotify_device_override.peek().is_some()
+            || !self.config.peek().spotify_prefer_active_device
+        {
+            return;
+        }
+        self.spotify_device_override.set(Some(device_id));
+        self.external_active.set(true);
+    }
+
+    pub(crate) fn spotify_transport_pause(&mut self) {
+        if self.spotify_device_override.peek().is_some() {
+            if let Some(access) = self.spotify_access() {
+                spawn(async move {
+                    let _ = ::server::spotify::api::player_pause(&access).await;
+                });
+            }
+        } else if let Some(host) = self.spotify_host.peek().clone() {
+            host.pause();
+        }
+    }
+
+    pub(crate) fn spotify_transport_resume(&mut self) {
+        if self.spotify_device_override.peek().is_some() {
+            if let Some(access) = self.spotify_access() {
+                spawn(async move {
+                    let _ = ::server::spotify::api::player_resume(&access).await;
+                });
+            }
+        } else if let Some(host) = self.spotify_host.peek().clone() {
+            host.resume();
+        }
+    }
+
+    /// Begin playing a Spotify track id. A chosen Connect device gets the URI
+    /// directly; otherwise ensure the host and start it on the SDK device — or
+    /// stash it as pending until the device is ready AND the tab has confirmed
+    /// playback is allowed. The pump fires the pending URI on those events.
+    pub(crate) fn start_spotify_uri(&mut self, access: String, device: String, uri: String) {
+        if let Some(task) = self.spotify_start_task.take() {
+            task.cancel();
+        }
+        let mut error = self.playback_error;
+        let task = spawn(async move {
+            tokio::time::sleep(Duration::from_millis(125)).await;
+            if let Err(e) = ::server::spotify::api::start_playback(&access, &device, &[uri]).await {
+                tracing::warn!(error = %e, "spotify start_playback failed");
+                error.set(Some(e));
+            }
+        });
+        self.spotify_start_task.set(Some(task));
+    }
+
+    /// True while Spotify is still reporting a track other than the one kopuz
+    /// last commanded. The SDK keeps emitting state for the outgoing track for
+    /// a beat after a skip, and applying it flashes the previous song back over
+    /// the one kopuz already showed. Self-clearing: the first report that
+    /// matches, or the window lapsing, drops the guard so a track genuinely
+    /// started from another client is never held back for long.
+    pub(crate) fn spotify_report_is_stale(&mut self, reported: Option<&str>) -> bool {
+        let Some((commanded, at)) = self.spotify_commanded.peek().clone() else {
+            return false;
+        };
+        if at.elapsed() > Duration::from_secs(3) || reported == Some(commanded.as_str()) {
+            self.spotify_commanded.set(None);
+            return false;
+        }
+        true
+    }
+
+    fn spotify_play(&mut self, item_id: &str, track: &Track) {
+        let uri = format!("spotify:track:{item_id}");
+        self.spotify_commanded
+            .set(Some((item_id.to_string(), std::time::Instant::now())));
+        let override_device = self.spotify_device_override.peek().clone();
+        if let Some(device) = override_device {
+            if let Some(access) = self.spotify_access() {
+                self.spotify_pending_uri.set(None);
+                self.start_spotify_uri(access, device, uri);
+            }
+            return;
+        }
+        self.ensure_spotify_host();
+        if let Some(host) = self.spotify_host.peek().clone() {
+            let artwork = self.current_song_cover_url.peek().clone();
+            host.set_now_playing(track, &artwork);
+        }
+        if !*self.spotify_activated.peek() {
+            self.spotify_pending_uri.set(Some(uri));
+            return;
+        }
+        let sdk_device = self.spotify_device.peek().clone();
+        match (self.spotify_access(), sdk_device) {
+            (Some(access), Some(device)) => {
+                self.spotify_pending_uri.set(None);
+                self.start_spotify_uri(access, device, uri);
+            }
+            _ => self.spotify_pending_uri.set(Some(uri)),
+        }
+    }
+
+    /// Stop external (Spotify) playback and hand control back to the engine.
+    /// Also drops any deferred play so a later `Ready`/`Activated` event can't
+    /// start an obsolete track over whatever plays next.
+    pub(crate) fn stop_external_playback(&mut self) {
+        if !*self.external_active.peek() {
+            return;
+        }
+        self.spotify_pending_uri.set(None);
+        self.spotify_commanded.set(None);
+        if let Some(task) = self.spotify_start_task.take() {
+            task.cancel();
+        }
+        self.spotify_transport_pause();
+        self.external_active.set(false);
+    }
+
     /// Seek the current track. All progress-bar / lyric scrubbers route here.
     pub fn seek(&mut self, time: Duration) {
+        if *self.external_active.peek() {
+            if self.spotify_device_override.peek().is_some() {
+                if let Some(access) = self.spotify_access() {
+                    let ms = time.as_millis() as u64;
+                    spawn(async move {
+                        let _ = ::server::spotify::api::player_seek(&access, ms).await;
+                    });
+                }
+            } else if let Some(host) = self.spotify_host.peek().clone() {
+                host.seek(time.as_millis() as u64);
+            }
+            self.spotify_progress_anchor
+                .set(Some((time.as_millis() as u64, std::time::Instant::now())));
+            self.current_song_progress.set(time.as_secs());
+            return;
+        }
         // The scrub targets the visible track. During a crossfade that's the
         // outgoing session: revert the armed transition and seek it by its own
         // token, so a fade that just completed can't misdirect the seek.
@@ -503,6 +908,20 @@ impl PlayerController {
     }
 
     pub fn displayed_progress_secs_f64(&self) -> f64 {
+        if *self.external_active.peek() {
+            if let Some((ms, at)) = *self.spotify_progress_anchor.peek() {
+                let mut pos = ms as f64 / 1000.0;
+                if *self.is_playing.peek() {
+                    pos += at.elapsed().as_secs_f64();
+                }
+                let dur = *self.current_song_duration.peek();
+                if dur > 0 {
+                    pos = pos.min(dur as f64);
+                }
+                return pos;
+            }
+            return *self.current_song_progress.peek() as f64;
+        }
         // Mid-crossfade the bar shows the outgoing (fading) track's live position.
         if self.pending_crossfade_ui.peek().is_some()
             && let Some(fading) = self.player.peek().fading_position()
@@ -602,6 +1021,37 @@ impl PlayerController {
         let is_server_item = item_ref.is_server();
         let id = item_ref.primary_id().unwrap_or_default().to_string();
         let stream_id = item_ref.stream_id().unwrap_or_default().to_string();
+
+        let is_spotify_item = track.id.service() == Some(MusicService::Spotify);
+        if !is_spotify_item {
+            self.stop_external_playback();
+        } else if self.spotify_access().is_some() {
+            self.playback_error.set(None);
+            self.cancel_radio_task();
+            self.cancel_load_task();
+            self.clear_pending_crossfade_ui();
+            self.player.peek().stop_for_transition();
+            let token = self.allocate_token();
+            self.set_intent(PlaybackIntent::Committed { token });
+            self.external_active.set(true);
+            self.spotify_progress_anchor
+                .set(Some((0, std::time::Instant::now())));
+            self.hydrate_current_track_metadata(idx, 0);
+            self.is_playing.set(true);
+            self.spotify_play(&id, &track);
+            scrobble_scheduler::schedule(
+                track.clone(),
+                Some(id.clone()),
+                self.config,
+                self.current_token,
+                token,
+                self.is_playing,
+                Some(self.active_source),
+                ScrobbleOptions::REMOTE_NATIVE,
+                self.db.peek().clone(),
+            );
+            return;
+        }
 
         // ── classify the source ─────────────────────────────────────────
 
@@ -704,6 +1154,7 @@ impl PlayerController {
             crossfade: use_crossfade,
             from_token,
         });
+        self.buffered_ranges.set(Vec::new());
 
         let cover_url: String = if offline_path.is_some() {
             self.cover_url_for_track(&track)
@@ -754,6 +1205,8 @@ impl PlayerController {
                 } else {
                     (None, None)
                 };
+                let buffer_progress = (!is_radio_item)
+                    .then(|| ctrl.buffer_progress_callback(token));
 
                 let factory: SourceFactory = if let Some(path) = local_path {
                     Box::new(move || decoder::open_file(&path).map_err(|e| e.to_string()))
@@ -777,6 +1230,7 @@ impl PlayerController {
                                 false,
                                 None,
                                 rt_handle.clone(),
+                                buffer_progress.clone(),
                             )()
                         }
                     })
@@ -822,6 +1276,7 @@ impl PlayerController {
                         is_radio_item,
                         icy_tx,
                         rt_handle,
+                        buffer_progress,
                     )
                 };
 
@@ -928,6 +1383,7 @@ fn network_factory(
     is_radio: bool,
     icy_tx: Option<tokio::sync::watch::Sender<utils::icy::IcyMeta>>,
     rt_handle: tokio::runtime::Handle,
+    buffer_progress: Option<utils::stream_buffer::BufferProgressCallback>,
 ) -> SourceFactory {
     Box::new(move || {
         let build = || -> std::io::Result<_> {
@@ -945,8 +1401,11 @@ fn network_factory(
                     // YT: HTTP Range-backed source. Symphonia can seek freely
                     // (Matroska Cues at the end, scrub anywhere) and startup
                     // probes only fetch the ~512 KiB they need.
-                    let range =
-                        utils::range_source::RangeStreamSource::new(stream_url, yt_user_agent)?;
+                    let range = utils::range_source::RangeStreamSource::new_with_progress(
+                        stream_url,
+                        yt_user_agent,
+                        buffer_progress,
+                    )?;
                     let len = Some(range.total_size());
                     let (source, mut hint) = decoder::from_stream_with_len(range, len);
                     hint.with_extension(fmt.extension());
@@ -955,14 +1414,15 @@ fn network_factory(
                     // No-pot fallback: googlevideo 403s deep ranges, and the
                     // probe reads the webm tail — stream sequentially instead of
                     // failing outright (issue #386). No scrubbing.
-                    let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                    let stream = utils::stream_buffer::StreamBuffer::with_user_agent_and_progress(
                         stream_url,
                         false,
                         yt_user_agent,
                         None,
                         rt_handle,
+                        buffer_progress,
                     );
-                    stream.wait_for_total_size();
+                    stream.wait_for_response_headers();
                     let len = stream.known_total_size();
                     let (source, mut hint) = decoder::from_stream_with_len(stream, len);
                     hint.with_extension(fmt.extension());
@@ -980,16 +1440,35 @@ fn network_factory(
                 hint.with_extension("m4a");
                 Ok((source, hint))
             } else {
-                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
-                    stream_url,
-                    false,
-                    yt_user_agent,
-                    None,
-                    rt_handle,
-                );
-                stream.wait_for_total_size();
-                let len = stream.known_total_size();
-                Ok(decoder::from_stream_with_len(stream, len))
+                // Jellyfin and Subsonic/Navidrome normally support HTTP
+                // ranges. Let format probes jump straight to tail metadata
+                // instead of making a sequential buffer download everything
+                // between the start and end of the file.
+                match utils::range_source::RangeStreamSource::new_with_progress(
+                    stream_url.clone(),
+                    yt_user_agent.clone(),
+                    buffer_progress.clone(),
+                ) {
+                    Ok(range) => {
+                        let len = Some(range.total_size());
+                        Ok(decoder::from_stream_with_len(range, len))
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, "HTTP ranges unavailable; using progressive stream");
+                        let stream =
+                            utils::stream_buffer::StreamBuffer::with_user_agent_and_progress(
+                                stream_url,
+                                false,
+                                yt_user_agent,
+                                None,
+                                rt_handle,
+                                buffer_progress,
+                            );
+                        stream.wait_for_response_headers();
+                        let len = stream.known_total_size();
+                        Ok(decoder::from_stream_with_len(stream, len))
+                    }
+                }
             }
         };
         build().map_err(|e| e.to_string())
@@ -1019,6 +1498,39 @@ pub fn use_player_controller(
     let intent = use_signal(|| PlaybackIntent::Stopped);
     let next_token = use_signal(|| 0u64);
     let current_token = use_signal(|| 0u64);
+    let buffered_ranges = use_signal(Vec::<BufferedRange>::new);
+    let (progress_tx, progress_rx) = use_hook(|| {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<BufferProgressEvent>();
+        (tx, std::rc::Rc::new(std::cell::RefCell::new(Some(rx))))
+    });
+    let buffer_progress_tx = use_signal(move || progress_tx);
+    let progress_rx_slot = progress_rx.clone();
+    let mut buffered_ranges_sink = buffered_ranges;
+    use_effect(move || {
+        let Some(mut progress_rx) = progress_rx_slot.borrow_mut().take() else {
+            return;
+        };
+        spawn(async move {
+            while let Some(event) = progress_rx.recv().await {
+                if *current_token.peek() != event.token {
+                    continue;
+                }
+                let Some(total) = event.total.filter(|total| *total > 0) else {
+                    continue;
+                };
+                buffered_ranges_sink.with_mut(|ranges| {
+                    merge_buffered_range(
+                        ranges,
+                        BufferedRange {
+                            start: event.start,
+                            end: event.end,
+                            total,
+                        },
+                    );
+                });
+            }
+        });
+    });
     let armed_transition = use_signal(|| None);
     let browse_loading = use_signal(|| false);
     let is_loading = use_memo(move || intent.read().is_loading() || *browse_loading.read());
@@ -1032,6 +1544,17 @@ pub fn use_player_controller(
     let load_task = use_signal(|| None::<dioxus_core::Task>);
     let station_registry = use_context::<Signal<radio::registry::StationRegistry>>();
     let playback_error = use_signal(|| None::<String>);
+    let spotify_host = use_signal(|| None::<::server::spotify::host::SpotifyHost>);
+    let spotify_device = use_signal(|| None::<String>);
+    let spotify_pending_uri = use_signal(|| None::<String>);
+    let spotify_activated = use_signal(|| false);
+    let spotify_device_override = use_signal(|| None::<String>);
+    let spotify_progress_anchor = use_signal(|| None::<(u64, std::time::Instant)>);
+    let spotify_host_starting = use_signal(|| false);
+    let spotify_start_task = use_signal(|| None::<dioxus_core::Task>);
+    let spotify_commanded = use_signal(|| None::<(String, std::time::Instant)>);
+    let external_active = use_signal(|| false);
+    let spotify_device_chosen = use_signal(|| false);
     let db = use_signal(move || db_handle);
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
 
@@ -1084,6 +1607,8 @@ pub fn use_player_controller(
         current_song_bitrate,
         current_song_duration,
         current_song_progress,
+        buffered_ranges,
+        buffer_progress_tx,
         current_song_cover_url,
         current_track_snapshot,
         volume,
@@ -1101,5 +1626,84 @@ pub fn use_player_controller(
         load_task,
         station_registry,
         playback_error,
+        spotify_host,
+        spotify_device,
+        spotify_pending_uri,
+        spotify_activated,
+        spotify_device_override,
+        spotify_progress_anchor,
+        spotify_host_starting,
+        spotify_start_task,
+        spotify_commanded,
+        external_active,
+        spotify_device_chosen,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BufferedRange, merge_buffered_range};
+
+    #[test]
+    fn buffered_ranges_merge_adjacent_and_overlapping_chunks() {
+        let mut ranges = Vec::new();
+        for (start, end) in [(500, 750), (0, 250), (200, 500)] {
+            merge_buffered_range(
+                &mut ranges,
+                BufferedRange {
+                    start,
+                    end,
+                    total: 1_000,
+                },
+            );
+        }
+
+        assert_eq!(
+            ranges,
+            vec![BufferedRange {
+                start: 0,
+                end: 750,
+                total: 1_000,
+            }]
+        );
+    }
+
+    #[test]
+    fn buffered_ranges_preserve_gaps_and_reset_for_a_new_total() {
+        let mut ranges = Vec::new();
+        merge_buffered_range(
+            &mut ranges,
+            BufferedRange {
+                start: 0,
+                end: 100,
+                total: 1_000,
+            },
+        );
+        merge_buffered_range(
+            &mut ranges,
+            BufferedRange {
+                start: 900,
+                end: 1_000,
+                total: 1_000,
+            },
+        );
+        assert_eq!(ranges.len(), 2);
+
+        merge_buffered_range(
+            &mut ranges,
+            BufferedRange {
+                start: 0,
+                end: 50,
+                total: 500,
+            },
+        );
+        assert_eq!(
+            ranges,
+            vec![BufferedRange {
+                start: 0,
+                end: 50,
+                total: 500,
+            }]
+        );
     }
 }

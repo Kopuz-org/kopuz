@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+use reader::{CoverRef, Track};
+
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
 const COVER_ART_ARCHIVE: &str = "https://coverartarchive.org";
 const ITUNES: &str = "https://itunes.apple.com/search";
@@ -8,6 +10,28 @@ pub const USER_AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (https://github.com/temidaradev/kopuz)"
 );
+
+pub fn youtube_cover_art_url(track: &Track) -> Option<String> {
+    if track.id.service() != Some(config::MusicService::YtMusic) {
+        return None;
+    }
+
+    let CoverRef::EmbeddedUrl(url) = CoverRef::for_track(track) else {
+        return None;
+    };
+
+    if reqwest::Url::parse(&url)
+        .ok()
+        .is_some_and(|parsed| parsed.host_str() == Some("i.ytimg.com"))
+    {
+        let video_id = track.id.key();
+        if !video_id.is_empty() {
+            return Some(format!("https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"));
+        }
+    }
+
+    Some(url)
+}
 
 fn build_client() -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder().user_agent(USER_AGENT).build()
@@ -255,4 +279,62 @@ pub async fn resolve_cover_art_url(
         album
     );
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use config::MusicService;
+    use reader::TrackId;
+
+    fn track(service: MusicService, cover: Option<&str>) -> Track {
+        Track {
+            id: TrackId::Server {
+                service,
+                item_id: "video-id".to_string(),
+            },
+            cover: cover.map(str::to_string),
+            album_id: String::new(),
+            title: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            duration: 0,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn youtube_tracks_prefer_their_source_artwork() {
+        let url = "https://lh3.googleusercontent.com/youtube-cover=w800-h800";
+        assert_eq!(
+            youtube_cover_art_url(&track(MusicService::YtMusic, Some(url))).as_deref(),
+            Some(url)
+        );
+    }
+
+    #[test]
+    fn youtube_video_thumbnails_use_the_stable_public_url() {
+        let signed = "https://i.ytimg.com/vi/video-id/hqdefault.jpg?sqp=temporary&rs=signature";
+        assert_eq!(
+            youtube_cover_art_url(&track(MusicService::YtMusic, Some(signed))).as_deref(),
+            Some("https://i.ytimg.com/vi/video-id/hqdefault.jpg")
+        );
+    }
+
+    #[test]
+    fn non_youtube_tracks_keep_the_existing_lookup_path() {
+        let url = "https://example.com/source-cover.jpg";
+        assert_eq!(
+            youtube_cover_art_url(&track(MusicService::SoundCloud, Some(url))),
+            None
+        );
+    }
 }

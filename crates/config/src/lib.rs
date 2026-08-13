@@ -7,7 +7,9 @@ use std::path::PathBuf;
 
 mod source;
 mod views;
-pub use source::{Browser, JellyfinServer, MusicServer, MusicService, SavedServer, Source};
+pub use source::{
+    Browser, JellyfinServer, MusicServer, MusicService, SavedLocalSource, SavedServer, Source,
+};
 pub use views::{IntegrationConfig, LibraryConfig, PlaybackConfig, ServerAuth, UiConfig};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -565,6 +567,13 @@ pub enum UiStyle {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SettingsLayout {
+    #[default]
+    Cd,
+    TopBar,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum ListenNowStyle {
     #[default]
     List,
@@ -609,22 +618,33 @@ pub struct AppConfig {
     pub server: Option<MusicServer>,
     #[serde(default)]
     pub servers: Vec<SavedServer>,
-    /// Id of the active server (`servers.id`), or `None` for local. The DB-backed
-    /// source of truth for "which server is active"; `server`/`servers` above are
-    /// hydrated from the `servers` table around it. (`server` stays for now so the
-    /// ~90 existing `config.server` readers keep working — they migrate to id-based
-    /// resolution with the auth-gate work.)
-    /// The active source: `Local` or `Server(id)`. Single source of truth for
-    /// "which source/server is active" — `server`/`servers` above are hydrated
-    /// from the `servers` table around it.
+    /// Named, isolated filesystem libraries. The legacy `music_directory`
+    /// remains the built-in Local source for backwards compatibility.
+    #[serde(default)]
+    pub local_sources: Vec<SavedLocalSource>,
+    /// The active source: built-in Local, a named local library, or Server(id).
+    /// `server` is hydrated only for the active remote source.
     #[serde(default)]
     pub active_source: Source,
     #[serde(default)]
     pub source_explicitly_set: bool,
+    /// Browser id used to host Spotify playback (`chrome`/`edge`/`brave`/
+    /// `chromium`/`vivaldi`/`safari`); `None` picks the first available.
+    #[serde(default)]
+    pub spotify_browser: Option<String>,
+    /// When Spotify is active and another Connect device is already playing,
+    /// adopt that device on connect (`true`, default) instead of starting
+    /// playback on this app's in-app device.
+    #[serde(default = "default_true")]
+    pub spotify_prefer_active_device: bool,
     #[serde(default, deserialize_with = "deserialize_music_directories")]
     pub music_directory: Vec<PathBuf>,
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Palette file matugen or pywal writes, polled for changes while the live
+    /// theme is active. Empty means whichever default location exists.
+    #[serde(default)]
+    pub live_theme_path: String,
     #[serde(default = "default_device_id")]
     pub device_id: String,
     #[serde(default = "default_discord_presence")]
@@ -750,6 +770,8 @@ pub struct AppConfig {
     pub player_bar_position: PlayerBarPosition,
     #[serde(default)]
     pub ui_style: UiStyle,
+    #[serde(default)]
+    pub settings_layout: SettingsLayout,
     #[serde(default = "default_hero_height")]
     pub hero_height: u32,
     #[serde(default = "default_home_sections")]
@@ -887,10 +909,14 @@ impl Default for AppConfig {
         Self {
             server: None,
             servers: Vec::new(),
+            local_sources: Vec::new(),
             active_source: Source::Local,
             source_explicitly_set: false,
+            spotify_browser: None,
+            spotify_prefer_active_device: true,
             music_directory: vec![music_directory],
             theme: default_theme(),
+            live_theme_path: String::new(),
             device_id: default_device_id(),
             discord_presence: Some(true),
             discord_presence_paused: Some(true),
@@ -944,6 +970,7 @@ impl Default for AppConfig {
             offline_tracks: HashMap::new(),
             player_bar_position: PlayerBarPosition::Bottom,
             ui_style: UiStyle::Normal,
+            settings_layout: SettingsLayout::Cd,
             hero_height: default_hero_height(),
             home_sections: default_home_sections(),
             listen_now_style: ListenNowStyle::default(),
@@ -1017,6 +1044,19 @@ impl AppConfig {
         }
     }
 
+    pub fn add_local_source(&mut self, source: SavedLocalSource) {
+        if !self.local_sources.iter().any(|saved| saved.id == source.id) {
+            self.local_sources.push(source);
+        }
+    }
+
+    pub fn remove_local_source(&mut self, id: &str) {
+        self.local_sources.retain(|source| source.id != id);
+        if self.active_source.local_library_id() == Some(id) {
+            self.clear_active_server();
+        }
+    }
+
     pub fn find_saved_server(&self, id: &str) -> Option<&SavedServer> {
         self.servers.iter().find(|s| s.id == id)
     }
@@ -1053,6 +1093,13 @@ impl AppConfig {
         self.source_explicitly_set = true;
     }
 
+    pub fn set_active_local_source(&mut self, source: Source) {
+        debug_assert!(source.is_local());
+        self.active_source = source;
+        self.server = None;
+        self.source_explicitly_set = true;
+    }
+
     pub fn set_active_server_snapshot(&mut self, server: MusicServer) {
         let source = server.id.clone().map_or(Source::Local, Source::Server);
         self.active_source = source;
@@ -1083,7 +1130,10 @@ impl AppConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppConfig, BackBehavior, Browser, EqualizerSettings, MusicServer, ServerAuth};
+    use super::{
+        AppConfig, BackBehavior, Browser, EqualizerSettings, MusicServer, ServerAuth,
+        SettingsLayout,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -1141,6 +1191,16 @@ mod tests {
             config.music_directory,
             vec![PathBuf::from("/music"), PathBuf::from("/archive")]
         );
+    }
+
+    #[test]
+    fn settings_layout_is_backward_compatible_and_deserializes_top_bar() {
+        let default_config: AppConfig = serde_json::from_str("{}").unwrap();
+        let top_bar_config: AppConfig =
+            serde_json::from_str(r#"{"settings_layout":"TopBar"}"#).unwrap();
+
+        assert_eq!(default_config.settings_layout, SettingsLayout::Cd);
+        assert_eq!(top_bar_config.settings_layout, SettingsLayout::TopBar);
     }
 
     #[test]

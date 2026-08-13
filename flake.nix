@@ -55,7 +55,10 @@
           craneLib = mkCraneLib pkgs;
         in
         {
-          kopuz = pkgs.callPackage ./packaging/nix/crane.nix { inherit craneLib; };
+          kopuz = pkgs.callPackage ./packaging/nix/crane.nix {
+            inherit craneLib;
+            gitRev = self.rev or self.dirtyRev or null;
+          };
           default = self.packages.${system}.kopuz;
         }
       );

@@ -12,7 +12,7 @@
 //!     `YYYY-MM-DD_HH-MM-SS`, which sorts alphabetically ==
 //!     chronologically.
 //!   - `crash-<ts>.txt`    — written only on a panic (message + backtrace +
-//!     recent log tail + version/OS).
+//!     recent log tail + version/commit/OS).
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -124,11 +124,8 @@ fn read_tail(path: &Path) -> Option<String> {
 }
 
 /// Write a crash report from the panic hook. Returns the path written.
-/// `version` is passed in by the caller because `env!("CARGO_PKG_VERSION")`
-/// here would resolve to `utils`, not the app.
 pub fn write_crash_report(
     dir: &Path,
-    version: &str,
     message: &str,
     location: &str,
     backtrace: &str,
@@ -137,7 +134,8 @@ pub fn write_crash_report(
     let path = dir.join(format!("{CRASH_PREFIX}{ts}.txt"));
     let mut f = std::fs::File::create(&path).ok()?;
     let _ = writeln!(f, "kopuz crash report — {ts} UTC");
-    let _ = writeln!(f, "version: {version}");
+    let _ = writeln!(f, "version: {}", crate::build_info::VERSION);
+    let _ = writeln!(f, "commit: {}", crate::build_info::COMMIT);
     let _ = writeln!(
         f,
         "os: {} / {}",
@@ -185,7 +183,7 @@ pub fn open_log_dir() -> io::Result<()> {
 }
 
 /// Bundle the current session log and the most recent crash report (plus a
-/// version/OS header) into a single file at `dest`, for the user to attach to
+/// version/commit/OS header) into a single file at `dest`, for the user to attach to
 /// a bug report. Triggered by the settings "Export logs" button.
 pub fn export_logs(dest: &Path) -> io::Result<()> {
     let dir =
@@ -206,6 +204,8 @@ pub fn export_logs(dest: &Path) -> io::Result<()> {
 
     let mut out = std::fs::File::create(dest)?;
     writeln!(out, "=== kopuz log export — {} UTC ===", timestamp())?;
+    writeln!(out, "version: {}", crate::build_info::VERSION)?;
+    writeln!(out, "commit: {}", crate::build_info::COMMIT)?;
     writeln!(
         out,
         "os: {} / {}",

@@ -1,3 +1,4 @@
+use components::search_bar::SearchBar;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 
@@ -18,6 +19,7 @@ pub fn FavoritesPage(
     mut current_queue_index: Signal<usize>,
 ) -> Element {
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let search_query = use_signal(String::new);
 
     rsx! {
         div {
@@ -46,7 +48,12 @@ pub fn FavoritesPage(
                 }
             }
 
-            FavoritesBody { config, queue }
+            SearchBar { search_query }
+            FavoritesBody {
+                config,
+                queue,
+                search_query,
+            }
         }
     }
 }

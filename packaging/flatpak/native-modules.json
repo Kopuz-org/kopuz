@@ -1,0 +1,36 @@
+{
+  "name": "native-modules",
+  "buildsystem": "simple",
+  "build-commands": [],
+  "modules": [
+    {
+      "name": "xdotool",
+      "buildsystem": "simple",
+      "build-commands": [
+        "make INSTALL_MAN=0 PREFIX=$FLATPAK_DEST",
+        "make install INSTALL_MAN=0 PREFIX=$FLATPAK_DEST"
+      ],
+      "sources": [
+        {
+          "type": "git",
+          "url": "https://github.com/jordansissel/xdotool.git",
+          "tag": "v4.20260303.1",
+          "commit": "d37c16111dbe38ea29194f20ac9de03cff8dfc1c"
+        }
+      ]
+    },
+    {
+      "name": "yt-dlp",
+      "buildsystem": "simple",
+      "build-commands": ["install -Dm755 yt-dlp $FLATPAK_DEST/bin/yt-dlp"],
+      "sources": [
+        {
+          "type": "file",
+          "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.03.17/yt-dlp_linux",
+          "sha256": "c2b0189f581fe4a2ddd41954f1bcb7d327db04b07ed0dea97e4f1b3e09b5dd8e",
+          "dest-filename": "yt-dlp"
+        }
+      ]
+    }
+  ]
+}

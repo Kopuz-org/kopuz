@@ -36,6 +36,7 @@ mod jellyfin;
 mod local;
 mod offline;
 mod soundcloud;
+mod spotify;
 mod subsonic;
 mod types;
 mod youtube_music;
@@ -43,6 +44,7 @@ use jellyfin::JellyfinSource;
 use local::LocalSource;
 use offline::OfflineServerSource;
 use soundcloud::SoundcloudSource;
+use spotify::SpotifySource;
 use subsonic::SubsonicSource;
 pub use types::*;
 use youtube_music::YtSource;
@@ -133,8 +135,20 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("radio"))
     }
 
+    /// Start a radio/mix seeded from a whole playlist, returning the generated
+    /// queue. The queue is the source's own mix for that playlist — not the
+    /// playlist's tracks — so callers play it as-is. Shares
+    /// [`Capabilities::radio`] with [`start_radio`](Self::start_radio): a source
+    /// that can seed radio from a track can seed it from a playlist too.
+    async fn start_playlist_radio(
+        &self,
+        _playlist_ref: &str,
+    ) -> Result<Vec<reader::Track>, SourceError> {
+        Err(SourceError::unsupported("playlist radio"))
+    }
+
     /// The track's canonical public web URL, when this source has shareable web
-    /// pages (e.g. a YouTube Music watch link). `None` otherwise — callers fall
+    /// pages (e.g. a YouTube Music watch link or Spotify track link). `None` otherwise — callers fall
     /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.
     fn web_url(&self, _track: &reader::Track) -> Option<String> {
         None
@@ -604,7 +618,7 @@ pub trait MediaSource: Send + Sync {
     /// Increment a track's play count, keyed by its uid. DB-cache op.
     async fn bump_listen_count(&self, track_uid: &str) -> Result<(), SourceError> {
         self.db()
-            .bump_listen_count(track_uid)
+            .bump_listen_count(self.source(), track_uid)
             .await
             .map_err(SourceError::from)
     }
@@ -702,16 +716,6 @@ pub(super) async fn mirror_added(
     Ok(())
 }
 
-/// Encode a cover URL into the `urlhex_…` tag the Subsonic cover seam decodes
-/// back (the synthetic album/track cover reference for Subsonic/Custom).
-pub(super) fn encode_cover_url_tag(url: &str) -> String {
-    let mut hex = String::with_capacity(url.len() * 2);
-    for b in url.as_bytes() {
-        hex.push_str(&format!("{b:02x}"));
-    }
-    format!("urlhex_{hex}")
-}
-
 /// Filter a library corpus by a lowercased `query` — the shared search behavior
 /// for corpus-backed sources (local, Jellyfin, Subsonic). Matches tracks on
 /// title/artist/album/genre (≤100) and albums on title/artist/genre, deduped by
@@ -791,6 +795,7 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         }
         MusicService::YtMusic => Box::new(YtSource::new(db, source, conn)),
         MusicService::SoundCloud => Box::new(SoundcloudSource::new(db, source, conn)),
+        MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
     }
 }
 
@@ -809,13 +814,9 @@ pub fn configured_server(db: Db, config: &AppConfig) -> Option<Box<dyn MediaSour
     Some(remote_source(db, source, &conn))
 }
 
-/// The local (filesystem) [`MediaSource`] — for the statically-local pages,
-/// which never act on a server and so need no config.
-pub fn local(db: Db) -> Box<dyn MediaSource> {
-    Box::new(LocalSource {
-        db,
-        source: Source::Local,
-    })
+/// A local (filesystem) [`MediaSource`] using the supplied DB namespace.
+pub fn local(db: Db, source: Source) -> Box<dyn MediaSource> {
+    Box::new(LocalSource { db, source })
 }
 
 /// The [`MediaSource`] backing a given [`Source`] key — the single factory.
@@ -825,7 +826,7 @@ pub fn local(db: Db) -> Box<dyn MediaSource> {
 /// the result (the cached [`ActiveSource`]) rather than calling per render.
 pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSource> {
     match source {
-        Source::Local => local(db),
+        Source::Local | Source::LocalLibrary(_) => local(db, source.clone()),
         Source::Server(id) => match ServerConn::resolve(config) {
             Some(conn) => remote_source(db, Source::Server(id.clone()), &conn),
             None => Box::new(OfflineServerSource {

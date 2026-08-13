@@ -87,6 +87,10 @@ impl DenoCoreEngine {
 }
 
 impl JsEngine for DenoCoreEngine {
+    fn is_persistent(&self) -> bool {
+        true
+    }
+
     fn run<'a>(
         &'a self,
         program: String,
@@ -119,7 +123,8 @@ fn run(mut rx: mpsc::UnboundedReceiver<SolveJob>) {
             extensions: vec![decipher_ext::init_ops()],
             ..Default::default()
         });
-        if let Err(e) = js.execute_script("decipher:prelude", PRELUDE) {
+        let boot = format!("{PRELUDE}\n{}", super::solver_bootstrap());
+        if let Err(e) = js.execute_script("decipher:prelude", boot) {
             tracing::error!(error = %e, "decipher: prelude failed");
             // Drain with errors so callers don't hang.
             while let Ok(job) = rx.try_recv() {
@@ -130,6 +135,12 @@ fn run(mut rx: mpsc::UnboundedReceiver<SolveJob>) {
         while let Some(job) = rx.recv().await {
             let result = solve_one(&mut js, job.program).await;
             let _ = job.reply.send(result);
+            // Each solve churns MBs of JS heap (the installed player closure is
+            // compiled from ~2.5 MB of source). V8's default old-space limit is
+            // gigabytes, so without a hint it grows for the whole session
+            // instead of collecting — a full GC here keeps the isolate flat and
+            // hands the pages back to the OS.
+            js.v8_isolate().low_memory_notification();
         }
     });
 }

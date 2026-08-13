@@ -1,3 +1,4 @@
+use config::MusicService;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -23,6 +24,30 @@ pub enum ArtistImageRef {
     Local(PathBuf),
     /// A remote URL (from a server sync).
     Remote(String),
+}
+
+/// Typed in-memory form of the cover references persisted by older databases
+/// and source adapters.
+///
+/// Storage remains string-based for backwards compatibility. All interpretation
+/// of those strings happens here so callers never need to split service prefixes
+/// or decode embedded URLs themselves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CoverRef {
+    Local(PathBuf),
+    JellyfinItem {
+        item_id: String,
+        tag: Option<String>,
+    },
+    SubsonicItem {
+        item_id: String,
+        /// Ask for the item's own art over a fully signed request. Set when the
+        /// source recorded no cover key at all — that lookup doesn't accept the
+        /// query-token form every other Subsonic ref resolves with.
+        signed: bool,
+    },
+    EmbeddedUrl(String),
+    None,
 }
 
 /// Typed track identity — replaces the old `Track.path` synthetic-string hack.
@@ -85,6 +110,7 @@ impl TrackId {
             ("subsonic", config::MusicService::Subsonic),
             ("custom", config::MusicService::Custom),
             ("soundcloud", config::MusicService::SoundCloud),
+            ("spotify", config::MusicService::Spotify),
         ] {
             if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
                 let item_id = rest.split(':').next().unwrap_or("").to_string();
@@ -105,6 +131,7 @@ fn service_prefix(s: config::MusicService) -> &'static str {
         config::MusicService::Subsonic => "subsonic",
         config::MusicService::Custom => "custom",
         config::MusicService::SoundCloud => "soundcloud",
+        config::MusicService::Spotify => "spotify",
     }
 }
 
@@ -134,6 +161,158 @@ pub struct Track {
     pub playlist_item_id: Option<String>,
     #[serde(default)]
     pub artists: Vec<String>,
+}
+
+impl CoverRef {
+    /// The persisted sentinel for "the source reported no cover for this item".
+    pub const NO_COVER: &'static str = "none";
+
+    /// Parse a persisted cover reference without consulting the active source.
+    pub fn parse(stored: &str) -> Self {
+        if stored.is_empty() || stored == Self::NO_COVER {
+            return Self::None;
+        }
+        if let Some(url) = Self::decode_embedded(stored) {
+            return Self::EmbeddedUrl(url);
+        }
+
+        let path = Path::new(stored);
+        if path.is_absolute() {
+            return Self::Local(path.to_path_buf());
+        }
+
+        let mut parts = stored.splitn(3, ':');
+        let prefix = parts.next().unwrap_or_default();
+        let item_id = parts.next().unwrap_or_default();
+        let value = parts.next();
+        match prefix {
+            "jellyfin" if !item_id.is_empty() => {
+                Self::remote_item(MusicService::Jellyfin, item_id, value)
+            }
+            "subsonic" if !item_id.is_empty() => {
+                Self::remote_item(MusicService::Subsonic, item_id, value)
+            }
+            "custom" if !item_id.is_empty() => {
+                Self::remote_item(MusicService::Custom, item_id, value)
+            }
+            // YT Music and legacy SoundCloud refs only carry self-contained
+            // artwork. Their item identity is irrelevant to cover resolution.
+            "ytmusic" | "soundcloud" => value.map_or(Self::None, Self::parse),
+            _ => Self::None,
+        }
+    }
+
+    /// Build a cover ref when the service and item identity are already typed.
+    pub fn remote_item(service: MusicService, item_id: &str, cover: Option<&str>) -> Self {
+        if let Some(value) = cover {
+            if value == Self::NO_COVER {
+                return Self::None;
+            }
+            // The value may already describe a cover on its own: an embedded
+            // URL, or — when an album's whole ref is projected onto a track — a
+            // ref in its own right. Either wins over reading it as *this*
+            // item's key, which is the misread this type exists to prevent. A
+            // real image tag carries no service prefix and no URL scheme, so it
+            // parses to `None` and falls through to the arms below.
+            match Self::parse(value) {
+                Self::None | Self::Local(_) => {}
+                typed => return typed,
+            }
+        }
+
+        match service {
+            MusicService::Jellyfin => Self::JellyfinItem {
+                item_id: item_id.to_string(),
+                tag: cover.map(str::to_string),
+            },
+            MusicService::Subsonic | MusicService::Custom => Self::SubsonicItem {
+                item_id: item_id.to_string(),
+                signed: false,
+            },
+            MusicService::YtMusic | MusicService::SoundCloud | MusicService::Spotify => {
+                cover.map_or(Self::None, Self::parse)
+            }
+        }
+    }
+
+    /// Encode an item-scoped cover ref in the persisted `service:item[:value]`
+    /// form [`parse`](Self::parse) reads back — the one place a service prefix
+    /// is written. Hand-rolled `format!`s are how a Subsonic row ended up
+    /// carrying a `jellyfin:` ref.
+    pub fn stored_item_ref(service: MusicService, item_id: &str, cover: Option<&str>) -> String {
+        let prefix = service_prefix(service);
+        match cover {
+            Some(value) => format!("{prefix}:{item_id}:{value}"),
+            None => format!("{prefix}:{item_id}"),
+        }
+    }
+
+    /// Resolve the cover candidate and fallback encoded by a typed track.
+    pub fn for_track(track: &Track) -> Self {
+        let Some(service) = track.id.service() else {
+            return track.cover.as_deref().map_or(Self::None, Self::parse);
+        };
+        let item_id = track.id.key();
+
+        match service {
+            MusicService::Jellyfin => match track.cover.as_deref() {
+                Some(cover) => Self::remote_item(service, &item_id, Some(cover)),
+                None if track.album_id.starts_with("jellyfin:") => Self::parse(&track.album_id),
+                None => Self::remote_item(service, &item_id, None),
+            },
+            MusicService::YtMusic => match track.cover.as_deref() {
+                Some(cover) => Self::remote_item(service, &item_id, Some(cover)),
+                None => Self::parse(&track.album_id),
+            },
+            MusicService::Subsonic | MusicService::Custom
+                if track.cover.as_deref() == Some(Self::NO_COVER) =>
+            {
+                // The sync found no cover key for this song. Its own art is
+                // still worth asking for — but only over a signed request.
+                Self::SubsonicItem {
+                    item_id: item_id.into_owned(),
+                    signed: true,
+                }
+            }
+            MusicService::Subsonic | MusicService::Custom => {
+                Self::remote_item(service, &item_id, track.cover.as_deref())
+            }
+            MusicService::SoundCloud | MusicService::Spotify => {
+                track.cover.as_deref().map_or(Self::None, Self::parse)
+            }
+        }
+    }
+
+    /// Encode a URL for persisted fields that still use the `urlhex_…` form.
+    pub fn encode_url(url: &str) -> String {
+        let mut encoded = String::with_capacity(7 + url.len() * 2);
+        encoded.push_str("urlhex_");
+        for byte in url.as_bytes() {
+            use std::fmt::Write as _;
+            let _ = write!(encoded, "{byte:02x}");
+        }
+        encoded
+    }
+
+    fn decode_embedded(stored: &str) -> Option<String> {
+        if let Some(url) = stored.strip_prefix("directurl:") {
+            return (!url.is_empty()).then(|| url.to_string());
+        }
+        if stored.starts_with("http://") || stored.starts_with("https://") {
+            return Some(stored.to_string());
+        }
+
+        let hex = stored.strip_prefix("urlhex_")?;
+        if hex.len() % 2 != 0 {
+            return None;
+        }
+        let mut bytes = Vec::with_capacity(hex.len() / 2);
+        for pair in hex.as_bytes().chunks_exact(2) {
+            let pair = std::str::from_utf8(pair).ok()?;
+            bytes.push(u8::from_str_radix(pair, 16).ok()?);
+        }
+        String::from_utf8(bytes).ok()
+    }
 }
 
 /// What to do with the track's embedded front-cover picture on save.
@@ -258,7 +437,8 @@ impl Library {
 
 #[cfg(test)]
 mod tests {
-    use super::Library;
+    use super::{CoverRef, Library, Track, TrackId};
+    use config::MusicService;
     use std::path::PathBuf;
 
     #[test]
@@ -272,6 +452,210 @@ mod tests {
         let library: Library = serde_json::from_str(json).unwrap();
 
         assert_eq!(library.root_paths, vec![PathBuf::from("/music")]);
+    }
+
+    #[test]
+    fn cover_ref_parses_every_persisted_shape() {
+        assert_eq!(
+            CoverRef::parse("/music/album/cover.jpg"),
+            CoverRef::Local(PathBuf::from("/music/album/cover.jpg"))
+        );
+        assert_eq!(
+            CoverRef::parse("jellyfin:album-1:tag-1"),
+            CoverRef::JellyfinItem {
+                item_id: "album-1".to_string(),
+                tag: Some("tag-1".to_string())
+            }
+        );
+        assert_eq!(
+            CoverRef::parse("subsonic:cover-1"),
+            CoverRef::SubsonicItem {
+                item_id: "cover-1".to_string(),
+                signed: false
+            }
+        );
+        assert_eq!(
+            CoverRef::parse("directurl:https://img.example/cover.jpg"),
+            CoverRef::EmbeddedUrl("https://img.example/cover.jpg".to_string())
+        );
+
+        let url = "https://img.example/a:b.jpg";
+        let encoded = CoverRef::encode_url(url);
+        assert_eq!(
+            CoverRef::parse(&format!("ytmusic:_:{encoded}")),
+            CoverRef::EmbeddedUrl(url.to_string())
+        );
+        assert_eq!(CoverRef::parse("jellyfin:album-1:none"), CoverRef::None);
+        assert_eq!(CoverRef::parse("urlhex_not-hex"), CoverRef::None);
+    }
+
+    fn track(service: MusicService, item_id: &str, cover: Option<&str>, album_id: &str) -> Track {
+        Track {
+            id: TrackId::Server {
+                service,
+                item_id: item_id.to_string(),
+            },
+            cover: cover.map(str::to_string),
+            album_id: album_id.to_string(),
+            title: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            duration: 0,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn jellyfin_track_uses_typed_album_fallback() {
+        let with_tag = track(
+            MusicService::Jellyfin,
+            "track-1",
+            None,
+            "jellyfin:album-1:album-tag",
+        );
+        assert_eq!(
+            CoverRef::for_track(&with_tag),
+            CoverRef::JellyfinItem {
+                item_id: "album-1".to_string(),
+                tag: Some("album-tag".to_string())
+            }
+        );
+
+        // A bare album ref (the sync's form when the album has no Primary tag)
+        // still names the album, not the song with no art of its own.
+        let bare = track(MusicService::Jellyfin, "track-1", None, "jellyfin:album-1");
+        assert_eq!(
+            CoverRef::for_track(&bare),
+            CoverRef::JellyfinItem {
+                item_id: "album-1".to_string(),
+                tag: None
+            }
+        );
+
+        // No album ref at all → the song's own item.
+        let orphan = track(MusicService::Jellyfin, "track-1", None, "");
+        assert_eq!(
+            CoverRef::for_track(&orphan),
+            CoverRef::JellyfinItem {
+                item_id: "track-1".to_string(),
+                tag: None
+            }
+        );
+    }
+
+    /// The regression the type exists to prevent: an album's whole ref landing
+    /// in a track's `cover` slot must not be sent as that *track's* image tag.
+    #[test]
+    fn a_ref_in_the_cover_slot_resolves_as_that_ref() {
+        assert_eq!(
+            CoverRef::remote_item(
+                MusicService::Jellyfin,
+                "track-1",
+                Some("jellyfin:album-1:album-tag")
+            ),
+            CoverRef::JellyfinItem {
+                item_id: "album-1".to_string(),
+                tag: Some("album-tag".to_string())
+            }
+        );
+
+        // A real Jellyfin image tag carries no service prefix, so it stays the
+        // track's own tag.
+        assert_eq!(
+            CoverRef::remote_item(MusicService::Jellyfin, "track-1", Some("d41d8cd98f00b204")),
+            CoverRef::JellyfinItem {
+                item_id: "track-1".to_string(),
+                tag: Some("d41d8cd98f00b204".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn subsonic_track_without_a_cover_key_asks_for_its_own_art() {
+        assert_eq!(
+            CoverRef::for_track(&track(
+                MusicService::Subsonic,
+                "song-1",
+                Some(CoverRef::NO_COVER),
+                ""
+            )),
+            CoverRef::SubsonicItem {
+                item_id: "song-1".to_string(),
+                signed: true
+            }
+        );
+
+        // Absent (rather than sentinel) → the plain token-authenticated lookup.
+        assert_eq!(
+            CoverRef::for_track(&track(MusicService::Custom, "song-1", None, "")),
+            CoverRef::SubsonicItem {
+                item_id: "song-1".to_string(),
+                signed: false
+            }
+        );
+    }
+
+    #[test]
+    fn soundcloud_track_covers_are_self_contained() {
+        let url = "https://i1.sndcdn.com/artworks-1:2-large.jpg";
+        for stored in [url.to_string(), format!("directurl:{url}")] {
+            assert_eq!(
+                CoverRef::for_track(&track(MusicService::SoundCloud, "sc-1", Some(&stored), "")),
+                CoverRef::EmbeddedUrl(url.to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn stored_item_refs_round_trip_through_parse() {
+        for (service, expected) in [
+            (
+                MusicService::Jellyfin,
+                CoverRef::JellyfinItem {
+                    item_id: "item-1".to_string(),
+                    tag: Some("tag-1".to_string()),
+                },
+            ),
+            (
+                MusicService::Subsonic,
+                CoverRef::SubsonicItem {
+                    item_id: "item-1".to_string(),
+                    signed: false,
+                },
+            ),
+            (
+                MusicService::Custom,
+                CoverRef::SubsonicItem {
+                    item_id: "item-1".to_string(),
+                    signed: false,
+                },
+            ),
+        ] {
+            let stored = CoverRef::stored_item_ref(service, "item-1", Some("tag-1"));
+            assert_eq!(CoverRef::parse(&stored), expected, "{stored}");
+            assert_eq!(
+                CoverRef::parse(&CoverRef::stored_item_ref(
+                    service,
+                    "item-1",
+                    Some(CoverRef::NO_COVER)
+                )),
+                CoverRef::None,
+                "the no-cover sentinel survives the round trip"
+            );
+        }
+
+        let url = "https://img.example/a:b.jpg";
+        let stored =
+            CoverRef::stored_item_ref(MusicService::YtMusic, "_", Some(&CoverRef::encode_url(url)));
+        assert_eq!(CoverRef::parse(&stored), CoverRef::EmbeddedUrl(url.into()));
     }
 }
 

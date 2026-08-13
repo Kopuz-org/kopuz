@@ -38,7 +38,13 @@ impl Theme {
 
     // Maps values back to the css custom properties Kopuz uses.
     pub fn to_css(&self) -> String {
-        let mut out = format!(".theme-{} {{\n", self.id);
+        self.to_css_for(&format!(".theme-{}", self.id))
+    }
+
+    /// The same body under a caller-chosen selector, for a theme that has to
+    /// outrank an existing `.theme-*` rule instead of sitting beside one.
+    pub fn to_css_for(&self, selector: &str) -> String {
+        let mut out = format!("{selector} {{\n");
         for (purpose, css_var) in VAR_MAP {
             if let Some(val) = self.var(purpose) {
                 out.push_str(&format!("    {}: {};\n", css_var, val));

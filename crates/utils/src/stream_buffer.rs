@@ -18,6 +18,11 @@ const MIN_PREBUFFER_BYTES: usize = 256 * 1024; // 256KB
 const MIN_BUFFER_AHEAD: usize = 128 * 1024; // 128KB
 
 const MAX_BUFFER_SIZE: usize = 1024 * 1024 * 1024; // 1GB
+const PROGRESS_REPORT_STEP: usize = 64 * 1024;
+
+/// Reports one downloaded byte range as `[start, end)` plus the total length
+/// when the server exposes it.
+pub type BufferProgressCallback = Arc<dyn Fn(u64, u64, Option<u64>) + Send + Sync>;
 
 /// Shared state between the async downloader and sync readers.
 ///
@@ -26,12 +31,14 @@ const MAX_BUFFER_SIZE: usize = 1024 * 1024 * 1024; // 1GB
 /// - `done`: HTTP stream finished (success or error)
 /// - `error`: reason for failure, if any
 /// - `total_size`: Content-Length header value (may be unknown for radio/streams)
+/// - `response_ready`: response headers arrived, even when no Content-Length exists
 /// - `prebuffer_ready`: enough data buffered to start playback safely
 struct SharedState {
     buffer: Vec<u8>,
     done: bool,
     error: Option<String>,
     total_size: Option<u64>,
+    response_ready: bool,
     prebuffer_ready: bool,
 }
 
@@ -55,6 +62,17 @@ impl StreamBuffer {
         icy_tx: Option<tokio::sync::watch::Sender<crate::icy::IcyMeta>>,
         runtime: tokio::runtime::Handle,
     ) -> Self {
+        Self::with_user_agent_and_progress(url, is_radio, user_agent, icy_tx, runtime, None)
+    }
+
+    pub fn with_user_agent_and_progress(
+        url: String,
+        is_radio: bool,
+        user_agent: Option<String>,
+        icy_tx: Option<tokio::sync::watch::Sender<crate::icy::IcyMeta>>,
+        runtime: tokio::runtime::Handle,
+        progress: Option<BufferProgressCallback>,
+    ) -> Self {
         let prebuffer_size = if is_radio {
             16 * 1024
         } else {
@@ -67,6 +85,7 @@ impl StreamBuffer {
                 done: false,
                 error: None,
                 total_size: None,
+                response_ready: false,
                 prebuffer_ready: false,
             }),
             Notify::new(),
@@ -144,6 +163,7 @@ impl StreamBuffer {
                             let (lock, notify) = &*state_clone;
                             let mut state = lock.lock().await;
                             state.total_size = total_size;
+                            state.response_ready = true;
                             notify.notify_waiters();
                         }
 
@@ -161,6 +181,7 @@ impl StreamBuffer {
                         });
 
                         let mut total_buffered = 0usize;
+                        let mut last_progress_report = 0usize;
                         let mut audio_scratch = Vec::new();
 
                         while let Ok(Some(chunk)) = response.chunk().await {
@@ -210,6 +231,15 @@ impl StreamBuffer {
 
                                 notify.notify_waiters();
                             }
+
+                            if total_buffered.saturating_sub(last_progress_report)
+                                >= PROGRESS_REPORT_STEP
+                            {
+                                if let Some(progress) = &progress {
+                                    progress(0, total_buffered as u64, total_size);
+                                }
+                                last_progress_report = total_buffered;
+                            }
                         }
 
                         let (lock, notify) = &*state_clone;
@@ -217,6 +247,16 @@ impl StreamBuffer {
                         state.done = true;
                         state.prebuffer_ready = true;
                         notify.notify_waiters();
+                        drop(state);
+                        if total_buffered > 0
+                            && let Some(progress) = &progress
+                        {
+                            progress(
+                                0,
+                                total_buffered as u64,
+                                total_size.or(Some(total_buffered as u64)),
+                            );
+                        }
                     }
                     Err(e) => {
                         let (lock, notify) = &*state_clone;
@@ -253,11 +293,14 @@ impl StreamBuffer {
         }
     }
 
-    pub fn wait_for_total_size(&self) {
+    /// Wait until the HTTP response headers tell us whether a total size is
+    /// available. A chunked response has no Content-Length, so it must not wait
+    /// for the body to finish downloading.
+    pub fn wait_for_response_headers(&self) {
         let (lock, _notify) = &*self.state;
         loop {
             let state = lock.blocking_lock();
-            if state.total_size.is_some() || state.done {
+            if state.response_ready || state.done {
                 return;
             }
             drop(state);
@@ -268,7 +311,7 @@ impl StreamBuffer {
     pub fn known_total_size(&self) -> Option<u64> {
         let (lock, _) = &*self.state;
         let state = lock.blocking_lock();
-        state.total_size.or(Some(state.buffer.len() as u64))
+        state.total_size
     }
 
     fn wait_for_buffer_ahead(&self, min_ahead: usize) {
@@ -365,5 +408,51 @@ impl Seek for StreamBuffer {
 
         self.pos = new_pos as u64;
         Ok(self.pos)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn missing_length_is_known_once_response_headers_arrive() {
+        let state = Arc::new((
+            Mutex::new(SharedState {
+                buffer: Vec::new(),
+                done: false,
+                error: None,
+                total_size: None,
+                response_ready: false,
+                prebuffer_ready: false,
+            }),
+            Notify::new(),
+        ));
+        let stream = StreamBuffer {
+            state: state.clone(),
+            pos: 0,
+        };
+        let (result_tx, result_rx) = mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            stream.wait_for_response_headers();
+            result_tx
+                .send(stream.known_total_size())
+                .expect("send header result");
+        });
+
+        {
+            let (lock, notify) = &*state;
+            let mut state = lock.blocking_lock();
+            state.response_ready = true;
+            notify.notify_waiters();
+        }
+
+        let result = result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("header wait completes without the body finishing");
+        waiter.join().expect("join header waiter");
+
+        assert_eq!(result, None);
     }
 }

@@ -439,7 +439,7 @@ fn AlbumDetail(
     // discovered album renders (header + full track list) instead of "not found".
     let direct_remote_res: Resource<Option<::server::source::RemoteAlbum>> = {
         use_resource(move || {
-            let want = caps().albums == ::server::source::AlbumType::YtMusic && !*is_offline.read();
+            let want = !*is_offline.read();
             let db_has = album_res.read().clone().flatten().is_some();
             let id = album_id_memo();
             let src = active_source.peek().clone();
@@ -545,6 +545,24 @@ fn AlbumDetail(
         })
     };
 
+    let full_album_tracks_res = use_resource(move || {
+        let want = caps().albums == ::server::source::AlbumType::Standard
+            && caps().sync
+            && !*is_offline.read();
+        let ids = matching_ids();
+        let src = active_source.peek().clone();
+        utils::offload(async move {
+            if !want {
+                return Vec::new();
+            }
+            let mut out: Vec<reader::models::Track> = Vec::new();
+            for id in &ids {
+                out.extend(src.fetch_album_tracks(id).await.unwrap_or_default());
+            }
+            out
+        })
+    });
+
     let tracks = use_memo(move || {
         let offline = caps().downloads && *is_offline.read();
         let conf = config.read();
@@ -573,6 +591,12 @@ fn AlbumDetail(
             .into_iter()
             .filter(|t| !offline || conf.offline_tracks.contains_key(t.id.key().as_ref()))
             .collect();
+        if !offline {
+            let full = full_album_tracks_res.read().clone().unwrap_or_default();
+            if full.len() > tracks.len() {
+                tracks = full;
+            }
+        }
         tracks.sort_by(|a, b| {
             a.disc_number
                 .unwrap_or(1)
@@ -689,6 +713,7 @@ fn AlbumDetail(
                 })),
                 cover_url,
                 is_album: true,
+                release_year: (album.year > 0).then_some(album.year),
                 tracks: tracks(),
                 on_close,
                 enable_metadata: cap.edit_tags,
@@ -789,7 +814,7 @@ fn AlbumDetail(
 }
 
 /// YT-Music-style album page: a left meta column (cover, artist link, title,
-/// "Album • year", song count · duration, play / shuffle / download) beside the
+/// "Album", song count · duration · year, play / shuffle / download) beside the
 /// full track list. Shown only for the catalog remote (YT) once the album
 /// resolved; local/other sources use [`TrackListView`]. Rows reuse [`TrackRow`]
 /// so play / queue / menu / download behave exactly as everywhere else.
@@ -844,11 +869,18 @@ fn YtAlbumDetail(
     let tracks_play_all = tracks.clone();
     let tracks_download_all = tracks.clone();
     let artist_for_nav_btn = artist_name.clone();
-    // Share target: the album's YT browse link when resolved, else the first
-    // track's web url so the button still does something before the fetch lands.
+    // Prefer the provider's album page; fall back to its first track page.
     let share_url = browse_id
         .as_ref()
-        .map(|id| format!("https://music.youtube.com/browse/{id}"))
+        .and_then(|id| match tracks.first().and_then(|t| t.id.service()) {
+            Some(config::MusicService::Spotify) => {
+                Some(format!("https://open.spotify.com/album/{id}"))
+            }
+            Some(config::MusicService::YtMusic) => {
+                Some(format!("https://music.youtube.com/browse/{id}"))
+            }
+            _ => None,
+        })
         .or_else(|| tracks.first().and_then(|t| active_source.peek().web_url(t)));
 
     rsx! {
@@ -881,15 +913,17 @@ fn YtAlbumDetail(
                         }
                         h1 { class: "text-3xl font-semibold tracking-tight text-white leading-[1.1] break-words", "{title}" }
                         div { class: "text-sm text-slate-400 flex flex-wrap items-center gap-x-2 justify-center md:justify-start",
-                            if let Some(y) = year {
+                            if year.is_some() {
                                 span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{i18n::t(\"album\")}" }
-                                span { class: "text-white/30", "•" }
-                                span { "{y}" }
                                 span { class: "text-white/30", "•" }
                             }
                             span { "{i18n::t_with(\"showcase_song_count\", &[(\"count\", song_count.to_string())])}" }
                             span { class: "text-white/30", "•" }
                             span { "{dur_min} {i18n::t(\"min\")}" }
+                            if let Some(y) = year {
+                                span { class: "text-white/30", "•" }
+                                span { "{y}" }
+                            }
                         }
                     }
                     div { class: "flex items-center gap-3 mt-1",
@@ -979,7 +1013,11 @@ fn YtAlbumDetail(
                                     cover_url,
                                     is_album: true,
                                     hide_delete: true,
-                                    row_num: Some(idx + 1),
+                                    row_num: Some(components::showcase::track_row_number(
+                                        track.track_number,
+                                        idx + 1,
+                                        true,
+                                    )),
                                     is_menu_open,
                                     is_currently_playing: is_current,
                                     is_downloaded,

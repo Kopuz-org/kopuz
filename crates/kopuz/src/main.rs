@@ -1,7 +1,7 @@
 use components::{
     CoverArtBackground, QuickSearch, bottombar::Bottombar, compact_player::CompactPlayer,
     download_overlay::DownloadOverlay, fullscreen::Fullscreen, rightbar::Rightbar,
-    sidebar::Sidebar, titlebar::Titlebar,
+    sidebar::Sidebar, spotify_devices::SpotifyDevicesPanel, titlebar::Titlebar,
 };
 #[cfg(not(target_os = "android"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
@@ -56,6 +56,60 @@ const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::fol
 /// save per settle+cooldown window instead of one per mutation.
 const STORE_SAVE_SETTLE_MS: u64 = 600;
 const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
+/// How often the matugen/pywal palette is stat'd. The active rate is what a
+/// wallpaper change costs before the colours follow; the idle one only exists to
+/// notice the theme being switched on.
+const LIVE_THEME_POLL_MS: u64 = 400;
+const LIVE_THEME_IDLE_POLL_MS: u64 = 2000;
+
+fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, Vec<PathBuf>)> {
+    std::iter::once((config::Source::Local, config.music_directory.clone()))
+        .chain(config.local_sources.iter().map(|source| {
+            (
+                config::Source::LocalLibrary(source.id.clone()),
+                source.directories.clone(),
+            )
+        }))
+        .collect()
+}
+
+async fn persist_resolved_covers(
+    db: &db::Db,
+    source: &config::Source,
+    albums: &[reader::Album],
+    missing_ids: &std::collections::HashSet<String>,
+    gens: hooks::db_reactivity::Generations,
+    scan_is_current: &impl Fn() -> bool,
+) {
+    let mut changed = false;
+    for album in albums {
+        if !missing_ids.contains(&album.id) {
+            continue;
+        }
+        let Some(cover) = album.cover_path.as_ref() else {
+            continue;
+        };
+        if !scan_is_current() {
+            break;
+        }
+        let path = cover.to_string_lossy().into_owned();
+        match db
+            .update_album_cover_if_not_manual(source, &album.id, &path)
+            .await
+        {
+            Ok(written) => changed |= written,
+            Err(error) => tracing::warn!(
+                album_id = %album.id,
+                source = %source.as_str(),
+                %error,
+                "failed to persist automatically resolved album cover"
+            ),
+        }
+    }
+    if changed {
+        gens.bump(hooks::db_reactivity::Table::Albums);
+    }
+}
 
 /// Build the `@font-face` + `body`/`#app-root` override CSS for a user-picked
 /// font file, inlining its bytes as a `data:` URI so no custom protocol handler
@@ -459,8 +513,6 @@ fn App() -> Element {
         use_hook(|| Signal::new_in_scope(::server::DownloadProgress::default(), ScopeId::ROOT));
     pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
-    let trigger_cover_reextract = use_signal(|| 0);
-    use_context_provider(|| hooks::CoverReextractTrigger(trigger_cover_reextract));
     // Applies detached yt-dlp completions (history + rescan) in this scope —
     // the job drivers outlive the downloads page and can't write these.
     pages::ytdlp_jobs::use_ytdlp_completion_sink(config, trigger_rescan);
@@ -479,12 +531,13 @@ fn App() -> Element {
     let current_track_snapshot = use_signal(|| None::<reader::Track>);
     let mut volume = use_signal(|| 1.0f32);
     let mut persisted_volume = use_signal(|| 1.0f32);
-    let mut configured_music_dirs = use_signal(|| config.peek().music_directory.clone());
+    let mut configured_local_libraries = use_signal(|| configured_local_sources(&config.peek()));
 
     let is_playing = use_signal(|| false);
     let mut is_fullscreen = use_signal(|| false);
     let mut compact_mode = use_signal(|| false);
     let is_rightbar_open = use_signal(|| false);
+    let is_devices_open = use_signal(|| false);
     let rightbar_width = use_signal(|| 320usize);
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
     // Config is the one remaining whole-value save: persisting a default that
@@ -633,9 +686,9 @@ fn App() -> Element {
     });
 
     use_effect(move || {
-        let next_dirs = config.read().music_directory.clone();
-        if *configured_music_dirs.peek() != next_dirs {
-            configured_music_dirs.set(next_dirs);
+        let next_sources = configured_local_sources(&config.read());
+        if *configured_local_libraries.peek() != next_sources {
+            configured_local_libraries.set(next_sources);
         }
     });
 
@@ -908,6 +961,34 @@ fn App() -> Element {
         });
     });
 
+    let mut spotify_refresh_identity = use_signal(|| None::<String>);
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+        let identity: Option<String> = config.read().server.as_ref().and_then(|s| {
+            (s.service == config::MusicService::Spotify && s.access_token.is_some())
+                .then(|| s.id.clone().unwrap_or_else(|| s.url.clone()))
+        });
+        if identity == *spotify_refresh_identity.peek() {
+            return;
+        }
+        spotify_refresh_identity.set(identity.clone());
+        let Some(my_identity) = identity else {
+            return;
+        };
+        spawn(async move {
+            updates::run_spotify_refresh(config).await;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
+                if spotify_refresh_identity.peek().as_deref() != Some(my_identity.as_str()) {
+                    return;
+                }
+                updates::run_spotify_refresh(config).await;
+            }
+        });
+    });
+
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
@@ -1135,7 +1216,7 @@ fn App() -> Element {
                     let _apply = tracing::info_span!("startup.apply_config").entered();
                     let loaded = cfg_loaded;
                     config.set(loaded.clone());
-                    configured_music_dirs.set(loaded.music_directory.clone());
+                    configured_local_libraries.set(configured_local_sources(&loaded));
                     volume.set(loaded.volume);
                     persisted_volume.set(loaded.volume);
                     player.peek().set_volume(loaded.volume);
@@ -1197,7 +1278,7 @@ fn App() -> Element {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
-        let configured_dirs = configured_music_dirs.read().clone();
+        let configured_sources = configured_local_libraries.read().clone();
         let trigger = *trigger_rescan.read();
         let fetch_covers = config.peek().auto_fetch_covers;
         let fetch_strategy = config.peek().cover_fetch_strategy;
@@ -1208,9 +1289,12 @@ fn App() -> Element {
 
         let scan_key = format!(
             "{}|{}",
-            configured_dirs
+            configured_sources
                 .iter()
-                .map(|d| d.to_string_lossy())
+                .flat_map(|(source, dirs)| {
+                    std::iter::once(source.as_str().to_string())
+                        .chain(dirs.iter().map(|dir| dir.to_string_lossy().into_owned()))
+                })
                 .collect::<Vec<_>>()
                 .join(","),
             trigger,
@@ -1233,7 +1317,7 @@ fn App() -> Element {
         spawn(async move {
             let db = db_scan;
             let gens = gens_scan;
-            let configured_dirs = configured_dirs;
+            for (source, configured_dirs) in configured_sources {
             let scannable_dirs: Vec<PathBuf> = configured_dirs
                 .iter()
                 .filter(|d| d.exists())
@@ -1252,7 +1336,7 @@ fn App() -> Element {
                 if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
                     prefix.push(std::path::MAIN_SEPARATOR);
                 }
-                let found = match db.folder_tracks(&prefix).await {
+                let found = match db.folder_tracks(&source, &prefix).await {
                     Ok(t) => t,
                     Err(e) => {
                         tracing::error!(error = %e, root = %prefix, "rescan: seed query failed — aborting scan");
@@ -1265,7 +1349,7 @@ fn App() -> Element {
                     }
                 }
             }
-            let seed_albums = match db.albums(&db::Source::Local).await {
+            let seed_albums = match db.albums(&source).await {
                 Ok(a) => a,
                 Err(e) => {
                     tracing::error!(error = %e, "rescan: album seed failed — aborting scan");
@@ -1332,10 +1416,10 @@ fn App() -> Element {
                     return;
                 }
                 for chunk in current_lib.tracks.chunks(100) {
-                    let _ = db.upsert_tracks(&db::Source::Local, chunk).await;
+                    let _ = db.upsert_tracks(&source, chunk).await;
                     gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
                 }
-                let _ = db.upsert_albums(&db::Source::Local, &current_lib.albums).await;
+                let _ = db.upsert_albums(&source, &current_lib.albums).await;
                 let keep_keys: Vec<String> = current_lib
                     .tracks
                     .iter()
@@ -1348,7 +1432,7 @@ fn App() -> Element {
                     return;
                 }
                 let _ = db
-                    .prune_source(&db::Source::Local, &keep_keys, &keep_albums)
+                    .prune_source(&source, &keep_keys, &keep_albums)
                     .await;
                 for (artist, img) in &current_lib.local_artist_images {
                     let p = img.to_string_lossy().into_owned();
@@ -1368,32 +1452,43 @@ fn App() -> Element {
                 gens.bump(hooks::db_reactivity::Table::Tracks);
                 gens.bump(hooks::db_reactivity::Table::Albums);
 
-                if fetch_covers {
-                    // Fetch missing covers in the background so the UI stays responsive.
-                    // Passing `progress_cb` into the task keeps the scan-progress bar
-                    // alive during fetching; it disappears automatically when the task ends.
-                    // Albums that HAD no cover before the fetch get the fetched one
-                    // written straight to the DB (manual covers were never in the
-                    // missing set, so they can't be overwritten).
-                    let lib_for_fetch = current_lib;
-                    let db = db.clone();
-                    spawn(async move {
+                let lib_for_covers = current_lib;
+                let db = db.clone();
+                let source = source.clone();
+                let lastfm_key = lastfm_key.clone();
+                spawn(async move {
+                    let mut lib = lib_for_covers;
+                    let missing_local = reader::missing_cover_ids(&lib);
+                    let local_report = reader::index_local_covers(
+                        &mut lib,
+                        cover_cache(),
+                        progress_cb.clone(),
+                    )
+                    .await;
+                    tracing::info!(
+                        attempted = local_report.attempted,
+                        found = local_report.found,
+                        missing = local_report.missing,
+                        "local cover indexing complete"
+                    );
+                    persist_resolved_covers(
+                        &db,
+                        &source,
+                        &lib.albums,
+                        &missing_local,
+                        gens,
+                        &scan_is_current,
+                    )
+                    .await;
+
+                    if fetch_covers {
                         let fetcher = reader::cover_fetcher::CoverFetcher::new(
                             cover_cache(),
                             fetch_strategy,
                             lastfm_key,
-                            progress_cb,
+                            progress_cb.clone(),
                         );
-                        let mut lib = lib_for_fetch;
-                        let missing_before: std::collections::HashSet<String> = lib
-                            .albums
-                            .iter()
-                            .filter(|a| {
-                                a.cover_path.as_ref().is_none_or(|p| !p.exists())
-                                    && !a.manual_cover
-                            })
-                            .map(|a| a.id.clone())
-                            .collect();
+                        let missing_before = reader::missing_cover_ids(&lib);
                         let report = fetcher.fetch_missing_covers(&mut lib).await;
                         tracing::info!(
                             "Cover auto-fetch: {} found, {} missing, {} errors",
@@ -1401,116 +1496,26 @@ fn App() -> Element {
                             report.missing,
                             report.errors,
                         );
-                        let mut changed = false;
-                        for album in lib.albums.iter() {
-                            if !missing_before.contains(&album.id) {
-                                continue;
-                            }
-                            let Some(cover) = album.cover_path.as_ref() else {
-                                continue;
-                            };
-                            let p = cover.to_string_lossy().into_owned();
-                            if db
-                                .update_album_cover(&db::Source::Local, &album.id, Some(&p), false)
-                                .await
-                                .is_ok()
-                            {
-                                changed = true;
-                            }
-                        }
-                        if changed {
-                            gens.bump(hooks::db_reactivity::Table::Albums);
-                        }
-                    }.instrument(tracing::info_span!("library.fetch_covers")));
-                } else {
-                    // No cover fetching — drop the callback so the progress bar closes.
+                        persist_resolved_covers(
+                            &db,
+                            &source,
+                            &lib.albums,
+                            &missing_before,
+                            gens,
+                            &scan_is_current,
+                        )
+                        .await;
+                    }
                     drop(progress_cb);
-                }
+                }.instrument(tracing::info_span!("library.index_covers")));
             } else {
                 // No music directories configured: the local library is empty.
-                let _ = db.prune_source(&db::Source::Local, &[], &[]).await;
+                let _ = db.prune_source(&source, &[], &[]).await;
                 gens.bump(hooks::db_reactivity::Table::Tracks);
                 gens.bump(hooks::db_reactivity::Table::Albums);
             }
-        }.instrument(tracing::info_span!("library.rescan")));
-    });
-
-    // Force re-extraction of local covers (embedded art, then folder art) for
-    // any album whose cached cover file is missing. No online fetch — this is
-    // the "force rescan photos" action and is independent of auto_fetch_covers.
-    let db_for_reextract = db.clone();
-    let mut cover_reextract_in_flight = use_signal(|| false);
-    use_effect(move || {
-        if !*initial_load_done.read() || !*config_loaded_ok.read() {
-            return;
-        }
-        if *trigger_cover_reextract.read() == 0 {
-            return;
-        }
-        let db = db_for_reextract.clone();
-        let gens = gens_for_albums;
-        if *cover_reextract_in_flight.peek() {
-            return;
-        }
-        cover_reextract_in_flight.set(true);
-        let cover_cache_dir = cover_cache();
-        spawn(
-            async move {
-                let albums = match db.albums(&db::Source::Local).await {
-                    Ok(a) => a,
-                    Err(e) => {
-                        tracing::error!(error = %e, "cover re-extract: album query failed");
-                        return;
-                    }
-                };
-                let mut changed = 0u32;
-                for album in &albums {
-                    // Manual covers are user-set; a present file needs nothing.
-                    if album.manual_cover || album.cover_path.as_ref().is_some_and(|p| p.exists()) {
-                        continue;
-                    }
-                    let tracks = match db.album_tracks(&db::Source::Local, &album.id).await {
-                        Ok(t) => t,
-                        Err(_) => continue,
-                    };
-                    let mut new_cover: Option<std::path::PathBuf> = None;
-                    for track in &tracks {
-                        let Some(path) = track.id.local_path() else {
-                            continue;
-                        };
-                        // Embedded art first, then a folder image beside the track.
-                        if let Some((data, _mime)) = reader::read_cover(path)
-                            && let Ok(saved) =
-                                reader::utils::save_cover(&album.id, &data, None, &cover_cache_dir)
-                        {
-                            new_cover = Some(saved);
-                            break;
-                        }
-                        if let Some(folder) =
-                            path.parent().and_then(reader::utils::find_folder_cover)
-                        {
-                            new_cover = Some(folder);
-                            break;
-                        }
-                    }
-                    if let Some(cover) = new_cover {
-                        let p = cover.to_string_lossy().into_owned();
-                        if db
-                            .update_album_cover(&db::Source::Local, &album.id, Some(&p), false)
-                            .await
-                            .is_ok()
-                        {
-                            changed += 1;
-                        }
-                    }
-                }
-                if changed > 0 {
-                    gens.bump(hooks::db_reactivity::Table::Albums);
-                }
-                tracing::info!(updated = changed, "cover re-extract: complete");
             }
-            .instrument(tracing::info_span!("library.cover_reextract")),
-        );
+        }.instrument(tracing::info_span!("library.rescan")));
     });
 
     use_effect(move || {
@@ -1680,6 +1685,52 @@ fn App() -> Element {
         ));
     });
 
+    // matugen and pywal rewrite their output on every wallpaper change, so the
+    // palette is polled rather than read once: picking a new wallpaper recolours
+    // Kopuz in place. Only while the theme is selected, otherwise this is a timer
+    // nobody asked for.
+    let mut live_theme_css = use_signal(String::new);
+    use_future(move || async move {
+        let mut last: Option<(PathBuf, String)> = None;
+        loop {
+            if config.peek().theme != utils::live_theme::THEME_ID {
+                if last.take().is_some() {
+                    live_theme_css.set(String::new());
+                }
+                utils::sleep(std::time::Duration::from_millis(LIVE_THEME_IDLE_POLL_MS)).await;
+                continue;
+            }
+            let path = utils::live_theme::resolve_path(&config.peek().live_theme_path);
+            let probe = path.clone();
+            let raw = tokio::task::spawn_blocking(move || utils::live_theme::read(&probe))
+                .await
+                .unwrap_or_default();
+            let current = raw.map(|raw| (path, raw));
+            if current != last {
+                last = current;
+                let css = last
+                    .as_ref()
+                    .and_then(|(path, raw)| utils::live_theme::parse(raw, path))
+                    .map(|vars| utils::live_theme::to_css(&vars))
+                    .unwrap_or_default();
+                live_theme_css.set(css);
+            }
+            utils::sleep(std::time::Duration::from_millis(LIVE_THEME_POLL_MS)).await;
+        }
+    });
+
+    use_effect(move || {
+        let css = live_theme_css.read().clone();
+        let css_json = serde_json::to_string(&css).unwrap_or_else(|_| "\"\"".to_string());
+        let _ = dioxus::document::eval(&format!(
+            r#"(function(){{
+                let el = document.getElementById('live-theme-style');
+                if (!el) {{ el = document.createElement('style'); el.id = 'live-theme-style'; document.head.appendChild(el); }}
+                el.textContent = {css_json};
+            }})()"#
+        ));
+    });
+
     // Inject a user-picked UI font reactively, mirroring the custom-themes path
     // above: read the file, inline it as a data: URI, and swap the <style>'s text.
     let custom_font_path = use_memo(move || config.read().custom_font_path.clone());
@@ -1705,10 +1756,16 @@ fn App() -> Element {
     });
 
     let theme_class = use_memo(move || {
-        if config.read().theme == "album-art" {
+        let theme = config.read().theme.clone();
+        if theme == "album-art" {
             "theme-default".to_string()
+        } else if theme == utils::live_theme::THEME_ID {
+            // A palette can be partial, or not written yet, so the default sits
+            // underneath to keep every var resolving. The injected `.theme-live`
+            // block lands later in <head>, so it still wins.
+            format!("theme-default theme-{theme}")
         } else {
-            format!("theme-{}", config.read().theme)
+            format!("theme-{theme}")
         }
     });
 
@@ -1716,6 +1773,11 @@ fn App() -> Element {
     let dir = if is_rtl { "rtl" } else { "ltr" };
     let content_row_class = "flex flex-1 overflow-hidden";
     let update_banner_state = update_banner.read().clone();
+    let update_banner_padding = if cfg!(target_os = "macos") {
+        "pl-20 pr-4"
+    } else {
+        "px-4"
+    };
 
     let background_style = use_memo(move || {
         let conf = config.read();
@@ -1802,7 +1864,7 @@ fn App() -> Element {
                 div { dir: "ltr", Titlebar {} }
             }
 
-            if active_source == config::Source::Local {
+            if active_source().is_local() {
                 if let Some(file) = scan_current_file.read().clone() {
                     div {
                         class: "flex-shrink-0",
@@ -1835,7 +1897,12 @@ fn App() -> Element {
                 .read()
                 .server
                 .as_ref()
-                .map(|s| s.service == config::MusicService::YtMusic)
+                .map(|s| {
+                    matches!(
+                        s.service,
+                        config::MusicService::YtMusic | config::MusicService::Spotify
+                    )
+                })
                 .unwrap_or(false)
             {
                 if let Some(msg) = ctrl.playback_error.read().clone() {
@@ -1904,7 +1971,7 @@ fn App() -> Element {
                 div {
                     class: "flex-shrink-0",
                     div {
-                        class: "flex items-center justify-between gap-3 px-4 py-2 bg-sky-500/15 border-b border-sky-500/20 text-sky-200 text-sm",
+                        class: "flex items-center justify-between gap-3 {update_banner_padding} py-2 bg-sky-500/15 border-b border-sky-500/20 text-sky-200 text-sm",
                         div {
                             class: "flex items-center gap-2",
                             i { class: "fa-solid fa-download text-xs" }
@@ -1953,6 +2020,7 @@ fn App() -> Element {
                     volume: volume,
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
+                    is_devices_open: is_devices_open,
                 }
             }
             div {
@@ -2274,6 +2342,10 @@ fn App() -> Element {
                     current_song_artist: current_song_artist,
                     current_song_album: current_song_album,
                 }
+                SpotifyDevicesPanel {
+                    is_devices_open: is_devices_open,
+                    is_rightbar_open: is_rightbar_open,
+                }
             }
             Fullscreen {
                 player: player,
@@ -2342,6 +2414,7 @@ fn App() -> Element {
                     volume: volume,
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
+                    is_devices_open: is_devices_open,
                 }
             }
         }

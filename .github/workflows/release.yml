@@ -1,132 +1,330 @@
-name: release
-
-# The `release` branch is the source of truth for published builds. Merging into
-# it (version bumped, gate green) cuts a release: the Linux tarball is built on
-# Arch so it links current distro sonames (fixes #512), attached to the GitHub
-# release, and pushed to the kopuz-bin AUR package. Flatpak / Windows / Nix jobs
-# hang off this same pipeline later.
+name: Release packages
 
 on:
   push:
-    branches: [release]
-  pull_request:
-    branches: [release]
+    tags:
+      - "v*"
   workflow_dispatch:
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  version-gate:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.gate.outputs.version }}
-      should_build: ${{ steps.decide.outputs.should_build }}
+  linux:
+    runs-on: ubuntu-22.04
+
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Check version bump + consistency
-        id: gate
+      - name: Install system dependencies
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            bash scripts/check_release_version.sh --require-bump
-          else
-            bash scripts/check_release_version.sh
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            libopus-dev libasound2-dev libxdo-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libsoup-3.0-dev libssl-dev \
+            libglib2.0-dev libpango1.0-dev \
+            libcairo2-dev libgdk-pixbuf-2.0-dev \
+            fakeroot libfuse2 rpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install dioxus-cli
+        run: cargo install dioxus-cli@0.7.9 --locked
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build CSS
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./crates/player/**/*.rs,./crates/reader/**/*.rs'
+
+      - name: Read and verify version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[] | select(.name == "kopuz") | .version'
+          )"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}"
+            exit 1
           fi
 
-      - name: Decide whether a build is needed
-        id: decide
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Linux application
+        run: dx build --release --platform desktop --package kopuz --locked
+
+      - name: Prepare AppDir
+        run: |
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/applications
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp target/dx/kopuz/release/linux/app/kopuz AppDir/usr/bin/kopuz
+          cp data/moe.kopuz.kopuz.desktop AppDir/usr/share/applications/
+          cp crates/kopuz/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
+
+      - name: Download linuxdeploy
+        run: |
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
+
+      - name: Build AppImage
         env:
-          GH_TOKEN: ${{ github.token }}
+          ARCH: x86_64
+          GTK_THEME: Adwaita
+          DEPLOY_GTK_VERSION: "3"
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
-          ver="${{ steps.gate.outputs.version }}"
-          asset="kopuz_v${ver}_x86_64-linux.tar.gz"
-          have_asset=false
-          if gh release view "v${ver}" --json assets -q '.assets[].name' 2>/dev/null \
-               | grep -qx "$asset"; then
-            have_asset=true
-          fi
-          should_build=false
-          if [ "${{ github.event_name }}" != "pull_request" ] && [ "$have_asset" != true ]; then
-            should_build=true
-          fi
-          echo "release asset present: $have_asset -> should_build=$should_build"
-          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir AppDir \
+            --plugin gtk \
+            --exclude-library "libwebkit2gtk*" \
+            --exclude-library "libjavascriptcoregtk*" \
+            --output appimage
 
-  build-arch-tarball:
-    needs: version-gate
-    if: needs.version-gate.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    container: archlinux:base-devel
-    outputs:
-      version: ${{ needs.version-gate.outputs.version }}
-    steps:
-      - name: Install git (for checkout inside container)
-        run: pacman -Sy --noconfirm --needed git
-      - uses: actions/checkout@v4
-      - name: Build Linux tarball on Arch
-        run: bash scripts/build-arch-tarball.sh
-      - uses: actions/upload-artifact@v4
+      - name: Collect AppImage
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          appimage="$(
+            find . -maxdepth 1 -type f -iname '*.AppImage' \
+              ! -name 'linuxdeploy*.AppImage' -print -quit
+          )"
+
+          if [[ -z "$appimage" ]]; then
+            echo "linuxdeploy did not produce an AppImage"
+            exit 1
+          fi
+
+          mkdir -p dist
+          mv "$appimage" "dist/Kopuz_${VERSION}_x86_64.AppImage"
+
+      - name: Build DEB and RPM packages
+        run: |
+          dx bundle --release --platform desktop --package kopuz --package-types deb --out-dir bundle-deb --locked
+          dx bundle --release --platform desktop --package kopuz --package-types rpm --out-dir bundle-rpm --locked
+          mv bundle-deb/*.deb dist/
+          mv bundle-rpm/*.rpm dist/
+
+      - name: Create Linux checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for package in dist/*.AppImage dist/*.deb dist/*.rpm; do
+            sha256sum "$package" > "${package}.sha256"
+          done
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v4
         with:
-          name: linux-tarball
-          path: dist/kopuz_v*_x86_64-linux.tar.gz
+          name: kopuz-release-linux-${{ steps.version.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install dioxus-cli
+        run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build CSS
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./crates/player/**/*.rs,./crates/reader/**/*.rs'
+
+      - name: Read and verify version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[] | select(.name == "kopuz") | .version'
+          )"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}"
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Bundle macOS application
+        run: dx bundle --release --platform desktop --package kopuz --package-types macos --out-dir dist --locked
+
+      - name: Set bundle version and apply ad-hoc signature
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" dist/Kopuz.app/Contents/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION}" dist/Kopuz.app/Contents/Info.plist
+          codesign --force --sign - dist/Kopuz.app/Contents/MacOS/kopuz
+          codesign --force --deep --sign - dist/Kopuz.app
+          codesign --verify --deep --strict --verbose=2 dist/Kopuz.app
+
+      - name: Free disk space for DMG
+        run: |
+          cargo clean
+          rm -rf node_modules
+          df -h /
+
+      - name: Create DMG and checksum
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          dmg="dist/Kopuz_${VERSION}_aarch64.dmg"
+          hdiutil create -volname Kopuz -srcfolder dist/Kopuz.app -ov -format UDZO "$dmg"
+          hdiutil verify "$dmg"
+          shasum -a 256 "$dmg" > "${dmg}.sha256"
+
+      - name: Upload macOS packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: kopuz-release-macos-${{ steps.version.outputs.version }}
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sha256
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install dioxus-cli
+        run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add Cargo bin to PATH
+        shell: pwsh
+        run: |
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+          $cargoBin = Join-Path $cargoHome "bin"
+          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build CSS
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./crates/player/**/*.rs,./crates/reader/**/*.rs'
+
+      - name: Read and verify version
+        id: version
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($metadata.packages | Where-Object name -eq "kopuz").version
+
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match Cargo version $version"
+          }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Build EXE and MSI installers
+        shell: pwsh
+        run: |
+          dx bundle --release --platform desktop --package kopuz --package-types nsis --out-dir bundle-nsis --locked
+          dx bundle --release --platform desktop --package kopuz --package-types msi --out-dir bundle-msi --locked
+
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Move-Item bundle-nsis/*.exe dist/
+          Move-Item bundle-msi/*.msi dist/
+
+      - name: Create Windows checksums
+        shell: pwsh
+        run: |
+          $packages = Get-ChildItem dist -File | Where-Object { $_.Extension -in ".exe", ".msi" }
+
+          if ($packages.Count -ne 2) {
+            throw "Expected one EXE and one MSI installer, found $($packages.Count)"
+          }
+
+          $packages | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)" | Out-File -FilePath "$($_.FullName).sha256" -Encoding ascii
+          }
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: kopuz-release-windows-${{ steps.version.outputs.version }}
+          path: |
+            dist/*.exe
+            dist/*.exe.sha256
+            dist/*.msi
+            dist/*.msi.sha256
           if-no-files-found: error
 
   publish:
-    needs: [version-gate, build-arch-tarball]
+    if: github.ref_type == 'tag'
+    needs: [linux, macos, windows]
     runs-on: ubuntu-latest
-    container: archlinux:base-devel
+    permissions:
+      contents: write
+
     steps:
-      - name: Install tools
-        # curl is makepkg's default download agent for fetching the release
-        # tarball during the AUR test-build; base-devel doesn't pull the CLI.
-        run: pacman -Syu --noconfirm --needed git github-cli openssh sudo base-devel curl
-      - uses: actions/checkout@v4
-      # The job container runs as root while the checkout is owned by the runner
-      # user; git's dubious-ownership guard otherwise trips any git the gh CLI
-      # shells out to. GH_REPO also lets gh talk to the API without git at all.
-      - name: Trust workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: actions/download-artifact@v4
+      - name: Download packages
+        uses: actions/download-artifact@v4
         with:
-          name: linux-tarball
+          pattern: kopuz-release-*
           path: dist
-      - name: Attach tarball to the GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          ver="${{ needs.version-gate.outputs.version }}"
-          tarball="dist/kopuz_v${ver}_x86_64-linux.tar.gz"
-          test -f "$tarball" || { echo "::error::tarball not at $tarball; dist:"; ls -R dist; exit 1; }
-          if ! gh release view "v${ver}" >/dev/null 2>&1; then
-            gh release create "v${ver}" --target "$GITHUB_SHA" --title "v${ver}" --generate-notes
-          fi
-          gh release upload "v${ver}" "$tarball" --clobber
-      - name: Publish to AUR
-        env:
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-        run: |
-          ver="${{ needs.version-gate.outputs.version }}"
-          tarball="$PWD/dist/kopuz_v${ver}_x86_64-linux.tar.gz"
-          # makepkg refuses root: run the publish as an unprivileged builder.
-          useradd -m builder
-          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
-          install -d -m700 -o builder -g builder /home/builder/.ssh
-          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/id_ed25519
-          chmod 600 /home/builder/.ssh/id_ed25519
-          chown builder:builder /home/builder/.ssh/id_ed25519
-          chown -R builder:builder "$PWD"
-          sudo -u builder env \
-            HOME=/home/builder \
-            VERSION="$ver" \
-            TARBALL="$tarball" \
-            PKGBUILD_TEMPLATE="$PWD/packaging/aur/PKGBUILD" \
-            GIT_SSH_COMMAND="ssh -i /home/builder/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new" \
-            bash scripts/publish-aur.sh
+          merge-multiple: true
+
+      - name: Upload packages to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.AppImage
+            dist/*.AppImage.sha256
+            dist/*.deb
+            dist/*.deb.sha256
+            dist/*.rpm
+            dist/*.rpm.sha256
+            dist/*.dmg
+            dist/*.dmg.sha256
+            dist/*.exe
+            dist/*.exe.sha256
+            dist/*.msi
+            dist/*.msi.sha256

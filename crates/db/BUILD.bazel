@@ -1,0 +1,105 @@
+load("//build_defs:kopuz_rust.bzl", "kopuz_rust_integration_test", "kopuz_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+exports_files(["Cargo.toml"])
+
+kopuz_rust_library(
+    name = "db",
+    compile_data = glob([
+        ".sqlx/*.json",
+        "migrations/*.sql",
+    ]),
+    extra_deps = [
+        "//crates/config",
+        "//crates/reader",
+    ],
+    rustc_env = {"SQLX_OFFLINE": "true"},
+)
+
+kopuz_rust_integration_test(
+    name = "config_integration",
+    src = "tests/config.rs",
+    extra_deps = [
+        ":db",
+        "//crates/config",
+        "//crates/reader",
+    ],
+    rustc_env = {"SQLX_OFFLINE": "true"},
+)
+
+kopuz_rust_integration_test(
+    name = "favorites_integration",
+    src = "tests/favorites.rs",
+    extra_deps = [
+        ":db",
+        "//crates/config",
+        "//crates/reader",
+    ],
+    rustc_env = {"SQLX_OFFLINE": "true"},
+)
+
+kopuz_rust_integration_test(
+    name = "import_integration",
+    src = "tests/import.rs",
+    extra_deps = [
+        ":db",
+        "//crates/config",
+        "//crates/reader",
+    ],
+    rustc_env = {"SQLX_OFFLINE": "true"},
+)
+
+kopuz_rust_integration_test(
+    name = "migration_integration",
+    src = "tests/migration.rs",
+    extra_deps = [
+        ":db",
+        "//crates/config",
+        "//crates/reader",
+    ],
+    rustc_env = {"SQLX_OFFLINE": "true"},
+)
+
+kopuz_rust_integration_test(
+    name = "persistence_integration",
+    src = "tests/persistence.rs",
+    extra_deps = [
+        ":db",
+        "//crates/config",
+        "//crates/reader",
+    ],
+    rustc_env = {"SQLX_OFFLINE": "true"},
+)
+
+kopuz_rust_integration_test(
+    name = "queries_integration",
+    src = "tests/queries.rs",
+    extra_deps = [
+        ":db",
+        "//crates/config",
+        "//crates/reader",
+    ],
+    rustc_env = {"SQLX_OFFLINE": "true"},
+)
+
+kopuz_rust_integration_test(
+    name = "typed_queries_integration",
+    src = "tests/typed_queries.rs",
+    extra_deps = [
+        ":db",
+        "//crates/config",
+        "//crates/reader",
+    ],
+    rustc_env = {"SQLX_OFFLINE": "true"},
+)
+
+kopuz_rust_integration_test(
+    name = "writes_integration",
+    src = "tests/writes.rs",
+    extra_deps = [
+        ":db",
+        "//crates/config",
+        "//crates/reader",
+    ],
+    rustc_env = {"SQLX_OFFLINE": "true"},
+)

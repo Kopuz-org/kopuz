@@ -46,6 +46,10 @@ fn track_cover_url(conf: &AppConfig, track: &Track) -> Option<String> {
     ::server::cover::track(conf, track, 384).map(|c| c.to_string())
 }
 
+/// The hero stretches one cover across the full content width (up to 800px
+/// tall), so it asks for far more pixels than the 384px grid cards.
+const HERO_COVER_WIDTH: u32 = 1400;
+
 /// The source-agnostic Home body (sections + hero). Rendered for local and any
 /// server; the active source decides the data, covers (via the source seam), the
 /// recently-played list, and offline/sync gating.
@@ -397,26 +401,51 @@ pub fn HomeBody(
             .take(10)
             .cloned()
             .map(|p| {
-                let cover_url = p.tracks.first().and_then(|tid| {
-                    cover_tracks
-                        .iter()
-                        .find(|t| {
-                            let id = t.id.key();
-                            !id.is_empty() && id.as_ref() == tid.as_str()
+                let cover_url = {
+                    if let Some(url) =
+                        ::server::cover::from_path(&conf, p.cover_path.as_deref(), 384)
+                    {
+                        Some(url.to_string())
+                    } else if let Some(tag) = &p.image_tag
+                        && let Some(s) = &conf.server
+                    {
+                        ::server::cover::resolve(
+                            &conf,
+                            reader::CoverRef::remote_item(s.service, &p.id, Some(tag.as_str())),
+                            384,
+                        )
+                        .map(|t| t.to_string())
+                    } else {
+                        p.tracks.first().and_then(|tid| {
+                            cover_tracks
+                                .iter()
+                                .find(|t| {
+                                    let id = t.id.key();
+                                    !id.is_empty() && id.as_ref() == tid.as_str()
+                                })
+                                .and_then(|t| track_cover_url(&conf, t))
                         })
-                        .and_then(|t| track_cover_url(&conf, t))
-                });
+                    }
+                };
                 (p.id, p.name, p.tracks.len(), cover_url)
             })
             .collect::<Vec<_>>()
     });
 
-    let jellyfin_hero_cover = use_memo(move || {
+    let hero_cover = use_memo(move || {
         let conf = config.read();
         let entry = hero_entry.read();
-        let (_, album_opt, _) = entry.as_ref()?;
-        let album = album_opt.as_ref()?;
-        ::server::cover::from_path(&conf, album.cover_path.as_deref(), 1400).map(|c| c.to_string())
+        let (track, album_opt, _) = entry.as_ref()?;
+        // The album's own art first, but fall back to the track's — the albums
+        // query lags the recently-played one, and not every album has a cover
+        // path, which otherwise left the hero on the 384px card thumbnail.
+        let cover = album_opt
+            .as_ref()
+            .and_then(|album| {
+                ::server::cover::from_path(&conf, album.cover_path.as_deref(), HERO_COVER_WIDTH)
+            })
+            .or_else(|| ::server::cover::track(&conf, track, HERO_COVER_WIDTH))?;
+        Some(components::high_quality_artwork_url(cover.to_string()))
     });
 
     let conf_snapshot = config.read();
@@ -525,7 +554,7 @@ pub fn HomeBody(
                                     is_vaxry,
                                     listen_now_style,
                                     jellyfin_shuffled(),
-                                    jellyfin_hero_cover(),
+                                    hero_cover(),
                                     continue_listening(),
                                     hero_entry(),
                                     jellyfin_artists(),
@@ -738,19 +767,10 @@ fn ServerHeroBanner(
                 if let Some((_, _album_opt, entry_cover)) = hero_entry.as_ref() {
                     div { class: "absolute inset-0 overflow-hidden",
                         if let Some(url) = hero_cover.clone().or(entry_cover.clone()) {
-                            {
-                                let src = if url.starts_with("artwork://") {
-                                    format!("{url}&hq=1")
-                                } else {
-                                    url.clone()
-                                };
-                                rsx! {
-                                    img {
-                                        src: "{src}",
-                                        class: "absolute inset-0 w-full h-full object-cover object-center",
-                                        decoding: "async",
-                                    }
-                                }
+                            img {
+                                src: "{url}",
+                                class: "absolute inset-0 w-full h-full object-cover object-center",
+                                decoding: "async",
                             }
                         }
                         div { class: "absolute inset-0 bg-gradient-to-r from-black/95 via-black/60 to-black/20" }

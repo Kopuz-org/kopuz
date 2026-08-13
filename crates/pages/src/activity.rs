@@ -84,6 +84,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
 
     let visible_tracks: Vec<(usize, Track, u64, String, Option<CoverUrl>)> = {
         let conf = config.read();
+        let active_source = source();
         let albums = album_map.read();
         let window_rows = window.rows.read().clone().unwrap_or_default();
         let row_offset = window_rows.offset as usize;
@@ -92,11 +93,8 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             .into_iter()
             .enumerate()
             .map(|(i, track)| {
-                let plays = conf
-                    .listen_counts
-                    .get(&track.id.uid())
-                    .copied()
-                    .unwrap_or(0);
+                let count_key = active_source.listen_count_key(&track.id.uid());
+                let plays = conf.listen_counts.get(&count_key).copied().unwrap_or(0);
                 let genre = albums.get(&track.album_id).cloned().unwrap_or_default();
                 let cover_url = ::server::cover::track(&conf, &track, 64);
                 (row_offset + i, track, plays, genre, cover_url)

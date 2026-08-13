@@ -7,15 +7,58 @@ use super::search::synthesize_album_id;
 
 const ORIGIN: &str = "https://music.youtube.com";
 
-#[tracing::instrument(name = "yt.start_mix", skip(cookies), fields(seed = %seed_video_id))]
-pub async fn start_mix(seed_video_id: &str, cookies: &str) -> Result<Vec<Track>, String> {
-    let playlist_id = format!("RDAMVM{seed_video_id}");
+/// What a mix is generated from. The `RD…` id and whether the request pins a
+/// first video are both derived from this one value, so they can't be paired
+/// wrongly — a playlist mix with a `videoId` is not a request YT answers.
+pub(super) enum MixSeed<'a> {
+    /// One track: the mix plays on from it, with the seed itself at index 0.
+    Video(&'a str),
+    /// A whole playlist — YT's own "Start radio" on a playlist. The queue is
+    /// generated, so it bears no relation to the playlist's track list.
+    Playlist(&'a str),
+}
+
+impl MixSeed<'_> {
+    /// The `RD…` playlist id the mix is built under.
+    fn mix_playlist_id(&self) -> String {
+        match self {
+            Self::Video(id) => format!("RDAMVM{id}"),
+            // Playlist ids are stored bare, but the `VL`-prefixed browse form
+            // leaks in from some InnerTube responses (see `playlists.rs`) and
+            // `RDAMPL` wants the bare one. Normalizing here rather than at
+            // construction means no caller can skip it.
+            Self::Playlist(id) => format!("RDAMPL{}", id.strip_prefix("VL").unwrap_or(id)),
+        }
+    }
+
+    /// The video pinned as the queue's first entry, if any. Sending an empty
+    /// `videoId` makes YT hand back an empty queue, so a playlist mix omits the
+    /// field entirely rather than passing a blank one.
+    fn pinned_video_id(&self) -> Option<&str> {
+        match self {
+            Self::Video(id) => Some(id),
+            Self::Playlist(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for MixSeed<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Video(id) => write!(f, "video:{id}"),
+            Self::Playlist(id) => write!(f, "playlist:{id}"),
+        }
+    }
+}
+
+/// Ask YT to generate a radio queue from `seed` and return the tracks it lists.
+#[tracing::instrument(name = "yt.mix", skip(cookies), fields(seed = %seed))]
+pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<Vec<Track>, String> {
     let client = WEB_REMIX;
-    let body = json!({
+    let mut body = json!({
         "enablePersistentPlaylistPanel": true,
         "tunerSettingValue": "AUTOMIX_SETTING_NORMAL",
-        "videoId": seed_video_id,
-        "playlistId": playlist_id,
+        "playlistId": seed.mix_playlist_id(),
         "params": "wAEB",
         "isAudioOnly": true,
         "context": {
@@ -28,6 +71,11 @@ pub async fn start_mix(seed_video_id: &str, cookies: &str) -> Result<Vec<Track>,
             "user": { "lockedSafetyMode": false },
         },
     });
+    if let Some(video_id) = seed.pinned_video_id()
+        && let Some(obj) = body.as_object_mut()
+    {
+        obj.insert("videoId".into(), json!(video_id));
+    }
 
     // Mix endpoint works without auth (anonymous radio for any public
     // video). Skip Cookie + SAPISID when cookies is empty so anon

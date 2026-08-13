@@ -27,7 +27,7 @@ impl ScrobbleOptions {
     };
 
     pub const LOCAL: Self = Self {
-        include_librefm: false,
+        include_librefm: true,
         include_musicbrainz_ids: true,
     };
 }
