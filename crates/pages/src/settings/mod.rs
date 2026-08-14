@@ -890,6 +890,10 @@ fn remote_folder_settings(mut config: Signal<AppConfig>) -> Option<RemoteFolderS
     let creds = {
         let cfg = config.read();
         let server = cfg.server.as_ref()?;
+        let active_id = cfg.active_source.server_id()?;
+        if server.id.as_deref() != Some(active_id) {
+            return None;
+        }
         if server.service != MusicService::Nextcloud {
             return None;
         }
