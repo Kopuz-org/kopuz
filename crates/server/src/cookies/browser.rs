@@ -174,7 +174,9 @@ pub(crate) async fn find_browser_bin(browser: Browser, profile: String) -> Optio
     {
         let id = v.to_string().to_owned();
         if check_browser_command(format!("flatpak info {id}")).await {
-            return Some(BrowserBin::CommandLine(format!("flatpak run {id}")));
+            return Some(BrowserBin::CommandLine(format!(
+                "flatpak run --filesystem={profile} {id}"
+            )));
         }
     }
 
