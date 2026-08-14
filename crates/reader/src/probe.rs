@@ -163,20 +163,30 @@ pub fn ogg_duration(head: &HeadInfo, tail: &[u8]) -> Option<u64> {
     (secs > 0).then_some(secs)
 }
 
-/// Granule position of the last complete page header in `tail`.
+/// Granule position of the last page in the tail that states one.
 fn last_granule_position(tail: &[u8]) -> Option<u64> {
     // "OggS", version, header type, then the granule position.
     const GRANULE_AT: usize = 6;
     const HEADER_LEN: usize = GRANULE_AT + 8;
+    /// A page on which no packet finishes carries -1, not a position.
+    const NO_POSITION: u64 = u64::MAX;
 
     tail.windows(HEADER_LEN)
         .rev()
-        .find(|window| window.starts_with(b"OggS"))
+        .filter(|window| is_page_header(window))
         .map(|window| {
             let mut granule = [0u8; 8];
             granule.copy_from_slice(&window[GRANULE_AT..HEADER_LEN]);
             u64::from_le_bytes(granule)
         })
+        .find(|granule| *granule != NO_POSITION)
+}
+
+/// Whether a window of at least HEADER_LEN bytes opens a page. The capture
+/// pattern is not self-synchronising, so the version and header-type fields are
+/// checked too; payload bytes spelling "OggS" would otherwise yield a duration.
+fn is_page_header(window: &[u8]) -> bool {
+    window.starts_with(b"OggS") && window[4] == 0 && window[5] & 0xF8 == 0
 }
 
 #[cfg(test)]
@@ -196,6 +206,22 @@ mod tests {
         let mut stream = ogg_page(44_100);
         stream.extend(ogg_page(88_200));
         assert_eq!(last_granule_position(&stream), Some(88_200));
+    }
+
+    #[test]
+    fn last_granule_position_skips_a_page_without_one() {
+        let mut stream = ogg_page(88_200);
+        stream.extend(ogg_page(u64::MAX));
+        assert_eq!(last_granule_position(&stream), Some(88_200));
+    }
+
+    #[test]
+    fn last_granule_position_ignores_the_pattern_in_a_payload() {
+        // "OggS" inside packet data, with a version byte no real page has.
+        let mut stream = ogg_page(44_100);
+        stream.extend_from_slice(b"OggS\x07\x00");
+        stream.extend_from_slice(&999_999_999u64.to_le_bytes());
+        assert_eq!(last_granule_position(&stream), Some(44_100));
     }
 
     #[test]
