@@ -493,7 +493,9 @@ async fn download_with_progress(
             )
             .await
             .map_err(|_| format!("range request timed out after {RANGE_TIMEOUT_SECS}s"))?
-            .map_err(|e| format!("Range request failed: {e}"))?;
+            // `without_url`: a download URL can carry credentials in its
+            // userinfo, and this message is shown in the download list.
+            .map_err(|e| format!("Range request failed: {}", e.without_url()))?;
 
             let status = resp.status();
             if !status.is_success() {
@@ -513,7 +515,7 @@ async fn download_with_progress(
             let bytes = resp
                 .bytes()
                 .await
-                .map_err(|e| format!("Range read error: {e}"))?;
+                .map_err(|e| format!("Range read error: {}", e.without_url()))?;
             let expected_len = end - start + 1;
             // Defensive: a short read (network hiccup mid-Range)
             // would otherwise advance `start = end + 1` past where
@@ -567,7 +569,7 @@ async fn download_with_progress(
     let mut response = req
         .send()
         .await
-        .map_err(|e| format!("Request failed: {e}"))?;
+        .map_err(|e| format!("Request failed: {}", e.without_url()))?;
 
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()));
@@ -619,7 +621,7 @@ async fn download_with_progress(
         )
         .await
         .map_err(|_| format!("chunk timed out after {CHUNK_TIMEOUT_SECS}s"))?
-        .map_err(|e| format!("Read error: {e}"))?;
+        .map_err(|e| format!("Read error: {}", e.without_url()))?;
 
         let chunk = match chunk_result {
             Some(c) => c,

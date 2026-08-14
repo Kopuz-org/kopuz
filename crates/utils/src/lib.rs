@@ -13,6 +13,7 @@ pub mod lyrics;
 pub mod musicbrainz;
 pub mod playlist;
 pub mod range_source;
+pub mod redact;
 pub mod stream_buffer;
 pub mod themes;
 use std::path::Path;

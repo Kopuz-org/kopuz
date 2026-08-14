@@ -100,7 +100,9 @@ impl RangeStreamSource {
             .get(&url)
             .header("Range", "bytes=0-0")
             .send()
-            .map_err(IoError::other)?;
+            // `without_url`: a stream URL can carry credentials in its userinfo,
+            // and a reqwest error prints the URL it failed on.
+            .map_err(|e| IoError::other(e.without_url()))?;
         let status = resp.status();
         if status != reqwest::StatusCode::PARTIAL_CONTENT {
             return Err(IoError::new(
@@ -247,14 +249,14 @@ fn fetch_range(
         .get(url)
         .header("Range", format!("bytes={start}-{end}"))
         .send()
-        .map_err(IoError::other)?;
+        .map_err(|e| IoError::other(e.without_url()))?;
     if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
         return Err(IoError::other(format!(
             "range fetch {start}-{end} expected HTTP 206, got {}",
             resp.status()
         )));
     }
-    let bytes = resp.bytes().map_err(IoError::other)?;
+    let bytes = resp.bytes().map_err(|e| IoError::other(e.without_url()))?;
     let expected = (end - start + 1) as usize;
     if bytes.len() != expected {
         return Err(IoError::new(
