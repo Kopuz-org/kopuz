@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = Personalizat (API manual)
 server_name_optional = Nume server (opțional)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = Schimbă
 heart_track_to_add = Adaugă o piesă la favorite în timp ce este redată pentru a o vedea aici.
 heart_track_to_add_server = Adaugă o piesă la favorite în timp ce este redată pentru a o vedea aici și a o sincroniza cu serverul.

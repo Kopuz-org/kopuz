@@ -162,6 +162,7 @@ subsonic = Subsonic
 custom_manual = Нестандартные (ручное API)
 server_name_optional = Имя сервера (опционально)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = Изменить
 heart_track_to_add = Поставьте ❤️ треку, чтобы добавить его в избранное.
 heart_track_to_add_server = Поставьте ❤️ треку, чтобы добавить его в избранное и синхронизировать его с сервером.

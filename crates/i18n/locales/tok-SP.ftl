@@ -157,6 +157,7 @@ subsonic = Subsonic
 custom_manual = Custom (manual API)
 server_name_optional = 󱥂󱥌 (󱤘)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = 󱥄󱤆
 heart_track_to_add = 󱥄󱤭󱤉󱥀󱥅󱤬󱤠󱤕󱤡󱤕󱤧󱤖󱥩󱥁
 heart_track_to_add_server = 󱥄󱤭󱤉󱥀󱥅󱤬󱤠󱤕󱤡󱤕󱤧󱤖󱥩󱥁󱦜󱥹󱤡󱤴󱥌󱤉󱥡󱥁󱥩󱥌

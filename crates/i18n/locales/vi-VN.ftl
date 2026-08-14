@@ -239,6 +239,7 @@ subsonic = Subsonic
 custom_manual = Tùy chỉnh (API thủ công)
 server_name_optional = Tên máy chủ (không bắt buộc)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = Thay đổi
 heart_track_to_add = Nhấn tim một bài khi đang phát để thêm vào đây.
 heart_track_to_add_server = Nhấn tim một bài khi đang phát để thêm vào đây và đồng bộ lên máy chủ của bạn.

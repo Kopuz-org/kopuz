@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = Власний (власне API)
 server_name_optional = Назва серверу (необов'язково)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = Змінити
 heart_track_to_add = Уподобайте трек поки він грає, аби він відобразився тут.
 heart_track_to_add_server = Уподобайте трек поки він грає, аби він відобразився тут і на вашому сервері.

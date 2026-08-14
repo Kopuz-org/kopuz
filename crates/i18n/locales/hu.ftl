@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = Egyéni (manuális API)
 server_name_optional = Szerver neve (opcionális)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = Módosítás
 heart_track_to_add = Kedveld a dalt lejátszás közben, hogy itt megjelenjen.
 heart_track_to_add_server = Kedveld a dalt lejátszás közben, hogy itt megjelenjen és szinkronizálódjon a szerverrel.

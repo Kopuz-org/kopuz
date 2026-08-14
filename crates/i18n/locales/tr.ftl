@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = Özel (manuel API)
 server_name_optional = Sunucu adı (isteğe bağlı)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = Değiştir
 heart_track_to_add = Eklemek için çalarken bir parçayı beğenin.
 heart_track_to_add_server = Eklemek ve sunucunuza senkronize etmek için çalarken bir parçayı beğenin.

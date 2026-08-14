@@ -239,6 +239,7 @@ subsonic = Subsonic
 custom_manual = Kustom (manual API)
 server_name_optional = Nama peladen (opsional)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = Ubah
 heart_track_to_add = Tekan tombol suka pada lagu yang diputar untuk menambahkannya di sini.
 heart_track_to_add_server = Tekan tombol suka pada lagu yang diputar untuk menambahkannya disini dan tersinkron di peladen anda.

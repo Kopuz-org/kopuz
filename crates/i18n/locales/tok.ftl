@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = Custom (manual API)
 server_name_optional = nimi pana (ken)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = o ante
 heart_track_to_add = o luka e nena olin lon kute kalama la kalama li kama tawa ni
 heart_track_to_add_server = o luka e nena olin lon kute kalama la kalama li kama tawa ni. kin la mi pana e sona ni tawa pana

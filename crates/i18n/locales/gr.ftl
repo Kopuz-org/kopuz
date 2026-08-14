@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = Προσαρμοσμένο (χειροκίνητο API)
 server_name_optional = Όνομα διακομιστή (προαιρετικό)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = Αλλαγή
 heart_track_to_add = Πατήστε like σε ένα κομμάτι ενώ παίζει για να το προσθέσετε.
 heart_track_to_add_server = Πατήστε like σε ένα κομμάτι ενώ παίζει για να το προσθέσετε και να συγχρονιστεί με τον διακομιστή σας.

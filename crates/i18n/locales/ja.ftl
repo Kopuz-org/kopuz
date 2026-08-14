@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = カスタム（手動API）
 server_name_optional = サーバー名（任意）
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = 変更
 heart_track_to_add = 再生中の曲をハートしてここに追加します。
 heart_track_to_add_server = 再生中の曲をハートしてここに追加し、サーバーに同期します。

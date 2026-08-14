@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = 自定义（手动 API）
 server_name_optional = 服务器名称（可选）
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = 更改
 heart_track_to_add = 播放时点收藏即可添加到这里。
 heart_track_to_add_server = 播放时点收藏即可添加到这里，并同步到你的服务器。

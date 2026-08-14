@@ -239,6 +239,7 @@ subsonic = Subsonic
 custom_manual = Anpassad (manuellt API)
 server_name_optional = Servernamn (valfritt)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = Ändra
 heart_track_to_add = Markera en låt som favorit medan den spelas för att lägga till den här.
 heart_track_to_add_server = Markera en låt som favorit medan den spelas för att lägga till den här och synkronisera den med din server.

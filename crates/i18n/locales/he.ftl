@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = מותאם אישית (API ידני)
 server_name_optional = שם שרת (אופציונלי)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = שינוי
 heart_track_to_add = סמנו שיר בלב בזמן שהוא מתנגן כדי להוסיף אותו לכאן.
 heart_track_to_add_server = סמנו שיר בלב בזמן שהוא מתנגן כדי להוסיף אותו לכאן ולסנכרן אותו לשרת.

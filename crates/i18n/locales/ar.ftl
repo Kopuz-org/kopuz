@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = مخصص (API يدوي)
 server_name_optional = اسم الخادم (اختياري)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = تغيير
 heart_track_to_add = أضف إعجابك بمقطع أثناء تشغيله لإضافته هنا.
 heart_track_to_add_server = أضف إعجابك بمقطع أثناء تشغيله لإضافته هنا ومزامنته مع الخادم.

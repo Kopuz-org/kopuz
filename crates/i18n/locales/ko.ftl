@@ -161,6 +161,7 @@ subsonic = Subsonic
 custom_manual = 사용자 지정(수동 API)
 server_name_optional = 서버 이름(선택 사항)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = 변경
 heart_track_to_add = 재생 중인 곡에 하트를 눌러 여기에 추가하세요.
 heart_track_to_add_server = 재생 중인 곡에 하트를 눌러 여기에 추가하고 서버와 동기화하세요.

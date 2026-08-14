@@ -239,6 +239,7 @@ subsonic = Subsonic
 custom_manual = தனிப்பயன் (கைமுறை API)
 server_name_optional = சேவையக பெயர் (விருப்பத்தேர்வு)
 server_url_placeholder = http://localhost:8096
+nextcloud_url_placeholder = https://cloud.example.com
 change = மாற்று
 heart_track_to_add = இயங்கும்போது ஒரு தடத்தை இதயமிட்டு இங்கே சேர்க்கவும்.
 heart_track_to_add_server = இயங்கும்போது ஒரு தடத்தை இதயமிட்டு இங்கே சேர்த்து உங்கள் சேவையகத்துடன் ஒத்திசைக்கவும்.
