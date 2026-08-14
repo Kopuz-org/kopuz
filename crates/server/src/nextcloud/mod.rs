@@ -29,6 +29,10 @@ const PROBE_HEAD_BYTES: u64 = 256 * 1024;
 /// enough to hold one page header.
 const PROBE_TAIL_BYTES: u64 = 64 * 1024;
 
+/// Read windows for a duration, tried in order. Only a file whose tags push the
+/// audio past the first needs the second.
+const DURATION_HEAD_STEPS: &[u64] = &[32 * 1024, PROBE_HEAD_BYTES];
+
 /// Read windows for embedded art. Only a file whose tags run past one is read
 /// again, so this is a ceiling rather than a cost per track. Megabyte-sized art
 /// pushes the end of the tags well past the first step.
@@ -246,41 +250,64 @@ impl NextcloudClient {
             .map_err(|e| format!("could not update favourite: {e}"))
     }
 
-    /// Track length, read from the file's header because WebDAV never reports
-    /// one. Costs one ranged GET, two for Ogg, whose length lives in its final
-    /// page. `None` when the header does not state a length (an MP3 with no
-    /// Xing frame, an MP4 whose moov trails the audio), so the UI shows no
-    /// duration rather than a wrong one.
+    /// Track length in whole seconds, read from the file's header because
+    /// WebDAV never reports one. Costs one ranged GET per duration head step,
+    /// plus one for Ogg's tail. None when the header states no length (an MP3
+    /// with no Xing frame, an MP4 whose moov trails the audio), so the UI shows
+    /// no duration rather than a wrong one.
     pub(crate) async fn probe_duration(&self, remote_path: &str) -> Option<u64> {
-        let head = match self
-            .nc
-            .files()
-            .read_range(remote_path, 0, Some(PROBE_HEAD_BYTES - 1))
-            .await
-        {
-            Ok(head) => head?,
-            Err(e) => {
-                tracing::debug!(path = remote_path, error = %e, "duration probe failed");
-                return None;
+        let extension = extension(remote_path);
+
+        for window in DURATION_HEAD_STEPS {
+            let head = match self
+                .nc
+                .files()
+                .read_range(remote_path, 0, Some(window - 1))
+                .await
+            {
+                Ok(Some(head)) => head,
+                Ok(None) => return None,
+                Err(e) => {
+                    tracing::debug!(path = remote_path, error = %e, "duration probe failed");
+                    return None;
+                }
+            };
+
+            let info = reader::probe::read_head(&head.bytes, extension.as_deref());
+            if info.duration_secs.is_some() {
+                return info.duration_secs;
             }
-        };
-
-        let info = reader::probe::read_head(&head.bytes, extension(remote_path).as_deref());
-        if let Some(secs) = info.duration_secs {
-            return Some(secs);
+            // Ogg states its length in the last page, never in the first.
+            if head.bytes.starts_with(b"OggS") {
+                return self.ogg_tail_duration(remote_path, &info, head.total).await;
+            }
+            // Whole file already read, so a wider window changes nothing.
+            if head.total <= *window {
+                break;
+            }
         }
+        None
+    }
 
-        if !head.bytes.starts_with(b"OggS") {
-            return None;
-        }
-        let tail_start = head.total.saturating_sub(PROBE_TAIL_BYTES);
+    /// Length of an Ogg file from its final page, given what the head stated
+    /// and the file's total size. None if the tail cannot be read.
+    async fn ogg_tail_duration(
+        &self,
+        remote_path: &str,
+        head: &reader::probe::HeadInfo,
+        total: u64,
+    ) -> Option<u64> {
         let tail = self
             .nc
             .files()
-            .download_range(remote_path, tail_start, head.total.saturating_sub(1))
+            .download_range(
+                remote_path,
+                total.saturating_sub(PROBE_TAIL_BYTES),
+                total.saturating_sub(1),
+            )
             .await
             .ok()?;
-        reader::probe::ogg_duration(&info, &tail)
+        reader::probe::ogg_duration(head, &tail)
     }
 
     /// Cache a sidecar image on disk. `None` rather than an error: art never

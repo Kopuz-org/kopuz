@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use config::{MusicService, Source};
 use db::Db;
@@ -60,6 +62,9 @@ const CAPABILITIES: Capabilities = Capabilities {
 /// loading someone's home instance like a scan.
 const ART_CONCURRENCY: usize = 8;
 
+/// Duration probes in flight at once, held back like the art fetches.
+const DURATION_CONCURRENCY: usize = 8;
+
 /// Cache one album's art: a sidecar image if there is one, else the picture the
 /// tracks carry. Parts come by value because a future borrowing the album fails
 /// lifetime inference once buffered inside an `async_trait` method.
@@ -77,6 +82,46 @@ async fn album_art(
         (cached, _) => cached,
     }
     .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Track lengths by remote path, probed only for paths the last scan left
+/// without one. A header stating no length leaves no mark to reuse, so such a
+/// track is probed again every scan. Paths that stay unknown are absent.
+async fn track_durations(
+    client: &NextcloudClient,
+    db: &Db,
+    source: &Source,
+    paths: &[String],
+) -> HashMap<String, u64> {
+    let mut durations: HashMap<String, u64> = db
+        .tracks_by_keys(source, paths)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "could not reuse stored nextcloud durations");
+            Vec::new()
+        })
+        .into_iter()
+        .filter(|track| track.duration > 0)
+        .map(|track| (track.id.key().into_owned(), track.duration))
+        .collect();
+
+    // Owned, for the same lifetime reason album_art takes owned parts.
+    let missing: Vec<String> = paths
+        .iter()
+        .filter(|path| !durations.contains_key(*path))
+        .cloned()
+        .collect();
+
+    let probed = futures_util::stream::iter(missing.into_iter().map(|path| async move {
+        let secs = client.probe_duration(&path).await?;
+        Some((path, secs))
+    }))
+    .buffered(DURATION_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
+
+    durations.extend(probed.into_iter().flatten());
+    durations
 }
 
 /// Cached art, or the sentinel that stops the resolver guessing at a URL.
@@ -121,8 +166,7 @@ impl MediaSource for NextcloudSource {
             .await;
 
         // Per album, before the tracks, so an album's tracks share one file.
-        let mut cached_covers: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+        let mut cached_covers: HashMap<String, String> = HashMap::new();
         let mut out_albums = Vec::with_capacity(albums.len());
 
         for (album, cached) in albums.into_iter().zip(covers) {
@@ -142,10 +186,14 @@ impl MediaSource for NextcloudSource {
             });
         }
 
+        let paths: Vec<String> = tracks.iter().map(|track| track.path.clone()).collect();
+        let durations = track_durations(client, &self.db, &self.source, &paths).await;
+
         let out_tracks = tracks
             .into_iter()
             .map(|track| {
                 let cached = cached_covers.get(&track.album_path).map(String::as_str);
+                let duration = durations.get(&track.path).copied().unwrap_or(0);
                 reader::Track {
                     id: reader::models::TrackId::Server {
                         service: MusicService::Nextcloud,
@@ -160,9 +208,8 @@ impl MediaSource for NextcloudSource {
                     title: track.title,
                     artist: track.artist.clone(),
                     album: track.album,
-                    // WebDAV reports neither; the header probe in resolve_stream
-                    // stamps a duration when the track plays.
-                    duration: 0,
+                    // 0 when neither the listing nor the header stated one.
+                    duration,
                     khz: 0,
                     bitrate: 0,
                     track_number: track.track_number,
@@ -184,14 +231,12 @@ impl MediaSource for NextcloudSource {
     }
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
-        let client = self.client()?;
         Ok(StreamInfo {
-            url: client.stream_url(item_id),
+            url: self.client()?.stream_url(item_id),
             format: None,
             user_agent: None,
-            // The listing carries no duration, so the header is the only source
-            // of one; the player stamps it onto the track when it arrives.
-            duration_secs: client.probe_duration(item_id).await,
+            // The scan probed the header; repeating it costs a round trip per play.
+            duration_secs: None,
             bitrate: None,
             content_length: None,
         })
