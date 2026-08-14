@@ -62,10 +62,7 @@ fn read_head_inner(head: &[u8], extension: Option<&str>) -> HeadInfo {
         return HeadInfo::default();
     };
 
-    let audio = match &track.codec_params {
-        Some(CodecParameters::Audio(audio)) => Some(audio),
-        _ => None,
-    };
+    let audio = track.codec_params.as_ref().and_then(CodecParameters::audio);
 
     let duration_secs = track
         .duration
