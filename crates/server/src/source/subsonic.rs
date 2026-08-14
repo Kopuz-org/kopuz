@@ -452,6 +452,7 @@ mod tests {
             device_id: "test".to_string(),
             apple_music_storefront: String::new(),
             apple_music_language: String::new(),
+            folders: Vec::new(),
         };
         let src = SubsonicSource::new(db, Source::Server("test".to_string()), &conn);
 
