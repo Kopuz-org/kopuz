@@ -136,7 +136,8 @@ strip = "symbols"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+# reader::probe catches panics from symphonia on malformed remote bytes.
+panic = "unwind"
 
 [profile.dev.package."*"]
 opt-level = 3
@@ -154,4 +155,4 @@ inherits = "release"
 strip = "symbols"
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+panic = "unwind"
