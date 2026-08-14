@@ -206,7 +206,9 @@ pub(super) fn group(
             .unwrap_or_else(|| entry.name().to_string());
         let (title, track_number) = split_leading_number(&stem);
 
-        let album_title = if album_name.is_empty() {
+        // The root folder is the library, not an album: loose files under it
+        // would otherwise all group under a "Music" album.
+        let album_title = if album_name.is_empty() || album_path == dav_path::normalise(root) {
             "Unknown Album".to_string()
         } else {
             album_name.to_string()

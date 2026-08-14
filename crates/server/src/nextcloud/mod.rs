@@ -297,16 +297,18 @@ impl NextcloudClient {
         head: &reader::probe::HeadInfo,
         total: u64,
     ) -> Option<u64> {
+        let start = total.saturating_sub(PROBE_TAIL_BYTES);
+        let expected = total.saturating_sub(start);
         let tail = self
             .nc
             .files()
-            .download_range(
-                remote_path,
-                total.saturating_sub(PROBE_TAIL_BYTES),
-                total.saturating_sub(1),
-            )
+            .download_range(remote_path, start, total.saturating_sub(1))
             .await
             .ok()?;
+        if tail.len() as u64 != expected {
+            tracing::debug!(path = remote_path, "nextcloud ignored the ogg tail range");
+            return None;
+        }
         reader::probe::ogg_duration(head, &tail)
     }
 
@@ -471,9 +473,20 @@ fn cached_art(dir: &Path, stem: &str) -> Option<PathBuf> {
 }
 
 /// Write `bytes` to `target`, returning it, or `None` if the cache is unwritable.
+/// The write lands on a temporary name first: readers only test `exists()`, so a
+/// half-written file would be served as art for good.
 async fn write_cached(dir: &Path, target: &Path, bytes: &[u8]) -> Option<PathBuf> {
     tokio::fs::create_dir_all(dir).await.ok()?;
-    tokio::fs::write(target, bytes).await.ok()?;
+    let staging = target.with_extension(format!(
+        "{}.{}.part",
+        target.extension().and_then(|e| e.to_str()).unwrap_or("bin"),
+        std::process::id(),
+    ));
+    tokio::fs::write(&staging, bytes).await.ok()?;
+    if tokio::fs::rename(&staging, target).await.is_err() {
+        let _ = tokio::fs::remove_file(&staging).await;
+        return None;
+    }
     Some(target.to_path_buf())
 }
 
