@@ -909,6 +909,55 @@ select:disabled {
     }
 }
 
+/* The fan disc is built around a hub on its left edge; RTL puts the column on
+   the other side of the workspace, so mirror the geometry to keep the hub
+   against the window edge and the wedges fanning into the content. */
+@media (min-width: 901px) and (min-height: 541px) {
+    [dir="rtl"] .settings-page.settings-layout-cd {
+        padding-right: 0 !important;
+        padding-left: 1.5rem !important;
+    }
+
+    [dir="rtl"] .settings-page.settings-layout-cd > h1 {
+        margin-right: 1.5rem;
+        margin-left: 0;
+    }
+
+    [dir="rtl"] .settings-layout-cd .settings-fan-disc::before {
+        border-right: 0;
+        border-left: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 13%, transparent);
+        border-radius: 999px 0 0 999px;
+        background:
+            repeating-radial-gradient(
+                circle at right center,
+                transparent 0 8px,
+                color-mix(in srgb, var(--color-white, #ffffff) 3.5%, transparent) 9px,
+                transparent 10px
+            ),
+            radial-gradient(
+                circle at right center,
+                color-mix(in srgb, var(--color-white, #ffffff) 8%, var(--color-black, #000000)) 0 21%,
+                color-mix(in srgb, var(--color-black, #000000) 72%, transparent) 21.5% 100%
+            );
+    }
+
+    [dir="rtl"] .settings-layout-cd .settings-fan-disc::after {
+        right: -12.9%;
+        left: auto;
+    }
+
+    [dir="rtl"] .settings-layout-cd .settings-fan-item {
+        left: 0;
+        clip-path: polygon(50% 50%, 0.96% 40.25%, 0% 50%, 0.96% 59.75%);
+        transform: rotate(calc(-1 * var(--fan-angle)));
+    }
+
+    [dir="rtl"] .settings-layout-cd .settings-fan-label {
+        left: calc(100% - var(--label-x));
+        transform: translate(-50%, -50%) rotate(calc(-1 * var(--label-tilt)));
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .settings-fan-item,
     .settings-fan-label {

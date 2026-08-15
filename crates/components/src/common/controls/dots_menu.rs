@@ -39,10 +39,16 @@ pub struct DotsMenuProps {
     pub icon: String,
 }
 
+/// The panel measures itself pinned to the viewport origin, because `left`/`right`
+/// left to `auto` shrink-to-fit against whatever room sits beside the trigger's
+/// static position — in RTL that is a few pixels, which collapses the panel to
+/// icon width. `anchor` is likewise phrased in LTR terms and mirrored for RTL so
+/// the panel opens towards the middle of the window instead of off-screen.
 #[component]
 pub fn DotsMenu(props: DotsMenuProps) -> Element {
     let mut trigger_element = use_signal(|| None::<MountedEvent>);
     let mut panel_geometry = use_signal(|| None::<(f64, f64, f64, f64)>);
+    let is_rtl = i18n::is_rtl();
 
     let base_button_class = format!(
         "w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors {}",
@@ -52,7 +58,7 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
         Some((left, top, width, height)) => format!(
             "position: fixed; left: clamp(8px, {left}px, calc(100vw - {width}px - 8px)); top: clamp(8px, {top}px, calc(100vh - {height}px - 8px)); visibility: visible;"
         ),
-        None => "position: fixed; visibility: hidden;".to_string(),
+        None => "position: fixed; left: 0; top: 0; visibility: hidden;".to_string(),
     };
 
     rsx! {
@@ -85,7 +91,7 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                 }
 
                 div {
-                    class: "w-auto bg-neutral-900 border border-white/10 rounded-lg dots-menu-panel py-1 shadow-xl",
+                    class: "w-auto flex flex-col bg-neutral-900 border border-white/10 rounded-lg dots-menu-panel py-1 shadow-xl",
                     style: "{panel_style}",
                     onmounted: {
                         let anchor = props.anchor.clone();
@@ -104,7 +110,7 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                                 let Ok(panel_rect) = panel_evt.get_client_rect().await else {
                                     return;
                                 };
-                                let left = if anchor == "left" {
+                                let left = if (anchor == "left") != is_rtl {
                                     trigger_rect.min_x()
                                 } else {
                                     trigger_rect.max_x() - panel_rect.width()
@@ -138,7 +144,7 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                             rsx! {
                                 button {
                                     key: "{idx}",
-                                    class: "w-full text-left px-4 py-2 text-sm {text_color} hover:bg-white/10 flex items-center gap-2 transition-colors whitespace-nowrap",
+                                    class: "px-4 py-2 text-sm {text_color} hover:bg-white/10 flex items-center gap-2 transition-colors whitespace-nowrap",
                                     onclick: move |_| {
                                         panel_geometry.set(None);
                                         props.on_action.call(idx);
