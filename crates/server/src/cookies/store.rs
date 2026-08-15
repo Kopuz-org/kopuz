@@ -14,7 +14,7 @@ pub(crate) struct Cookie {
 
 /// Decrypt the isolated profile's Chromium cookie store (via `rookie`) and
 /// return every cookie scoped to `domain`.
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "android")))]
 pub(crate) async fn read_cookies(
     browser: Browser,
     profile_root: &Path,
@@ -72,6 +72,20 @@ pub(crate) async fn read_cookies(
         "read cookies from isolated profile"
     );
     Ok(cookies)
+}
+
+/// Android: the isolated-profile sign-in that fills a Chromium cookie store is
+/// a desktop flow, so there is never a profile here to read.
+#[cfg(target_os = "android")]
+pub(crate) async fn read_cookies(
+    browser: Browser,
+    _profile_root: &Path,
+    _domain: &str,
+) -> Result<Vec<Cookie>, String> {
+    Err(format!(
+        "browser cookie import is desktop-only ({})",
+        browser.label()
+    ))
 }
 
 /// Windows: native v10/v11 (DPAPI) + v20 (planted app-bound) decryption — no

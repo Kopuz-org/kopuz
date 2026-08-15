@@ -609,7 +609,39 @@ pub fn release_db_path() -> std::path::PathBuf {
 
 /// `<config_dir>` for kopuz (matches the legacy JSON store location).
 pub fn config_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "android")]
+    if let Some(dir) = android_files_dir() {
+        return dir;
+    }
     directories::ProjectDirs::from("com", "temidaradev", "kopuz")
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("./config"))
+}
+
+/// `Context.getFilesDir()` — the app's private storage. `directories` falls back
+/// to the XDG layout on Android, which resolves under a `$HOME` no app process
+/// can write to, so SQLite fails to open the database at startup.
+#[cfg(target_os = "android")]
+fn android_files_dir() -> Option<std::path::PathBuf> {
+    use jni::objects::{JObject, JString};
+
+    let ctx = ndk_context::android_context();
+    // SAFETY: the pointers come from ndk_context, which wry/tao populate from
+    // the Activity before `main` runs, and are valid for the process lifetime.
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }.ok()?;
+    let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let mut env = vm.attach_current_thread().ok()?;
+
+    let files_dir = env
+        .call_method(&context, "getFilesDir", "()Ljava/io/File;", &[])
+        .ok()?
+        .l()
+        .ok()?;
+    let path = env
+        .call_method(&files_dir, "getAbsolutePath", "()Ljava/lang/String;", &[])
+        .ok()?
+        .l()
+        .ok()?;
+    let path: String = env.get_string(&JString::from(path)).ok()?.into();
+    Some(std::path::PathBuf::from(path))
 }

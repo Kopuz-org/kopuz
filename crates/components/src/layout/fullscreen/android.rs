@@ -29,6 +29,27 @@ pub(crate) fn FullscreenAndroid(
 ) -> Element {
     let mut active_tab = use_signal(|| 0usize);
     let tab = *active_tab.read();
+
+    let mut swipe = crate::gestures::use_swipe();
+    let pull = swipe.pull_down();
+    let sheet_style = if pull > 0.0 {
+        format!(
+            "{} transform: translateY({pull}px);",
+            background_style.read()
+        )
+    } else {
+        format!(
+            "{} transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);",
+            background_style.read()
+        )
+    };
+    const DISMISS_AT: f64 = 140.0;
+    let on_pull_end = move |evt: TouchEvent| {
+        let dismissed = swipe.pull_down() >= DISMISS_AT;
+        if swipe.finish(&evt) == Some(crate::gestures::SwipeDirection::Down) || dismissed {
+            is_fullscreen.set(false);
+        }
+    };
     let close_text = i18n::t("close").to_string();
     let music_text = i18n::t("music").to_string();
     let up_next_text = i18n::t("up_next").to_string();
@@ -48,8 +69,10 @@ pub(crate) fn FullscreenAndroid(
 
     rsx! {
         div {
-            class: "fixed inset-0 z-50 flex flex-col text-white select-none",
-            style: "{background_style.read()}",
+            // Above the mobile top bar (z-60) — at z-50 that bar painted over
+            // this sheet's own header, hiding the close button and the tabs.
+            class: "fixed inset-0 z-[70] flex flex-col text-white select-none",
+            style: "{sheet_style}",
 
             if let Some(cover) = cover_background() {
                 crate::CoverArtBackground { cover }
@@ -57,6 +80,10 @@ pub(crate) fn FullscreenAndroid(
 
             div {
                 class: "flex items-center gap-2 px-3 pt-[env(safe-area-inset-top)] pb-1 shrink-0",
+                ontouchstart: move |evt| swipe.start(&evt),
+                ontouchmove: move |evt| swipe.update(&evt),
+                ontouchend: on_pull_end,
+                ontouchcancel: move |_| swipe.reset(),
                 button {
                     class: "w-10 h-10 flex items-center justify-center text-white/60 active:scale-95 transition-all shrink-0",
                     "aria-label": "{close_text}",
@@ -73,6 +100,10 @@ pub(crate) fn FullscreenAndroid(
             if tab == 0 {
                 div {
                     class: "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]",
+                    ontouchstart: move |evt| swipe.start(&evt),
+                    ontouchmove: move |evt| swipe.update(&evt),
+                    ontouchend: on_pull_end,
+                    ontouchcancel: move |_| swipe.reset(),
                     TrackMetadata {
                         is_fullscreen,
                         current_song_cover_url,

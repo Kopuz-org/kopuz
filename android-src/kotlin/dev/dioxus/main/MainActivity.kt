@@ -24,6 +24,7 @@ class MainActivity : WryActivity() {
         enableEdgeToEdge()
         MediaSessionHelper.init(this)
         requestNotificationPermission()
+        requestMediaPermission()
         requestBatteryOptimizationExemption()
     }
 
@@ -86,6 +87,22 @@ class MainActivity : WryActivity() {
                     1001
                 )
             }
+        }
+    }
+
+    // Without this the library scan finds nothing: the manifest entry alone does not
+    // grant read access to shared storage, and the scanner has no way to ask for it
+    // from the Rust side. Tiramisu split the media permissions out of READ_EXTERNAL_STORAGE.
+    private fun requestMediaPermission() {
+        val needed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (needed.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, needed.toTypedArray(), 1002)
         }
     }
 

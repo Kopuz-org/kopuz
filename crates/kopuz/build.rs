@@ -244,6 +244,53 @@ fn main() {
     // 5. Generate launcher icons from our logo. dx only ships its default icon, so
     //    build them here.
     generate_launcher_icons(&main_dir.join("res"));
+
+    // 6. dx templates `versionCode = 1` into the module's Gradle script and never
+    //    moves it, so every release would look like the same build to Android and
+    //    refuse to install over its predecessor. Derive it from the crate version.
+    if let Some(app_dir) = main_dir.parent().and_then(Path::parent) {
+        patch_version_code(&app_dir.join("build.gradle.kts"));
+    }
+}
+
+/// Android needs a single monotonically increasing integer. `major.minor.patch`
+/// packs into one as long as minor and patch stay under 100 — 0.14.0 becomes
+/// 1400, 1.0.0 becomes 10000.
+fn android_version_code() -> u32 {
+    let version = env!("CARGO_PKG_VERSION");
+    let mut parts = version
+        .split(['.', '-'])
+        .map(|p| p.parse::<u32>().unwrap_or(0));
+    let major = parts.next().unwrap_or(0);
+    let minor = parts.next().unwrap_or(0);
+    let patch = parts.next().unwrap_or(0);
+    major * 10_000 + minor * 100 + patch
+}
+
+/// Rewrite `versionCode = <n>` in the generated module Gradle script. Idempotent:
+/// re-running with the same crate version is a no-op.
+fn patch_version_code(gradle: &Path) {
+    let Ok(content) = fs::read_to_string(gradle) else {
+        warn(&format!("cannot read {}", gradle.display()));
+        return;
+    };
+    let Some(start) = content.find("versionCode = ") else {
+        warn(&format!("no versionCode in {}", gradle.display()));
+        return;
+    };
+    let digits = start + "versionCode = ".len();
+    let end = digits
+        + content[digits..]
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(0);
+    let wanted = android_version_code().to_string();
+    if content[digits..end] == wanted {
+        return;
+    }
+    let patched = format!("{}{wanted}{}", &content[..digits], &content[end..]);
+    if let Err(e) = fs::write(gradle, patched) {
+        warn(&format!("cannot write {}: {e}", gradle.display()));
+    }
 }
 
 /// Resize kopuz/assets/logo.png into the Android launcher mipmaps, replacing dx's

@@ -83,7 +83,10 @@ windows = "0.62"
 winres = "0.1"
 symphonia-adapter-libopus = "0.3"
 mpris-server = "0.10.0"
-jni = "0.22"
+# 0.22 replaced `JNIEnv` with `EnvUnowned` and made `GlobalRef` generic;
+# `player/systemint/android.rs` is written against 0.21, which dioxus already
+# pulls in. Bumping this again means porting that file first.
+jni = "0.21"
 ndk-context = "0.1"
 thiserror = "2.0"
 tokio-tungstenite = "0.30.0"

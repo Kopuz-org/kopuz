@@ -33,6 +33,19 @@ pub fn BottombarVaxry(
     let fav_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_fav = hooks::use_db_queries::use_track_is_favorite(fav_track);
     let crate::CompactMode(mut compact_mode) = use_context::<crate::CompactMode>();
+
+    // Declared outside the `cfg!` branch below so hook order never depends on the target.
+    let mut bar_swipe = crate::gestures::use_swipe();
+    let on_bar_swipe = move |evt: TouchEvent| {
+        use crate::gestures::SwipeDirection;
+        match bar_swipe.finish(&evt) {
+            Some(SwipeDirection::Up) => is_fullscreen.set(true),
+            Some(SwipeDirection::Left) => ctrl.play_next(),
+            Some(SwipeDirection::Right) => ctrl.play_prev(),
+            _ => {}
+        }
+    };
+
     if cfg!(target_os = "android") {
         let is_loading = *ctrl.is_loading.read();
         let buffered_ranges = ctrl.buffered_ranges.read().clone();
@@ -47,6 +60,10 @@ pub fn BottombarVaxry(
             div {
                 class: "shrink-0 h-[68px] bg-black/85 backdrop-blur-2xl border-t border-white/10 flex items-center px-3 gap-3 relative overflow-hidden mb-[env(safe-area-inset-bottom)]",
                 onclick: move |_| is_fullscreen.set(true),
+                ontouchstart: move |evt| bar_swipe.start(&evt),
+                ontouchmove: move |evt| bar_swipe.update(&evt),
+                ontouchend: on_bar_swipe,
+                ontouchcancel: move |_| bar_swipe.reset(),
                 div { class: "absolute top-0 left-0 h-[2px] bg-white/10 w-full overflow-hidden",
                     PlaybackBufferIndicator {
                         ranges: buffered_ranges,

@@ -901,11 +901,21 @@ where
     }
 }
 
+/// The folder a fresh install scans. `directories` resolves the XDG layout
+/// against `$HOME`, which on Android is a private app path with no music in it,
+/// so point at the shared media directory the platform actually uses.
+fn default_music_directory() -> PathBuf {
+    if cfg!(target_os = "android") {
+        return PathBuf::from("/storage/emulated/0/Music");
+    }
+    directories::UserDirs::new()
+        .and_then(|u| u.audio_dir().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("./assets"))
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
-        let music_directory = directories::UserDirs::new()
-            .and_then(|u| u.audio_dir().map(|p| p.to_path_buf()))
-            .unwrap_or_else(|| PathBuf::from("./assets"));
+        let music_directory = default_music_directory();
         Self {
             server: None,
             servers: Vec::new(),

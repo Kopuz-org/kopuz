@@ -277,6 +277,49 @@ sudo ln -s /usr/lib/webkit2gtk-4.1/WebKitWebProcess /usr/libexec/webkit2gtk-4.1/
 sudo ln -s /usr/lib/webkit2gtk-4.1/WebKitGPUProcess /usr/libexec/webkit2gtk-4.1/
 ```
 
+### Android
+
+Grab `kopuz-<version>-arm64-v8a.apk` from the
+[releases page](https://github.com/Kopuz-org/kopuz/releases) and install it.
+Only 64-bit ARM devices are supported (Android 7.0 / API 24 and newer). The APK
+is signed with the project release key, so an install from a different source
+has to be uninstalled first.
+
+To build one yourself you need the Android SDK (build-tools + platform 34) and
+NDK, with `ANDROID_HOME` and `ANDROID_NDK_HOME` exported:
+
+```bash
+# Debug-signed, for a quick sideload
+just android-patch
+
+# Release build; unsigned unless the keystore variables below are set
+just android-release
+just android-install
+```
+
+`just android-release` signs the APK when these are exported:
+
+| Variable | Meaning |
+| --- | --- |
+| `KOPUZ_ANDROID_KEYSTORE` | path to the JKS/PKCS12 keystore |
+| `KOPUZ_ANDROID_KEYSTORE_PASSWORD` | store password |
+| `KOPUZ_ANDROID_KEY_ALIAS` | key alias inside the store |
+| `KOPUZ_ANDROID_KEY_PASSWORD` | key password (defaults to the store password) |
+
+CI reads the same values from the repository secrets `ANDROID_KEYSTORE_BASE64`
+(the keystore, base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
+and `ANDROID_KEY_PASSWORD`. Without them the release job still runs and publishes
+an unsigned APK.
+
+The Android `versionCode` is derived from the crate version as
+`major * 10000 + minor * 100 + patch`, so bumping `version` in `Cargo.toml` is
+all an update needs.
+
+`packaging/fdroid/com.temidaradev.kopuz.yml` is the build recipe to submit to
+[fdroiddata](https://gitlab.com/fdroid/fdroiddata); F-Droid builds from source
+and signs with its own key, so its APKs and the GitHub ones are not
+interchangeable.
+
 ### Build from Source
 
 #### Dependencies
