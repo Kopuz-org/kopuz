@@ -5,6 +5,7 @@ pub mod cenc;
 pub mod signin;
 pub mod stream;
 pub mod types;
+pub mod widevine;
 
 pub use api::AppleMusicApi;
 

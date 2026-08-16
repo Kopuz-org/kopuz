@@ -1,7 +1,4 @@
-use aes::Aes128;
-use aes::cipher::{KeyIvInit, StreamCipher};
-
-type Aes128Ctr = ctr::Ctr128BE<Aes128>;
+use super::widevine::Cdm;
 
 fn u32be(d: &[u8], o: usize) -> u32 {
     u32::from_be_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]])
@@ -305,27 +302,37 @@ fn try_parse_senc(
 
 // CENC decryption
 
-fn crypt_sample_cenc(sample: &mut [u8], key: &[u8], iv: &[u8; 16], subs: &[(u16, u32)]) {
-    let mut cipher = Aes128Ctr::new(key.into(), iv.into());
-    if subs.is_empty() {
-        cipher.apply_keystream(sample);
-    } else {
-        let mut pos = 0usize;
-        for &(clear, protected) in subs {
-            pos += clear as usize;
-            if protected > 0 && pos + protected as usize <= sample.len() {
-                cipher.apply_keystream(&mut sample[pos..pos + protected as usize]);
-                pos += protected as usize;
-            }
-        }
+/// Decrypt one CENC sample in place through the CDM.
+fn crypt_sample_cenc(
+    sample: &mut [u8],
+    cdm: &Cdm,
+    key_id: &[u8],
+    iv: &[u8; 16],
+    subs: &[(u16, u32)],
+) -> Result<(), String> {
+    let subsamples: Vec<(u32, u32)> = subs
+        .iter()
+        .map(|&(clear, protected)| (u32::from(clear), protected))
+        .collect();
+    let clear = cdm.decrypt(sample, key_id, iv, &subsamples)?;
+    if clear.len() != sample.len() {
+        return Err(format!(
+            "CDM returned {} bytes for a {}-byte sample",
+            clear.len(),
+            sample.len()
+        ));
     }
+    sample.copy_from_slice(&clear);
+    Ok(())
 }
 
-pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
+/// Rewrite an encrypted fMP4 as cleartext, decrypting every CENC sample through
+/// `cdm`. The license for `key_id` must already be loaded into the CDM.
+pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, String> {
     tracing::info!(
-        "am.decrypt: file={} bytes, key={} bytes",
+        "am.decrypt: file={} bytes, key_id={} bytes",
         data.len(),
-        key.len()
+        key_id.len()
     );
 
     // 1. Find init segment (ftyp + moov)
@@ -488,7 +495,13 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
                     break;
                 }
 
-                crypt_sample_cenc(&mut decrypted[sample_start..sample_end], key, &iv, subs);
+                crypt_sample_cenc(
+                    &mut decrypted[sample_start..sample_end],
+                    cdm,
+                    key_id,
+                    &iv,
+                    subs,
+                )?;
                 total_samples += 1;
             }
 

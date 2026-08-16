@@ -2,7 +2,6 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
 use super::auth;
-use super::cdm::Cdm;
 
 const LICENSE_SERVER_URL: &str =
     "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense";
@@ -142,41 +141,19 @@ pub async fn get_web_playback(
     })
 }
 
-/// Builds a Widevine PSSH from the KID (matching Go's getPSSH).
-fn build_pssh(kid_base64: &str) -> Result<String, String> {
-    let kid = STANDARD
-        .decode(kid_base64)
-        .map_err(|e| format!("decode KID base64: {e}"))?;
-
-    let content_id_encoded = STANDARD.encode(b"");
-
-    use prost::Message;
-    let header = super::cdm::wv::WidevineCencHeader {
-        algorithm: Some(1), // AESCTR
-        key_id: vec![kid.to_vec()],
-        provider: Some(String::new()),
-        content_id: Some(content_id_encoded.into_bytes()),
-        track_type_deprecated: None,
-        policy: Some(String::new()),
-    };
-    let header_bytes = header.encode_to_vec();
-
-    let mut pssh = b"0123456789abcdef0123456789abcdef".to_vec();
-    pssh.extend_from_slice(&header_bytes);
-
-    Ok(STANDARD.encode(&pssh))
-}
-
-/// Gets the content decryption key via Widevine CDM license exchange.
-async fn get_content_key(
-    cdm: &super::cdm::Cdm,
+/// Exchange the CDM's challenge for a license and load it back into the CDM.
+///
+/// Nothing is returned: the content key stays sealed inside the CDM, which is
+/// the point of driving the real one rather than a hand-rolled protocol.
+async fn load_license(
+    cdm: &super::widevine::Cdm,
     license_request: &[u8],
     adam_id: &str,
     uri_prefix: &str,
     kid_base64: &str,
     bearer_token: &str,
     media_user_token: &str,
-) -> Result<(String, Vec<u8>), String> {
+) -> Result<(), String> {
     let envelope = serde_json::json!({
         "challenge": STANDARD.encode(license_request),
         "key-system": "com.widevine.alpha",
@@ -258,29 +235,17 @@ async fn get_content_key(
         .map_err(|e| format!("decode license: {e}"))?;
 
     tracing::debug!(
-        "am.license: license binary len={}, calling cdm.get_license_keys",
+        "am.license: license binary len={}, loading into CDM",
         license_data.len()
     );
 
-    let keys = cdm
-        .get_license_keys(license_request, &license_data)
-        .map_err(|e| {
-            tracing::warn!("am.license: get_license_keys failed: {e}");
-            e
-        })?;
+    cdm.update(&license_data).map_err(|e| {
+        tracing::warn!("am.license: loading the license failed: {e}");
+        e
+    })?;
 
-    tracing::debug!("am.license: got {} keys from CDM", keys.len());
-
-    for key in &keys {
-        if key.key_type == 2 {
-            // CONTENT key
-            let key_hex = hex::encode(&key.value);
-            tracing::debug!("am.license: got content key ({} bytes)", key.value.len());
-            return Ok((key_hex, key.value.clone()));
-        }
-    }
-
-    Err("no content key found in license response".to_string())
+    tracing::debug!("am.license: keys loaded");
+    Ok(())
 }
 
 /// Full pipeline: resolve + download + decrypt. Returns decrypted fMP4 bytes.
@@ -303,50 +268,28 @@ pub async fn resolve_and_decrypt(
 
     let playback = get_web_playback(&adam_id, &bearer_token, media_user_token).await?;
 
-    tracing::debug!("am.stream: building PSSH and CDM license request");
-
-    let pssh = build_pssh(&playback.kid_base64)?;
-    tracing::debug!("am.stream: PSSH built ({} bytes)", pssh.len());
-    let init_data = STANDARD
-        .decode(&pssh)
-        .map_err(|e| format!("decode PSSH: {e}"))?;
-
+    let key_id = STANDARD
+        .decode(&playback.kid_base64)
+        .map_err(|e| format!("decode KID: {e}"))?;
+    let init_data = super::widevine::build_pssh(&key_id);
     tracing::debug!(
-        "am.stream: creating CDM with {} byte init_data",
-        init_data.len()
+        "am.stream: pssh box built ({} bytes) for kid={}",
+        init_data.len(),
+        playback.kid_base64
     );
-    let cdm = Cdm::new_default(&init_data)?;
-    let license_request = cdm.get_license_request()?;
+
+    // Borrow the CDM from an installed browser. Its device key stays sealed, so
+    // no key material ships with kopuz.
+    let cdm = super::widevine::Cdm::open_system()?;
+    let license_request = cdm.challenge(&init_data)?;
     tracing::debug!(
-        "am.stream: license request generated ({} bytes)",
+        "am.stream: license challenge generated ({} bytes)",
         license_request.len()
     );
-    tracing::debug!(
-        "am.stream: license request first 50 bytes: {}",
-        license_request[..license_request.len().min(50)]
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
-    tracing::debug!(
-        "am.stream: KID (b64) = {}, uri_prefix = {}",
-        playback.kid_base64,
-        playback.uri_prefix
-    );
-    tracing::debug!(
-        "am.stream: kid decoded len = {}",
-        STANDARD
-            .decode(&playback.kid_base64)
-            .unwrap_or_default()
-            .len()
-    );
-    tracing::debug!("am.stream: pssh (b64) = {pssh}");
-    tracing::debug!("am.stream: pssh decoded len = {}", init_data.len());
 
     tracing::debug!("am.stream: exchanging license with Apple");
 
-    let (key_hex, key_bytes) = get_content_key(
+    load_license(
         &cdm,
         &license_request,
         &adam_id,
@@ -356,12 +299,6 @@ pub async fn resolve_and_decrypt(
         media_user_token,
     )
     .await?;
-
-    tracing::info!(
-        "am.stream: got content key (len={}, hex={})",
-        key_bytes.len(),
-        &key_hex[..32.min(key_hex.len())]
-    );
 
     tracing::info!(
         "am.stream: downloading encrypted fMP4 from {}",
@@ -389,12 +326,11 @@ pub async fn resolve_and_decrypt(
         .map_err(|e| format!("read fMP4 bytes: {e}"))?;
 
     tracing::info!(
-        "am.stream: downloaded {} bytes, decrypting with key {}",
-        encrypted_bytes.len(),
-        &key_hex[..32.min(key_hex.len())]
+        "am.stream: downloaded {} bytes, decrypting through the CDM",
+        encrypted_bytes.len()
     );
 
-    let decrypted = crate::applemusic::cenc::decrypt_fmp4(&encrypted_bytes, &key_bytes)?;
+    let decrypted = crate::applemusic::cenc::decrypt_fmp4(&encrypted_bytes, &cdm, &key_id)?;
 
     // Save decrypted output for testing
     let tmp_dir = std::env::temp_dir().join("kopuz_am_decrypt");

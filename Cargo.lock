@@ -4572,6 +4572,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "cbc",
+ "cc",
  "cmac",
  "ctr 0.9.2",
  "deno_core",

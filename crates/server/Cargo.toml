@@ -60,6 +60,7 @@ symphonia = { workspace = true }
 
 [build-dependencies]
 prost-build = "0.13"
+cc = "1"
 
 # Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
 # library) there, which can't cross-compile.
