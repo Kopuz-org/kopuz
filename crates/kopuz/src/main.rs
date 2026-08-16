@@ -1890,6 +1890,10 @@ fn App() -> Element {
             style: "{background_style}",
             dir: "{dir}",
             "data-platform": if cfg!(target_os = "android") { "android" } else { "desktop" },
+            // Lets the stylesheet gate rules that only a webview implements, so
+            // they are switched off under the native renderer rather than
+            // silently ignored.
+            "data-renderer": if components::blitz_active() { "native" } else { "webview" },
             "data-reduce-animations": "{reduce_animations}",
             tabindex: "0",
             autofocus: true,

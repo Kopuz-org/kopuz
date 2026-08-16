@@ -755,9 +755,6 @@ select:disabled {
         scrollbar-width: none;
     }
 
-    .settings-layout-topbar .settings-fan::-webkit-scrollbar {
-        display: none;
-    }
 
     .settings-layout-topbar .settings-fan-disc {
         display: contents;
@@ -837,9 +834,6 @@ select:disabled {
         scrollbar-width: none;
     }
 
-    .settings-fan::-webkit-scrollbar {
-        display: none;
-    }
 
     .settings-fan-disc {
         display: contents;
@@ -977,7 +971,6 @@ select:disabled {
     border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 16%, transparent);
     border-radius: 0.5rem;
     background: color-mix(in srgb, var(--color-black, #000000) 58%, transparent);
-    -webkit-backdrop-filter: blur(14px) saturate(120%);
     backdrop-filter: blur(14px) saturate(120%);
     color: var(--color-white, #ffffff);
     font-size: 0.875rem;
@@ -1020,7 +1013,6 @@ select:disabled {
     border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 16%, transparent);
     border-radius: 0.65rem;
     background: color-mix(in srgb, var(--color-black, #000000) 72%, transparent);
-    -webkit-backdrop-filter: blur(18px) saturate(125%);
     backdrop-filter: blur(18px) saturate(125%);
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }

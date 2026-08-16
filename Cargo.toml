@@ -17,7 +17,7 @@ keywords = ["music", "player", "audio", "dioxus"]
 # winit 0.31-beta) are what the window_host seam is written against.
 dioxus = { version = "0.8.0-alpha.1", features = [] }
 # Native (Blitz/wgpu) renderer + its window-host API. Crates add their own features.
-dioxus-native = { version = "0.8.0-alpha.1", default-features = false }
+dioxus-native = "0.8.0-alpha.1"
 blitz-traits = "=0.3.0-beta.1"
 winit = "=0.31.0-beta.2"
 serde = { version = "1.0", features = ["derive"] }

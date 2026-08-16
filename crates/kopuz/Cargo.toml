@@ -24,28 +24,15 @@ info_plist_path = "Info.plist"
 [target.'cfg(not(target_os = "android"))'.dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
 # Native renderer (Blitz/wgpu). Both renderers compile in; KOPUZ_BLITZ=1
-# selects native at runtime. "incremental" is left off — it repaints from a
-# damage region blitz does not yet track correctly for this UI.
+# selects native at runtime. Upstream defaults plus the extras this UI needs —
+# no feature is chosen to dodge a renderer bug, those get fixed upstream.
 dioxus-native = { workspace = true, features = [
-    # Renderer. "vello" (wgpu) rather than the default "vello-hybrid", which
-    # panics on the fully transparent paints this UI is full of.
-    "vello",
-    "accessibility",
     "autofocus",
-    "clipboard",
     "complex-scripts",
     "data-uri",
-    "file-dialog",
-    "hot-reload",
-    "html",
-    "net",
     "scrollbars",
-    "svg",
-    "system-fonts",
-    # Blitz's own logs (font loading, resource fetches) through our subscriber —
-    # without it a font that fails to decode is silently invisible.
+    # Blitz's own resource logs (font decode, fetches) through our subscriber.
     "tracing",
-    "woff",
 ] }
 discord-rich-presence = { workspace = true }
 tracing-subscriber = { workspace = true }

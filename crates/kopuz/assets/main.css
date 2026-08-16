@@ -233,8 +233,6 @@ body {
     max-width: 100%;
     cursor: copy;
     user-select: all;
-    -webkit-user-select: all;
-    -webkit-line-clamp: 1;
     line-clamp: 1;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -300,6 +298,11 @@ body {
 [data-platform="android"],
 [data-platform="android"] * {
     user-select: none !important;
+}
+
+/* No standard equivalent, and only a webview implements them. */
+[data-renderer="webview"][data-platform="android"],
+[data-renderer="webview"][data-platform="android"] * {
     -webkit-touch-callout: none !important;
     -webkit-tap-highlight-color: transparent !important;
 }
