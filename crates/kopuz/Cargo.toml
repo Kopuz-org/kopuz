@@ -42,6 +42,9 @@ dioxus-native = { workspace = true, features = [
     "scrollbars",
     "svg",
     "system-fonts",
+    # Blitz's own logs (font loading, resource fetches) through our subscriber —
+    # without it a font that fails to decode is silently invisible.
+    "tracing",
     "woff",
 ] }
 discord-rich-presence = { workspace = true }
