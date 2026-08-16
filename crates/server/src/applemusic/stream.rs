@@ -263,6 +263,17 @@ pub async fn resolve_and_decrypt(
         language,
     );
     let adam_id = api.resolve_catalog_id(adam_id).await?;
+    let cache_path = decrypted_cache_path(&adam_id);
+    if let Ok(cached) = tokio::fs::read(&cache_path).await
+        && !cached.is_empty()
+    {
+        tracing::info!(
+            "am.stream: reusing decrypted {} ({} bytes)",
+            cache_path.display(),
+            cached.len()
+        );
+        return Ok(cached);
+    }
 
     tracing::info!("am.stream: resolving web playback for adam_id={adam_id}");
 
@@ -332,20 +343,44 @@ pub async fn resolve_and_decrypt(
 
     let decrypted = crate::applemusic::cenc::decrypt_fmp4(&encrypted_bytes, &cdm, &key_id)?;
 
-    // Save decrypted output for testing
-    let tmp_dir = std::env::temp_dir().join("kopuz_am_decrypt");
-    let _ = tokio::fs::create_dir_all(&tmp_dir).await;
-    let id = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let out_path = tmp_dir.join(format!("decrypted_{id}.m4a"));
-    let _ = tokio::fs::write(&out_path, &decrypted).await;
+    store_decrypted(&cache_path, &decrypted).await;
     tracing::info!(
         "am.stream: decrypted {} bytes → {}",
         decrypted.len(),
-        out_path.display()
+        cache_path.display()
     );
 
     Ok(decrypted)
+}
+
+/// Where a track's decrypted audio is cached, keyed by catalog id so a replay
+/// reuses it. Lives under the temp dir, so the OS clears it between boots rather
+/// than leaving decrypted audio around indefinitely.
+fn decrypted_cache_path(adam_id: &str) -> std::path::PathBuf {
+    let safe: String = adam_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        .collect();
+    std::env::temp_dir()
+        .join("kopuz_am_decrypt")
+        .join(format!("{safe}.m4a"))
+}
+
+/// Publish `bytes` at `path` via a temp file + rename, so a crash mid-write
+/// can't leave a truncated file that later reads back as a valid cache hit.
+async fn store_decrypted(path: &std::path::Path, bytes: &[u8]) {
+    let Some(dir) = path.parent() else { return };
+    if let Err(e) = tokio::fs::create_dir_all(dir).await {
+        tracing::debug!("am.stream: cache dir {}: {e}", dir.display());
+        return;
+    }
+    let staging = path.with_extension("part");
+    if let Err(e) = tokio::fs::write(&staging, bytes).await {
+        tracing::debug!("am.stream: cache write {}: {e}", staging.display());
+        return;
+    }
+    if let Err(e) = tokio::fs::rename(&staging, path).await {
+        tracing::debug!("am.stream: cache publish {}: {e}", path.display());
+        let _ = tokio::fs::remove_file(&staging).await;
+    }
 }
