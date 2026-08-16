@@ -18,6 +18,8 @@ use std::sync::{Arc, Mutex};
 use super::cenc::{self, Fmp4Layout};
 use super::widevine::Cdm;
 
+const PREBUFFER_BYTES: usize = 256 * 1024;
+
 /// The file plus everything needed to fill in the rest of it.
 ///
 /// One lock covers the buffer, the per-sample flags and the CDM together. That
@@ -78,6 +80,19 @@ impl ProgressiveTrack {
             total,
             pos: 0,
         };
+
+        // Build the cushion before the decoder ever reads. Costs a fraction of a
+        // second and is what keeps playback from stuttering out of the gate.
+        let prebuffer_end = layout.init_end + PREBUFFER_BYTES;
+        let started = std::time::Instant::now();
+        track
+            .ensure_range(0, prebuffer_end)
+            .map_err(|e| format!("prebuffer: {e}"))?;
+        tracing::info!(
+            "am.decrypt: prebuffered {} KiB in {:.2}s",
+            PREBUFFER_BYTES / 1024,
+            started.elapsed().as_secs_f64()
+        );
 
         // Fill in the rest in order, so sequential playback stays ahead of the
         // playhead. A plain thread: this is CPU-bound and runs for a while.
@@ -147,9 +162,44 @@ impl ProgressiveTrack {
             return Ok(());
         }
         // First sample that could overlap: samples are sorted and disjoint.
-        let mut i = samples.partition_point(|s| s.end() <= start);
+        let first = samples.partition_point(|s| s.end() <= start);
+        if first >= samples.len() || samples[first].start >= end {
+            return Ok(());
+        }
+
+        // One lock for the whole range, not one per sample: re-acquiring it
+        // between samples lets the background filler cut in each time, so a read
+        // that needs 80 samples ends up interleaved 80 times. A reader is
+        // latency-critical (the audio device is draining); the filler is not.
+        let mut s = self
+            .state
+            .lock()
+            .map_err(|_| IoError::other("decrypt state poisoned"))?;
+        if let Some(e) = &s.error {
+            return Err(IoError::other(e.clone()));
+        }
+        let State {
+            buf,
+            decrypted,
+            cdm,
+            remaining,
+            error,
+        } = &mut *s;
+        // No CDM means the track is already fully decrypted.
+        let Some(cdm) = cdm.as_ref() else {
+            return Ok(());
+        };
+
+        let mut i = first;
         while i < samples.len() && samples[i].start < end {
-            ensure_decrypted(&self.state, &self.layout, &self.key_id, i).map_err(IoError::other)?;
+            if !decrypted[i] {
+                if let Err(e) = cenc::decrypt_sample(buf, &samples[i], cdm, &self.key_id) {
+                    *error = Some(e.clone());
+                    return Err(IoError::other(e));
+                }
+                decrypted[i] = true;
+                *remaining -= 1;
+            }
             i += 1;
         }
         Ok(())
