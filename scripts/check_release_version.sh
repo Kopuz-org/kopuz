@@ -39,8 +39,8 @@ ok "crane.nix version == $ver"
 
 # --- consistency: AppStream metainfo has a release entry --------------------
 grep -qP "<release version=\"$(printf '%s' "$ver" | sed 's/\./\\./g')\"" \
-  data/com.temidaradev.kopuz.metainfo.xml \
-  || fail "data/com.temidaradev.kopuz.metainfo.xml has no <release version=\"$ver\"> entry"
+  data/moe.kopuz.kopuz.metainfo.xml \
+  || fail "data/moe.kopuz.kopuz.metainfo.xml has no <release version=\"$ver\"> entry"
 ok "metainfo has <release version=\"$ver\">"
 
 # --- bump check (PR mode) ---------------------------------------------------
