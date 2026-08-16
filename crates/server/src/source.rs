@@ -36,6 +36,7 @@ mod jellyfin;
 mod local;
 mod offline;
 mod soundcloud;
+mod spotify;
 mod subsonic;
 mod types;
 mod youtube_music;
@@ -43,6 +44,7 @@ use jellyfin::JellyfinSource;
 use local::LocalSource;
 use offline::OfflineServerSource;
 use soundcloud::SoundcloudSource;
+use spotify::SpotifySource;
 use subsonic::SubsonicSource;
 pub use types::*;
 use youtube_music::YtSource;
@@ -133,8 +135,20 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("radio"))
     }
 
+    /// Start a radio/mix seeded from a whole playlist, returning the generated
+    /// queue. The queue is the source's own mix for that playlist — not the
+    /// playlist's tracks — so callers play it as-is. Shares
+    /// [`Capabilities::radio`] with [`start_radio`](Self::start_radio): a source
+    /// that can seed radio from a track can seed it from a playlist too.
+    async fn start_playlist_radio(
+        &self,
+        _playlist_ref: &str,
+    ) -> Result<Vec<reader::Track>, SourceError> {
+        Err(SourceError::unsupported("playlist radio"))
+    }
+
     /// The track's canonical public web URL, when this source has shareable web
-    /// pages (e.g. a YouTube Music watch link). `None` otherwise — callers fall
+    /// pages (e.g. a YouTube Music watch link or Spotify track link). `None` otherwise — callers fall
     /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.
     fn web_url(&self, _track: &reader::Track) -> Option<String> {
         None
@@ -350,6 +364,29 @@ pub trait MediaSource: Send + Sync {
     async fn set_favorite(&self, ref_: &str, on: bool) -> Result<(), SourceError> {
         self.db()
             .set_favorite(self.source().as_str(), ref_, on)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Record `track`'s favorite state LOCALLY as a clean row (no dirty/pending),
+    /// without touching the remote. The optimistic half of a favorite toggle:
+    /// write this first so the UI reflects the change immediately, then
+    /// [`push_favorite`](Self::push_favorite) to the remote — and call this again
+    /// with the opposite `on` to revert if the push is rejected. An empty key is a
+    /// no-op.
+    async fn record_favorite(&self, track: &reader::Track, on: bool) -> Result<(), SourceError> {
+        let key = track.id.key();
+        if key.trim().is_empty() {
+            return Ok(());
+        }
+        // Cache the track so the favorites view can resolve the ref.
+        if on {
+            let _ = self.upsert_tracks(std::slice::from_ref(track)).await;
+        }
+        let sid = self.source().as_str();
+        self.db().set_favorite(sid, key.as_ref(), on).await?;
+        self.db()
+            .clear_favorite_dirty(sid, key.as_ref())
             .await
             .map_err(SourceError::from)
     }
@@ -581,7 +618,7 @@ pub trait MediaSource: Send + Sync {
     /// Increment a track's play count, keyed by its uid. DB-cache op.
     async fn bump_listen_count(&self, track_uid: &str) -> Result<(), SourceError> {
         self.db()
-            .bump_listen_count(track_uid)
+            .bump_listen_count(self.source(), track_uid)
             .await
             .map_err(SourceError::from)
     }
@@ -679,16 +716,6 @@ pub(super) async fn mirror_added(
     Ok(())
 }
 
-/// Encode a cover URL into the `urlhex_…` tag the Subsonic cover seam decodes
-/// back (the synthetic album/track cover reference for Subsonic/Custom).
-pub(super) fn encode_cover_url_tag(url: &str) -> String {
-    let mut hex = String::with_capacity(url.len() * 2);
-    for b in url.as_bytes() {
-        hex.push_str(&format!("{b:02x}"));
-    }
-    format!("urlhex_{hex}")
-}
-
 /// Filter a library corpus by a lowercased `query` — the shared search behavior
 /// for corpus-backed sources (local, Jellyfin, Subsonic). Matches tracks on
 /// title/artist/album/genre (≤100) and albums on title/artist/genre, deduped by
@@ -768,15 +795,16 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         }
         MusicService::YtMusic => Box::new(YtSource::new(db, source, conn)),
         MusicService::SoundCloud => Box::new(SoundcloudSource::new(db, source, conn)),
-MusicService::AppleMusic => Box::new(AppleMusicSource {
-    db,
-    source,
-    client: crate::applemusic::AppleMusicApi::new(
-        Some(conn.token.clone()),
-        &conn.apple_music_storefront,
-        &conn.apple_music_language,
-    ),
-}),
+        MusicService::AppleMusic => Box::new(AppleMusicSource {
+            db,
+            source,
+            client: crate::applemusic::AppleMusicApi::new(
+                Some(conn.token.clone()),
+                &conn.apple_music_storefront,
+                &conn.apple_music_language,
+            ),
+        }),
+        MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
     }
 }
 
@@ -785,36 +813,6 @@ MusicService::AppleMusic => Box::new(AppleMusicSource {
 /// rotation, so call sites read the cached handle instead of rebuilding — and
 /// for a server, re-standing-up an HTTP client — on every operation.
 pub type ActiveSource = std::sync::Arc<dyn MediaSource>;
-
-/// Ergonomic, track-centric wrappers over the source's DB-backed favorite truth,
-/// so call sites read `track.is_favorite(&source).await` instead of pulling the
-/// key out by hand. Defined here (not on `reader::Track`) because the truth lives
-/// on [`MediaSource`], and `reader` can't depend on `server`.
-#[async_trait]
-pub trait TrackFavorite {
-    /// Whether this track is currently favorited for `source` (an empty key —
-    /// e.g. an unresolved track — is never a favorite).
-    async fn is_favorite(&self, source: &ActiveSource) -> bool;
-
-    /// Set this track's favorite state for `source` (an empty key is a no-op).
-    async fn set_favorite(&self, source: &ActiveSource, on: bool) -> Result<(), SourceError>;
-}
-
-#[async_trait]
-impl TrackFavorite for reader::Track {
-    async fn is_favorite(&self, source: &ActiveSource) -> bool {
-        let key = self.id.key();
-        !key.trim().is_empty() && source.is_favorite(key.as_ref()).await
-    }
-
-    async fn set_favorite(&self, source: &ActiveSource, on: bool) -> Result<(), SourceError> {
-        let key = self.id.key();
-        if key.trim().is_empty() {
-            return Ok(());
-        }
-        source.set_favorite(key.as_ref(), on).await
-    }
-}
 
 /// The configured server's [`MediaSource`], or `None` when no usable creds
 /// exist. Unlike [`active`] this ignores the active source — the reconciler
@@ -825,13 +823,9 @@ pub fn configured_server(db: Db, config: &AppConfig) -> Option<Box<dyn MediaSour
     Some(remote_source(db, source, &conn))
 }
 
-/// The local (filesystem) [`MediaSource`] — for the statically-local pages,
-/// which never act on a server and so need no config.
-pub fn local(db: Db) -> Box<dyn MediaSource> {
-    Box::new(LocalSource {
-        db,
-        source: Source::Local,
-    })
+/// A local (filesystem) [`MediaSource`] using the supplied DB namespace.
+pub fn local(db: Db, source: Source) -> Box<dyn MediaSource> {
+    Box::new(LocalSource { db, source })
 }
 
 /// The [`MediaSource`] backing a given [`Source`] key — the single factory.
@@ -841,7 +835,7 @@ pub fn local(db: Db) -> Box<dyn MediaSource> {
 /// the result (the cached [`ActiveSource`]) rather than calling per render.
 pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSource> {
     match source {
-        Source::Local => local(db),
+        Source::Local | Source::LocalLibrary(_) => local(db, source.clone()),
         Source::Server(id) => match ServerConn::resolve(config) {
             Some(conn) => remote_source(db, Source::Server(id.clone()), &conn),
             None => Box::new(OfflineServerSource {
@@ -894,8 +888,13 @@ impl MediaSource for AppleMusicSource {
         let token = self.client.media_user_token().unwrap_or("");
         let encoded_token =
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, token.as_bytes());
+        // Parsed by `ResolvedStreamRef::apple_music_parts` on the hooks side.
         Ok(StreamInfo {
-            url: format!("__AM_FMP4:{_item_id}:{encoded_token}"),
+            url: format!(
+                "__AM_FMP4:{_item_id}:{}:{}:{encoded_token}",
+                self.client.storefront(),
+                self.client.language()
+            ),
             format: None,
             user_agent: None,
             duration_secs: None,
@@ -937,7 +936,7 @@ impl MediaSource for AppleMusicSource {
             .map(|s| {
                 s.data
                     .iter()
-                    .map(|t| crate::applemusic::track_from_song_data(t))
+                    .map(crate::applemusic::track_from_song_data)
                     .collect()
             })
             .unwrap_or_default();
@@ -1041,9 +1040,7 @@ impl MediaSource for AppleMusicSource {
                 id: p.id,
                 name: p.attributes.name,
                 image_tag: p.attributes.artwork.map(|a| {
-                    utils::jellyfin_image::encode_cover_url(&crate::applemusic::artwork_url(
-                        &a.url, 300,
-                    ))
+                    reader::CoverRef::encode_url(&crate::applemusic::artwork_url(&a.url, 300))
                 }),
             })
             .collect())
@@ -1060,7 +1057,7 @@ impl MediaSource for AppleMusicSource {
             .map_err(SourceError::Backend)?;
         Ok(songs
             .iter()
-            .map(|s| crate::applemusic::track_from_song_data(s))
+            .map(crate::applemusic::track_from_song_data)
             .collect())
     }
 
@@ -1112,11 +1109,11 @@ impl MediaSource for AppleMusicSource {
             .map_err(SourceError::Backend)?;
         let mut out = Vec::new();
         for a in &artists {
-            if let Some(artwork) = &a.attributes.artwork {
-                if !artwork.url.is_empty() {
-                    let url = crate::applemusic::artwork_url(&artwork.url, 300);
-                    out.push((a.attributes.name.clone(), url));
-                }
+            if let Some(artwork) = &a.attributes.artwork
+                && !artwork.url.is_empty()
+            {
+                let url = crate::applemusic::artwork_url(&artwork.url, 300);
+                out.push((a.attributes.name.clone(), url));
             }
         }
         tracing::info!("am.fetch_artist_images: {} artists with images", out.len());

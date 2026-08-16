@@ -47,7 +47,6 @@ fn reset_progress_session() {
     state.session_elapsed_secs = 0.0;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn queue_downloads(
     requests: Vec<(String, String, String)>,
     config: Signal<AppConfig>,
@@ -142,7 +141,6 @@ pub fn queue_downloads(
     );
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 async fn download_worker(
     mut queue: Signal<DownloadQueue>,
     mut config: Signal<AppConfig>,
@@ -250,7 +248,6 @@ async fn download_worker(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn delete_downloads(
     ids: Vec<String>,
     mut config: Signal<AppConfig>,
@@ -278,7 +275,6 @@ pub fn delete_downloads(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[tracing::instrument(
     name = "download.track",
     skip(url, user_agent, queue, session_start, cancel_flag),

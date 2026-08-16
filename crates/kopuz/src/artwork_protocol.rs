@@ -1,6 +1,5 @@
 use tracing::Instrument;
 
-#[cfg(not(target_arch = "wasm32"))]
 fn thumb_cache_path(file_path: &str) -> std::path::PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -9,7 +8,6 @@ fn thumb_cache_path(file_path: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("rusic_thumb_{hash:016x}.jpg"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn hq_cache_path(file_path: &str) -> std::path::PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -19,80 +17,106 @@ fn hq_cache_path(file_path: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("rusic_hq_{hash:016x}.jpg"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn make_thumbnail(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     use image::codecs::jpeg::JpegEncoder;
     let img = image::load_from_memory(raw).ok()?;
-    const MAX: u32 = 400;
-    let img = if img.width() > MAX || img.height() > MAX {
-        img.thumbnail(MAX, MAX)
+    const MAX_DIMENSION: u32 = 400;
+    let img = if img.width() > MAX_DIMENSION || img.height() > MAX_DIMENSION {
+        img.thumbnail(MAX_DIMENSION, MAX_DIMENSION)
     } else {
         img
     };
-    let mut out: Vec<u8> = Vec::new();
+    let mut out = Vec::new();
     img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, 75))
         .ok()?;
     let _ = std::fs::write(cache_path, &out);
     Some(out)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     use image::codecs::jpeg::JpegEncoder;
     const SIZE_LIMIT: usize = 2 * 1024 * 1024;
-    const MAX_DIM: u32 = 1920;
-    const QUALITY: u8 = 85;
+    const MAX_DIMENSION: u32 = 1920;
 
     if raw.len() <= SIZE_LIMIT {
         return None;
     }
     let img = image::load_from_memory(raw).ok()?;
-    let img = if img.width() > MAX_DIM || img.height() > MAX_DIM {
-        img.thumbnail(MAX_DIM, MAX_DIM)
+    let img = if img.width() > MAX_DIMENSION || img.height() > MAX_DIMENSION {
+        img.thumbnail(MAX_DIMENSION, MAX_DIMENSION)
     } else {
         img
     };
-    let mut out: Vec<u8> = Vec::new();
-    img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, QUALITY))
+    let mut out = Vec::new();
+    img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, 85))
         .ok()?;
     let _ = std::fs::write(cache_path, &out);
     Some(out)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn mime_for_path(file_path: &str) -> &'static str {
+    let extension = std::path::Path::new(file_path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default();
+    if extension.eq_ignore_ascii_case("png") {
+        "image/png"
+    } else if extension.eq_ignore_ascii_case("gif") {
+        "image/gif"
+    } else if extension.eq_ignore_ascii_case("webp") {
+        "image/webp"
+    } else if extension.eq_ignore_ascii_case("bmp") {
+        "image/bmp"
+    } else if extension.eq_ignore_ascii_case("avif") {
+        "image/avif"
+    } else if extension.eq_ignore_ascii_case("svg") {
+        "image/svg+xml"
+    } else if extension.eq_ignore_ascii_case("tif") || extension.eq_ignore_ascii_case("tiff") {
+        "image/tiff"
+    } else if extension.eq_ignore_ascii_case("ico") {
+        "image/x-icon"
+    } else {
+        "image/jpeg"
+    }
+}
+
+#[cfg(not(target_os = "android"))]
 pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) {
     fn resp(
         status: u16,
         headers: &[(&str, &str)],
         body: Vec<u8>,
     ) -> http::Response<std::borrow::Cow<'static, [u8]>> {
-        let mut b = http::Response::builder().status(status);
-        b = b.header("Access-Control-Allow-Origin", "*");
-        for (k, v) in headers {
-            b = b.header(*k, *v);
+        let mut builder = http::Response::builder()
+            .status(status)
+            .header("Access-Control-Allow-Origin", "*");
+        for (key, value) in headers {
+            builder = builder.header(*key, *value);
         }
-        b.body(std::borrow::Cow::from(body)).unwrap_or_else(|_| {
-            http::Response::builder()
-                .status(500)
-                .header("Access-Control-Allow-Origin", "*")
-                .body(std::borrow::Cow::from(Vec::new()))
-                .expect("static fallback response")
-        })
+        builder
+            .body(std::borrow::Cow::from(body))
+            .unwrap_or_else(|_| {
+                http::Response::builder()
+                    .status(500)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(std::borrow::Cow::from(Vec::new()))
+                    .expect("static fallback response")
+            })
     }
 
     tokio::spawn(
         async move {
             let query = uri.query().unwrap_or_default();
-            let file_path: String = query
+            let file_path = query
                 .split('&')
-                .find_map(|kv| kv.strip_prefix("p="))
+                .find_map(|part| part.strip_prefix("p="))
                 .map(|encoded| {
                     percent_encoding::percent_decode_str(encoded)
                         .decode_utf8_lossy()
                         .into_owned()
                 })
                 .unwrap_or_default();
-            let high_quality = query.split('&').any(|kv| kv == "hq=1");
+            let high_quality = query.split('&').any(|part| part == "hq=1");
 
             if file_path.is_empty() {
                 responder.respond(resp(400, &[], Vec::new()));
@@ -114,9 +138,9 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
             };
 
             if high_quality {
-                let hq_path = hq_cache_path(&file_path);
-                if hq_path.exists()
-                    && let Ok(b) = tokio::fs::read(&hq_path).await
+                let cache_path = hq_cache_path(&file_path);
+                if cache_path.exists()
+                    && let Ok(bytes) = tokio::fs::read(&cache_path).await
                 {
                     responder.respond(resp(
                         200,
@@ -124,27 +148,21 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
                             ("Content-Type", "image/jpeg"),
                             ("Cache-Control", "public, max-age=31536000"),
                         ],
-                        b,
+                        bytes,
                     ));
                     return;
                 }
+
                 match tokio::fs::read(&file_path).await {
                     Ok(raw) => {
-                        let file_path_clone = file_path.clone();
-                        let result = tokio::task::spawn_blocking(move || {
-                            make_hq_image(&raw, &hq_path)
-                                .map(|b| (b, "image/jpeg"))
-                                .unwrap_or_else(|| {
-                                    let mime = if file_path_clone.ends_with(".png") {
-                                        "image/png"
-                                    } else {
-                                        "image/jpeg"
-                                    };
-                                    (raw, mime)
-                                })
+                        let mime = mime_for_path(&file_path);
+                        match tokio::task::spawn_blocking(move || {
+                            make_hq_image(&raw, &cache_path)
+                                .map(|bytes| (bytes, "image/jpeg"))
+                                .unwrap_or((raw, mime))
                         })
-                        .await;
-                        match result {
+                        .await
+                        {
                             Ok((bytes, mime)) => responder.respond(resp(
                                 200,
                                 &[
@@ -156,27 +174,22 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
                             Err(_) => responder.respond(resp(500, &[], Vec::new())),
                         }
                     }
-                    Err(_) => responder.respond(resp(404, &[], Vec::new())),
+                    Err(error) => {
+                        tracing::warn!(path = %file_path, %error, "artwork not found");
+                        responder.respond(resp(404, &[], Vec::new()));
+                    }
                 }
                 return;
             }
 
-            let thumb_path = thumb_cache_path(&file_path);
-
-            let (bytes, mime) = if thumb_path.exists() {
-                match tokio::fs::read(&thumb_path).await {
-                    Ok(b) => (b, "image/jpeg"),
+            let cache_path = thumb_cache_path(&file_path);
+            let (bytes, mime) = if cache_path.exists() {
+                match tokio::fs::read(&cache_path).await {
+                    Ok(bytes) => (bytes, "image/jpeg"),
                     Err(_) => {
-                        let _ = std::fs::remove_file(&thumb_path);
+                        let _ = std::fs::remove_file(&cache_path);
                         match tokio::fs::read(&file_path).await {
-                            Ok(b) => (
-                                b,
-                                if file_path.ends_with(".png") {
-                                    "image/png"
-                                } else {
-                                    "image/jpeg"
-                                },
-                            ),
+                            Ok(bytes) => (bytes, mime_for_path(&file_path)),
                             Err(_) => {
                                 responder.respond(resp(404, &[], Vec::new()));
                                 return;
@@ -187,32 +200,24 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
             } else {
                 match tokio::fs::read(&file_path).await {
                     Ok(raw) => {
-                        let thumb_path_clone = thumb_path.clone();
+                        let cache_path_clone = cache_path.clone();
                         match tokio::task::spawn_blocking(move || {
-                            match make_thumbnail(&raw, &thumb_path_clone) {
-                                Some(b) => Ok(b),
-                                None => Err(raw),
-                            }
+                            make_thumbnail(&raw, &cache_path_clone)
+                                .map(Ok)
+                                .unwrap_or(Err(raw))
                         })
                         .await
                         {
-                            Ok(Ok(b)) => (b, "image/jpeg"),
-                            Ok(Err(raw)) => (
-                                raw,
-                                if file_path.ends_with(".png") {
-                                    "image/png"
-                                } else {
-                                    "image/jpeg"
-                                },
-                            ),
+                            Ok(Ok(bytes)) => (bytes, "image/jpeg"),
+                            Ok(Err(raw)) => (raw, mime_for_path(&file_path)),
                             Err(_) => {
                                 responder.respond(resp(500, &[], Vec::new()));
                                 return;
                             }
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!("[artwork] not found {}: {}", file_path, e);
+                    Err(error) => {
+                        tracing::warn!(path = %file_path, %error, "artwork not found");
                         responder.respond(resp(404, &[], Vec::new()));
                         return;
                     }
@@ -230,4 +235,25 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
         }
         .in_current_span(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn thumbnail_and_background_caches_are_separate() {
+        assert_ne!(
+            thumb_cache_path("/music/cover.png"),
+            hq_cache_path("/music/cover.png")
+        );
+    }
+
+    #[test]
+    fn artwork_mime_preserves_common_formats() {
+        assert_eq!(mime_for_path("cover.PNG"), "image/png");
+        assert_eq!(mime_for_path("cover.webp"), "image/webp");
+        assert_eq!(mime_for_path("cover.svg"), "image/svg+xml");
+        assert_eq!(mime_for_path("cover.jpg"), "image/jpeg");
+    }
 }

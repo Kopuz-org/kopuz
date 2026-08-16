@@ -1,0 +1,33 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps", "crate_edition")
+load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+exports_files(["Cargo.toml"])
+
+cargo_build_script(
+    name = "i18n_build_script",
+    srcs = ["build.rs"],
+    data = glob(["locales/*.ftl"]),
+    edition = crate_edition(),
+    pkg_name = "kopuz-i18n",
+    version = "0.11.0",
+)
+
+rust_library(
+    name = "i18n",
+    aliases = aliases(normal = True, proc_macro = True),
+    crate_name = "i18n",
+    deps = all_crate_deps(normal = True) + [":i18n_build_script"],
+    edition = crate_edition(),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_env = {"CARGO_PKG_VERSION": "0.11.0"},
+    srcs = glob(["src/**/*.rs"]),
+    version = "0.11.0",
+)
+
+rust_test(
+    name = "i18n_test",
+    crate = ":i18n",
+    edition = crate_edition(),
+)

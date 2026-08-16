@@ -1,20 +1,17 @@
 use dioxus::prelude::*;
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AvailableUpdate {
     pub version: String,
     pub release_url: String,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(serde::Deserialize)]
 struct GithubRelease {
     tag_name: String,
     html_url: String,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn parse_version_parts(version: &str) -> Option<Vec<u64>> {
     let core = version
         .trim()
@@ -29,7 +26,6 @@ fn parse_version_parts(version: &str) -> Option<Vec<u64>> {
     parts.filter(|parts| !parts.is_empty())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn is_newer_version(current: &str, candidate: &str) -> bool {
     let Some(current_parts) = parse_version_parts(current) else {
         return false;
@@ -52,7 +48,6 @@ fn is_newer_version(current: &str, candidate: &str) -> bool {
     false
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub async fn fetch_available() -> Option<AvailableUpdate> {
     let client = reqwest::Client::builder()
         .user_agent(format!("kopuz/{}", env!("CARGO_PKG_VERSION")))
@@ -81,7 +76,6 @@ pub async fn fetch_available() -> Option<AvailableUpdate> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub async fn run_rotation(mut config: Signal<config::AppConfig>) {
     let cookies = match config.peek().server.as_ref() {
         Some(s) if s.service == config::MusicService::YtMusic => s.access_token.clone(),
@@ -92,11 +86,17 @@ pub async fn run_rotation(mut config: Signal<config::AppConfig>) {
         return;
     }
     let started = std::time::Instant::now();
-    match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
+    let from_len = cookies.len();
+    let outcome =
+        utils::offload(
+            async move { server::ytmusic::verify_session_keepalive::tick(&cookies).await },
+        )
+        .await;
+    match outcome {
         Ok(Some(updated)) => {
             tracing::debug!(
                 secs = started.elapsed().as_secs_f32(),
-                from = cookies.len(),
+                from = from_len,
                 to = updated.len(),
                 "verify_session OK - jar rotated",
             );
@@ -106,5 +106,34 @@ pub async fn run_rotation(mut config: Signal<config::AppConfig>) {
         }
         Ok(None) => {}
         Err(e) => tracing::warn!(error = %e, "verify_session failed"),
+    }
+}
+
+/// Refresh the active Spotify server's OAuth access token from its refresh token
+/// (access tokens expire ~hourly) and write the re-packed pair back to config.
+pub async fn run_spotify_refresh(mut config: Signal<config::AppConfig>) {
+    let (packed, client_id) = match config.peek().server.as_ref() {
+        Some(s) if s.service == config::MusicService::Spotify => {
+            (s.access_token.clone(), s.url.clone())
+        }
+        _ => return,
+    };
+    let Some(packed) = packed else { return };
+    if client_id.trim().is_empty() {
+        return;
+    }
+    match server::spotify::auth::refresh_packed(&packed, client_id.clone()).await {
+        Ok(new_packed) => {
+            let mut cfg = config.write();
+            if let Some(srv) = cfg.server.as_mut()
+                && srv.service == config::MusicService::Spotify
+                && srv.url == client_id
+                && srv.access_token.as_deref() == Some(packed.as_str())
+            {
+                srv.access_token = Some(new_packed);
+                tracing::debug!("spotify token refreshed");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "spotify token refresh failed"),
     }
 }

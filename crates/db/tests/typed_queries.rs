@@ -8,11 +8,16 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Executor};
 
 fn unique_db() -> PathBuf {
+    // pid + counter, not just clock: macOS's µs clock let parallel tests
+    // collide on a nanos-only name and delete each other's live DB.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("kopuz-tq-{nanos}"));
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("kopuz-tq-{pid}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join("kopuz.db")
 }
@@ -77,9 +82,12 @@ async fn seed(db_path: &std::path::Path) {
     batch.push_str(
         "INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, artists_json) \
          VALUES (100, 'srv-1', 'vid1', 'YtMusic', 'al-yt', 'Server Song', 'Cyn', 'Yt Album', '[]');\n\
+         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, artists_json) \
+         VALUES (101, 'local:test', '/music/jazz/b_1.flac', 'al-separate', 'Separate Song', 'Dee', 'Separate Album', '[]');\n\
          INSERT INTO albums (source, source_album_id, title, artist, genre) VALUES \
            ('local', 'al-rock', 'Rock One', 'Axel', 'Rock'), \
            ('local', 'al-jazz', 'Jazz One', 'Bea', 'Jazz'), \
+           ('local:test', 'al-separate', 'Separate Album', 'Dee', 'Other'), \
            ('srv-1', 'al-yt', 'Yt Album', 'Cyn', 'Pop');\n\
          INSERT INTO listen_counts (track_key, count) VALUES \
            ('/music/rock/a1.flac', 3), ('/music/jazz/b_1.flac', 10), ('ytmusic:vid1', 7);\n",
@@ -102,18 +110,38 @@ async fn typed_queries_smoke() {
         "album_tracks orders by disc/track"
     );
 
-    let bea = db.artist_tracks(&local, "Bea").await.unwrap();
+    let bea = db.artist_tracks(&local, "Bea", None).await.unwrap();
     assert_eq!(bea.len(), 2);
     assert!(bea.iter().all(|t| t.artist == "Bea"));
+
+    let bounded = db.artist_tracks(&local, "Bea", Some(1)).await.unwrap();
+    assert_eq!(bounded.len(), 1, "limit bounds the query SQL-side");
 
     let jazz = db.genre_tracks(&local, "Jazz").await.unwrap();
     assert_eq!(jazz.len(), 2);
     assert!(jazz.iter().all(|t| t.album == "Jazz One"));
 
     // Prefix with an underscore in a filename must not act as a wildcard.
-    let folder = db.folder_tracks("/music/jazz/").await.unwrap();
+    let folder = db
+        .folder_tracks(&Source::Local, "/music/jazz/")
+        .await
+        .unwrap();
     assert_eq!(folder.len(), 2);
-    let none = db.folder_tracks("/music/ja_z/").await.unwrap();
+    let separate = db
+        .folder_tracks(&Source::LocalLibrary("local:test".into()), "/music/jazz/")
+        .await
+        .unwrap();
+    assert_eq!(separate.len(), 1);
+    assert_eq!(separate[0].title, "Separate Song");
+    assert_eq!(
+        separate[0].id.local_path(),
+        Some(std::path::Path::new("/music/jazz/b_1.flac")),
+        "named local sources must reconstruct filesystem track ids",
+    );
+    let none = db
+        .folder_tracks(&Source::Local, "/music/ja_z/")
+        .await
+        .unwrap();
     assert!(none.is_empty(), "LIKE metachars are escaped");
 
     let samples = db.artist_sample_tracks(&local, 10).await.unwrap();

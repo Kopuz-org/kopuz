@@ -1,5 +1,24 @@
 # Contributing to Kopuz
 
+<!--toc:start-->
+
+- [Contributing to Kopuz](#contributing-to-kopuz)
+  - [Code of Conduct](#code-of-conduct)
+  - [Before You Start](#before-you-start)
+  - [Development Setup](#development-setup)
+  - [Common Commands](#common-commands)
+  - [Testing Expectations](#testing-expectations)
+  - [Code Style](#code-style)
+  - [Pull Requests and Submitting Changes](#pull-requests-and-submitting-changes)
+    - [History Hygiene](#history-hygiene)
+    - [Commit Messages](#commit-messages)
+  - [Maintainer Communication](#maintainer-communication)
+  - [AI Policy](#ai-policy)
+    - [What This Means](#what-this-means)
+  - [License](#license)
+
+<!--toc:end-->
+
 Kopuz is a Rust and Dioxus music player with desktop, packaging, and media
 backend code living in one workspace. Contributions are welcome when they are
 small enough to review, tested against the path they touch, and honest about the
@@ -104,7 +123,7 @@ Kopuz uses Rust 2024 and workspace lints from `Cargo.toml`.
 - Keep generated assets such as Tailwind output in sync when your change depends
   on them.
 
-## Pull Requests
+## Pull Requests and Submitting Changes
 
 Keep commits and pull requests focused on one behavior change. A useful PR
 description includes:
@@ -118,6 +137,69 @@ description includes:
 Maintainers may ask for narrower diffs, clearer tests, or a different boundary.
 Please handle review comments in follow-up commits instead of force-pushing away
 review context unless a maintainer asks you to clean up the branch.
+
+### History Hygiene
+
+Keep the final history reviewable; each commit should be an atomic, squashed
+logical change with a useful subject. Before asking for final review, squash
+fixup commits, typo-only follow-ups, formatter-only repair commits, and
+review-addressing noise into the commit that introduced the behavior.
+
+Avoid merge commits in pull request branches. Rebase on the target branch when
+needed, then force-push with lease. A pull request may contain more than one
+commit when the changes are genuinely separate, but each commit should build on
+its own idea and pass the commit message rules below.
+
+### Commit Messages
+
+[scoped commits]
+
+Please use clear, descriptive commit messages that adhere to **[scoped
+commits]** format that are **no longer than 80 characters**. Since Kopuz is
+rather large, the scope may differ. The main difference is how the scope is
+described. Depending on your change, the scope may be the crate you are working
+on or the crate plus the Rust module you've edited. For example, a change that
+affects the entirety of the `components` crate would use the `components:`
+prefix while a change targeting `header.rs` in `components` would use
+`components/header`:
+
+**One targeted module**:
+
+```commitmsg
+components/header: fix expanded state not persisting across track changes
+```
+
+**Various modules in one crate**:
+
+```commitmsg
+player: fix gapless playback gap calculation
+```
+
+**Multiple crates**:
+
+```commitmsg
+various: flush source state on library rescan
+```
+
+In single-crate commits, the format is `<crate>/<module>: <description>`. Some
+common non-crate scopes include `various`, `treewide`, `chore` or `meta` for
+common maintenance tasks. `docs` is the default scope for documentation changes,
+and `build` can be used for the catch-all scope for packaging related changes.
+We also use `nix` specifically for Nix-related packaging.
+
+In most cases, the format will be `<crate-name>/<module-name>: <description>`.
+You should also strive to make your commits atomic, and focus each commit on one
+logical change. Ensure that your messages are _descriptive_ .
+
+CI enforces these commit subject rules on pull requests and pushes:
+
+- the subject must be no longer than 80 characters;
+- the subject must use `scope: description` or `scope/module: description`.
+
+> [!TIP]
+> You do not need to reference issues in commit bodies, but you _may_ add
+> something like `Fixes #XXX` to the long description to auto-link relevant
+> issues.
 
 ## Maintainer Communication
 

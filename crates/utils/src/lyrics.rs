@@ -4,13 +4,13 @@ use std::collections::{HashSet, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
+mod apple_music;
 mod cache;
 mod local;
 mod lrc;
 mod model;
 mod request;
 mod server;
-mod apple_music;
 
 use cache::{
     LyricsInflightGuard, load_persisted_lyrics, lyrics_cache, store_lyrics, try_begin_lyrics_fetch,
@@ -469,42 +469,42 @@ where
         }
     }
 
-    if let Some(am_auth) = &request.apple_music_auth {
-        if track_path.starts_with("applemusic:") {
-            let started = Instant::now();
-            let am_lyrics = apple_music::fetch_apple_music_lyrics(am_auth).await;
-            tracing::info!(
-                target: "kopuz::lyrics",
-                "apple_music key_hash={} elapsed_ms={} kind={}",
-                log_lyrics_key_hash(&cache_key),
-                started.elapsed().as_millis(),
-                lyrics_kind(am_lyrics.as_ref())
-            );
-            lyrics_debug!(
-                "provider=apple_music elapsed_ms={} kind={}",
-                started.elapsed().as_millis(),
-                lyrics_kind(am_lyrics.as_ref())
-            );
-            if let Some(lyrics) = am_lyrics {
-                if has_word_timestamps(&lyrics) {
-                    store_lyrics(&cache_key, &Some(lyrics.clone())).await;
-                    tracing::info!(
-                        target: "kopuz::lyrics",
-                        "selected key_hash={} source=apple_music kind={} total_ms={}",
-                        log_lyrics_key_hash(&cache_key),
-                        lyrics_kind(Some(&lyrics)),
-                        total_start.elapsed().as_millis()
-                    );
-                    lyrics_debug!(
-                        "selected source=apple_music key_hash={} kind={} total_ms={}",
-                        cache_key_hash,
-                        lyrics_kind(Some(&lyrics)),
-                        total_start.elapsed().as_millis()
-                    );
-                    return Some(lyrics);
-                }
-                fallback.get_or_insert(lyrics);
+    if let Some(am_auth) = &request.apple_music_auth
+        && track_path.starts_with("applemusic:")
+    {
+        let started = Instant::now();
+        let am_lyrics = apple_music::fetch_apple_music_lyrics(am_auth).await;
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "apple_music key_hash={} elapsed_ms={} kind={}",
+            log_lyrics_key_hash(&cache_key),
+            started.elapsed().as_millis(),
+            lyrics_kind(am_lyrics.as_ref())
+        );
+        lyrics_debug!(
+            "provider=apple_music elapsed_ms={} kind={}",
+            started.elapsed().as_millis(),
+            lyrics_kind(am_lyrics.as_ref())
+        );
+        if let Some(lyrics) = am_lyrics {
+            if has_word_timestamps(&lyrics) {
+                store_lyrics(&cache_key, &Some(lyrics.clone())).await;
+                tracing::info!(
+                    target: "kopuz::lyrics",
+                    "selected key_hash={} source=apple_music kind={} total_ms={}",
+                    log_lyrics_key_hash(&cache_key),
+                    lyrics_kind(Some(&lyrics)),
+                    total_start.elapsed().as_millis()
+                );
+                lyrics_debug!(
+                    "selected source=apple_music key_hash={} kind={} total_ms={}",
+                    cache_key_hash,
+                    lyrics_kind(Some(&lyrics)),
+                    total_start.elapsed().as_millis()
+                );
+                return Some(lyrics);
             }
+            fallback.get_or_insert(lyrics);
         }
     }
 
@@ -803,15 +803,7 @@ fn log_lyrics_key_hash(key: &str) -> String {
 }
 
 fn lyrics_terminal_debug_enabled() -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        false
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::env::var_os("KOPUZ_LYRICS_DEBUG").is_some()
-    }
+    std::env::var_os("KOPUZ_LYRICS_DEBUG").is_some()
 }
 
 fn lyrics_cache_key(

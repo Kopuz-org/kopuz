@@ -19,6 +19,8 @@ pub struct RegistryStationRef {
 #[derive(Debug, Default)]
 pub struct StationRegistry {
     stations: HashMap<String, StationManifest>,
+    /// Runtime inserts; kept out of the curated listing.
+    runtime_ids: std::collections::HashSet<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -88,7 +90,6 @@ async fn fetch_content(
     let is_http = |s: &str| s.starts_with("http://") || s.starts_with("https://");
 
     if is_http(url_or_path) || base_url_or_dir.is_some_and(is_http) {
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let url = if is_http(url_or_path) {
                 url_or_path.to_string()
@@ -125,12 +126,6 @@ async fn fetch_content(
 
             Ok((text, new_base))
         }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err(RegistryError::Network(
-                "HTTP fetching not supported on WASM yet".into(),
-            ))
-        }
     } else {
         let path = if let Some(base) = base_url_or_dir {
             let mut p = PathBuf::from(base);
@@ -153,9 +148,7 @@ async fn fetch_content(
 
 impl StationRegistry {
     pub fn new() -> Self {
-        Self {
-            stations: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub async fn import_registry(&mut self, url_or_path: &str) -> Result<(), RegistryError> {
@@ -234,8 +227,43 @@ impl StationRegistry {
         Ok(())
     }
 
+    /// Insert a built manifest; bypassing registry JSON validation.
+    pub fn insert_manifest(&mut self, manifest: StationManifest) {
+        self.runtime_ids.insert(manifest.id.clone());
+        self.stations.insert(manifest.id.clone(), manifest);
+    }
+
+    /// Insert a manifest as a curated station (shown in the Selected list).
+    pub fn pin_manifest(&mut self, manifest: StationManifest) {
+        self.runtime_ids.remove(&manifest.id);
+        self.stations.insert(manifest.id.clone(), manifest);
+    }
+
+    /// Demote a pinned station back to a runtime insert; stays playable.
+    pub fn unpin_station(&mut self, id: &str) {
+        if self.stations.contains_key(id) {
+            self.runtime_ids.insert(id.to_string());
+        }
+    }
+
+    /// True when the station shows in the curated (Selected) list.
+    pub fn is_registry_station(&self, id: &str) -> bool {
+        self.stations.contains_key(id) && !self.runtime_ids.contains(id)
+    }
+
     pub fn all_stations(&self) -> Vec<&StationManifest> {
         let mut vec: Vec<_> = self.stations.values().collect();
+        vec.sort_by(|a, b| a.name.cmp(&b.name));
+        vec
+    }
+
+    /// Stations from imported JSON registries, without runtime inserts.
+    pub fn registry_stations(&self) -> Vec<&StationManifest> {
+        let mut vec: Vec<_> = self
+            .stations
+            .values()
+            .filter(|m| !self.runtime_ids.contains(&m.id))
+            .collect();
         vec.sort_by(|a, b| a.name.cmp(&b.name));
         vec
     }
@@ -298,6 +326,36 @@ mod tests {
 
         assert_eq!(registry.stations.len(), 1);
         assert!(registry.get("test_station").is_some());
+    }
+
+    #[test]
+    fn runtime_inserts_stay_out_of_registry_listing() {
+        let manifest_json = r#"{
+            "schema_version": "1.0",
+            "id": "browser-uuid",
+            "name": "Browser Station",
+            "description": "d",
+            "streams": [{ "id": "main", "name": "Live", "url": "https://example.com/s" }]
+        }"#;
+        let manifest: StationManifest = serde_json::from_str(manifest_json).unwrap();
+
+        let mut registry = StationRegistry::new();
+        registry.insert_manifest(manifest);
+
+        assert!(registry.get("browser-uuid").is_some());
+        assert_eq!(registry.all_stations().len(), 1);
+        assert!(registry.registry_stations().is_empty());
+        assert!(!registry.is_registry_station("browser-uuid"));
+
+        let manifest = registry.get("browser-uuid").unwrap().clone();
+        registry.pin_manifest(manifest);
+        assert!(registry.is_registry_station("browser-uuid"));
+        assert_eq!(registry.registry_stations().len(), 1);
+
+        registry.unpin_station("browser-uuid");
+        assert!(!registry.is_registry_station("browser-uuid"));
+        assert!(registry.registry_stations().is_empty());
+        assert!(registry.get("browser-uuid").is_some());
     }
 
     #[test]

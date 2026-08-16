@@ -8,10 +8,11 @@ use components::header::Header;
 use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
+use components::sort_control::SortControl;
 use components::stat_card::StatCard;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
-use config::{AppConfig, UiStyle};
+use config::{AppConfig, TrackSortField, UiStyle};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
@@ -47,21 +48,16 @@ pub fn LibraryPage(
     let caps = use_memo(move || active_source.read().capabilities());
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
-    let initial_sort_order = config.read().sort_order.clone();
-    let mut sort_order = use_signal(move || initial_sort_order);
+    let library_sort = use_signal(|| config.peek().library_sort.clone());
     let filter = use_memo(move || TrackFilter {
         source: source(),
-        sort: match *sort_order.read() {
-            config::SortOrder::Title => TrackSort::Title,
-            config::SortOrder::Artist => TrackSort::Artist,
-            config::SortOrder::Album => TrackSort::Album,
-        },
+        sort: TrackSort::Fields(library_sort.read().clone()),
         ..Default::default()
     });
     use_effect(move || {
-        let curr = sort_order.read().clone();
-        if config.peek().sort_order != curr {
-            config.write().sort_order = curr;
+        let curr = library_sort.read().clone();
+        if config.peek().library_sort != curr {
+            config.write().library_sort = curr;
         }
     });
 
@@ -303,10 +299,10 @@ pub fn LibraryPage(
             .collect::<Vec<_>>()
     };
 
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     rsx! {
         div {
-            class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+            class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
 
             if *show_playlist_modal.read() {
                 PlaylistModal {
@@ -461,19 +457,19 @@ pub fn LibraryPage(
 
             div {
                 class: "flex items-center justify-between mb-6",
-                if is_modern {
+                if is_vaxry {
                     div {
                         p {
                             class: "text-[10px] font-bold mb-0.5 text-white/35",
                             "{i18n::t(\"library\")}"
                         }
-                        h1 { class: "text-2xl font-bold text-white", "{i18n::t(\"your_library\")}" }
+                        h1 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"your_library\")}" }
                     }
                 } else {
-                    h1 { class: "text-3xl font-bold text-white", "{i18n::t(\"your_library\")}" }
+                    h1 { class: "text-3xl font-semibold tracking-tight text-white", "{i18n::t(\"your_library\")}" }
                 }
                 button {
-                    class: "text-white/60 hover:text-white transition-colors p-2 rounded-full hover:bg-white/10",
+                    class: "w-9 h-9 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
                     title: if caps().scan_folders { i18n::t("rescan_library").to_string() } else { i18n::t("refresh_music_library").to_string() },
                     onclick: move |_| {
                         if caps().scan_folders {
@@ -548,38 +544,18 @@ pub fn LibraryPage(
                     }
                     h2 { class: "text-xl font-semibold text-white/80", "{i18n::t(\"tracks\")}" }
                 }
-                div {
-                    class: "flex space-x-1 bg-white/5 border border-white/5 p-1 rounded-lg",
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Title {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Title),
-                        "{i18n::t(\"title\")}"
-                    }
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Artist {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Artist),
-                        "{i18n::t(\"artist\")}"
-                    }
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Album {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Album),
-                        "{i18n::t(\"album\")}"
-                    }
+                SortControl {
+                    criteria: library_sort,
+                    available: vec![
+                        TrackSortField::Title,
+                        TrackSortField::Artist,
+                        TrackSortField::Album,
+                        TrackSortField::Duration,
+                        TrackSortField::DateAdded,
+                    ],
                 }
             }
-            Header { is_modern: is_modern, is_album: false }
+            Header { is_vaxry: is_vaxry, is_album: false }
             VirtualScrollView {
                 id: "library-scroll".to_string(),
                 class: if cfg!(target_os = "android") { "flex-1 overflow-y-auto overflow-x-hidden pb-20".to_string() } else { "flex-1 overflow-y-auto pb-20".to_string() },

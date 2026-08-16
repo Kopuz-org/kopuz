@@ -1,20 +1,24 @@
 use serde::{Deserialize, Serialize};
 
 /// Where a track/playlist/favorite comes from, and what the app is currently
-/// sourcing from: the local library, or a specific media server.
+/// sourcing from: the built-in local library, a named local library, or a
+/// specific media server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum Source {
     #[default]
     Local,
+    /// A separately configured local library. Its id includes the `local:`
+    /// namespace so it can safely share the DB `source` column with server ids.
+    LocalLibrary(String),
     Server(String),
 }
 
 impl Source {
-    /// The `source` column value: `"local"` or the server id.
+    /// The `source` column value: `"local"`, a `local:<uuid>` id, or a server id.
     pub fn as_str(&self) -> &str {
         match self {
             Source::Local => "local",
-            Source::Server(id) => id.as_str(),
+            Source::LocalLibrary(id) | Source::Server(id) => id.as_str(),
         }
     }
 
@@ -22,6 +26,8 @@ impl Source {
     pub fn from_column(s: &str) -> Self {
         if s == "local" {
             Source::Local
+        } else if s.starts_with("local:") {
+            Source::LocalLibrary(s.to_owned())
         } else {
             Source::Server(s.to_owned())
         }
@@ -31,7 +37,46 @@ impl Source {
     pub fn server_id(&self) -> Option<&str> {
         match self {
             Source::Server(id) => Some(id),
-            Source::Local => None,
+            Source::Local | Source::LocalLibrary(_) => None,
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, Source::Local | Source::LocalLibrary(_))
+    }
+
+    pub fn local_library_id(&self) -> Option<&str> {
+        match self {
+            Source::LocalLibrary(id) => Some(id),
+            Source::Local | Source::Server(_) => None,
+        }
+    }
+
+    /// Key used by the play-count cache. Legacy Local and server sources keep
+    /// their existing uid keys; named local libraries add their source id so
+    /// the same filesystem path can have independent counts in each library.
+    pub fn listen_count_key(&self, track_uid: &str) -> String {
+        match self {
+            Source::LocalLibrary(id) => format!("{id}|{track_uid}"),
+            Source::Local | Source::Server(_) => track_uid.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SavedLocalSource {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub directories: Vec<std::path::PathBuf>,
+}
+
+impl SavedLocalSource {
+    pub fn new(name: String, directories: Vec<std::path::PathBuf>) -> Self {
+        Self {
+            id: format!("local:{}", uuid::Uuid::new_v4()),
+            name,
+            directories,
         }
     }
 }
@@ -46,6 +91,7 @@ pub enum MusicService {
     YtMusic,
     AppleMusic,
     SoundCloud,
+    Spotify,
 }
 
 impl MusicService {
@@ -57,13 +103,17 @@ impl MusicService {
             Self::YtMusic => "YouTube Music",
             Self::AppleMusic => "Apple Music",
             Self::SoundCloud => "SoundCloud",
+            Self::Spotify => "Spotify",
         }
     }
 
     /// Backends that authenticate via a browser sign-in window (OAuth/cookies)
     /// rather than a URL + username/password form.
     pub fn uses_browser_signin(&self) -> bool {
-        matches!(self, Self::YtMusic | Self::AppleMusic | Self::SoundCloud)
+        matches!(
+            self,
+            Self::YtMusic | Self::AppleMusic | Self::SoundCloud | Self::Spotify
+        )
     }
 }
 
@@ -151,6 +201,7 @@ pub enum Browser {
     Brave,
     Edge,
     Vivaldi,
+    Helium,
 }
 
 impl Browser {
@@ -160,6 +211,7 @@ impl Browser {
         Browser::Brave,
         Browser::Edge,
         Browser::Vivaldi,
+        Browser::Helium,
     ];
 
     /// The stable id used in URL routes, settings UI option values,
@@ -171,6 +223,7 @@ impl Browser {
             Browser::Brave => "brave",
             Browser::Edge => "edge",
             Browser::Vivaldi => "vivaldi",
+            Browser::Helium => "helium",
         }
     }
 
@@ -181,6 +234,7 @@ impl Browser {
             Browser::Brave => "Brave",
             Browser::Edge => "Edge",
             Browser::Vivaldi => "Vivaldi",
+            Browser::Helium => "Helium",
         }
     }
 

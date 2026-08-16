@@ -13,6 +13,8 @@ use std::sync::Arc;
 
 mod backend;
 
+pub use backend::{QueuedScrobbleRow, ScrobbleService};
+
 /// What a one-shot legacy-JSON import did. `ran == false` means it was skipped
 /// (already migrated, or no legacy JSON present); the counts are then all zero.
 #[derive(Debug, Default, Clone)]
@@ -50,7 +52,7 @@ pub struct QueueSnapshot {
 }
 
 /// Sort order for a track listing — maps to an indexed `ORDER BY`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum TrackSort {
     /// Artist → album → disc → track (the natural library order).
     #[default]
@@ -62,6 +64,9 @@ pub enum TrackSort {
     DateAdded,
     /// Most-played first (`listen_counts` join), ties by title.
     PlayCount,
+    /// Stacked user criteria (library sort control): the first field decides,
+    /// the rest break ties. Empty falls back to [`TrackSort::ArtistAlbum`].
+    Fields(Vec<config::SortCriterion<config::TrackSortField>>),
 }
 
 /// What a windowed track listing selects: which source, how it's sorted, and
@@ -113,14 +118,12 @@ impl From<serde_json::Error> for DbError {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl From<sqlx::Error> for DbError {
     fn from(e: sqlx::Error) -> Self {
         DbError::Backend(e.to_string())
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl From<sqlx::migrate::MigrateError> for DbError {
     fn from(e: sqlx::migrate::MigrateError) -> Self {
         DbError::Backend(e.to_string())
@@ -163,11 +166,13 @@ pub trait ReadStore: Send + Sync {
         album_id: &str,
     ) -> Result<Vec<reader::Track>, DbError>;
 
-    /// One artist's tracks, album/disc/track-ordered.
+    /// One artist's tracks, album/disc/track-ordered. `limit` bounds the query
+    /// SQL-side for callers that only probe a few rows.
     async fn artist_tracks(
         &self,
         source: &Source,
         artist: &str,
+        limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError>;
 
     /// Tracks whose album has this genre, artist/album-ordered.
@@ -178,7 +183,11 @@ pub trait ReadStore: Send + Sync {
     ) -> Result<Vec<reader::Track>, DbError>;
 
     /// Local tracks under a directory (path-prefix match), path-ordered.
-    async fn folder_tracks(&self, prefix: &str) -> Result<Vec<reader::Track>, DbError>;
+    async fn folder_tracks(
+        &self,
+        source: &Source,
+        prefix: &str,
+    ) -> Result<Vec<reader::Track>, DbError>;
 
     /// This source's recently-played track keys, newest first (capped).
     async fn recently_played(&self, source: &Source, limit: u32) -> Result<Vec<String>, DbError>;
@@ -244,6 +253,10 @@ pub trait ReadStore: Send + Sync {
     /// `(cache_key, kind)`, if cached.
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
 
+    /// Metadata-cache keys of `kind` written within the last `max_age_secs` —
+    /// e.g. the fresh artist-photo misses the fetch loop must not re-search.
+    async fn meta_keys_since(&self, kind: &str, max_age_secs: i64) -> Result<Vec<String>, DbError>;
+
     /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
     async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
 
@@ -255,6 +268,9 @@ pub trait ReadStore: Send + Sync {
 
     /// Pending-unlike tombstones (`dirty=2`) not yet pushed to the server.
     async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// The whole offline scrobble backlog, oldest listen first (drain order).
+    async fn scrobble_queue_all(&self) -> Result<Vec<QueuedScrobbleRow>, DbError>;
 }
 
 /// The persistence API: every mutation plus admin/dev ops, layered on top of the
@@ -303,7 +319,7 @@ pub trait Storage: ReadStore {
         image_ref: Option<&str>,
     ) -> Result<(), DbError>;
 
-    /// Set/clear an album's cover (manual covers survive non-manual updates).
+    /// Explicitly set/clear an album's cover and its manual state.
     async fn update_album_cover(
         &self,
         source: &Source,
@@ -311,6 +327,15 @@ pub trait Storage: ReadStore {
         cover_path: Option<&str>,
         manual: bool,
     ) -> Result<(), DbError>;
+
+    /// Set an automatically resolved cover unless a manual cover now exists.
+    /// Returns whether the album row was updated.
+    async fn update_album_cover_if_not_manual(
+        &self,
+        source: &Source,
+        album_id: &str,
+        cover_path: &str,
+    ) -> Result<bool, DbError>;
 
     /// Upsert one playlist's metadata (name/cover/image_tag), keeping membership.
     async fn upsert_playlist_meta(
@@ -393,8 +418,8 @@ pub trait Storage: ReadStore {
         folder_id: Option<&str>,
     ) -> Result<(), DbError>;
 
-    /// Increment one track's play count (single-row upsert; key = `TrackId::uid()`).
-    async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError>;
+    /// Increment one track's play count in its source partition.
+    async fn bump_listen_count(&self, source: &Source, track_uid: &str) -> Result<(), DbError>;
 
     /// Record a play for this source's recently-played history (caps + trims).
     async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;
@@ -406,6 +431,20 @@ pub trait Storage: ReadStore {
 
     /// Persist the queue/progress snapshot to the single `queue_state` row.
     async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
+
+    /// Enqueue a failed scrobble (issue #335). A repeat of the same
+    /// `(listen, service)` folds into the existing row; the backlog is capped to
+    /// the newest listens, dropping the oldest first.
+    async fn scrobble_queue_push(&self, row: &QueuedScrobbleRow) -> Result<(), DbError>;
+
+    /// Drop one delivered (or permanently-failed) `(listen, service)` row.
+    async fn scrobble_queue_delete(
+        &self,
+        listened_at: i64,
+        artist: &str,
+        title: &str,
+        service: ScrobbleService,
+    ) -> Result<(), DbError>;
 
     /// Generic metadata-cache write (upsert of `payload` for `(cache_key, kind)`).
     async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError>;
@@ -512,23 +551,15 @@ impl Db {
     }
 }
 
-/// Open the database and apply migrations (native), or build the in-memory stub
-/// (wasm). Native callers should `block_on` this in `main()` before mounting.
-#[cfg(not(target_arch = "wasm32"))]
+/// Open the database and apply migrations. Native callers should `block_on`
+/// this in `main()` before mounting.
 pub async fn init(db_path: &std::path::Path) -> Result<Db, DbError> {
-    let native = backend::native::Native::open(db_path).await?;
+    let native = backend::Native::open(db_path).await?;
     Ok(Db(Arc::new(native)))
-}
-
-/// wasm: an in-memory stub so `dx build --platform web` compiles. Not persistent.
-#[cfg(target_arch = "wasm32")]
-pub fn init_stub() -> Db {
-    Db(Arc::new(backend::stub::Stub::new()))
 }
 
 /// The on-disk database path: `KOPUZ_DB_PATH` override, else `<config_dir>/kopuz.db`
 /// (release) or `kopuz-debug.db` (debug builds, so `dx run` never touches real data).
-#[cfg(not(target_arch = "wasm32"))]
 pub fn default_db_path() -> std::path::PathBuf {
     if let Ok(p) = std::env::var("KOPUZ_DB_PATH") {
         return std::path::PathBuf::from(p);
@@ -546,7 +577,6 @@ pub fn default_db_path() -> std::path::PathBuf {
 /// the titlebar mode. Opens the DB read-only without running migrations; `None`
 /// if the DB or blob doesn't exist yet (first launch). Server/creds fields are
 /// NOT hydrated — blob fields only.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
     if !db_path.exists() {
         return None;
@@ -573,13 +603,11 @@ pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
 
 /// The RELEASE database path (`kopuz.db`), independent of build profile — the
 /// debug panel's "load release DB" source.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn release_db_path() -> std::path::PathBuf {
     config_dir().join("kopuz.db")
 }
 
 /// `<config_dir>` for kopuz (matches the legacy JSON store location).
-#[cfg(not(target_arch = "wasm32"))]
 pub fn config_dir() -> std::path::PathBuf {
     directories::ProjectDirs::from("com", "temidaradev", "kopuz")
         .map(|d| d.config_dir().to_path_buf())

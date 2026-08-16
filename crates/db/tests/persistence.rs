@@ -9,11 +9,16 @@ use db::{QueueSnapshot, Source, TrackFilter};
 use reader::models::{Track, TrackId};
 
 fn unique_db() -> PathBuf {
+    // pid + counter, not just clock: macOS's µs clock let parallel tests
+    // collide on a nanos-only name and delete each other's live DB.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("kopuz-persist-{nanos}"));
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("kopuz-persist-{pid}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join("kopuz.db")
 }
@@ -499,18 +504,20 @@ async fn streaming_playlist_tracks_upsert_then_sweep() {
 }
 
 #[tokio::test]
-async fn liked_music_playlist_is_hidden_from_the_grid() {
+async fn liked_music_playlist_surfaces_in_the_grid() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
     seed_active_server(&db, "srv-1").await;
     let srv = Source::Server("srv-1".into());
 
-    // A real playlist surfaces; the reserved "LM" (YT Liked Music) one never
-    // does — likes belong to the favorites view, not the playlists grid.
+    // "LM" (YT Liked Music) is a playlist like any other as far as the store is
+    // concerned — the YT source decides where its entries come from. This read
+    // used to filter the id out, which hid the tile no matter what the source
+    // returned.
     db.upsert_playlist_meta(&srv, "PLX", "Mix", None, None)
         .await
         .unwrap();
-    db.upsert_playlist_meta(&srv, "LM", "Liked Songs", None, None)
+    db.upsert_playlist_meta(&srv, "LM", "Liked Music", None, None)
         .await
         .unwrap();
     db.set_playlist_tracks(&srv, "LM", &["VID1".into()])
@@ -519,7 +526,14 @@ async fn liked_music_playlist_is_hidden_from_the_grid() {
 
     let store = db.load_playlists(&srv).await.unwrap();
     let ids: Vec<&str> = store.playlists.iter().map(|p| p.id.as_str()).collect();
-    assert_eq!(ids, vec!["PLX"], "LM must not surface as a playlist");
+    assert!(
+        ids.contains(&"LM"),
+        "LM must surface as a playlist: {ids:?}"
+    );
+    assert!(ids.contains(&"PLX"));
+
+    let lm = store.playlists.iter().find(|p| p.id == "LM").unwrap();
+    assert_eq!(lm.tracks, vec!["VID1".to_string()]);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

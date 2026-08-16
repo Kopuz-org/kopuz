@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Kopuz
+Comment=A modern music player
+Exec=kopuz
+Icon=moe.kopuz.kopuz
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Player;Music;
+Keywords=Music;Player;
+StartupWMClass=kopuz

@@ -96,10 +96,11 @@ impl MediaSource for JellyfinSource {
                         .image_tags
                         .as_ref()
                         .and_then(|t| t.get("Primary").cloned());
-                    let cover_path = Some(PathBuf::from(match &image_tag {
-                        Some(tag) => format!("jellyfin:{}:{}", a.id, tag),
-                        None => format!("jellyfin:{}", a.id),
-                    }));
+                    let cover_path = Some(PathBuf::from(reader::CoverRef::stored_item_ref(
+                        MusicService::Jellyfin,
+                        &a.id,
+                        image_tag.as_deref(),
+                    )));
                     albums.push(reader::Album {
                         id: format!("jellyfin:{}", a.id),
                         title: a.name,
@@ -183,7 +184,7 @@ impl MediaSource for JellyfinSource {
                 if let Some(tags) = &artist.image_tags
                     && let Some(tag) = tags.get("Primary")
                 {
-                    let url = utils::jellyfin_image::jellyfin_image_url(
+                    let url = crate::cover::jellyfin_item_url(
                         self.client.base_url(),
                         &artist.id,
                         Some(tag.as_str()),
@@ -423,7 +424,7 @@ impl MediaSource for JellyfinSource {
             {
                 out.push((
                     artist.name.clone(),
-                    utils::jellyfin_image::jellyfin_image_url(
+                    crate::cover::jellyfin_item_url(
                         self.client.base_url(),
                         &artist.id,
                         Some(tag.as_str()),

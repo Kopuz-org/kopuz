@@ -278,7 +278,6 @@ pub struct ArtistSearchData {
 }
 
 #[allow(non_snake_case)]
-#[allow(non_snake_case)]
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ArtistSearchAttributes {
     #[serde(default)]

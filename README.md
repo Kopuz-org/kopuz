@@ -12,12 +12,12 @@
   </a>
   <img src="https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white" alt="Rust">
   <img src="https://github.com/Kopuz-org/kopuz/actions/workflows/build.yml/badge.svg" alt="Build">
-  <img src="https://github.com/user-attachments/assets/b7322455-d407-4f42-ae43-8a83fbb8f74f" alt="Kopuz">
+  <img src="https://github.com/user-attachments/assets/ca88f0c0-15d7-4a4d-8e81-78a61a70084f" alt="Kopuz">
 
 <br/>
   <br/>
   <p>
-    <b>English</b> | <a href="docs/README-TR.md">Türkçe</a> | <a href="docs/README-PT-PT.md">Português de Portugal</a>
+    <b>English</b> | <a href="docs/README-TR.md">Türkçe</a> | <a href="docs/README-PT-PT.md">Português de Portugal</a> | <a href="docs/README-ML.md">മലയാളം</a>
   </p>
 </div>
 
@@ -38,11 +38,11 @@ this is mythological rather than historical.
 ## Overview
 
 Kopuz allows you to scan your local directories for audio files, stream from
-your Jellyfin or Subsonic (Navidrome, etc.) server, or connect **YouTube Music**
-or **SoundCloud** as a streaming backend, automatically organizing everything
-into a browsable library. You can navigate by artists, albums, genres, or
-explore your custom playlists. The application is built for performance and
-desktop integration, utilizing the power of Rust.
+your Jellyfin or Subsonic (Navidrome, etc.) server, or connect **YouTube
+Music**, **SoundCloud**, or **Spotify** as a streaming backend, automatically
+organizing everything into a browsable library. You can navigate by artists,
+albums, genres, or explore your custom playlists. The application is built for
+performance and desktop integration, utilizing the power of Rust.
 
 Library, playlists, favorites, and settings are stored in a local **SQLite**
 database (`kopuz.db`); the UI reads it live so changes show up immediately. Each
@@ -65,22 +65,26 @@ media source carries its own credentials and its own favorites.
   Requires the appindicator library on Linux (see Installation notes).
 - **Discord RPC**: Embedded RPC included!!!
 - **Multiple Backends**: Stream from your Jellyfin or Subsonic-compatible server
-  (Navidrome works great), connect YouTube Music or SoundCloud, or just point it
-  at a local folder. Mix and match as you like. Every source is exposed through
-  one unified `MediaSource` layer, and the UI adapts to each source's
-  capabilities (search, downloads, radio, discover, favorites sync, etc.) rather
-  than hardcoding per-service behavior.
+  (Navidrome works great), connect YouTube Music, SoundCloud, or Spotify, or
+  just point it at a local folder. Mix and match as you like. Every source is
+  exposed through one unified `MediaSource` layer, and the UI adapts to each
+  source's capabilities (search, downloads, radio, discover, favorites sync,
+  etc.) rather than hardcoding per-service behavior.
 - **YouTube Music**: Full streaming backend with a Spotify-style **Discover**
   page (recommended songs, playlists, albums, artists, and moods), rich **artist
   profiles** (banner, top songs, albums, singles, related artists),
   album/playlist browsing, and **mix radio** ("start radio" from any track).
-  Sign in with your account for your library, Liked Music, and playlists — or
+  Sign in with your account for your library, Liked Music, and playlists - or
   run it **anonymously** (no sign-in) for browse, search, and playback of public
   tracks. See [YouTube Music Setup](#youtube-music-setup).
 - **SoundCloud**: Streaming backend with search, track playback (progressive MP3
   and Go+ AAC/HLS), your **Liked tracks** as favorites, read-only playlists, and
   like/unlike. Added via a one-time browser sign-in in an isolated profile. See
   [SoundCloud Setup](#soundcloud-setup).
+- **Spotify**: Your saved tracks, albums, and playlists, a **Discover** page,
+  search, and scrobbling, with playback through Spotify's official Web Playback
+  SDK or any **Spotify Connect** device you own. Needs Premium and a one-time
+  app setup. See [Spotify Setup](#spotify-setup).
 - **Lyrics Support**: Enjoy real-time synced and plain lyrics, complete with
   auto-scrolling to follow along with your music.
 - **Favorites**: Star tracks locally or sync favorites with your
@@ -91,7 +95,11 @@ media source carries its own credentials and its own favorites.
   music.
 - **File-Type Badges**: Local tracks show a small format badge (MP3, FLAC, WAV,
   etc.) in track rows so you can see the source format at a glance.
-- **Search**: Search across artists, albums, and tracks with real-time results.
+- **Search**: Search across artists, albums, and tracks with real-time results,
+  plus a **quick search** overlay you can pop open from anywhere to jump
+  straight to what you're looking for.
+- **Custom UI Fonts**: Bring your own font for the interface and make Kopuz look
+  the way you want.
 - **Listening Logs**: Tracks play counts locally so you can see what you
   actually listen to most.
 - **Scrobbling**: Scrobble to ListenBrainz. For Jellyfin users,
@@ -99,9 +107,9 @@ media source carries its own credentials and its own favorites.
 - **Language Support**: UI available in Arabic, Brazilian Portuguese, Dutch,
   English, European Portuguese, Filipino, French, German, Greek, Hebrew,
   Hungarian, Indonesian, Italian, Japanese, Korean, Malayalam, Polish, Romanian,
-  Russian, Simplified Chinese, Spanish, Tamil, Toki Pona, Turkish, Ukrainian,
-  Vietnamese, and Sitelen Pona with a streamlined experience for adding new
-  languages.
+  Russian, Simplified Chinese, Spanish, Swedish, Tamil, Toki Pona, Turkish,
+  Ukrainian, Vietnamese, and Sitelen Pona with a streamlined experience for
+  adding new languages.
 - **High Performance**: Heavy background processing and an optimized library
   scanner ensure the app opens instantly, runs smoothly, and skips previously
   indexed files quickly.
@@ -111,7 +119,7 @@ media source carries its own credentials and its own favorites.
   properly as you browse different views and pages.
 - **Reduce Animations**: Accessibility setting to tone down motion effects if
   you prefer a calmer UI.
-- **Equalizer**: Built-in 5-band equalizer with presets and custom settings to
+- **Equalizer**: Built-in 10-band equalizer with presets and custom settings to
   fine-tune your sound.
 - **Crossfade**: Blend track transitions for smoother automatic playback between
   songs on native desktop builds. Browser playback currently uses normal track
@@ -120,10 +128,10 @@ media source carries its own credentials and its own favorites.
   and `Swap L/R` output modes.
 - **yt-dlp Integration**: Download audio directly from YouTube and other
   supported sites via yt-dlp. Choose your output format (Best Audio, MP3, FLAC,
-  WAV, or MP4 video). FLAC is not recommended since yt-dlp remuxes lossy audio
-  rather than decoding from a lossless source. Supports SponsorBlock, chapter
-  splitting, cookies, rate limiting, and more. Requires `yt-dlp` installed on
-  your system.
+  Opus, WAV, or MP4 video). FLAC is not recommended since yt-dlp remuxes lossy
+  audio rather than decoding from a lossless source. Supports SponsorBlock,
+  chapter splitting, cookies, rate limiting, and more. Requires `yt-dlp`
+  installed on your system.
 - **Metadata Settings**: A dedicated Metadata section in Settings lets you
   control how artist images are sourced. Choose between **Album Cover** (uses
   the first album artwork as the artist photo, default) or **Artist Photo**
@@ -134,6 +142,14 @@ media source carries its own credentials and its own favorites.
   ever shows blank.
 
 ## Installation
+
+### Cargo (crates.io)
+
+Install directly with Cargo:
+
+```bash
+cargo install --locked kopuz
+```
 
 ### NixOS / Nix
 
@@ -191,31 +207,48 @@ in {
 Install from the AUR using your preferred helper:
 
 ```bash
-yay -S kopuz
+yay -S kopuz-bin
 # or
-paru -S kopuz
+paru -S kopuz-bin
 ```
-
-> **Note:** `dioxus-cli` must be installed first at the version matching dioxus
-> 0.7.x:
->
-> ```bash
-> cargo install dioxus-cli --version "^0.7"
-> ```
 
 ### Flatpak (Recommended)
 
-Kopuz is soon available on Flathub. To install from source manifest:
+Kopuz is soon available on Flathub. In the meantime, you can install it via our
+pre-built Flatpak repository, or build it yourself from source.
+
+#### Option 1: Install pre-built (recommended)
+
+```bash
+flatpak install --user --or-update \
+    https://kopuz-org.github.io/kopuz-flatpak/moe.kopuz.kopuz.flatpakref
+```
+
+#### Option 2: Build from source manifest
+
+##### Requirements
+
+Make sure you have Rust and the Dioxus CLI installed. We recommend installing
+`dioxus-cli` through your distro's package manager when available. If it's not
+packaged for your distro, you can install it via Cargo as a fallback:
+
+```bash
+cargo install --locked dioxus-cli
+```
+
+Then build and install Kopuz:
 
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
-flatpak-builder --user --install --force-clean build-dir packaging/flatpak/com.temidaradev.kopuz.json
-flatpak run com.temidaradev.kopuz
+dx build --release --package kopuz
+flatpak-builder --user --install --force-clean \
+  build-dir packaging/flatpak/moe.kopuz.kopuz.json
+flatpak run moe.kopuz.kopuz
 ```
 
 You can also click on the file and open it with an app provider, for example KDE
-discover
+Discover.
 
 ### AppImage
 
@@ -274,7 +307,7 @@ development environment.
 > The system tray icon (used by **minimize to tray**) requires the
 > **appindicator** library at runtime. It is included in the package
 > dependencies below. Without it the tray icon simply won't appear and closing
-> the window quits the app instead of hiding it — Kopuz still runs normally. The
+> the window quits the app instead of hiding it - Kopuz still runs normally. The
 > Nix dev shell already provides it.
 
 **Arch Linux Based Systems**
@@ -307,18 +340,94 @@ cargo install --locked dioxus-cli
 
 #### Developing Kopuz
 
+Install [Bazelisk](https://github.com/bazelbuild/bazelisk), which reads the
+repository's pinned `.bazelversion`. On macOS:
+
 ```bash
-# Clone the repository
-$ git clone https://github.com/Kopuz-org/kopuz
+brew install bazelisk
+```
 
-# Move to the cloned directory
+Clone the repository and build the desktop binary:
+
+```bash
+git clone https://github.com/Kopuz-org/kopuz
 cd kopuz
+bazel build //:kopuz
+```
 
-# Install npm dependencies
-npm install
+Run it with a separate debug database:
 
-# Serve project with Dioxus CLI
-dx serve --package kopuz
+```bash
+KOPUZ_DB_PATH=kopuz-debug.db bazel run //:kopuz
+```
+
+Build the optimized binary:
+
+```bash
+bazel build --config=release //:kopuz
+```
+
+The first Bazel invocation downloads the pinned Bazel and Rust toolchains plus
+the third-party crates recorded in `Cargo.lock` and `Cargo.Bazel.lock`. The
+built binary is available through the stable `bazel-bin/crates/kopuz/kopuz`
+symlink.
+
+Test one crate or the complete workspace:
+
+```bash
+bazel test //crates/db:db_test
+bazel test //:tests
+```
+
+Run Clippy with warnings denied:
+
+```bash
+bazel build \
+  --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect \
+  --output_groups=clippy_checks \
+  --@rules_rust//rust/settings:clippy_flag=-Dwarnings \
+  //crates/...
+```
+
+Check formatting without changing files:
+
+```bash
+bazel build \
+  --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect \
+  --output_groups=rustfmt_checks \
+  //crates/...
+```
+
+Apply rustfmt:
+
+```bash
+bazel run @rules_rust//:rustfmt -- //crates/...
+```
+
+Cargo manifests remain the source of truth for dependency versions and features.
+After changing a manifest or `Cargo.lock`, regenerate Bazel's resolution lock:
+
+```bash
+CARGO_BAZEL_REPIN=1 bazel build //crates/config:config
+```
+
+Tailwind output is committed because Dioxus consumes it as an application asset.
+Regenerate it whenever UI classes change:
+
+```bash
+npm ci
+npx @tailwindcss/cli -i ./tailwind.css \
+  -o ./crates/kopuz/assets/tailwind.css
+```
+
+The Bazel target builds and runs the native Rust executable. Dioxus still owns
+desktop installers and mobile project generation, so use the existing wrapper
+after the Bazel build/test gates when producing those artifacts:
+
+```bash
+just build
+just android-patch
+just ios-build-sim
 ```
 
 ### macOS
@@ -371,34 +480,22 @@ and hit rescan.
 Kopuz can use YouTube Music as a streaming backend. Add it from **Settings →
 Media servers → Add → YouTube Music**.
 
-> [!NOTE]
-> No external helper is needed anymore. Anonymous playback requires a content PO
-> token, which Kopuz now mints **in-app** with a hidden WebView running
-> YouTube's BotGuard. The old `rustypipe-botguard` subprocess is gone, so
-> there's nothing to `cargo install` and it works inside Flatpak.
-
 ### Choosing a mode
 
 The setup dialog offers two methods:
 
-- **Sign in with a browser** — kopuz opens the Google sign-in page in an
+- **Sign in with a browser** - kopuz opens the Google sign-in page in an
   **isolated browser profile** (a fresh, separate session; your normal browsing
   is never touched), waits for you to log in, and extracts the session cookies.
   Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
-  Edge, or Vivaldi). This unlocks your **library, Liked Music, playlists, and
-  followed artists**.
+  Edge, Vivaldi, or Helium). This unlocks your **library, Liked Music,
+  playlists, and followed artists**.
 
-- **Continue without signing in (anonymous)** — no sign-in, no cookies. You can
+- **Continue without signing in (anonymous)** - no sign-in, no cookies. You can
   **browse, search, open artist/album/playlist pages, start mix radio, and play
   public tracks**. Liked Music, library playlists, and following/liking are
   disabled (those views show a "sign in to enable" prompt). Music Premium-only
   tracks can't be played anonymously.
-
-> [!NOTE]
-> On **Windows**, browser sign-in is currently disabled — the Google accounts
-> page renders blank inside the isolated profile. Windows users get anonymous
-> mode automatically. Sign-in works on Linux and macOS. (Tracked as
-> `TODO(windows-signin)` in `crates/server/src/ytmusic/isolated_profile.rs`.)
 
 ### Premium tracks
 
@@ -416,17 +513,172 @@ There's no URL or password to type. Kopuz opens `soundcloud.com/signin` in an
 **isolated browser profile** (a fresh, separate session; your normal browsing is
 never touched), waits for you to log in, and pulls the session's `oauth_token`.
 Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
-Edge, or Vivaldi).
+Edge, Vivaldi, or Helium).
 
 Once signed in you get search, track playback (progressive MP3 plus Go+ AAC/HLS
 streams), your **Liked tracks** as favorites, read-only access to your
 playlists, and like/unlike. Removing the source cleans up its isolated profile.
 
+## Spotify Setup
+
+Spotify works differently from every other backend in Kopuz, so it needs a bit
+of one-time setup. Kopuz talks to the official Web API for your library, and the
+audio itself is played by Spotify's official Web Playback SDK running in a
+browser on your machine. Kopuz drives that player and shows everything in its
+own UI, but it never touches the audio stream, and it never asks for your
+password.
+
+### Before you start
+
+You need three things:
+
+- **Spotify Premium.** The Web Playback SDK refuses to stream on free accounts.
+  Browsing your library still works without Premium, playback does not.
+- **Your own Spotify client.** Kopuz does not ship a Client ID, you create one
+  in about two minutes and paste it in.
+- **A supported browser installed.** Chrome, Edge, Brave, Chromium, Vivaldi,
+  Helium or Safari on macOS. Firefox is not usable here: the SDK has a
+  long-standing bug in Firefox where playback dies a few seconds in, so Kopuz
+  will not pick it.
+
+  > [!NOTE]
+  > To use the Spotify backend with Helium, you need to place the Widevine files
+  > in the correct location. See
+  > [here](https://github.com/imputnet/helium/issues/116#issuecomment-3668370766)
+  > for more information. On NixOS using
+  > [hjem](https://github.com/feel-co/hjem), this can be done by adding
+  >
+  > ```nix
+  > hjem.users.your-username = {
+  >   xdg.config.files."net.imput.helium/WidevineCdm/latest-component-updated-widevine-cdm".text = ''
+  >     {"Path":"${pkgs.widevine-cdm}/share/google/chrome/WidevineCdm"}
+  >   '';
+  > };
+  > ```
+  >
+  > to your configuration.
+
+### 1. Create your Spotify app
+
+1. Open
+   [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+   and log in with the account you want to listen with.
+2. Click **Create app**. Name and description can be anything, they are only
+   shown to you.
+3. In **Redirect URIs**, add exactly this, no trailing slash:
+
+   ```text
+   http://127.0.0.1:8898/callback
+   ```
+
+   Spotify compares this string character by character, so a typo here is the
+   single most common reason sign-in fails.
+
+4. Under **Which API/SDKs are you planning to use?**, tick both **Web API** and
+   **Web Playback SDK**.
+5. Save, then open the app's **Settings** and copy the **Client ID**. You never
+   need the Client Secret, Kopuz uses PKCE instead.
+6. Go to the app's **User Management** and add the display name and email of
+   every Spotify account that will sign in, including your own.
+
+> [!IMPORTANT]
+> A freshly created app is in Spotify's **Development Mode**. That means at most
+> five listed users can sign in, the app owner needs Premium, and some API
+> surfaces are restricted (see [What Spotify limits](#what-spotify-limits)
+> below). This is Spotify's policy, not a Kopuz limitation.
+
+### 2. Add the source in Kopuz
+
+Go to **Settings → Media servers → Add → Spotify**, paste your Client ID into
+the **Spotify Client ID** field, and save.
+
+Kopuz opens Spotify's consent page in your default browser. Approve it, and the
+redirect comes back to a small listener Kopuz runs on `127.0.0.1:8898` just for
+those few seconds. Make sure nothing else is sitting on port 8898 while you sign
+in. After that the source is ready, and Kopuz refreshes the token on its own
+from then on.
+
+### 3. Playing music
+
+There are two places your music can come out, and you can switch between them
+whenever you like.
+
+**The in-app player (default).** The first time you hit play, Kopuz opens a
+small player tab in a supported browser. That tab is doing the actual playing,
+because DRM playback only works in a real browser. Leave it open in the
+background and forget about it. Everything is still controlled from Kopuz:
+play/pause, seek, volume, next/previous, your queue, and your system media keys.
+The tab closes itself when you quit Kopuz.
+
+Browsers block sound until you interact with a page, so if the very first track
+sits there doing nothing, click once anywhere in that tab. Kopuz waits for that
+and then starts the track.
+
+**A Spotify Connect device.** The device button in the bottom bar lists whatever
+Spotify Connect targets you have around: your phone, the desktop app, a speaker,
+a TV. Pick one and Kopuz sends playback straight there, with no browser tab
+involved at all. Progress, play state, and the current track stay in sync in
+Kopuz, and your OS media widget follows along too. Pick **kopuz (this app)** to
+come back to the in-app player.
+
+### Settings worth knowing
+
+Both of these live on the Spotify row under **Settings → Media servers**:
+
+- **Spotify playback browser.** Which browser gets the player tab. **Automatic**
+  picks the first supported one it finds installed.
+- **Spotify playback device.** What Kopuz should do when Spotify is already
+  playing somewhere else as Kopuz starts up. **Other device** (the default)
+  means Kopuz adopts that session and just syncs to it instead of yanking
+  playback away from it. **This app** means Kopuz always plays locally.
+
+### What you get
+
+Saved tracks show up as favorites, saved albums as your library, and your
+playlists are browsable. There is a **Discover** page with On repeat, Jump back
+in, and All-time favorites, search across tracks/albums/artists, liking and
+unliking, and scrobbling to Last.fm, Libre.fm, and ListenBrainz like any other
+source.
+
+### What Spotify limits
+
+Most of the rough edges here come from Spotify's Development Mode, not from
+Kopuz:
+
+- **Search returns at most ten results per type.** Development Mode apps get a
+  hard cap on the search endpoint.
+- **Playlists are read-only.** You can browse and play them, but creating and
+  editing playlists is not available for Spotify sources.
+- **Playlists you only follow may look empty.** Spotify only exposes the tracks
+  of playlists you own or collaborate on. Editorial playlists (Discover Weekly,
+  Release Radar, and friends) are off limits to third-party apps entirely.
+- **No downloads, no tag editing, no radio** for Spotify tracks.
+- **No equalizer, crossfade, or gapless** on Spotify audio. The browser owns
+  that audio pipeline, so Kopuz's own audio features do not apply to it.
+
+### Troubleshooting
+
+- **"Spotify playback needs Chrome, Edge, Brave, Chromium, Vivaldi, Helium, or
+  Safari"** means none of those were found. Install one, then pick it under
+  **Settings → Media servers**.
+- **Sign-in never completes.** Check the redirect URI on your Spotify app
+  character by character, and make sure nothing else is using port 8898.
+- **Sign-in is refused for a friend's account.** Add them under **User
+  Management** on your app first. Development Mode allows five users total.
+- **Auth errors after the app has been closed for a while.** Kopuz refreshes the
+  token on startup, so give it a moment. If it sticks, remove the Spotify source
+  and add it again.
+- **The Discover page is empty.** If you signed in before updating Kopuz, your
+  token may predate the scopes Discover needs. Sign out and back in.
+- **A track plays in the tab but Kopuz looks frozen**, or the other way around.
+  Closing the player tab by hand disconnects the device. Press play again in
+  Kopuz and it will open a fresh one.
+
 ## Logs & Debugging
 
 Kopuz logs through [`tracing`](https://docs.rs/tracing). Most of this is
-reachable from the app itself — **Settings → Logs** has **Open logs folder**,
-**Export logs**, and an **Enable Performance Tracing** toggle — so users never
+reachable from the app itself - **Settings → Logs** has **Open logs folder**,
+**Export logs**, and an **Enable Performance Tracing** toggle - so users never
 need a terminal to send a useful report.
 
 ### Where the files live
@@ -443,7 +695,7 @@ straight here):
 | `latest.log`            | The current session. Span timing + events; the live log.                                         |
 | `kopuz-<timestamp>.log` | Previous sessions, archived on startup (last 10 kept). A restart never erases the run before it. |
 | `crash-<timestamp>.txt` | Written **only on a crash** (Rust panic): message, backtrace, recent log tail, app/OS version.   |
-| `kopuz-trace.json`      | Performance trace — only when tracing is enabled (see below). Overwritten each run.              |
+| `kopuz-trace.json`      | Performance trace - only when tracing is enabled (see below). Overwritten each run.              |
 
 Timestamps are UTC `YYYY-MM-DD_HH-MM-SS`, so the files sort chronologically.
 
@@ -457,7 +709,7 @@ crash report into one file), or **Open logs folder** and grab the newest
 **Performance issue (freeze / slow load / stutter) →** ask the user to:
 
 1. **Settings → Logs → enable "Performance Tracing"**, then **restart** the app
-   (the toggle warns about this — the trace recorder is set up once at startup).
+   (the toggle warns about this - the trace recorder is set up once at startup).
 2. Reproduce the slow action.
 3. **Quit the app** (this flushes the trace cleanly).
 4. **Settings → Logs → Open logs folder** and send `kopuz-trace.json` (or
@@ -468,7 +720,7 @@ Open the trace at [speedscope.app](https://speedscope.app) or
 resolve, browse/search/pagination, mix radio, library scan, downloads, playback
 transitions, per-component renders) are instrumented as named spans, and
 worker-thread work nests under the action that launched it, so the trace shows
-exactly where time goes. Turn it back off afterward — it adds overhead and grows
+exactly where time goes. Turn it back off afterward - it adds overhead and grows
 the trace file during long sessions.
 
 ### Power-user env vars
@@ -490,7 +742,7 @@ KOPUZ_LOG="info,dioxus_core=trace" kopuz
 `RUST_LOG` works too; `KOPUZ_LOG` takes precedence.
 
 The **performance trace** is enabled only via **Settings → Logs → Enable
-Performance Tracing** (then restart) — there's no env var for it; the UI is the
+Performance Tracing** (then restart) - there's no env var for it; the UI is the
 single source of truth. Off by default → zero overhead.
 
 > Debug builds add a **Trigger crash** button in Settings → Logs to exercise the
@@ -560,7 +812,3 @@ longer than needed.
 
 - Logo design by: Lucas Amorim -
   [His Instagram Account](https://www.instagram.com/yattets/)
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://www.star-history.com/?repos=Kopuz-org%2Fkopuz&type=date&legend=top-left)

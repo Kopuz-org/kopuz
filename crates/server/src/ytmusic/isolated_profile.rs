@@ -20,13 +20,9 @@ pub fn delete_profile(server_id: &str) -> std::io::Result<()> {
     cookies::delete_profile(PROFILE_PREFIX, server_id)
 }
 
-// TODO: (windows-signin) browser sign-in is disabled on Windows in the UI
-// (settings_popups.rs forces anonymous mode there) because the Google accounts
-// page renders a blank document inside the isolated `--user-data-dir` profile —
-// SAPISID/SID never land and this loops to timeout. Linux/macOS work. Likely
-// Edge/Chrome first-run + automation heuristics specific to Windows; needs a
-// Windows tester (tried --disable-blink-features=AutomationControlled + UA
-// spoof, reverted — commits 6bec69d/8a03c89). Until then, Windows = anonymous.
+// Windows browser sign-in is now supported: cookies are decrypted natively
+// (v10 DPAPI + planted v20 app-bound key — see `crate::cookies::windows_native`),
+// so the extract callback below resolves the same as Linux/macOS.
 #[tracing::instrument(name = "yt.signin", skip(server_id, signin_timeout), fields(browser = %browser))]
 pub async fn launch_signin_and_extract(
     browser: Browser,

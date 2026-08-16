@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 #[cfg(not(target_os = "windows"))]
 use std::path::Path;
+use std::path::PathBuf;
 
 /// Directory of an isolated browser profile kopuz owns, named
 /// `<prefix>-<server_id>`.

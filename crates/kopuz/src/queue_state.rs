@@ -55,28 +55,45 @@ pub fn snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
     }
 }
 
-fn is_server_queue_track(track: &Track) -> bool {
-    matches!(
-        track
-            .id
-            .uid()
-            .split(':')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "jellyfin" | "subsonic" | "custom"
-    )
+fn is_streamable_queue_track(track: &Track) -> bool {
+    // Defer to the same scheme parser playback uses, so the restore filter can't
+    // drift from the list of server sources (this copy had already fallen behind
+    // on ytmusic/soundcloud). Parsing is case-exact, matching playback: uid()
+    // emits lowercase scheme prefixes, so a mis-cased id that would play back as
+    // Local is correctly excluded here too.
+    hooks::playback_ref::PlaybackItemRef::parse(&track.id.uid()).is_server()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn is_restorable_queue_track(track: &Track) -> bool {
-    is_server_queue_track(track) || track.id.local_path().is_some_and(|p| p.exists())
+    is_streamable_queue_track(track) || track.id.local_path().is_some_and(|p| p.exists())
 }
 
-#[cfg(target_arch = "wasm32")]
-fn is_restorable_queue_track(_track: &Track) -> bool {
-    true
+/// Per-track `exists()` stats dominate restore on slow/external volumes
+/// (milliseconds each × thousands of tracks), so they run fanned out across
+/// threads. A panicked chunk defaults to keeping its tracks — playback
+/// already tolerates missing files at play time.
+fn restorable_flags(queue: &[Track]) -> Vec<bool> {
+    const THREADS: usize = 32;
+    let chunk_size = queue.len().div_ceil(THREADS).max(1);
+    let chunks: Vec<&[Track]> = queue.chunks(chunk_size).collect();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = chunks
+            .iter()
+            .map(|tracks| {
+                scope.spawn(move || {
+                    tracks
+                        .iter()
+                        .map(is_restorable_queue_track)
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .zip(&chunks)
+            .flat_map(|(handle, tracks)| handle.join().unwrap_or_else(|_| vec![true; tracks.len()]))
+            .collect()
+    })
 }
 
 pub fn sanitize(state: PersistedQueueState) -> Option<PersistedQueueState> {
@@ -88,12 +105,13 @@ pub fn sanitize(state: PersistedQueueState) -> Option<PersistedQueueState> {
         .current_queue_index
         .min(state.queue.len().saturating_sub(1));
     let mut selected_track_survived = false;
+    let flags = restorable_flags(&state.queue);
     let survivors: Vec<(usize, Track)> = state
         .queue
         .into_iter()
         .enumerate()
-        .filter(|(idx, track)| {
-            let keep = is_restorable_queue_track(track);
+        .filter(|(idx, _)| {
+            let keep = flags[*idx];
             if keep && *idx == original_index {
                 selected_track_survived = true;
             }
@@ -187,4 +205,57 @@ pub fn build_snapshot(
         shuffle_order: shuffle_order.to_vec(),
         shuffle_enabled,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reader::TrackId;
+
+    fn track(id: TrackId) -> Track {
+        Track {
+            id,
+            cover: None,
+            album_id: String::new(),
+            title: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            duration: 0,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn streamable_covers_every_server_source_and_excludes_local() {
+        for service in [
+            config::MusicService::Jellyfin,
+            config::MusicService::Subsonic,
+            config::MusicService::Custom,
+            config::MusicService::YtMusic,
+            config::MusicService::SoundCloud,
+        ] {
+            let t = track(TrackId::Server {
+                service,
+                item_id: "x".into(),
+            });
+            assert!(
+                is_streamable_queue_track(&t),
+                "server source {service:?} must be streamable"
+            );
+        }
+
+        let local = track(TrackId::Local("/music/a.flac".into()));
+        assert!(
+            !is_streamable_queue_track(&local),
+            "local is not streamable"
+        );
+    }
 }

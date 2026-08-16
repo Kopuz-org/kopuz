@@ -25,6 +25,7 @@ const ITEM_HEIGHT: f64 = 60.0;
 pub fn FavoritesBody(
     config: Signal<AppConfig>,
     mut queue: Signal<Vec<reader::models::Track>>,
+    search_query: Signal<String>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
@@ -35,8 +36,20 @@ pub fn FavoritesBody(
         .get(&Route::Favorites)
         .copied()
         .unwrap_or(0.0);
-    let scroll_stat = use_signal(move || saved_scroll);
+    let mut scroll_stat = use_signal(move || saved_scroll);
     let container_height = use_signal(|| 0.0_f64);
+    let mut previous_search_query = use_signal(|| search_query.peek().clone());
+    use_effect(move || {
+        let query = search_query.read().clone();
+        if *previous_search_query.peek() != query {
+            previous_search_query.set(query);
+            scroll_stat.set(0.0);
+            scroll_positions.write().insert(Route::Favorites, 0.0);
+            let _ = dioxus::document::eval(
+                "let el = document.getElementById('favorites-scroll'); if (el) el.scrollTop = 0;",
+            );
+        }
+    });
     // YT sync state:
     // - `is_syncing`: true while a fetch is in flight
     // - `synced_so_far`: count of tracks streamed into the library so far
@@ -246,13 +259,14 @@ pub fn FavoritesBody(
         );
     });
 
+    let search_query_normalized = search_query.read().trim().to_lowercase();
+    let loaded_tracks = fav_tracks_res.read().clone().unwrap_or_default();
+    let has_favorites = !loaded_tracks.is_empty();
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
         let conf = config.read();
-        fav_tracks_res
-            .read()
-            .clone()
-            .unwrap_or_default()
+        loaded_tracks
             .into_iter()
+            .filter(|track| track_matches_filter(track, &search_query_normalized))
             .map(|t| {
                 let cover_url = ::server::cover::track(&conf, &t, 80);
                 (t, cover_url)
@@ -279,7 +293,7 @@ pub fn FavoritesBody(
 
     let displayed_tracks_for_selection = sorted_displayed_tracks.clone();
     let is_empty = displayed_tracks.is_empty();
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
 
     // Window the rows: only the visible slice (plus buffer) exists in the
     // DOM — the full 800+ row list made every scroll frame repaint a huge
@@ -609,7 +623,7 @@ pub fn FavoritesBody(
                                 }
                             }
                             button {
-                                class: "px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-white/80 transition-colors disabled:opacity-50",
+                                class: "px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 transition-colors disabled:opacity-50",
                                 disabled: syncing,
                                 onclick: move |_| {
                                     let next = *refresh_nonce.peek() + 1;
@@ -634,7 +648,7 @@ pub fn FavoritesBody(
                     {
                         // Anonymous YT shows a sign-in prompt; otherwise the
                         // standard empty state with a source-appropriate hint.
-                        let yt_anon = caps().discover
+                        let yt_anon = caps().albums == ::server::source::AlbumType::YtMusic
                             && config
                                 .read()
                                 .server
@@ -642,10 +656,20 @@ pub fn FavoritesBody(
                                 .map(|s| s.yt_anonymous)
                                 .unwrap_or(false);
                         let add_hint = i18n::t("heart_track_to_add");
+                        let no_results = i18n::t_with(
+                            "no_results_found",
+                            &[("query", search_query.read().trim().to_string())],
+                        );
                         rsx! {
                             div {
                                 class: "flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6",
-                                if yt_anon {
+                                if has_favorites && !search_query_normalized.is_empty() {
+                                    i { class: "fa-solid fa-magnifying-glass text-4xl mb-4 opacity-30" }
+                                    p {
+                                        class: "text-base",
+                                        "{no_results}"
+                                    }
+                                } else if yt_anon {
                                     i { class: "fa-solid fa-right-to-bracket text-4xl mb-4 opacity-50" }
                                     p { class: "text-base", "{i18n::t(\"yt_anon_favorites\")}" }
                                 } else {
@@ -684,12 +708,12 @@ pub fn FavoritesBody(
                     span { "{i18n::t(\"select_all\")}" }
                 }
                 div {
-                    class: if is_modern {
+                    class: if is_vaxry {
                         "grid px-3 py-2 text-[10px] font-bold border-b mb-1"
                     } else {
                         "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2"
                     },
-                    style: if is_modern {
+                    style: if is_vaxry {
                         "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
                     } else {
                         "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;"
@@ -748,6 +772,17 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
+fn track_matches_filter(track: &reader::models::Track, query: &str) -> bool {
+    query.is_empty()
+        || track.title.to_lowercase().contains(query)
+        || track.artist.to_lowercase().contains(query)
+        || track.album.to_lowercase().contains(query)
+        || track
+            .artists
+            .iter()
+            .any(|artist| artist.to_lowercase().contains(query))
+}
+
 /// Build a list of synthetic Album entries out of the user's YT tracks.
 /// YT doesn't expose a separate albums endpoint, so we group by
 /// Track.album_id (assigned in search.rs::synthesize_album_id) and pick
@@ -766,16 +801,11 @@ fn synthesize_albums(tracks: &[reader::models::Track]) -> Vec<reader::models::Al
     by_album
         .into_iter()
         .map(|(album_id, t)| {
-            // Reuse the first track's thumbnail as the album cover, in the
-            // form `jellyfin_image_url_from_path` decodes: a raw URL via the
-            // `directurl:` prefix, an already-embedded tag via `ytmusic:_:`.
-            let cover_path = t.cover.as_deref().map(|c| {
-                if c.starts_with("http://") || c.starts_with("https://") {
-                    PathBuf::from(format!("directurl:{c}"))
-                } else {
-                    PathBuf::from(format!("ytmusic:_:{c}"))
-                }
-            });
+            // Reuse the first track's thumbnail as the album cover. A YT track's
+            // `cover` is already a self-contained form — a raw URL or a
+            // `urlhex_` tag — both of which `CoverRef::parse` reads as-is, so
+            // there's no wrapper to add.
+            let cover_path = t.cover.as_deref().map(PathBuf::from);
             reader::models::Album {
                 id: album_id,
                 title: if t.album.is_empty() {
@@ -791,4 +821,42 @@ fn synthesize_albums(tracks: &[reader::models::Track]) -> Vec<reader::models::Al
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::track_matches_filter;
+    use reader::models::{Track, TrackId};
+    use std::path::PathBuf;
+
+    fn track() -> Track {
+        Track {
+            id: TrackId::Local(PathBuf::from("test.flac")),
+            cover: None,
+            album_id: "album-id".to_string(),
+            title: "Midnight City".to_string(),
+            artist: "M83".to_string(),
+            album: "Hurry Up, We're Dreaming".to_string(),
+            duration: 244,
+            khz: 44_100,
+            bitrate: 0,
+            track_number: Some(11),
+            disc_number: Some(1),
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: vec!["Anthony Gonzalez".to_string()],
+        }
+    }
+
+    #[test]
+    fn favorites_filter_matches_track_metadata_case_insensitively() {
+        let track = track();
+
+        for query in ["", "midnight", "M83", "dreaming", "GONZALEZ"] {
+            assert!(track_matches_filter(&track, &query.to_lowercase()));
+        }
+        assert!(!track_matches_filter(&track, "unrelated"));
+    }
 }

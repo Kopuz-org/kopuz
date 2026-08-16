@@ -67,6 +67,7 @@ pub struct SubsonicPlaylist {
     pub id: String,
     pub name: String,
     pub song_count: Option<u32>,
+    pub cover_art: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -179,6 +180,20 @@ struct PlaylistCreationData {
     playlist: Option<SubsonicPlaylist>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SimilarSongsContainer {
+    #[serde(default)]
+    song: Vec<SubsonicSong>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetSimilarSongs2Data {
+    #[serde(default, rename = "similarSongs2")]
+    similar_songs2: Option<SimilarSongsContainer>,
+}
+
 /// Build a Subsonic `getCoverArt` URL without the caller holding a client — the
 /// player's synchronous cover path needs it but must not construct a client.
 pub fn cover_art_url(
@@ -207,7 +222,6 @@ pub fn stream_url_with_bitrate(
 impl SubsonicClient {
     pub fn new(base_url: &str, username: &str, password: &str) -> Self {
         let builder = reqwest::Client::builder();
-        #[cfg(not(target_arch = "wasm32"))]
         let builder = builder.timeout(std::time::Duration::from_secs(10));
         let http_client = builder.build().unwrap_or_else(|_| reqwest::Client::new());
 
@@ -252,6 +266,25 @@ impl SubsonicClient {
             )
             .await?;
         Ok(data.album.map(|a| a.song).unwrap_or_default())
+    }
+
+    /// OpenSubsonic `getSimilarSongs2`, needs a server-side plugin such as
+    /// Navidrome's AudioMuse to actually return results.
+    pub async fn get_similar_songs(
+        &self,
+        song_id: &str,
+        count: usize,
+    ) -> Result<Vec<SubsonicSong>, String> {
+        let data = self
+            .call::<GetSimilarSongs2Data>(
+                "getSimilarSongs2.view",
+                vec![
+                    ("id".to_string(), song_id.to_string()),
+                    ("count".to_string(), count.to_string()),
+                ],
+            )
+            .await?;
+        Ok(data.similar_songs2.map(|s| s.song).unwrap_or_default())
     }
 
     pub async fn get_playlists(&self) -> Result<Vec<SubsonicPlaylist>, String> {

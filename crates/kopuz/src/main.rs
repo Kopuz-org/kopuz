@@ -1,40 +1,39 @@
 use components::{
-    bottombar::Bottombar, compact_player::CompactPlayer, download_overlay::DownloadOverlay,
-    fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
+    CoverArtBackground, QuickSearch, bottombar::Bottombar, compact_player::CompactPlayer,
+    download_overlay::DownloadOverlay, fullscreen::Fullscreen, rightbar::Rightbar,
+    sidebar::Sidebar, spotify_devices::SpotifyDevicesPanel, titlebar::Titlebar,
 };
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+#[cfg(target_os = "windows")]
 use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 use dioxus::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
 use kopuz_route::Route;
 use pages::server::download_manager::DownloadQueue;
 use player::player::Player;
 use queue_state::PersistedQueueState;
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 use tracing::Instrument;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+#[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 
 mod app_db;
 mod app_lifecycle;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 mod artwork_protocol;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 mod chrome_trace;
 mod desktop_shell;
 mod legacy;
 mod logging;
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
-mod pot_minter;
+#[cfg(not(target_os = "android"))]
 mod queue_state;
+#[cfg(not(target_os = "android"))]
+mod ui_profile;
 mod updates;
 #[cfg(target_os = "windows")]
 mod windows_titlebar;
@@ -57,6 +56,100 @@ const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::fol
 /// save per settle+cooldown window instead of one per mutation.
 const STORE_SAVE_SETTLE_MS: u64 = 600;
 const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
+/// How often the matugen/pywal palette is stat'd. The active rate is what a
+/// wallpaper change costs before the colours follow; the idle one only exists to
+/// notice the theme being switched on.
+const LIVE_THEME_POLL_MS: u64 = 400;
+const LIVE_THEME_IDLE_POLL_MS: u64 = 2000;
+
+fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, Vec<PathBuf>)> {
+    std::iter::once((config::Source::Local, config.music_directory.clone()))
+        .chain(config.local_sources.iter().map(|source| {
+            (
+                config::Source::LocalLibrary(source.id.clone()),
+                source.directories.clone(),
+            )
+        }))
+        .collect()
+}
+
+async fn persist_resolved_covers(
+    db: &db::Db,
+    source: &config::Source,
+    albums: &[reader::Album],
+    missing_ids: &std::collections::HashSet<String>,
+    gens: hooks::db_reactivity::Generations,
+    scan_is_current: &impl Fn() -> bool,
+) {
+    let mut changed = false;
+    for album in albums {
+        if !missing_ids.contains(&album.id) {
+            continue;
+        }
+        let Some(cover) = album.cover_path.as_ref() else {
+            continue;
+        };
+        if !scan_is_current() {
+            break;
+        }
+        let path = cover.to_string_lossy().into_owned();
+        match db
+            .update_album_cover_if_not_manual(source, &album.id, &path)
+            .await
+        {
+            Ok(written) => changed |= written,
+            Err(error) => tracing::warn!(
+                album_id = %album.id,
+                source = %source.as_str(),
+                %error,
+                "failed to persist automatically resolved album cover"
+            ),
+        }
+    }
+    if changed {
+        gens.bump(hooks::db_reactivity::Table::Albums);
+    }
+}
+
+/// Build the `@font-face` + `body`/`#app-root` override CSS for a user-picked
+/// font file, inlining its bytes as a `data:` URI so no custom protocol handler
+/// is needed. Returns `None` when the path is empty, unreadable, or an
+/// unsupported extension — callers treat that as "no custom font".
+fn build_custom_font_css(path: &str) -> Option<String> {
+    use base64::Engine;
+    if path.is_empty() {
+        return None;
+    }
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let (mime, format) = match ext.as_str() {
+        "woff2" => ("font/woff2", "woff2"),
+        "woff" => ("font/woff", "woff"),
+        "otf" => ("font/otf", "opentype"),
+        "ttf" => ("font/ttf", "truetype"),
+        _ => return None,
+    };
+    // Cap the file size before reading: the bytes end up base64-inlined in the
+    // DOM, so an oversized (or wrongly-picked) file would bloat the document.
+    const MAX_FONT_BYTES: u64 = 32 * 1024 * 1024;
+    let len = std::fs::metadata(path).ok()?.len();
+    if len > MAX_FONT_BYTES {
+        tracing::warn!("[custom-font] ignoring {path}: {len} bytes exceeds {MAX_FONT_BYTES} limit");
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Some(format!(
+        "@font-face {{ font-family: \"kopuz-custom-font\"; \
+         src: url(data:{mime};base64,{b64}) format(\"{format}\"); \
+         font-display: swap; }}\n\
+         body, #app-root {{ font-family: \"kopuz-custom-font\", \"JetBrains Mono\", \
+         \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif, \"nasin-nanpa\"; }}"
+    ))
+}
 
 #[cfg(target_os = "windows")]
 #[component]
@@ -89,11 +182,10 @@ fn StaticHeadAssets() -> Element {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
 
 fn main() {
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         let log_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
             .map(|dirs| dirs.cache_dir().join("logs"))
@@ -116,12 +208,9 @@ fn main() {
         let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
 
         let presence: Option<Arc<Presence>> = match Presence::new("1470087339639443658") {
-            Ok(p) => {
-                tracing::info!("Discord presence connected");
-                Some(Arc::new(p))
-            }
+            Ok(p) => Some(Arc::new(p)),
             Err(e) => {
-                tracing::warn!("Failed to connect to Discord: {e}");
+                tracing::warn!("Discord presence unavailable: {e}");
                 None
             }
         };
@@ -169,12 +258,6 @@ fn main() {
             .with_background_color((0, 0, 0, 255))
             .with_data_directory(webview_data_dir)
             .with_window(window)
-            // Anon PoToken minter: stand up the hidden music.youtube.com webview
-            // once we have the event-loop target (issue #349).
-            .with_custom_event_handler(|_event, _target| {
-                crate::pot_minter::install_if_wanted(_target);
-                crate::pot_minter::pump();
-            })
             .with_asynchronous_custom_protocol(
                 "artwork",
                 |_id, request, responder: dioxus::desktop::RequestAsyncResponder| {
@@ -313,12 +396,6 @@ fn main() {
 
         dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
     }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = app_db::DB_HANDLE.set(db::init_stub());
-        dioxus::launch(App);
-    }
 }
 
 #[component]
@@ -332,8 +409,6 @@ fn App() -> Element {
     // wry handlers fire in registration order, and shutting logging down
     // first would leave the final queue/config persists (and any failure
     // warnings) out of latest.log and the trace.
-
-    app_lifecycle::use_webview_decipher_engine();
 
     // The whole-Library signal is GONE — pages/components read the DB through
     // query hooks, and every track self-resolves its cover via the cover seam
@@ -364,7 +439,7 @@ fn App() -> Element {
             }
             path
         }
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+        #[cfg(not(target_os = "android"))]
         {
             let path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
                 .map(|dirs| dirs.cache_dir().to_path_buf())
@@ -372,8 +447,6 @@ fn App() -> Element {
             let _ = std::fs::create_dir_all(&path);
             path
         }
-        #[cfg(target_arch = "wasm32")]
-        std::path::PathBuf::from("./cache")
     });
     // ROOT-owned: detached tasks (download workers, close-flush) read/write
     // these after the spawning page — and in principle this component — is
@@ -428,28 +501,12 @@ fn App() -> Element {
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.
     let active_caps = use_memo(move || active_source.read().capabilities());
-    // Start the PoToken minter whenever a YouTube Music server is active — not
-    // just anon. A *signed-in but non-Premium* account streams the same 251 as
-    // anon and also needs a content pot for deep ranges; only true Premium
-    // subscribers (itag 774) are pot-exempt, and we can't know that until a
-    // track resolves. So run the minter for any YtMusic session; Premium just
-    // leaves it idle. Reactive: fires when config loads or the server changes.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
-    use_effect(move || {
-        let yt_active = config
-            .read()
-            .server
-            .as_ref()
-            .is_some_and(|s| s.service == config::MusicService::YtMusic);
-        if yt_active {
-            crate::pot_minter::request();
-        }
-    });
+    // The PoToken minter isn't armed here: it's a headless deno_core runtime that
+    // self-starts on the first `mint_content_pot` (only when YT demands a pot).
     hooks::use_sync_task::use_sync_task(config, db.clone());
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]
     let cover_cache = use_memo(move || cache_dir().join("covers"));
-    #[cfg(not(target_arch = "wasm32"))]
     let _ = std::fs::create_dir_all(cover_cache());
     let download_queue = use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
     let download_progress =
@@ -462,7 +519,7 @@ fn App() -> Element {
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
-    let mut player = use_signal(Player::new);
+    let player = use_signal(Player::new);
     let current_song_cover_url = use_signal(String::new);
     let current_song_title = use_signal(String::new);
     let current_song_artist = use_signal(String::new);
@@ -474,12 +531,13 @@ fn App() -> Element {
     let current_track_snapshot = use_signal(|| None::<reader::Track>);
     let mut volume = use_signal(|| 1.0f32);
     let mut persisted_volume = use_signal(|| 1.0f32);
-    let mut configured_music_dirs = use_signal(|| config.peek().music_directory.clone());
+    let mut configured_local_libraries = use_signal(|| configured_local_sources(&config.peek()));
 
     let is_playing = use_signal(|| false);
     let mut is_fullscreen = use_signal(|| false);
     let mut compact_mode = use_signal(|| false);
     let is_rightbar_open = use_signal(|| false);
+    let is_devices_open = use_signal(|| false);
     let rightbar_width = use_signal(|| 320usize);
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
     // Config is the one remaining whole-value save: persisting a default that
@@ -488,6 +546,7 @@ fn App() -> Element {
     // empty DB still counts). Library/playlists/favorites have no such flag
     // anymore — they're targeted per-row writes, never full-replace.
     let mut config_loaded_ok = use_signal(|| false);
+    let mut queue_loaded_ok = use_signal(|| false);
 
     let mut pending_queue_state_snapshot = use_signal(|| None::<PersistedQueueState>);
     let mut pending_queue_state_revision = use_signal(|| 0u64);
@@ -500,7 +559,7 @@ fn App() -> Element {
     // flush silently never ran. Signals are peeked here (not Send), the
     // joined thread does the blocking DB work. Idempotent across
     // CloseRequested/LoopDestroyed.
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     dioxus::desktop::use_wry_event_handler(move |event, _| {
         use dioxus::desktop::tao::event::{Event, WindowEvent};
         if matches!(
@@ -515,15 +574,16 @@ fn App() -> Element {
                 let db = db.clone();
                 // None = the queue is empty (a cleared queue must persist as
                 // empty, not resurrect) — but only once the saved queue has
-                // actually been restored, else a quit during startup would
-                // wipe it.
-                let queue_snap = (*initial_load_done.peek()).then(|| {
-                    pending_queue_state_snapshot
-                        .peek()
-                        .clone()
-                        .map(queue_state::snapshot)
-                        .unwrap_or_default()
-                });
+                // actually been restored, else a quit during startup (or a
+                // failed load) would wipe it.
+                let queue_snap =
+                    (*initial_load_done.peek() && *queue_loaded_ok.peek()).then(|| {
+                        pending_queue_state_snapshot
+                            .peek()
+                            .clone()
+                            .map(queue_state::snapshot)
+                            .unwrap_or_default()
+                    });
                 // Library/playlists/favorites need no flush — every mutation
                 // already committed as a targeted write when it happened.
                 let cfg = (*config_loaded_ok.peek()).then(|| {
@@ -558,7 +618,7 @@ fn App() -> Element {
         }
     });
 
-    #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+    #[cfg(target_os = "macos")]
     use_effect(move || {
         let _ = dioxus::document::eval(
             r#"(function(){
@@ -592,15 +652,16 @@ fn App() -> Element {
     });
 
     use_effect(move || {
-        let _ = dioxus::document::eval(
-            r#"document.addEventListener('error',function(e){
+        let _ = dioxus::document::eval(&format!(
+            r#"document.addEventListener('error',function(e){{
                 var t=e.target;
-                if(t.tagName==='IMG'&&!t.dataset.fallback&&t.src){
+                if(t.tagName==='IMG'&&!t.dataset.fallback&&t.src){{
                     t.dataset.fallback='1';
-                    t.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27400%27 viewBox=%270 0 400 400%27%3E%3Crect width=%27400%27 height=%27400%27 fill=%27%231e1b2e%27/%3E%3Ccircle cx=%27200%27 cy=%27180%27 r=%2770%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27/%3E%3Cpath d=%27M155 280 Q200 240 245 280%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E';
-                }
-            },true);"#,
-        );
+                    t.src='{}';
+                }}
+            }},true);"#,
+            utils::DEFAULT_COVER_SVG.replace('\'', "%27"),
+        ));
     });
 
     use_effect(move || {
@@ -608,7 +669,12 @@ fn App() -> Element {
         if !url.is_empty() {
             spawn(
                 async move {
-                    if let Some(colors) = utils::color::get_palette_from_url(&url).await {
+                    let colors =
+                        utils::offload(
+                            async move { utils::color::get_palette_from_url(&url).await },
+                        )
+                        .await;
+                    if let Some(colors) = colors {
                         palette.set(Some(colors));
                     }
                 }
@@ -620,15 +686,13 @@ fn App() -> Element {
     });
 
     use_effect(move || {
-        let next_dirs = config.read().music_directory.clone();
-        if *configured_music_dirs.peek() != next_dirs {
-            configured_music_dirs.set(next_dirs);
+        let next_sources = configured_local_sources(&config.read());
+        if *configured_local_libraries.peek() != next_sources {
+            configured_local_libraries.set(next_sources);
         }
     });
 
-    #[cfg(not(target_arch = "wasm32"))]
     let presence = PRESENCE.get().cloned().flatten();
-    #[cfg(not(target_arch = "wasm32"))]
     provide_context(presence.clone());
 
     let mut station_registry = use_signal(radio::registry::StationRegistry::new);
@@ -648,33 +712,49 @@ fn App() -> Element {
             .filter(|r| r.enabled)
             .map(|r| r.url.clone())
             .collect();
+        let pinned_stations: Vec<String> = config.read().pinned_stations.clone();
 
+        // Key on paths only: pin toggles update the live registry directly,
+        // a rebuild would re-fetch every registry.
         let key = registry_paths.join(",");
         if *last_radio_registry_key.peek() == Some(key.clone()) {
             return;
         }
         last_radio_registry_key.set(Some(key));
 
-        spawn(
-            async move {
-                let mut new_registry = radio::registry::StationRegistry::new();
-                let mut import_count = 0;
+        spawn(async move {
+            let (new_registry, import_count) = utils::offload(
+                async move {
+                    let mut new_registry = radio::registry::StationRegistry::new();
+                    let mut import_count = 0;
 
-                for path in registry_paths {
-                    match new_registry.import_registry(&path).await {
-                        Ok(_) => import_count += 1,
-                        Err(e) => tracing::warn!("Failed to import registry from {}: {}", path, e),
+                    for path in registry_paths {
+                        match new_registry.import_registry(&path).await {
+                            Ok(_) => import_count += 1,
+                            Err(e) => {
+                                tracing::warn!("Failed to import registry from {}: {}", path, e)
+                            }
+                        }
                     }
-                }
 
-                station_registry.set(new_registry);
-
-                if import_count > 0 {
-                    tracing::info!("Imported {} external radio registries", import_count);
+                    for json in pinned_stations {
+                        match serde_json::from_str(&json) {
+                            Ok(manifest) => new_registry.pin_manifest(manifest),
+                            Err(e) => tracing::warn!("Failed to parse pinned station: {}", e),
+                        }
+                    }
+                    (new_registry, import_count)
                 }
+                .instrument(tracing::info_span!("radio.registry_load")),
+            )
+            .await;
+
+            station_registry.set(new_registry);
+
+            if import_count > 0 {
+                tracing::info!("Imported {} external radio registries", import_count);
             }
-            .instrument(tracing::info_span!("radio.registry_load")),
-        );
+        });
     });
 
     let mut selected_album_id = use_signal(String::new);
@@ -687,8 +767,8 @@ fn App() -> Element {
     // search at render time.
     let mut selected_artist_channel_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
-    let fetched_artist_images: Signal<std::collections::HashMap<String, String>> =
-        use_signal(std::collections::HashMap::new);
+    let fetched_artist_images: Signal<::server::cover::FetchedArtistImages> =
+        use_signal(Default::default);
     let mut search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
@@ -696,9 +776,7 @@ fn App() -> Element {
     let current_queue_index = use_signal(|| 0usize);
 
     let mut network_banner: Signal<Option<bool>> = use_signal(|| None);
-    #[cfg(not(target_arch = "wasm32"))]
     let mut update_banner: Signal<Option<updates::AvailableUpdate>> = use_signal(|| None);
-    #[cfg(not(target_arch = "wasm32"))]
     let mut did_check_updates = use_signal(|| false);
     let mut ctrl = hooks::use_player_controller(
         player,
@@ -716,6 +794,7 @@ fn App() -> Element {
         current_track_snapshot,
         volume,
         config,
+        config_loaded_ok,
         db.clone(),
     );
 
@@ -757,7 +836,6 @@ fn App() -> Element {
         }
     });
 
-    #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -845,9 +923,7 @@ fn App() -> Element {
     // re-runs cheap, but only spawns a new loop when the identity
     // changes (sign-in, account switch). Sign-out clears the
     // identity and the running loop exits on its next tick.
-    #[cfg(not(target_arch = "wasm32"))]
     let mut yt_keepalive_identity = use_signal(|| None::<String>);
-    #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -885,17 +961,42 @@ fn App() -> Element {
         });
     });
 
-    #[cfg(all(
-        not(target_arch = "wasm32"),
-        any(target_os = "linux", target_os = "windows")
-    ))]
+    let mut spotify_refresh_identity = use_signal(|| None::<String>);
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+        let identity: Option<String> = config.read().server.as_ref().and_then(|s| {
+            (s.service == config::MusicService::Spotify && s.access_token.is_some())
+                .then(|| s.id.clone().unwrap_or_else(|| s.url.clone()))
+        });
+        if identity == *spotify_refresh_identity.peek() {
+            return;
+        }
+        spotify_refresh_identity.set(identity.clone());
+        let Some(my_identity) = identity else {
+            return;
+        };
+        spawn(async move {
+            updates::run_spotify_refresh(config).await;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
+                if spotify_refresh_identity.peek().as_deref() != Some(my_identity.as_str()) {
+                    return;
+                }
+                updates::run_spotify_refresh(config).await;
+            }
+        });
+    });
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
         let win = dioxus::desktop::window();
         win.set_decorations(mode == config::TitlebarMode::System);
     });
 
-    #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
         let win = dioxus::desktop::window();
@@ -907,7 +1008,7 @@ fn App() -> Element {
     // Library/playlists/favorites have no save loops anymore — every mutation
     // commits as a targeted write at the call site and bumps a generation.
 
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         use dioxus::desktop::trayicon::TrayIcon;
         use dioxus::desktop::{WindowCloseBehaviour, window};
@@ -1009,7 +1110,7 @@ fn App() -> Element {
     }
 
     use_effect(move || {
-        if !*initial_load_done.read() {
+        if !*initial_load_done.read() || !*queue_loaded_ok.read() {
             return;
         }
 
@@ -1068,7 +1169,6 @@ fn App() -> Element {
 
     let db_for_load = db.clone();
     use_hook(move || {
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let db = db_for_load;
             let mut ctrl = ctrl;
@@ -1082,7 +1182,11 @@ fn App() -> Element {
                 // on success: its save is the one remaining whole-value write,
                 // and persisting a default born of a read failure would wipe
                 // real settings/servers.
-                let cfg_loaded = match db.load_config().await {
+                let cfg_loaded = match db
+                    .load_config()
+                    .instrument(tracing::info_span!("startup.load_config"))
+                    .await
+                {
                     Ok(c) => {
                         config_loaded_ok.set(true);
                         c
@@ -1092,18 +1196,36 @@ fn App() -> Element {
                         None
                     }
                 };
-                let queue_loaded = db.load_queue().await.ok();
+                let queue_loaded = match db
+                    .load_queue()
+                    .instrument(tracing::info_span!("startup.load_queue"))
+                    .await
+                {
+                    Ok(snap) => {
+                        queue_loaded_ok.set(true);
+                        Some(snap)
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to load queue from db — queue saves disabled this session");
+                        None
+                    }
+                };
 
                 let cfg_loaded = cfg_loaded.unwrap_or_default();
                 {
+                    let _apply = tracing::info_span!("startup.apply_config").entered();
                     let loaded = cfg_loaded;
                     config.set(loaded.clone());
-                    configured_music_dirs.set(loaded.music_directory.clone());
+                    configured_local_libraries.set(configured_local_sources(&loaded));
                     volume.set(loaded.volume);
                     persisted_volume.set(loaded.volume);
-                    player.write().set_volume(loaded.volume);
-                    player.write().set_channel_mode(loaded.channel_mode);
-                    player.write().set_equalizer(loaded.equalizer.clone());
+                    player.peek().set_volume(loaded.volume);
+                    player.peek().set_channel_mode(loaded.channel_mode);
+                    player.peek().set_equalizer(loaded.equalizer.clone());
+                    player
+                        .peek()
+                        .set_device_change_behavior(loaded.device_change_behavior);
+                    player.peek().set_sample_rate_mode(loaded.sample_rate_mode);
                     i18n::set_locale(&loaded.language);
                 }
 
@@ -1111,23 +1233,31 @@ fn App() -> Element {
                 // startup. An unselected source stays Local (the config default);
                 // the user picks a server explicitly via the sidebar.
 
-                if let Some(snap) = queue_loaded
-                    && let Some(queue_state) = queue_state::sanitize(PersistedQueueState {
-                        version: snap.version,
-                        queue: snap.queue,
-                        current_queue_index: snap.current_queue_index,
-                        progress_secs: snap.progress_secs,
-                        shuffle_order: snap.shuffle_order,
-                        shuffle_enabled: snap.shuffle_enabled,
+                let queue_state = utils::offload(async move {
+                    queue_loaded.and_then(|snap| {
+                        queue_state::sanitize(PersistedQueueState {
+                            version: snap.version,
+                            queue: snap.queue,
+                            current_queue_index: snap.current_queue_index,
+                            progress_secs: snap.progress_secs,
+                            shuffle_order: snap.shuffle_order,
+                            shuffle_enabled: snap.shuffle_enabled,
+                        })
                     })
+                })
+                .instrument(tracing::info_span!("startup.sanitize_queue"))
+                .await;
                 {
-                    ctrl.restore_queue_state(
-                        queue_state.queue,
-                        queue_state.current_queue_index,
-                        queue_state.progress_secs,
-                        queue_state.shuffle_order,
-                        queue_state.shuffle_enabled,
-                    );
+                    let _restore = tracing::info_span!("startup.restore_queue").entered();
+                    if let Some(queue_state) = queue_state {
+                        ctrl.restore_queue_state(
+                            queue_state.queue,
+                            queue_state.current_queue_index,
+                            queue_state.progress_secs,
+                            queue_state.shuffle_order,
+                            queue_state.shuffle_enabled,
+                        );
+                    }
                 }
 
                 initial_load_done.set(true);
@@ -1136,14 +1266,6 @@ fn App() -> Element {
                 // multi-minute interval.
                 hooks::use_sync_task::nudge_activate();
             }.instrument(tracing::info_span!("startup.load")));
-        }
-        // wasm: the stub Db yields defaults (web is not a shipped target); just
-        // unblock the save effects.
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Local is the default source; no auto-switch to a server.
-            config_loaded_ok.set(true);
-            initial_load_done.set(true);
         }
     });
 
@@ -1156,7 +1278,7 @@ fn App() -> Element {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
-        let configured_dirs = configured_music_dirs.read().clone();
+        let configured_sources = configured_local_libraries.read().clone();
         let trigger = *trigger_rescan.read();
         let fetch_covers = config.peek().auto_fetch_covers;
         let fetch_strategy = config.peek().cover_fetch_strategy;
@@ -1167,9 +1289,12 @@ fn App() -> Element {
 
         let scan_key = format!(
             "{}|{}",
-            configured_dirs
+            configured_sources
                 .iter()
-                .map(|d| d.to_string_lossy())
+                .flat_map(|(source, dirs)| {
+                    std::iter::once(source.as_str().to_string())
+                        .chain(dirs.iter().map(|dir| dir.to_string_lossy().into_owned()))
+                })
                 .collect::<Vec<_>>()
                 .join(","),
             trigger,
@@ -1189,11 +1314,10 @@ fn App() -> Element {
 
         let db_scan = db_for_rescan.clone();
         let gens_scan = gens_for_albums;
-        #[cfg(not(target_arch = "wasm32"))]
         spawn(async move {
             let db = db_scan;
             let gens = gens_scan;
-            let configured_dirs = configured_dirs;
+            for (source, configured_dirs) in configured_sources {
             let scannable_dirs: Vec<PathBuf> = configured_dirs
                 .iter()
                 .filter(|d| d.exists())
@@ -1212,7 +1336,7 @@ fn App() -> Element {
                 if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
                     prefix.push(std::path::MAIN_SEPARATOR);
                 }
-                let found = match db.folder_tracks(&prefix).await {
+                let found = match db.folder_tracks(&source, &prefix).await {
                     Ok(t) => t,
                     Err(e) => {
                         tracing::error!(error = %e, root = %prefix, "rescan: seed query failed — aborting scan");
@@ -1225,7 +1349,7 @@ fn App() -> Element {
                     }
                 }
             }
-            let seed_albums = match db.albums(&db::Source::Local).await {
+            let seed_albums = match db.albums(&source).await {
                 Ok(a) => a,
                 Err(e) => {
                     tracing::error!(error = %e, "rescan: album seed failed — aborting scan");
@@ -1292,10 +1416,10 @@ fn App() -> Element {
                     return;
                 }
                 for chunk in current_lib.tracks.chunks(100) {
-                    let _ = db.upsert_tracks(&db::Source::Local, chunk).await;
+                    let _ = db.upsert_tracks(&source, chunk).await;
                     gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
                 }
-                let _ = db.upsert_albums(&db::Source::Local, &current_lib.albums).await;
+                let _ = db.upsert_albums(&source, &current_lib.albums).await;
                 let keep_keys: Vec<String> = current_lib
                     .tracks
                     .iter()
@@ -1308,7 +1432,7 @@ fn App() -> Element {
                     return;
                 }
                 let _ = db
-                    .prune_source(&db::Source::Local, &keep_keys, &keep_albums)
+                    .prune_source(&source, &keep_keys, &keep_albums)
                     .await;
                 for (artist, img) in &current_lib.local_artist_images {
                     let p = img.to_string_lossy().into_owned();
@@ -1328,29 +1452,43 @@ fn App() -> Element {
                 gens.bump(hooks::db_reactivity::Table::Tracks);
                 gens.bump(hooks::db_reactivity::Table::Albums);
 
-                if fetch_covers {
-                    // Fetch missing covers in the background so the UI stays responsive.
-                    // Passing `progress_cb` into the task keeps the scan-progress bar
-                    // alive during fetching; it disappears automatically when the task ends.
-                    // Albums that HAD no cover before the fetch get the fetched one
-                    // written straight to the DB (manual covers were never in the
-                    // missing set, so they can't be overwritten).
-                    let lib_for_fetch = current_lib;
-                    let db = db.clone();
-                    spawn(async move {
+                let lib_for_covers = current_lib;
+                let db = db.clone();
+                let source = source.clone();
+                let lastfm_key = lastfm_key.clone();
+                spawn(async move {
+                    let mut lib = lib_for_covers;
+                    let missing_local = reader::missing_cover_ids(&lib);
+                    let local_report = reader::index_local_covers(
+                        &mut lib,
+                        cover_cache(),
+                        progress_cb.clone(),
+                    )
+                    .await;
+                    tracing::info!(
+                        attempted = local_report.attempted,
+                        found = local_report.found,
+                        missing = local_report.missing,
+                        "local cover indexing complete"
+                    );
+                    persist_resolved_covers(
+                        &db,
+                        &source,
+                        &lib.albums,
+                        &missing_local,
+                        gens,
+                        &scan_is_current,
+                    )
+                    .await;
+
+                    if fetch_covers {
                         let fetcher = reader::cover_fetcher::CoverFetcher::new(
                             cover_cache(),
                             fetch_strategy,
                             lastfm_key,
-                            progress_cb,
+                            progress_cb.clone(),
                         );
-                        let mut lib = lib_for_fetch;
-                        let missing_before: std::collections::HashSet<String> = lib
-                            .albums
-                            .iter()
-                            .filter(|a| a.cover_path.is_none() && !a.manual_cover)
-                            .map(|a| a.id.clone())
-                            .collect();
+                        let missing_before = reader::missing_cover_ids(&lib);
                         let report = fetcher.fetch_missing_covers(&mut lib).await;
                         tracing::info!(
                             "Cover auto-fetch: {} found, {} missing, {} errors",
@@ -1358,36 +1496,24 @@ fn App() -> Element {
                             report.missing,
                             report.errors,
                         );
-                        let mut changed = false;
-                        for album in lib.albums.iter() {
-                            if !missing_before.contains(&album.id) {
-                                continue;
-                            }
-                            let Some(cover) = album.cover_path.as_ref() else {
-                                continue;
-                            };
-                            let p = cover.to_string_lossy().into_owned();
-                            if db
-                                .update_album_cover(&db::Source::Local, &album.id, Some(&p), false)
-                                .await
-                                .is_ok()
-                            {
-                                changed = true;
-                            }
-                        }
-                        if changed {
-                            gens.bump(hooks::db_reactivity::Table::Albums);
-                        }
-                    }.instrument(tracing::info_span!("library.fetch_covers")));
-                } else {
-                    // No cover fetching — drop the callback so the progress bar closes.
+                        persist_resolved_covers(
+                            &db,
+                            &source,
+                            &lib.albums,
+                            &missing_before,
+                            gens,
+                            &scan_is_current,
+                        )
+                        .await;
+                    }
                     drop(progress_cb);
-                }
+                }.instrument(tracing::info_span!("library.index_covers")));
             } else {
                 // No music directories configured: the local library is empty.
-                let _ = db.prune_source(&db::Source::Local, &[], &[]).await;
+                let _ = db.prune_source(&source, &[], &[]).await;
                 gens.bump(hooks::db_reactivity::Table::Tracks);
                 gens.bump(hooks::db_reactivity::Table::Albums);
+            }
             }
         }.instrument(tracing::info_span!("library.rescan")));
     });
@@ -1450,12 +1576,47 @@ fn App() -> Element {
     provide_context(scroll_positions);
     provide_context(components::source_switcher::SettingsAnchor(settings_anchor));
     provide_context(fetched_artist_images);
-    provide_context(components::NavigationController {
+    let mut nav_history = use_signal(Vec::<components::NavSnapshot>::new);
+    let mut nav_restoring = use_signal(|| false);
+    let mut nav_last = use_signal(|| None::<components::NavSnapshot>);
+    use_effect(move || {
+        let snap = components::NavSnapshot {
+            route: *current_route.read(),
+            album_id: selected_album_id.read().clone(),
+            artist_name: selected_artist_name.read().clone(),
+            artist_channel_id: selected_artist_channel_id.read().clone(),
+            playlist_id: selected_playlist_id.read().clone(),
+            discover_playlist_id: discover_selected_playlist_id.read().clone(),
+            discover_playlist_title: discover_selected_playlist_title.read().clone(),
+        };
+        if *nav_restoring.peek() {
+            nav_restoring.set(false);
+            nav_last.set(Some(snap));
+            return;
+        }
+        let prev = nav_last.peek().clone();
+        match prev {
+            Some(prev) if prev != snap => {
+                nav_history.write().push(prev);
+                nav_last.set(Some(snap));
+            }
+            None => nav_last.set(Some(snap)),
+            _ => {}
+        }
+    });
+
+    let nav_ctrl = components::NavigationController {
         current_route,
         selected_artist_name,
         selected_artist_channel_id,
         selected_album_id,
-    });
+        selected_playlist_id,
+        discover_playlist_id: discover_selected_playlist_id,
+        discover_playlist_title: discover_selected_playlist_title,
+        history: nav_history,
+        restoring: nav_restoring,
+    };
+    provide_context(nav_ctrl);
 
     // Sidebar collapse state. On Android the sidebar is an overlay drawer that
     // starts collapsed and is toggled by the mobile header hamburger; the
@@ -1464,7 +1625,7 @@ fn App() -> Element {
     use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
 
     use_context_provider(|| components::CompactMode(compact_mode));
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         let mut saved_window_size = use_signal(|| None::<LogicalSize<f64>>);
         use_effect(move || {
@@ -1524,31 +1685,172 @@ fn App() -> Element {
         ));
     });
 
+    // matugen and pywal rewrite their output on every wallpaper change, so the
+    // palette is polled rather than read once: picking a new wallpaper recolours
+    // Kopuz in place. Only while the theme is selected, otherwise this is a timer
+    // nobody asked for.
+    let mut live_theme_css = use_signal(String::new);
+    use_future(move || async move {
+        let mut last: Option<(PathBuf, String)> = None;
+        loop {
+            if config.peek().theme != utils::live_theme::THEME_ID {
+                if last.take().is_some() {
+                    live_theme_css.set(String::new());
+                }
+                utils::sleep(std::time::Duration::from_millis(LIVE_THEME_IDLE_POLL_MS)).await;
+                continue;
+            }
+            let path = utils::live_theme::resolve_path(&config.peek().live_theme_path);
+            let probe = path.clone();
+            let raw = tokio::task::spawn_blocking(move || utils::live_theme::read(&probe))
+                .await
+                .unwrap_or_default();
+            let current = raw.map(|raw| (path, raw));
+            if current != last {
+                last = current;
+                let css = last
+                    .as_ref()
+                    .and_then(|(path, raw)| utils::live_theme::parse(raw, path))
+                    .map(|vars| utils::live_theme::to_css(&vars))
+                    .unwrap_or_default();
+                live_theme_css.set(css);
+            }
+            utils::sleep(std::time::Duration::from_millis(LIVE_THEME_POLL_MS)).await;
+        }
+    });
+
+    use_effect(move || {
+        let css = live_theme_css.read().clone();
+        let css_json = serde_json::to_string(&css).unwrap_or_else(|_| "\"\"".to_string());
+        let _ = dioxus::document::eval(&format!(
+            r#"(function(){{
+                let el = document.getElementById('live-theme-style');
+                if (!el) {{ el = document.createElement('style'); el.id = 'live-theme-style'; document.head.appendChild(el); }}
+                el.textContent = {css_json};
+            }})()"#
+        ));
+    });
+
+    // Inject a user-picked UI font reactively, mirroring the custom-themes path
+    // above: read the file, inline it as a data: URI, and swap the <style>'s text.
+    let custom_font_path = use_memo(move || config.read().custom_font_path.clone());
+    use_effect(move || {
+        let path = custom_font_path.read().clone();
+        spawn(async move {
+            // Read + base64-encode on a blocking worker so a large font never
+            // stalls the render thread this effect runs on.
+            let css = tokio::task::spawn_blocking(move || {
+                build_custom_font_css(&path).unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default();
+            let css_json = serde_json::to_string(&css).unwrap_or_else(|_| "\"\"".to_string());
+            let _ = dioxus::document::eval(&format!(
+                r#"(function(){{
+                    let el = document.getElementById('custom-font-style');
+                    if (!el) {{ el = document.createElement('style'); el.id = 'custom-font-style'; document.head.appendChild(el); }}
+                    el.textContent = {css_json};
+                }})()"#
+            ));
+        });
+    });
+
     let theme_class = use_memo(move || {
-        if config.read().theme == "album-art" {
+        let theme = config.read().theme.clone();
+        if theme == "album-art" {
             "theme-default".to_string()
+        } else if theme == utils::live_theme::THEME_ID {
+            // A palette can be partial, or not written yet, so the default sits
+            // underneath to keep every var resolving. The injected `.theme-live`
+            // block lands later in <head>, so it still wins.
+            format!("theme-default theme-{theme}")
         } else {
-            format!("theme-{}", config.read().theme)
+            format!("theme-{theme}")
         }
     });
 
     let is_rtl = i18n::is_rtl();
     let dir = if is_rtl { "rtl" } else { "ltr" };
     let content_row_class = "flex flex-1 overflow-hidden";
-    #[cfg(not(target_arch = "wasm32"))]
     let update_banner_state = update_banner.read().clone();
+    let update_banner_padding = if cfg!(target_os = "macos") {
+        "pl-20 pr-4"
+    } else {
+        "px-4"
+    };
 
     let background_style = use_memo(move || {
-        if config.read().theme == "album-art" {
+        let conf = config.read();
+        if conf.theme == "album-art"
+            && !conf.cover_art_background
+            && conf.custom_background_path.is_empty()
+        {
             utils::color::get_background_style(palette.read().as_deref())
         } else {
             "background-color: var(--color-black); background-image: none;".to_string()
         }
     });
 
+    let cover_background = use_memo(move || {
+        let conf = config.read();
+        if !conf.custom_background_path.is_empty() {
+            let path = std::path::PathBuf::from(&conf.custom_background_path);
+            return utils::format_artwork_url(Some(&path)).map(|url| url.as_ref().to_string());
+        }
+        if conf.cover_art_background {
+            let url = current_song_cover_url.read().clone();
+            return (!url.is_empty()).then_some(url);
+        }
+        None
+    });
+
     let reduce_animations = use_memo(move || config.read().reduce_animations);
     let active_source = use_memo(move || config.read().active_source.clone());
     let switch_source = hooks::source_switch::use_switch_source();
+    let mut show_quick_search = use_signal(|| false);
+    let quick_search_source = hooks::use_db_queries::use_active_source();
+    use_effect(move || {
+        if !*show_quick_search.read() {
+            let _ = dioxus::document::eval(
+                "const el = document.getElementById('app-root'); if (el) el.focus();",
+            );
+        }
+    });
+
+    use_effect(move || {
+        let mut ctrl = ctrl;
+        spawn(async move {
+            let mut eval = dioxus::document::eval(
+                r#"(function(){
+                    if (window.__kopuzSpaceHandler) {
+                        document.removeEventListener('keydown', window.__kopuzSpaceHandler, true);
+                    }
+                    const isTextEntry = (el) => {
+                        if (!el) return false;
+                        if (el.isContentEditable) return true;
+                        const tag = el.tagName;
+                        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+                    };
+                    const handler = (e) => {
+                        if (e.key !== ' ' && e.code !== 'Space') return;
+                        if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+                        if (isTextEntry(e.target) || isTextEntry(document.activeElement)) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (e.repeat) return;
+                        dioxus.send('toggle-play');
+                    };
+                    window.__kopuzSpaceHandler = handler;
+                    document.addEventListener('keydown', handler, true);
+                })()"#,
+            );
+            while let Ok(v) = eval.recv::<serde_json::Value>().await {
+                if v.as_str() == Some("toggle-play") {
+                    ctrl.toggle();
+                }
+            }
+        });
+    });
 
     rsx! {
         // we use this component here to prevent re-diffing to prevent warns in console
@@ -1556,7 +1858,8 @@ fn App() -> Element {
         WindowsToolbarIconAssets {}
 
         div {
-            class: "flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
+            id: "app-root",
+            class: "relative z-0 flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
             style: "{background_style}",
             dir: "{dir}",
             "data-platform": if cfg!(target_os = "android") { "android" } else { "desktop" },
@@ -1578,16 +1881,22 @@ fn App() -> Element {
                     let c = *compact_mode.read();
                     compact_mode.set(!c);
                     evt.prevent_default();
-                } else if key == Key::Character(" ".into()) {
-                    ctrl.toggle();
+                } else if (mods.meta() || mods.ctrl())
+                    && matches!(&key, Key::Character(s) if s.eq_ignore_ascii_case("k"))
+                {
+                    let c = *show_quick_search.read();
+                    show_quick_search.set(!c);
                     evt.prevent_default();
                 }
             },
+            if let Some(cover) = cover_background() {
+                CoverArtBackground { cover }
+            }
             if cfg!(any(target_os = "linux", target_os = "windows")) {
                 div { dir: "ltr", Titlebar {} }
             }
 
-            if active_source == config::Source::Local {
+            if active_source().is_local() {
                 if let Some(file) = scan_current_file.read().clone() {
                     div {
                         class: "flex-shrink-0",
@@ -1620,7 +1929,12 @@ fn App() -> Element {
                 .read()
                 .server
                 .as_ref()
-                .map(|s| s.service == config::MusicService::YtMusic)
+                .map(|s| {
+                    matches!(
+                        s.service,
+                        config::MusicService::YtMusic | config::MusicService::Spotify
+                    )
+                })
                 .unwrap_or(false)
             {
                 if let Some(msg) = ctrl.playback_error.read().clone() {
@@ -1685,20 +1999,11 @@ fn App() -> Element {
                 }
             }
 
-            if let Some(update) = {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    update_banner_state.clone()
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    None
-                }
-            } {
+            if let Some(update) = update_banner_state.clone() {
                 div {
                     class: "flex-shrink-0",
                     div {
-                        class: "flex items-center justify-between gap-3 px-4 py-2 bg-sky-500/15 border-b border-sky-500/20 text-sky-200 text-sm",
+                        class: "flex items-center justify-between gap-3 {update_banner_padding} py-2 bg-sky-500/15 border-b border-sky-500/20 text-sky-200 text-sm",
                         div {
                             class: "flex items-center gap-2",
                             i { class: "fa-solid fa-download text-xs" }
@@ -1710,7 +2015,7 @@ fn App() -> Element {
                                     onclick: {
                                         let release_url = update.release_url.clone();
                                         move |_| {
-                                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                                            #[cfg(not(target_os = "android"))]
                                             if let Err(e) = webbrowser::open(&release_url) {
                                                 tracing::error!("Failed to open release page: {}", e);
                                             }
@@ -1747,6 +2052,7 @@ fn App() -> Element {
                     volume: volume,
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
+                    is_devices_open: is_devices_open,
                 }
             }
             div {
@@ -1813,17 +2119,7 @@ fn App() -> Element {
                                     if is_details {
                                         button {
                                             class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
-                                            onclick: move |_| {
-                                                match *current_route.peek() {
-                                                    Route::Album => selected_album_id.set(String::new()),
-                                                    Route::Artist => {
-                                                        selected_artist_name.set(String::new());
-                                                        selected_artist_channel_id.set(None);
-                                                    }
-                                                    Route::Playlists => selected_playlist_id.set(None),
-                                                    _ => {}
-                                                }
-                                            },
+                                            onclick: move |_| nav_ctrl.go_back(),
                                             i { class: "fa-solid fa-arrow-left text-lg" }
                                         }
                                     } else {
@@ -1836,7 +2132,7 @@ fn App() -> Element {
                                     div { class: "flex-1 flex justify-center pr-10",
                                         h2 {
                                             class: "text-[13px] font-black tracking-[0.2em] text-white/90 uppercase",
-                                            style: "font-family: 'JetBrains Mono', monospace;",
+                                            style: "font-family: 'kopuz-custom-font', 'JetBrains Mono', monospace;",
                                             "{page_title}"
                                         }
                                     }
@@ -1917,13 +2213,7 @@ fn App() -> Element {
                             pages::server::discover::DiscoverPlaylistDetail {
                                 selected_playlist_id: discover_selected_playlist_id,
                                 selected_playlist_title: discover_selected_playlist_title,
-                                on_back: move |_| {
-                                    // Mirror DiscoverArtist: clear id so
-                                    // re-opening the same playlist refetches.
-                                    discover_selected_playlist_id.set(None);
-                                    discover_selected_playlist_title.set(None);
-                                    current_route.set(Route::Discover);
-                                },
+                                on_back: move |_| nav_ctrl.go_back(),
                             }
                         },
                         Route::Search => rsx! {
@@ -1971,10 +2261,8 @@ fn App() -> Element {
                             }
                         },
                         Route::Artist => {
-                            // YT Music gets the rich YT-backed profile (banner,
-                            // top songs, albums, related) ONLY when an artist
-                            // is actually selected. The Artists sidebar tab /
-                            // back-to-list navigation lands with both signals
+                            // YT Music gets the rich YT-backed profile (banner, top songs, albums, related) ONLY when an artist is actually selected. The Artists sidebar tab / back-to-list navigation
+                            //  lands with both signals
                             // cleared — fall through to the library-driven
                             // grid in that case (populated on YT from followed
                             // artists + liked-song artists by the library
@@ -1993,12 +2281,7 @@ fn App() -> Element {
                                     pages::server::discover::DiscoverArtistPage {
                                         selected_artist_id: selected_artist_channel_id,
                                         selected_artist_name: selected_artist_name,
-                                        on_back: move |_| {
-                                            // Empty selection on Route::Artist renders the grid.
-                                            selected_artist_name.set(String::new());
-                                            selected_artist_channel_id.set(None);
-                                            current_route.set(Route::Artist);
-                                        },
+                                        on_back: move |_| nav_ctrl.go_back(),
                                         on_select_album: move |id: String| {
                                             selected_album_id.set(id);
                                             current_route.set(Route::Album);
@@ -2072,10 +2355,8 @@ fn App() -> Element {
                                 config: config,
                             }
                         },
-                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                        #[cfg(not(target_os = "android"))]
                         Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config } },
-                        #[cfg(target_arch = "wasm32")]
-                        Route::Ytdlp => rsx! { pages::settings::Settings { config } },
                         Route::Settings => rsx! { pages::settings::Settings { config } },
                         #[cfg(not(target_os = "android"))]
                         Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { config } },
@@ -2092,6 +2373,10 @@ fn App() -> Element {
                     current_song_title: current_song_title,
                     current_song_artist: current_song_artist,
                     current_song_album: current_song_album,
+                }
+                SpotifyDevicesPanel {
+                    is_devices_open: is_devices_open,
+                    is_rightbar_open: is_rightbar_open,
                 }
             }
             Fullscreen {
@@ -2113,6 +2398,38 @@ fn App() -> Element {
             }
             DownloadOverlay { queue: download_queue }
             CompactPlayer {}
+            if *show_quick_search.read() {
+                QuickSearch {
+                    show: show_quick_search,
+                    on_play: move |(track, fallback): (reader::Track, Vec<reader::Track>)| {
+                        let read_db = consume_context::<hooks::ReadDb>();
+                        let filter = hooks::TrackFilter {
+                            source: quick_search_source(),
+                            sort: hooks::TrackSort::Fields(config.peek().library_sort.clone()),
+                            ..Default::default()
+                        };
+                        spawn(async move {
+                            let all = read_db
+                                .tracks_page(
+                                    &filter,
+                                    hooks::Page {
+                                        offset: 0,
+                                        limit: u32::MAX,
+                                    },
+                                )
+                                .await
+                                .unwrap_or_default();
+                            if let Some(idx) = all.iter().position(|t| t.id == track.id) {
+                                queue.set(all);
+                                ctrl.play_track(idx);
+                            } else if let Some(idx) = fallback.iter().position(|t| t.id == track.id) {
+                                queue.set(fallback);
+                                ctrl.play_track(idx);
+                            }
+                        });
+                    },
+                }
+            }
             if config.read().player_bar_position == config::PlayerBarPosition::Bottom {
                 Bottombar {
                     config,
@@ -2129,6 +2446,7 @@ fn App() -> Element {
                     volume: volume,
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
+                    is_devices_open: is_devices_open,
                 }
             }
         }

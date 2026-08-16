@@ -4,6 +4,7 @@
   "name": "J1 Tokyo",
   "description": "radio_j1_desc",
   "icon": "fa-solid fa-radio",
+  "tags": ["jpop", "hits"],
   "streams": [
     { "id": "J1HITS", "name": "J1 HITS", "url": "https://jenny.torontocast.com:2000/stream/J1HITS", "icon": "fa-solid fa-fire" },
     { "id": "J1GOLD", "name": "J1 GOLD", "url": "https://jenny.torontocast.com:2000/stream/J1GOLD", "icon": "fa-solid fa-compact-disc" }

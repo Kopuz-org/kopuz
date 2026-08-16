@@ -3,6 +3,25 @@ use std::path::PathBuf;
 use config::Browser;
 use tokio::process::Command;
 
+/// How to invoke the browser. The two shapes must not be conflated: a `Path`
+/// may contain spaces (macOS app bundles, Windows Program Files) and is never
+/// split, while a `CommandLine` is multi-token by construction (`flatpak run
+/// <id>`, `$KOPUZ_BROWSER_COMMAND`) and is split on whitespace. Guessing the
+/// shape from the string is exactly what broke spawning `/Applications/Google
+/// Chrome.app/...` (#513) and `C:\Program Files\...` before it (#435).
+#[derive(Debug, Clone)]
+pub(crate) enum BrowserBin {
+    Path(String),
+    CommandLine(String),
+}
+
+impl std::fmt::Display for BrowserBin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (Self::Path(s) | Self::CommandLine(s)) = self;
+        f.write_str(s)
+    }
+}
+
 pub(crate) fn browser_candidates(browser: Browser) -> &'static [&'static str] {
     match browser {
         Browser::Brave => &["brave", "brave-browser"],
@@ -15,6 +34,19 @@ pub(crate) fn browser_candidates(browser: Browser) -> &'static [&'static str] {
             "microsoft-edge-dev",
         ],
         Browser::Vivaldi => &["vivaldi", "vivaldi-stable"],
+        Browser::Helium => &["helium-browser", "helium"],
+    }
+}
+
+pub(crate) fn browser_flatpak_ids(browser: Browser) -> &'static [&'static str] {
+    match browser {
+        Browser::Brave => &["com.brave.Browser"],
+        Browser::Chrome => &["com.google.Chrome", "com.google.ChromeDev"],
+        Browser::Chromium => &["org.chromium.Chromium"],
+        Browser::Edge => &["com.microsoft.Edge"],
+        Browser::Vivaldi => &["com.vivaldi.Vivaldi"],
+        // Helium ships .deb/AppImage/tarball upstream, no flatpak.
+        Browser::Helium => &[],
     }
 }
 
@@ -26,6 +58,7 @@ fn macos_app_paths(browser: Browser) -> &'static [&'static str] {
         Browser::Chromium => &["/Applications/Chromium.app/Contents/MacOS/Chromium"],
         Browser::Edge => &["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
         Browser::Vivaldi => &["/Applications/Vivaldi.app/Contents/MacOS/Vivaldi"],
+        Browser::Helium => &["/Applications/Helium.app/Contents/MacOS/Helium"],
     }
 }
 
@@ -67,43 +100,13 @@ fn windows_install_paths(browser: Browser) -> Vec<PathBuf> {
             add(&pf86, r"Vivaldi\Application\vivaldi.exe");
             add(&local, r"Vivaldi\Application\vivaldi.exe");
         }
+        Browser::Helium => {
+            add(&pf, r"imput\Helium\Application\chrome.exe");
+            add(&pf86, r"imput\Helium\Application\chrome.exe");
+            add(&local, r"imput\Helium\Application\chrome.exe");
+        }
     }
     out
-}
-
-pub(crate) fn find_browser_bin(browser: Browser) -> Option<String> {
-    let env_key = format!(
-        "KOPUZ_{}_BIN",
-        browser.id().to_uppercase().replace('-', "_")
-    );
-    if let Some(v) = std::env::var_os(&env_key)
-        && !v.is_empty()
-    {
-        return Some(v.to_string_lossy().into_owned());
-    }
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
-    for candidate in browser_candidates(browser) {
-        for dir in &dirs {
-            let p = dir.join(candidate);
-            if p.is_file() {
-                return Some(candidate.to_string());
-            }
-        }
-    }
-    #[cfg(target_os = "macos")]
-    for path in macos_app_paths(browser) {
-        if std::path::Path::new(path).is_file() {
-            return Some((*path).to_string());
-        }
-    }
-    #[cfg(target_os = "windows")]
-    for path in windows_install_paths(browser) {
-        if path.is_file() {
-            return Some(path.to_string_lossy().into_owned());
-        }
-    }
-    None
 }
 
 /// True inside a flatpak sandbox, where the host browser is only reachable via
@@ -112,9 +115,31 @@ pub(crate) fn in_flatpak() -> bool {
     std::path::Path::new("/.flatpak-info").exists()
 }
 
-/// Resolve the browser on the *host* PATH (the sandbox can't stat host
-/// binaries), probing each candidate with `flatpak-spawn --host command -v`.
-pub(crate) async fn find_host_browser_bin(browser: Browser) -> Option<String> {
+/// True if the command does not error, uses `sh -c` for executing in shell
+/// If running in flatpak container uses `flatpak-spawn --host`.
+pub(crate) async fn check_browser_command(arg: String) -> bool {
+    let mut command = if in_flatpak() {
+        let mut c = Command::new("flatpak-spawn");
+        c.args(["--host", "sh", "-c"]);
+        c
+    } else {
+        let mut c = Command::new("sh");
+        c.arg("-c");
+        c
+    };
+
+    command.arg(arg);
+
+    command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+pub(crate) async fn find_browser_bin(browser: Browser, profile: String) -> Option<BrowserBin> {
     let env_key = format!(
         "KOPUZ_{}_BIN",
         browser.id().to_uppercase().replace('-', "_")
@@ -122,20 +147,57 @@ pub(crate) async fn find_host_browser_bin(browser: Browser) -> Option<String> {
     if let Some(v) = std::env::var_os(&env_key)
         && !v.is_empty()
     {
-        return Some(v.to_string_lossy().into_owned());
+        return Some(BrowserBin::Path(v.to_string_lossy().into_owned()));
     }
-    for cand in browser_candidates(browser) {
-        let ok = Command::new("flatpak-spawn")
-            .args(["--host", "sh", "-c"])
-            .arg(format!("command -v {cand}"))
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ok {
-            return Some(cand.to_string());
+
+    if in_flatpak() {
+        for cand in browser_candidates(browser) {
+            if check_browser_command(format!("command -v {cand}")).await {
+                return Some(BrowserBin::Path(cand.to_string()));
+            }
+        }
+    } else {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+        for candidate in browser_candidates(browser) {
+            for dir in &dirs {
+                let p = dir.join(candidate);
+                if p.is_file() {
+                    return Some(BrowserBin::Path(candidate.to_string()));
+                }
+            }
+        }
+    }
+
+    if let Ok(v) = std::env::var("KOPUZ_BROWSER_FLATPAK_ID")
+        && !v.trim().is_empty()
+    {
+        let id = v.to_string().to_owned();
+        if check_browser_command(format!("flatpak info {id}")).await {
+            return Some(BrowserBin::CommandLine(format!(
+                "flatpak run --filesystem={profile} {id}"
+            )));
+        }
+    }
+
+    for cand in browser_flatpak_ids(browser) {
+        if check_browser_command(format!("flatpak info {cand}")).await {
+            return Some(BrowserBin::CommandLine(format!(
+                "flatpak run --filesystem={profile} {cand}"
+            )));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    for path in macos_app_paths(browser) {
+        if std::path::Path::new(path).is_file() {
+            return Some(BrowserBin::Path((*path).to_string()));
+        }
+    }
+    #[cfg(target_os = "windows")]
+    for path in windows_install_paths(browser) {
+        if path.is_file() {
+            return Some(BrowserBin::Path(path.to_string_lossy().into_owned()));
         }
     }
     None
@@ -143,12 +205,71 @@ pub(crate) async fn find_host_browser_bin(browser: Browser) -> Option<String> {
 
 /// Plain `Command` natively; `flatpak-spawn --host --watch-bus` when packaged,
 /// so `child.kill()`/`kill_on_drop` still tears the host browser down.
-pub(crate) fn browser_command(bin: &str) -> Command {
+pub(crate) fn browser_command(bin: &BrowserBin) -> Command {
+    let tokens: Vec<&str> = match bin {
+        BrowserBin::Path(p) => vec![p.as_str()],
+        BrowserBin::CommandLine(c) => {
+            let split: Vec<&str> = c.split_whitespace().collect();
+            if split.is_empty() {
+                vec![c.as_str()]
+            } else {
+                split
+            }
+        }
+    };
     if in_flatpak() {
         let mut c = Command::new("flatpak-spawn");
-        c.args(["--host", "--watch-bus", bin]);
+        c.args(["--host", "--watch-bus"]);
+        c.args(&tokens);
         c
     } else {
-        Command::new(bin)
+        let mut c = Command::new(tokens[0]);
+        c.args(&tokens[1..]);
+        c
+    }
+}
+
+pub async fn has_host_spawn() -> bool {
+    if !in_flatpak() {
+        return true;
+    }
+
+    Command::new("flatpak-spawn")
+        .args(["--host", "true"])
+        .status()
+        .await
+        .is_ok_and(|status| status.success())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_with_spaces_is_never_split() {
+        // The #513 shape: a macOS app-bundle binary. Splitting it spawned
+        // "/Applications/Google" and failed with ENOENT.
+        let bin = BrowserBin::Path(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".to_string(),
+        );
+        let cmd = browser_command(&bin);
+        assert_eq!(
+            cmd.as_std().get_program().to_string_lossy(),
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        );
+        assert_eq!(cmd.as_std().get_args().count(), 0);
+    }
+
+    #[test]
+    fn a_command_line_is_split_into_tokens() {
+        let bin = BrowserBin::CommandLine("flatpak run com.google.Chrome".to_string());
+        let cmd = browser_command(&bin);
+        assert_eq!(cmd.as_std().get_program().to_string_lossy(), "flatpak");
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, ["run", "com.google.Chrome"]);
     }
 }

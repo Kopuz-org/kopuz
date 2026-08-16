@@ -5,8 +5,10 @@
 
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
+use components::sort_control::SortControl;
 use components::track_list_view::TrackListView;
-use config::AppConfig;
+use components::view_mode_toggle::ViewModeToggle;
+use config::{AlbumViewMode, AppConfig};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
@@ -58,6 +60,7 @@ pub fn Album(
     let source = use_active_source();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = use_memo(move || active_source.read().capabilities());
+    let nav_ctrl = use_context::<components::NavigationController>();
 
     let open_album_menu = use_signal(|| None::<String>);
     let mut show_album_playlist_modal = use_signal(|| false);
@@ -96,7 +99,7 @@ pub fn Album(
             if album_id.read().is_empty() {
                 div { class: "flex-1 min-h-0 flex flex-col",
                     if !cfg!(target_os = "android") {
-                        h1 { class: "text-3xl font-bold text-white mb-6 shrink-0", "{i18n::t(\"all_albums\")}" }
+                        h1 { class: "text-3xl font-semibold tracking-tight text-white mb-6 shrink-0", "{i18n::t(\"all_albums\")}" }
                     }
 
                     AlbumGrid {
@@ -159,7 +162,7 @@ pub fn Album(
                     album_id_str: album_id.read().clone(),
                     queue,
                     current_queue_index,
-                    on_close: move |_| album_id.set(String::new()),
+                    on_close: move |_| nav_ctrl.go_back(),
                 }
             }
         }
@@ -168,7 +171,7 @@ pub fn Album(
 
 #[component]
 fn AlbumGrid(
-    config: Signal<AppConfig>,
+    mut config: Signal<AppConfig>,
     mut album_id: Signal<String>,
     mut open_album_menu: Signal<Option<String>>,
     mut show_album_playlist_modal: Signal<bool>,
@@ -181,6 +184,24 @@ fn AlbumGrid(
     let is_offline = use_context::<Signal<bool>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let albums_res = use_albums(source);
+
+    let album_sort = use_signal(|| config.peek().album_sort.clone());
+    use_effect(move || {
+        let curr = album_sort.read().clone();
+        if config.peek().album_sort != curr {
+            config.write().album_sort = curr;
+        }
+    });
+    let view_mode = use_signal(|| config.peek().album_view_mode);
+    use_effect(move || {
+        let curr = *view_mode.read();
+        if config.peek().album_view_mode != curr {
+            config.write().album_view_mode = curr;
+        }
+    });
+    let available_sort_fields = use_memo(move || {
+        reader::sort::available_album_fields(&albums_res.read().clone().unwrap_or_default())
+    });
 
     // Offline (server): only albums with downloaded tracks. Album ids come from
     // the downloaded tracks themselves. The grid dedupes by title — the detail
@@ -214,19 +235,17 @@ fn AlbumGrid(
     let albums = use_memo(move || {
         let offline = caps().downloads && *is_offline.read();
         let downloaded = downloaded_album_ids();
-        let mut albums = albums_res.read().clone().unwrap_or_default();
-        albums.sort_by(|a, b| {
-            a.title
-                .trim()
-                .to_lowercase()
-                .cmp(&b.title.trim().to_lowercase())
-        });
         let mut seen = HashSet::new();
-        albums
+        let mut albums = albums_res
+            .read()
+            .clone()
+            .unwrap_or_default()
             .into_iter()
             .filter(|a| !offline || downloaded.contains(&a.id))
             .filter(|a| seen.insert(a.title.trim().to_lowercase()))
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        reader::sort::sort_albums(&mut albums, &album_sort.read());
+        albums
     });
 
     // Restore the grid scroll once after the albums first render; guarded so DB
@@ -244,6 +263,11 @@ fn AlbumGrid(
     });
 
     rsx! {
+        div { class: "flex-1 min-h-0 flex flex-col",
+        div { class: "flex items-center justify-end gap-2 mb-4 shrink-0",
+            ViewModeToggle { mode: view_mode }
+            SortControl { criteria: album_sort, available: available_sort_fields() }
+        }
         div {
             id: "album-grid-scroll",
             class: "flex-1 min-h-0 overflow-y-auto pb-8",
@@ -251,7 +275,11 @@ fn AlbumGrid(
             if albums().is_empty() {
                 p { class: "text-slate-500", "{i18n::t(\"no_albums_found\")}" }
             } else {
-                div { class: "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6",
+                div {
+                    // Cards keep identical classes in both modes (`.vcard*` hooks are
+                    // restyled by the `.view-list` CSS), so toggling only patches this
+                    // container's class — no per-card re-render or cover refetch.
+                    class: if *view_mode.read() == AlbumViewMode::List { "view-list" } else { "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6" },
                     for album in albums() {
                         {
                             let cap = caps();
@@ -273,8 +301,8 @@ fn AlbumGrid(
                             rsx! {
                                 div {
                                     key: "{album.id}",
-                                    class: if is_open { "group relative z-50 p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors" } else { "group relative p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors" },
-                                    style: if is_open { "content-visibility: visible; contain: none; contain-intrinsic-size: 0 230px;" } else { "content-visibility: auto; contain-intrinsic-size: 0 230px;" },
+                                    class: if is_open { "vcard group relative z-50 p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors" } else { "vcard group relative p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors" },
+                                    style: if is_open { "content-visibility: visible; contain: none;" } else { "content-visibility: auto;" },
                                     oncontextmenu: {
                                         let id = id_for_menu.clone();
                                         move |evt| {
@@ -284,10 +312,10 @@ fn AlbumGrid(
                                     },
 
                                     div {
-                                        class: "cursor-pointer",
+                                        class: "vcard-click cursor-pointer",
                                         onclick: move |_| album_id.set(id_for_nav.clone()),
                                         div {
-                                            class: "aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
+                                            class: "vcard-cover aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
                                             style: "-webkit-user-drag: none;",
                                             ondragstart: move |evt| evt.prevent_default(),
                                             if let Some(url) = &cover_url {
@@ -298,11 +326,14 @@ fn AlbumGrid(
                                                 }
                                             }
                                         }
-                                        h3 { class: "text-white font-medium truncate", "{album.title}" }
-                                        p { class: "text-sm text-stone-400 truncate", "{album.artist}" }
+                                        div {
+                                            class: "vcard-meta",
+                                            h3 { class: "text-white font-medium truncate", "{album.title}" }
+                                            p { class: "text-sm text-stone-400 truncate", "{album.artist}" }
+                                        }
                                     }
 
-                                    div { class: "absolute bottom-3 right-3",
+                                    div { class: "vcard-menu absolute bottom-3 right-3",
                                         DotsMenu {
                                             actions,
                                             is_open,
@@ -378,6 +409,7 @@ fn AlbumGrid(
                 }
             }
         }
+        }
     }
 }
 
@@ -407,16 +439,16 @@ fn AlbumDetail(
     // discovered album renders (header + full track list) instead of "not found".
     let direct_remote_res: Resource<Option<::server::source::RemoteAlbum>> = {
         use_resource(move || {
-            let want = caps().albums == ::server::source::AlbumType::YtMusic && !*is_offline.read();
+            let want = !*is_offline.read();
             let db_has = album_res.read().clone().flatten().is_some();
             let id = album_id_memo();
             let src = active_source.peek().clone();
-            async move {
+            utils::offload(async move {
                 if !want || db_has || id.trim().is_empty() {
                     return None;
                 }
                 src.fetch_album_by_ref(&id).await.ok().flatten()
-            }
+            })
         })
     };
 
@@ -479,13 +511,13 @@ fn AlbumDetail(
         use_resource(move || {
             let _ = gens.generation(Table::Tracks);
             let (src, ids) = (active_source(), matching_ids());
-            async move {
+            utils::offload(async move {
                 let mut out = Vec::new();
                 for id in &ids {
                     out.extend(src.album_tracks(id).await.unwrap_or_default());
                 }
                 out
-            }
+            })
         })
     };
 
@@ -500,7 +532,7 @@ fn AlbumDetail(
             let want = caps().albums == ::server::source::AlbumType::YtMusic && !*is_offline.read();
             let album = album_res.read().clone().flatten();
             let src = active_source.peek().clone();
-            async move {
+            utils::offload(async move {
                 let album = album?;
                 if !want || album.title.trim().is_empty() {
                     return None;
@@ -509,9 +541,27 @@ fn AlbumDetail(
                     .await
                     .ok()
                     .flatten()
-            }
+            })
         })
     };
+
+    let full_album_tracks_res = use_resource(move || {
+        let want = caps().albums == ::server::source::AlbumType::Standard
+            && caps().sync
+            && !*is_offline.read();
+        let ids = matching_ids();
+        let src = active_source.peek().clone();
+        utils::offload(async move {
+            if !want {
+                return Vec::new();
+            }
+            let mut out: Vec<reader::models::Track> = Vec::new();
+            for id in &ids {
+                out.extend(src.fetch_album_tracks(id).await.unwrap_or_default());
+            }
+            out
+        })
+    });
 
     let tracks = use_memo(move || {
         let offline = caps().downloads && *is_offline.read();
@@ -541,6 +591,12 @@ fn AlbumDetail(
             .into_iter()
             .filter(|t| !offline || conf.offline_tracks.contains_key(t.id.key().as_ref()))
             .collect();
+        if !offline {
+            let full = full_album_tracks_res.read().clone().unwrap_or_default();
+            if full.len() > tracks.len() {
+                tracks = full;
+            }
+        }
         tracks.sort_by(|a, b| {
             a.disc_number
                 .unwrap_or(1)
@@ -657,7 +713,7 @@ fn AlbumDetail(
                 })),
                 cover_url,
                 is_album: true,
-                back_label: i18n::t("back_to_albums").to_string(),
+                release_year: (album.year > 0).then_some(album.year),
                 tracks: tracks(),
                 on_close,
                 enable_metadata: cap.edit_tags,
@@ -666,9 +722,9 @@ fn AlbumDetail(
                 on_cover_click: cap.edit_tags.then(|| EventHandler::new(move |_| {
                     let aid = aid_cover.clone();
                     let _ = &aid;
-                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                    #[cfg(not(target_os = "android"))]
                     let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                    #[cfg(not(target_os = "android"))]
                     spawn(async move {
                         let file = rfd::AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
@@ -758,7 +814,7 @@ fn AlbumDetail(
 }
 
 /// YT-Music-style album page: a left meta column (cover, artist link, title,
-/// "Album • year", song count · duration, play / shuffle / download) beside the
+/// "Album", song count · duration · year, play / shuffle / download) beside the
 /// full track list. Shown only for the catalog remote (YT) once the album
 /// resolved; local/other sources use [`TrackListView`]. Rows reuse [`TrackRow`]
 /// so play / queue / menu / download behave exactly as everywhere else.
@@ -813,21 +869,25 @@ fn YtAlbumDetail(
     let tracks_play_all = tracks.clone();
     let tracks_download_all = tracks.clone();
     let artist_for_nav_btn = artist_name.clone();
-    // Share target: the album's YT browse link when resolved, else the first
-    // track's web url so the button still does something before the fetch lands.
+    // Prefer the provider's album page; fall back to its first track page.
     let share_url = browse_id
         .as_ref()
-        .map(|id| format!("https://music.youtube.com/browse/{id}"))
+        .and_then(|id| match tracks.first().and_then(|t| t.id.service()) {
+            Some(config::MusicService::Spotify) => {
+                Some(format!("https://open.spotify.com/album/{id}"))
+            }
+            Some(config::MusicService::YtMusic) => {
+                Some(format!("https://music.youtube.com/browse/{id}"))
+            }
+            _ => None,
+        })
         .or_else(|| tracks.first().and_then(|t| active_source.peek().web_url(t)));
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
             if !cfg!(target_os = "android") {
-                button {
-                    class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-6 shrink-0 self-start group",
-                    onclick: move |_| on_close.call(()),
-                    i { class: "fa-solid fa-arrow-left text-sm group-hover:-translate-x-0.5 transition-transform" }
-                    span { class: "text-sm font-medium", "{i18n::t(\"back_to_albums\")}" }
+                components::back_button::BackButton {
+                    on_click: move |_| on_close.call(()),
                 }
             }
 
@@ -851,17 +911,19 @@ fn YtAlbumDetail(
                             onclick: move |_| nav_ctrl.navigate_to_artist(artist_for_nav.clone()),
                             "{artist_name}"
                         }
-                        h1 { class: "text-3xl font-bold text-white leading-[1.1] break-words", "{title}" }
+                        h1 { class: "text-3xl font-semibold tracking-tight text-white leading-[1.1] break-words", "{title}" }
                         div { class: "text-sm text-slate-400 flex flex-wrap items-center gap-x-2 justify-center md:justify-start",
-                            if let Some(y) = year {
+                            if year.is_some() {
                                 span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{i18n::t(\"album\")}" }
-                                span { class: "text-white/30", "•" }
-                                span { "{y}" }
                                 span { class: "text-white/30", "•" }
                             }
                             span { "{i18n::t_with(\"showcase_song_count\", &[(\"count\", song_count.to_string())])}" }
                             span { class: "text-white/30", "•" }
                             span { "{dur_min} {i18n::t(\"min\")}" }
+                            if let Some(y) = year {
+                                span { class: "text-white/30", "•" }
+                                span { "{y}" }
+                            }
                         }
                     }
                     div { class: "flex items-center gap-3 mt-1",
@@ -909,7 +971,8 @@ fn YtAlbumDetail(
                         }
                         // Shuffle.
                         button {
-                            class: format!("w-11 h-11 rounded-full border flex items-center justify-center transition-colors {}", if *ctrl.shuffle.read() { "text-white bg-white/10 border-white/30" } else { "text-slate-300 border-white/15 hover:text-white hover:border-white/30" }),
+                            class: format!("w-11 h-11 rounded-full border flex items-center justify-center transition-colors {}", if *ctrl.shuffle.read() { "bg-white/10 border-white/30" } else { "text-slate-300 border-white/15 hover:text-white hover:border-white/30" }),
+                            style: if *ctrl.shuffle.read() { "color: var(--color-indigo-500);" } else { "" },
                             title: i18n::t("shuffle").to_string(),
                             onclick: move |_| ctrl.toggle_shuffle(),
                             i { class: "fa-solid fa-shuffle" }
@@ -950,7 +1013,11 @@ fn YtAlbumDetail(
                                     cover_url,
                                     is_album: true,
                                     hide_delete: true,
-                                    row_num: Some(idx + 1),
+                                    row_num: Some(components::showcase::track_row_number(
+                                        track.track_number,
+                                        idx + 1,
+                                        true,
+                                    )),
                                     is_menu_open,
                                     is_currently_playing: is_current,
                                     is_downloaded,

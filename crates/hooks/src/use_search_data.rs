@@ -55,12 +55,17 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
         let conf = config.read().clone();
         let source = active_source.read().clone();
 
-        async move {
+        utils::offload(async move {
             if query.trim().is_empty() {
                 return None;
             }
             let span = tracing::info_span!("query.search", source = conf.active_source.as_str());
-            let (tracks, albums) = source.search(&query).instrument(span).await.ok()?;
+            let (tracks, albums) = source
+                .search(&query)
+                .instrument(span)
+                .await
+                .inspect_err(|e| tracing::warn!(error = %e, "search failed"))
+                .ok()?;
             let result_tracks: TrackRes = tracks
                 .iter()
                 .map(|t| (t.clone(), server::cover::track(&conf, t, 80)))
@@ -75,7 +80,7 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
                 })
                 .collect();
             Some((result_tracks, result_albums))
-        }
+        })
     });
 
     SearchData {

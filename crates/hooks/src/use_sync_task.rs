@@ -40,11 +40,6 @@ pub fn use_sync_task(config: Signal<config::AppConfig>, db: Db) {
     use_future(move || {
         let db = db.clone();
         async move {
-            #[cfg(target_arch = "wasm32")]
-            {
-                let _ = (&db, &gens);
-            }
-            #[cfg(not(target_arch = "wasm32"))]
             {
                 let mut consecutive_failures: u32 = 0;
                 loop {
@@ -87,7 +82,11 @@ pub fn use_sync_task(config: Signal<config::AppConfig>, db: Db) {
                     } else {
                         SyncReason::Interval
                     };
-                    match reconcile_favorites(source.as_ref(), reason).await {
+                    let outcome = utils::offload(async move {
+                        reconcile_favorites(source.as_ref(), reason).await
+                    })
+                    .await;
+                    match outcome {
                         Ok(report) => {
                             consecutive_failures = 0;
                             // did_pull, not pulled: a pull that only removed

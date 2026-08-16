@@ -4,6 +4,7 @@
   "name": "Asia DREAM Radio",
   "description": "radio_asiadreamradio_desc",
   "icon": "fa-solid fa-radio",
+  "tags": ["jpop", "asian pop"],
   "streams": [
     { "id": "japan_hits", "name": "Japan Hits", "url": "https://quincy.torontocast.com:2020/;?type=http", "icon": "fa-solid fa-fire" },
     { "id": "natsukashii", "name": "Natsukashii", "url": "https://quincy.torontocast.com:2070/;?type=http", "icon": "fa-solid fa-clock-rotate-left" },

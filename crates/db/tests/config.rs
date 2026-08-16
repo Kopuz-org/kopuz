@@ -4,16 +4,21 @@
 
 use std::path::PathBuf;
 
-use config::{AppConfig, MusicServer, MusicService, SavedServer};
+use config::{AppConfig, MusicServer, MusicService, SavedLocalSource, SavedServer, Source};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, SqliteConnection};
 
 fn unique_db() -> PathBuf {
+    // pid + counter, not just clock: macOS's µs clock let parallel tests
+    // collide on a nanos-only name and delete each other's live DB.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("kopuz-cfg-{nanos}"));
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("kopuz-cfg-{pid}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join("kopuz.db")
 }
@@ -68,10 +73,14 @@ async fn config_round_trips_with_creds_in_servers_table() {
     // Play counts are written ONLY through bump_listen_count (a per-play
     // 1-row upsert), never by save_config — but load_config hydrates them.
     for _ in 0..7 {
-        db.bump_listen_count("ytmusic:VID1").await.unwrap();
+        db.bump_listen_count(&Source::Server("srv-b".into()), "ytmusic:VID1")
+            .await
+            .unwrap();
     }
     for _ in 0..3 {
-        db.bump_listen_count("/music/a.flac").await.unwrap();
+        db.bump_listen_count(&Source::Local, "/music/a.flac")
+            .await
+            .unwrap();
     }
 
     let loaded = db.load_config().await.unwrap().expect("config present");
@@ -118,6 +127,38 @@ async fn config_round_trips_with_creds_in_servers_table() {
     assert_eq!(n, 1, "srv-a removed, srv-b kept");
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn named_local_source_round_trips_as_active() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let local = SavedLocalSource {
+        id: "local:test-library".into(),
+        name: "Work music".into(),
+        directories: vec![PathBuf::from("/music/work")],
+    };
+    let cfg = AppConfig {
+        active_source: Source::LocalLibrary(local.id.clone()),
+        local_sources: vec![local.clone()],
+        ..Default::default()
+    };
+
+    db.save_config(&cfg).await.unwrap();
+    db.bump_listen_count(&cfg.active_source, "/music/work/a.flac")
+        .await
+        .unwrap();
+    let loaded = db.load_config().await.unwrap().expect("config present");
+
+    assert_eq!(loaded.active_source, Source::LocalLibrary(local.id.clone()));
+    assert_eq!(loaded.local_sources, vec![local]);
+    assert!(loaded.server.is_none());
+    assert_eq!(
+        loaded
+            .listen_counts
+            .get("local:test-library|/music/work/a.flac"),
+        Some(&1),
+    );
 }
 
 async fn open(db_path: &std::path::Path) -> SqliteConnection {

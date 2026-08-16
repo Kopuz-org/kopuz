@@ -188,36 +188,34 @@ fn extract_track_info(
 }
 
 fn get_tenc_iv_size(data: &[u8], enca_body_start: usize, enca_body_end: usize) -> u8 {
-    if let Some((sinf_bs, sinf_be, _)) = find_child(data, enca_body_start, enca_body_end, SINF) {
-        if let Some((schi_bs, schi_be, _)) = find_child(data, sinf_bs, sinf_be, SCHI) {
-            if let Some((tenc_bs, _, _)) = find_child(data, schi_bs, schi_be, TENC) {
-                if tenc_bs + 8 <= data.len() {
-                    return data[tenc_bs + 7];
-                }
-            }
-        }
+    if let Some((sinf_bs, sinf_be, _)) = find_child(data, enca_body_start, enca_body_end, SINF)
+        && let Some((schi_bs, schi_be, _)) = find_child(data, sinf_bs, sinf_be, SCHI)
+        && let Some((tenc_bs, _, _)) = find_child(data, schi_bs, schi_be, TENC)
+        && tenc_bs + 8 <= data.len()
+    {
+        return data[tenc_bs + 7];
     }
     16
 }
 
 // SENC parsing
 
-fn parse_senc(
-    iv_size: u8,
-    sample_count: u32,
-    raw_data: &[u8],
-    use_subsample: bool,
-) -> (Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>) {
+/// Per-sample decryption inputs read out of a `senc` box: each sample's 16-byte
+/// IV, paired with its subsample layout as `(clear_bytes, encrypted_bytes)`
+/// runs (empty when the sample is encrypted whole).
+type SencSamples = (Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>);
+
+fn parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample: bool) -> SencSamples {
     if iv_size == 0 && sample_count == 0 {
         return (vec![], vec![]);
     }
 
     if use_subsample {
         // Subsample mode: each sample has [IV] + subsample_count(2) + patterns(n*6)
-        if iv_size != 0 {
-            if let Some(result) = try_parse_senc(iv_size, sample_count, raw_data, true) {
-                return result;
-            }
+        if iv_size != 0
+            && let Some(result) = try_parse_senc(iv_size, sample_count, raw_data, true)
+        {
+            return result;
         }
         for try_size in [0u8, 8, 16] {
             if try_size == iv_size {
@@ -230,10 +228,10 @@ fn parse_senc(
         }
     } else {
         // Full-sample mode: each sample has just [IV], no subsample patterns
-        if iv_size != 0 {
-            if let Some(result) = try_parse_senc(iv_size, sample_count, raw_data, false) {
-                return result;
-            }
+        if iv_size != 0
+            && let Some(result) = try_parse_senc(iv_size, sample_count, raw_data, false)
+        {
+            return result;
         }
         for try_size in [0u8, 8, 16] {
             if try_size == iv_size {
@@ -255,7 +253,7 @@ fn try_parse_senc(
     sample_count: u32,
     raw_data: &[u8],
     use_subsample: bool,
-) -> Option<(Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>)> {
+) -> Option<SencSamples> {
     let count = sample_count as usize;
     let mut pos = 0usize;
     let mut ivs = Vec::with_capacity(count);
@@ -462,7 +460,7 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
             }
 
             // Decrypt samples in-place
-            let mdat_body_len = mdat_total_size.saturating_sub(8) as usize;
+            let mdat_body_len = mdat_total_size.saturating_sub(8);
             let mut decrypted = vec![0u8; mdat_body_len];
             let mdat_data_end = mdat_body_start + mdat_body_len;
             if mdat_data_end > data.len() {
@@ -576,26 +574,27 @@ fn parse_trun(
     }
 
     // Fill default sizes from tfhd/trex if trun didn't provide sizes
-    if sizes.is_empty() && sample_count > 0 {
-        if let Some((tfhd_bs, _, _)) = tfhd {
-            // tfhd body: version(1)+flags(3)=4 bytes, track_id(4 bytes), then optional fields
-            let tfhd_version_flags = u32be(data, tfhd_bs);
-            let tfhd_flags = tfhd_version_flags & 0x00FFFFFF;
-            let mut off = tfhd_bs + 8; // skip version+flags + track_id
-            if tfhd_flags & 0x000001 != 0 {
-                off += 8;
-            } // base_data_offset (u64)
-            if tfhd_flags & 0x000002 != 0 {
-                off += 4;
-            } // sample_description_index (u32)
-            if tfhd_flags & 0x000008 != 0 {
-                off += 4;
-            } // default_sample_duration (u32)
-            if tfhd_flags & 0x000010 != 0 && off + 4 <= data.len() {
-                let def_size = u32be(data, off);
-                if def_size > 0 {
-                    sizes = vec![def_size; sample_count];
-                }
+    if sizes.is_empty()
+        && sample_count > 0
+        && let Some((tfhd_bs, _, _)) = tfhd
+    {
+        // tfhd body: version(1)+flags(3)=4 bytes, track_id(4 bytes), then optional fields
+        let tfhd_version_flags = u32be(data, tfhd_bs);
+        let tfhd_flags = tfhd_version_flags & 0x00FFFFFF;
+        let mut off = tfhd_bs + 8; // skip version+flags + track_id
+        if tfhd_flags & 0x000001 != 0 {
+            off += 8;
+        } // base_data_offset (u64)
+        if tfhd_flags & 0x000002 != 0 {
+            off += 4;
+        } // sample_description_index (u32)
+        if tfhd_flags & 0x000008 != 0 {
+            off += 4;
+        } // default_sample_duration (u32)
+        if tfhd_flags & 0x000010 != 0 && off + 4 <= data.len() {
+            let def_size = u32be(data, off);
+            if def_size > 0 {
+                sizes = vec![def_size; sample_count];
             }
         }
     }

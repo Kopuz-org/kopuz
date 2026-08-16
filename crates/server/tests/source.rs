@@ -7,14 +7,41 @@
 use std::path::PathBuf;
 
 use db::Source;
+use reader::{Track, TrackId};
 use server::source;
 
+fn track(id: TrackId) -> Track {
+    Track {
+        id,
+        cover: None,
+        album_id: String::new(),
+        title: String::new(),
+        artist: String::new(),
+        album: String::new(),
+        duration: 0,
+        khz: 0,
+        bitrate: 0,
+        track_number: None,
+        disc_number: None,
+        musicbrainz_release_id: None,
+        musicbrainz_recording_id: None,
+        musicbrainz_track_id: None,
+        playlist_item_id: None,
+        artists: Vec::new(),
+    }
+}
+
 fn unique_db() -> PathBuf {
+    // pid + counter, not just clock: macOS's µs clock let parallel tests
+    // collide on a nanos-only name and delete each other's live DB.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("kopuz-source-{nanos}"));
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("kopuz-source-{pid}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join("kopuz.db")
 }
@@ -22,7 +49,7 @@ fn unique_db() -> PathBuf {
 #[tokio::test]
 async fn local_create_then_add_playlist_round_trips() {
     let db = db::init(&unique_db()).await.unwrap();
-    let src = source::local(db.clone());
+    let src = source::local(db.clone(), Source::Local);
 
     let id = src
         .create_playlist("Road Trip", &["/music/a.flac".into()])
@@ -58,7 +85,7 @@ async fn local_create_then_add_playlist_round_trips() {
 #[tokio::test]
 async fn local_favorite_round_trips() {
     let db = db::init(&unique_db()).await.unwrap();
-    let src = source::local(db.clone());
+    let src = source::local(db.clone(), Source::Local);
 
     assert!(!src.is_favorite("/music/x.flac").await);
 
@@ -73,4 +100,29 @@ async fn local_favorite_round_trips() {
 
     src.set_favorite("/music/x.flac", false).await.unwrap();
     assert!(!src.is_favorite("/music/x.flac").await);
+}
+
+#[tokio::test]
+async fn record_favorite_writes_a_clean_local_row_and_reverts() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let src = source::local(db.clone(), Source::Local);
+    let t = track(TrackId::Local("/music/x.flac".into()));
+
+    // record_favorite writes the local state as a CLEAN row (no dirty/pending) —
+    // the optimistic half of a toggle.
+    src.record_favorite(&t, true).await.unwrap();
+    assert!(
+        db.favorites("local")
+            .await
+            .unwrap()
+            .contains(&"/music/x.flac".to_string())
+    );
+    assert!(db.dirty_favorites("local").await.unwrap().is_empty());
+
+    // Calling it with the opposite `on` reverts cleanly (the revert-on-push-fail
+    // path) — no favorite, no lingering row.
+    src.record_favorite(&t, false).await.unwrap();
+    assert!(!src.is_favorite("/music/x.flac").await);
+    assert!(db.dirty_favorites("local").await.unwrap().is_empty());
+    assert!(db.dirty_unlikes("local").await.unwrap().is_empty());
 }

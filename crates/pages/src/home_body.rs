@@ -1,7 +1,5 @@
-use ::server::source::TrackFavorite;
 use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
     use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_favorites,
     use_playlists, use_top_genre, use_tracks_by_keys,
@@ -48,6 +46,10 @@ fn track_cover_url(conf: &AppConfig, track: &Track) -> Option<String> {
     ::server::cover::track(conf, track, 384).map(|c| c.to_string())
 }
 
+/// The hero stretches one cover across the full content width (up to 800px
+/// tall), so it asks for far more pixels than the 384px grid cards.
+const HERO_COVER_WIDTH: u32 = 1400;
+
 /// The source-agnostic Home body (sections + hero). Rendered for local and any
 /// server; the active source decides the data, covers (via the source seam), the
 /// recently-played list, and offline/sync gating.
@@ -68,6 +70,10 @@ pub fn HomeBody(
 
     let albums_res = use_albums(source);
     let playlists_res = use_playlists();
+    // The artist-image caches the Top Artists row resolves through (read-only:
+    // home triggers no photo fetch; the Artists page's pipeline fills these).
+    let artist_images_res = hooks::use_db_queries::use_artist_images();
+    let fetched_artist_images = use_context::<Signal<::server::cover::FetchedArtistImages>>();
     let offline_keys = use_memo(move || -> Vec<String> {
         if !(caps().downloads && *is_offline.read()) {
             return Vec::new();
@@ -317,6 +323,9 @@ pub fn HomeBody(
 
     let jellyfin_artists = use_memo(move || {
         let conf = config.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
+        let images = artist_images_res.read().clone().unwrap_or_default();
+        let fetched = fetched_artist_images.read();
         let tracks = if caps().downloads && *is_offline.read() {
             let mut downloaded = offline_tracks_res.read().clone().unwrap_or_default();
             downloaded.sort_by_key(|a| a.artist.to_lowercase());
@@ -331,7 +340,23 @@ pub fn HomeBody(
                 continue;
             }
             if unique_artists.insert(track.artist.clone()) {
-                let cover_url = track_cover_url(&conf, track);
+                // The same image chain the Artists grid uses: photo where one
+                // exists, the track's album cover as the Library last resort
+                // (a Remote catalog resolves photo-or-placeholder instead).
+                let norm = utils::artist::normalize_artist_key(&track.artist);
+                let album_cover = albums
+                    .iter()
+                    .find(|a| a.id == track.album_id)
+                    .and_then(|a| a.cover_path.as_deref());
+                let art = ::server::cover::ArtistArt::from_caches(
+                    &images,
+                    &fetched,
+                    &norm,
+                    &track.artist,
+                    album_cover,
+                    caps().artist_view,
+                );
+                let cover_url = ::server::cover::artist(&conf, art, 384).map(|c| c.to_string());
                 artist_list.push((track.artist.clone(), cover_url));
             }
             if artist_list.len() >= 10 {
@@ -376,30 +401,55 @@ pub fn HomeBody(
             .take(10)
             .cloned()
             .map(|p| {
-                let cover_url = p.tracks.first().and_then(|tid| {
-                    cover_tracks
-                        .iter()
-                        .find(|t| {
-                            let id = t.id.key();
-                            !id.is_empty() && id.as_ref() == tid.as_str()
+                let cover_url = {
+                    if let Some(url) =
+                        ::server::cover::from_path(&conf, p.cover_path.as_deref(), 384)
+                    {
+                        Some(url.to_string())
+                    } else if let Some(tag) = &p.image_tag
+                        && let Some(s) = &conf.server
+                    {
+                        ::server::cover::resolve(
+                            &conf,
+                            reader::CoverRef::remote_item(s.service, &p.id, Some(tag.as_str())),
+                            384,
+                        )
+                        .map(|t| t.to_string())
+                    } else {
+                        p.tracks.first().and_then(|tid| {
+                            cover_tracks
+                                .iter()
+                                .find(|t| {
+                                    let id = t.id.key();
+                                    !id.is_empty() && id.as_ref() == tid.as_str()
+                                })
+                                .and_then(|t| track_cover_url(&conf, t))
                         })
-                        .and_then(|t| track_cover_url(&conf, t))
-                });
+                    }
+                };
                 (p.id, p.name, p.tracks.len(), cover_url)
             })
             .collect::<Vec<_>>()
     });
 
-    let jellyfin_hero_cover = use_memo(move || {
+    let hero_cover = use_memo(move || {
         let conf = config.read();
         let entry = hero_entry.read();
-        let (_, album_opt, _) = entry.as_ref()?;
-        let album = album_opt.as_ref()?;
-        ::server::cover::from_path(&conf, album.cover_path.as_deref(), 1400).map(|c| c.to_string())
+        let (track, album_opt, _) = entry.as_ref()?;
+        // The album's own art first, but fall back to the track's — the albums
+        // query lags the recently-played one, and not every album has a cover
+        // path, which otherwise left the hero on the 384px card thumbnail.
+        let cover = album_opt
+            .as_ref()
+            .and_then(|album| {
+                ::server::cover::from_path(&conf, album.cover_path.as_deref(), HERO_COVER_WIDTH)
+            })
+            .or_else(|| ::server::cover::track(&conf, track, HERO_COVER_WIDTH))?;
+        Some(components::high_quality_artwork_url(cover.to_string()))
     });
 
     let conf_snapshot = config.read();
-    let is_modern = conf_snapshot.ui_style == UiStyle::Modern;
+    let is_vaxry = conf_snapshot.ui_style == UiStyle::Vaxry;
     let listen_now_style = conf_snapshot.listen_now_style;
     let sections: Vec<(String, bool)> = conf_snapshot
         .home_sections
@@ -501,10 +551,10 @@ pub fn HomeBody(
                                     &key_for_render,
                                     config,
                                     edit,
-                                    is_modern,
+                                    is_vaxry,
                                     listen_now_style,
                                     jellyfin_shuffled(),
-                                    jellyfin_hero_cover(),
+                                    hero_cover(),
                                     continue_listening(),
                                     hero_entry(),
                                     jellyfin_artists(),
@@ -532,7 +582,7 @@ fn render_server_section(
     key: &str,
     config: Signal<AppConfig>,
     edit: bool,
-    is_modern: bool,
+    is_vaxry: bool,
     listen_now_style: ListenNowStyle,
     jellyfin_shuffled: Vec<AlbumCard>,
     hero_cover: Option<String>,
@@ -554,32 +604,32 @@ fn render_server_section(
             ServerHeroBanner {
                 config,
                 edit,
-                is_modern,
+                is_vaxry,
                 hero_entry,
                 hero_cover,
                 on_play_album,
             }
         },
         "continue_listening" => render_continue_listening(
-            is_modern,
+            is_vaxry,
             continue_listening,
             on_select_album,
             on_play_album,
             scroll_container,
         ),
         "listen_now" => render_listen_now(
-            is_modern,
+            is_vaxry,
             listen_now_style,
             jellyfin_shuffled,
             on_select_album,
             on_play_album,
         ),
-        "top_artists" => render_top_artists(is_modern, artists, on_search_artist, scroll_container),
+        "top_artists" => render_top_artists(is_vaxry, artists, on_search_artist, scroll_container),
         "new_releases" => render_albums_row(
             "jelly-albums-scroll",
             i18n::t("new_releases").to_string(),
             i18n::t("albums").to_string(),
-            is_modern,
+            is_vaxry,
             new_releases,
             on_select_album,
             on_play_album,
@@ -596,7 +646,7 @@ fn render_server_section(
                 "jelly-made-for-you-scroll",
                 i18n::t("made_for_you").to_string(),
                 eyebrow,
-                is_modern,
+                is_vaxry,
                 albums,
                 on_select_album,
                 on_play_album,
@@ -607,7 +657,7 @@ fn render_server_section(
             "jelly-recently-added-scroll",
             i18n::t("recently_added").to_string(),
             i18n::t("library").to_string(),
-            is_modern,
+            is_vaxry,
             recently_added,
             on_select_album,
             on_play_album,
@@ -615,7 +665,7 @@ fn render_server_section(
         ),
         "playlists" => render_playlists(
             config,
-            is_modern,
+            is_vaxry,
             recent_playlists,
             on_select_playlist,
             scroll_container,
@@ -628,7 +678,7 @@ fn render_server_section(
 fn ServerHeroBanner(
     mut config: Signal<AppConfig>,
     edit: bool,
-    is_modern: bool,
+    is_vaxry: bool,
     hero_entry: Option<(Track, Option<Album>, Option<String>)>,
     hero_cover: Option<String>,
     on_play_album: EventHandler<String>,
@@ -637,9 +687,7 @@ fn ServerHeroBanner(
     let mut start_y = use_signal(|| 0.0_f64);
     let mut start_h = use_signal(|| 0_u32);
 
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     // The track's own `album_id` (not the resolved `Album`, which lags behind a
     // separate albums query) — so the play button and the favorite-state heart
     // work the instant the hero track renders, not only once albums load.
@@ -688,7 +736,7 @@ fn ServerHeroBanner(
     });
 
     let hero_height = config.read().hero_height;
-    let section_class = if is_modern {
+    let section_class = if is_vaxry {
         "relative rounded-xl overflow-hidden mb-10"
     } else {
         "relative rounded-xl overflow-hidden mb-12"
@@ -734,7 +782,7 @@ fn ServerHeroBanner(
                         i { class: "fa-solid fa-star text-[8px]" }
                         "{i18n::t(\"featured_album\")}"
                     }
-                    h1 { class: "text-3xl md:text-5xl font-black text-white mb-4 leading-tight max-w-xl break-words", "{hero_title}" }
+                    h1 { class: "text-3xl md:text-5xl font-semibold tracking-tight text-white mb-4 leading-tight break-words", style: "overflow: hidden; text-overflow:ellipsis;white-space: nowrap;", "{hero_title}" }
                     if !hero_artist.is_empty() {
                         p { class: "text-base md:text-lg text-white/60 mb-8 font-medium line-clamp-1 max-w-md", "{i18n::t_with(\"by_artist_full\", &[(\"artist\", hero_artist.clone())])}" }
                     }
@@ -785,16 +833,7 @@ fn ServerHeroBanner(
                                         } else {
                                             hero_tracks_res.read().clone().unwrap_or_default()
                                         };
-                                        let new_fav = !jelly_hero_fav;
-                                        let source = active_source.peek().clone();
-                                        spawn(async move {
-                                            for t in &tracks {
-                                                let _ = t.set_favorite(&source, new_fav).await;
-                                            }
-                                            gens.bump(Table::Favorites);
-                                            // Pending DB rows; the reconciler pushes them.
-                                            hooks::use_sync_task::nudge();
-                                        });
+                                        hooks::favorites::set_favorite_many(tracks, !jelly_hero_fav);
                                     },
                                     i { class: "{hero_heart_icon}" }
                                 }
@@ -822,7 +861,7 @@ fn ServerHeroBanner(
 }
 
 fn render_continue_listening(
-    is_modern: bool,
+    is_vaxry: bool,
     tracks: Vec<(Track, Option<Album>, Option<String>)>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
@@ -832,22 +871,22 @@ fn render_continue_listening(
         return rsx! { div {} };
     }
     rsx! {
-        section { class: if is_modern { "mb-10" } else { "mb-12" },
+        section { class: if is_vaxry { "mb-10" } else { "mb-12" },
             div { class: "flex items-center justify-between mb-6",
                 div {
-                    if is_modern {
+                    if is_vaxry {
                         p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
                     }
-                    h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"continue_listening\")}" }
+                    h2 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"continue_listening\")}" }
                 }
                 div { class: "flex gap-2",
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-continue-scroll", -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-continue-scroll", 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
@@ -905,7 +944,7 @@ fn render_continue_listening(
 }
 
 fn render_listen_now(
-    is_modern: bool,
+    is_vaxry: bool,
     listen_now_style: ListenNowStyle,
     jellyfin_shuffled: Vec<AlbumCard>,
     on_select_album: EventHandler<String>,
@@ -916,13 +955,13 @@ fn render_listen_now(
     }
     let use_cards = listen_now_style == ListenNowStyle::Cards;
     rsx! {
-        section { class: if is_modern { "mb-10" } else { "mb-12" },
+        section { class: if is_vaxry { "mb-10" } else { "mb-12" },
             div { class: "flex items-end justify-between mb-6",
                 div {
-                    if is_modern {
+                    if is_vaxry {
                         p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"music\")}" }
                     }
-                    h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-3xl font-extrabold text-white tracking-tight leading-none" }, "{i18n::t(\"listen_now\")}" }
+                    h2 { class: if is_vaxry { "text-2xl font-semibold tracking-tight text-white" } else { "text-3xl font-semibold tracking-tight text-white leading-none" }, "{i18n::t(\"listen_now\")}" }
                 }
             }
             if use_cards {
@@ -934,7 +973,7 @@ fn render_listen_now(
                                 let id = album_id.clone();
                                 move |_| on_select_album.call(id.clone())
                             },
-                            div { class: "aspect-square rounded-lg bg-stone-800 mb-2 overflow-hidden relative",
+                            div { class: "aspect-square rounded-xl bg-stone-800 mb-2 overflow-hidden relative",
                                 if let Some(url) = cover_url {
                                     img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-500", decoding: "async", loading: "lazy" }
                                 } else {
@@ -959,7 +998,7 @@ fn render_listen_now(
                 div { class: "grid grid-cols-[repeat(auto-fill,minmax(350px,1fr))] gap-4",
                     for (album_id, title, artist, cover_url) in jellyfin_shuffled.iter().skip(1).take(8).cloned() {
                         div {
-                            class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
+                            class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
                             onclick: {
                                 let id = album_id.clone();
                                 move |_| on_select_album.call(id.clone())
@@ -995,7 +1034,7 @@ fn render_listen_now(
 }
 
 fn render_top_artists(
-    is_modern: bool,
+    is_vaxry: bool,
     artists: Vec<(String, Option<String>)>,
     on_search_artist: EventHandler<String>,
     scroll_container: impl Fn(&str, i32) + Copy + 'static,
@@ -1004,22 +1043,22 @@ fn render_top_artists(
         return rsx! { div {} };
     }
     rsx! {
-        section { class: if is_modern { "mt-10" } else { "mt-12" },
+        section { class: if is_vaxry { "mt-10" } else { "mt-12" },
             div { class: "flex items-center justify-between mb-6",
                 div {
-                    if is_modern {
+                    if is_vaxry {
                         p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"artists\")}" }
                     }
-                    h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"top_artists\")}" }
+                    h2 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"top_artists\")}" }
                 }
                 div { class: "flex gap-2",
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-artists-scroll", -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-artists-scroll", 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
@@ -1057,7 +1096,7 @@ fn render_albums_row(
     scroll_id: &'static str,
     title: String,
     eyebrow: String,
-    is_modern: bool,
+    is_vaxry: bool,
     albums: Vec<AlbumCard>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
@@ -1067,22 +1106,22 @@ fn render_albums_row(
         return rsx! { div {} };
     }
     rsx! {
-        section { class: if is_modern { "mt-10" } else { "mt-12" },
+        section { class: if is_vaxry { "mt-10" } else { "mt-12" },
             div { class: "flex items-center justify-between mb-6",
                 div {
-                    if is_modern {
+                    if is_vaxry {
                         p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{eyebrow}" }
                     }
-                    h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{title}" }
+                    h2 { class: "text-2xl font-semibold tracking-tight text-white", "{title}" }
                 }
                 div { class: "flex gap-2",
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container(scroll_id, -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container(scroll_id, 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
@@ -1098,7 +1137,7 @@ fn render_albums_row(
                             let id = album_id.clone();
                             move |_| on_select_album.call(id.clone())
                         },
-                        div { class: "aspect-square rounded-lg bg-stone-800/80 mb-4 overflow-hidden transition-all duration-300 relative",
+                        div { class: "aspect-square rounded-xl bg-stone-800/80 mb-4 overflow-hidden transition-all duration-300 relative",
                             if let Some(url) = cover_url {
                                 img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-500", decoding: "async", loading: "lazy" }
                             } else {
@@ -1125,7 +1164,7 @@ fn render_albums_row(
 
 fn render_playlists(
     _config: Signal<AppConfig>,
-    is_modern: bool,
+    is_vaxry: bool,
     recent_playlists: Vec<(String, String, usize, Option<String>)>,
     on_select_playlist: EventHandler<String>,
     scroll_container: impl Fn(&str, i32) + Copy + 'static,
@@ -1134,22 +1173,22 @@ fn render_playlists(
         return rsx! { div {} };
     }
     rsx! {
-        section { class: if is_modern { "mt-10" } else { "mt-16" },
+        section { class: if is_vaxry { "mt-10" } else { "mt-16" },
             div { class: "flex items-center justify-between mb-6",
                 div {
-                    if is_modern {
+                    if is_vaxry {
                         p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
                     }
-                    h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"playlists\")}" }
+                    h2 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"playlists\")}" }
                 }
                 div { class: "flex gap-2",
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-playlists-scroll", -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-playlists-scroll", 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
@@ -1168,7 +1207,7 @@ fn render_playlists(
                                     let id = id.clone();
                                     move |_| on_select_playlist.call(id.clone())
                                 },
-                                div { class: "aspect-square rounded-lg bg-white/5 mb-4 overflow-hidden transition-all duration-500 relative",
+                                div { class: "aspect-square rounded-xl bg-white/5 mb-4 overflow-hidden transition-all duration-500 relative",
                                     if let Some(url) = cover_url {
                                         img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-110 transition-transform duration-700", decoding: "async", loading: "lazy" }
                                     } else {

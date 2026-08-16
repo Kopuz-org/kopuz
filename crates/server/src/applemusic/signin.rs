@@ -52,22 +52,25 @@ pub async fn launch_signin_and_extract(
         .await
         .map_err(|e| format!("mkdir am-profile: {e}"))?;
 
-    let bin = if ip::in_flatpak() {
-        ip::find_host_browser_bin(browser).await.ok_or_else(|| {
-            format!(
-                "{browser} not found on the host (looked for: {}). Install it on the host system.",
-                ip::browser_candidates(browser).join(", ")
-            )
-        })?
-    } else {
-        ip::find_browser_bin(browser).ok_or_else(|| {
-            format!(
-                "{browser} not found in PATH (looked for: {}). Install it, or set $KOPUZ_{}_BIN.",
-                ip::browser_candidates(browser).join(", "),
-                browser.id().to_uppercase().replace('-', "_")
-            )
-        })?
-    };
+    // One lookup for both cases — it resolves a host-spawn command line itself
+    // when running under Flatpak.
+    let bin = ip::find_browser_bin(browser, profile.display().to_string())
+        .await
+        .ok_or_else(|| {
+            if ip::in_flatpak() {
+                format!(
+                    "{browser} not found on the host (looked for: {}). Install it on the host system, or set $KOPUZ_{}_BIN.",
+                    ip::browser_candidates(browser).join(", "),
+                    browser.id().to_uppercase().replace('-', "_")
+                )
+            } else {
+                format!(
+                    "{browser} not found in PATH (looked for: {}). Install it, or set $KOPUZ_{}_BIN.",
+                    ip::browser_candidates(browser).join(", "),
+                    browser.id().to_uppercase().replace('-', "_")
+                )
+            }
+        })?;
 
     let mut cmd = ip::browser_command(&bin);
     cmd.arg("--no-first-run")
@@ -119,48 +122,19 @@ async fn extract_media_user_token(browser: Browser, profile: &Path) -> Option<St
     result
 }
 
+/// Read one cookie out of the isolated sign-in profile. Goes through the shared
+/// cookie seam so Apple Music gets the same per-platform decryption as the other
+/// browser-signin sources — notably Windows, where `rookie`/`libesedb` isn't
+/// available and a native DPAPI backend is used instead.
 pub async fn extract_cookie(
     browser: Browser,
     profile_root: &Path,
     name: &str,
 ) -> Result<Option<String>, String> {
-    let db_path = pick_cookies_path(profile_root).ok_or_else(|| {
-        tracing::warn!(
-            "am.signin.extract_cookie: no Cookies database at {}",
-            profile_root.display()
-        );
-        "no Cookies database yet".to_string()
-    })?;
-    let browser_name = rookie_browser_name(browser);
+    let cookies = crate::cookies::read_cookies(browser, profile_root, COOKIE_DOMAIN).await?;
     tracing::debug!(
-        "am.signin.extract_cookie: name={name}, db={}",
-        db_path.display()
-    );
-    let profile_owned = profile_root.to_path_buf();
-
-    let cookies =
-        tokio::task::spawn_blocking(move || -> Result<Vec<rookie::enums::Cookie>, String> {
-            let domains = Some(vec![COOKIE_DOMAIN.to_string()]);
-            #[cfg(not(target_os = "windows"))]
-            {
-                let _ = profile_owned;
-                let config = rookie::config::get_browser_config(browser_name);
-                rookie::chromium_based(config, db_path, domains).map_err(|e| e.to_string())
-            }
-            #[cfg(target_os = "windows")]
-            {
-                let _ = browser_name;
-                let key_path = profile_owned.join("Local State");
-                rookie::chromium_based(key_path, db_path, domains).map_err(|e| e.to_string())
-            }
-        })
-        .await
-        .map_err(|e| format!("cookie extract task: {e}"))??;
-
-    tracing::debug!(
-        "am.signin.extract_cookie: {} cookies from {}",
-        cookies.len(),
-        COOKIE_DOMAIN
+        "am.signin.extract_cookie: {} cookies from {COOKIE_DOMAIN}",
+        cookies.len()
     );
     let found = cookies
         .into_iter()
@@ -170,23 +144,4 @@ pub async fn extract_cookie(
         tracing::debug!("am.signin.extract_cookie: cookie '{name}' not found or empty");
     }
     Ok(found)
-}
-
-fn rookie_browser_name(browser: Browser) -> &'static str {
-    match browser {
-        Browser::Brave => "brave",
-        Browser::Chrome => "chrome",
-        Browser::Chromium => "chromium",
-        Browser::Edge => "edge",
-        Browser::Vivaldi => "vivaldi",
-    }
-}
-
-fn pick_cookies_path(profile_root: &Path) -> Option<PathBuf> {
-    [
-        profile_root.join("Default").join("Network").join("Cookies"),
-        profile_root.join("Default").join("Cookies"),
-    ]
-    .into_iter()
-    .find(|p| p.exists())
 }

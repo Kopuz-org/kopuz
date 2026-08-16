@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>English</string>
     <key>CFBundleExecutable</key>
-    <string>Kopuz</string>
+    <string>kopuz</string>
     <key>CFBundleIdentifier</key>
     <string>com.temidaradev.kopuz</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -17,9 +17,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.6.0</string>
+    <string>0.13.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>0.13.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>10.11</string>
 

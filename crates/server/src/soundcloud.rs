@@ -12,8 +12,8 @@
 //! occasionally; any `4xx` triggers one forced re-scrape before giving up.
 //!
 //! Track encoding mirrors the YouTube Music backend: the path is
-//! `soundcloud:<trackId>:urlhex_<artwork-url-hex>` so the shared cover resolver
-//! (`utils::jellyfin_image`) can decode artwork synchronously, and the stream
+//! `soundcloud:<trackId>:urlhex_<artwork-url-hex>` so the shared typed cover
+//! resolver can decode artwork synchronously, and the stream
 //! URL is resolved lazily via [`resolve_stream`] (the controller tags it with a
 //! `__SC_PENDING:` sentinel, just like `__YT_PENDING:`).
 

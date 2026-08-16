@@ -27,12 +27,14 @@ rand = { workspace = true }
 uuid = { workspace = true }
 md5 = { workspace = true }
 sha1 = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
 httpdate = { workspace = true }
 hex = { workspace = true }
-rookie = { workspace = true }
-sha2 = "0.10"
-web-time = { workspace = true }
-tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
+webbrowser = { workspace = true }
+tokio = { workspace = true, features = ["fs", "process", "rt", "sync", "net", "io-util"] }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
 reader = { workspace = true }
 db = { workspace = true }
 utils = { workspace = true }
@@ -40,6 +42,11 @@ async-trait = { workspace = true }
 quick-xml = { workspace = true }
 urlencoding = "2.1"
 regex = "1"
+# `rsa` 0.9 (and the cmac/aes stack beside it) is built on digest 0.10, while the
+# workspace sha1 is 0.11/digest 0.11 — whose traits don't satisfy `Pss::new` or
+# `Oaep::new`. The Apple Music CDM takes its own aliased 0.10 copy; everything
+# else in this crate keeps the workspace version.
+sha1-digest10 = { package = "sha1", version = "0.10" }
 rsa = "0.9"
 pkcs8 = "0.10"
 pkcs1 = "0.7"
@@ -47,7 +54,6 @@ aes = "0.8"
 cbc = "0.1"
 cmac = "0.7"
 ctr = "0.9"
-base64 = "0.22"
 m3u8-rs = "6"
 prost = "0.13"
 symphonia = { workspace = true }
@@ -56,10 +62,31 @@ symphonia = { workspace = true }
 prost-build = "0.13"
 
 # Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
-# library) there, which can't cross-compile and is unusable anyway since
-# Chromium v20's App-Bound Encryption blocks non-admin cookie decryption.
+# library) there, which can't cross-compile.
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 rookie = "0.5"
+
+# Headless JS for YouTube (desktop only; no V8 on Android): deno_core runs the
+# sig/n decipher solver and rustypipe-botguard mints PoTokens, sharing one V8.
+# Versions (incl. the deno_core lock) live in the workspace manifest.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+deno_core = { workspace = true }
+rustypipe-botguard = { workspace = true }
+
+# Windows native cookie decryption (v10 DPAPI + planted v20 app-bound). Reuses
+# the project's sqlx/sqlite (NOT rusqlite — that would double-link libsqlite3).
+[target.'cfg(windows)'.dependencies]
+base64 = { workspace = true }
+aes-gcm = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
+windows-core = "0.62"
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Rpc",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
+] }
 
 [[example]]
 name = "duration_probe"

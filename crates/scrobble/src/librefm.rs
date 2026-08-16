@@ -227,8 +227,19 @@ pub fn make_scrobble<'a>(
         .unwrap_or_default()
         .as_secs() as i64;
 
+    make_scrobble_at(artist, track, release, now_unix)
+}
+
+/// Like [`make_scrobble`], but with an explicit listen timestamp. Used when
+/// resubmitting queued offline scrobbles so they keep their original time.
+pub fn make_scrobble_at<'a>(
+    artist: &'a str,
+    track: &'a str,
+    release: Option<&'a str>,
+    timestamp: i64,
+) -> Scrobble<'a> {
     Scrobble {
-        timestamp: now_unix,
+        timestamp,
         track_metadata: TrackMetadata {
             artist_name: artist,
             track_name: track,

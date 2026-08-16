@@ -19,6 +19,17 @@ pub use player::YtStreamInfo;
 
 pub const SOURCE_PREFIX: &str = "ytmusic";
 
+/// Initialize the process-global V8 platform once, before any isolate. The
+/// decipher and BotGuard runtimes are separate isolates on separate threads; if
+/// each inits lazily, the second races the first and segfaults. Lazy, so a
+/// non-YouTube session never touches V8.
+#[cfg(not(target_os = "android"))]
+pub(crate) fn ensure_v8_platform() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| deno_core::JsRuntime::init_platform(None, false));
+}
+
 /// Build the typed id for a YouTube Music track (video id).
 pub(crate) fn yt_id(video_id: impl Into<String>) -> TrackId {
     TrackId::Server {
@@ -84,6 +95,22 @@ impl YouTubeMusicClient {
     /// so its photos are real YT artist images.
     pub async fn resolve_artist_image(&self, name: &str) -> Result<Option<String>, String> {
         search::resolve_artist_image(name, self.cookies.as_deref()).await
+    }
+
+    /// The artist's channel reconciled from one of their songs' watch-queue
+    /// byline — works for user channels the Artists search can't find.
+    pub async fn artist_channel_for_video(
+        &self,
+        video_id: &str,
+        artist_name: &str,
+    ) -> Result<Option<String>, String> {
+        mix::artist_channel_for_video(video_id, artist_name, self.cookies.as_deref().unwrap_or(""))
+            .await
+    }
+
+    /// The channel's square avatar, for grid photos of song-reconciled artists.
+    pub async fn artist_avatar(&self, channel_id: &str) -> Result<Option<String>, String> {
+        discover::artist_avatar(channel_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     /// Resolve a saved album (title + artist) back to its YT album browse id
@@ -258,8 +285,26 @@ impl YouTubeMusicClient {
     // discover/mix `post` and innertube::browse now interpret as "skip
     // SAPISID auth headers" (see browse_maybe_auth / discover::post).
 
+    /// Whether this client has cookies — i.e. the user is signed in rather than
+    /// browsing YT anonymously.
+    pub fn is_authenticated(&self) -> bool {
+        self.cookies.is_some()
+    }
+
     pub async fn start_mix(&self, seed_video_id: &str) -> Result<Vec<Track>, String> {
-        mix::start_mix(seed_video_id, self.cookies.as_deref().unwrap_or("")).await
+        mix::fetch(
+            mix::MixSeed::Video(seed_video_id),
+            self.cookies.as_deref().unwrap_or(""),
+        )
+        .await
+    }
+
+    pub async fn start_playlist_mix(&self, playlist_id: &str) -> Result<Vec<Track>, String> {
+        mix::fetch(
+            mix::MixSeed::Playlist(playlist_id),
+            self.cookies.as_deref().unwrap_or(""),
+        )
+        .await
     }
 
     pub async fn discover_home(&self) -> Result<discover::DiscoverHome, String> {

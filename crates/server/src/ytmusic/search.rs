@@ -110,7 +110,11 @@ pub async fn resolve_artist_channel_id(
     }
     let http = super::innertube::http_client();
     let resp = do_search_raw(http, query, Some(ARTISTS_FILTER), cookies).await?;
-    Ok(walk_first_artist_browse_id(&resp))
+    Ok(pick_artist_row(&resp, query).and_then(|row| {
+        row.pointer("/navigationEndpoint/browseEndpoint/browseId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    }))
 }
 
 /// Resolve an album title + artist to its YT Music album browse id
@@ -162,9 +166,11 @@ fn walk_first_album_browse_id(v: &Value) -> Option<String> {
     }
 }
 
-/// The top artist result's avatar URL for `name` from the YT Music "Artists"
-/// tab. Powers the Artists grid so its circular photos are the real YT artist
-/// images and nothing else. Returns None when no artist row matched.
+/// The best-matching artist's avatar URL for `name` from the YT Music
+/// "Artists" tab. Powers the Artists grid so its circular photos are the real
+/// YT artist images and nothing else. Returns None when no artist row
+/// survived the row checks — the grid then falls back to an album cover,
+/// which beats confidently showing someone else's face.
 #[tracing::instrument(name = "yt.artist_image", skip(cookies), fields(name = %name))]
 pub async fn resolve_artist_image(
     name: &str,
@@ -175,50 +181,114 @@ pub async fn resolve_artist_image(
     }
     let http = super::innertube::http_client();
     let resp = do_search_raw(http, name, Some(ARTISTS_FILTER), cookies).await?;
-    Ok(walk_first_artist_thumbnail(&resp))
+    Ok(pick_artist_row(&resp, name).and_then(best_thumbnail))
 }
 
-/// First artist row (`musicResponsiveListItemRenderer` that links a `UC…`
-/// channel) → its best thumbnail. The artists filter keeps results to artist
-/// rows so the first such hit is the top-ranked match.
-fn walk_first_artist_thumbnail(v: &Value) -> Option<String> {
-    match v {
-        Value::Object(map) => {
-            if let Some(row) = map.get("musicResponsiveListItemRenderer")
-                && walk_first_artist_browse_id(row).is_some()
-                && let Some(thumb) = best_thumbnail(row)
-            {
-                return Some(thumb);
-            }
-            map.values().find_map(walk_first_artist_thumbnail)
-        }
-        Value::Array(arr) => arr.iter().find_map(walk_first_artist_thumbnail),
-        _ => None,
-    }
+/// The search row that best represents artist `want`:
+///
+/// - only rows whose OWN navigation endpoint browses to a `UC…` channel typed
+///   `MUSIC_PAGE_TYPE_ARTIST` count. Checking for a `UC…` id anywhere inside
+///   the row (as this used to) also matched playlist/profile rows, whose
+///   per-artist title runs carry channel links — donating a playlist cover as
+///   an "artist photo".
+/// - aggregate auto-channels are skipped: they title themselves with a pile
+///   of names ("A、B、C、…"), carry a generic mosaic avatar, and rank first
+///   for many different queries — the "several tiles share one wrong photo"
+///   failure.
+/// - a row whose folded title equals the query wins; otherwise the first
+///   surviving row does. The fallback is deliberate: YT restyles names the
+///   library spells differently (romanization, casing, spacing — "さんみゅ~"
+///   is titled "Sunmyu" with `hl=en`), so demanding a title match would strip
+///   photos from every such artist.
+fn pick_artist_row<'a>(resp: &'a Value, want: &str) -> Option<&'a Value> {
+    let mut rows = Vec::new();
+    collect_search_rows(resp, &mut rows);
+    let candidates: Vec<&Value> = rows
+        .into_iter()
+        .filter(|r| is_artist_row(r))
+        .filter(|r| row_title(r).is_some_and(|t| !looks_like_artist_pile(t)))
+        .collect();
+    let want = fold_artist_name(want);
+    candidates
+        .iter()
+        .find(|r| row_title(r).is_some_and(|t| fold_artist_name(t) == want))
+        .or(candidates.first())
+        .copied()
 }
 
-/// Recursively walk the JSON for the first browseEndpoint pointing at
-/// a `UC…` channel. The artists filter restricts results to artist
-/// rows so the first hit is the top-ranked match.
-fn walk_first_artist_browse_id(v: &Value) -> Option<String> {
+/// Every `musicResponsiveListItemRenderer` in the response, in document order.
+fn collect_search_rows<'a>(v: &'a Value, out: &mut Vec<&'a Value>) {
     match v {
         Value::Object(map) => {
-            if let Some(ep) = map.get("browseEndpoint")
-                && let Some(bid) = ep.get("browseId").and_then(|x| x.as_str())
-                && bid.starts_with("UC")
-            {
-                return Some(bid.to_string());
+            if let Some(row) = map.get("musicResponsiveListItemRenderer") {
+                out.push(row);
             }
             for child in map.values() {
-                if let Some(found) = walk_first_artist_browse_id(child) {
-                    return Some(found);
-                }
+                collect_search_rows(child, out);
             }
-            None
         }
-        Value::Array(arr) => arr.iter().find_map(walk_first_artist_browse_id),
-        _ => None,
+        Value::Array(arr) => {
+            for child in arr {
+                collect_search_rows(child, out);
+            }
+        }
+        _ => {}
     }
+}
+
+/// Whether the row itself navigates to an artist page (not merely contains a
+/// channel link somewhere inside).
+fn is_artist_row(row: &Value) -> bool {
+    let Some(ep) = row.pointer("/navigationEndpoint/browseEndpoint") else {
+        return false;
+    };
+    ep.get("browseId")
+        .and_then(|v| v.as_str())
+        .is_some_and(|b| b.starts_with("UC"))
+        && ep
+            .pointer(
+                "/browseEndpointContextSupportedConfigs/browseEndpointContextMusicConfig/pageType",
+            )
+            .and_then(|v| v.as_str())
+            == Some("MUSIC_PAGE_TYPE_ARTIST")
+}
+
+fn row_title(row: &Value) -> Option<&str> {
+    row.pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
+        .and_then(|v| v.as_str())
+}
+
+/// Aggregate auto-channels list several artists in their title; three or more
+/// comma segments marks one. (Two is a legitimate duo credit.)
+fn looks_like_artist_pile(title: &str) -> bool {
+    title.split(['、', ',']).count() >= 3
+}
+
+/// Fold a name for comparison: lowercase, whitespace removed. YT restyles
+/// casing and spacing freely — "FujiwaraHagane" for "Fujiwara Hagane",
+/// "D-Cell" for "D-CELL".
+pub(super) fn fold_artist_name(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// Split an unlinked artist credit into individual names: "feat."/"ft."
+/// (space-prefixed, any case) and commas separate; a bare "&" does NOT —
+/// "MYTH & ROID" is one artist. Leading "&"s left by a ", & C" tail are
+/// stripped. A plain single name passes through unchanged.
+fn split_unlinked_artists(text: &str) -> Vec<String> {
+    let mut joined = text.to_string();
+    for sep in [" feat.", " Feat.", " FEAT.", " ft.", " Ft.", " FT."] {
+        joined = joined.replace(sep, ",");
+    }
+    joined
+        .split([',', '、'])
+        .map(|part| part.trim().trim_start_matches('&').trim())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.to_string())
+        .collect()
 }
 
 async fn do_search_raw(
@@ -494,13 +564,16 @@ fn parse_search_row(
         // Unlinked artist text (no channel run). Fall back to the first run
         // that isn't the duration, album, or — for albumless rows — the
         // view-count tail. The leading run is the artist in every observed
-        // shape.
+        // shape. Unlike channel-linked runs, this text can be a joined credit
+        // ("INABAKUMORI feat. Kaai Yuki") — split it, or the whole credit
+        // becomes a phantom artist of its own in the Artists grid.
         artists = runs
             .iter()
             .map(|(t, _)| t.clone())
             .filter(|t| !looks_like_duration(t))
             .filter(|t| Some(t) != album.as_ref())
             .take(1)
+            .flat_map(|t| split_unlinked_artists(&t))
             .collect();
     }
 
@@ -793,4 +866,34 @@ fn parse_mm_ss(s: &str) -> Option<u64> {
     let mins: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
     let hours: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
     Some(hours * 3600 + mins * 60 + secs)
+}
+
+#[cfg(test)]
+mod artist_split_tests {
+    use super::split_unlinked_artists;
+
+    #[test]
+    fn splits_feat_and_commas_keeps_ampersand_names() {
+        assert_eq!(
+            split_unlinked_artists("INABAKUMORI feat. Kaai Yuki"),
+            vec!["INABAKUMORI", "Kaai Yuki"]
+        );
+        // No space after "feat." — as YT actually delivers it.
+        assert_eq!(
+            split_unlinked_artists("かいりきベア feat.缶缶"),
+            vec!["かいりきベア", "缶缶"]
+        );
+        assert_eq!(
+            split_unlinked_artists("塞壬唱片-MSR, 真名辺あや, & TMKJ"),
+            vec!["塞壬唱片-MSR", "真名辺あや", "TMKJ"]
+        );
+        // "&" alone never splits, and "ft." needs its leading space — names
+        // like "Swift." must not be cut mid-word.
+        assert_eq!(split_unlinked_artists("MYTH & ROID"), vec!["MYTH & ROID"]);
+        assert_eq!(
+            split_unlinked_artists("Taylor Swift."),
+            vec!["Taylor Swift."]
+        );
+        assert_eq!(split_unlinked_artists("Reol"), vec!["Reol"]);
+    }
 }

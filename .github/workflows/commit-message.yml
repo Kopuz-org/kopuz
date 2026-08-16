@@ -1,0 +1,62 @@
+name: commit message
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  commit-message:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check commit subjects
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          zero=0000000000000000000000000000000000000000
+          if [[ "$BASE_SHA" == "$zero" ]]; then
+            range="$HEAD_SHA"
+          else
+            range="$BASE_SHA..$HEAD_SHA"
+          fi
+
+          conventional_re='^(feat|fix|refactor|perf|test|style|ci|revert)(\([^)]+\)!?|!): '
+          scoped_re='^[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)?: .+'
+          checked=0
+          failed=0
+          while IFS=$'\t' read -r sha subject; do
+            checked=$((checked + 1))
+            if ((${#subject} > 80)); then
+              echo "::error title=Commit subject too long::$sha has ${#subject} characters: $subject"
+              failed=1
+              continue
+            fi
+
+            if [[ "$subject" =~ $conventional_re ]]; then
+              echo "::error title=Conventional Commit subject::$sha looks like Conventional Commits; Kopuz uses scoped commits: $subject"
+              failed=1
+              continue
+            fi
+
+            if ! [[ "$subject" =~ $scoped_re ]]; then
+              echo "::error title=Invalid commit subject::$sha must use 'scope: description': $subject"
+              failed=1
+              continue
+            fi
+          done < <(git log --format='%h%x09%s' "$range")
+
+          if ((checked == 0)); then
+            echo "No commits to check."
+          elif ((failed)); then
+            exit 1
+          else
+            echo "Checked $checked commit subject(s)."
+          fi

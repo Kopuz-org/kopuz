@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use crate::{
-    AppConfig, ArtistPhotoSource, ArtistViewOrder, BackBehavior, Browser, ChannelMode,
-    EqualizerSettings, FetchStrategy, HomeSection, ListenNowStyle, MusicServer, MusicService,
-    PlayerBarPosition, RegistryEntry, SortOrder, TitlebarMode, UiStyle,
+    AppConfig, ArtistViewOrder, BackBehavior, Browser, ChannelMode, EqualizerSettings,
+    FetchStrategy, HomeSection, ListenNowStyle, MusicServer, MusicService, PlayerBarPosition,
+    RegistryEntry, SettingsLayout, SortOrder, TitlebarMode, UiStyle,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +38,7 @@ pub struct UiConfig {
     pub titlebar_mode: TitlebarMode,
     pub player_bar_position: PlayerBarPosition,
     pub ui_style: UiStyle,
+    pub settings_layout: SettingsLayout,
     pub hero_height: u32,
     pub home_sections: Vec<HomeSection>,
     pub listen_now_style: ListenNowStyle,
@@ -50,7 +51,6 @@ pub struct LibraryConfig {
     pub music_directory: Vec<PathBuf>,
     pub sort_order: SortOrder,
     pub artist_view_order: ArtistViewOrder,
-    pub artist_photo_source: ArtistPhotoSource,
     pub auto_fetch_covers: bool,
     pub cover_fetch_strategy: FetchStrategy,
 }
@@ -59,6 +59,7 @@ pub struct LibraryConfig {
 pub struct IntegrationConfig {
     pub discord_presence: Option<bool>,
     pub discord_presence_paused: Option<bool>,
+    pub discord_presence_source: Option<bool>,
     pub musicbrainz_token: String,
     pub lastfm_api_key: String,
     pub lastfm_api_secret: String,
@@ -109,6 +110,7 @@ impl AppConfig {
             titlebar_mode: self.titlebar_mode,
             player_bar_position: self.player_bar_position,
             ui_style: self.ui_style,
+            settings_layout: self.settings_layout,
             hero_height: self.hero_height,
             home_sections: self.home_sections.clone(),
             listen_now_style: self.listen_now_style,
@@ -122,7 +124,6 @@ impl AppConfig {
             music_directory: self.music_directory.clone(),
             sort_order: self.sort_order.clone(),
             artist_view_order: self.artist_view_order.clone(),
-            artist_photo_source: self.artist_photo_source,
             auto_fetch_covers: self.auto_fetch_covers,
             cover_fetch_strategy: self.cover_fetch_strategy,
         }
@@ -132,6 +133,7 @@ impl AppConfig {
         IntegrationConfig {
             discord_presence: self.discord_presence,
             discord_presence_paused: self.discord_presence_paused,
+            discord_presence_source: self.discord_presence_source,
             musicbrainz_token: self.musicbrainz_token.clone(),
             lastfm_api_key: self.lastfm_api_key.clone(),
             lastfm_api_secret: self.lastfm_api_secret.clone(),

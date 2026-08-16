@@ -4,16 +4,22 @@
 
 use std::path::PathBuf;
 
+use config::{SortCriterion, SortDirection, TrackSortField};
 use db::{Page, Source, TrackFilter, TrackSort};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Executor};
 
 fn unique_db() -> PathBuf {
+    // pid + counter, not just clock: macOS's µs clock let parallel tests
+    // collide on a nanos-only name and delete each other's live DB.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("kopuz-q-{nanos}"));
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("kopuz-q-{pid}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join("kopuz.db")
 }
@@ -130,6 +136,40 @@ async fn windowed_queries_over_20k_tracks() {
         .await
         .unwrap();
     assert_eq!(by_artist[0].artist, "Artist 000");
+
+    let stacked = db
+        .tracks_page(
+            &TrackFilter {
+                sort: TrackSort::Fields(vec![
+                    SortCriterion::new(TrackSortField::Artist, SortDirection::Asc),
+                    SortCriterion::new(TrackSortField::Title, SortDirection::Desc),
+                ]),
+                ..local.clone()
+            },
+            Page {
+                offset: 0,
+                limit: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(stacked[0].artist, "Artist 000");
+    assert_eq!(stacked[0].title, "Track 19950");
+
+    let fallback = db
+        .tracks_page(
+            &TrackFilter {
+                sort: TrackSort::Fields(Vec::new()),
+                ..local.clone()
+            },
+            Page {
+                offset: 0,
+                limit: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(fallback[0].artist, "Artist 000");
 
     // Reconstructed identity is a local path.
     assert!(matches!(page[0].id, reader::models::TrackId::Local(_)));

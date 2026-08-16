@@ -1,3 +1,4 @@
+use crate::cover_indexer::missing_cover_ids;
 use crate::models::Library;
 use crate::utils::save_cover;
 use config::FetchStrategy;
@@ -52,13 +53,12 @@ impl CoverFetcher {
 
     pub async fn fetch_missing_covers(&self, library: &mut Library) -> FetchReport {
         let mut report = FetchReport::default();
+        let missing_ids = missing_cover_ids(library);
         let missing: Vec<usize> = library
             .albums
             .iter()
             .enumerate()
-            .filter(|(_, a)| {
-                a.cover_path.is_none() && a.title != "Unknown Album" && !a.manual_cover
-            })
+            .filter(|(_, album)| missing_ids.contains(&album.id) && album.title != "Unknown Album")
             .map(|(i, _)| i)
             .collect();
 

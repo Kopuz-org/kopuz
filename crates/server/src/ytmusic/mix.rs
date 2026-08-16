@@ -7,15 +7,58 @@ use super::search::synthesize_album_id;
 
 const ORIGIN: &str = "https://music.youtube.com";
 
-#[tracing::instrument(name = "yt.start_mix", skip(cookies), fields(seed = %seed_video_id))]
-pub async fn start_mix(seed_video_id: &str, cookies: &str) -> Result<Vec<Track>, String> {
-    let playlist_id = format!("RDAMVM{seed_video_id}");
+/// What a mix is generated from. The `RD…` id and whether the request pins a
+/// first video are both derived from this one value, so they can't be paired
+/// wrongly — a playlist mix with a `videoId` is not a request YT answers.
+pub(super) enum MixSeed<'a> {
+    /// One track: the mix plays on from it, with the seed itself at index 0.
+    Video(&'a str),
+    /// A whole playlist — YT's own "Start radio" on a playlist. The queue is
+    /// generated, so it bears no relation to the playlist's track list.
+    Playlist(&'a str),
+}
+
+impl MixSeed<'_> {
+    /// The `RD…` playlist id the mix is built under.
+    fn mix_playlist_id(&self) -> String {
+        match self {
+            Self::Video(id) => format!("RDAMVM{id}"),
+            // Playlist ids are stored bare, but the `VL`-prefixed browse form
+            // leaks in from some InnerTube responses (see `playlists.rs`) and
+            // `RDAMPL` wants the bare one. Normalizing here rather than at
+            // construction means no caller can skip it.
+            Self::Playlist(id) => format!("RDAMPL{}", id.strip_prefix("VL").unwrap_or(id)),
+        }
+    }
+
+    /// The video pinned as the queue's first entry, if any. Sending an empty
+    /// `videoId` makes YT hand back an empty queue, so a playlist mix omits the
+    /// field entirely rather than passing a blank one.
+    fn pinned_video_id(&self) -> Option<&str> {
+        match self {
+            Self::Video(id) => Some(id),
+            Self::Playlist(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for MixSeed<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Video(id) => write!(f, "video:{id}"),
+            Self::Playlist(id) => write!(f, "playlist:{id}"),
+        }
+    }
+}
+
+/// Ask YT to generate a radio queue from `seed` and return the tracks it lists.
+#[tracing::instrument(name = "yt.mix", skip(cookies), fields(seed = %seed))]
+pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<Vec<Track>, String> {
     let client = WEB_REMIX;
-    let body = json!({
+    let mut body = json!({
         "enablePersistentPlaylistPanel": true,
         "tunerSettingValue": "AUTOMIX_SETTING_NORMAL",
-        "videoId": seed_video_id,
-        "playlistId": playlist_id,
+        "playlistId": seed.mix_playlist_id(),
         "params": "wAEB",
         "isAudioOnly": true,
         "context": {
@@ -28,6 +71,11 @@ pub async fn start_mix(seed_video_id: &str, cookies: &str) -> Result<Vec<Track>,
             "user": { "lockedSafetyMode": false },
         },
     });
+    if let Some(video_id) = seed.pinned_video_id()
+        && let Some(obj) = body.as_object_mut()
+    {
+        obj.insert("videoId".into(), json!(video_id));
+    }
 
     // Mix endpoint works without auth (anonymous radio for any public
     // video). Skip Cookie + SAPISID when cookies is empty so anon
@@ -221,4 +269,188 @@ fn parse_mm_ss(s: &str) -> Option<u64> {
     let mins: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
     let hours: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
     Some(hours * 3600 + mins * 60 + secs)
+}
+
+/// The artist's channel id, reconciled from one of their songs: the watch
+/// queue's byline links every song's artists to their channels — including
+/// user channels for uploaded content, which the Artists search can't find
+/// at all. Prefers the byline run whose folded text equals `artist_name`;
+/// with no name match, a byline with exactly one channel is unambiguous.
+#[tracing::instrument(name = "yt.artist_from_song", skip(cookies), fields(video_id = %video_id, artist = %artist_name))]
+pub async fn artist_channel_for_video(
+    video_id: &str,
+    artist_name: &str,
+    cookies: &str,
+) -> Result<Option<String>, String> {
+    let client = WEB_REMIX;
+    let body = json!({
+        "videoId": video_id,
+        "isAudioOnly": true,
+        "context": {
+            "client": {
+                "clientName": client.client_name,
+                "clientVersion": client.client_version,
+                "hl": "en",
+                "gl": "US",
+            },
+        },
+    });
+    let cookies_opt = if cookies.is_empty() {
+        None
+    } else {
+        Some(cookies)
+    };
+    let mut req = super::innertube::http_client()
+        .clone()
+        .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
+        .header("Content-Type", "application/json")
+        .header("X-YouTube-Client-Name", client.client_id)
+        .header("X-YouTube-Client-Version", client.client_version)
+        .header("Origin", ORIGIN)
+        .header("Referer", format!("{ORIGIN}/"));
+    if let Some(c) = cookies_opt {
+        let auth = sapisid_hash(c, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
+    }
+    let resp: Value = req
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("next HTTP: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("next HTTP: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("next JSON: {e}"))?;
+
+    // (text, channel) pairs from the requested video's own byline — scoped by
+    // videoId so other queue entries' artists can't be picked up.
+    let mut channels: Vec<(String, String)> = Vec::new();
+    collect_video_byline_channels(&resp, video_id, &mut channels);
+    let want = super::search::fold_artist_name(artist_name);
+    let named = channels
+        .iter()
+        .find(|(text, _)| super::search::fold_artist_name(text) == want)
+        .map(|(_, id)| id.clone())
+        .or_else(|| {
+            // A joined credit ("beat_shobon & CircusP") equals no single run;
+            // the run it STARTS with is the credit's primary artist. Longest
+            // prefix, so "A & B" prefers a run "A & B'" over plain "A"… never
+            // a mid-string accident.
+            channels
+                .iter()
+                .filter(|(text, _)| {
+                    let folded = super::search::fold_artist_name(text);
+                    !folded.is_empty() && want.starts_with(&folded)
+                })
+                .max_by_key(|(text, _)| super::search::fold_artist_name(text).len())
+                .map(|(_, id)| id.clone())
+        });
+    Ok(named
+        .or_else(|| {
+            let mut ids = channels.iter().map(|(_, id)| id.as_str());
+            let first = ids.next()?;
+            ids.all(|id| id == first).then(|| first.to_string())
+        })
+        .or_else(|| {
+            // Unlinked byline text (album songs credited to a joined name):
+            // the row menu's "Go to artist" entry is YT's own canonical
+            // artist for the song.
+            let mut menu_artists = Vec::new();
+            collect_video_menu_artists(&resp, video_id, &mut menu_artists);
+            menu_artists.into_iter().next()
+        }))
+}
+
+/// `MUSIC_PAGE_TYPE_ARTIST` browse targets from the requested video's row
+/// menu (the "Go to artist" entry) — present even when the byline is plain
+/// unlinked text.
+fn collect_video_menu_artists(v: &Value, video_id: &str, out: &mut Vec<String>) {
+    match v {
+        Value::Object(map) => {
+            if let Some(row) = map.get("playlistPanelVideoRenderer")
+                && row.get("videoId").and_then(|x| x.as_str()) == Some(video_id)
+                && let Some(menu) = row.get("menu")
+            {
+                collect_artist_endpoints(menu, out);
+            }
+            for child in map.values() {
+                collect_video_menu_artists(child, video_id, out);
+            }
+        }
+        Value::Array(arr) => {
+            for child in arr {
+                collect_video_menu_artists(child, video_id, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_artist_endpoints(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Object(map) => {
+            if let Some(ep) = map.get("browseEndpoint")
+                && let Some(bid) = ep.get("browseId").and_then(|x| x.as_str())
+                && bid.starts_with("UC")
+                && ep
+                    .pointer("/browseEndpointContextSupportedConfigs/browseEndpointContextMusicConfig/pageType")
+                    .and_then(|x| x.as_str())
+                    == Some("MUSIC_PAGE_TYPE_ARTIST")
+            {
+                out.push(bid.to_string());
+            }
+            for child in map.values() {
+                collect_artist_endpoints(child, out);
+            }
+        }
+        Value::Array(arr) => {
+            for child in arr {
+                collect_artist_endpoints(child, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_video_byline_channels(v: &Value, video_id: &str, out: &mut Vec<(String, String)>) {
+    match v {
+        Value::Object(map) => {
+            if let Some(row) = map.get("playlistPanelVideoRenderer")
+                && row.get("videoId").and_then(|x| x.as_str()) == Some(video_id)
+            {
+                for key in ["longBylineText", "shortBylineText"] {
+                    let Some(runs) = row
+                        .pointer(&format!("/{key}/runs"))
+                        .and_then(|r| r.as_array())
+                    else {
+                        continue;
+                    };
+                    for run in runs {
+                        let Some(text) = run.get("text").and_then(|t| t.as_str()) else {
+                            continue;
+                        };
+                        let Some(bid) = run
+                            .pointer("/navigationEndpoint/browseEndpoint/browseId")
+                            .and_then(|b| b.as_str())
+                        else {
+                            continue;
+                        };
+                        if bid.starts_with("UC") {
+                            out.push((text.to_string(), bid.to_string()));
+                        }
+                    }
+                }
+            }
+            for child in map.values() {
+                collect_video_byline_channels(child, video_id, out);
+            }
+        }
+        Value::Array(arr) => {
+            for child in arr {
+                collect_video_byline_channels(child, video_id, out);
+            }
+        }
+        _ => {}
+    }
 }

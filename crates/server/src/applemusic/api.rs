@@ -453,11 +453,11 @@ impl AppleMusicApi {
                 tracing::debug!("am.find_favorite_songs: found by name — id={}", pl.id);
                 return Ok(Some(pl.id.clone()));
             }
-            if let Some(tags) = &pl.attributes.tags {
-                if tags.iter().any(|t| t == "favorited") {
-                    tracing::debug!("am.find_favorite_songs: found by tag — id={}", pl.id);
-                    return Ok(Some(pl.id.clone()));
-                }
+            if let Some(tags) = &pl.attributes.tags
+                && tags.iter().any(|t| t == "favorited")
+            {
+                tracing::debug!("am.find_favorite_songs: found by tag — id={}", pl.id);
+                return Ok(Some(pl.id.clone()));
             }
         }
         tracing::warn!(
@@ -669,13 +669,12 @@ impl AppleMusicApi {
             .await
             .map_err(|e| format!("parse catalog response: {e}"))?;
 
-        if let Some(data) = body["data"].as_array() {
-            if let Some(first) = data.first() {
-                if let Some(catalog_id) = first["id"].as_str() {
-                    tracing::debug!("am.resolve_catalog_id: {id} → {catalog_id}");
-                    return Ok(catalog_id.to_string());
-                }
-            }
+        if let Some(data) = body["data"].as_array()
+            && let Some(first) = data.first()
+            && let Some(catalog_id) = first["id"].as_str()
+        {
+            tracing::debug!("am.resolve_catalog_id: {id} → {catalog_id}");
+            return Ok(catalog_id.to_string());
         }
 
         tracing::warn!("am.resolve_catalog_id: no catalog id found for {id}");
@@ -707,9 +706,7 @@ impl AppleMusicApi {
                 Ok(resp) => {
                     let status = resp.status();
                     if !status.is_success() {
-                        tracing::debug!(
-                            "am.get_lyrics: {lrc_type} → {status} for {catalog_id}"
-                        );
+                        tracing::debug!("am.get_lyrics: {lrc_type} → {status} for {catalog_id}");
                         continue;
                     }
                     let body = resp
@@ -732,9 +729,7 @@ impl AppleMusicApi {
                             return Ok(ttml.clone());
                         }
                     }
-                    tracing::debug!(
-                        "am.get_lyrics: {lrc_type} empty for {catalog_id}"
-                    );
+                    tracing::debug!("am.get_lyrics: {lrc_type} empty for {catalog_id}");
                 }
                 Err(e) => {
                     tracing::warn!("am.get_lyrics: {lrc_type} error for {catalog_id}: {e}");
@@ -743,5 +738,4 @@ impl AppleMusicApi {
         }
         Err("no lyrics available".into())
     }
-
 }

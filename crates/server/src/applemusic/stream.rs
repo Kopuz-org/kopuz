@@ -241,10 +241,10 @@ async fn get_content_key(
         );
     }
 
-    if let Some(err_code) = license_json["errorCode"].as_i64() {
-        if err_code != 0 {
-            return Err(format!("license error code: {err_code}"));
-        }
+    if let Some(err_code) = license_json["errorCode"].as_i64()
+        && err_code != 0
+    {
+        return Err(format!("license error code: {err_code}"));
     }
 
     let license_b64 = license_json["license"]
@@ -282,7 +282,6 @@ async fn get_content_key(
 
     Err("no content key found in license response".to_string())
 }
-
 
 /// Full pipeline: resolve + download + decrypt. Returns decrypted fMP4 bytes.
 pub async fn resolve_and_decrypt(

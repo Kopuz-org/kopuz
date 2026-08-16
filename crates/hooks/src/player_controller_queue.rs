@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use reader::Track;
 
 use crate::playback_ref::PlaybackItemRef;
-use crate::use_player_controller::{LoopMode, PlayerController};
+use crate::use_player_controller::{LoopMode, PlaybackIntent, PlayerController};
 
 impl PlayerController {
     pub fn play_next(&mut self) {
@@ -15,16 +15,36 @@ impl PlayerController {
         self.play_next_with_transition(true);
     }
 
-    fn play_next_with_transition(&mut self, allow_crossfade: bool) {
-        if *self.is_loading.peek() {
-            self.skip_in_progress.set(false);
+    /// Whether advancing from `idx` will land on another track to play. The
+    /// crossfade arm and the actual advance MUST agree on this: if the arm
+    /// fires when the advance would instead hit end-of-queue, playback pauses
+    /// mid-fade and the song dies ~crossfade-seconds early. Shuffle-agnostic on
+    /// purpose — `play_next_with_transition` decides end-of-queue purely from
+    /// position + loop mode, so this does too.
+    pub(crate) fn has_following_track(idx: usize, queue_len: usize, loop_mode: LoopMode) -> bool {
+        if queue_len == 0 {
+            return false;
         }
+        match loop_mode {
+            LoopMode::Track | LoopMode::Queue => true,
+            LoopMode::None => idx + 1 < queue_len,
+        }
+    }
 
+    /// `current_queue_index` points into the permutation while shuffle is on,
+    /// so end-of-queue is measured there too — and against a permutation that
+    /// still covers the queue, or Next lands on a position that resolves to no
+    /// track and does nothing at all.
+    fn play_next_with_transition(&mut self, allow_crossfade: bool) {
         let idx = *self.current_queue_index.peek();
-        let queue_len = self.queue.peek().len();
+        let queue_len = if *self.shuffle.peek() {
+            self.repair_shuffle_order();
+            self.shuffle_order.peek().len()
+        } else {
+            self.queue.peek().len()
+        };
 
         if queue_len == 0 {
-            self.skip_in_progress.set(false);
             return;
         }
 
@@ -35,9 +55,18 @@ impl PlayerController {
                 self.play_track_with_history(idx, allow_crossfade);
             }
             _ => {
-                if idx + 1 >= queue_len && loop_mode == LoopMode::None {
-                    self.skip_in_progress.set(false);
-                    self.player.write().pause();
+                if !Self::has_following_track(idx, queue_len, loop_mode) {
+                    // End of queue: kill any in-flight load so it can't restart
+                    // playback later (the stale-Loaded rule catches a promoted
+                    // one), then pause.
+                    self.cancel_load_task();
+                    self.clear_pending_crossfade_ui();
+                    self.set_intent(PlaybackIntent::Stopped);
+                    if *self.external_active.peek() {
+                        self.spotify_transport_pause();
+                    } else {
+                        self.player.peek().pause();
+                    }
                     self.is_playing.set(false);
                     return;
                 }
@@ -58,17 +87,29 @@ impl PlayerController {
     }
 
     pub fn play_prev(&mut self) {
+        // Previous during an armed crossfade means "back to the track I see":
+        // undo the transition and restart the visible (outgoing) track.
+        let idx = *self.current_queue_index.peek();
+        if self.revert_transition().is_some() {
+            self.play_track_no_history_without_crossfade(idx);
+            return;
+        }
+
         let progress = *self.current_song_progress.peek();
         let back_behavior = self.config.peek().back_behavior;
 
         if back_behavior == BackBehavior::RewindThenPrev && progress > 3 {
-            self.player.write().seek(std::time::Duration::ZERO);
-            self.current_song_progress.set(0);
+            self.seek(std::time::Duration::ZERO);
             return;
         }
 
         let idx = *self.current_queue_index.peek();
-        let queue_len = self.queue.peek().len();
+        let queue_len = if *self.shuffle.peek() {
+            self.repair_shuffle_order();
+            self.shuffle_order.peek().len()
+        } else {
+            self.queue.peek().len()
+        };
 
         if queue_len == 0 {
             return;
@@ -114,6 +155,54 @@ impl PlayerController {
         // will be used as a pointer to the retrieve the current track in the shuffled order
         self.current_queue_index.set(0);
         self.shuffle_order.set(order);
+    }
+
+    /// Position of a queue index inside the running shuffle permutation, or
+    /// `None` when the permutation still doesn't cover it after repair.
+    pub(crate) fn shuffle_position_of(&mut self, physical_idx: usize) -> Option<usize> {
+        self.repair_shuffle_order();
+        self.shuffle_order
+            .peek()
+            .iter()
+            .position(|&idx| idx == physical_idx)
+    }
+
+    /// Make the permutation cover the whole queue again without disturbing the
+    /// order it already has. A permutation shorter than the queue leaves
+    /// positions that resolve to no track at all, so Next reaches one and
+    /// silently does nothing; the missing entries are shuffled among themselves
+    /// and appended rather than triggering a full reshuffle.
+    fn repair_shuffle_order(&mut self) {
+        let queue_len = self.queue.peek().len();
+        if self.shuffle_order.peek().len() == queue_len
+            && self
+                .shuffle_order
+                .peek()
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == queue_len
+        {
+            return;
+        }
+        let repaired = Self::repaired_order(&self.shuffle_order.peek(), queue_len);
+        self.shuffle_order.set(repaired);
+    }
+
+    fn repaired_order(order: &[usize], queue_len: usize) -> Vec<usize> {
+        use rand::seq::SliceRandom;
+        let mut repaired: Vec<usize> = Vec::with_capacity(queue_len);
+        for &idx in order {
+            if idx < queue_len && !repaired.contains(&idx) {
+                repaired.push(idx);
+            }
+        }
+        let mut missing: Vec<usize> = (0..queue_len)
+            .filter(|idx| !repaired.contains(idx))
+            .collect();
+        missing.shuffle(&mut rand::rng());
+        repaired.extend(missing);
+        repaired
     }
 
     pub fn play_queue_shuffled(&mut self, tracks: Vec<Track>) {
@@ -198,6 +287,12 @@ impl PlayerController {
         }
     }
 
+    pub fn set_shuffle(&mut self, on: bool) {
+        if *self.shuffle.peek() != on {
+            self.toggle_shuffle();
+        }
+    }
+
     pub fn toggle_shuffle(&mut self) {
         let now_on = !*self.shuffle.peek();
         self.shuffle.set(now_on);
@@ -226,12 +321,39 @@ impl PlayerController {
     }
     pub fn play_radio(&mut self, station_id: &str, stream_id: &str) {
         let path = format!("radio:{}:{}", station_id, stream_id);
+
+        // Seed station name&artist from the manifest so the UI never shows
+        // raw ids while waiting for the first metadata update.
+        let (title, artist) = {
+            let registry = self.station_registry.read();
+            let station = registry.get(station_id);
+            let title = station
+                .map(|s| s.name.clone())
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| stream_id.to_string());
+            let artist = station
+                .and_then(|s| match &s.metadata {
+                    Some(radio::manifest::MetadataSourceDef::Static(st)) => {
+                        Some(st.resolve(stream_id).1.to_string())
+                    }
+                    _ => None,
+                })
+                .or_else(|| {
+                    station
+                        .and_then(|s| s.streams.iter().find(|st| st.id == stream_id))
+                        .map(|st| st.name.clone())
+                })
+                .filter(|a| !a.trim().is_empty())
+                .unwrap_or_else(|| "Live Radio".to_string());
+            (title, artist)
+        };
+
         let track = Track {
             id: reader::models::TrackId::Local(std::path::PathBuf::from(path)),
             cover: None,
             album_id: "".to_string(),
-            title: stream_id.to_string(),
-            artist: station_id.to_string(),
+            title,
+            artist,
             album: "Live Radio".to_string(),
             duration: u64::MAX,
             khz: 0,
@@ -265,17 +387,15 @@ impl PlayerController {
     /// changes — without it, a queued `ytmusic:` track would be replayed
     /// through whichever backend's stream-builder is now active.
     pub fn reset_for_backend_switch(&mut self) {
-        // Invalidate any in-flight track-load spawn (YT __YT_PENDING
-        // resolver, Jellyfin stream open, etc.) so its eventual
-        // completion doesn't start playback against the cleared queue
-        // or post a stale error banner / clear is_loading for the new
-        // backend's first track.
-        self.play_generation.with_mut(|g| *g += 1);
+        // Kill any in-flight track load (YT __YT_PENDING resolver, Jellyfin
+        // stream open, etc.) so its eventual completion doesn't start playback
+        // against the cleared queue or post a stale error banner.
+        self.cancel_load_task();
+        self.stop_external_playback();
+        self.set_intent(PlaybackIntent::Stopped);
         self.cancel_radio_task();
-        self.player.write().stop_for_transition();
+        self.player.peek().stop_for_transition();
         self.is_playing.set(false);
-        self.is_loading.set(false);
-        self.skip_in_progress.set(false);
         self.queue.write().clear();
         self.history.write().clear();
         self.current_queue_index.set(0);
@@ -284,26 +404,51 @@ impl PlayerController {
     }
 
     pub fn pause(&mut self) {
+        if *self.external_active.peek() {
+            self.spotify_transport_pause();
+            self.is_playing.set(false);
+            return;
+        }
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
             .is_some_and(|t| PlaybackItemRef::parse(&t.id.uid()).is_radio());
 
+        // Pausing mid-load cancels it, else the cancelled reply leaves the
+        // loading intent stuck (the radio-connect spinner leak). A resolving
+        // crossfade is reverted whole (its outgoing session stays pausable); an
+        // immediate load has no session left, so record a resume point. A
+        // *running* fade isn't reverted — pause freezes it, resume continues it.
+        if self.intent.peek().is_loading() && self.revert_transition().is_none() {
+            self.cancel_load_task();
+            if !is_radio && let Some(track) = self.get_track_at(idx) {
+                let progress_secs = (*self.current_song_progress.peek()).min(track.duration);
+                self.set_pending_resume_for_track(&track, progress_secs);
+            }
+            self.set_intent(PlaybackIntent::Stopped);
+        }
+
         if is_radio {
-            self.player.write().stop_for_transition();
+            self.player.peek().stop_for_transition();
         } else {
-            self.player.write().pause();
+            self.player.peek().pause();
         }
         self.is_playing.set(false);
     }
 
     pub fn resume(&mut self) {
+        if *self.external_active.peek() {
+            self.spotify_transport_resume();
+            self.is_playing.set(true);
+            return;
+        }
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
             .is_some_and(|t| PlaybackItemRef::parse(&t.id.uid()).is_radio());
 
-        if is_radio || !self.player.peek().can_resume() {
+        let can_resume = self.player.peek().can_resume();
+        if is_radio || !can_resume {
             if let Some(track) = self.get_track_at(idx) {
                 if !is_radio {
                     let progress_secs = (*self.current_song_progress.peek()).min(track.duration);
@@ -314,7 +459,17 @@ impl PlayerController {
             return;
         }
 
-        self.player.write().play_resume();
+        // Adopt the live engine session as the committed intent: flows that
+        // quiesce playback but keep the session resumable (end of queue,
+        // pause-during-load) leave the intent Stopped, and without re-adopting
+        // here the pump's stale-session rule would stop the track this starts.
+        let engine_token = self.player.peek().session_token();
+        if engine_token != 0 {
+            self.set_intent(PlaybackIntent::Committed {
+                token: engine_token,
+            });
+        }
+        self.player.peek().play_resume();
         self.is_playing.set(true);
     }
 
@@ -419,11 +574,11 @@ impl PlayerController {
         shuffle_order: Vec<usize>,
         shuffle_enabled: bool,
     ) {
+        self.cancel_load_task();
         self.clear_pending_crossfade_ui();
         self.player.write().stop();
         self.is_playing.set(false);
-        self.is_loading.set(false);
-        self.skip_in_progress.set(false);
+        self.set_intent(PlaybackIntent::Stopped);
         self.history.set(Vec::new());
         self.queue.set(queue);
         self.shuffle.set(shuffle_enabled);
@@ -453,5 +608,56 @@ impl PlayerController {
 
         self.hydrate_current_track_metadata(idx, progress_secs);
         self.set_pending_resume_for_track(&track, progress_secs);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The crossfade arm gates on `has_following_track`; it must return false
+    // exactly when `play_next_with_transition` would hit end-of-queue, or the
+    // arm fires with nothing to fade into and playback dies ~crossfade-secs
+    // early. `idx` is the pointer into the shuffle permutation when shuffle is
+    // on (queue_len == shuffle_order.len()), so this stays shuffle-agnostic.
+    #[test]
+    fn has_following_track_matches_end_of_queue() {
+        use LoopMode::{None, Queue, Track};
+
+        // Empty queue: never a next.
+        assert!(!PlayerController::has_following_track(0, 0, None));
+        assert!(!PlayerController::has_following_track(0, 0, Queue));
+
+        // Last position, no loop: end of queue — the regressed case (a single
+        // shuffled track is just queue_len == 1 at idx 0).
+        assert!(!PlayerController::has_following_track(0, 1, None));
+        assert!(!PlayerController::has_following_track(4, 5, None));
+
+        // Mid-queue, no loop: a real next exists.
+        assert!(PlayerController::has_following_track(0, 5, None));
+        assert!(PlayerController::has_following_track(3, 5, None));
+
+        // Queue loop wraps; Track loop repeats — always a next.
+        assert!(PlayerController::has_following_track(0, 1, Queue));
+        assert!(PlayerController::has_following_track(4, 5, Queue));
+        assert!(PlayerController::has_following_track(4, 5, Track));
+    }
+
+    /// A permutation that doesn't cover the queue leaves positions resolving to
+    /// no track, so Next silently does nothing and end-of-queue lands early.
+    /// Repairing must extend it, never reorder what the user is already hearing.
+    #[test]
+    fn repaired_permutation_keeps_the_order_it_already_had() {
+        let repaired = PlayerController::repaired_order(&[3, 0], 5);
+        assert_eq!(&repaired[..2], &[3, 0]);
+        assert_eq!(repaired.len(), 5);
+
+        let mut covered = repaired.clone();
+        covered.sort_unstable();
+        assert_eq!(covered, vec![0, 1, 2, 3, 4]);
+
+        let repaired = PlayerController::repaired_order(&[2, 9, 2, 0], 3);
+        assert_eq!(&repaired[..2], &[2, 0]);
+        assert_eq!(repaired.len(), 3);
     }
 }

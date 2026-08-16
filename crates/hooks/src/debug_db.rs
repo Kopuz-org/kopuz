@@ -6,10 +6,7 @@
 
 use dioxus::prelude::*;
 
-#[cfg(all(
-    debug_assertions,
-    not(any(target_arch = "wasm32", target_os = "android"))
-))]
+#[cfg(all(debug_assertions, not(target_os = "android")))]
 pub fn debug_db_section() -> Element {
     let db = use_context::<db::Db>();
     let gens = crate::db_reactivity::use_generations();
@@ -140,10 +137,7 @@ pub fn debug_db_section() -> Element {
     }
 }
 
-#[cfg(not(all(
-    debug_assertions,
-    not(any(target_arch = "wasm32", target_os = "android"))
-)))]
+#[cfg(not(all(debug_assertions, not(target_os = "android"))))]
 pub fn debug_db_section() -> Element {
     rsx! {}
 }

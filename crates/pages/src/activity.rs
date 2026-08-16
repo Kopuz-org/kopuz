@@ -41,7 +41,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             .collect::<HashMap<String, String>>()
     });
 
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()
@@ -84,6 +84,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
 
     let visible_tracks: Vec<(usize, Track, u64, String, Option<CoverUrl>)> = {
         let conf = config.read();
+        let active_source = source();
         let albums = album_map.read();
         let window_rows = window.rows.read().clone().unwrap_or_default();
         let row_offset = window_rows.offset as usize;
@@ -92,11 +93,8 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             .into_iter()
             .enumerate()
             .map(|(i, track)| {
-                let plays = conf
-                    .listen_counts
-                    .get(&track.id.uid())
-                    .copied()
-                    .unwrap_or(0);
+                let count_key = active_source.listen_count_key(&track.id.uid());
+                let plays = conf.listen_counts.get(&count_key).copied().unwrap_or(0);
                 let genre = albums.get(&track.album_id).cloned().unwrap_or_default();
                 let cover_url = ::server::cover::track(&conf, &track, 64);
                 (row_offset + i, track, plays, genre, cover_url)
@@ -107,23 +105,23 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
     let subtitle = i18n::t("most_played_tracks");
 
     rsx! {
-        div { class: if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+        div { class: if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             div { class: "max-w-[1600px] mx-auto w-full shrink-0",
                 div { class: "mb-8 flex items-end justify-between",
                     div {
-                        if is_modern {
+                        if is_vaxry {
                             p {
                                 class: "text-[10px] font-bold mb-0.5",
                                 style: "color: rgba(255,255,255,0.35);",
                                 "{i18n::t(\"library\")}"
                             }
                         }
-                        h1 { class: if is_modern { "text-2xl font-bold text-white mb-1" } else { "text-3xl font-bold text-white mb-2" },
+                        h1 { class: if is_vaxry { "text-2xl font-semibold tracking-tight text-white mb-1" } else { "text-3xl font-semibold tracking-tight text-white mb-2" },
                             "{i18n::t(\"listening_logs\")}"
                         }
                         p { class: "text-slate-400 text-sm", "{subtitle}" }
                     }
-                    if !is_modern {
+                    if !is_vaxry {
                         div {
                             div { class: "w-12 h-12 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-slate-400",
                                 i { class: "fa-solid fa-chart-simple" }
@@ -193,7 +191,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
 
                                             div { class: "flex-1 min-w-0 pr-4 flex items-center",
                                                 div {
-                                                    class: if is_modern { "w-8 h-8 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" } else { "w-10 h-10 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" },
+                                                    class: if is_vaxry { "w-8 h-8 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" } else { "w-10 h-10 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" },
                                                     if let Some(url) = cover_url {
                                                         img { src: "{url.as_ref()}", class: "w-full h-full object-cover", decoding: "async", loading: "lazy" }
                                                     } else {
@@ -202,11 +200,11 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                                 }
                                                 div { class: "flex-1 min-w-0",
                                                     div {
-                                                        class: if is_modern { "text-white font-medium truncate text-sm" } else { "text-white font-medium truncate text-[15px] mb-0.5" },
+                                                        class: if is_vaxry { "text-white font-medium truncate text-sm" } else { "text-white font-medium truncate text-[15px] mb-0.5" },
                                                         "{track.title}"
                                                     }
                                                     div {
-                                                        class: if is_modern { "text-slate-400 text-xs truncate group-hover:text-slate-300 transition-colors" } else { "text-slate-400 text-sm truncate group-hover:text-slate-300 transition-colors" },
+                                                        class: if is_vaxry { "text-slate-400 text-xs truncate group-hover:text-slate-300 transition-colors" } else { "text-slate-400 text-sm truncate group-hover:text-slate-300 transition-colors" },
                                                         "{track.artist}"
                                                     }
                                                 }

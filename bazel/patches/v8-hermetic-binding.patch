@@ -1,0 +1,41 @@
+--- build.rs
++++ build.rs
+@@ -694 +694 @@ fn print_prebuilt_src_binding_path() {
+-  let src_binding_path = get_dirs().root.join("gen").join(name.clone());
++  let packaged_binding_path = get_dirs().root.join("gen").join(name.clone());
+@@ -699 +699 @@ fn print_prebuilt_src_binding_path() {
+-    download_file(url, src_binding_path.clone());
++    download_file(url, packaged_binding_path.clone());
+@@ -701,0 +702,9 @@ fn print_prebuilt_src_binding_path() {
++  let out_binding_path = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join(name);
++  fs::copy(&packaged_binding_path, &out_binding_path).unwrap_or_else(|err| {
++    panic!(
++      "failed to copy {} to {}: {err}",
++      packaged_binding_path.display(),
++      out_binding_path.display()
++    )
++  });
++
+@@ -704 +713 @@ fn print_prebuilt_src_binding_path() {
+-    src_binding_path.display()
++    out_binding_path.display()
+@@ -550,3 +559,4 @@ fn download_static_lib_binaries() {
+-  let dir = static_lib_dir();
+-  std::fs::create_dir_all(&dir).unwrap();
+-  println!("cargo:rustc-link-search={}", dir.display());
++  let cached_dir = static_lib_dir();
++  std::fs::create_dir_all(&cached_dir).unwrap();
++  let cached_path = static_lib_path();
++  download_file(url, cached_path.clone());
+@@ -554 +564,10 @@ fn download_static_lib_binaries() {
+-  download_file(url, static_lib_path());
++  let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
++  let out_path = out_dir.join(static_lib_name(""));
++  std::fs::copy(&cached_path, &out_path).unwrap_or_else(|err| {
++    panic!(
++      "failed to copy {} to {}: {err}",
++      cached_path.display(),
++      out_path.display()
++    )
++  });
++  println!("cargo:rustc-link-search={}", out_dir.display());

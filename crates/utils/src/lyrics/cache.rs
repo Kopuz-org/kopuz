@@ -5,7 +5,7 @@ use super::{LyricLine, Lyrics};
 
 const LYRICS_CACHE_CAPACITY: usize = 256;
 const LYRICS_META_KIND: &str = "lyrics";
-const NEGATIVE_TTL_SECS: u64 = 7 * 24 * 60 * 60;
+const NEGATIVE_TTL_SECS: u64 = 24 * 60 * 60;
 
 static LYRICS_CACHE: OnceLock<Mutex<LyricsCache>> = OnceLock::new();
 static LYRICS_INFLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();

@@ -2,7 +2,7 @@ use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecryptMut, KeyIvInit, block_padding::NoPadding};
 use pkcs1::DecodeRsaPrivateKey;
 use prost::Message;
-use sha1::{Digest, Sha1};
+use sha1_digest10::{Digest, Sha1};
 
 pub mod wv {
     include!(concat!(env!("OUT_DIR"), "/wv.rs"));
@@ -182,7 +182,7 @@ impl Cdm {
                 iv.len(),
                 encrypted_key.len()
             );
-            tracing::debug!("am.cdm: enc_key for AES: {}", hex::encode(&encryption_key));
+            tracing::debug!("am.cdm: enc_key for AES: {}", hex::encode(encryption_key));
             let cipher = Aes128CbcDec::new(&encryption_key, GenericArray::from_slice(&iv[..16]));
             cipher
                 .decrypt_padded_mut::<NoPadding>(&mut decrypted)
@@ -209,7 +209,7 @@ impl Cdm {
 
             tracing::debug!(
                 "am.cdm: decrypted key id={} type={} value_len={}",
-                hex::encode(&key_container.id.as_deref().unwrap_or(&[])),
+                hex::encode(key_container.id.as_deref().unwrap_or(&[])),
                 key_type,
                 decrypted.len(),
             );

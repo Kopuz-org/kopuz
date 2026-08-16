@@ -302,16 +302,8 @@ fn SongListShelf(
                             {
                                 let track = track.clone();
                                 let tracks_for_play = tracks.clone();
-                                let cover_url = utils::jellyfin_image::resolve_track_cover(
-                                    track.cover.as_deref(),
-                                    &track.id.key(),
-                                    &track.album_id,
-                                    "",
-                                    None,
-                                    96,
-                                    80,
-                                )
-                                .map(utils::cover_url_from_string);
+                                let cover_url =
+                                    server::cover::track(&ctrl.config.read(), &track, 96);
                                 let track_for_play = track.clone();
                                 let track_for_menu = track.clone();
                                 let track_path_for_match = track.id.clone();
@@ -484,7 +476,7 @@ fn play_playlist_async(
     mut now_playing: Signal<Option<String>>,
     cache: Signal<HashMap<String, Vec<Track>>>,
 ) {
-    ctrl.is_loading.set(true);
+    ctrl.browse_loading.set(true);
     now_playing.set(Some(id.clone()));
     // Cache hit from hover-prefetch — start playback synchronously, no
     // network roundtrip needed. This is the path that makes Discover
@@ -506,7 +498,7 @@ fn play_playlist_async(
             // currently-playing track.
             let fail = |ctrl: &mut hooks::use_player_controller::PlayerController,
                         now_playing: &mut Signal<Option<String>>| {
-                ctrl.is_loading.set(false);
+                ctrl.browse_loading.set(false);
                 now_playing.set(None);
             };
             let source = ctrl.active_source.peek().clone();
@@ -565,13 +557,19 @@ fn play_playlist_async(
                     // mid-stream break leaves `accumulated` truncated, and
                     // caching that would poison every future click on this tile.
                     None => {
-                        cache_writer.write().insert(id, accumulated);
+                        cache_writer.write().insert(id.clone(), accumulated);
                         break;
                     }
                 }
             }
             if !started {
-                fail(&mut ctrl, &mut now_playing);
+                match source.fetch_album_tracks(&id).await {
+                    Ok(tracks) if !tracks.is_empty() => {
+                        cache_writer.write().insert(id, tracks.clone());
+                        ctrl.play_queue_linear(tracks);
+                    }
+                    _ => fail(&mut ctrl, &mut now_playing),
+                }
             }
         }
         .instrument(play_span),
@@ -719,21 +717,14 @@ fn Card(
 
 #[component]
 fn SongCard(track: Track) -> Element {
-    let thumbnail = utils::jellyfin_image::resolve_track_cover(
-        track.cover.as_deref(),
-        &track.id.key(),
-        &track.album_id,
-        "",
-        None,
-        320,
-        80,
-    );
     let title = track.title.clone();
     let artist = track.artist.clone();
     let video_id = track_video_id(&track);
 
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let thumbnail = server::cover::track(&ctrl.config.read(), &track, 320)
+        .map(|cover| cover.as_ref().to_string());
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut cache = use_context::<DiscoverPrefetchCache>().0;
 
@@ -859,7 +850,7 @@ fn play_song_with_mix(
     mut now_playing: Signal<Option<String>>,
     cache: Signal<HashMap<String, Vec<Track>>>,
 ) {
-    ctrl.is_loading.set(true);
+    ctrl.browse_loading.set(true);
     now_playing.set(Some(video_id.clone()));
     if let Some(mix) = cache.peek().get(&video_id).cloned()
         && !mix.is_empty()
@@ -1011,7 +1002,7 @@ pub fn DiscoverPlaylistDetail(
     }
 
     // Loading / error keep a lightweight header + back button; the loaded state
-    // hands off to the shared modern TrackListView (same look as the local
+    // hands off to the shared vaxry TrackListView (same look as the local
     // playlist / album pages) so Discover playlists match everywhere else.
     if *loading.read() {
         return rsx! {
@@ -1043,7 +1034,6 @@ pub fn DiscoverPlaylistDetail(
                 name: header_title.clone(),
                 description: String::new(),
                 cover_url,
-                back_label: i18n::t("back").to_string(),
                 tracks: track_list,
                 is_album: false,
                 on_close: move |_| on_back.call(()),
@@ -1059,7 +1049,6 @@ fn BackButton(on_back: EventHandler<()>) -> Element {
             class: "inline-flex items-center gap-2 text-white/70 hover:text-white text-sm cursor-pointer mb-6 group",
             onclick: move |_| on_back.call(()),
             i { class: "fa-solid fa-chevron-left text-xs transition-transform group-hover:-translate-x-0.5" }
-            span { "{i18n::t(\"back\")}" }
         }
     }
 }
@@ -1189,7 +1178,6 @@ pub fn DiscoverArtistPage(
                 class: "inline-flex items-center gap-2 text-white/70 hover:text-white text-sm cursor-pointer mt-6 ml-6 md:ml-10 mb-2 group",
                 onclick: move |_| on_back.call(()),
                 i { class: "fa-solid fa-chevron-left text-xs transition-transform group-hover:-translate-x-0.5" }
-                span { "{i18n::t(\"back\")}" }
             }
 
             if *loading.read() {

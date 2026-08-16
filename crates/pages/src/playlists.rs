@@ -25,6 +25,7 @@ pub fn PlaylistsPage(
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
     let source = use_active_source();
+    let nav_ctrl = use_context::<components::NavigationController>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = use_memo(move || active_source.read().capabilities());
 
@@ -91,10 +92,10 @@ pub fn PlaylistsPage(
         last_source.set(config.read().active_source.clone());
     }
 
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
 
     rsx! {
-        div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+        div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             if let Some(pid) = selected_playlist_id.read().clone() {
                 {
                     let pid_for_dl = pid.clone();
@@ -123,7 +124,7 @@ pub fn PlaylistsPage(
                         PlaylistDetail {
                             playlist_id: pid,
                             config,
-                            on_close: move |_| selected_playlist_id.set(None),
+                            on_close: move |_| nav_ctrl.close_playlist(),
                             is_downloading_all,
                             on_download_all: move |_| {
                                 let requests: Vec<(String, String, String)> = {
@@ -208,23 +209,23 @@ pub fn PlaylistsPage(
                     }
                 }
             } else {
-                div { class: if is_modern { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
-                    if is_modern {
+                div { class: if is_vaxry { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
+                    if is_vaxry {
                         div {
                             p {
                                 class: "text-[10px] font-bold mb-0.5",
                                 style: "color: rgba(255,255,255,0.35);",
                                 "{i18n::t(\"library\")}"
                             }
-                            h1 { class: "text-2xl font-bold text-white", "{i18n::t(\"playlists\")}" }
+                            h1 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"playlists\")}" }
                         }
                     } else {
-                        h1 { class: "text-3xl font-bold text-white", "{i18n::t(\"playlists\")}" }
+                        h1 { class: "text-3xl font-semibold tracking-tight text-white", "{i18n::t(\"playlists\")}" }
                     }
                     div { class: "flex items-center gap-1",
                         if caps().folders {
                             button {
-                                class: "text-white/60 flex items-center hover:text-white transition-colors p-3 rounded-full hover:bg-white/10",
+                                class: "w-10 h-10 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
                                 title: i18n::t("new_folder").to_string(),
                                 onclick: move |_| {
                                     let new_id = uuid::Uuid::new_v4().to_string();
@@ -244,7 +245,7 @@ pub fn PlaylistsPage(
                             }
                         }
                         button {
-                            class: "text-white/60 flex items-center hover:text-white transition-colors p-3 rounded-full hover:bg-white/10",
+                            class: "w-10 h-10 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
                             title: i18n::t("add_playlist").to_string(),
                             aria_label: i18n::t("add_playlist").to_string(),
                             onclick: move |_| {
@@ -279,7 +280,11 @@ pub fn PlaylistsPage(
                             let read_db = consume_context::<hooks::ReadDb>();
                             let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                             spawn(async move {
-                                let tracks = read_db.folder_tracks(&prefix).await.unwrap_or_default();
+                                let source_key = local.source().clone();
+                                let tracks = read_db
+                                    .folder_tracks(&source_key, &prefix)
+                                    .await
+                                    .unwrap_or_default();
                                 let refs: Vec<String> = tracks
                                     .iter()
                                     .map(|track| track.id.key().into_owned())
@@ -302,6 +307,19 @@ pub fn PlaylistsPage(
             }
         }
     }
+}
+
+/// What a playlist card's overflow entry does. The menu is built conditionally —
+/// the folder entries only appear inside a folder, radio only when the source
+/// supports it — so entries carry their meaning instead of being matched by
+/// position, where adding one silently rewires every entry after it.
+#[derive(Clone, Copy, PartialEq)]
+enum PlaylistCardAction {
+    MoveToFolder,
+    RemoveFromFolder,
+    Rename,
+    StartRadio,
+    Delete,
 }
 
 /// The playlists grid: folders + local management when the source organises into
@@ -363,8 +381,8 @@ fn PlaylistsGrid(
         let yt_nonce = *yt_refresh_nonce.read();
         let trigger = *refresh_trigger.read();
         // YT auto-syncs only once (a stamp guards re-runs); other servers re-fetch
-        // on a server/identity change. `discover` marks the active source as YT.
-        let is_ytmusic = caps().discover;
+        // on a server/identity change.
+        let is_ytmusic = caps().albums == ::server::source::AlbumType::YtMusic;
 
         // Dedup key from the active server's identity (+ trigger), so a re-render
         // with the same server doesn't re-fetch.
@@ -548,14 +566,11 @@ fn PlaylistsGrid(
         if let Some(tag) = &playlist.image_tag
             && let Some(server) = &conf.server
         {
-            return utils::map_cover_url(Some(utils::jellyfin_image::jellyfin_image_url(
-                &server.url,
-                &playlist.id,
-                Some(tag.as_str()),
-                server.access_token.as_deref(),
+            return ::server::cover::resolve(
+                &conf,
+                reader::CoverRef::remote_item(server.service, &playlist.id, Some(tag.as_str())),
                 384,
-                80,
-            )));
+            );
         }
         let first_ref = playlist.tracks.first()?;
         let track = first_tracks
@@ -602,7 +617,16 @@ fn PlaylistsGrid(
         store.playlists.clone()
     };
     drop(conf);
-    let is_yt = caps().discover;
+    let is_yt = caps().albums == ::server::source::AlbumType::YtMusic;
+    // The flat remote card has no overflow menu of its own, so radio is its one
+    // entry — no kind-tagged action list needed here (unlike the folder card).
+    let can_radio = caps().radio;
+    let radio_text = components::radio_actions::radio_label();
+    let radio_actions = vec![MenuAction::new(
+        radio_text.as_str(),
+        components::radio_actions::RADIO_ICON,
+    )];
+    let mut active_menu = active_menu;
     let yt_anon = config
         .read()
         .server
@@ -630,7 +654,7 @@ fn PlaylistsGrid(
                                 }
                             }
                             button {
-                                class: "px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-white/80 transition-colors disabled:opacity-50",
+                                class: "px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 transition-colors disabled:opacity-50",
                                 disabled: syncing,
                                 onclick: move |_| {
                                     let next = *yt_refresh_nonce.peek() + 1;
@@ -669,7 +693,7 @@ fn PlaylistsGrid(
                         rsx! {
                             div {
                                 key: "{playlist.id}",
-                                class: "bg-white/5 border border-white/5 rounded-lg p-6 hover:bg-white/10 transition-all cursor-pointer group relative",
+                                class: "bg-white/5 border border-white/5 rounded-xl p-6 hover:bg-white/10 transition-all cursor-pointer group relative",
                                 onclick: move |_| selected_playlist_id.set(Some(playlist_id_nav.clone())),
                                 div { class: "mb-4 w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden transition-all bg-white/5",
                                     if let Some(url) = cover_url {
@@ -682,8 +706,37 @@ fn PlaylistsGrid(
                                         }
                                     }
                                 }
-                                h3 { class: "text-xl font-bold text-white mb-1 truncate", "{playlist.name}" }
-                                p { class: "text-sm text-slate-400", "Server • {playlist.tracks.len()} tracks" }
+                                div { class: "flex items-start justify-between gap-2",
+                                    div { class: "min-w-0 flex-1",
+                                        h3 { class: "text-xl font-bold text-white mb-1 truncate", "{playlist.name}" }
+                                        p { class: "text-sm text-slate-400", "Server • {playlist.tracks.len()} tracks" }
+                                    }
+                                    if can_radio {
+                                        {
+                                            let pid_menu = playlist.id.clone();
+                                            let is_menu_open = active_menu.read().as_deref() == Some(playlist.id.as_str());
+                                            let start_radio = components::radio_actions::playlist_radio_handler(playlist.id.clone());
+                                            rsx! {
+                                                div { onclick: move |evt: Event<MouseData>| evt.stop_propagation(),
+                                                    DotsMenu {
+                                                        actions: radio_actions.clone(),
+                                                        is_open: is_menu_open,
+                                                        on_open: move |_| active_menu.set(Some(pid_menu.clone())),
+                                                        on_close: move |_| active_menu.set(None),
+                                                        button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
+                                                        anchor: "right".to_string(),
+                                                        on_action: move |_: usize| {
+                                                            active_menu.set(None);
+                                                            if let Some(handler) = start_radio {
+                                                                handler.call(());
+                                                            }
+                                                        },
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 if caps().downloads {
                                     button {
                                         class: "absolute top-4 right-4 w-8 h-8 rounded-full bg-black/40 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:border-white/30 transition-colors opacity-0 group-hover:opacity-100",
@@ -786,17 +839,40 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
     let remove_folder_text = i18n::t("remove_from_folder").to_string();
     let delete_folder_text = i18n::t("delete_folder").to_string();
 
-    let playlist_actions = vec![
-        MenuAction::new(move_text.as_str(), "fa-solid fa-folder-open"),
-        MenuAction::new(rename_playlist_text.as_str(), "fa-solid fa-pen"),
-        MenuAction::new(delete_playlist_text.as_str(), "fa-solid fa-trash").destructive(),
-    ];
-    let folder_playlist_actions = vec![
-        MenuAction::new(move_text.as_str(), "fa-solid fa-folder-open"),
-        MenuAction::new(remove_folder_text.as_str(), "fa-solid fa-folder-minus"),
-        MenuAction::new(rename_playlist_text.as_str(), "fa-solid fa-pen"),
-        MenuAction::new(delete_playlist_text.as_str(), "fa-solid fa-trash").destructive(),
-    ];
+    let radio_text = components::radio_actions::radio_label();
+    let can_radio = consume_context::<Signal<::server::source::ActiveSource>>()
+        .read()
+        .capabilities()
+        .radio;
+
+    let build_playlist_actions = |in_folder: bool| -> (Vec<MenuAction>, Vec<PlaylistCardAction>) {
+        let mut entries = vec![(
+            MenuAction::new(move_text.as_str(), "fa-solid fa-folder-open"),
+            PlaylistCardAction::MoveToFolder,
+        )];
+        if in_folder {
+            entries.push((
+                MenuAction::new(remove_folder_text.as_str(), "fa-solid fa-folder-minus"),
+                PlaylistCardAction::RemoveFromFolder,
+            ));
+        }
+        entries.push((
+            MenuAction::new(rename_playlist_text.as_str(), "fa-solid fa-pen"),
+            PlaylistCardAction::Rename,
+        ));
+        if can_radio {
+            entries.push((
+                MenuAction::new(radio_text.as_str(), components::radio_actions::RADIO_ICON),
+                PlaylistCardAction::StartRadio,
+            ));
+        }
+        entries.push((
+            MenuAction::new(delete_playlist_text.as_str(), "fa-solid fa-trash").destructive(),
+            PlaylistCardAction::Delete,
+        ));
+        entries.into_iter().unzip()
+    };
+
     let folder_actions = vec![
         MenuAction::new(rename_folder_text.as_str(), "fa-solid fa-pen"),
         MenuAction::new(delete_folder_text.as_str(), "fa-solid fa-trash").destructive(),
@@ -812,15 +888,14 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
         let name = playlist.name.clone();
         let count = playlist.tracks.len();
         let is_menu_open = active_menu.read().as_deref() == Some(playlist.id.as_str());
-        let actions = if in_folder {
-            folder_playlist_actions.clone()
-        } else {
-            playlist_actions.clone()
-        };
+        let (actions, action_kinds) = build_playlist_actions(in_folder);
+        // Resolved during render, like the track rows' radio: the handler reads
+        // context, which an event closure can't do.
+        let start_radio = components::radio_actions::playlist_radio_handler(playlist.id.clone());
         rsx! {
             div {
                 key: "{pid}",
-                class: "bg-white/5 border border-white/5 rounded-lg p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
+                class: "bg-white/5 border border-white/5 rounded-xl p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
                 onclick: move |_| selected_playlist_id.set(Some(pid_click.clone())),
                 div { class: "mb-4 w-full h-32 rounded-xl flex items-center justify-center overflow-hidden transition-all bg-white/5",
                     if let Some(url) = cover_url {
@@ -856,55 +931,52 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                             anchor: "right".to_string(),
                             on_action: move |idx: usize| {
                                 active_menu.set(None);
-                                if in_folder {
-                                    match idx {
-                                        0 => move_target_id.set(Some(pid_action.clone())),
-                                        1 => {
-                                            let pid = pid_action.clone();
-                                            let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                            spawn(async move {
-                                                if local
-                                                    .set_playlist_folder(&pid, None)
-                                                    .await
-                                                    .is_ok()
-                                                {
-                                                    gens.bump(Table::Folders);
-                                                }
-                                            });
-                                        }
-                                        2 => {
-                                            rename_playlist_id.set(Some(pid_action.clone()));
-                                            rename_playlist_name.set(name_for_rename.clone());
-                                        }
-                                        _ => {
-                                            let pid = pid_action.clone();
-                                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                            spawn(async move {
-                                                if source.delete_playlist(&pid).await.is_ok()
-                                                    && source.set_playlist_folder(&pid, None).await.is_ok()
-                                                {
-                                                    gens.bump(Table::Playlists);
-                                                    gens.bump(Table::Folders);
-                                                }
-                                            });
+                                let Some(kind) = action_kinds.get(idx).copied() else {
+                                    return;
+                                };
+                                match kind {
+                                    PlaylistCardAction::MoveToFolder => {
+                                        move_target_id.set(Some(pid_action.clone()))
+                                    }
+                                    PlaylistCardAction::RemoveFromFolder => {
+                                        let pid = pid_action.clone();
+                                        let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                        spawn(async move {
+                                            if local
+                                                .set_playlist_folder(&pid, None)
+                                                .await
+                                                .is_ok()
+                                            {
+                                                gens.bump(Table::Folders);
+                                            }
+                                        });
+                                    }
+                                    PlaylistCardAction::Rename => {
+                                        rename_playlist_id.set(Some(pid_action.clone()));
+                                        rename_playlist_name.set(name_for_rename.clone());
+                                    }
+                                    PlaylistCardAction::StartRadio => {
+                                        if let Some(handler) = start_radio {
+                                            handler.call(());
                                         }
                                     }
-                                } else {
-                                    match idx {
-                                        0 => move_target_id.set(Some(pid_action.clone())),
-                                        1 => {
-                                            rename_playlist_id.set(Some(pid_action.clone()));
-                                            rename_playlist_name.set(name_for_rename.clone());
-                                        }
-                                        _ => {
-                                            let pid = pid_action.clone();
-                                            let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                            spawn(async move {
-                                                if s.delete_playlist(&pid).await.is_ok() {
-                                                    gens.bump(Table::Playlists);
-                                                }
-                                            });
-                                        }
+                                    // Deleting from inside a folder also drops the
+                                    // membership row, so the folder doesn't keep a
+                                    // dangling id.
+                                    PlaylistCardAction::Delete => {
+                                        let pid = pid_action.clone();
+                                        let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                        spawn(async move {
+                                            if source.delete_playlist(&pid).await.is_err() {
+                                                return;
+                                            }
+                                            gens.bump(Table::Playlists);
+                                            if in_folder
+                                                && source.set_playlist_folder(&pid, None).await.is_ok()
+                                            {
+                                                gens.bump(Table::Folders);
+                                            }
+                                        });
                                     }
                                 }
                             },
@@ -991,11 +1063,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
             if let Some(ref folder) = open_folder {
                 div {
                     div { class: "flex items-center gap-3 mb-8",
-                        button {
-                            class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
-                            onclick: move |_| open_folder_id.set(None),
-                            i { class: "fa-solid fa-arrow-left" }
-                            "{i18n::t(\"back_to_playlists\")}"
+                        components::back_button::BackButton {
+                            class: "",
+                            on_click: move |_| open_folder_id.set(None),
                         }
                         span { class: "text-white/30", "/" }
                         span { class: "text-white font-semibold", "{folder.name}" }
@@ -1040,7 +1110,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                     rsx! {
                                         div {
                                             key: "{fid}",
-                                            class: "bg-white/5 border border-white/5 rounded-lg p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
+                                            class: "bg-white/5 border border-white/5 rounded-xl p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
                                             onclick: move |_| open_folder_id.set(Some(fid_open.clone())),
                                             div { class: "mb-4 w-full h-32 rounded-xl flex items-center justify-center overflow-hidden transition-all bg-white/5",
                                                 if let Some(url) = cover_url {
@@ -1131,7 +1201,7 @@ fn RenameTextModal(
                 onclick: move |evt| evt.stop_propagation(),
                 h2 { class: "text-lg font-bold text-white mb-4", "{title}" }
                 input {
-                    class: "w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 mb-4",
+                    class: "w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-white/25 mb-4",
                     value: "{value()}",
                     oninput: move |evt| value.set(evt.value()),
                     onkeydown: move |evt| {

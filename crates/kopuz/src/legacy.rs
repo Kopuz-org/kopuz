@@ -1,4 +1,3 @@
-#[cfg(not(target_arch = "wasm32"))]
 pub fn migrate_locations() {
     let Some(dirs) = directories::ProjectDirs::from("com", "temidaradev", "kopuz") else {
         return;

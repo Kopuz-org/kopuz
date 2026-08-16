@@ -4,6 +4,12 @@ use dioxus::prelude::*;
 use hooks::ReadDb;
 use tracing::Instrument;
 
+pub(crate) async fn ensure_host_access(mut host_access: Signal<bool>) -> Option<()> {
+    let host = ::server::cookies::has_host_spawn().await;
+    host_access.set(host);
+    None
+}
+
 async fn validate_ytmusic(cookies: &str) -> bool {
     ::server::provider::validate_ytmusic_cookies(cookies).await
 }
@@ -105,11 +111,46 @@ pub fn add_registry(
     );
 }
 
-pub fn ytmusic_auto_login(
+/// Persist freshly-obtained browser-sign-in credentials onto the active server
+/// and mirror the browser choice into its saved entry. Shared by the YT Music
+/// and SoundCloud auto-login flows (the only per-service differences are how the
+/// token is obtained and how the user id is derived).
+fn apply_browser_login(
     mut config: Signal<AppConfig>,
-    yt_browser: Signal<Browser>,
+    browser: Browser,
+    token: String,
+    user_id: String,
+) {
+    let mut cfg = config.write();
+    let saved_id = cfg.server.as_ref().and_then(|server| server.id.clone());
+    if let Some(server) = cfg.server.as_mut() {
+        server.access_token = Some(token);
+        server.user_id = Some(user_id);
+        server.yt_browser = Some(browser);
+    }
+    if let Some(id) = saved_id
+        && let Some(saved) = cfg.servers.iter_mut().find(|server| server.id == id)
+    {
+        saved.yt_browser = Some(browser);
+    }
+}
+
+/// Surface a browser sign-in failure to both the settings error line and the
+/// player error banner.
+fn report_signin_failure(
     mut error: Signal<Option<String>>,
     mut playback_error: Signal<Option<String>>,
+    msg: String,
+) {
+    error.set(Some(msg.clone()));
+    playback_error.set(Some(msg));
+}
+
+pub fn ytmusic_auto_login(
+    config: Signal<AppConfig>,
+    yt_browser: Signal<Browser>,
+    mut error: Signal<Option<String>>,
+    playback_error: Signal<Option<String>>,
 ) {
     let (browser, existing, server_id) = {
         let cfg = config.peek();
@@ -121,44 +162,30 @@ pub fn ytmusic_auto_login(
             srv.and_then(|s| s.id.clone()).unwrap_or_default(),
         )
     };
-    let mut report = move |msg: String| {
-        error.set(Some(msg.clone()));
-        playback_error.set(Some(msg));
-    };
     spawn(async move {
         let cookies = match ensure_ytmusic_signed_in(existing, browser, &server_id).await {
             Ok(cookies) => cookies,
             Err(err) => {
-                report(format!("YT Music sign-in failed ({browser}): {err}"));
+                report_signin_failure(
+                    error,
+                    playback_error,
+                    format!("YT Music sign-in failed ({browser}): {err}"),
+                );
                 return;
             }
         };
-
         let yt_user_id =
             ::server::ytmusic::derive_user_id(&cookies).unwrap_or_else(|| "me".to_string());
-        {
-            let mut cfg = config.write();
-            let saved_id = cfg.server.as_ref().and_then(|server| server.id.clone());
-            if let Some(server) = cfg.server.as_mut() {
-                server.access_token = Some(cookies);
-                server.user_id = Some(yt_user_id);
-                server.yt_browser = Some(browser);
-            }
-            if let Some(id) = saved_id
-                && let Some(saved) = cfg.servers.iter_mut().find(|server| server.id == id)
-            {
-                saved.yt_browser = Some(browser);
-            }
-        }
+        apply_browser_login(config, browser, cookies, yt_user_id);
         error.set(None);
     });
 }
 
 pub fn soundcloud_auto_login(
-    mut config: Signal<AppConfig>,
+    config: Signal<AppConfig>,
     yt_browser: Signal<Browser>,
     mut error: Signal<Option<String>>,
-    mut playback_error: Signal<Option<String>>,
+    playback_error: Signal<Option<String>>,
 ) {
     let (browser, server_id) = {
         let cfg = config.peek();
@@ -167,10 +194,6 @@ pub fn soundcloud_auto_login(
             srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
             srv.and_then(|s| s.id.clone()).unwrap_or_default(),
         )
-    };
-    let mut report = move |msg: String| {
-        error.set(Some(msg.clone()));
-        playback_error.set(Some(msg));
     };
     spawn(async move {
         let token = match ::server::soundcloud::signin::launch_signin_and_extract(
@@ -182,25 +205,56 @@ pub fn soundcloud_auto_login(
         {
             Ok(token) => token,
             Err(err) => {
-                report(format!("SoundCloud sign-in failed ({browser}): {err}"));
+                report_signin_failure(
+                    error,
+                    playback_error,
+                    format!("SoundCloud sign-in failed ({browser}): {err}"),
+                );
                 return;
             }
         };
         let user_id = ::server::soundcloud::derive_user_id(&token)
             .await
             .unwrap_or_else(|| "me".to_string());
+        apply_browser_login(config, browser, token, user_id);
+        error.set(None);
+    });
+}
+
+/// Spotify OAuth (Authorization-Code + PKCE) sign-in: opens the default browser
+/// at the consent screen, captures the redirect on a loopback listener, and
+/// stores the packed `<access>\n<refresh>` token + user id on the active server.
+/// Unlike YT/SoundCloud this is a real redirect flow, not cookie-scraping, so it
+/// takes no browser choice.
+pub fn spotify_auto_login(
+    mut config: Signal<AppConfig>,
+    mut error: Signal<Option<String>>,
+    playback_error: Signal<Option<String>>,
+) {
+    let client_id = config
+        .peek()
+        .server
+        .as_ref()
+        .map(|s| s.url.clone())
+        .unwrap_or_default();
+    spawn(async move {
+        let auth = match ::server::spotify::auth::launch_signin_and_extract(client_id).await {
+            Ok(auth) => auth,
+            Err(err) => {
+                report_signin_failure(
+                    error,
+                    playback_error,
+                    format!("Spotify sign-in failed: {err}"),
+                );
+                return;
+            }
+        };
+        let packed = ::server::spotify::auth::pack_token(&auth.access_token, &auth.refresh_token);
         {
             let mut cfg = config.write();
-            let saved_id = cfg.server.as_ref().and_then(|server| server.id.clone());
             if let Some(server) = cfg.server.as_mut() {
-                server.access_token = Some(token);
-                server.user_id = Some(user_id);
-                server.yt_browser = Some(browser);
-            }
-            if let Some(id) = saved_id
-                && let Some(saved) = cfg.servers.iter_mut().find(|server| server.id == id)
-            {
-                saved.yt_browser = Some(browser);
+                server.access_token = Some(packed);
+                server.user_id = Some(auth.user_id);
             }
         }
         error.set(None);
@@ -276,6 +330,7 @@ pub fn add_server(
     let selected_service = server_service();
     let is_ytmusic = selected_service == MusicService::YtMusic;
     let is_soundcloud = selected_service == MusicService::SoundCloud;
+    let is_spotify = selected_service == MusicService::Spotify;
     let is_browser_signin = selected_service.uses_browser_signin();
 
     if server_name().trim().is_empty() {
@@ -285,6 +340,13 @@ pub fn add_server(
 
     if !is_browser_signin && !server_url().starts_with("http") {
         error.set(Some(i18n::t("invalid_server_url").to_string()));
+        return;
+    }
+
+    if is_spotify && server_url().trim().is_empty() {
+        error.set(Some(
+            "Enter your Spotify app Client ID (create one at developer.spotify.com)".to_string(),
+        ));
         return;
     }
 
@@ -301,6 +363,8 @@ pub fn add_server(
                 "https://soundcloud.com".to_string()
             } else if selected_service == MusicService::AppleMusic {
                 "https://music.apple.com".to_string()
+            } else if is_spotify {
+                url_input.trim().to_string()
             } else {
                 url_input
             };
@@ -343,9 +407,12 @@ pub fn add_server(
                 ytmusic_auto_login(config, yt_browser, error, playback_error);
             } else if is_soundcloud {
                 soundcloud_auto_login(config, yt_browser, error, playback_error);
-            } else if selected_service == MusicService::AppleMusic && !*apple_music_use_manual.peek()
+            } else if selected_service == MusicService::AppleMusic
+                && !*apple_music_use_manual.peek()
             {
                 applemusic_auto_login(config, yt_browser, error, playback_error);
+            } else if is_spotify {
+                spotify_auto_login(config, error, playback_error);
             } else if !is_browser_signin {
                 show_login.set(true);
             }
@@ -382,6 +449,7 @@ pub fn switch_server(
             MusicService::AppleMusic => {
                 applemusic_auto_login(config, yt_browser, error, playback_error)
             }
+            MusicService::Spotify => spotify_auto_login(config, error, playback_error),
             _ => show_login.set(true),
         }
     });

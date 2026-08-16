@@ -7,7 +7,9 @@ use std::path::PathBuf;
 
 mod source;
 mod views;
-pub use source::{Browser, JellyfinServer, MusicServer, MusicService, SavedServer, Source};
+pub use source::{
+    Browser, JellyfinServer, MusicServer, MusicService, SavedLocalSource, SavedServer, Source,
+};
 pub use views::{IntegrationConfig, LibraryConfig, PlaybackConfig, ServerAuth, UiConfig};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -19,10 +21,6 @@ pub enum FetchStrategy {
     LastFmOnly,
 }
 
-// Maybe host on the website?
-pub const DEFAULT_REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json";
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RegistryEntry {
     pub url: String,
@@ -31,6 +29,9 @@ pub struct RegistryEntry {
     #[serde(default)]
     pub is_default: bool,
 }
+
+pub const DEFAULT_REGISTRY_URL: &str =
+    "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json";
 
 pub fn default_radio_registries() -> Vec<RegistryEntry> {
     vec![RegistryEntry {
@@ -142,12 +143,56 @@ pub struct CustomTheme {
     pub vars: HashMap<String, String>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SortOrder {
     Title,
     Artist,
     Album,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SortDirection {
+    #[default]
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AlbumSortField {
+    Title,
+    Artist,
+    Year,
+    Genre,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SortCriterion<F> {
+    pub field: F,
+    pub direction: SortDirection,
+}
+
+impl<F> SortCriterion<F> {
+    pub fn new(field: F, direction: SortDirection) -> Self {
+        Self { field, direction }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TrackSortField {
+    Title,
+    Artist,
+    Album,
+    Duration,
+    DateAdded,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ArtistSortField {
+    Name,
+    /// Track count (primary-artist credits).
+    Tracks,
+    /// Album count.
+    Albums,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -157,10 +202,10 @@ pub enum ArtistViewOrder {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum ArtistPhotoSource {
+pub enum AlbumViewMode {
     #[default]
-    AlbumCover,
-    ArtistPhoto,
+    Grid,
+    List,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -206,6 +251,64 @@ impl ChannelMode {
             "right-only" => Self::RightOnly,
             "swap-left-right" => Self::SwapLeftRight,
             _ => Self::Stereo,
+        }
+    }
+}
+
+/// What playback does after the output device changes (unplugged headphones,
+/// OS default switched) and the engine has migrated to the new device.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum DeviceChangeBehavior {
+    /// Keep playing on the new device at the same position.
+    Resume,
+    /// Migrate to the new device but hold paused until the user resumes.
+    #[default]
+    Pause,
+}
+
+impl DeviceChangeBehavior {
+    pub const ALL: &'static [Self] = &[Self::Resume, Self::Pause];
+
+    pub const fn value_str(self) -> &'static str {
+        match self {
+            Self::Resume => "resume",
+            Self::Pause => "pause",
+        }
+    }
+
+    pub fn from_value_str(value: &str) -> Self {
+        match value {
+            "pause" => Self::Pause,
+            _ => Self::Resume,
+        }
+    }
+}
+
+/// Which sample rate the output stream is opened at.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SampleRateMode {
+    /// Keep the device at its default rate and resample every source to it.
+    #[default]
+    System,
+    /// Reopen the device at each track's native rate (switches the DAC per
+    /// track when rates differ).
+    Source,
+}
+
+impl SampleRateMode {
+    pub const ALL: &'static [Self] = &[Self::System, Self::Source];
+
+    pub const fn value_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Source => "source",
+        }
+    }
+
+    pub fn from_value_str(value: &str) -> Self {
+        match value {
+            "source" => Self::Source,
+            _ => Self::System,
         }
     }
 }
@@ -266,13 +369,13 @@ impl EqPreset {
         }
     }
 
-    pub const fn gains(self) -> [f32; 5] {
+    pub const fn gains(self) -> [f32; 10] {
         match self {
-            Self::Flat | Self::Custom => [0.0, 0.0, 0.0, 0.0, 0.0],
-            Self::BassBoost => [6.0, 4.5, 2.0, -0.5, -1.5],
-            Self::TrebleBoost => [-1.5, -0.5, 0.5, 4.0, 6.0],
-            Self::VocalBoost => [-2.0, 0.5, 3.5, 2.5, -0.5],
-            Self::Loudness => [4.0, 2.0, 0.5, 2.5, 4.0],
+            Self::Flat | Self::Custom => [0.0; 10],
+            Self::BassBoost => [7.0, 6.5, 5.0, 3.5, 1.0, -0.5, -1.0, -1.5, -1.5, -1.5],
+            Self::TrebleBoost => [-1.5, -1.5, -1.0, -0.5, 0.0, 0.5, 2.0, 4.0, 6.0, 6.5],
+            Self::VocalBoost => [-2.5, -2.0, -1.5, 0.0, 2.5, 3.5, 3.0, 2.5, 0.5, -0.5],
+            Self::Loudness => [5.0, 4.5, 3.0, 1.5, 0.5, 0.0, 1.0, 2.5, 4.0, 4.5],
         }
     }
 
@@ -288,8 +391,36 @@ impl EqPreset {
     }
 }
 
-fn default_eq_bands() -> [f32; 5] {
-    [0.0, 0.0, 0.0, 0.0, 0.0]
+fn default_eq_bands() -> [f32; 10] {
+    [0.0; 10]
+}
+
+/// Slots in the current 10-band layout (32/64/125/250/500/1k/2k/4k/8k/16k Hz)
+/// that the legacy 5-band layout (60/250/1k/4k/12k Hz) maps onto, picked as the
+/// nearest frequency: 60→64, 250→250, 1k→1k, 4k→4k, 12k→16k.
+const LEGACY_EQ_BAND_SLOTS: [usize; 5] = [1, 3, 5, 7, 9];
+
+fn deserialize_eq_bands<'de, D>(deserializer: D) -> Result<[f32; 10], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values: Vec<f32> = Vec::deserialize(deserializer)?;
+    let mut out = [0.0_f32; 10];
+
+    if values.len() == LEGACY_EQ_BAND_SLOTS.len() {
+        // Migrate a saved 5-band custom preset onto the nearest 10-band slots so
+        // existing boosts keep their original frequencies instead of shifting
+        // down (e.g. a 1 kHz boost must not be reinterpreted as a 125 Hz boost).
+        for (&slot, value) in LEGACY_EQ_BAND_SLOTS.iter().zip(values.iter().copied()) {
+            out[slot] = value;
+        }
+    } else {
+        for (slot, value) in out.iter_mut().zip(values.iter().copied()) {
+            *slot = value;
+        }
+    }
+
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -298,14 +429,17 @@ pub struct EqualizerSettings {
     pub enabled: bool,
     #[serde(default)]
     pub preset: EqPreset,
-    #[serde(default = "default_eq_bands")]
-    pub bands: [f32; 5],
+    #[serde(
+        default = "default_eq_bands",
+        deserialize_with = "deserialize_eq_bands"
+    )]
+    pub bands: [f32; 10],
     #[serde(default)]
     pub preamp_db: f32,
 }
 
 impl EqualizerSettings {
-    pub fn resolved_bands(&self) -> [f32; 5] {
+    pub fn resolved_bands(&self) -> [f32; 10] {
         if self.preset == EqPreset::Custom {
             self.bands
         } else {
@@ -428,7 +562,15 @@ pub enum PlayerBarPosition {
 pub enum UiStyle {
     #[default]
     Normal,
-    Modern,
+    #[serde(alias = "Modern")]
+    Vaxry,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SettingsLayout {
+    #[default]
+    Cd,
+    TopBar,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -476,30 +618,57 @@ pub struct AppConfig {
     pub server: Option<MusicServer>,
     #[serde(default)]
     pub servers: Vec<SavedServer>,
-    /// Id of the active server (`servers.id`), or `None` for local. The DB-backed
-    /// source of truth for "which server is active"; `server`/`servers` above are
-    /// hydrated from the `servers` table around it. (`server` stays for now so the
-    /// ~90 existing `config.server` readers keep working — they migrate to id-based
-    /// resolution with the auth-gate work.)
-    /// The active source: `Local` or `Server(id)`. Single source of truth for
-    /// "which source/server is active" — `server`/`servers` above are hydrated
-    /// from the `servers` table around it.
+    /// Named, isolated filesystem libraries. The legacy `music_directory`
+    /// remains the built-in Local source for backwards compatibility.
+    #[serde(default)]
+    pub local_sources: Vec<SavedLocalSource>,
+    /// The active source: built-in Local, a named local library, or Server(id).
+    /// `server` is hydrated only for the active remote source.
     #[serde(default)]
     pub active_source: Source,
     #[serde(default)]
     pub source_explicitly_set: bool,
+    /// Browser id used to host Spotify playback (`chrome`/`edge`/`brave`/
+    /// `chromium`/`vivaldi`/`safari`); `None` picks the first available.
+    #[serde(default)]
+    pub spotify_browser: Option<String>,
+    /// When Spotify is active and another Connect device is already playing,
+    /// adopt that device on connect (`true`, default) instead of starting
+    /// playback on this app's in-app device.
+    #[serde(default = "default_true")]
+    pub spotify_prefer_active_device: bool,
     #[serde(default, deserialize_with = "deserialize_music_directories")]
     pub music_directory: Vec<PathBuf>,
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// Palette file matugen or pywal writes, polled for changes while the live
+    /// theme is active. Empty means whichever default location exists.
+    #[serde(default)]
+    pub live_theme_path: String,
     #[serde(default = "default_device_id")]
     pub device_id: String,
     #[serde(default = "default_discord_presence")]
     pub discord_presence: Option<bool>,
     #[serde(default = "default_discord_presence_paused")]
     pub discord_presence_paused: Option<bool>,
+    #[serde(default = "default_discord_presence_source")]
+    pub discord_presence_source: Option<bool>,
     #[serde(default = "default_sort_order")]
     pub sort_order: SortOrder,
+    #[serde(default = "default_album_sort")]
+    pub album_sort: Vec<SortCriterion<AlbumSortField>>,
+    #[serde(default = "default_library_sort")]
+    pub library_sort: Vec<SortCriterion<TrackSortField>>,
+    #[serde(default = "default_album_sort")]
+    pub artist_album_sort: Vec<SortCriterion<AlbumSortField>>,
+    #[serde(default = "default_artist_sort")]
+    pub artist_sort: Vec<SortCriterion<ArtistSortField>>,
+    #[serde(default)]
+    pub album_view_mode: AlbumViewMode,
+    #[serde(default)]
+    pub artist_album_view_mode: AlbumViewMode,
+    #[serde(default)]
+    pub artists_view_mode: AlbumViewMode,
     #[serde(default = "default_artist_view_order")]
     pub artist_view_order: ArtistViewOrder,
     #[serde(default)]
@@ -522,6 +691,34 @@ pub struct AppConfig {
     pub language: String,
     #[serde(default)]
     pub reduce_animations: bool,
+    /// When enabled, fullscreen mode hides its own transport controls and lets
+    /// the player bar act as the multimedia controller instead.
+    #[serde(default)]
+    pub fullscreen_use_player_bar: bool,
+    /// Fullscreen: the Up Next / Lyrics side panel is collapsed. Toggled from
+    /// the fullscreen UI itself, remembered across sessions.
+    #[serde(default)]
+    pub fullscreen_tabs_collapsed: bool,
+    /// Use the current track's cover as the app background, overriding the
+    /// active theme's background (including the album-art gradient).
+    #[serde(default)]
+    pub cover_art_background: bool,
+    /// How strongly the cover art background is darkened, in percent (0-95).
+    #[serde(default = "default_cover_art_darkening")]
+    pub cover_art_darkening: u8,
+    /// Blur radius of the cover art background, in pixels (0 = sharp).
+    #[serde(default)]
+    pub cover_art_blur: u8,
+    /// Absolute path to a user-chosen image used as the app background,
+    /// overriding both the theme background and the cover art background.
+    /// Empty = unset. Shares the darkening/blur treatment with cover art.
+    #[serde(default)]
+    pub custom_background_path: String,
+    /// Absolute path to a user-chosen font file (ttf/otf/woff/woff2) applied
+    /// as the app's UI font, overriding the default JetBrains Mono stack.
+    /// Empty = unset.
+    #[serde(default)]
+    pub custom_font_path: String,
     /// Opt-in chrome/Perfetto performance trace. Read at startup (the
     /// subscriber is built once), so a change needs a restart. Adds runtime
     /// overhead — surfaced with a warning in settings.
@@ -535,6 +732,8 @@ pub struct AppConfig {
     pub minimize_to_tray: bool,
     #[serde(default = "default_show_source_toggle")]
     pub show_source_toggle: bool,
+    #[serde(default = "default_true")]
+    pub show_row_images: bool,
     #[serde(default = "default_sidebar_order")]
     pub sidebar_order: Vec<String>,
     #[serde(default = "default_volume")]
@@ -552,6 +751,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub equalizer: EqualizerSettings,
     #[serde(default)]
+    pub device_change_behavior: DeviceChangeBehavior,
+    #[serde(default)]
+    pub sample_rate_mode: SampleRateMode,
+    #[serde(default)]
     pub ytdlp_output_dir: String,
     #[serde(default)]
     pub ytdlp_options: YtdlpOptions,
@@ -567,6 +770,8 @@ pub struct AppConfig {
     pub player_bar_position: PlayerBarPosition,
     #[serde(default)]
     pub ui_style: UiStyle,
+    #[serde(default)]
+    pub settings_layout: SettingsLayout,
     #[serde(default = "default_hero_height")]
     pub hero_height: u32,
     #[serde(default = "default_home_sections")]
@@ -574,19 +779,19 @@ pub struct AppConfig {
     #[serde(default)]
     pub listen_now_style: ListenNowStyle,
     #[serde(default)]
-    pub artist_photo_source: ArtistPhotoSource,
-    #[serde(default)]
     pub auto_fetch_covers: bool,
     #[serde(default)]
     pub cover_fetch_strategy: FetchStrategy,
     #[serde(default = "default_radio_registries")]
     pub radio_registries: Vec<RegistryEntry>,
+    /// Station manifests (JSON) pinned from the radio browser.
+    #[serde(default)]
+    pub pinned_stations: Vec<String>,
     #[serde(default)]
     pub prefer_local_lyrics: bool,
     #[serde(default)]
     pub enable_musixmatch_lyrics: bool,
 }
-
 
 fn default_theme() -> String {
     "default".to_string()
@@ -604,8 +809,33 @@ fn default_discord_presence_paused() -> Option<bool> {
     Some(true)
 }
 
+fn default_discord_presence_source() -> Option<bool> {
+    Some(true)
+}
+
 fn default_sort_order() -> SortOrder {
     SortOrder::Title
+}
+
+fn default_album_sort() -> Vec<SortCriterion<AlbumSortField>> {
+    vec![SortCriterion::new(
+        AlbumSortField::Title,
+        SortDirection::Asc,
+    )]
+}
+
+fn default_library_sort() -> Vec<SortCriterion<TrackSortField>> {
+    vec![SortCriterion::new(
+        TrackSortField::Title,
+        SortDirection::Asc,
+    )]
+}
+
+fn default_artist_sort() -> Vec<SortCriterion<ArtistSortField>> {
+    vec![SortCriterion::new(
+        ArtistSortField::Name,
+        SortDirection::Asc,
+    )]
 }
 
 fn default_artist_view_order() -> ArtistViewOrder {
@@ -618,6 +848,10 @@ fn default_show_source_toggle() -> bool {
 
 fn default_auto_check_updates() -> bool {
     true
+}
+
+fn default_cover_art_darkening() -> u8 {
+    60
 }
 
 pub fn default_sidebar_order() -> Vec<String> {
@@ -675,14 +909,26 @@ impl Default for AppConfig {
         Self {
             server: None,
             servers: Vec::new(),
+            local_sources: Vec::new(),
             active_source: Source::Local,
             source_explicitly_set: false,
+            spotify_browser: None,
+            spotify_prefer_active_device: true,
             music_directory: vec![music_directory],
             theme: default_theme(),
+            live_theme_path: String::new(),
             device_id: default_device_id(),
             discord_presence: Some(true),
             discord_presence_paused: Some(true),
+            discord_presence_source: Some(true),
             sort_order: default_sort_order(),
+            album_sort: default_album_sort(),
+            library_sort: default_library_sort(),
+            artist_album_sort: default_album_sort(),
+            artist_sort: default_artist_sort(),
+            album_view_mode: AlbumViewMode::Grid,
+            artist_album_view_mode: AlbumViewMode::Grid,
+            artists_view_mode: AlbumViewMode::Grid,
             artist_view_order: default_artist_view_order(),
             listen_counts: HashMap::new(),
             musicbrainz_token: String::new(),
@@ -694,10 +940,18 @@ impl Default for AppConfig {
             librefm_session_key: String::new(),
             language: default_language(),
             reduce_animations: false,
+            fullscreen_use_player_bar: false,
+            fullscreen_tabs_collapsed: false,
+            cover_art_background: false,
+            cover_art_darkening: default_cover_art_darkening(),
+            cover_art_blur: 0,
+            custom_background_path: String::new(),
+            custom_font_path: String::new(),
             tracing_enabled: false,
             auto_check_updates: default_auto_check_updates(),
             minimize_to_tray: false,
             show_source_toggle: default_show_source_toggle(),
+            show_row_images: true,
             sidebar_order: default_sidebar_order(),
             volume: default_volume(),
             volume_scroll_step: default_volume_scroll_step(),
@@ -706,6 +960,8 @@ impl Default for AppConfig {
             back_behavior: BackBehavior::RewindThenPrev,
             channel_mode: ChannelMode::Stereo,
             equalizer: EqualizerSettings::default(),
+            device_change_behavior: DeviceChangeBehavior::Pause,
+            sample_rate_mode: SampleRateMode::System,
             ytdlp_output_dir: String::new(),
             ytdlp_options: YtdlpOptions::default(),
             ytdlp_history: Vec::new(),
@@ -714,13 +970,14 @@ impl Default for AppConfig {
             offline_tracks: HashMap::new(),
             player_bar_position: PlayerBarPosition::Bottom,
             ui_style: UiStyle::Normal,
+            settings_layout: SettingsLayout::Cd,
             hero_height: default_hero_height(),
             home_sections: default_home_sections(),
             listen_now_style: ListenNowStyle::default(),
-            artist_photo_source: ArtistPhotoSource::AlbumCover,
             auto_fetch_covers: false,
             cover_fetch_strategy: FetchStrategy::default(),
             radio_registries: default_radio_registries(),
+            pinned_stations: Vec::new(),
             prefer_local_lyrics: false,
             enable_musixmatch_lyrics: false,
         }
@@ -789,6 +1046,19 @@ impl AppConfig {
         }
     }
 
+    pub fn add_local_source(&mut self, source: SavedLocalSource) {
+        if !self.local_sources.iter().any(|saved| saved.id == source.id) {
+            self.local_sources.push(source);
+        }
+    }
+
+    pub fn remove_local_source(&mut self, id: &str) {
+        self.local_sources.retain(|source| source.id != id);
+        if self.active_source.local_library_id() == Some(id) {
+            self.clear_active_server();
+        }
+    }
+
     pub fn find_saved_server(&self, id: &str) -> Option<&SavedServer> {
         self.servers.iter().find(|s| s.id == id)
     }
@@ -818,10 +1088,16 @@ impl AppConfig {
     }
 }
 
-
 impl AppConfig {
     pub fn clear_active_server(&mut self) {
         self.active_source = Source::Local;
+        self.server = None;
+        self.source_explicitly_set = true;
+    }
+
+    pub fn set_active_local_source(&mut self, source: Source) {
+        debug_assert!(source.is_local());
+        self.active_source = source;
         self.server = None;
         self.source_explicitly_set = true;
     }
@@ -856,8 +1132,43 @@ impl AppConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppConfig, BackBehavior, Browser, MusicServer, ServerAuth};
+    use super::{
+        AppConfig, BackBehavior, Browser, EqualizerSettings, MusicServer, ServerAuth,
+        SettingsLayout,
+    };
     use std::path::PathBuf;
+
+    #[test]
+    fn legacy_five_band_custom_eq_migrates_to_nearest_slots() {
+        // A custom preset saved by the old 5-band UI: boosts at 60/250/1k/4k/12k Hz.
+        let json = r#"{
+            "enabled": true,
+            "preset": "Custom",
+            "bands": [3.0, 0.0, 5.0, -2.0, 4.0],
+            "preamp_db": 0.0
+        }"#;
+
+        let eq: EqualizerSettings = serde_json::from_str(json).unwrap();
+
+        // Each legacy value lands on the nearest 10-band slot (64/250/1k/4k/16k Hz),
+        // not the first five slots (which are now 32/64/125/250/500 Hz).
+        assert_eq!(
+            eq.bands,
+            [0.0, 3.0, 0.0, 0.0, 0.0, 5.0, 0.0, -2.0, 0.0, 4.0]
+        );
+    }
+
+    #[test]
+    fn modern_ten_band_eq_round_trips_unchanged() {
+        let bands = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        let json = format!(
+            r#"{{ "enabled": true, "preset": "Custom", "bands": {bands:?}, "preamp_db": 0.0 }}"#
+        );
+
+        let eq: EqualizerSettings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(eq.bands, bands);
+    }
 
     #[test]
     fn config_deserializes_legacy_single_music_directory() {
@@ -882,6 +1193,16 @@ mod tests {
             config.music_directory,
             vec![PathBuf::from("/music"), PathBuf::from("/archive")]
         );
+    }
+
+    #[test]
+    fn settings_layout_is_backward_compatible_and_deserializes_top_bar() {
+        let default_config: AppConfig = serde_json::from_str("{}").unwrap();
+        let top_bar_config: AppConfig =
+            serde_json::from_str(r#"{"settings_layout":"TopBar"}"#).unwrap();
+
+        assert_eq!(default_config.settings_layout, SettingsLayout::Cd);
+        assert_eq!(top_bar_config.settings_layout, SettingsLayout::TopBar);
     }
 
     #[test]
