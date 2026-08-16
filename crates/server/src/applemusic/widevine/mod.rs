@@ -4,7 +4,6 @@
 //! official `cdm::ContentDecryptionModule` ABI (see `shim/widevine_shim.cc`) to
 //! generate a license challenge and decrypt CENC samples.
 
-
 use std::path::Path;
 
 #[cfg(not(target_os = "android"))]
@@ -12,7 +11,7 @@ use std::ffi::CString;
 #[cfg(not(target_os = "android"))]
 use std::os::raw::{c_char, c_int};
 #[cfg(not(target_os = "android"))]
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, OnceLock};
 
 pub mod discover;
 
@@ -38,15 +37,15 @@ unsafe extern "C" {
     fn wv_free(p: *mut u8);
 }
 
-/// Guards the process-wide native CDM. Every entry point takes this.
+/// Serializes use of the process-wide native CDM for a whole track.
 #[cfg(not(target_os = "android"))]
-static CDM_LOCK: Mutex<()> = Mutex::new(());
+static CDM_SESSION: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
 
 #[cfg(not(target_os = "android"))]
-fn lock() -> MutexGuard<'static, ()> {
-    // A poisoned lock only means some other call panicked; the CDM itself is
-    // still usable, and refusing to play from then on would be worse.
-    CDM_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+fn session() -> Arc<tokio::sync::Mutex<()>> {
+    CDM_SESSION
+        .get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
 }
 
 /// Copy a shim-allocated buffer into a `Vec` and release it.
@@ -63,7 +62,19 @@ unsafe fn take(out: *mut u8, len: u32) -> Vec<u8> {
     v
 }
 
+/// An exclusive session on the system Widevine CDM.
+///
+/// Holding one means holding [`CDM_SESSION`] for as long as the handle lives, so
+/// a whole track — challenge, licence, every sample — runs against one session.
+/// The native CDM is process-wide and re-opening it tears down the live session,
+/// so overlapping tracks must queue rather than interleave.
+#[cfg(not(target_os = "android"))]
+pub struct Cdm {
+    _session: tokio::sync::OwnedMutexGuard<()>,
+}
+
 /// A loaded system Widevine CDM.
+#[cfg(target_os = "android")]
 pub struct Cdm {
     _private: (),
 }
@@ -102,17 +113,19 @@ impl Cdm {
 
 #[cfg(not(target_os = "android"))]
 impl Cdm {
-    /// Load and initialize the CDM at `path`.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
+    /// Take an exclusive session on the CDM at `path`, loading it if needed.
+    ///
+    /// Waits for any track already using the CDM to finish.
+    pub async fn open(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref();
         let s = path
             .to_str()
             .ok_or_else(|| format!("non-UTF-8 CDM path: {}", path.display()))?;
         let c = CString::new(s).map_err(|e| format!("CDM path has an interior NUL: {e}"))?;
 
-        let _guard = lock();
+        let session = session().lock_owned().await;
         match unsafe { wv_open(c.as_ptr()) } {
-            0 => Ok(Self { _private: () }),
+            0 => Ok(Self { _session: session }),
             1 => Err(format!(
                 "couldn't load the Widevine CDM at {} — the file may be corrupt or built for another architecture",
                 path.display()
@@ -127,19 +140,18 @@ impl Cdm {
     }
 
     /// Locate a CDM from an installed browser and open it.
-    pub fn open_system() -> Result<Self, String> {
+    pub async fn open_system() -> Result<Self, String> {
         let path = discover::locate().ok_or_else(|| {
             "no Widevine CDM found. Apple Music playback borrows one from an installed browser — \
              install Firefox (or Chrome/Brave) and play any DRM video once so it downloads the CDM, \
              or set $KOPUZ_WIDEVINE_CDM to a libwidevinecdm library"
                 .to_string()
         })?;
-        Self::open(path)
+        Self::open(path).await
     }
 
     /// Generate a license challenge from a CENC pssh box.
     pub fn challenge(&self, pssh_box: &[u8]) -> Result<Vec<u8>, String> {
-        let _guard = lock();
         let mut out = std::ptr::null_mut();
         let mut len = 0u32;
         match unsafe { wv_challenge(pssh_box.as_ptr(), pssh_box.len() as u32, &mut out, &mut len) }
@@ -153,7 +165,6 @@ impl Cdm {
 
     /// Feed the license response back so the CDM loads the content keys.
     pub fn update(&self, license: &[u8]) -> Result<(), String> {
-        let _guard = lock();
         match unsafe { wv_update(license.as_ptr(), license.len() as u32) } {
             0 => Ok(()),
             21 => Err("the CDM rejected the license response".to_string()),
@@ -179,7 +190,6 @@ impl Cdm {
             subs.push(encrypted);
         }
 
-        let _guard = lock();
         let mut out = std::ptr::null_mut();
         let mut len = 0u32;
         let rc = unsafe {
@@ -273,11 +283,11 @@ mod tests {
     /// challenge. Needs Google's proprietary binary, so it can't run in CI —
     /// point `$KOPUZ_WIDEVINE_CDM` at one (or at a browser profile) and run
     /// `cargo test -p kopuz-server -- --ignored` to exercise the C++ shim.
-    #[test]
+    #[tokio::test]
     #[ignore = "needs a system Widevine CDM"]
     #[cfg(not(target_os = "android"))]
-    fn challenge_against_a_real_cdm() {
-        let cdm = Cdm::open_system().expect("open a system CDM");
+    async fn challenge_against_a_real_cdm() {
+        let cdm = Cdm::open_system().await.expect("open a system CDM");
         let challenge = cdm
             .challenge(&build_pssh(&[0x11u8; 16]))
             .expect("generate a challenge");

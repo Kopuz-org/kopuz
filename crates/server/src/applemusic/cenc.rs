@@ -368,6 +368,10 @@ pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, St
     // 4. Process each fragment (moof + mdat)
     pos = init_end;
     let mut total_samples = 0u32;
+    // Split the wall time between the CDM itself and our own box walking, so a
+    // slow decrypt can be attributed instead of guessed at.
+    let mut cdm_time = std::time::Duration::ZERO;
+    let started = std::time::Instant::now();
 
     while pos + 8 <= data.len() {
         let (moof_bs, moof_be, moof_total) = match read_box(data, pos) {
@@ -495,6 +499,7 @@ pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, St
                     break;
                 }
 
+                let t0 = std::time::Instant::now();
                 crypt_sample_cenc(
                     &mut decrypted[sample_start..sample_end],
                     cdm,
@@ -502,6 +507,7 @@ pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, St
                     &iv,
                     subs,
                 )?;
+                cdm_time += t0.elapsed();
                 total_samples += 1;
             }
 
@@ -516,9 +522,14 @@ pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, St
         pos = moof_be;
     }
 
+    let total = started.elapsed();
     tracing::info!(
-        "am.decrypt: done — {total_samples} samples, {} bytes",
-        output.len()
+        "am.decrypt: done — {total_samples} samples, {} bytes in {:.2}s (cdm {:.2}s = {:.0}µs/sample, other {:.2}s)",
+        output.len(),
+        total.as_secs_f64(),
+        cdm_time.as_secs_f64(),
+        cdm_time.as_secs_f64() * 1e6 / total_samples.max(1) as f64,
+        (total - cdm_time).as_secs_f64()
     );
     Ok(output)
 }

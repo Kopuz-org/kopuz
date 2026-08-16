@@ -144,6 +144,8 @@ extern "C" {
 
 // 0 = success; non-zero maps to WidevineError in the Rust wrapper.
 int wv_open(const char* so_path) {
+  if (g_host && g_host->cdm) return 0;
+
   LibHandle lib = lib_open(so_path);
   if (!lib) return 1;
   auto init = reinterpret_cast<void (*)()>(lib_sym(lib, "InitializeCdmModule_4"));

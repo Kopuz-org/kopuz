@@ -280,7 +280,7 @@ pub async fn resolve_and_decrypt(
 
     // Borrow the CDM from an installed browser. Its device key stays sealed, so
     // no key material ships with kopuz.
-    let cdm = super::widevine::Cdm::open_system()?;
+    let cdm = super::widevine::Cdm::open_system().await?;
     let license_request = cdm.challenge(&init_data)?;
     tracing::debug!(
         "am.stream: license challenge generated ({} bytes)",
