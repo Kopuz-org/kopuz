@@ -23,6 +23,27 @@ info_plist_path = "Info.plist"
 # Desktop only. Android uses the mobile renderer, logs to logcat, and has no Discord IPC.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
+# Native renderer (Blitz/wgpu). Both renderers compile in; KOPUZ_BLITZ=1
+# selects native at runtime. "incremental" is left off — it repaints from a
+# damage region blitz does not yet track correctly for this UI.
+dioxus-native = { workspace = true, features = [
+    # Renderer. "vello" (wgpu) rather than the default "vello-hybrid", which
+    # panics on the fully transparent paints this UI is full of.
+    "vello",
+    "accessibility",
+    "autofocus",
+    "clipboard",
+    "complex-scripts",
+    "data-uri",
+    "file-dialog",
+    "hot-reload",
+    "html",
+    "net",
+    "scrollbars",
+    "svg",
+    "system-fonts",
+    "woff",
+] }
 discord-rich-presence = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }

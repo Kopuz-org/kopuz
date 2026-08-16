@@ -169,15 +169,6 @@ pub fn install_native_artwork_drag_prevention() {
         if (!document.__kopuzNativeArtworkDragPreventionInstalled) {
             document.__kopuzNativeArtworkDragPreventionInstalled = true;
 
-            const style = document.createElement('style');
-            style.textContent = `
-                img, [style*="background-image"] {
-                    -webkit-user-drag: none;
-                    user-drag: none;
-                }
-            `;
-            document.head.appendChild(style);
-
             document.addEventListener('dragstart', (event) => {
                 const target = event.target;
                 const isTrackRowDrag = !!(target && target.closest && target.closest('.track-row-draggable'));

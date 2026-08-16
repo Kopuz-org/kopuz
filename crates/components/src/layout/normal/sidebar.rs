@@ -1,5 +1,5 @@
 #[cfg(target_os = "macos")]
-use dioxus::desktop::window;
+use crate::window_host;
 use dioxus::prelude::*;
 use kopuz_route::Route;
 
@@ -259,7 +259,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                     class: "absolute top-0 left-0 w-full h-10 z-50",
                     onmousedown: move |_| {
                         #[cfg(target_os = "macos")]
-                        window().drag();
+                        window_host::drag();
                     }
                 }
             }

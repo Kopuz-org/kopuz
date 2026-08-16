@@ -39,3 +39,7 @@ i18n = { workspace = true }
 # (which auto-detects the music dir via JNI instead).
 [target.'cfg(not(target_os = "android"))'.dependencies]
 rfd = { workspace = true }
+# Host-window handles behind the window_host seam: the native renderer's shell
+# provider and the winit window it wraps.
+blitz-traits = { workspace = true }
+winit = { workspace = true }

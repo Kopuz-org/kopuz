@@ -1,12 +1,13 @@
+use crate::window_host;
 use config::AppConfig;
-use dioxus::desktop::window;
 use dioxus::prelude::*;
 
 #[component]
 pub fn Titlebar() -> Element {
     {
         let config = use_context::<Signal<AppConfig>>();
-        if config.read().titlebar_mode != config::TitlebarMode::Custom {
+        if config.read().titlebar_mode != config::TitlebarMode::Custom || !window_host::available()
+        {
             return rsx! {};
         }
         let minimize_text = i18n::t("minimize").to_string();
@@ -17,7 +18,7 @@ pub fn Titlebar() -> Element {
             div {
                 class: "flex items-center h-9 bg-black/50 border-b border-white/5 flex-shrink-0 select-none relative",
                 onmousedown: move |_| {
-                    window().drag();
+                    window_host::drag();
                 },
 
                 div { class: "flex-1" }
@@ -37,19 +38,19 @@ pub fn Titlebar() -> Element {
                     button {
                         class: "w-11 h-full flex items-center justify-center text-white/25 hover:text-white/70 hover:bg-white/6 transition-all duration-150",
                         title: "{minimize_text}",
-                        onclick: move |_| window().window.set_minimized(true),
+                        onclick: move |_| window_host::minimize(),
                         i { class: "fa-solid fa-minus text-[10px] leading-none" }
                     }
                     button {
                         class: "w-11 h-full flex items-center justify-center text-white/25 hover:text-white/70 hover:bg-white/6 transition-all duration-150",
                         title: "{maximize_text}",
-                        onclick: move |_| window().toggle_maximized(),
+                        onclick: move |_| window_host::toggle_maximized(),
                         i { class: "fa-regular fa-square text-[10px] leading-none" }
                     }
                     button {
                         class: "w-11 h-full flex items-center justify-center text-white/25 hover:text-white hover:bg-red-500/70 transition-all duration-150",
                         title: "{close_text}",
-                        onclick: move |_| window().close(),
+                        onclick: move |_| window_host::close(),
                         i { class: "fa-solid fa-xmark text-[10px] leading-none" }
                     }
                 }
