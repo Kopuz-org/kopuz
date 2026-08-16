@@ -1463,7 +1463,7 @@ fn network_factory(
                     storefront.to_string(),
                     language.to_string(),
                 );
-                let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let track = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     rt_handle.block_on(::server::applemusic::stream::resolve_and_decrypt(
                         &adam_id,
                         &token,
@@ -1481,9 +1481,11 @@ fn network_factory(
                     Err(format!("Apple Music decrypt panicked: {msg}"))
                 })
                 .map_err(std::io::Error::other)?;
-                let len = Some(bytes.len() as u64);
-                let cursor = std::io::Cursor::new(bytes);
-                let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
+                // Always seekable: samples decrypt on demand, so symphonia's probe
+                // jumping to EOF for an `mfra` index costs the handful of samples
+                // it actually reads rather than the whole track.
+                let len = Some(track.total_size());
+                let (source, mut hint) = decoder::from_stream_with_len(track, len);
                 hint.with_extension("m4a");
                 Ok((source, hint))
             } else {

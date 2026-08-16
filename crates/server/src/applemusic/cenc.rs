@@ -325,16 +325,43 @@ fn crypt_sample_cenc(
     sample.copy_from_slice(&clear);
     Ok(())
 }
+/// One encrypted sample: where it sits in the file, and what the CDM needs to
+/// turn it into cleartext.
+///
+/// Offsets are absolute and identical in ciphertext and cleartext — CENC is
+/// size-preserving and every box is copied verbatim — which is what lets a
+/// sample be decrypted in isolation, in place, in any order.
+#[derive(Debug, Clone)]
+pub struct EncryptedSample {
+    pub start: usize,
+    pub len: usize,
+    pub iv: [u8; 16],
+    pub subs: Vec<(u16, u32)>,
+}
 
-/// Rewrite an encrypted fMP4 as cleartext, decrypting every CENC sample through
-/// `cdm`. The license for `key_id` must already be loaded into the CDM.
-pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, String> {
-    tracing::info!(
-        "am.decrypt: file={} bytes, key_id={} bytes",
-        data.len(),
-        key_id.len()
-    );
+impl EncryptedSample {
+    pub fn end(&self) -> usize {
+        self.start + self.len
+    }
+}
 
+/// Everything needed to decrypt a track without walking its boxes again.
+#[derive(Debug, Default)]
+pub struct Fmp4Layout {
+    /// End of the init segment (`ftyp`..`moov`).
+    pub init_end: usize,
+    /// `enca`/`encv` box offsets to be relabelled `mp4a` so decoders accept the
+    /// now-cleartext track.
+    pub enca_positions: Vec<usize>,
+    /// Every encrypted sample, in file order.
+    pub samples: Vec<EncryptedSample>,
+}
+
+/// Walk the fMP4 once and record where every encrypted sample lives.
+///
+/// Pure parsing — no CDM calls — so it's cheap (~10ms for a 7 MB track) and can
+/// run before the first byte is needed.
+pub fn index_fmp4(data: &[u8]) -> Result<Fmp4Layout, String> {
     // 1. Find init segment (ftyp + moov)
     let mut init_end = 0usize;
     let mut pos = 0;
@@ -352,64 +379,40 @@ pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, St
     if init_end == 0 {
         return Err("no moov".to_string());
     }
-    tracing::info!("am.decrypt: init segment = {init_end} bytes");
 
-    // 2. DecryptInit: extract track info and patch enca→mp4a in init
     let (track_infos, enca_positions) = extract_track_info(data, init_end)?;
-    tracing::info!("am.decrypt: {} encrypted tracks", track_infos.len());
+    let mut layout = Fmp4Layout {
+        init_end,
+        enca_positions,
+        samples: Vec::new(),
+    };
 
-    // 3. Write init segment with enca→mp4a (just overwrite 4-byte type, no size changes)
-    let mut output = Vec::with_capacity(data.len());
-    output.extend_from_slice(&data[..init_end]);
-    for pos in &enca_positions {
-        output[*pos + 4..*pos + 8].copy_from_slice(b"mp4a");
-    }
-
-    // 4. Process each fragment (moof + mdat)
+    // 2. Walk each fragment (moof + mdat) collecting sample positions.
     pos = init_end;
-    let mut total_samples = 0u32;
-    // Split the wall time between the CDM itself and our own box walking, so a
-    // slow decrypt can be attributed instead of guessed at.
-    let mut cdm_time = std::time::Duration::ZERO;
-    let started = std::time::Instant::now();
-
     while pos + 8 <= data.len() {
         let (moof_bs, moof_be, moof_total) = match read_box(data, pos) {
             Some(v) => v,
             None => break,
         };
-        let bt = box_type(data, pos);
-        if bt != MOOF {
+        if box_type(data, pos) != MOOF {
             pos += moof_total;
             continue;
         }
-        tracing::debug!("am.decrypt: found moof at {pos} total={moof_total}");
         let moof_pos = pos;
         let moof_start_pos = moof_pos as u64;
 
-        // Find next mdat
-        let mut mdat_pos = moof_be;
-        let mut mdat_body_start = 0usize;
-        let mut mdat_total_size = 0usize;
-        while mdat_pos + 8 <= data.len() {
-            let (mdb, _, mtot) = match read_box(data, mdat_pos) {
-                Some(v) => v,
-                None => break,
-            };
-            if box_type(data, mdat_pos) == MDAT {
-                mdat_body_start = mdb;
-                mdat_total_size = mtot;
-                break;
-            }
-            mdat_pos += mtot;
-        }
-        if mdat_body_start == 0 {
+        // The mdat carrying this moof's samples follows it.
+        let mdat_pos = moof_pos + moof_total;
+        let Some((_, _, mdat_total_size)) = read_box(data, mdat_pos) else {
+            break;
+        };
+        if box_type(data, mdat_pos) != MDAT {
             pos = moof_be;
             continue;
         }
-        let mdat_payload_offset = mdat_pos as u64 + 8;
+        let mdat_body_start = mdat_pos + 8;
+        let mdat_payload_offset = mdat_body_start as u64;
 
-        // Process each traf in moof
         for (traf_pos, traf_bs, traf_total) in find_all_children(data, moof_bs, moof_be) {
             if box_type(data, traf_pos) != TRAF {
                 continue;
@@ -417,40 +420,28 @@ pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, St
             let traf_be = traf_bs + traf_total - 8;
 
             let tfhd = find_child(data, traf_bs, traf_be, TFHD);
-            // TFHD: version(1)+flags(3)=4 bytes, then track_ID(4 bytes) at body offset 4
             let track_id = tfhd
                 .as_ref()
                 .map(|(s, _, _)| u32be(data, s + 4))
                 .unwrap_or(0);
 
-            let ti = track_infos.iter().find(|t| t.track_id == track_id);
-            if ti.is_none() {
+            let Some(ti) = track_infos.iter().find(|t| t.track_id == track_id) else {
                 continue;
-            }
-            let ti = ti.unwrap();
+            };
             let per_sample_iv_size = ti.default_iv_size;
 
-            // Parse senc
             let mut traf_ivs: Vec<[u8; 16]> = Vec::new();
             let mut traf_subs: Vec<Vec<(u16, u32)>> = Vec::new();
-
             if let Some((senc_bs, senc_be, _)) = find_child(data, traf_bs, traf_be, SENC) {
                 let flags = u32be(data, senc_bs);
                 let sample_count = u32be(data, senc_bs + 4);
                 let raw = &data[senc_bs + 8..senc_be];
                 let use_subsample = (flags & 0x02) != 0;
                 let (ivs, subs) = parse_senc(per_sample_iv_size, sample_count, raw, use_subsample);
-                tracing::debug!(
-                    "am.decrypt: senc: {} IVs, {} subs, iv_size={}",
-                    ivs.len(),
-                    subs.len(),
-                    per_sample_iv_size
-                );
                 traf_ivs = ivs;
                 traf_subs = subs;
             }
 
-            // Get trun data
             let trun = find_child(data, traf_bs, traf_be, TRUN);
             let (trun_data_offset, samples) = match trun {
                 Some((trun_bs, trun_be, _)) => parse_trun(
@@ -465,73 +456,101 @@ pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, St
                 ),
                 None => (0, vec![]),
             };
-
             if samples.is_empty() {
                 continue;
             }
 
-            // Decrypt samples in-place
             let mdat_body_len = mdat_total_size.saturating_sub(8);
-            let mut decrypted = vec![0u8; mdat_body_len];
-            let mdat_data_end = mdat_body_start + mdat_body_len;
-            if mdat_data_end > data.len() {
+            if mdat_body_start + mdat_body_len > data.len() {
                 continue;
             }
-            decrypted.copy_from_slice(&data[mdat_body_start..mdat_data_end]);
 
+            // A running offset: re-summing the preceding sizes per sample is
+            // quadratic, and a fragment holds hundreds of samples.
+            let mut offset = trun_data_offset;
             let mut iv = [0u8; 16];
             for (i, &sz) in samples.iter().enumerate() {
                 let sz = sz as usize;
                 if sz == 0 {
                     continue;
                 }
-
-                // copy senc IV into 16-byte buffer (zero-pad if < 16)
                 if i < traf_ivs.len() {
                     iv = traf_ivs[i];
                 }
-                let subs = traf_subs.get(i).map(|s| s.as_slice()).unwrap_or(&[]);
-
-                let sample_start =
-                    trun_data_offset + samples.iter().take(i).map(|&s| s as usize).sum::<usize>();
-                let sample_end = sample_start + sz;
-                if sample_end > decrypted.len() {
+                if offset + sz > mdat_body_len {
                     break;
                 }
-
-                let t0 = std::time::Instant::now();
-                crypt_sample_cenc(
-                    &mut decrypted[sample_start..sample_end],
-                    cdm,
-                    key_id,
-                    &iv,
-                    subs,
-                )?;
-                cdm_time += t0.elapsed();
-                total_samples += 1;
+                layout.samples.push(EncryptedSample {
+                    start: mdat_body_start + offset,
+                    len: sz,
+                    iv,
+                    subs: traf_subs.get(i).cloned().unwrap_or_default(),
+                });
+                offset += sz;
             }
-
-            // Write moof + decrypted mdat
-            output.extend_from_slice(&data[moof_pos..moof_pos + moof_total]);
-            let mut mdat_out = vec![0u8; 8 + mdat_body_len];
-            mdat_out[..8].copy_from_slice(&data[mdat_pos..mdat_pos + 8]);
-            mdat_out[8..].copy_from_slice(&decrypted);
-            output.extend_from_slice(&mdat_out);
         }
 
         pos = moof_be;
     }
 
+    tracing::info!(
+        "am.decrypt: indexed {} samples, init {} bytes",
+        layout.samples.len(),
+        layout.init_end
+    );
+    Ok(layout)
+}
+
+/// Relabel `enca`/`encv` as `mp4a` so the decoder reads the track as plain AAC.
+/// Only the 4-byte box type changes, so every offset is preserved.
+pub fn patch_init(buf: &mut [u8], layout: &Fmp4Layout) {
+    for pos in &layout.enca_positions {
+        if pos + 8 <= buf.len() {
+            buf[pos + 4..pos + 8].copy_from_slice(b"mp4a");
+        }
+    }
+}
+
+/// Decrypt one sample in place. `buf` is the whole file; `sample.start` indexes
+/// into it directly.
+pub fn decrypt_sample(
+    buf: &mut [u8],
+    sample: &EncryptedSample,
+    cdm: &Cdm,
+    key_id: &[u8],
+) -> Result<(), String> {
+    if sample.end() > buf.len() {
+        return Err("sample runs past end of file".to_string());
+    }
+    crypt_sample_cenc(
+        &mut buf[sample.start..sample.end()],
+        cdm,
+        key_id,
+        &sample.iv,
+        &sample.subs,
+    )
+}
+
+/// Decrypt a whole track at once — the simple path, kept for callers that want
+/// the finished bytes rather than a stream.
+pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, String> {
+    let layout = index_fmp4(data)?;
+    let mut buf = data.to_vec();
+    patch_init(&mut buf, &layout);
+
+    let started = std::time::Instant::now();
+    for sample in &layout.samples {
+        decrypt_sample(&mut buf, sample, cdm, key_id)?;
+    }
     let total = started.elapsed();
     tracing::info!(
-        "am.decrypt: done — {total_samples} samples, {} bytes in {:.2}s (cdm {:.2}s = {:.0}µs/sample, other {:.2}s)",
-        output.len(),
+        "am.decrypt: done — {} samples, {} bytes in {:.2}s ({:.0}µs/sample)",
+        layout.samples.len(),
+        buf.len(),
         total.as_secs_f64(),
-        cdm_time.as_secs_f64(),
-        cdm_time.as_secs_f64() * 1e6 / total_samples.max(1) as f64,
-        (total - cdm_time).as_secs_f64()
+        total.as_secs_f64() * 1e6 / layout.samples.len().max(1) as f64
     );
-    Ok(output)
+    Ok(buf)
 }
 
 // Parse trun

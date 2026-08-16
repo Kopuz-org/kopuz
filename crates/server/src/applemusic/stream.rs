@@ -249,12 +249,17 @@ async fn load_license(
 }
 
 /// Full pipeline: resolve + download + decrypt. Returns decrypted fMP4 bytes.
+/// Resolve a track to a decrypted, readable stream.
+///
+/// Returns as soon as the licence is loaded and the ciphertext is in hand — the
+/// CDM work then runs behind the returned [`ProgressiveTrack`], so playback can
+/// start on the first fragment instead of waiting out the whole track.
 pub async fn resolve_and_decrypt(
     adam_id: &str,
     media_user_token: &str,
     storefront: &str,
     language: &str,
-) -> Result<Vec<u8>, String> {
+) -> Result<super::progressive::ProgressiveTrack, String> {
     let bearer_token = auth::get_bearer_token().await?;
     // Resolve the id to a catalog Adam id if needed (library ids don't work with web playback)
     let api = crate::applemusic::AppleMusicApi::new(
@@ -272,7 +277,7 @@ pub async fn resolve_and_decrypt(
             cache_path.display(),
             cached.len()
         );
-        return Ok(cached);
+        return Ok(super::progressive::ProgressiveTrack::ready(cached));
     }
 
     tracing::info!("am.stream: resolving web playback for adam_id={adam_id}");
@@ -341,16 +346,14 @@ pub async fn resolve_and_decrypt(
         encrypted_bytes.len()
     );
 
-    let decrypted = crate::applemusic::cenc::decrypt_fmp4(&encrypted_bytes, &cdm, &key_id)?;
-
-    store_decrypted(&cache_path, &decrypted).await;
-    tracing::info!(
-        "am.stream: decrypted {} bytes → {}",
-        decrypted.len(),
-        cache_path.display()
-    );
-
-    Ok(decrypted)
+    super::progressive::ProgressiveTrack::spawn(
+        encrypted_bytes.to_vec(),
+        cdm,
+        key_id,
+        move |decrypted| {
+            store_decrypted_blocking(&cache_path, &decrypted);
+        },
+    )
 }
 
 /// Where a track's decrypted audio is cached, keyed by catalog id so a replay
@@ -368,19 +371,27 @@ fn decrypted_cache_path(adam_id: &str) -> std::path::PathBuf {
 
 /// Publish `bytes` at `path` via a temp file + rename, so a crash mid-write
 /// can't leave a truncated file that later reads back as a valid cache hit.
-async fn store_decrypted(path: &std::path::Path, bytes: &[u8]) {
+///
+/// Blocking: it runs on the decrypt thread once the last fragment lands.
+fn store_decrypted_blocking(path: &std::path::Path, bytes: &[u8]) {
     let Some(dir) = path.parent() else { return };
-    if let Err(e) = tokio::fs::create_dir_all(dir).await {
+    if let Err(e) = std::fs::create_dir_all(dir) {
         tracing::debug!("am.stream: cache dir {}: {e}", dir.display());
         return;
     }
     let staging = path.with_extension("part");
-    if let Err(e) = tokio::fs::write(&staging, bytes).await {
+    if let Err(e) = std::fs::write(&staging, bytes) {
         tracing::debug!("am.stream: cache write {}: {e}", staging.display());
         return;
     }
-    if let Err(e) = tokio::fs::rename(&staging, path).await {
+    if let Err(e) = std::fs::rename(&staging, path) {
         tracing::debug!("am.stream: cache publish {}: {e}", path.display());
-        let _ = tokio::fs::remove_file(&staging).await;
+        let _ = std::fs::remove_file(&staging);
+    } else {
+        tracing::info!(
+            "am.stream: cached {} bytes → {}",
+            bytes.len(),
+            path.display()
+        );
     }
 }
