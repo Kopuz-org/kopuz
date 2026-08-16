@@ -744,9 +744,12 @@ impl AppleMusicApi {
         let resp = self.get(&path).await?;
         let status = resp.status();
         if !status.is_success() {
-            tracing::warn!(
-                "am.resolve_catalog_id: catalog resolve failed ({status}) for {id}, \
-                 library song may not have a catalog equivalent"
+            // Expected for uploaded iCloud Music Library tracks: they have no
+            // catalog equivalent because Apple never sold them. Keeping the
+            // library id is right — `web_playback_body` dispatches on it.
+            tracing::debug!(
+                "am.resolve_catalog_id: no catalog equivalent for {id} ({status}), \
+                 playing it as a library track"
             );
             return Ok(id.to_string());
         }
@@ -764,7 +767,7 @@ impl AppleMusicApi {
             return Ok(catalog_id.to_string());
         }
 
-        tracing::warn!("am.resolve_catalog_id: no catalog id found for {id}");
+        tracing::debug!("am.resolve_catalog_id: no catalog id in response for {id}");
         Ok(id.to_string())
     }
 
