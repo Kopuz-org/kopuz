@@ -299,12 +299,12 @@ just android-install
 
 `just android-release` signs the APK when these are exported:
 
-| Variable | Meaning |
-| --- | --- |
-| `KOPUZ_ANDROID_KEYSTORE` | path to the JKS/PKCS12 keystore |
-| `KOPUZ_ANDROID_KEYSTORE_PASSWORD` | store password |
-| `KOPUZ_ANDROID_KEY_ALIAS` | key alias inside the store |
-| `KOPUZ_ANDROID_KEY_PASSWORD` | key password (defaults to the store password) |
+| Variable                          | Meaning                                       |
+| --------------------------------- | --------------------------------------------- |
+| `KOPUZ_ANDROID_KEYSTORE`          | path to the JKS/PKCS12 keystore               |
+| `KOPUZ_ANDROID_KEYSTORE_PASSWORD` | store password                                |
+| `KOPUZ_ANDROID_KEY_ALIAS`         | key alias inside the store                    |
+| `KOPUZ_ANDROID_KEY_PASSWORD`      | key password (defaults to the store password) |
 
 CI reads the same values from the repository secrets `ANDROID_KEYSTORE_BASE64`
 (the keystore, base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
