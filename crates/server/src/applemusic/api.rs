@@ -6,6 +6,38 @@ use super::types::*;
 const BASE: &str = "https://amp-api.music.apple.com";
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
+/// Playlist track references. Apple requires the resource `type` alongside the
+/// id; without it the request is accepted and the tracks silently dropped.
+fn track_refs(item_refs: &[String]) -> Vec<serde_json::Value> {
+    item_refs
+        .iter()
+        .map(|id| serde_json::json!({ "id": id, "type": "songs" }))
+        .collect()
+}
+
+// The `me` endpoints take their arguments as `ids[type]=` query parameters,
+// percent-encoded as Apple's own client sends them. They're built here, apart
+// from the requests, because nothing short of mutating a real library can check
+// them at runtime — so the tests check them here instead.
+
+fn favorites_path(item_id: &str) -> String {
+    format!("/v1/me/favorites?ids%5Bsongs%5D={item_id}")
+}
+
+fn library_add_path(item_id: &str) -> String {
+    format!("/v1/me/library?ids%5Bsongs%5D={item_id}&representation=ids")
+}
+
+fn playlist_add_path(playlist_id: &str) -> String {
+    format!("/v1/me/library/playlists/{playlist_id}/tracks?representation=resources")
+}
+
+fn playlist_entry_delete_path(playlist_id: &str, entry_id: &str) -> String {
+    format!(
+        "/v1/me/library/playlists/{playlist_id}/tracks?ids%5Blibrary-songs%5D={entry_id}&mode=all"
+    )
+}
+
 pub struct AppleMusicApi {
     http: Client,
     media_user_token: Option<String>,
@@ -57,7 +89,11 @@ impl AppleMusicApi {
             .header("Referer", "https://music.apple.com/");
 
         if let Some(token) = &self.media_user_token {
-            req = req.header("Cookie", format!("media-user-token={token}"));
+            // Both, as Apple's own client does: `Media-User-Token` is what the
+            // API documents, the cookie is what the web player carries.
+            req = req
+                .header("Media-User-Token", token)
+                .header("Cookie", format!("media-user-token={token}"));
         }
 
         tracing::debug!("am.get: {url}");
@@ -88,7 +124,11 @@ impl AppleMusicApi {
             .json(body);
 
         if let Some(token) = &self.media_user_token {
-            req = req.header("Cookie", format!("media-user-token={token}"));
+            // Both, as Apple's own client does: `Media-User-Token` is what the
+            // API documents, the cookie is what the web player carries.
+            req = req
+                .header("Media-User-Token", token)
+                .header("Cookie", format!("media-user-token={token}"));
         }
 
         tracing::debug!("am.post: {url}");
@@ -97,6 +137,36 @@ impl AppleMusicApi {
         tracing::debug!("am.post: {path} → {status}");
         if !status.is_success() {
             tracing::warn!("am.post: {path} failed ({status})");
+        }
+        Ok(resp)
+    }
+
+    /// POST with no body. The library and favorites mutations take their
+    /// arguments as query parameters and reject a JSON payload.
+    async fn post_empty(&self, path: &str) -> Result<reqwest::Response, String> {
+        let bearer = auth::get_bearer_token().await?;
+        let url = format!("{BASE}{path}");
+        let mut req = self
+            .http
+            .post(&url)
+            .header("Authorization", format!("Bearer {bearer}"))
+            .header("User-Agent", USER_AGENT)
+            .header("Origin", "https://music.apple.com")
+            .header("Referer", "https://music.apple.com/")
+            .header("Content-Length", "0");
+
+        if let Some(token) = &self.media_user_token {
+            req = req
+                .header("Media-User-Token", token)
+                .header("Cookie", format!("media-user-token={token}"));
+        }
+
+        tracing::debug!("am.post_empty: {url}");
+        let resp = req.send().await.map_err(|e| format!("POST {path}: {e}"))?;
+        let status = resp.status();
+        tracing::debug!("am.post_empty: {path} → {status}");
+        if !status.is_success() {
+            tracing::warn!("am.post_empty: {path} failed ({status})");
         }
         Ok(resp)
     }
@@ -113,7 +183,11 @@ impl AppleMusicApi {
             .header("Referer", "https://music.apple.com/");
 
         if let Some(token) = &self.media_user_token {
-            req = req.header("Cookie", format!("media-user-token={token}"));
+            // Both, as Apple's own client does: `Media-User-Token` is what the
+            // API documents, the cookie is what the web player carries.
+            req = req
+                .header("Media-User-Token", token)
+                .header("Cookie", format!("media-user-token={token}"));
         }
 
         tracing::debug!("am.delete: {url}");
@@ -481,13 +555,33 @@ impl AppleMusicApi {
 
     // ── Library mutations ───────────────────────────────────────────
 
+    /// Favourite (or un-favourite) a catalog song.
+    ///
+    /// Distinct from the library: `/v1/me/library` adds the song to your
+    /// collection, this sets the heart. `POST` favourites, `DELETE` clears it —
+    /// the same pair Apple's own client issues for `UpdateFavoritesIntent`.
+    pub async fn set_favorite(&self, item_id: &str, on: bool) -> Result<(), String> {
+        tracing::debug!("am.set_favorite: id={item_id}, on={on}");
+        let path = favorites_path(item_id);
+        let resp = if on {
+            self.post_empty(&path).await?
+        } else {
+            self.delete(&path).await?
+        };
+        if !resp.status().is_success() {
+            let err = format!("set_favorite: HTTP {}", resp.status());
+            tracing::warn!("am.set_favorite: {err}");
+            return Err(err);
+        }
+        tracing::debug!("am.set_favorite: OK");
+        Ok(())
+    }
+
+    /// Add a catalog song to the user's library. Arguments go in the query
+    /// string — this endpoint takes no body.
     pub async fn add_to_library(&self, item_id: &str) -> Result<(), String> {
         tracing::debug!("am.add_to_library: id={item_id}");
-        let body = serde_json::json!({
-            "id": item_id,
-            "type": "songs",
-        });
-        let resp = self.post("/v1/me/library", &body).await?;
+        let resp = self.post_empty(&library_add_path(item_id)).await?;
         if !resp.status().is_success() {
             let err = format!("add_to_library: HTTP {}", resp.status());
             tracing::warn!("am.add_to_library: {err}");
@@ -517,16 +611,12 @@ impl AppleMusicApi {
         item_refs: &[String],
     ) -> Result<String, String> {
         tracing::debug!("am.create_playlist: name={name}, items={}", item_refs.len());
-        let mut attributes = serde_json::json!({ "name": name });
-        if !item_refs.is_empty() {
-            let mut tracks = Vec::new();
-            for id in item_refs {
-                tracks.push(serde_json::json!({ "id": id }));
-            }
-            attributes["tracks"] = serde_json::json!({ "data": tracks });
-        }
+        // Tracks belong under `relationships`, not `attributes` — Apple ignores
+        // (or rejects) them anywhere else, which is why playlists created with
+        // songs came out empty.
         let body = serde_json::json!({
-            "attributes": attributes,
+            "attributes": { "name": name },
+            "relationships": { "tracks": { "data": track_refs(item_refs) } },
         });
         let resp = self.post("/v1/me/library/playlists", &body).await?;
         if !resp.status().is_success() {
@@ -559,17 +649,8 @@ impl AppleMusicApi {
             "am.add_to_playlist: playlist={playlist_id}, items={}",
             item_refs.len()
         );
-        let mut tracks = Vec::new();
-        for id in item_refs {
-            tracks.push(serde_json::json!({ "id": id }));
-        }
-        let body = serde_json::json!({ "data": tracks });
-        let resp = self
-            .post(
-                &format!("/v1/me/library/playlists/{}/tracks", playlist_id),
-                &body,
-            )
-            .await?;
+        let body = serde_json::json!({ "data": track_refs(item_refs) });
+        let resp = self.post(&playlist_add_path(playlist_id), &body).await?;
         if !resp.status().is_success() {
             let err = format!("add_to_playlist: HTTP {}", resp.status());
             tracing::warn!("am.add_to_playlist: {err}");
@@ -579,17 +660,23 @@ impl AppleMusicApi {
         Ok(())
     }
 
+    /// Remove one entry from a library playlist.
+    ///
+    /// `entry_id` is the *library* song id of that playlist row, not the catalog
+    /// Adam ID — the same track added twice is two rows with two ids. The id has
+    /// to be in the query: a bare `DELETE` on the collection is unscoped and
+    /// takes the playlist's whole contents with it.
     pub async fn remove_from_playlist(
         &self,
         playlist_id: &str,
-        track_ids: &[String],
+        entry_id: &str,
     ) -> Result<(), String> {
-        tracing::debug!(
-            "am.remove_from_playlist: playlist={playlist_id}, tracks={}",
-            track_ids.len()
-        );
+        tracing::debug!("am.remove_from_playlist: playlist={playlist_id}, entry={entry_id}");
+        if entry_id.is_empty() {
+            return Err("remove_from_playlist: empty entry id".to_string());
+        }
         let resp = self
-            .delete(&format!("/v1/me/library/playlists/{}/tracks", playlist_id))
+            .delete(&playlist_entry_delete_path(playlist_id, entry_id))
             .await?;
         if !resp.status().is_success() {
             let err = format!("remove_from_playlist: HTTP {}", resp.status());
@@ -737,5 +824,68 @@ impl AppleMusicApi {
             }
         }
         Err("no lyrics available".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Favouriting is not adding to the library. They're different endpoints
+    /// against different sets, and `fetch_favorites` reads the one this writes.
+    #[test]
+    fn favoriting_targets_the_heart_not_the_library() {
+        let path = favorites_path("1811922756");
+        assert_eq!(path, "/v1/me/favorites?ids%5Bsongs%5D=1811922756");
+        assert!(!path.starts_with("/v1/me/library"));
+    }
+
+    /// The add-to-library call carries its id in the query string; this endpoint
+    /// takes no JSON body, so an id in a payload goes nowhere.
+    #[test]
+    fn adding_to_the_library_passes_the_id_as_a_parameter() {
+        assert_eq!(
+            library_add_path("1811922756"),
+            "/v1/me/library?ids%5Bsongs%5D=1811922756&representation=ids"
+        );
+    }
+
+    /// The one that matters most: a `DELETE` on the tracks collection with no
+    /// `ids[...]` is unscoped, and empties the playlist rather than removing the
+    /// one row. The id has to survive into the query.
+    #[test]
+    fn removing_a_playlist_entry_is_scoped_to_that_entry() {
+        let path = playlist_entry_delete_path("p.abc123", "i.entry456");
+        assert!(
+            path.contains("ids%5Blibrary-songs%5D=i.entry456"),
+            "unscoped delete would wipe the playlist: {path}"
+        );
+        assert_eq!(
+            path,
+            "/v1/me/library/playlists/p.abc123/tracks\
+             ?ids%5Blibrary-songs%5D=i.entry456&mode=all"
+        );
+    }
+
+    #[test]
+    fn adding_to_a_playlist_asks_for_the_created_resources() {
+        assert_eq!(
+            playlist_add_path("p.abc123"),
+            "/v1/me/library/playlists/p.abc123/tracks?representation=resources"
+        );
+    }
+
+    /// Apple drops track references silently when the resource `type` is
+    /// missing — the request still returns 201, with an empty playlist.
+    #[test]
+    fn track_references_carry_the_resource_type() {
+        let refs = track_refs(&["123".to_string(), "456".to_string()]);
+        assert_eq!(
+            serde_json::Value::Array(refs),
+            serde_json::json!([
+                {"id": "123", "type": "songs"},
+                {"id": "456", "type": "songs"},
+            ])
+        );
     }
 }

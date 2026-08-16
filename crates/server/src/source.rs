@@ -1015,17 +1015,13 @@ impl MediaSource for AppleMusicSource {
     }
 
     async fn push_favorite(&self, item_id: &str, on: bool) -> Result<(), SourceError> {
-        if on {
-            self.client
-                .add_to_library(item_id)
-                .await
-                .map_err(SourceError::Backend)
-        } else {
-            self.client
-                .remove_from_library(item_id)
-                .await
-                .map_err(SourceError::Backend)
-        }
+        // The heart, not the library. `fetch_favorites` reads the Favorite Songs
+        // playlist, which is what this endpoint feeds; adding to the library
+        // instead left the two halves describing different sets.
+        self.client
+            .set_favorite(item_id, on)
+            .await
+            .map_err(SourceError::Backend)
     }
 
     async fn fetch_playlists(&self) -> Result<Vec<PlaylistMeta>, SourceError> {
@@ -1057,7 +1053,7 @@ impl MediaSource for AppleMusicSource {
             .map_err(SourceError::Backend)?;
         Ok(songs
             .iter()
-            .map(crate::applemusic::track_from_song_data)
+            .map(crate::applemusic::track_from_playlist_entry)
             .collect())
     }
 
@@ -1090,14 +1086,20 @@ impl MediaSource for AppleMusicSource {
         track: &reader::Track,
         _position: usize,
     ) -> Result<(), SourceError> {
-        let vid = track.id.key();
-        if vid.is_empty() {
-            return Err(SourceError::InvalidInput("track has no item id".into()));
-        }
+        // The playlist row's own id, not the catalog id — see
+        // `track_from_playlist_entry`.
+        let entry_id = track
+            .playlist_item_id
+            .as_deref()
+            .ok_or_else(|| SourceError::InvalidInput("track has no playlist-entry id".into()))?;
         self.client
-            .remove_from_playlist(playlist_id, &[vid.into_owned()])
+            .remove_from_playlist(playlist_id, entry_id)
             .await
-            .map_err(SourceError::Backend)
+            .map_err(SourceError::Backend)?;
+        self.db
+            .remove_playlist_tracks(&self.source, playlist_id, &[track.id.key().into_owned()])
+            .await
+            .map_err(SourceError::from)
     }
 
     async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError> {

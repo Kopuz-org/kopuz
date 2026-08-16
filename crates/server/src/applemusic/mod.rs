@@ -95,6 +95,26 @@ pub fn track_from_song_data(song: &types::TrackData) -> Track {
     }
 }
 
+/// Convert one row of a library playlist to a reader::Track.
+///
+/// A library playlist returns *library* songs: the resource id identifies that
+/// row — it's what removal has to target, and the same song added twice is two
+/// rows with two ids — while playback still needs the catalog Adam ID.
+pub fn track_from_playlist_entry(song: &types::TrackData) -> Track {
+    let mut track = track_from_song_data(song);
+    if let Some(catalog_id) = song
+        .attributes
+        .playParams
+        .as_ref()
+        .and_then(|p| p.catalog_id.as_deref())
+        .filter(|s| !s.is_empty())
+    {
+        track.id = apple_music_id(catalog_id);
+    }
+    track.playlist_item_id = Some(song.id.clone());
+    track
+}
+
 /// Convert a library song resource to a reader::Track.
 /// Uses playParams.catalogId (the Adam ID) when available, falling back to the
 /// library ID. The web playback API requires Adam IDs, not library IDs.
@@ -172,5 +192,52 @@ pub fn album_from_library(album: &types::LibraryAlbumResource) -> reader::Album 
                 ))
             }),
         manual_cover: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A playlist row carries two ids and they aren't interchangeable: the
+    /// library id addresses the row (removal needs it), the catalog id is what
+    /// plays. Mapping the row id into `Track::id` produces tracks that can't be
+    /// streamed; dropping it produces tracks that can't be removed.
+    #[test]
+    fn a_playlist_entry_keeps_the_row_id_and_plays_the_catalog_id() {
+        let entry: types::TrackData = serde_json::from_value(serde_json::json!({
+            "id": "i.rowid123",
+            "type": "library-songs",
+            "attributes": {
+                "name": "Kool-Aid",
+                "artistName": "Bring Me The Horizon",
+                "albumName": "POST HUMAN: NeX GEn",
+                "durationInMillis": 208_000,
+                "playParams": { "id": "i.rowid123", "kind": "song", "catalogId": "1811922756" }
+            }
+        }))
+        .expect("library song");
+
+        let track = track_from_playlist_entry(&entry);
+        assert_eq!(track.id.key(), "1811922756", "playback needs the Adam ID");
+        assert_eq!(track.playlist_item_id.as_deref(), Some("i.rowid123"));
+        assert_eq!(track.title, "Kool-Aid");
+        assert_eq!(track.duration, 208);
+    }
+
+    /// A catalog song reached through a playlist has no `catalogId`; its own id
+    /// already is one, so it must not be blanked.
+    #[test]
+    fn a_playlist_entry_without_a_catalog_id_keeps_its_own() {
+        let entry: types::TrackData = serde_json::from_value(serde_json::json!({
+            "id": "1811922756",
+            "type": "songs",
+            "attributes": { "name": "Kool-Aid" }
+        }))
+        .expect("catalog song");
+
+        let track = track_from_playlist_entry(&entry);
+        assert_eq!(track.id.key(), "1811922756");
+        assert_eq!(track.playlist_item_id.as_deref(), Some("1811922756"));
     }
 }
