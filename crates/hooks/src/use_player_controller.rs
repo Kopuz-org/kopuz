@@ -1469,6 +1469,7 @@ fn network_factory(
                         &token,
                         &storefront,
                         &language,
+                        buffer_progress.clone(),
                     ))
                 }))
                 .unwrap_or_else(|panic| {

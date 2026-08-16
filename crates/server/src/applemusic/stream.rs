@@ -147,6 +147,7 @@ pub async fn get_web_playback(
 /// the point of driving the real one rather than a hand-rolled protocol.
 async fn load_license(
     cdm: &super::widevine::Cdm,
+    session: &super::widevine::LicenseSession,
     license_request: &[u8],
     adam_id: &str,
     uri_prefix: &str,
@@ -239,7 +240,7 @@ async fn load_license(
         license_data.len()
     );
 
-    cdm.update(&license_data).map_err(|e| {
+    cdm.update(session, &license_data).map_err(|e| {
         tracing::warn!("am.license: loading the license failed: {e}");
         e
     })?;
@@ -259,6 +260,7 @@ pub async fn resolve_and_decrypt(
     media_user_token: &str,
     storefront: &str,
     language: &str,
+    progress: Option<utils::stream_buffer::BufferProgressCallback>,
 ) -> Result<super::progressive::ProgressiveTrack, String> {
     let bearer_token = auth::get_bearer_token().await?;
     // Resolve the id to a catalog Adam id if needed (library ids don't work with web playback)
@@ -277,6 +279,10 @@ pub async fn resolve_and_decrypt(
             cache_path.display(),
             cached.len()
         );
+        if let Some(p) = &progress {
+            let total = cached.len() as u64;
+            p(0, total, Some(total));
+        }
         return Ok(super::progressive::ProgressiveTrack::ready(cached));
     }
 
@@ -297,7 +303,10 @@ pub async fn resolve_and_decrypt(
     // Borrow the CDM from an installed browser. Its device key stays sealed, so
     // no key material ships with kopuz.
     let cdm = super::widevine::Cdm::open_system().await?;
-    let license_request = cdm.challenge(&init_data)?;
+    // Held only for challenge → licence → update. Decryption runs without it, so
+    // a track already playing never blocks the next one from starting.
+    let license = cdm.begin_license().await;
+    let license_request = cdm.challenge(&license, &init_data)?;
     tracing::debug!(
         "am.stream: license challenge generated ({} bytes)",
         license_request.len()
@@ -307,6 +316,7 @@ pub async fn resolve_and_decrypt(
 
     load_license(
         &cdm,
+        &license,
         &license_request,
         &adam_id,
         &playback.uri_prefix,
@@ -315,6 +325,8 @@ pub async fn resolve_and_decrypt(
         media_user_token,
     )
     .await?;
+
+    drop(license);
 
     tracing::info!(
         "am.stream: downloading encrypted fMP4 from {}",
@@ -350,6 +362,7 @@ pub async fn resolve_and_decrypt(
         encrypted_bytes.to_vec(),
         cdm,
         key_id,
+        progress,
         move |decrypted| {
             store_decrypted_blocking(&cache_path, &decrypted);
         },
@@ -357,15 +370,20 @@ pub async fn resolve_and_decrypt(
 }
 
 /// Where a track's decrypted audio is cached, keyed by catalog id so a replay
-/// reuses it. Lives under the temp dir, so the OS clears it between boots rather
-/// than leaving decrypted audio around indefinitely.
+/// reuses it.
+///
+/// The user cache dir, not the temp dir: a decrypted track is several MB and
+/// `/tmp` is tmpfs (RAM) on most Linux systems, so caching whole tracks there
+/// spends memory to save disk. Small artefacts like cover thumbnails are fine in
+/// temp; these are not.
 fn decrypted_cache_path(adam_id: &str) -> std::path::PathBuf {
     let safe: String = adam_id
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         .collect();
-    std::env::temp_dir()
-        .join("kopuz_am_decrypt")
+    directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+        .map(|dirs| dirs.cache_dir().join("applemusic"))
+        .unwrap_or_else(|| std::env::temp_dir().join("kopuz-applemusic"))
         .join(format!("{safe}.m4a"))
 }
 

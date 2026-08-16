@@ -37,16 +37,44 @@ unsafe extern "C" {
     fn wv_free(p: *mut u8);
 }
 
-/// Serializes use of the process-wide native CDM for a whole track.
+/// Serializes the licence exchange only — `challenge` through `update`.
+///
+/// The shim tracks a single "current session id", so two tracks interleaving
+/// their challenge/update pairs would load one's licence into the other's
+/// session. Held across the licence HTTP round-trip (~0.5s), hence async.
+///
+/// Deliberately NOT held for the life of a track. A Widevine CDM retains the
+/// keys of every session it is given and selects one per `Decrypt` by key id, so
+/// tracks decrypt concurrently. Holding it longer made a track's background
+/// decrypt block every later play until it finished.
 #[cfg(not(target_os = "android"))]
-static CDM_SESSION: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
+static LICENSE_LOCK: OnceLock<Arc<tokio::sync::Mutex<()>>> = OnceLock::new();
 
 #[cfg(not(target_os = "android"))]
-fn session() -> Arc<tokio::sync::Mutex<()>> {
-    CDM_SESSION
+fn license_lock() -> Arc<tokio::sync::Mutex<()>> {
+    LICENSE_LOCK
         .get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))
         .clone()
 }
+
+/// Serializes individual calls into the native CDM, which is one process-wide
+/// instance and not re-entrant. Each hold is a single operation (~1.6ms for a
+/// decrypt), never a whole track.
+#[cfg(not(target_os = "android"))]
+static CALL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(not(target_os = "android"))]
+fn call_lock() -> std::sync::MutexGuard<'static, ()> {
+    CALL_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Proof the holder owns the CDM's session slot, for the span between generating
+/// a challenge and loading the licence it returns.
+#[cfg(not(target_os = "android"))]
+pub struct LicenseSession(#[allow(dead_code)] tokio::sync::OwnedMutexGuard<()>);
+
+#[cfg(target_os = "android")]
+pub struct LicenseSession;
 
 /// Copy a shim-allocated buffer into a `Vec` and release it.
 ///
@@ -62,19 +90,11 @@ unsafe fn take(out: *mut u8, len: u32) -> Vec<u8> {
     v
 }
 
-/// An exclusive session on the system Widevine CDM.
+/// A handle to the process-wide system Widevine CDM.
 ///
-/// Holding one means holding [`CDM_SESSION`] for as long as the handle lives, so
-/// a whole track — challenge, licence, every sample — runs against one session.
-/// The native CDM is process-wide and re-opening it tears down the live session,
-/// so overlapping tracks must queue rather than interleave.
-#[cfg(not(target_os = "android"))]
-pub struct Cdm {
-    _session: tokio::sync::OwnedMutexGuard<()>,
-}
-
-/// A loaded system Widevine CDM.
-#[cfg(target_os = "android")]
+/// Cheap and non-exclusive: holding one grants no ownership of the CDM. Loading
+/// is idempotent, and per-call locking keeps the non-re-entrant native instance
+/// safe, so several tracks can hold one at once.
 pub struct Cdm {
     _private: (),
 }
@@ -92,11 +112,19 @@ impl Cdm {
         Self::open("")
     }
 
-    pub fn challenge(&self, _pssh_box: &[u8]) -> Result<Vec<u8>, String> {
+    pub async fn begin_license(&self) -> LicenseSession {
+        LicenseSession
+    }
+
+    pub fn challenge(
+        &self,
+        _session: &LicenseSession,
+        _pssh_box: &[u8],
+    ) -> Result<Vec<u8>, String> {
         Self::open("").map(|_| Vec::new())
     }
 
-    pub fn update(&self, _license: &[u8]) -> Result<(), String> {
+    pub fn update(&self, _session: &LicenseSession, _license: &[u8]) -> Result<(), String> {
         Self::open("").map(|_| ())
     }
 
@@ -123,9 +151,9 @@ impl Cdm {
             .ok_or_else(|| format!("non-UTF-8 CDM path: {}", path.display()))?;
         let c = CString::new(s).map_err(|e| format!("CDM path has an interior NUL: {e}"))?;
 
-        let session = session().lock_owned().await;
+        let _guard = call_lock();
         match unsafe { wv_open(c.as_ptr()) } {
-            0 => Ok(Self { _session: session }),
+            0 => Ok(Self { _private: () }),
             1 => Err(format!(
                 "couldn't load the Widevine CDM at {} — the file may be corrupt or built for another architecture",
                 path.display()
@@ -150,8 +178,14 @@ impl Cdm {
         Self::open(path).await
     }
 
+    /// Claim the CDM's session slot for one licence exchange.
+    pub async fn begin_license(&self) -> LicenseSession {
+        LicenseSession(license_lock().lock_owned().await)
+    }
+
     /// Generate a license challenge from a CENC pssh box.
-    pub fn challenge(&self, pssh_box: &[u8]) -> Result<Vec<u8>, String> {
+    pub fn challenge(&self, _session: &LicenseSession, pssh_box: &[u8]) -> Result<Vec<u8>, String> {
+        let _guard = call_lock();
         let mut out = std::ptr::null_mut();
         let mut len = 0u32;
         match unsafe { wv_challenge(pssh_box.as_ptr(), pssh_box.len() as u32, &mut out, &mut len) }
@@ -164,7 +198,8 @@ impl Cdm {
     }
 
     /// Feed the license response back so the CDM loads the content keys.
-    pub fn update(&self, license: &[u8]) -> Result<(), String> {
+    pub fn update(&self, _session: &LicenseSession, license: &[u8]) -> Result<(), String> {
+        let _guard = call_lock();
         match unsafe { wv_update(license.as_ptr(), license.len() as u32) } {
             0 => Ok(()),
             21 => Err("the CDM rejected the license response".to_string()),
@@ -190,6 +225,7 @@ impl Cdm {
             subs.push(encrypted);
         }
 
+        let _guard = call_lock();
         let mut out = std::ptr::null_mut();
         let mut len = 0u32;
         let rc = unsafe {
@@ -288,8 +324,9 @@ mod tests {
     #[cfg(not(target_os = "android"))]
     async fn challenge_against_a_real_cdm() {
         let cdm = Cdm::open_system().await.expect("open a system CDM");
+        let session = cdm.begin_license().await;
         let challenge = cdm
-            .challenge(&build_pssh(&[0x11u8; 16]))
+            .challenge(&session, &build_pssh(&[0x11u8; 16]))
             .expect("generate a challenge");
 
         assert!(!challenge.is_empty(), "challenge must not be empty");

@@ -1,22 +1,39 @@
 //! Random-access decryption of an Apple Music track.
 //!
-//! The CDM costs ~1.6ms per sample, and a track holds thousands of them, so
-//! decrypting everything up front costs ~15s before the first note. But samples
-//! are independent — each carries its own IV — and CENC is size-preserving, so
-//! a sample can be decrypted on its own, in place, in any order.
+//! A track is thousands of small samples (~800 bytes each) and the CDM costs
+//! ~0.2ms apiece, so decrypting everything up front is around a second of dead
+//! air before the first note. But samples are independent — each carries its own
+//! IV — and CENC is size-preserving, so a sample can be decrypted on its own, in
+//! place, in any order.
 //!
 //! So the file is held as ciphertext with the init segment patched, and each
 //! sample is decrypted the moment something actually reads it. A read only pays
-//! for the bytes it touches (~800 bytes and ~1.6ms per sample), a seek costs
-//! nothing at all, and anything already decrypted is a plain memcpy. A
-//! background thread fills in the rest in order so sequential playback stays
-//! ahead of the playhead, and a fully decrypted track is cached to disk.
+//! for the bytes it touches, a seek costs nothing at all, and anything already
+//! decrypted is a plain memcpy. That turns the second into the ~0.06s it takes
+//! to decrypt the prebuffer. A background thread fills in the rest in order so
+//! sequential playback stays ahead of the playhead, and a fully decrypted track
+//! is cached to disk.
 
 use std::io::{Error as IoError, ErrorKind, Read, Result as IoResult, Seek, SeekFrom};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+
+use utils::stream_buffer::BufferProgressCallback;
 
 use super::cenc::{self, Fmp4Layout};
 use super::widevine::Cdm;
+
+/// How often the background filler reports progress, in bytes. The seek bar
+/// only needs coarse ranges, and every report crosses a channel.
+const PROGRESS_STEP: usize = 64 * 1024;
+
+/// How far ahead of the playhead the filler works before going idle.
+const LOOKAHEAD_BYTES: usize = 4 * 1024 * 1024;
+
+/// Samples decrypted between yields during that burst. At ~0.2ms each this hands
+/// the lock back every few milliseconds — far inside the 2s ring — so playback
+/// still gets served while the filler is busy.
+const FILL_BATCH: usize = 32;
 
 const PREBUFFER_BYTES: usize = 256 * 1024;
 
@@ -25,9 +42,9 @@ const PREBUFFER_BYTES: usize = 256 * 1024;
 /// One lock covers the buffer, the per-sample flags and the CDM together. That
 /// is deliberate: it makes "decrypt this sample unless someone already did"
 /// atomic. Decrypting twice would run ciphertext through the cipher a second
-/// time and corrupt it, so exactly-once matters more than the ~1.6ms the lock is
-/// held. Readers and the background thread contend for single samples, never for
-/// the whole track.
+/// time and corrupt it, so exactly-once matters more than the fraction of a
+/// millisecond the lock is held. Readers and the background thread contend for
+/// single samples, never for the whole track.
 struct State {
     /// Whole file: ciphertext, with decrypted samples written over in place.
     buf: Vec<u8>,
@@ -43,6 +60,8 @@ pub struct ProgressiveTrack {
     layout: Arc<Fmp4Layout>,
     key_id: Arc<Vec<u8>>,
     state: Arc<Mutex<State>>,
+    /// Where the decoder has read to, so the filler knows how far ahead it is.
+    read_pos: Arc<AtomicUsize>,
     total: u64,
     pos: u64,
 }
@@ -56,6 +75,7 @@ impl ProgressiveTrack {
         encrypted: Vec<u8>,
         cdm: Cdm,
         key_id: Vec<u8>,
+        progress: Option<BufferProgressCallback>,
         on_complete: impl FnOnce(Vec<u8>) + Send + 'static,
     ) -> Result<Self, String> {
         let layout = Arc::new(cenc::index_fmp4(&encrypted)?);
@@ -73,10 +93,12 @@ impl ProgressiveTrack {
             error: None,
         }));
 
+        let read_pos = Arc::new(AtomicUsize::new(0));
         let track = Self {
             layout: layout.clone(),
             key_id: Arc::new(key_id),
             state: state.clone(),
+            read_pos: read_pos.clone(),
             total,
             pos: 0,
         };
@@ -93,34 +115,62 @@ impl ProgressiveTrack {
             PREBUFFER_BYTES / 1024,
             started.elapsed().as_secs_f64()
         );
+        // The seek bar draws these, same as the HTTP-backed sources. Here the
+        // limiting resource is CDM time rather than bandwidth, but a listener
+        // reads it the same way: how much is ready to play.
+        if let Some(p) = &progress {
+            p(0, prebuffer_end.min(total as usize) as u64, Some(total));
+        }
 
         // Fill in the rest in order, so sequential playback stays ahead of the
-        // playhead. A plain thread: this is CPU-bound and runs for a while.
+        // playhead. A plain thread rather than a task: the decryption itself is
+        // CPU-bound, and between bursts this parks waiting on the playhead — so
+        // it lives as long as the track does, mostly idle.
         let key_id = track.key_id.clone();
         std::thread::Builder::new()
             .name("am-decrypt".into())
             .spawn(move || {
-                let started = std::time::Instant::now();
+                let mut reported = prebuffer_end.min(total as usize);
                 for index in 0..sample_count {
+                    // Stay a bounded distance ahead of the playhead, then idle.
+                    // Racing to the end of the track only buys contention.
+                    while layout.samples[index].start
+                        > read_pos.load(Ordering::Relaxed) + LOOKAHEAD_BYTES
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    if index % FILL_BATCH == 0 {
+                        // Hand the lock back so a read waiting to copy bytes it
+                        // already has isn't stuck behind the whole burst.
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
                     if let Err(e) = ensure_decrypted(&state, &layout, &key_id, index) {
                         tracing::warn!("am.decrypt: background fill stopped: {e}");
                         return;
                     }
+                    if let Some(p) = &progress {
+                        let end = layout.samples[index].end();
+                        if end >= reported + PROGRESS_STEP {
+                            p(reported as u64, end as u64, Some(total));
+                            reported = end;
+                        }
+                    }
+                }
+                if let Some(p) = &progress
+                    && reported < total as usize
+                {
+                    p(reported as u64, total, Some(total));
                 }
                 let finished = {
                     let mut s = match state.lock() {
                         Ok(s) => s,
                         Err(_) => return,
                     };
-                    // Release the CDM session here rather than at drop: the next
-                    // track shouldn't wait on the cache write below.
+                    // Dropping the handle frees nothing exclusive — it only
+                    // marks this track done so later reads skip the CDM.
                     s.cdm = None;
                     s.error.is_none().then(|| s.buf.clone())
                 };
-                tracing::info!(
-                    "am.decrypt: fully decrypted {sample_count} samples in {:.2}s",
-                    started.elapsed().as_secs_f64()
-                );
                 if let Some(bytes) = finished {
                     on_complete(bytes);
                 }
@@ -143,6 +193,7 @@ impl ProgressiveTrack {
                 remaining: 0,
                 error: None,
             })),
+            read_pos: Arc::new(AtomicUsize::new(0)),
             total,
             pos: 0,
         }
@@ -264,6 +315,7 @@ impl Read for ProgressiveTrack {
         out[..n].copy_from_slice(&s.buf[start..end]);
         drop(s);
         self.pos += n as u64;
+        self.read_pos.store(self.pos as usize, Ordering::Relaxed);
         Ok(n)
     }
 }
