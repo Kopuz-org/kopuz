@@ -256,6 +256,10 @@ fn main() {
 /// Android needs a single monotonically increasing integer. `major.minor.patch`
 /// packs into one as long as minor and patch stay under 100 — 0.14.0 becomes
 /// 1400, 1.0.0 becomes 10000.
+///
+/// Past 99 the fields would carry into each other and two different releases
+/// could claim the same code (0.14.100 and 0.15.0 both give 1500), so the build
+/// stops instead: a silently duplicated code makes an update uninstallable.
 fn android_version_code() -> u32 {
     let version = env!("CARGO_PKG_VERSION");
     let mut parts = version
@@ -264,6 +268,11 @@ fn android_version_code() -> u32 {
     let major = parts.next().unwrap_or(0);
     let minor = parts.next().unwrap_or(0);
     let patch = parts.next().unwrap_or(0);
+    assert!(
+        minor < 100 && patch < 100,
+        "crate version {version} cannot be packed into an android versionCode: \
+         minor and patch have to stay below 100"
+    );
     major * 10_000 + minor * 100 + patch
 }
 

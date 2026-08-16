@@ -53,7 +53,9 @@ echo "[3/4] Aligning..."
 "$zipalign" -p -f 4 "$unsigned" "$out"
 
 echo "[4/4] Signing..."
-KOPUZ_ANDROID_KEY_PASSWORD="${KOPUZ_ANDROID_KEY_PASSWORD:-$KOPUZ_ANDROID_KEYSTORE_PASSWORD}"
+# `export`, not a bare assignment: apksigner reads this out of its own
+# environment, and the fallback would otherwise only exist in this shell.
+export KOPUZ_ANDROID_KEY_PASSWORD="${KOPUZ_ANDROID_KEY_PASSWORD:-$KOPUZ_ANDROID_KEYSTORE_PASSWORD}"
 "$apksigner" sign \
   --ks "$KOPUZ_ANDROID_KEYSTORE" \
   --ks-pass "env:KOPUZ_ANDROID_KEYSTORE_PASSWORD" \

@@ -258,15 +258,19 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          p { class: "text-lg", "{i18n::t(\"no_songs_here\")}" }
                      }
                  } else {
-                     div { class: "shrink-0",
-                         Header {
-                             is_vaxry: false,
-                             is_album: props.is_album,
-                             is_selection_mode: props.is_selection_mode,
-                             on_select_all: props.on_select_all,
-                             all_selected: props.all_selected,
-                             sort_state: sort_state,
-                             is_reorderable: props.is_reorderable
+                     // The phone rows are a two-line list, not a column grid, so
+                     // the column headings have nothing to label there.
+                     if !cfg!(target_os = "android") {
+                         div { class: "shrink-0",
+                             Header {
+                                 is_vaxry: false,
+                                 is_album: props.is_album,
+                                 is_selection_mode: props.is_selection_mode,
+                                 on_select_all: props.on_select_all,
+                                 all_selected: props.all_selected,
+                                 sort_state: sort_state,
+                                 is_reorderable: props.is_reorderable
+                             }
                          }
                      }
                      div { class: "flex-1 min-h-0 w-full flex flex-col overflow-hidden",

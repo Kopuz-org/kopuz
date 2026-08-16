@@ -299,6 +299,14 @@ jobs:
   android:
     runs-on: ubuntu-22.04
 
+    # Job level, not step level: a step's own `env` is not visible to its `if`,
+    # so the keystore guard below could never see these there.
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KOPUZ_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KOPUZ_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KOPUZ_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -345,23 +353,38 @@ jobs:
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
-      # Absent on forks and on pull requests, where the build still has to pass —
-      # build-apk.sh leaves the APK unsigned rather than failing in that case.
-      - name: Decode the signing keystore
-        if: ${{ env.KEYSTORE_BASE64 != '' }}
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      # A tag is a published release, so it has to carry the project signature —
+      # an unsigned APK there would strand everyone who installed a signed one.
+      # Validation runs without the secrets (forks, pull requests) stay unsigned.
+      - name: Require signing secrets on tags
+        if: github.ref_type == 'tag'
+        shell: bash
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/kopuz.keystore"
+          set -euo pipefail
+
+          missing=()
+          [[ -n "${ANDROID_KEYSTORE_BASE64}" ]] || missing+=(ANDROID_KEYSTORE_BASE64)
+          [[ -n "${KOPUZ_ANDROID_KEYSTORE_PASSWORD}" ]] || missing+=(ANDROID_KEYSTORE_PASSWORD)
+          [[ -n "${KOPUZ_ANDROID_KEY_ALIAS}" ]] || missing+=(ANDROID_KEY_ALIAS)
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "Refusing to publish an unsigned APK. Missing secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Decode the signing keystore
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/kopuz.keystore"
           echo "KOPUZ_ANDROID_KEYSTORE=$RUNNER_TEMP/kopuz.keystore" >> "$GITHUB_ENV"
 
       - name: Build the release APK
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
           NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
-          KOPUZ_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KOPUZ_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KOPUZ_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./packaging/android/build-apk.sh
 
       - name: Create Android checksum

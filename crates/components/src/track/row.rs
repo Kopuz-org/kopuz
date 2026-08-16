@@ -79,8 +79,6 @@ pub fn TrackRow(
     let drag_track_normal_mouse = track.clone();
     let drag_selected_tracks_mouse = selected_queue_tracks.clone();
     let drag_selected_tracks_normal_mouse = selected_queue_tracks.clone();
-    let play_next_track_mouse = track.clone();
-    let play_next_track_normal = track.clone();
     let drag_cover_url = cover_url.as_ref().map(|url| url.as_ref().to_string());
     let drag_cover_url_normal = drag_cover_url.clone();
     let mut pending_queue_drag = use_signal(|| None::<(f64, f64)>);
@@ -93,11 +91,6 @@ pub fn TrackRow(
     let delete_song_text = i18n::t("delete").to_string();
     let share_text = i18n::t("share_musicbrainz").to_string();
     let view_metadata_text = i18n::t("view_metadata").to_string();
-
-    // The track to share, cloned once per layout closure (vaxry / normal) since
-    // each moves it in; `share_track` picks the link form from the source.
-    let share_track_vaxry = track.clone();
-    let share_track_normal = track.clone();
 
     let mut actions = Vec::new();
 
@@ -196,6 +189,55 @@ pub fn TrackRow(
         0
     };
 
+    // One handler for every layout — the action list is identical, only the
+    // chrome around it differs.
+    let menu_track = track.clone();
+    let on_menu_action = EventHandler::new(move |idx: usize| {
+        if let Some(play_next_idx) = play_next_idx
+            && idx == play_next_idx
+        {
+            ctrl.queue_play_next(vec![menu_track.clone()]);
+            on_close_menu.call(());
+            return;
+        }
+        if let Some(queue_idx) = add_to_queue_idx
+            && idx == queue_idx
+        {
+            if let Some(handler) = on_queue {
+                handler.call(());
+            }
+            return;
+        }
+
+        if idx == add_to_playlist_idx {
+            on_add_to_playlist.call(());
+        } else if remove_action_idx == Some(idx) {
+            if let Some(handler) = on_remove_from_playlist {
+                handler.call(());
+            }
+        } else if has_download && idx == download_action_idx {
+            if let Some(handler) = on_download {
+                handler.call(());
+            }
+        } else if idx == share_idx {
+            let src = active_source.peek().clone();
+            share_track(menu_track.clone(), src);
+            on_close_menu.call(());
+        } else if mix_idx == Some(idx) {
+            if let Some(handler) = on_start_radio {
+                handler.call(());
+            }
+            on_close_menu.call(());
+        } else if view_metadata_idx == Some(idx) {
+            if let Some(handler) = on_view_metadata {
+                handler.call(());
+            }
+            on_close_menu.call(());
+        } else if Some(idx) == delete_action_idx {
+            on_delete.call(());
+        }
+    });
+
     let mut long_press_task = use_signal(|| None);
     let mut long_press_occurred = use_signal(|| false);
 
@@ -244,6 +286,90 @@ pub fn TrackRow(
     } else {
         COLUMNS_VAXRY
     };
+
+    // Phones get a two-line row instead of the desktop column grid: artwork,
+    // title, and one muted line of artist + duration. The album and file-type
+    // columns do not survive a 400px viewport, and neither skin's grid does.
+    if cfg!(target_os = "android") {
+        return rsx! {
+            div {
+                // Fixed height, not padding: the virtual scroller lays its spacers
+                // out in multiples of one row, so this cannot vary with whether
+                // artwork is switched on.
+                class: "flex items-center gap-3 px-2 h-14 rounded-lg active:bg-white/10 transition-colors select-none",
+                style: if is_currently_playing {
+                    format!("background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
+                } else {
+                    format!("box-shadow: {selection_shadow};")
+                },
+                onclick: move |_| {
+                    if *long_press_occurred.peek() {
+                        long_press_occurred.set(false);
+                        return;
+                    }
+                    if is_selection_mode {
+                        if let Some(handler) = on_select {
+                            handler.call(!is_selected);
+                        }
+                    } else {
+                        on_play.call(());
+                    }
+                },
+                ontouchstart: move |_| start_long_press(),
+                ontouchend: move |_| cancel_long_press(),
+                ontouchcancel: move |_| cancel_long_press(),
+
+                if is_selection_mode {
+                    div {
+                        class: if is_selected {
+                            "w-5 h-5 shrink-0 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center"
+                        } else {
+                            "w-5 h-5 shrink-0 rounded border border-white/30 flex items-center justify-center"
+                        },
+                        if is_selected {
+                            i { class: "fa-solid fa-check text-[10px]" }
+                        }
+                    }
+                } else if show_row_images {
+                    div { class: "w-11 h-11 shrink-0 rounded bg-white/5 overflow-hidden flex items-center justify-center",
+                        if let Some(url) = &cover_url {
+                            img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
+                        } else {
+                            i { class: "fa-solid fa-music text-white/20 text-xs" }
+                        }
+                    }
+                }
+
+                div { class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
+                    span {
+                        class: if is_currently_playing {
+                            "text-[13px] font-semibold truncate leading-tight text-indigo-400"
+                        } else {
+                            "text-[13px] font-medium truncate leading-tight text-white/95"
+                        },
+                        "{track.title}"
+                    }
+                    span { class: "text-[11px] text-white/45 truncate leading-tight", dir: "ltr",
+                        "{track.artist} • {duration_str}"
+                    }
+                }
+
+                if !is_selection_mode {
+                    div { class: "shrink-0",
+                        DotsMenu {
+                            actions,
+                            is_open: is_menu_open,
+                            on_open: move |_| on_click_menu.call(()),
+                            on_close: move |_| on_close_menu.call(()),
+                            button_class: "active:scale-95".to_string(),
+                            anchor: "right".to_string(),
+                            on_action: on_menu_action,
+                        }
+                    }
+                }
+            }
+        };
+    }
 
     if is_vaxry {
         return rsx! {
@@ -474,43 +600,7 @@ pub fn TrackRow(
                             on_close: move |_| on_close_menu.call(()),
                             button_class: "active:scale-95".to_string(),
                             anchor: "right".to_string(),
-                            on_action: move |idx: usize| {
-                                if let Some(play_next_idx) = play_next_idx
-                                    && idx == play_next_idx
-                                {
-                                    ctrl.queue_play_next(vec![play_next_track_mouse.clone()]);
-                                    on_close_menu.call(());
-                                    return;
-                                }
-                                if let Some(queue_idx) = add_to_queue_idx
-                                    && idx == queue_idx
-                                    && let Some(handler) = on_queue
-                                {
-                                    handler.call(());
-                                    return;
-                                }
-                                if idx == add_to_playlist_idx {
-                                    on_add_to_playlist.call(());
-                                } else if remove_action_idx == Some(idx) {
-                                    if let Some(handler) = on_remove_from_playlist { handler.call(()); }
-                                } else if has_download && idx == download_action_idx {
-                                    if let Some(handler) = on_download { handler.call(()); }
-                                } else if idx == share_idx {
-                                    let src = active_source.peek().clone();
-                                    share_track(share_track_vaxry.clone(), src);
-                                    on_close_menu.call(());
-                                } else if mix_idx == Some(idx) {
-                                    if let Some(handler) = on_start_radio {
-                                        handler.call(());
-                                    }
-                                    on_close_menu.call(());
-                                } else if view_metadata_idx == Some(idx) {
-                                    if let Some(handler) = on_view_metadata { handler.call(()); }
-                                    on_close_menu.call(());
-                                } else if Some(idx) == delete_action_idx {
-                                    on_delete.call(());
-                                }
-                            },
+                            on_action: on_menu_action,
                         }
                     }
                 }
@@ -743,51 +833,7 @@ pub fn TrackRow(
                         on_close: move |_| on_close_menu.call(()),
                         button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100 active:scale-95".to_string(),
                         anchor: "right".to_string(),
-                        on_action: move |idx: usize| {
-                            if let Some(play_next_idx) = play_next_idx
-                                && idx == play_next_idx
-                            {
-                                ctrl.queue_play_next(vec![play_next_track_normal.clone()]);
-                                on_close_menu.call(());
-                                return;
-                            }
-                            if let Some(queue_idx) = add_to_queue_idx
-                                && idx == queue_idx
-                            {
-                                if let Some(handler) = on_queue {
-                                    handler.call(());
-                                }
-                                return;
-                            }
-
-                            if idx == add_to_playlist_idx {
-                                on_add_to_playlist.call(());
-                            } else if remove_action_idx == Some(idx) {
-                                if let Some(handler) = on_remove_from_playlist {
-                                    handler.call(());
-                                }
-                            } else if has_download && idx == download_action_idx {
-                                if let Some(handler) = on_download {
-                                    handler.call(());
-                                }
-                            } else if idx == share_idx {
-                                let src = active_source.peek().clone();
-                                share_track(share_track_normal.clone(), src);
-                                on_close_menu.call(());
-                            } else if mix_idx == Some(idx) {
-                                if let Some(handler) = on_start_radio {
-                                    handler.call(());
-                                }
-                                on_close_menu.call(());
-                            } else if view_metadata_idx == Some(idx) {
-                                if let Some(handler) = on_view_metadata {
-                                    handler.call(());
-                                }
-                                on_close_menu.call(());
-                            } else if Some(idx) == delete_action_idx {
-                                on_delete.call(());
-                            }
-                        },
+                        on_action: on_menu_action,
                     }
                 }
             }

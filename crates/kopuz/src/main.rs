@@ -186,12 +186,14 @@ static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLoc
 /// Hand the Android trust store to rustls before anything opens a TLS
 /// connection. `rustls-platform-verifier` panics on first verification if it was
 /// never given a JVM and Context, which takes down the first sync or cover fetch.
+///
+/// Failing here is not recoverable — every HTTPS request would abort the process
+/// later, somewhere far less legible — so the caller stops startup instead.
 #[cfg(target_os = "android")]
-fn init_android_tls() {
+fn init_android_tls() -> Result<(), String> {
     let ctx = ndk_context::android_context();
     if ctx.vm().is_null() || ctx.context().is_null() {
-        tracing::error!("no android context — TLS verification will not work");
-        return;
+        return Err("no android JVM or Context on the ndk context".to_string());
     }
     // `::jni` — `dioxus::prelude::*` re-exports its own, older `jni`, and a glob
     // import shadows the extern prelude.
@@ -200,19 +202,19 @@ fn init_android_tls() {
     // handles stay valid for the lifetime of the process.
     let vm = unsafe { ::jni::JavaVM::from_raw(ctx.vm().cast()) };
     let raw_context = ctx.context().cast();
-    let result = vm.attach_current_thread(|env| {
+    vm.attach_current_thread(|env| {
         // SAFETY: `raw_context` is the Activity's global Context reference.
         let context = unsafe { ::jni::objects::JObject::from_raw(env, raw_context) };
         rustls_platform_verifier::android::init_with_env(env, context)
-    });
-    if let Err(e) = result {
-        tracing::error!(error = %e, "failed to initialize the android certificate verifier");
-    }
+    })
+    .map_err(|e: ::jni::errors::Error| e.to_string())
 }
 
 fn main() {
     #[cfg(target_os = "android")]
-    init_android_tls();
+    if let Err(e) = init_android_tls() {
+        panic!("android certificate verifier failed to initialize: {e}");
+    }
 
     #[cfg(not(target_os = "android"))]
     {
@@ -1655,15 +1657,14 @@ fn App() -> Element {
     let mut is_sidebar_collapsed = use_signal(|| cfg!(target_os = "android"));
     use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
 
-    // Anchored to where the finger landed rather than an overlay strip, which would
-    // swallow taps on whatever sits under the left edge of the page.
-    let mut edge_swipe = components::gestures::use_swipe();
-    let on_edge_swipe = move |evt: TouchEvent| {
-        const EDGE_ZONE: f64 = 28.0;
-        let from_edge = edge_swipe.origin().is_some_and(|(x, _)| x <= EDGE_ZONE);
-        if edge_swipe.finish(&evt) == Some(components::gestures::SwipeDirection::Right)
-            && from_edge
+    // Mirror of the drawer's swipe-left-to-close: a swipe right anywhere on the
+    // page opens it. Horizontal carousels swallow their own touches so scrolling
+    // one back to the start does not pull the drawer out with it.
+    let mut open_swipe = components::gestures::use_swipe();
+    let on_open_swipe = move |evt: TouchEvent| {
+        if open_swipe.finish(&evt) == Some(components::gestures::SwipeDirection::Right)
             && cfg!(target_os = "android")
+            && *is_sidebar_collapsed.peek()
         {
             is_sidebar_collapsed.set(false);
         }
@@ -2108,10 +2109,10 @@ fn App() -> Element {
             }
             div {
                 class: "{content_row_class}",
-                ontouchstart: move |evt| edge_swipe.start(&evt),
-                ontouchmove: move |evt| edge_swipe.update(&evt),
-                ontouchend: on_edge_swipe,
-                ontouchcancel: move |_| edge_swipe.reset(),
+                ontouchstart: move |evt| open_swipe.start(&evt),
+                ontouchmove: move |evt| open_swipe.update(&evt),
+                ontouchend: on_open_swipe,
+                ontouchcancel: move |_| open_swipe.reset(),
                 Sidebar {
                     current_route,
                     on_navigate: move |route| {

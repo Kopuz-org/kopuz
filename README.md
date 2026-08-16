@@ -308,12 +308,14 @@ just android-install
 
 CI reads the same values from the repository secrets `ANDROID_KEYSTORE_BASE64`
 (the keystore, base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
-and `ANDROID_KEY_PASSWORD`. Without them the release job still runs and publishes
-an unsigned APK.
+and `ANDROID_KEY_PASSWORD`. A tagged build fails outright if any of them is
+missing, so a release can never ship unsigned; validation runs on branches and
+forks build an unsigned APK instead.
 
 The Android `versionCode` is derived from the crate version as
 `major * 10000 + minor * 100 + patch`, so bumping `version` in `Cargo.toml` is
-all an update needs.
+all an update needs. Minor and patch have to stay below 100 — past that the
+fields would collide, and the build stops rather than emit a duplicate code.
 
 `packaging/fdroid/com.temidaradev.kopuz.yml` is the build recipe to submit to
 [fdroiddata](https://gitlab.com/fdroid/fdroiddata); F-Droid builds from source

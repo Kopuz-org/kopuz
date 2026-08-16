@@ -21,7 +21,7 @@ Repo: https://github.com/Kopuz-org/kopuz.git
 Builds:
   - versionName: 0.14.0
     versionCode: 1400
-    commit: v0.14.0
+    commit: 354ac3d04ee65aeec2a7bb38a2fe2a5406848143
     sudo:
       - apt-get update
       - apt-get install -y build-essential cmake pkg-config curl
@@ -32,8 +32,6 @@ Builds:
       - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
       - npm ci
       - npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css
-    gradle:
-      - yes
     output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
     build:
       - export SQLX_OFFLINE=true
