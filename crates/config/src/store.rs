@@ -161,6 +161,52 @@ impl FileLayers {
             merge_into(base, self.overrides.clone());
         }
     }
+
+    /// [`apply`](Self::apply) the layers over `base`, then deserialize the
+    /// config.
+    ///
+    /// These files are hand-written and Nix-generated, so a wrong type or a
+    /// misspelled enum variant is a normal thing to hit — and one bad key must
+    /// not cost the user every other setting. When the merged value doesn't
+    /// deserialize, the overridden keys are re-applied one at a time and the
+    /// ones that break the parse are dropped with a warning. A `base` that
+    /// can't deserialize on its own is still an error: that is the app's own
+    /// state, not something a text file caused.
+    pub fn merge_and_parse(&self, base: JsonValue) -> Result<crate::AppConfig, serde_json::Error> {
+        let mut merged = base.clone();
+        self.apply(&mut merged);
+        let error = match serde_json::from_value::<crate::AppConfig>(merged) {
+            Ok(cfg) => return Ok(cfg),
+            Err(error) => error,
+        };
+        serde_json::from_value::<crate::AppConfig>(base.clone()).map_err(|_| error)?;
+
+        let Some(overrides) = self.overrides.as_object() else {
+            return serde_json::from_value(base);
+        };
+        let mut kept = base;
+        let mut dropped: Vec<&str> = Vec::new();
+        for (key, value) in overrides {
+            let mut candidate = kept.clone();
+            merge_into(
+                &mut candidate,
+                JsonValue::Object(serde_json::Map::from_iter([(key.clone(), value.clone())])),
+            );
+            if serde_json::from_value::<crate::AppConfig>(candidate.clone()).is_ok() {
+                kept = candidate;
+            } else {
+                dropped.push(key);
+            }
+        }
+        if !dropped.is_empty() {
+            tracing::warn!(
+                path = %self.path.display(),
+                keys = %dropped.join(", "),
+                "ignoring unusable config keys from the settings file/drop-ins/env"
+            );
+        }
+        serde_json::from_value(kept)
+    }
 }
 
 /// Write the settings file from a full config JSON object (state keys are
@@ -420,6 +466,166 @@ mod tests {
         assert_eq!(restored.ytdlp_options, defaults.ytdlp_options);
     }
 
+    /// Every collection/enum/nested shape at once: the default config is
+    /// mostly empty vectors and unit enums, so it would not catch a field that
+    /// TOML can't express (array of tables, map of maps, fixed-size float
+    /// array) or one whose key ordering breaks the writer.
+    #[test]
+    fn a_fully_populated_config_round_trips_through_the_settings_file() {
+        use std::collections::HashMap;
+
+        use crate::{
+            AlbumSortField, AlbumViewMode, BackBehavior, ChannelMode, CustomTheme,
+            DeviceChangeBehavior, EqPreset, EqualizerSettings, FetchStrategy, HomeSection,
+            ListenNowStyle, OfflineQuality, PlayerBarPosition, RegistryEntry, SampleRateMode,
+            SavedLocalSource, SettingsLayout, SortCriterion, SortDirection, SortOrder,
+            TitlebarMode, UiStyle,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let cfg = AppConfig {
+            local_sources: vec![
+                SavedLocalSource {
+                    id: "local:one".into(),
+                    name: "Archive".into(),
+                    directories: vec!["/music/a".into(), "/music/b".into()],
+                },
+                SavedLocalSource {
+                    id: "local:two".into(),
+                    name: "Field recordings".into(),
+                    directories: vec![],
+                },
+            ],
+            active_source: crate::Source::LocalLibrary("local:two".into()),
+            spotify_browser: Some("brave".into()),
+            spotify_prefer_active_device: false,
+            music_directory: vec!["/music".into()],
+            theme: "custom-one".into(),
+            discord_presence: Some(false),
+            discord_presence_paused: None,
+            sort_order: SortOrder::Album,
+            album_sort: vec![
+                SortCriterion::new(AlbumSortField::Year, SortDirection::Desc),
+                SortCriterion::new(AlbumSortField::Title, SortDirection::Asc),
+            ],
+            album_view_mode: AlbumViewMode::List,
+            language: "tr".into(),
+            cover_art_darkening: 42,
+            custom_font_path: "/fonts/Inter.ttf".into(),
+            sidebar_order: vec!["home".into(), "albums".into()],
+            volume: 0.33,
+            crossfade_seconds: 7,
+            custom_themes: HashMap::from([(
+                "custom-one".to_string(),
+                CustomTheme {
+                    name: "Custom One".into(),
+                    vars: HashMap::from([
+                        ("--color-bg".to_string(), "#101010".to_string()),
+                        ("--color-fg".to_string(), "#eeeeee".to_string()),
+                    ]),
+                },
+            )]),
+            back_behavior: BackBehavior::AlwaysPrev,
+            channel_mode: ChannelMode::Mono,
+            equalizer: EqualizerSettings {
+                enabled: true,
+                preset: EqPreset::Custom,
+                bands: [-6.0, -3.5, 0.0, 1.5, 3.0, 4.5, 6.0, -1.0, -2.0, 12.0],
+                preamp_db: -2.5,
+            },
+            device_change_behavior: DeviceChangeBehavior::Resume,
+            sample_rate_mode: SampleRateMode::Source,
+            ytdlp_output_dir: "/downloads".into(),
+            titlebar_mode: TitlebarMode::System,
+            offline_quality: OfflineQuality::Original,
+            player_bar_position: PlayerBarPosition::Top,
+            ui_style: UiStyle::Vaxry,
+            settings_layout: SettingsLayout::TopBar,
+            hero_height: 420,
+            home_sections: vec![
+                HomeSection {
+                    key: "recently_played".into(),
+                    enabled: false,
+                },
+                HomeSection {
+                    key: "favorites".into(),
+                    enabled: true,
+                },
+            ],
+            listen_now_style: ListenNowStyle::Cards,
+            auto_fetch_covers: true,
+            cover_fetch_strategy: FetchStrategy::LastFmOnly,
+            radio_registries: vec![RegistryEntry {
+                url: "https://example.invalid/index.json".into(),
+                enabled: false,
+                is_default: false,
+            }],
+            pinned_stations: vec!["https://example.invalid/station.json".into()],
+            prefer_local_lyrics: true,
+            ..Default::default()
+        };
+
+        let written = save_settings_file(
+            &path,
+            &serde_json::to_value(&cfg).unwrap(),
+            &BTreeSet::new(),
+        );
+        assert!(written.unwrap(), "settings file not written");
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let mut base = serde_json::json!({});
+        layers.apply(&mut base);
+        let restored: AppConfig = serde_json::from_value(base).unwrap();
+
+        assert_eq!(restored.local_sources, cfg.local_sources);
+        assert_eq!(restored.active_source, cfg.active_source);
+        assert_eq!(restored.spotify_browser, cfg.spotify_browser);
+        assert_eq!(
+            restored.spotify_prefer_active_device,
+            cfg.spotify_prefer_active_device
+        );
+        assert_eq!(restored.music_directory, cfg.music_directory);
+        assert_eq!(restored.theme, cfg.theme);
+        assert_eq!(restored.discord_presence, cfg.discord_presence);
+        assert_eq!(restored.sort_order, cfg.sort_order);
+        assert_eq!(restored.album_sort, cfg.album_sort);
+        assert_eq!(restored.album_view_mode, cfg.album_view_mode);
+        assert_eq!(restored.language, cfg.language);
+        assert_eq!(restored.cover_art_darkening, cfg.cover_art_darkening);
+        assert_eq!(restored.custom_font_path, cfg.custom_font_path);
+        assert_eq!(restored.sidebar_order, cfg.sidebar_order);
+        assert_eq!(restored.volume, cfg.volume);
+        assert_eq!(restored.crossfade_seconds, cfg.crossfade_seconds);
+        assert_eq!(
+            serde_json::to_value(&restored.custom_themes).unwrap(),
+            serde_json::to_value(&cfg.custom_themes).unwrap()
+        );
+        assert_eq!(restored.back_behavior, cfg.back_behavior);
+        assert_eq!(restored.channel_mode, cfg.channel_mode);
+        assert_eq!(restored.equalizer, cfg.equalizer);
+        assert_eq!(restored.device_change_behavior, cfg.device_change_behavior);
+        assert_eq!(restored.sample_rate_mode, cfg.sample_rate_mode);
+        assert_eq!(restored.ytdlp_output_dir, cfg.ytdlp_output_dir);
+        assert_eq!(restored.titlebar_mode, cfg.titlebar_mode);
+        assert_eq!(restored.offline_quality, cfg.offline_quality);
+        assert_eq!(restored.player_bar_position, cfg.player_bar_position);
+        assert_eq!(restored.ui_style, cfg.ui_style);
+        assert_eq!(restored.settings_layout, cfg.settings_layout);
+        assert_eq!(restored.hero_height, cfg.hero_height);
+        assert_eq!(restored.home_sections, cfg.home_sections);
+        assert_eq!(restored.listen_now_style, cfg.listen_now_style);
+        assert_eq!(restored.auto_fetch_covers, cfg.auto_fetch_covers);
+        assert_eq!(restored.cover_fetch_strategy, cfg.cover_fetch_strategy);
+        assert_eq!(restored.radio_registries, cfg.radio_registries);
+        assert_eq!(restored.pinned_stations, cfg.pinned_stations);
+        assert_eq!(restored.prefer_local_lyrics, cfg.prefer_local_lyrics);
+
+        // `discord_presence_paused: None` has no TOML representation, so the
+        // key is absent and its serde default (`Some(true)`) comes back.
+        assert_eq!(restored.discord_presence_paused, Some(true));
+    }
+
     #[test]
     fn f32_fields_are_written_short_and_reload_identically() {
         let dir = tempfile::tempdir().unwrap();
@@ -603,6 +809,66 @@ mod tests {
         assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
         let written: toml::Table = std::fs::read_to_string(&target).unwrap().parse().unwrap();
         assert_eq!(written["theme"].as_str(), Some("default"));
+    }
+
+    /// The exact snippet the README hands to hjem users. If a rename ever makes
+    /// it stale, this fails instead of the user's first launch.
+    #[test]
+    fn the_documented_hjem_example_deserializes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(
+            &path,
+            "theme = \"gruvbox\"\nlanguage = \"en\"\ncrossfade_seconds = 3\n\n[equalizer]\nenabled = true\n",
+        )
+        .unwrap();
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let cfg = layers.merge_and_parse(serde_json::json!({})).unwrap();
+
+        assert_eq!(cfg.theme, "gruvbox");
+        assert_eq!(cfg.language, "en");
+        assert_eq!(cfg.crossfade_seconds, 3);
+        assert!(cfg.equalizer.enabled);
+        // Only `enabled` was set, so the rest of the table keeps its defaults.
+        assert_eq!(cfg.equalizer.bands, AppConfig::default().equalizer.bands);
+    }
+
+    #[test]
+    fn one_unusable_key_is_dropped_instead_of_failing_the_whole_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(
+            &path,
+            // `crossfade_seconds` wants an integer and `ui_style` a known
+            // variant — the two ways a hand-written value goes wrong.
+            "theme = \"nord\"\ncrossfade_seconds = \"loud\"\nui_style = \"Fancy\"\nlanguage = \"tr\"\n",
+        )
+        .unwrap();
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let base = serde_json::json!({ "theme": "default", "crossfade_seconds": 3 });
+        let cfg = layers.merge_and_parse(base).expect("config still loads");
+
+        assert_eq!(cfg.theme, "nord", "good keys still apply");
+        assert_eq!(cfg.language, "tr");
+        assert_eq!(cfg.crossfade_seconds, 3, "the base value survives");
+        assert_eq!(cfg.ui_style, crate::UiStyle::default());
+    }
+
+    #[test]
+    fn a_broken_base_is_still_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "theme = \"nord\"\n").unwrap();
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let base = serde_json::json!({ "volume": { "not": "a number" } });
+
+        assert!(
+            layers.merge_and_parse(base).is_err(),
+            "a corrupt blob must not be papered over — saves stay disabled"
+        );
     }
 
     #[test]

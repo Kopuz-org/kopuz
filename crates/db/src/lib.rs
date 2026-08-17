@@ -616,9 +616,8 @@ pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
     if blob.is_none() && !layers.has_overrides() {
         return None;
     }
-    let mut value = blob.unwrap_or_else(|| serde_json::json!({}));
-    layers.apply(&mut value);
-    serde_json::from_value(value).ok()
+    let value = blob.unwrap_or_else(|| serde_json::json!({}));
+    layers.merge_and_parse(value).ok()
 }
 
 /// The RELEASE database path (`kopuz.db`), independent of build profile — the

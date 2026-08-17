@@ -274,6 +274,63 @@ async fn layered_overrides_are_not_persisted_as_base_config() {
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
+/// The hand-written path end to end: a partial `settings.toml` plus a drop-in
+/// over an existing blob, with one unusable value in each. Everything the app
+/// can use applies, in precedence order, and the bad keys cost only themselves.
+#[tokio::test]
+async fn hand_written_layers_apply_over_the_blob_and_survive_bad_keys() {
+    let db_path = unique_db();
+    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let db = db::init(&db_path).await.unwrap();
+
+    let cfg = AppConfig {
+        theme: "midnight".into(),
+        language: "en".into(),
+        crossfade_seconds: 3,
+        volume: 0.8,
+        ..Default::default()
+    };
+    db.save_config(&cfg).await.unwrap();
+
+    std::fs::write(
+        &settings_path,
+        "theme = \"nord\"\nlanguage = \"tr\"\ncrossfade_seconds = \"loud\"\n",
+    )
+    .unwrap();
+    let dropin_dir = config::store::dropin_dir_for(&settings_path);
+    std::fs::create_dir_all(&dropin_dir).unwrap();
+    std::fs::write(
+        dropin_dir.join("20-theme.toml"),
+        "theme = \"dracula\"\nui_style = \"Fancy\"\n",
+    )
+    .unwrap();
+
+    let loaded = db.load_config().await.unwrap().expect("config present");
+    assert_eq!(loaded.theme, "dracula", "the drop-in out-ranks the file");
+    assert_eq!(loaded.language, "tr", "the file out-ranks the blob");
+    assert_eq!(loaded.volume, 0.8, "untouched keys come from the blob");
+    assert_eq!(
+        loaded.crossfade_seconds, 3,
+        "a bad value falls back to the stored one, not to the default"
+    );
+    assert_eq!(loaded.ui_style, config::UiStyle::default());
+
+    // Saving on top of that doesn't corrupt the hand-written file: the pinned
+    // drop-in key keeps the file's own value and the rest mirrors normally.
+    let mut cfg = loaded;
+    cfg.volume = 0.25;
+    db.save_config(&cfg).await.unwrap();
+    let written: toml::Table = std::fs::read_to_string(&settings_path)
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(written["theme"].as_str(), Some("nord"));
+    assert_eq!(written["language"].as_str(), Some("tr"));
+    assert_eq!(written["volume"].as_float(), Some(0.25));
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
 async fn open(db_path: &std::path::Path) -> SqliteConnection {
     SqliteConnectOptions::new()
         .filename(db_path)

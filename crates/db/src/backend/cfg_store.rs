@@ -42,12 +42,11 @@ pub async fn load_config(
         return Ok(None);
     }
 
-    let mut value: serde_json::Value = match &json {
+    let value: serde_json::Value = match &json {
         Some(json) => serde_json::from_str(json)?,
         None => serde_json::json!({}),
     };
-    layers.apply(&mut value);
-    let mut cfg: AppConfig = serde_json::from_value(value)?;
+    let mut cfg: AppConfig = layers.merge_and_parse(value)?;
     // The in-memory shape migrations the legacy file load used to run.
     cfg.migrate_home_sections();
     cfg.migrate_sidebar_order();
