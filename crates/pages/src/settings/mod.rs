@@ -179,6 +179,13 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
 
+            if try_consume_context::<config::store::FileLayers>().is_some_and(|layers| !layers.locked_keys.is_empty()) {
+                aside { class: "mb-4 rounded-xl border border-white/10 bg-white/5 px-5 py-3 flex items-center gap-3",
+                    i { class: "fa-solid fa-lock text-white/40 text-sm shrink-0" }
+                    p { class: "text-sm text-white/70", "{i18n::t(\"settings_managed_notice\")}" }
+                }
+            }
+
             div { class: "settings-workspace",
                 SettingsNavigation {
                     selected: active_category(),
@@ -200,6 +207,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("language").to_string(),
+                            config_key: "language",
                             control: rsx! {
                                 LanguageSelector {
                                     current_language: config.read().language.clone(),
@@ -215,6 +223,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("appearance").to_string(),
+                            config_key: "theme",
                             control: rsx! {
                                 ThemeSelector {
                                     current_theme: config.read().theme.clone(),
@@ -230,6 +239,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         {
                             SettingItem {
                                 title: i18n::t("live_theme_file").to_string(),
+                                config_key: "live_theme_path",
                                 control: rsx! {
                                     div { class: "flex items-center gap-2",
                                         span {
@@ -267,6 +277,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
                         SettingItem {
                             title: i18n::t("cover_art_background").to_string(),
+                            config_key: "cover_art_background",
                             control: rsx! {
                                 ToggleSetting {
                                     enabled: config.read().cover_art_background,
@@ -277,6 +288,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         if cfg!(not(target_os = "android")) {
                             SettingItem {
                                 title: i18n::t("custom_background").to_string(),
+                                config_key: "custom_background_path",
                                 control: rsx! {
                                     div { class: "flex items-center gap-2",
                                         if !config.read().custom_background_path.is_empty() {
@@ -314,6 +326,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         if cfg!(not(target_os = "android")) {
                             SettingItem {
                                 title: i18n::t("custom_font").to_string(),
+                                config_key: "custom_font_path",
                                 control: rsx! {
                                     div { class: "flex items-center gap-2",
                                         if !config.read().custom_font_path.is_empty() {
@@ -353,6 +366,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         {
                                 SettingItem {
                                     title: i18n::t("cover_art_darkening").to_string(),
+                                    config_key: "cover_art_darkening",
                                     control: rsx! {
                                         div { class: "flex items-center gap-3 min-w-[220px]",
                                             input {
@@ -378,6 +392,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                                 SettingItem {
                                     title: i18n::t("cover_art_blur").to_string(),
+                                    config_key: "cover_art_blur",
                                     control: rsx! {
                                         div { class: "flex items-center gap-3 min-w-[220px]",
                                             input {
@@ -407,6 +422,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     if active_category() == SettingsCategory::Library {
                         SettingItem {
                             title: i18n::t("local_libraries").to_string(),
+                            config_key: "music_directory",
                             control: rsx! {
                                 LocalSourceSettings {
                                     active_source: config.read().active_source.clone(),
@@ -553,6 +569,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("reduce_animations").to_string(),
+                            config_key: "reduce_animations",
                             control: rsx! {
                                 ToggleSetting {
                                     enabled: config.read().reduce_animations,
@@ -563,6 +580,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         if cfg!(not(target_os = "android")) {
                             SettingItem {
                                 title: i18n::t("fullscreen_use_player_bar").to_string(),
+                                config_key: "fullscreen_use_player_bar",
                                 control: rsx! {
                                     ToggleSetting {
                                         enabled: config.read().fullscreen_use_player_bar,
@@ -575,6 +593,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     if active_category() == SettingsCategory::General {
                         SettingItem {
                             title: i18n::t("auto_check_updates").to_string(),
+                            config_key: "auto_check_updates",
                             control: rsx! {
                                 ToggleSetting {
                                     enabled: config.read().auto_check_updates,
@@ -585,6 +604,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         if cfg!(not(target_os = "android")) {
                             SettingItem {
                                 title: i18n::t("minimize_to_tray").to_string(),
+                                config_key: "minimize_to_tray",
                                 control: rsx! {
                                     ToggleSetting {
                                         enabled: config.read().minimize_to_tray,
@@ -597,6 +617,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("show_source_toggle").to_string(),
+                            config_key: "show_source_toggle",
                                 control: rsx! {
                                 ToggleSetting {
                                     enabled: config.read().show_source_toggle,
@@ -608,6 +629,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("show_row_images").to_string(),
+                            config_key: "show_row_images",
                             control: rsx! {
                                 ToggleSetting {
                                     enabled: config.read().show_row_images,
@@ -620,6 +642,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         if cfg!(any(target_os = "linux", target_os = "windows")) {
                             SettingItem {
                                 title: i18n::t("titlebar_mode").to_string(),
+                                config_key: "titlebar_mode",
                                 control: rsx! {
                                     {
                                         let current_mode = config.read().titlebar_mode;
@@ -643,6 +666,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
                         SettingItem {
                             title: i18n::t("ui_style").to_string(),
+                            config_key: "ui_style",
                             control: rsx! {
                                 {
                                     let current_style = config.read().ui_style;
@@ -664,6 +688,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
                         SettingItem {
                             title: i18n::t("player_bar_position").to_string(),
+                            config_key: "player_bar_position",
                             control: rsx! {
                                 {
                                     let current_position = config.read().player_bar_position;
@@ -685,6 +710,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
                         SettingItem {
                             title: i18n::t("settings_layout").to_string(),
+                            config_key: "settings_layout",
                             control: rsx! {
                                 {
                                     let current_layout = config.read().settings_layout;
@@ -708,6 +734,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     if active_category() == SettingsCategory::General {
                         SettingItem {
                             title: i18n::t("back_behavior").to_string(),
+                            config_key: "back_behavior",
                             control: rsx! {
                                 BackBehaviorSelector {
                                     current: config.read().back_behavior,

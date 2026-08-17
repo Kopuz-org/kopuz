@@ -517,3 +517,5 @@ spotify_connect_device_other = Inne urządzenie
 spotify_connect_device_this = Ta aplikacja
 spotify_play_on = Odtwarzaj na
 spotify_this_app = kopuz (ta aplikacja)
+settings_managed_notice = Niektóre ustawienia są zarządzane przez konfigurację systemu (Nix/hjem) i nie można ich tutaj zmienić.
+setting_managed_by_system = Zarządzane przez konfigurację systemu

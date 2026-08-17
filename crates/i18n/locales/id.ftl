@@ -511,3 +511,5 @@ spotify_connect_device_other = Perangkat lain
 spotify_connect_device_this = Aplikasi ini
 spotify_play_on = Putar di
 spotify_this_app = kopuz (aplikasi ini)
+settings_managed_notice = Beberapa pengaturan dikelola oleh konfigurasi sistem (Nix/hjem) dan tidak dapat diubah di sini.
+setting_managed_by_system = Dikelola oleh konfigurasi sistem

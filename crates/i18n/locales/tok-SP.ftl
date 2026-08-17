@@ -518,3 +518,5 @@ spotify_connect_device_other = ilo ante
 spotify_connect_device_this = ilo ni
 spotify_play_on = o kalama lon
 spotify_this_app = kopuz (ilo ni)
+settings_managed_notice = nasin ilo mute li lawa tan nasin pi ilo suli (Nix/hjem) la sina ken ala ante e ona lon ni.
+setting_managed_by_system = nasin pi ilo suli li lawa e ni

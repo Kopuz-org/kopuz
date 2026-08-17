@@ -202,6 +202,60 @@ in {
 }
 ```
 
+#### Declarative configuration (hjem)
+
+Kopuz reads its settings from `~/.config/kopuz/settings.toml`, so you can
+manage them declaratively by linking that file with
+[hjem](https://github.com/feel-co/hjem):
+
+```nix
+{
+  hjem.users.alice.files.".config/kopuz/settings.toml".source =
+    (pkgs.formats.toml {}).generate "kopuz-settings.toml" {
+      theme = "gruvbox";
+      language = "en";
+      crossfade_seconds = 3;
+      equalizer.enabled = true;
+    };
+}
+```
+
+Or inline, without the `pkgs.formats` helper:
+
+```nix
+{
+  hjem.users.alice.files.".config/kopuz/settings.toml".text = ''
+    theme = "gruvbox"
+    language = "en"
+    crossfade_seconds = 3
+
+    [equalizer]
+    enabled = true
+  '';
+}
+```
+
+hjem links the file out of the Nix store, and Kopuz detects that it is
+immutable (a store symlink or read-only) and never writes to it. If Kopuz has
+already run once, remove the `settings.toml` it wrote (or turn on hjem's
+clobber option) so activation can replace it with the link. Keys you set
+there always win and show up grayed out in the settings UI; everything you
+leave out remains freely changeable in-app (runtime state keeps persisting in
+`kopuz.db`).
+
+To try config changes without a rebuild, use either of the ad-hoc override
+layers, both of which out-rank `settings.toml`:
+
+- **Drop-ins:** any `*.toml` in `~/.config/kopuz/settings.d/`, applied in
+  lexicographic order.
+- **Environment variables:** `KOPUZ_CONFIG_<FIELD>=value`, e.g.
+  `KOPUZ_CONFIG_THEME=nord kopuz`. Field names match `settings.toml` keys
+  uppercased; nest tables with `__` (`KOPUZ_CONFIG_EQUALIZER__ENABLED=true`).
+  Values are parsed as TOML (`3`, `true`, `["/a", "/b"]`), falling back to
+  plain strings.
+
+`KOPUZ_CONFIG_PATH` relocates the settings file itself.
+
 ### AUR (Arch Linux)
 
 Install from the AUR using your preferred helper:
@@ -441,11 +495,14 @@ xattr -d com.apple.quarantine /Applications/Kopuz.app
 
 ### Where does Kopuz keep its files?
 
-Your settings, scanned library, playlists, and favorites all live in a single
-**SQLite** database, `kopuz.db`, in the config directory. Album art and
-downloaded tracks stay on disk in the cache directory. (Debug builds use a
-separate `kopuz-debug.db` so `dx serve` never touches your real data. You can
-override the DB location with the `KOPUZ_DB_PATH` env var.)
+Your scanned library, playlists, favorites, and runtime state live in a single
+**SQLite** database, `kopuz.db`, in the config directory. Settings are
+mirrored to a human-editable `settings.toml` next to it — hand-edits (and
+hjem-managed values, see the hjem section above) apply on the next launch.
+Album art and downloaded tracks stay on disk in the cache directory. (Debug
+builds use a separate `kopuz-debug.db` and `settings-debug.toml` so `dx serve`
+never touches your real data. You can override the DB location with the
+`KOPUZ_DB_PATH` env var and the settings file with `KOPUZ_CONFIG_PATH`.)
 
 On **macOS**:
 

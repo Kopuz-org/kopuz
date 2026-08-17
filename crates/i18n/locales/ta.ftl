@@ -511,3 +511,5 @@ spotify_connect_device_other = வேறு சாதனம்
 spotify_connect_device_this = இந்த ஆப்
 spotify_play_on = இதில் இயக்கு
 spotify_this_app = kopuz (இந்த ஆப்)
+settings_managed_notice = சில அமைப்புகள் கணினி உள்ளமைவால் (Nix/hjem) நிர்வகிக்கப்படுகின்றன; அவற்றை இங்கே மாற்ற முடியாது.
+setting_managed_by_system = கணினி உள்ளமைவால் நிர்வகிக்கப்படுகிறது

@@ -155,6 +155,75 @@ async fn named_local_source_round_trips_as_active() {
     );
 }
 
+#[tokio::test]
+async fn settings_file_mirrors_saves_and_overrides_the_blob_on_load() {
+    let db_path = unique_db();
+    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let db = db::init(&db_path).await.unwrap();
+
+    let cfg = AppConfig {
+        theme: "midnight".into(),
+        ..Default::default()
+    };
+    db.save_config(&cfg).await.unwrap();
+
+    // The save mirrored the settings into the standalone file.
+    let text = std::fs::read_to_string(&settings_path).expect("settings file written");
+    let mut written: toml::Table = text.parse().unwrap();
+    assert_eq!(written["theme"].as_str(), Some("midnight"));
+
+    // A hand-edit (or hjem-managed value) in the file wins over the blob.
+    written.insert("theme".into(), "nord".into());
+    std::fs::write(&settings_path, written.to_string()).unwrap();
+    let loaded = db.load_config().await.unwrap().expect("config present");
+    assert_eq!(loaded.theme, "nord");
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+// The allow is for cleanup only: re-enabling write on our own temp file so the
+// temp dir can be removed.
+#[allow(clippy::permissions_set_readonly_false)]
+#[tokio::test]
+async fn managed_settings_file_is_never_written_but_still_applies() {
+    let db_path = unique_db();
+    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    std::fs::write(&settings_path, "theme = \"nord\"\nvolume = 0.25\n").unwrap();
+    let mut perms = std::fs::metadata(&settings_path).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&settings_path, perms).unwrap();
+
+    let db = db::init(&db_path).await.unwrap();
+
+    // No blob yet: the file layers alone configure the app.
+    let loaded = db
+        .load_config()
+        .await
+        .unwrap()
+        .expect("file layers present");
+    assert_eq!(loaded.theme, "nord");
+    assert_eq!(loaded.volume, 0.25);
+
+    // Saving persists to the blob and leaves the immutable file untouched;
+    // its keys keep overriding what the UI changed.
+    let mut cfg = loaded;
+    cfg.theme = "dracula".into();
+    cfg.crossfade_seconds = 4;
+    db.save_config(&cfg).await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&settings_path).unwrap(),
+        "theme = \"nord\"\nvolume = 0.25\n"
+    );
+    let reloaded = db.load_config().await.unwrap().expect("config present");
+    assert_eq!(reloaded.theme, "nord", "managed key wins over the blob");
+    assert_eq!(reloaded.crossfade_seconds, 4, "unmanaged key persists");
+
+    let mut perms = std::fs::metadata(&settings_path).unwrap().permissions();
+    perms.set_readonly(false);
+    let _ = std::fs::set_permissions(&settings_path, perms);
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
 async fn open(db_path: &std::path::Path) -> SqliteConnection {
     SqliteConnectOptions::new()
         .filename(db_path)

@@ -14,6 +14,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
             if !cfg!(target_os = "android") {
                 SettingItem {
                     title: i18n::t("discord_presence").to_string(),
+                    config_key: "discord_presence",
                     control: rsx! {
                         DiscordPresenceSettings {
                             enabled: config.read().discord_presence.unwrap_or(true),
@@ -24,6 +25,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                 if config.read().discord_presence.unwrap_or(true) {
                     SettingItem {
                         title: i18n::t("discord_presence_paused").to_string(),
+                        config_key: "discord_presence_paused",
                         control: rsx! {
                             DiscordPresencePausedSettings {
                                 enabled: config.read().discord_presence_paused.unwrap_or(true),
@@ -33,6 +35,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                     }
                     SettingItem {
                         title: i18n::t("discord_presence_source").to_string(),
+                        config_key: "discord_presence_source",
                         control: rsx! {
                             ToggleSetting {
                                 enabled: config.read().discord_presence_source.unwrap_or(true),
@@ -44,6 +47,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("listenbrainz").to_string(),
+                config_key: "musicbrainz_token",
                 control: rsx! {
                     MusicBrainzSettings {
                         current: config.read().musicbrainz_token.clone(),
@@ -55,6 +59,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("lastfm").to_string(),
+                config_key: "lastfm_api_key",
                 control: rsx! {
                     LastFmSettings {
                         api_key: config.read().lastfm_api_key.clone(),
@@ -74,6 +79,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("librefm").to_string(),
+                config_key: "librefm_session_key",
                 control: rsx! {
                     LibreFmSettings {
                         session_key: config.read().librefm_session_key.clone(),
@@ -93,6 +99,7 @@ pub(super) fn DownloadsSection(mut config: Signal<AppConfig>) -> Element {
         SettingsSection { title: i18n::t("offline_downloads").to_string(),
             SettingItem {
                 title: i18n::t("download_quality").to_string(),
+                config_key: "offline_quality",
                 control: rsx! {
                     select {
                         class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
@@ -119,6 +126,7 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
         SettingsSection { title: i18n::t("metadata").to_string(),
             SettingItem {
                 title: i18n::t("auto_fetch_covers").to_string(),
+                config_key: "auto_fetch_covers",
                 control: rsx! {
                     ToggleSetting {
                         enabled: config.read().auto_fetch_covers,
@@ -128,6 +136,7 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("prefer_local_lyrics").to_string(),
+                config_key: "prefer_local_lyrics",
                 control: rsx! {
                     ToggleSetting {
                         enabled: config.read().prefer_local_lyrics,
@@ -137,6 +146,7 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("enable_musixmatch_lyrics").to_string(),
+                config_key: "enable_musixmatch_lyrics",
                 control: rsx! {
                     ToggleSetting {
                         enabled: config.read().enable_musixmatch_lyrics,
@@ -146,6 +156,7 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("cover_fetch_strategy").to_string(),
+                config_key: "cover_fetch_strategy",
                 control: rsx! {
                     {
                         let current = config.read().cover_fetch_strategy;
@@ -202,6 +213,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
         SettingsSection { title: i18n::t("player_settings").to_string(),
             SettingItem {
                 title: i18n::t("crossfade").to_string(),
+                config_key: "crossfade_seconds",
                 control: rsx! {
                     div { class: "flex items-center gap-3 min-w-[220px]",
                         input {
@@ -227,6 +239,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("volume_scroll_step").to_string(),
+                config_key: "volume_scroll_step",
                 control: rsx! {
                     div { class: "flex items-center gap-3 min-w-[220px]",
                         input {
@@ -253,6 +266,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("channel_mode").to_string(),
+                config_key: "channel_mode",
                 control: rsx! {
                     ChannelModeSelector {
                         current: config.read().channel_mode,
@@ -265,6 +279,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("device_change_behavior").to_string(),
+                config_key: "device_change_behavior",
                 control: rsx! {
                     DeviceChangeBehaviorSelector {
                         current: config.read().device_change_behavior,
@@ -277,6 +292,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("sample_rate_mode").to_string(),
+                config_key: "sample_rate_mode",
                 control: rsx! {
                     SampleRateModeSelector {
                         current: config.read().sample_rate_mode,

@@ -14,11 +14,39 @@ use tracing::Instrument;
 static APP_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[component]
-pub fn SettingItem(title: String, control: Element) -> Element {
+pub fn SettingItem(
+    title: String,
+    control: Element,
+    /// The top-level `AppConfig` field this row edits. When the field is
+    /// pinned by a managed config layer (Nix/hjem file, drop-in, env var),
+    /// the row renders locked. Empty = never locked.
+    #[props(default)]
+    config_key: String,
+) -> Element {
+    let locked = !config_key.is_empty()
+        && try_consume_context::<config::store::FileLayers>()
+            .is_some_and(|layers| layers.is_locked(&config_key));
     rsx! {
         div { class: "settings-row flex items-center justify-between gap-5 px-5 py-2.5",
-            p { class: "min-w-0 text-sm text-white/90 font-medium", "{title}" }
-            {control}
+            div { class: "min-w-0 flex items-center gap-2",
+                p { class: "min-w-0 text-sm text-white/90 font-medium", "{title}" }
+                if locked {
+                    i {
+                        class: "fa-solid fa-lock text-[10px] text-white/40",
+                        title: i18n::t("setting_managed_by_system"),
+                    }
+                }
+            }
+            if locked {
+                div {
+                    class: "opacity-50 pointer-events-none select-none",
+                    aria_disabled: true,
+                    title: i18n::t("setting_managed_by_system"),
+                    {control}
+                }
+            } else {
+                {control}
+            }
         }
     }
 }
