@@ -421,6 +421,15 @@ pub async fn resolve_and_decrypt(
         playback.kid_base64
     );
 
+    // The bytes don't depend on the licence — the asset URL is already in hand and
+    // the CDM is only needed to *read* what arrives.
+    let downloading = {
+        let url = playback.file_url.clone();
+        let token = media_user_token.to_string();
+        tracing::info!("am.stream: downloading encrypted fMP4 from {url}");
+        tokio::spawn(async move { download_asset(&url, &token).await })
+    };
+
     // Borrow the CDM from an installed browser. Its device key stays sealed, so
     // no key material ships with kopuz.
     let cdm = super::widevine::Cdm::open_system().await?;
@@ -451,12 +460,11 @@ pub async fn resolve_and_decrypt(
 
     drop(license);
 
-    tracing::info!(
-        "am.stream: downloading encrypted fMP4 from {}",
-        playback.file_url
-    );
-
-    let encrypted_bytes = download_asset(&playback.file_url, media_user_token).await?;
+    // By here the download has usually had the licence round-trip to run in, so
+    // this is often already finished.
+    let encrypted_bytes = downloading
+        .await
+        .map_err(|e| format!("download task: {e}"))??;
 
     tracing::info!(
         "am.stream: downloaded {} bytes, decrypting through the CDM",
