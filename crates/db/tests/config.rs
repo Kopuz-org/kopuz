@@ -224,6 +224,56 @@ async fn managed_settings_file_is_never_written_but_still_applies() {
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
+/// A value a higher layer pins is not the user's choice, so a save must not
+/// bake it into the blob or the settings file: removing the layer has to
+/// restore what was configured before. Uses a drop-in rather than
+/// `KOPUZ_CONFIG_THEME` — same locked-key path, without mutating the process
+/// environment out from under the other tests in this binary.
+#[tokio::test]
+async fn layered_overrides_are_not_persisted_as_base_config() {
+    let db_path = unique_db();
+    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let db = db::init(&db_path).await.unwrap();
+
+    let cfg = AppConfig {
+        theme: "midnight".into(),
+        ..Default::default()
+    };
+    db.save_config(&cfg).await.unwrap();
+
+    let dropin_dir = config::store::dropin_dir_for(&settings_path);
+    std::fs::create_dir_all(&dropin_dir).unwrap();
+    std::fs::write(dropin_dir.join("10-theme.toml"), "theme = \"nord\"\n").unwrap();
+
+    let loaded = db.load_config().await.unwrap().expect("config present");
+    assert_eq!(loaded.theme, "nord", "the drop-in applies");
+
+    // Change something unrelated while the override is in force.
+    let mut cfg = loaded;
+    cfg.volume = 0.42;
+    db.save_config(&cfg).await.unwrap();
+
+    let written: toml::Table = std::fs::read_to_string(&settings_path)
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        written["theme"].as_str(),
+        Some("midnight"),
+        "the drop-in's theme leaked into the settings file"
+    );
+
+    std::fs::remove_dir_all(&dropin_dir).unwrap();
+    let reloaded = db.load_config().await.unwrap().expect("config present");
+    assert_eq!(
+        reloaded.theme, "midnight",
+        "removing the drop-in must restore the configured theme"
+    );
+    assert_eq!(reloaded.volume, 0.42, "unpinned key persists");
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
 async fn open(db_path: &std::path::Path) -> SqliteConnection {
     SqliteConnectOptions::new()
         .filename(db_path)

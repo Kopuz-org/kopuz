@@ -60,6 +60,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
             SettingItem {
                 title: i18n::t("lastfm").to_string(),
                 config_key: "lastfm_api_key",
+                extra_config_keys: vec!["lastfm_api_secret", "lastfm_session_key"],
                 control: rsx! {
                     LastFmSettings {
                         api_key: config.read().lastfm_api_key.clone(),
@@ -303,16 +304,20 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                     }
                 }
             }
-            div { class: "px-5 py-4",
-                p { class: "text-sm text-white/90 font-medium mb-3", "{i18n::t(\"equalizer\")}" }
-                EqualizerPanel {
-                    current: config.read().equalizer.clone(),
-                    on_preview: move |equalizer: config::EqualizerSettings| {
-                        ctrl.player.peek().set_equalizer(equalizer);
-                    },
-                    on_commit: move |equalizer: config::EqualizerSettings| {
-                        config.write().equalizer = equalizer.clone();
-                        ctrl.player.peek().set_equalizer(equalizer);
+            SettingItem {
+                title: i18n::t("equalizer").to_string(),
+                config_key: "equalizer",
+                stacked: true,
+                control: rsx! {
+                    EqualizerPanel {
+                        current: config.read().equalizer.clone(),
+                        on_preview: move |equalizer: config::EqualizerSettings| {
+                            ctrl.player.peek().set_equalizer(equalizer);
+                        },
+                        on_commit: move |equalizer: config::EqualizerSettings| {
+                            config.write().equalizer = equalizer.clone();
+                            ctrl.player.peek().set_equalizer(equalizer);
+                        }
                     }
                 }
             }

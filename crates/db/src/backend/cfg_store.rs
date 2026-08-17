@@ -12,7 +12,10 @@
 //! env, see `config::store`): its keys override the blob on load, and every
 //! save mirrors the settings back into it — unless it is Nix-managed
 //! (immutable), in which case the blob alone keeps persisting runtime state
-//! and the file's keys simply keep winning.
+//! and the file's keys simply keep winning. Keys a layer the app cannot write
+//! pins (managed file, drop-in, env) are excluded from both persisted forms:
+//! their value belongs to the layer, so saving it as base config would keep it
+//! applying once the layer is removed.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -188,6 +191,7 @@ pub async fn save_config(
     // cost hundreds of statements — the downloads-stutter bug.
 
     // Store the blob, stripped of creds/servers/counts, stamped with the active id.
+    let layers = config::store::FileLayers::read(settings_path);
     let mut blob = serde_json::to_value(cfg)?;
     if let Some(obj) = blob.as_object_mut() {
         obj.remove("server");
@@ -203,6 +207,27 @@ pub async fn save_config(
             },
         );
     }
+    // A key pinned by an unwritable layer holds that layer's value, merged in
+    // by `load_config` — persisting it would make the override the base config
+    // and keep it applying after the layer is gone. Keep what the blob had.
+    if !layers.locked_keys.is_empty() {
+        let prior: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
+            .fetch_optional(&mut *tx)
+            .await?;
+        let prior: serde_json::Value = prior
+            .as_deref()
+            .and_then(|json| serde_json::from_str(json).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(obj) = blob.as_object_mut() {
+            for key in &layers.locked_keys {
+                match prior.get(key.as_str()) {
+                    Some(value) => obj.insert(key.clone(), value.clone()),
+                    None => obj.remove(key.as_str()),
+                };
+            }
+        }
+    }
+
     let blob_str = serde_json::to_string(&blob)?;
     sqlx::query!(
         "INSERT INTO app_config (id, json) VALUES (1, ?1) \
@@ -217,7 +242,7 @@ pub async fn save_config(
     // Mirror the settings into the standalone file too (skipped when it is
     // Nix-managed). Best-effort: the DB save above already succeeded, and a
     // missing file write only means the blob's values apply on next load.
-    if let Err(e) = config::store::save_settings_file(settings_path, &blob) {
+    if let Err(e) = config::store::save_settings_file(settings_path, &blob, &layers.locked_keys) {
         tracing::warn!(path = %settings_path.display(), "failed to write settings file: {e}");
     }
 

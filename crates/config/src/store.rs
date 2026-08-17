@@ -167,7 +167,15 @@ impl FileLayers {
 /// stripped first), atomically via a sibling temp file. Returns `false`
 /// without touching anything when the file is managed — an immutable config
 /// is never written (issue #530).
-pub fn save_settings_file(settings_path: &Path, cfg_json: &JsonValue) -> std::io::Result<bool> {
+///
+/// `locked_keys` are the fields a higher layer pins ([`FileLayers::locked_keys`]):
+/// their in-memory value came from that layer, not from the user, so the file
+/// keeps whatever it already held for them.
+pub fn save_settings_file(
+    settings_path: &Path,
+    cfg_json: &JsonValue,
+    locked_keys: &BTreeSet<String>,
+) -> std::io::Result<bool> {
     if is_managed(settings_path, NIX_STORE_PREFIX) {
         tracing::debug!(path = %settings_path.display(), "settings file is managed; skipping write");
         return Ok(false);
@@ -181,6 +189,18 @@ pub fn save_settings_file(settings_path: &Path, cfg_json: &JsonValue) -> std::io
     };
     for key in STATE_KEYS {
         obj.remove(*key);
+    }
+    // A pinned key's value in `cfg_json` is the layer's, merged in on load.
+    // Writing it back would bake the override into the base file, so it would
+    // keep applying once the drop-in/env layer is gone.
+    if !locked_keys.is_empty() {
+        let existing = read_toml_table(settings_path).unwrap_or_default();
+        for key in locked_keys {
+            match existing.get(key) {
+                Some(value) => obj.insert(key.clone(), value.clone()),
+                None => obj.remove(key),
+            };
+        }
     }
     let table = match json_to_toml(&cfg) {
         Some(TomlValue::Table(table)) => table,
@@ -382,7 +402,7 @@ mod tests {
         let path = dir.path().join("settings.toml");
         let cfg_json = serde_json::to_value(AppConfig::default()).unwrap();
 
-        assert!(save_settings_file(&path, &cfg_json).unwrap());
+        assert!(save_settings_file(&path, &cfg_json, &BTreeSet::new()).unwrap());
 
         let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
         let mut base = serde_json::json!({});
@@ -410,7 +430,12 @@ mod tests {
             ..Default::default()
         };
 
-        save_settings_file(&path, &serde_json::to_value(&cfg).unwrap()).unwrap();
+        save_settings_file(
+            &path,
+            &serde_json::to_value(&cfg).unwrap(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
 
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
@@ -435,7 +460,7 @@ mod tests {
             .insert("track".into(), "/tmp/x.mp3".into());
         let cfg_json = serde_json::to_value(&cfg).unwrap();
 
-        save_settings_file(&path, &cfg_json).unwrap();
+        save_settings_file(&path, &cfg_json, &BTreeSet::new()).unwrap();
 
         let written: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
         for key in STATE_KEYS {
@@ -537,7 +562,7 @@ mod tests {
         assert!(layers.is_locked("theme"));
 
         let cfg_json = serde_json::to_value(AppConfig::default()).unwrap();
-        assert!(!save_settings_file(&path, &cfg_json).unwrap());
+        assert!(!save_settings_file(&path, &cfg_json, &BTreeSet::new()).unwrap());
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "theme = \"nord\"\n"
@@ -573,7 +598,7 @@ mod tests {
         std::os::unix::fs::symlink(&target, &link).unwrap();
 
         let cfg_json = serde_json::to_value(AppConfig::default()).unwrap();
-        assert!(save_settings_file(&link, &cfg_json).unwrap());
+        assert!(save_settings_file(&link, &cfg_json, &BTreeSet::new()).unwrap());
 
         assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
         let written: toml::Table = std::fs::read_to_string(&target).unwrap().parse().unwrap();

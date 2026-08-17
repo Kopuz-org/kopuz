@@ -423,6 +423,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         SettingItem {
                             title: i18n::t("local_libraries").to_string(),
                             config_key: "music_directory",
+                            extra_config_keys: vec!["local_sources"],
                             control: rsx! {
                                 LocalSourceSettings {
                                     active_source: config.read().active_source.clone(),
