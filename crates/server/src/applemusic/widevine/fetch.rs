@@ -514,7 +514,7 @@ mod tests {
             .await
             .expect("the fetched CDM should load");
         let session = cdm.begin_license().await;
-        let challenge = cdm
+        let (challenge, _cdm_session) = cdm
             .challenge(&session, &super::super::build_pssh(&[0x11u8; 16]))
             .expect("the fetched CDM should produce a license challenge");
         assert!(

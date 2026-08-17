@@ -76,6 +76,7 @@ class Host : public Host_11 {
   bool rejected = false;
   std::string error;
   bool keys_changed = false;
+  bool session_closed = false;
   bool resolved = false;
   std::vector<std::pair<int64_t, void*>> timers;
 
@@ -118,7 +119,7 @@ class Host : public Host_11 {
     keys_changed = true;
   }
   void OnExpirationChange(const char*, uint32_t, Time) override {}
-  void OnSessionClosed(const char*, uint32_t) override {}
+  void OnSessionClosed(const char*, uint32_t) override { session_closed = true; }
   void SendPlatformChallenge(const char*, uint32_t, const char*, uint32_t) override {}
   void EnableOutputProtection(uint32_t) override {}
   void QueryOutputProtectionStatus() override {}
@@ -176,29 +177,59 @@ int wv_open(const char* so_path) {
 }
 
 // init_data is a CENC pssh box. Returns the license challenge in *out.
+// Opens a CDM session and returns its licence challenge plus the session id.
+//
+// The id is the caller's to keep: the CDM holds one set of content keys per
+// session and picks between them by key id, so a track can only be decrypted
+// while its session is open. Closing them is wv_close's job, once the track is
+// done — not here.
 int wv_challenge(const uint8_t* init_data, uint32_t len, uint8_t** out, uint32_t* out_len,
-                 uint32_t* out_type) {
+                 uint32_t* out_type, uint8_t** out_sid, uint32_t* out_sid_len) {
   if (!g_host || !g_host->cdm) return 10;
   g_host->got_message = false;
   g_host->rejected = false;
   g_host->message_type = 0;
   g_host->challenge.clear();
+  g_host->session_id.clear();
   g_host->cdm->CreateSessionAndGenerateRequest(1, SessionType::kTemporary, InitDataType::kCenc,
                                                init_data, len);
   for (int i = 0; i < 500 && !g_host->got_message && !g_host->rejected; ++i) g_host->fire_timers();
   if (g_host->rejected) return 11;
   if (!g_host->got_message) return 12;
+  if (g_host->session_id.empty()) return 14;
   if (out_type) *out_type = g_host->message_type;
-  return emit(g_host->challenge.data(), g_host->challenge.size(), out, out_len) ? 0 : 13;
+  if (!emit(reinterpret_cast<const uint8_t*>(g_host->session_id.data()),
+            g_host->session_id.size(), out_sid, out_sid_len)) {
+    return 13;
+  }
+  if (!emit(g_host->challenge.data(), g_host->challenge.size(), out, out_len)) {
+    free(*out_sid);
+    *out_sid = nullptr;
+    return 13;
+  }
+  return 0;
+}
+
+// Release a session and the keys it holds. Anything still decrypting against
+// those keys must be finished first.
+int wv_close(const uint8_t* sid, uint32_t sid_len) {
+  if (!g_host || !g_host->cdm) return 40;
+  g_host->session_closed = false;
+  g_host->rejected = false;
+  g_host->cdm->CloseSession(3, reinterpret_cast<const char*>(sid), sid_len);
+  for (int i = 0; i < 500 && !g_host->session_closed && !g_host->rejected; ++i) {
+    g_host->fire_timers();
+  }
+  if (g_host->rejected) return 41;
+  return g_host->session_closed ? 0 : 42;
 }
 
 // Feed the license response back so the CDM learns the content keys.
-int wv_update(const uint8_t* license, uint32_t len) {
+int wv_update(const uint8_t* sid, uint32_t sid_len, const uint8_t* license, uint32_t len) {
   if (!g_host || !g_host->cdm) return 20;
   g_host->keys_changed = false;
   g_host->rejected = false;
-  g_host->cdm->UpdateSession(2, g_host->session_id.c_str(),
-                             static_cast<uint32_t>(g_host->session_id.size()), license, len);
+  g_host->cdm->UpdateSession(2, reinterpret_cast<const char*>(sid), sid_len, license, len);
   for (int i = 0; i < 500 && !g_host->keys_changed && !g_host->rejected; ++i) g_host->fire_timers();
   if (g_host->rejected) return 21;
   return g_host->keys_changed ? 0 : 22;

@@ -52,6 +52,7 @@ struct State {
     decrypted: Vec<bool>,
     /// `None` once the track is fully decrypted, or for a cache hit.
     cdm: Option<Cdm>,
+    session: Option<super::widevine::CdmSession>,
     remaining: usize,
     error: Option<String>,
 }
@@ -74,6 +75,7 @@ impl ProgressiveTrack {
     pub fn spawn(
         encrypted: Vec<u8>,
         cdm: Cdm,
+        session: super::widevine::CdmSession,
         key_id: Vec<u8>,
         progress: Option<BufferProgressCallback>,
         on_complete: impl FnOnce(Vec<u8>) + Send + 'static,
@@ -89,6 +91,7 @@ impl ProgressiveTrack {
             buf,
             decrypted: vec![false; sample_count],
             cdm: Some(cdm),
+            session: Some(session),
             remaining: sample_count,
             error: None,
         }));
@@ -167,8 +170,11 @@ impl ProgressiveTrack {
                         Err(_) => return,
                     };
                     // Dropping the handle frees nothing exclusive — it only
-                    // marks this track done so later reads skip the CDM.
+                    // marks this track done so later reads skip the CDM. The
+                    // session goes with it: every sample is plaintext now, so
+                    // nothing needs its keys any more.
                     s.cdm = None;
+                    s.session = None;
                     s.error.is_none().then(|| s.buf.clone())
                 };
                 if let Some(bytes) = finished {
@@ -190,6 +196,7 @@ impl ProgressiveTrack {
                 buf: bytes,
                 decrypted: Vec::new(),
                 cdm: None,
+                session: None,
                 remaining: 0,
                 error: None,
             })),
@@ -233,6 +240,8 @@ impl ProgressiveTrack {
             buf,
             decrypted,
             cdm,
+            // Not needed to decrypt
+            session: _,
             remaining,
             error,
         } = &mut *s;

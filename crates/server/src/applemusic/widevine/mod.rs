@@ -26,8 +26,11 @@ unsafe extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
         out_type: *mut u32,
+        out_sid: *mut *mut u8,
+        out_sid_len: *mut u32,
     ) -> c_int;
-    fn wv_update(license: *const u8, len: u32) -> c_int;
+    fn wv_close(sid: *const u8, sid_len: u32) -> c_int;
+    fn wv_update(sid: *const u8, sid_len: u32, license: *const u8, len: u32) -> c_int;
     #[allow(clippy::too_many_arguments)]
     fn wv_decrypt(
         data: *const u8,
@@ -46,9 +49,11 @@ unsafe extern "C" {
 
 /// Serializes the licence exchange only — `challenge` through `update`.
 ///
-/// The shim tracks a single "current session id", so two tracks interleaving
-/// their challenge/update pairs would load one's licence into the other's
-/// session. Held across the licence HTTP round-trip (~0.5s), hence async.
+/// The shim reports a newly created session through one callback slot, so two
+/// tracks generating challenges at once would race to read their own session id
+/// back. `update` names its session explicitly, so the lock only has to cover
+/// challenge → read the id; it's held across the licence round-trip (~0.5s) for
+/// simplicity, hence async.
 ///
 /// Deliberately NOT held for the life of a track. A Widevine CDM retains the
 /// keys of every session it is given and selects one per `Decrypt` by key id, so
@@ -82,6 +87,61 @@ pub struct LicenseSession(#[allow(dead_code)] tokio::sync::OwnedMutexGuard<()>);
 
 #[cfg(target_os = "android")]
 pub struct LicenseSession;
+
+/// A CDM session and the content keys loaded into it.
+///
+/// The CDM keeps one key set per session and chooses between them by key id when
+/// decrypting, so a track is decryptable only while its session is open. Dropping
+/// this closes the session and releases those keys — which is why it belongs to
+/// the track rather than to the licence exchange, and why sessions can't simply be
+/// closed once the licence has been loaded.
+#[cfg(not(target_os = "android"))]
+pub struct CdmSession {
+    id: Vec<u8>,
+}
+
+#[cfg(not(target_os = "android"))]
+fn close_session(id: &[u8]) -> Result<(), String> {
+    let _guard = call_lock();
+    match unsafe { wv_close(id.as_ptr(), id.len() as u32) } {
+        0 => Ok(()),
+        40 => Err("no CDM loaded".to_string()),
+        41 => Err("the CDM rejected the session close".to_string()),
+        42 => Err("the CDM never confirmed the session closed".to_string()),
+        n => Err(format!("closing the CDM session failed (code {n})")),
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+impl CdmSession {
+    /// Close the session, reporting whether the CDM accepted it.
+    ///
+    /// `Drop` does the same thing but can only log, so this exists for callers —
+    /// tests especially — that need to know a close actually took.
+    pub fn close(mut self) -> Result<(), String> {
+        // Emptying the id stops `Drop` closing it a second time.
+        let id = std::mem::take(&mut self.id);
+        close_session(&id)
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+impl Drop for CdmSession {
+    fn drop(&mut self) {
+        if self.id.is_empty() {
+            return;
+        }
+        // Best-effort: a session that won't close leaks inside the CDM, which is
+        // not worth failing a teardown over, but is worth saying so.
+        match close_session(&self.id) {
+            Ok(()) => tracing::debug!("am.widevine: CDM session closed"),
+            Err(e) => tracing::warn!("am.widevine: {e}"),
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+pub struct CdmSession;
 
 /// Copy a shim-allocated buffer into a `Vec` and release it.
 ///
@@ -127,11 +187,16 @@ impl Cdm {
         &self,
         _session: &LicenseSession,
         _pssh_box: &[u8],
-    ) -> Result<Vec<u8>, String> {
-        Self::open("").map(|_| Vec::new())
+    ) -> Result<(Vec<u8>, CdmSession), String> {
+        Self::open("").map(|_| (Vec::new(), CdmSession))
     }
 
-    pub fn update(&self, _session: &LicenseSession, _license: &[u8]) -> Result<(), String> {
+    pub fn update(
+        &self,
+        _session: &LicenseSession,
+        _cdm_session: &CdmSession,
+        _license: &[u8],
+    ) -> Result<(), String> {
         Self::open("").map(|_| ())
     }
 
@@ -218,11 +283,21 @@ impl Cdm {
     const INDIVIDUALIZATION_REQUEST: u32 = 3;
 
     /// Generate a license challenge from a CENC pssh box.
-    pub fn challenge(&self, _session: &LicenseSession, pssh_box: &[u8]) -> Result<Vec<u8>, String> {
+    ///
+    /// The returned [`CdmSession`] holds the CDM session this challenge belongs
+    /// to. Keep it for as long as the track needs decrypting — dropping it
+    /// releases the session's content keys.
+    pub fn challenge(
+        &self,
+        _session: &LicenseSession,
+        pssh_box: &[u8],
+    ) -> Result<(Vec<u8>, CdmSession), String> {
         let _guard = call_lock();
         let mut out = std::ptr::null_mut();
         let mut len = 0u32;
         let mut msg_type = 0u32;
+        let mut sid = std::ptr::null_mut();
+        let mut sid_len = 0u32;
         match unsafe {
             wv_challenge(
                 pssh_box.as_ptr(),
@@ -230,14 +305,19 @@ impl Cdm {
                 &mut out,
                 &mut len,
                 &mut msg_type,
+                &mut sid,
+                &mut sid_len,
             )
         } {
             0 => {
                 let message = unsafe { take(out, len) };
+                let session = CdmSession {
+                    id: unsafe { take(sid, sid_len) },
+                };
                 // Posting the wrong message type to Apple's licence server gets
                 // an opaque numeric rejection, so name the cause here instead.
                 match msg_type {
-                    Self::LICENSE_REQUEST => Ok(message),
+                    Self::LICENSE_REQUEST => Ok((message, session)),
                     Self::INDIVIDUALIZATION_REQUEST => Err(
                         "this Widevine CDM has no device certificate yet — it wants to provision \
                          itself first, which kopuz can't do. Play any DRM video (Netflix, Spotify \
@@ -256,9 +336,21 @@ impl Cdm {
     }
 
     /// Feed the license response back so the CDM loads the content keys.
-    pub fn update(&self, _session: &LicenseSession, license: &[u8]) -> Result<(), String> {
+    pub fn update(
+        &self,
+        _session: &LicenseSession,
+        cdm_session: &CdmSession,
+        license: &[u8],
+    ) -> Result<(), String> {
         let _guard = call_lock();
-        match unsafe { wv_update(license.as_ptr(), license.len() as u32) } {
+        match unsafe {
+            wv_update(
+                cdm_session.id.as_ptr(),
+                cdm_session.id.len() as u32,
+                license.as_ptr(),
+                license.len() as u32,
+            )
+        } {
             0 => Ok(()),
             21 => Err("the CDM rejected the license response".to_string()),
             22 => Err("the license response carried no usable key".to_string()),
@@ -427,7 +519,7 @@ mod tests {
     async fn challenge_against_a_real_cdm() {
         let cdm = Cdm::open_system().await.expect("open a system CDM");
         let session = cdm.begin_license().await;
-        let challenge = cdm
+        let (challenge, cdm_session) = cdm
             .challenge(&session, &build_pssh(&[0x11u8; 16]))
             .expect("generate a challenge");
 
@@ -439,5 +531,28 @@ mod tests {
             "challenge should be a ChromeCDM SignedMessage ({} bytes)",
             challenge.len()
         );
+
+        // The session has to be a real id, or nothing can be closed later.
+        assert!(!cdm_session.id.is_empty(), "no session id came back");
+        cdm_session.close().expect("the session should close");
+    }
+
+    /// Every play used to open a CDM session and never close one, so they piled
+    /// up for the life of the process. Opening and closing many in a row would
+    /// fail — or leak until the CDM refused more — if closing didn't work.
+    #[tokio::test]
+    #[ignore = "requires a system Widevine CDM"]
+    async fn sessions_are_closed_and_do_not_accumulate() {
+        let cdm = Cdm::open_system().await.expect("open a system CDM");
+        for i in 0..25 {
+            let license = cdm.begin_license().await;
+            let (_challenge, cdm_session) = cdm
+                .challenge(&license, &build_pssh(&[0x11u8; 16]))
+                .unwrap_or_else(|e| panic!("challenge {i} failed: {e}"));
+            drop(license);
+            cdm_session
+                .close()
+                .unwrap_or_else(|e| panic!("closing session {i} failed: {e}"));
+        }
     }
 }

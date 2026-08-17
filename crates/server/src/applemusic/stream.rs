@@ -245,17 +245,17 @@ async fn read_encrypted_playlist(
 async fn load_license(
     cdm: &super::widevine::Cdm,
     session: &super::widevine::LicenseSession,
+    cdm_session: &super::widevine::CdmSession,
     license_request: &[u8],
     adam_id: &str,
-    uri_prefix: &str,
-    kid_base64: &str,
+    playback: &WebPlaybackInfo,
     bearer_token: &str,
     media_user_token: &str,
 ) -> Result<(), String> {
     let envelope = serde_json::json!({
         "challenge": STANDARD.encode(license_request),
         "key-system": "com.widevine.alpha",
-        "uri": format!("{uri_prefix},{kid_base64}"),
+        "uri": format!("{},{}", playback.uri_prefix, playback.kid_base64),
         "adamId": adam_id,
         "isLibrary": is_library_id(adam_id),
         "user-initiated": true,
@@ -345,10 +345,11 @@ async fn load_license(
         license_data.len()
     );
 
-    cdm.update(session, &license_data).map_err(|e| {
-        tracing::warn!("am.license: loading the license failed: {e}");
-        e
-    })?;
+    cdm.update(session, cdm_session, &license_data)
+        .map_err(|e| {
+            tracing::warn!("am.license: loading the license failed: {e}");
+            e
+        })?;
 
     tracing::debug!("am.license: keys loaded");
     Ok(())
@@ -426,7 +427,9 @@ pub async fn resolve_and_decrypt(
     // Held only for challenge → licence → update. Decryption runs without it, so
     // a track already playing never blocks the next one from starting.
     let license = cdm.begin_license().await;
-    let license_request = cdm.challenge(&license, &init_data)?;
+    // The session outlives the licence exchange: it holds the content keys, so it
+    // travels with the track and is closed when the track is done with it.
+    let (license_request, cdm_session) = cdm.challenge(&license, &init_data)?;
     tracing::debug!(
         "am.stream: license challenge generated ({} bytes)",
         license_request.len()
@@ -437,10 +440,10 @@ pub async fn resolve_and_decrypt(
     load_license(
         &cdm,
         &license,
+        &cdm_session,
         &license_request,
         &adam_id,
-        &playback.uri_prefix,
-        &playback.kid_base64,
+        &playback,
         &bearer_token,
         media_user_token,
     )
@@ -463,6 +466,7 @@ pub async fn resolve_and_decrypt(
     super::progressive::ProgressiveTrack::spawn(
         encrypted_bytes,
         cdm,
+        cdm_session,
         key_id,
         progress,
         move |decrypted| {
