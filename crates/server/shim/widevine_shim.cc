@@ -71,6 +71,7 @@ class Host : public Host_11 {
   bool initialized = false, init_ok = false;
   std::string session_id;
   bool got_message = false;
+  uint32_t message_type = 0;
   std::vector<uint8_t> challenge;
   bool rejected = false;
   std::string error;
@@ -103,8 +104,13 @@ class Host : public Host_11 {
     rejected = true;
     if (msg && n) error.assign(msg, n);
   }
-  void OnSessionMessage(const char*, uint32_t, MessageType, const char* msg, uint32_t n) override {
+  void OnSessionMessage(const char*, uint32_t, MessageType type, const char* msg,
+                        uint32_t n) override {
     got_message = true;
+    // Kept, not discarded: an unprovisioned CDM answers with an
+    // individualization request for Google's provisioning server, which is not
+    // a licence challenge and must not be sent to the content licence server.
+    message_type = static_cast<uint32_t>(type);
     challenge.assign(reinterpret_cast<const uint8_t*>(msg),
                      reinterpret_cast<const uint8_t*>(msg) + n);
   }
@@ -170,16 +176,19 @@ int wv_open(const char* so_path) {
 }
 
 // init_data is a CENC pssh box. Returns the license challenge in *out.
-int wv_challenge(const uint8_t* init_data, uint32_t len, uint8_t** out, uint32_t* out_len) {
+int wv_challenge(const uint8_t* init_data, uint32_t len, uint8_t** out, uint32_t* out_len,
+                 uint32_t* out_type) {
   if (!g_host || !g_host->cdm) return 10;
   g_host->got_message = false;
   g_host->rejected = false;
+  g_host->message_type = 0;
   g_host->challenge.clear();
   g_host->cdm->CreateSessionAndGenerateRequest(1, SessionType::kTemporary, InitDataType::kCenc,
                                                init_data, len);
   for (int i = 0; i < 500 && !g_host->got_message && !g_host->rejected; ++i) g_host->fire_timers();
   if (g_host->rejected) return 11;
   if (!g_host->got_message) return 12;
+  if (out_type) *out_type = g_host->message_type;
   return emit(g_host->challenge.data(), g_host->challenge.size(), out, out_len) ? 0 : 13;
 }
 

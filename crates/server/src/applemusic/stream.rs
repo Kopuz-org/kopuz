@@ -319,6 +319,14 @@ async fn load_license(
     if let Some(err_code) = license_json["errorCode"].as_i64()
         && err_code != 0
     {
+        // Apple answers 200 with the failure in the body, and these codes aren't
+        // documented anywhere — so log the whole thing rather than just the
+        // number, which on its own says nothing about what to fix.
+        tracing::warn!(
+            "am.license: rejected with errorCode {err_code} for adamId={adam_id} \
+             (isLibrary={}), body: {resp_body}",
+            is_library_id(adam_id)
+        );
         return Err(format!("license error code: {err_code}"));
     }
 

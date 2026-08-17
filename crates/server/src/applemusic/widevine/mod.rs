@@ -19,7 +19,13 @@ pub mod discover;
 #[cfg(not(target_os = "android"))]
 unsafe extern "C" {
     fn wv_open(so_path: *const c_char) -> c_int;
-    fn wv_challenge(init_data: *const u8, len: u32, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn wv_challenge(
+        init_data: *const u8,
+        len: u32,
+        out: *mut *mut u8,
+        out_len: *mut u32,
+        out_type: *mut u32,
+    ) -> c_int;
     fn wv_update(license: *const u8, len: u32) -> c_int;
     #[allow(clippy::too_many_arguments)]
     fn wv_decrypt(
@@ -183,14 +189,44 @@ impl Cdm {
         LicenseSession(license_lock().lock_owned().await)
     }
 
+    /// `cdm::MessageType::kLicenseRequest` — the only message that is a licence
+    /// challenge. `kIndividualizationRequest` (3) is a provisioning request for
+    /// Google's server and means the CDM has no device certificate yet.
+    const LICENSE_REQUEST: u32 = 0;
+    const INDIVIDUALIZATION_REQUEST: u32 = 3;
+
     /// Generate a license challenge from a CENC pssh box.
     pub fn challenge(&self, _session: &LicenseSession, pssh_box: &[u8]) -> Result<Vec<u8>, String> {
         let _guard = call_lock();
         let mut out = std::ptr::null_mut();
         let mut len = 0u32;
-        match unsafe { wv_challenge(pssh_box.as_ptr(), pssh_box.len() as u32, &mut out, &mut len) }
-        {
-            0 => Ok(unsafe { take(out, len) }),
+        let mut msg_type = 0u32;
+        match unsafe {
+            wv_challenge(
+                pssh_box.as_ptr(),
+                pssh_box.len() as u32,
+                &mut out,
+                &mut len,
+                &mut msg_type,
+            )
+        } {
+            0 => {
+                let message = unsafe { take(out, len) };
+                // Posting the wrong message type to Apple's licence server gets
+                // an opaque numeric rejection, so name the cause here instead.
+                match msg_type {
+                    Self::LICENSE_REQUEST => Ok(message),
+                    Self::INDIVIDUALIZATION_REQUEST => Err(
+                        "this Widevine CDM has no device certificate yet — it wants to provision \
+                         itself first, which kopuz can't do. Play any DRM video (Netflix, Spotify \
+                         web, a Widevine test page) in the browser the CDM came from, then retry"
+                            .to_string(),
+                    ),
+                    other => Err(format!(
+                        "the CDM returned message type {other}, not a license request"
+                    )),
+                }
+            }
             11 => Err("the CDM rejected the pssh box".to_string()),
             12 => Err("the CDM produced no license challenge".to_string()),
             n => Err(format!("license challenge failed (code {n})")),
