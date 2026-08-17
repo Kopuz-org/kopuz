@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 /// The CDM's filename on this platform.
-const fn cdm_file_name() -> &'static str {
+pub(crate) const fn cdm_file_name() -> &'static str {
     #[cfg(target_os = "windows")]
     {
         "widevinecdm.dll"
@@ -175,7 +175,7 @@ fn search_under(dir: &Path, name: &str, depth: usize, found: &mut Vec<PathBuf>) 
 /// Versions appear as a path component (`4.10.2891.0`, `4.10.3050.0`), so a
 /// plain string sort would rank `4.10.999` above `4.10.3050`. Compare the dotted
 /// components numerically instead.
-fn version_key(path: &Path) -> Vec<u64> {
+pub(crate) fn version_key(path: &Path) -> Vec<u64> {
     path.components()
         .filter_map(|c| c.as_os_str().to_str())
         .find(|s| {
@@ -192,24 +192,36 @@ fn version_key(path: &Path) -> Vec<u64> {
 ///
 /// `$KOPUZ_WIDEVINE_CDM` overrides everything: it may point straight at the
 /// library or at a directory to search.
+/// The CDM named by `$KOPUZ_WIDEVINE_CDM`, if it points at one.
+///
+/// Separate from [`locate`] so it can be honoured before anything is downloaded:
+/// a user who names a CDM explicitly means that one, not a fresh copy off the
+/// network.
+pub fn override_cdm() -> Option<PathBuf> {
+    let name = cdm_file_name();
+    let override_path = env_dir("KOPUZ_WIDEVINE_CDM")?;
+    if override_path.is_file() {
+        tracing::debug!(path = %override_path.display(), "am.widevine: CDM from $KOPUZ_WIDEVINE_CDM");
+        return Some(override_path);
+    }
+    let mut found = Vec::new();
+    search_under(&override_path, name, 0, &mut found);
+    found.sort_by_key(|p| version_key(p));
+    if let Some(best) = found.pop() {
+        return Some(best);
+    }
+    tracing::warn!(
+        path = %override_path.display(),
+        "am.widevine: $KOPUZ_WIDEVINE_CDM set but no {name} found under it"
+    );
+    None
+}
+
 pub fn locate() -> Option<PathBuf> {
     let name = cdm_file_name();
 
-    if let Some(override_path) = env_dir("KOPUZ_WIDEVINE_CDM") {
-        if override_path.is_file() {
-            tracing::debug!(path = %override_path.display(), "am.widevine: CDM from $KOPUZ_WIDEVINE_CDM");
-            return Some(override_path);
-        }
-        let mut found = Vec::new();
-        search_under(&override_path, name, 0, &mut found);
-        found.sort_by_key(|p| version_key(p));
-        if let Some(best) = found.pop() {
-            return Some(best);
-        }
-        tracing::warn!(
-            path = %override_path.display(),
-            "am.widevine: $KOPUZ_WIDEVINE_CDM set but no {name} found under it"
-        );
+    if let Some(path) = override_cdm() {
+        return Some(path);
     }
 
     for root in search_roots() {

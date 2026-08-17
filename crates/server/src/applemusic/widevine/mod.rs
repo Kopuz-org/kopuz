@@ -14,6 +14,7 @@ use std::os::raw::{c_char, c_int};
 use std::sync::{Arc, OnceLock};
 
 pub mod discover;
+pub mod fetch;
 
 // MediaDrm API is TODO
 #[cfg(not(target_os = "android"))]
@@ -173,12 +174,33 @@ impl Cdm {
         }
     }
 
-    /// Locate a CDM from an installed browser and open it.
+    /// Find a CDM and open it.
+    ///
+    /// In order: an explicit `$KOPUZ_WIDEVINE_CDM`, then the one kopuz downloads
+    /// (fetching it if this is the first time), then — only if that failed — one
+    /// borrowed from an installed browser.
+    ///
+    /// Downloading leads because it's the one path that behaves the same
+    /// everywhere. Browser discovery depends on which browsers a user happens to
+    /// have and whether each has pulled its CDM down yet, so it's the fallback
+    /// for when the network isn't available rather than the primary route.
     pub async fn open_system() -> Result<Self, String> {
+        if let Some(path) = discover::override_cdm() {
+            return Self::open(path).await;
+        }
+
+        match fetch::ensure().await {
+            Ok(path) => return Self::open(path).await,
+            Err(e) => tracing::warn!(
+                "am.widevine: couldn't download a CDM ({e}) — looking for a browser's copy"
+            ),
+        }
+
         let path = discover::locate().ok_or_else(|| {
-            "no Widevine CDM found. Apple Music playback borrows one from an installed browser — \
-             install Firefox (or Chrome/Brave) and play any DRM video once so it downloads the CDM, \
-             or set $KOPUZ_WIDEVINE_CDM to a libwidevinecdm library"
+            "no Widevine CDM available. Apple Music playback needs one, and downloading it \
+             failed — check the network, install Firefox (or Chrome/Brave) and play any DRM \
+             video once so it fetches the CDM, or set $KOPUZ_WIDEVINE_CDM to a libwidevinecdm \
+             library"
                 .to_string()
         })?;
         Self::open(path).await

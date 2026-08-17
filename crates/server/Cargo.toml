@@ -43,6 +43,7 @@ quick-xml = { workspace = true }
 urlencoding = "2.1"
 regex = "1"
 m3u8-rs = "6"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 symphonia = { workspace = true }
 
 [build-dependencies]
