@@ -812,3 +812,7 @@ longer than needed.
 
 - Logo design by: Lucas Amorim -
   [His Instagram Account](https://www.instagram.com/yattets/)
+
+## Star History
+
+[![Star History Chart](https://star-history.dera.page/svg?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://star-history.dera.page/#Kopuz-org/kopuz&type=date&legend=top-left)
