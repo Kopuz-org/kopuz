@@ -223,25 +223,21 @@ fn extract_p_texts(ttml: &str) -> Vec<String> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                if qname_local_eq(e.name(), b"p") {
-                    in_p = true;
-                    current_text.clear();
-                }
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if qname_local_eq(e.name(), b"p") => {
+                in_p = true;
+                current_text.clear();
             }
             Ok(Event::Text(ref e)) if in_p => {
                 if let Ok(t) = e.unescape() {
                     current_text.push_str(&t);
                 }
             }
-            Ok(Event::End(ref e)) => {
-                if qname_local_eq(e.name(), b"p") && in_p {
-                    let trimmed = current_text.trim().to_string();
-                    if !trimmed.is_empty() {
-                        texts.push(trimmed);
-                    }
-                    in_p = false;
+            Ok(Event::End(ref e)) if in_p && qname_local_eq(e.name(), b"p") => {
+                let trimmed = current_text.trim().to_string();
+                if !trimmed.is_empty() {
+                    texts.push(trimmed);
                 }
+                in_p = false;
             }
             Ok(Event::Eof) => break,
             Err(_) => break,
@@ -272,38 +268,34 @@ fn parse_line_timed_impl(ttml: &str) -> Vec<LyricLine> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                if qname_local_eq(e.name(), b"p") {
-                    in_p = true;
-                    p_begin = get_attr_value(e, b"begin");
-                    current_text.clear();
-                }
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if qname_local_eq(e.name(), b"p") => {
+                in_p = true;
+                p_begin = get_attr_value(e, b"begin");
+                current_text.clear();
             }
             Ok(Event::Text(ref e)) if in_p => {
                 if let Ok(t) = e.unescape() {
                     current_text.push_str(&t);
                 }
             }
-            Ok(Event::End(ref e)) => {
-                if qname_local_eq(e.name(), b"p") && in_p {
-                    let text = current_text.trim().to_string();
-                    if !text.is_empty()
-                        && let Some(begin) = &p_begin
-                        && let Some(start_time) = parse_am_time(begin)
-                    {
-                        lines.push(LyricLine {
-                            start_time,
-                            end_time: None,
-                            text,
-                            chunks: Vec::new(),
-                            parent_line_index: None,
-                            background: false,
-                            opposite_turn: false,
-                        });
-                    }
-                    in_p = false;
-                    p_begin = None;
+            Ok(Event::End(ref e)) if in_p && qname_local_eq(e.name(), b"p") => {
+                let text = current_text.trim().to_string();
+                if !text.is_empty()
+                    && let Some(begin) = &p_begin
+                    && let Some(start_time) = parse_am_time(begin)
+                {
+                    lines.push(LyricLine {
+                        start_time,
+                        end_time: None,
+                        text,
+                        chunks: Vec::new(),
+                        parent_line_index: None,
+                        background: false,
+                        opposite_turn: false,
+                    });
                 }
+                in_p = false;
+                p_begin = None;
             }
             Ok(Event::Eof) => break,
             Err(_) => break,
@@ -362,12 +354,12 @@ fn parse_word_timed_impl(ttml: &str) -> Vec<LyricLine> {
             // be read off the markup rather than assumed: Latin lyrics put a
             // space there, CJK syllable spans butt up against each other, and
             // inserting one anyway yields "くるくる くる 回る".
-            Ok(Event::Text(ref e)) if in_p => {
-                if e.unescape()
-                    .is_ok_and(|t| t.chars().any(char::is_whitespace))
-                {
-                    pending_space = true;
-                }
+            Ok(Event::Text(ref e))
+                if in_p
+                    && e.unescape()
+                        .is_ok_and(|t| t.chars().any(char::is_whitespace)) =>
+            {
+                pending_space = true;
             }
             Ok(Event::End(ref e)) => {
                 if qname_local_eq(e.name(), b"span") && in_span {

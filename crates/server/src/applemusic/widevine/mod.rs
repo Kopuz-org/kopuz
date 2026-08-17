@@ -252,6 +252,35 @@ impl Cdm {
     }
 }
 
+/// The `WidevineCencHeader` protobuf that goes inside the pssh box.
+///
+/// Written out by hand rather than generated. It is six fields, only one of them
+/// ever non-empty, and generating it cost a `protoc` on every build machine —
+/// which nix and the Windows runner don't have, so the whole crate failed to
+/// build there. Twenty bytes of wire format is the cheaper side of that trade.
+///
+/// Field numbers and types come from `WidevineCencHeader`: 1 `algorithm`
+/// (varint), 2 `key_id` (repeated bytes), 3 `provider` and 6 `policy` (strings,
+/// sent empty). Fields are written in tag order, as protobuf encoders do.
+fn widevine_cenc_header(key_id: &[u8]) -> Vec<u8> {
+    fn varint(out: &mut Vec<u8>, mut value: u64) {
+        while value >= 0x80 {
+            out.push(value as u8 | 0x80);
+            value >>= 7;
+        }
+        out.push(value as u8);
+    }
+
+    let mut out = Vec::with_capacity(key_id.len() + 10);
+    out.extend_from_slice(&[0x08, 0x01]); // 1: algorithm = AESCTR
+    out.push(0x12); // 2: key_id, length-delimited
+    varint(&mut out, key_id.len() as u64);
+    out.extend_from_slice(key_id);
+    out.extend_from_slice(&[0x1a, 0x00]); // 3: provider = ""
+    out.extend_from_slice(&[0x32, 0x00]); // 6: policy = ""
+    out
+}
+
 /// Build a CENC pssh box for `key_id`, the init data a CDM expects.
 ///
 /// The previous hand-rolled CDM was handed 32 bytes of filler followed by a bare
@@ -264,16 +293,7 @@ pub fn build_pssh(key_id: &[u8]) -> Vec<u8> {
         0xed,
     ];
 
-    use prost::Message;
-    let header = super::cdm::wv::WidevineCencHeader {
-        algorithm: Some(1), // AESCTR
-        key_id: vec![key_id.to_vec()],
-        provider: Some(String::new()),
-        content_id: None,
-        track_type_deprecated: None,
-        policy: Some(String::new()),
-    };
-    let payload = header.encode_to_vec();
+    let payload = widevine_cenc_header(key_id);
 
     // size | 'pssh' | version+flags | system id | data size | data
     let total = 4 + 4 + 4 + 16 + 4 + payload.len();
@@ -290,6 +310,30 @@ pub fn build_pssh(key_id: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The header the CDM parses out of the pssh box. Pinned byte-for-byte
+    /// because it used to be generated from `wv.proto` by `protoc`; these are
+    /// exactly the bytes prost emitted for the same message.
+    #[test]
+    fn cenc_header_is_encoded_as_protobuf() {
+        assert_eq!(
+            widevine_cenc_header(&[0xAA; 4]),
+            vec![
+                0x08, 0x01, // 1: algorithm = AESCTR
+                0x12, 0x04, 0xAA, 0xAA, 0xAA, 0xAA, // 2: key_id
+                0x1a, 0x00, // 3: provider = ""
+                0x32, 0x00, // 6: policy = ""
+            ]
+        );
+    }
+
+    /// Key ids longer than 127 bytes need a multi-byte length varint.
+    #[test]
+    fn a_long_key_id_gets_a_multibyte_length() {
+        let encoded = widevine_cenc_header(&[0u8; 200]);
+        assert_eq!(&encoded[2..5], &[0x12, 0xC8, 0x01], "200 as a varint");
+        assert_eq!(encoded.len(), 2 + 3 + 200 + 2 + 2);
+    }
 
     #[test]
     fn pssh_box_is_well_formed() {

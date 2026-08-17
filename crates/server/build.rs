@@ -1,7 +1,5 @@
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    prost_build::compile_protos(&["proto/wv.proto"], &["proto/"])?;
+fn main() {
     build_widevine_shim();
-    Ok(())
 }
 
 /// Compile the C++ host for the system Widevine CDM (see `shim/widevine_shim.cc`).

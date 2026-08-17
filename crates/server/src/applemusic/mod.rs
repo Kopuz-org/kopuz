@@ -1,6 +1,6 @@
 pub mod api;
 pub mod auth;
-pub mod cdm;
+
 pub mod cenc;
 pub mod progressive;
 pub mod signin;
