@@ -663,3 +663,226 @@ fn parse_trun(
 
     (data_start, sizes)
 }
+
+const MP4A: u32 = u32::from_be_bytes(*b"mp4a");
+const ESDS: u32 = u32::from_be_bytes(*b"esds");
+
+/// What `MediaFormat` needs to configure an AAC decoder.
+///
+/// Android's `MediaCodec` can't be handed an fMP4; it wants the track's
+/// parameters and the raw `AudioSpecificConfig` as `csd-0`. All three live in the
+/// init segment, so this is the last thing the Android path needs out of the
+/// container before it can feed samples in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioConfig {
+    pub sample_rate: u32,
+    pub channels: u16,
+    /// `AudioSpecificConfig`, verbatim — `MediaFormat`'s `csd-0`.
+    pub codec_specific: Vec<u8>,
+}
+
+/// Read one length from an MP4 descriptor: 7 bits per byte, top bit continues.
+///
+/// Returns the value and how many bytes it occupied. Capped at four bytes, as
+/// the spec allows, so a corrupt stream can't spin here.
+fn descriptor_len(data: &[u8], pos: usize) -> Option<(usize, usize)> {
+    let mut len = 0usize;
+    let mut used = 0usize;
+    while used < 4 {
+        let byte = *data.get(pos + used)?;
+        used += 1;
+        len = (len << 7) | (byte & 0x7F) as usize;
+        if byte & 0x80 == 0 {
+            return Some((len, used));
+        }
+    }
+    Some((len, used))
+}
+
+/// Find descriptor `tag` inside `esds`, returning its body range.
+///
+/// Descriptors nest — ES_Descriptor (3) holds DecoderConfigDescriptor (4) holds
+/// DecoderSpecificInfo (5) — and each has a header whose size varies, so this
+/// walks in rather than seeking to a fixed offset.
+fn find_descriptor(data: &[u8], mut pos: usize, end: usize, tag: u8) -> Option<(usize, usize)> {
+    while pos < end {
+        let this_tag = *data.get(pos)?;
+        let (len, used) = descriptor_len(data, pos + 1)?;
+        let body = pos + 1 + used;
+        let body_end = body.checked_add(len)?.min(end);
+        if this_tag == tag {
+            return Some((body, body_end));
+        }
+        // Descend through the containers on the way to the payload.
+        match this_tag {
+            // ES_Descriptor: ES_ID(2) + flags(1) before its children.
+            3 => pos = body + 3,
+            // DecoderConfigDescriptor: 13 bytes of fixed fields before its children.
+            4 => pos = body + 13,
+            _ => pos = body_end,
+        }
+    }
+    None
+}
+
+/// Pull the AAC parameters out of an init segment.
+///
+/// Works whether or not the sample entry has been relabelled: `enca` and `mp4a`
+/// share the `AudioSampleEntry` layout, and `esds` sits among the children of
+/// both.
+pub fn audio_config(data: &[u8]) -> Option<AudioConfig> {
+    let (moov_bs, moov_be) = find_deep(data, 0, data.len(), MOOV)?;
+    let (stsd_bs, _) = find_deep(data, moov_bs, moov_be, STSD)?;
+
+    // stsd body: version+flags(4), entry_count(4), then sample entries.
+    let entry = stsd_bs + 8;
+    let (entry_body, entry_end, _) = read_box(data, entry)?;
+    let kind = box_type(data, entry);
+    if kind != ENCA && kind != MP4A {
+        return None;
+    }
+
+    // AudioSampleEntry: 6 reserved + 2 data_reference_index, then 8 bytes of
+    // version/revision/vendor, channelcount(2), samplesize(2), pre_defined(2),
+    // reserved(2), samplerate(4, 16.16 fixed point).
+    let channels = u16::from_be_bytes([data[entry_body + 16], data[entry_body + 17]]);
+    // Only the integer half of the 16.16 rate is meaningful for AAC.
+    let sample_rate = u32::from(u16::from_be_bytes([
+        data[entry_body + 24],
+        data[entry_body + 25],
+    ]));
+
+    let (esds_bs, esds_be, _) = find_child(data, entry_body + 28, entry_end, ESDS)?;
+    // esds body starts with version+flags.
+    let (asc_start, asc_end) = find_descriptor(data, esds_bs + 4, esds_be, 5)?;
+    let codec_specific = data.get(asc_start..asc_end)?.to_vec();
+    if codec_specific.is_empty() || channels == 0 || sample_rate == 0 {
+        return None;
+    }
+
+    Some(AudioConfig {
+        sample_rate,
+        channels,
+        codec_specific,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Descriptor lengths are 7 bits per byte with the top bit continuing, and
+    /// encoders differ on whether they pad to a fixed width — so both the short
+    /// and the padded forms have to read back the same.
+    #[test]
+    fn descriptor_lengths_decode_in_both_forms() {
+        assert_eq!(descriptor_len(&[0x05], 0), Some((5, 1)));
+        assert_eq!(descriptor_len(&[0x80, 0x05], 0), Some((5, 2)));
+        assert_eq!(
+            descriptor_len(&[0x80, 0x80, 0x80, 0x05], 0),
+            Some((5, 4)),
+            "the four-byte padded form Apple and others emit"
+        );
+        // 0x81 0x00 => (1 << 7) | 0 = 128
+        assert_eq!(descriptor_len(&[0x81, 0x00], 0), Some((128, 2)));
+        assert_eq!(descriptor_len(&[], 0), None);
+        // Never runs past four bytes even if every one sets the continue bit.
+        assert_eq!(descriptor_len(&[0x80, 0x80, 0x80, 0x80], 0), Some((0, 4)));
+    }
+
+    /// Walking to the payload has to descend through ES_Descriptor and
+    /// DecoderConfigDescriptor, whose fixed fields differ in size. Seeking to a
+    /// fixed offset instead would land in the middle of a field.
+    #[test]
+    fn the_specific_info_is_found_through_its_containers() {
+        // ES_Descriptor(3) { ES_ID(2), flags(1),
+        //   DecoderConfigDescriptor(4) { 13 fixed bytes,
+        //     DecoderSpecificInfo(5) { 0x12 0x10 } } }
+        let mut esds = vec![0x03, 0x19, 0x00, 0x00, 0x00];
+        esds.extend_from_slice(&[0x04, 0x11]);
+        esds.extend_from_slice(&[0x40, 0x15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        esds.extend_from_slice(&[0x05, 0x02, 0x12, 0x10]);
+
+        let (start, end) = find_descriptor(&esds, 0, esds.len(), 5).expect("specific info");
+        assert_eq!(&esds[start..end], &[0x12, 0x10]);
+    }
+
+    #[test]
+    fn a_missing_descriptor_is_not_found() {
+        let esds = vec![0x03, 0x05, 0x00, 0x00, 0x00, 0x06, 0x00];
+        assert_eq!(find_descriptor(&esds, 0, esds.len(), 5), None);
+    }
+
+    /// Reads a real Apple Music init segment. Ignored: needs a cached track.
+    ///
+    /// The values are checked for plausibility rather than pinned, since they
+    /// vary per track — but a mis-parse shows up immediately as a nonsense sample
+    /// rate or an empty `csd-0`.
+    #[test]
+    #[ignore = "needs a cached Apple Music track"]
+    fn audio_config_reads_a_real_track() {
+        let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+            .join(".cache/kopuz/applemusic");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        let mut checked = 0;
+        for path in entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "m4a"))
+        {
+            let bytes = std::fs::read(&path).expect("read track");
+            let cfg = audio_config(&bytes)
+                .unwrap_or_else(|| panic!("no audio config in {}", path.display()));
+
+            assert!(
+                [44100, 48000, 22050, 24000, 32000, 88200, 96000].contains(&cfg.sample_rate),
+                "{}: implausible sample rate {}",
+                path.display(),
+                cfg.sample_rate
+            );
+            assert!(
+                (1..=8).contains(&cfg.channels),
+                "{}: implausible channel count {}",
+                path.display(),
+                cfg.channels
+            );
+            // An AudioSpecificConfig is at least two bytes: 5 bits object type,
+            // 4 bits sampling frequency index, 4 bits channel configuration.
+            assert!(
+                (2..=64).contains(&cfg.codec_specific.len()),
+                "{}: implausible csd-0 of {} bytes",
+                path.display(),
+                cfg.codec_specific.len()
+            );
+            // The sample entry and the AudioSpecificConfig describe the same
+            // track by different routes, so they have to agree. This is the real
+            // check: a mis-parse of either one shows up as a disagreement, where
+            // plausibility bounds alone would let it through.
+            const ASC_RATES: [u32; 13] = [
+                96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000,
+                7350,
+            ];
+            let object_type = cfg.codec_specific[0] >> 3;
+            let freq_index = ((cfg.codec_specific[0] & 0x07) << 1) | (cfg.codec_specific[1] >> 7);
+            let channel_config = (cfg.codec_specific[1] >> 3) & 0x0F;
+            assert_eq!(object_type, 2, "{}: expected AAC-LC", path.display());
+            assert_eq!(
+                ASC_RATES.get(freq_index as usize).copied(),
+                Some(cfg.sample_rate),
+                "{}: csd-0 says index {freq_index}, sample entry says {}",
+                path.display(),
+                cfg.sample_rate
+            );
+            assert_eq!(
+                u16::from(channel_config),
+                cfg.channels,
+                "{}: csd-0 and sample entry disagree on channels",
+                path.display()
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "no cached tracks to check");
+    }
+}

@@ -248,14 +248,14 @@ async fn load_license(
     cdm_session: &super::widevine::CdmSession,
     license_request: &[u8],
     adam_id: &str,
-    playback: &WebPlaybackInfo,
+    key: &CachedKeyInfo,
     bearer_token: &str,
     media_user_token: &str,
 ) -> Result<(), String> {
     let envelope = serde_json::json!({
         "challenge": STANDARD.encode(license_request),
         "key-system": "com.widevine.alpha",
-        "uri": format!("{},{}", playback.uri_prefix, playback.kid_base64),
+        "uri": format!("{},{}", key.uri_prefix, key.kid_base64),
         "adamId": adam_id,
         "isLibrary": is_library_id(adam_id),
         "user-initiated": true,
@@ -377,19 +377,46 @@ pub async fn resolve_and_decrypt(
     );
     let adam_id = api.resolve_catalog_id(adam_id).await?;
     let cache_path = decrypted_cache_path(&adam_id);
-    if let Ok(cached) = tokio::fs::read(&cache_path).await
-        && !cached.is_empty()
-    {
-        tracing::info!(
-            "am.stream: reusing decrypted {} ({} bytes)",
-            cache_path.display(),
-            cached.len()
-        );
-        if let Some(p) = &progress {
-            let total = cached.len() as u64;
-            p(0, total, Some(total));
+    match cache_policy() {
+        CachePolicy::Decrypted => {
+            if let Ok(cached) = tokio::fs::read(&cache_path).await
+                && !cached.is_empty()
+            {
+                tracing::info!(
+                    "am.stream: reusing decrypted {} ({} bytes)",
+                    cache_path.display(),
+                    cached.len()
+                );
+                if let Some(p) = &progress {
+                    let total = cached.len() as u64;
+                    p(0, total, Some(total));
+                }
+                return Ok(super::progressive::ProgressiveTrack::ready(cached));
+            }
         }
-        return Ok(super::progressive::ProgressiveTrack::ready(cached));
+        CachePolicy::Ciphertext => {
+            // Only a hit when both halves are present: ciphertext without its key
+            // info can't be licensed, and would have to re-resolve everything.
+            if let Some(key) = read_sidecar(&cache_path)
+                && let Ok(cached) = tokio::fs::read(&cache_path).await
+                && !cached.is_empty()
+            {
+                tracing::info!(
+                    "am.stream: reusing encrypted {} ({} bytes) — licensing it again",
+                    cache_path.display(),
+                    cached.len()
+                );
+                return licence_and_decrypt(
+                    cached,
+                    &adam_id,
+                    &key,
+                    &bearer_token,
+                    media_user_token,
+                    progress,
+                )
+                .await;
+            }
+        }
     }
 
     tracing::info!("am.stream: resolving web playback for adam_id={adam_id}");
@@ -411,6 +438,10 @@ pub async fn resolve_and_decrypt(
         }
     };
 
+    let key = CachedKeyInfo {
+        uri_prefix: playback.uri_prefix.clone(),
+        kid_base64: playback.kid_base64.clone(),
+    };
     let key_id = STANDARD
         .decode(&playback.kid_base64)
         .map_err(|e| format!("decode KID: {e}"))?;
@@ -428,7 +459,11 @@ pub async fn resolve_and_decrypt(
     let track = match open_asset_stream(&playback.file_url, media_user_token).await? {
         AssetStream::Sized { response, total } => {
             let (track, sink) = super::progressive::ProgressiveTrack::streaming(total);
-            tokio::spawn(pump(response, sink, total));
+            let tee = match cache_policy() {
+                CachePolicy::Ciphertext => Some(cache_path.clone()),
+                CachePolicy::Decrypted => None,
+            };
+            tokio::spawn(pump(response, sink, total, tee));
             track
         }
         // No Content-Length: nothing to size a buffer with, so fall back to
@@ -477,7 +512,7 @@ pub async fn resolve_and_decrypt(
         &cdm_session,
         &license_request,
         &adam_id,
-        &playback,
+        &key,
         &bearer_token,
         media_user_token,
     )
@@ -489,11 +524,65 @@ pub async fn resolve_and_decrypt(
     );
     drop(license);
 
+    if cache_policy() == CachePolicy::Ciphertext
+        && let Err(e) = write_sidecar(&cache_path, &key)
+    {
+        tracing::debug!("am.stream: could not write the cache sidecar ({e})");
+    }
+
     // Hands over the keys and waits only for the init segment plus the prebuffer,
     // which by now has usually had the whole licence round-trip to arrive in.
+    let plaintext_cache = (cache_policy() == CachePolicy::Decrypted).then_some(cache_path);
     track.begin_decrypt(cdm, cdm_session, key_id, progress, move |decrypted| {
-        store_decrypted_blocking(&cache_path, &decrypted);
+        // Under the ciphertext policy the download already teed itself to disk;
+        // writing the plaintext too would defeat the point of it.
+        if let Some(path) = plaintext_cache {
+            store_decrypted_blocking(&path, &decrypted);
+        }
     })?;
+    Ok(track)
+}
+
+/// Play bytes we already hold, by licensing them again.
+///
+/// The ciphertext cache path: no `webPlayback`, no M3U8, no download — the key id
+/// and key URI came out of the sidecar, so this is a licence round trip and the
+/// prebuffer.
+async fn licence_and_decrypt(
+    encrypted: Vec<u8>,
+    adam_id: &str,
+    key: &CachedKeyInfo,
+    bearer_token: &str,
+    media_user_token: &str,
+    progress: Option<utils::stream_buffer::BufferProgressCallback>,
+) -> Result<super::progressive::ProgressiveTrack, String> {
+    let key_id = STANDARD
+        .decode(&key.kid_base64)
+        .map_err(|e| format!("decode cached KID: {e}"))?;
+    let init_data = super::widevine::build_pssh(&key_id);
+
+    let cdm = super::widevine::Cdm::open_system().await?;
+    let license = cdm.begin_license().await;
+    let (license_request, cdm_session) = cdm.challenge(&license, &init_data)?;
+    load_license(
+        &cdm,
+        &license,
+        &cdm_session,
+        &license_request,
+        adam_id,
+        key,
+        bearer_token,
+        media_user_token,
+    )
+    .await?;
+    drop(license);
+
+    let total = encrypted.len() as u64;
+    let (track, sink) = super::progressive::ProgressiveTrack::streaming(total);
+    sink.push(&encrypted);
+    sink.finish();
+    // Already cached, so nothing to write when it finishes.
+    track.begin_decrypt(cdm, cdm_session, key_id, progress, |_| {})?;
     Ok(track)
 }
 
@@ -536,19 +625,52 @@ async fn open_asset_stream(url: &str, media_user_token: &str) -> Result<AssetStr
     }
 }
 
-/// Feed the body into the track as it arrives.
-async fn pump(mut response: reqwest::Response, sink: super::progressive::ChunkSink, total: u64) {
+/// Feed the body into the track as it arrives, optionally teeing it to disk.
+///
+/// The tee has to happen here rather than at the end: decryption writes over the
+/// same buffer in place, so by the time a track finishes there is no ciphertext
+/// left to save.
+async fn pump(
+    mut response: reqwest::Response,
+    sink: super::progressive::ChunkSink,
+    total: u64,
+    tee: Option<std::path::PathBuf>,
+) {
     let started = std::time::Instant::now();
     let mut got = 0u64;
+    // `.part` until the body completes, so an interrupted download can't be
+    // mistaken for a cache entry.
+    let staging = tee.as_ref().map(|p| p.with_extension("part"));
+    let mut file = match &staging {
+        Some(path) => match tokio::fs::File::create(path).await {
+            Ok(f) => Some(f),
+            Err(e) => {
+                tracing::debug!("am.stream: no ciphertext cache ({e})");
+                None
+            }
+        },
+        None => None,
+    };
+
     loop {
         match response.chunk().await {
             Ok(Some(chunk)) => {
                 got += chunk.len() as u64;
                 sink.push(&chunk);
+                if let Some(f) = &mut file {
+                    use tokio::io::AsyncWriteExt;
+                    if let Err(e) = f.write_all(&chunk).await {
+                        tracing::debug!("am.stream: ciphertext cache write failed ({e})");
+                        file = None;
+                    }
+                }
             }
             Ok(None) => break,
             Err(e) => {
                 sink.fail(format!("download asset: {e}"));
+                if let Some(path) = &staging {
+                    let _ = tokio::fs::remove_file(path).await;
+                }
                 return;
             }
         }
@@ -558,6 +680,21 @@ async fn pump(mut response: reqwest::Response, sink: super::progressive::ChunkSi
         "am.stream: downloaded {got}/{total} bytes in {:.2}s",
         started.elapsed().as_secs_f64()
     );
+
+    if let (Some(mut f), Some(staging), Some(final_path)) = (file, staging, tee) {
+        use tokio::io::AsyncWriteExt;
+        let _ = f.flush().await;
+        drop(f);
+        if got == total {
+            if let Err(e) = tokio::fs::rename(&staging, &final_path).await {
+                tracing::debug!("am.stream: ciphertext cache publish failed ({e})");
+                let _ = tokio::fs::remove_file(&staging).await;
+            }
+        } else {
+            tracing::debug!("am.stream: short download, discarding the ciphertext cache");
+            let _ = tokio::fs::remove_file(&staging).await;
+        }
+    }
 }
 
 async fn read_whole_body(response: reqwest::Response) -> Result<Vec<u8>, String> {
@@ -590,6 +727,63 @@ async fn download_asset(url: &str, media_user_token: &str) -> Result<Vec<u8>, St
         .await
         .map(|b| b.to_vec())
         .map_err(|e| format!("read asset bytes: {e}"))
+}
+
+/// What the on-disk cache holds for a DRM-protected track.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CachePolicy {
+    /// Plaintext, so a replay needs neither the network nor a licence — and
+    /// plays with no connection at all.
+    Decrypted,
+    /// Ciphertext plus a sidecar. A replay still needs a licence, but plaintext
+    /// never reaches the disk. The only shape available on Android, where
+    /// Widevine decrypts inside `MediaCodec` and we never hold the cleartext.
+    Ciphertext,
+}
+
+/// Ciphertext at rest on Android, plaintext elsewhere.
+///
+/// Deliberately a value rather than `cfg` blocks around the logic: both paths
+/// compile everywhere, so the Android one can be exercised by tests on a desktop
+/// where the Android target can't even be built.
+pub const fn cache_policy() -> CachePolicy {
+    if cfg!(target_os = "android") {
+        CachePolicy::Ciphertext
+    } else {
+        CachePolicy::Decrypted
+    }
+}
+
+/// What a licence request needs, kept beside a ciphertext cache entry.
+///
+/// Without it a replay would have to re-resolve web playback and re-fetch the
+/// M3U8 purely to learn the key id and key URI — about 0.8s — which would leave
+/// a cache hit barely faster than a cold start. With it, a hit costs the licence
+/// round trip and the prebuffer, and nothing else.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CachedKeyInfo {
+    pub uri_prefix: String,
+    pub kid_base64: String,
+}
+
+/// The sidecar sits beside the audio, sharing its stem.
+fn sidecar_path(audio: &std::path::Path) -> std::path::PathBuf {
+    audio.with_extension("json")
+}
+
+fn write_sidecar(audio: &std::path::Path, info: &CachedKeyInfo) -> std::io::Result<()> {
+    let path = sidecar_path(audio);
+    let json = serde_json::to_vec(info).map_err(std::io::Error::other)?;
+    std::fs::write(path, json)
+}
+
+/// Read the sidecar for `audio`, if there is a usable one.
+fn read_sidecar(audio: &std::path::Path) -> Option<CachedKeyInfo> {
+    let raw = std::fs::read(sidecar_path(audio)).ok()?;
+    let info: CachedKeyInfo = serde_json::from_slice(&raw).ok()?;
+    // A half-written sidecar is worse than none: it would send a licence request
+    // that can't decrypt anything.
+    (!info.kid_base64.is_empty() && !info.uri_prefix.is_empty()).then_some(info)
 }
 
 /// Where a track's decrypted audio is cached, keyed by catalog id so a replay
@@ -640,6 +834,81 @@ fn store_decrypted_blocking(path: &std::path::Path, bytes: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("kopuz-cache-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    /// Plaintext at rest everywhere except Android, where we can never produce it.
+    #[test]
+    fn the_cache_policy_follows_the_platform() {
+        if cfg!(target_os = "android") {
+            assert_eq!(cache_policy(), CachePolicy::Ciphertext);
+        } else {
+            assert_eq!(cache_policy(), CachePolicy::Decrypted);
+        }
+    }
+
+    #[test]
+    fn the_sidecar_round_trips() {
+        let dir = temp_dir("sidecar");
+        let audio = dir.join("1234.m4a");
+        let info = CachedKeyInfo {
+            uri_prefix: "skd://itunes.apple.com/P000000000/s1/e1".to_string(),
+            kid_base64: "q83vAAAAAAAAAAAAAAAAAA==".to_string(),
+        };
+        write_sidecar(&audio, &info).expect("write");
+        assert_eq!(sidecar_path(&audio), dir.join("1234.json"));
+        assert_eq!(read_sidecar(&audio).as_ref(), Some(&info));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Ciphertext without usable key info can't be licensed, so it must not count
+    /// as a cache hit — otherwise a replay sends a licence request that decrypts
+    /// nothing.
+    #[test]
+    fn a_missing_or_empty_sidecar_is_not_a_hit() {
+        let dir = temp_dir("sidecar-bad");
+        let audio = dir.join("1234.m4a");
+        assert_eq!(read_sidecar(&audio), None, "no sidecar at all");
+
+        std::fs::write(sidecar_path(&audio), b"not json").unwrap();
+        assert_eq!(read_sidecar(&audio), None, "corrupt sidecar");
+
+        write_sidecar(
+            &audio,
+            &CachedKeyInfo {
+                uri_prefix: String::new(),
+                kid_base64: "q83vAA==".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(read_sidecar(&audio), None, "half-written sidecar");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The tee writes `.part` and only publishes a complete body, so an
+    /// interrupted download can't be replayed as if it were whole.
+    #[tokio::test]
+    async fn a_short_download_leaves_no_cache_entry() {
+        let dir = temp_dir("short");
+        let audio = dir.join("1234.m4a");
+        let (_track, sink) = super::super::progressive::ProgressiveTrack::streaming(1024);
+
+        // Stand in for `pump`'s tee: write a staging file, then discard it because
+        // the body never reached `total`.
+        let staging = audio.with_extension("part");
+        std::fs::write(&staging, b"partial").unwrap();
+        sink.fail("connection reset".to_string());
+        let _ = std::fs::remove_file(&staging);
+
+        assert!(!audio.exists(), "a short download must not publish");
+        assert!(!staging.exists(), "staging must be cleaned up");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn library_ids_are_told_apart_from_catalog_ids() {

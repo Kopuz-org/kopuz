@@ -15,6 +15,15 @@ use std::sync::{Arc, OnceLock};
 
 pub mod discover;
 pub mod fetch;
+pub mod mediadrm;
+
+/// Widevine's DRM system id, `edef8ba9-79d6-4ace-a3c8-27dcd51d21ed`.
+///
+/// One source of truth: it identifies the scheme in a `pssh` box on every
+/// platform, and Android derives its `java.util.UUID` from these same bytes.
+pub const WIDEVINE_SYSTEM_ID: [u8; 16] = [
+    0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce, 0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21, 0xed,
+];
 
 // MediaDrm API is TODO
 #[cfg(not(target_os = "android"))]
@@ -166,13 +175,22 @@ pub struct Cdm {
     _private: (),
 }
 
-/// Android: Widevine lives behind `MediaDrm`, which is a separate implementation.
-/// Until that lands, Apple Music playback reports why rather than failing at link
-/// time or playing silence.
+/// Android reaches Widevine through `MediaDrm`, which manages licences but cannot
+/// decrypt: content keys are issued decrypt-to-codec-only, so the plaintext is
+/// only ever produced inside `MediaCodec` and comes out as PCM. That makes Apple
+/// Music on Android a second playback path rather than another `Cdm` — see
+/// [`mediadrm`] for the detail and for the pieces that path will need.
+///
+/// Until it exists, every entry point says so rather than failing at link time or
+/// playing silence.
 #[cfg(target_os = "android")]
 impl Cdm {
     pub fn open(_path: impl AsRef<Path>) -> Result<Self, String> {
-        Err("Apple Music playback isn't supported on Android yet (needs MediaDrm)".to_string())
+        Err(
+            "Apple Music playback isn't supported on Android yet: Widevine there \
+             decrypts only inside MediaCodec, which needs a separate playback path"
+                .to_string(),
+        )
     }
 
     pub fn open_system() -> Result<Self, String> {
@@ -437,12 +455,6 @@ fn widevine_cenc_header(key_id: &[u8]) -> Vec<u8> {
 /// `WidevineCencHeader` and skipped past the filler; a real CDM parses this as an
 /// actual ISO-BMFF box, so it has to be one.
 pub fn build_pssh(key_id: &[u8]) -> Vec<u8> {
-    /// `edef8ba9-79d6-4ace-a3c8-27dcd51d21ed`
-    const WIDEVINE_SYSTEM_ID: [u8; 16] = [
-        0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce, 0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21,
-        0xed,
-    ];
-
     let payload = widevine_cenc_header(key_id);
 
     // size | 'pssh' | version+flags | system id | data size | data
