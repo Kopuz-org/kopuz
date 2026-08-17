@@ -334,7 +334,7 @@ impl AppleMusicApi {
             let parsed: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
                 tracing::warn!(
                     "am.library_page: parse failed page {page_num}: {e}\nbody (first 2000): {}",
-                    &body[..body.len().min(2000)]
+                    super::head(&body, 2000)
                 );
                 format!("parse library page: {e}")
             })?;
@@ -353,11 +353,18 @@ impl AppleMusicApi {
                     }
                 }
             }
+            // `self.get` prefixes BASE, so an absolute `next` has to lose it
+            // first or the URL becomes `https://amp-api…https://…`. Apple does
+            // return absolute cursors on some library endpoints — see
+            // `get_library_playlist_tracks`, which strips it the same way. A
+            // cursor pointing back at the page that produced it would page
+            // forever, so that ends the walk too.
             next = parsed
                 .get("next")
                 .and_then(|n| n.as_str())
                 .filter(|s| !s.is_empty())
-                .map(String::from);
+                .map(|s| s.strip_prefix(BASE).unwrap_or(s).to_string())
+                .filter(|s| *s != path);
             if next.is_none() {
                 break;
             }
@@ -428,7 +435,7 @@ impl AppleMusicApi {
         let parsed: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
             tracing::warn!(
                 "am.get_library_playlist_tracks: parse failed: {e}\nbody (first 2000): {}",
-                &body[..body.len().min(2000)]
+                super::head(&body, 2000)
             );
             format!("parse playlist: {e}")
         })?;

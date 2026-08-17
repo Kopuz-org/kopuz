@@ -55,7 +55,7 @@ pub struct AlbumRef {
 pub struct AlbumRefAttributes {
     #[serde(default)]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, rename = "artistName")]
     pub artist_name: String,
     #[serde(default)]
     pub artwork: Option<Artwork>,
@@ -159,7 +159,7 @@ pub struct AlbumData {
 pub struct AlbumAttributes {
     #[serde(default)]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, rename = "artistName")]
     pub artist_name: String,
     #[serde(default)]
     pub artwork: Artwork,
@@ -549,4 +549,45 @@ pub struct SongLyricsAttributes {
     #[serde(default)]
     #[serde(rename = "ttmlLocalizations")]
     pub ttml_localizations: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Apple sends camelCase throughout. This file copes three different ways —
+    /// raw camelCase fields, per-field `rename`, and snake_case — and because
+    /// every field is `#[serde(default)]`, a snake_case field with no `rename`
+    /// doesn't fail to parse. It quietly reads as `Default`, so a missing
+    /// mapping surfaces as blank text in the UI rather than an error anywhere.
+    ///
+    /// Both album shapes carry the artist and both had it wrong; tracks, which
+    /// do carry the `rename`, are the control.
+    #[test]
+    fn album_artists_come_from_apples_camel_case_key() {
+        let json = serde_json::json!({
+            "name": "an album",
+            "artistName": "a band",
+        });
+
+        let full: AlbumAttributes =
+            serde_json::from_value(json.clone()).expect("album attributes parse");
+        assert_eq!(full.artist_name, "a band");
+
+        let reference: AlbumRefAttributes =
+            serde_json::from_value(json.clone()).expect("album ref attributes parse");
+        assert_eq!(reference.artist_name, "a band");
+
+        let track: TrackAttributes = serde_json::from_value(json).expect("track attributes parse");
+        assert_eq!(track.artist_name, "a band");
+    }
+
+    /// The snake_case spelling is *not* what Apple sends, so accepting it would
+    /// mean the mapping above could be removed without any test noticing.
+    #[test]
+    fn the_snake_case_spelling_is_not_accepted() {
+        let json = serde_json::json!({ "artist_name": "a band" });
+        let full: AlbumAttributes = serde_json::from_value(json).expect("parses via defaults");
+        assert_eq!(full.artist_name, "", "only Apple's own key should bind");
+    }
 }

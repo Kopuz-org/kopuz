@@ -6,8 +6,6 @@
 //! air before the first note. But samples are independent — each carries its own
 //! IV — and CENC is size-preserving, so a sample can be decrypted on its own, in
 //! place, in any order.
-//!
-//! yap yap sahur
 
 use std::io::{Error as IoError, ErrorKind, Read, Result as IoResult, Seek, SeekFrom};
 use std::sync::atomic::{AtomicUsize, Ordering};

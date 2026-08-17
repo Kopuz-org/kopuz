@@ -197,9 +197,10 @@ impl CoverRef {
             "custom" if !item_id.is_empty() => {
                 Self::remote_item(MusicService::Custom, item_id, value)
             }
-            // YT Music and legacy SoundCloud refs only carry self-contained
-            // artwork. Their item identity is irrelevant to cover resolution.
-            "ytmusic" | "soundcloud" => value.map_or(Self::None, Self::parse),
+            // YT Music, SoundCloud and Apple Music refs only carry
+            // self-contained artwork — a URL, or an Apple artwork template.
+            // Their item identity is irrelevant to cover resolution.
+            "ytmusic" | "soundcloud" | "applemusic" => value.map_or(Self::None, Self::parse),
             _ => Self::None,
         }
     }
@@ -659,6 +660,29 @@ mod tests {
         let stored =
             CoverRef::stored_item_ref(MusicService::YtMusic, "_", Some(&CoverRef::encode_url(url)));
         assert_eq!(CoverRef::parse(&stored), CoverRef::EmbeddedUrl(url.into()));
+    }
+
+    /// Apple Music writes its album covers as `applemusic:<id>:<url>`, where the
+    /// URL is an artwork template still holding its `{w}`/`{h}` placeholders and
+    /// — being a URL — its own colons. Without a parser arm the whole ref read
+    /// back as `None` and no Apple Music album had a cover.
+    #[test]
+    fn apple_music_album_covers_round_trip() {
+        let url = "https://is1-ssl.mzstatic.com/image/thumb/a/b/600x600bb.jpg";
+        for stored in [
+            format!("applemusic:1234567890:{url}"),
+            CoverRef::stored_item_ref(MusicService::AppleMusic, "1234567890", Some(url)),
+        ] {
+            assert_eq!(
+                CoverRef::parse(&stored),
+                CoverRef::EmbeddedUrl(url.to_string()),
+                "{stored}"
+            );
+        }
+
+        // An id with no artwork has nothing to resolve to, but must not be
+        // mistaken for a cover value.
+        assert_eq!(CoverRef::parse("applemusic:1234567890"), CoverRef::None);
     }
 }
 

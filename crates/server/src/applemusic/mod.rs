@@ -26,6 +26,23 @@ pub fn artwork_url(template: &str, size: u32) -> String {
         .replace("{h}", &size.to_string())
 }
 
+/// At most `max` bytes of `s`, backed off to a character boundary.
+///
+/// For truncating a response body into a log line. Apple's bodies are UTF-8 and
+/// routinely non-ASCII — any track title outside Latin-1 will do it — so a plain
+/// `&body[..max]` can land inside a character and panic. These call sites are
+/// all on error paths, so that panic would replace the diagnostic being written.
+pub(crate) fn head(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Convert a catalog track response to a reader::Track.
 pub fn track_from_song_data(song: &types::TrackData) -> Track {
     let cover = if !song.attributes.artwork.url.is_empty() {

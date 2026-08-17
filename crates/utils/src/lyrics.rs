@@ -316,9 +316,13 @@ where
         }
     };
 
+    // Anything not backed by a file on disk. Missing a prefix here costs twice:
+    // the `.lrc` lookup below runs against a path that was never a path, and
+    // `prefer_local` returns before the remote providers are ever reached.
     let is_server = track_path.starts_with("jellyfin:")
         || track_path.starts_with("subsonic:")
-        || track_path.starts_with("custom:");
+        || track_path.starts_with("custom:")
+        || track_path.starts_with("applemusic:");
     let mut fallback: Option<Lyrics> = None;
 
     // 1. Local .lrc file (only for local tracks)

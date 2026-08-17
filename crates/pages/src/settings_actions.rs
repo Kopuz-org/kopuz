@@ -324,7 +324,7 @@ pub fn add_server(
     playback_error: Signal<Option<String>>,
     apple_music_storefront: Signal<String>,
     apple_music_language: Signal<String>,
-    apple_music_manual_token: Signal<String>,
+    mut apple_music_manual_token: Signal<String>,
     apple_music_use_manual: Signal<bool>,
 ) {
     let selected_service = server_service();
@@ -381,13 +381,19 @@ pub fn add_server(
             }
             new_server.yt_browser = (is_browser_signin && !is_anon).then(|| *yt_browser.peek());
             // Apple Music: set storefront, language, and optionally manual token.
+            // The token only applies in manual mode — the signal keeps its value
+            // between saves, so reading it unconditionally would attach the
+            // previous server's token to one that is about to sign in through
+            // the browser, and leave it there if that sign-in fails.
             if selected_service == MusicService::AppleMusic {
                 new_server.apple_music_storefront = apple_music_storefront();
                 new_server.apple_music_language = apple_music_language();
-                let manual = apple_music_manual_token();
-                if !manual.is_empty() {
-                    new_server.access_token = Some(manual);
-                    new_server.user_id = Some("me".to_string());
+                if *apple_music_use_manual.peek() {
+                    let manual = apple_music_manual_token();
+                    if !manual.is_empty() {
+                        new_server.access_token = Some(manual);
+                        new_server.user_id = Some("me".to_string());
+                    }
                 }
             }
             let saved = config::SavedServer::from_music_server(&new_server);
@@ -400,6 +406,9 @@ pub fn add_server(
             server_name.set(String::new());
             server_url.set(String::new());
             server_service.set(MusicService::Jellyfin);
+            // Cleared with the rest of the form: it has been persisted, and a
+            // credential left in a live signal is one the next server can pick up.
+            apple_music_manual_token.set(String::new());
             error.set(None);
             show_add_server.set(false);
 

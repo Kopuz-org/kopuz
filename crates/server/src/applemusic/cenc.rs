@@ -102,6 +102,12 @@ fn find_deep(data: &[u8], start: usize, end: usize, target: u32) -> Option<(usiz
     None
 }
 
+/// Each child as `(box_start, body_start, body_end)`.
+///
+/// `body_end` comes from [`read_box`], which is the only place that knows
+/// whether the box carried a 32- or 64-bit size. Deriving it at the call site
+/// as `body_start + total - 8` is right for a 32-bit box and eight bytes too
+/// long for a 64-bit one, which walks the child scan into the next sibling.
 fn find_all_children(
     data: &[u8],
     body_start: usize,
@@ -110,11 +116,11 @@ fn find_all_children(
     let mut result = Vec::new();
     let mut pos = body_start;
     while pos < body_end {
-        let (bs, _be, total) = match read_box(data, pos) {
+        let (bs, be, total) = match read_box(data, pos) {
             Some(v) => v,
             None => break,
         };
-        result.push((pos, bs, total));
+        result.push((pos, bs, be));
         pos += total;
     }
     result
@@ -139,19 +145,20 @@ fn extract_track_info(
         None => return Ok((track_infos, enca_positions)),
     };
 
-    for (trak_box_start, trak_body_start, trak_total) in
+    for (trak_box_start, trak_body_start, trak_body_end) in
         find_all_children(data, moov_body_start, moov_body_end)
     {
-        let trak_body_end = trak_body_start + trak_total - 8;
         if box_type(data, trak_box_start) != TRAK {
             continue;
         }
 
+        // The version byte decides where the track id sits, so the length
+        // needed isn't known until it has been read — hence the two checks.
         let track_id = find_child(data, trak_body_start, trak_body_end, TKHD)
-            .map(|(s, _, _)| {
-                let version = data[s];
-                let offset = if version == 0 { 12 } else { 20 };
-                u32be(data, s + offset)
+            .filter(|(bs, be, _)| bs < be)
+            .and_then(|(s, be, _)| {
+                let offset = if data[s] == 0 { 12 } else { 20 };
+                (s + offset + 4 <= be).then(|| u32be(data, s + offset))
             })
             .unwrap_or(0);
 
@@ -413,15 +420,20 @@ pub fn index_fmp4(data: &[u8]) -> Result<Fmp4Layout, String> {
         let mdat_body_start = mdat_pos + 8;
         let mdat_payload_offset = mdat_body_start as u64;
 
-        for (traf_pos, traf_bs, traf_total) in find_all_children(data, moof_bs, moof_be) {
+        for (traf_pos, traf_bs, traf_be) in find_all_children(data, moof_bs, moof_be) {
             if box_type(data, traf_pos) != TRAF {
                 continue;
             }
-            let traf_be = traf_bs + traf_total - 8;
 
+            // Every read below is bounds-checked against the box's own end
+            // rather than assumed. These bytes come off the network, and
+            // `index_fmp4` runs under `State`'s mutex — an out-of-range index
+            // here would poison it and leave the track unplayable for good,
+            // reported only as "decrypt state poisoned".
             let tfhd = find_child(data, traf_bs, traf_be, TFHD);
             let track_id = tfhd
                 .as_ref()
+                .filter(|(bs, be, _)| bs + 8 <= *be)
                 .map(|(s, _, _)| u32be(data, s + 4))
                 .unwrap_or(0);
 
@@ -432,7 +444,9 @@ pub fn index_fmp4(data: &[u8]) -> Result<Fmp4Layout, String> {
 
             let mut traf_ivs: Vec<[u8; 16]> = Vec::new();
             let mut traf_subs: Vec<Vec<(u16, u32)>> = Vec::new();
-            if let Some((senc_bs, senc_be, _)) = find_child(data, traf_bs, traf_be, SENC) {
+            if let Some((senc_bs, senc_be, _)) = find_child(data, traf_bs, traf_be, SENC)
+                && senc_bs + 8 <= senc_be
+            {
                 let flags = u32be(data, senc_bs);
                 let sample_count = u32be(data, senc_bs + 4);
                 let raw = &data[senc_bs + 8..senc_be];
@@ -811,6 +825,106 @@ mod tests {
     fn a_missing_descriptor_is_not_found() {
         let esds = vec![0x03, 0x05, 0x00, 0x00, 0x00, 0x06, 0x00];
         assert_eq!(find_descriptor(&esds, 0, esds.len(), 5), None);
+    }
+
+    /// `size` counts the header, so `body` of length 0 is a legal 8-byte box.
+    fn boxed(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut out = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(body);
+        out
+    }
+
+    fn concat(parts: &[Vec<u8>]) -> Vec<u8> {
+        parts.iter().flatten().copied().collect()
+    }
+
+    /// An init segment whose sole track is encrypted and has id 1, so a
+    /// fragment naming that id gets past the track lookup and reaches the
+    /// `senc` parse.
+    fn encrypted_init() -> Vec<u8> {
+        let mut tkhd = vec![0u8; 20];
+        tkhd[12..16].copy_from_slice(&1u32.to_be_bytes());
+        // stsd: version/flags, then a one-entry table.
+        let stsd = concat(&[vec![0, 0, 0, 0, 0, 0, 0, 1], boxed(b"enca", &[0u8; 28])]);
+        concat(&[
+            boxed(b"ftyp", b"isom"),
+            boxed(
+                b"moov",
+                &boxed(
+                    b"trak",
+                    &concat(&[boxed(b"tkhd", &tkhd), boxed(b"stsd", &stsd)]),
+                ),
+            ),
+        ])
+    }
+
+    /// A box can be well-formed as a box and still too short to hold the fields
+    /// its type implies. `index_fmp4` parses bytes straight off the network
+    /// under `State`'s mutex, so a panic here poisons the mutex and leaves the
+    /// track permanently unplayable — a far worse outcome than the empty index
+    /// a malformed box should produce.
+    #[test]
+    fn short_boxes_do_not_panic_the_indexer() {
+        // A `tkhd` at the very end of the buffer, which is the ordinary case
+        // while the init segment is still arriving: nothing follows `moov`, so
+        // reading the version byte and the track id runs off the allocation.
+        let empty = boxed(b"tkhd", &[]);
+        // Version 1 puts the track id at +20; this body stops at 4.
+        let stunted = boxed(b"tkhd", &[1, 0, 0, 0]);
+        for trak_body in [empty, stunted] {
+            let data = concat(&[
+                boxed(b"ftyp", b"isom"),
+                boxed(b"moov", &boxed(b"trak", &trak_body)),
+            ]);
+            let index = index_fmp4(&data).expect("a moov is present");
+            assert!(index.samples.is_empty(), "no moof, so no samples");
+        }
+
+        // `senc`'s per-sample table starts at +8, so a body shorter than that
+        // makes the table's start exceed its end. Slicing that way panics
+        // regardless of how much buffer follows.
+        for senc_body in [Vec::new(), vec![0u8; 4], vec![0u8; 7]] {
+            let traf = boxed(
+                b"traf",
+                &concat(&[
+                    boxed(b"tfhd", &[0, 0, 0, 0, 0, 0, 0, 1]),
+                    boxed(b"senc", &senc_body),
+                ]),
+            );
+            let data = concat(&[
+                encrypted_init(),
+                boxed(b"moof", &traf),
+                boxed(b"mdat", &[0u8; 16]),
+            ]);
+            let index = index_fmp4(&data).expect("a moov is present");
+            assert!(index.samples.is_empty(), "no trun, so no samples");
+        }
+    }
+
+    /// The fragment walk requires a readable `mdat` after each `moof`, which
+    /// puts at least eight bytes beyond every box inside that `moof`. That is
+    /// what keeps the fixed-offset reads on `tfhd` and `senc`'s header in
+    /// bounds, so the guards there are belt-and-braces rather than load-bearing
+    /// — this pins the precondition they lean on.
+    #[test]
+    fn a_fragment_is_only_walked_when_an_mdat_follows_it() {
+        let traf = boxed(b"traf", &boxed(b"tfhd", &[]));
+        let truncated = concat(&[encrypted_init(), boxed(b"moof", &traf)]);
+        assert!(
+            index_fmp4(&truncated)
+                .expect("a moov is present")
+                .samples
+                .is_empty(),
+            "a moof with nothing after it is not walked at all"
+        );
+
+        let with_mdat = concat(&[truncated.clone(), boxed(b"mdat", &[0u8; 16])]);
+        let moof_end = truncated.len();
+        assert!(
+            moof_end + 8 <= with_mdat.len(),
+            "the mdat guarantees eight readable bytes past the end of the moof"
+        );
     }
 
     /// Reads a real Apple Music init segment. Ignored: needs a cached track.

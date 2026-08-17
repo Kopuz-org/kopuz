@@ -84,11 +84,15 @@ pub fn AddServerPopup(
     let cancel_text = i18n::t("cancel").to_string();
     let save_text = i18n::t("save").to_string();
 
+    // Only a service that will actually launch a browser needs host access.
+    // YouTube Music anonymous and Apple Music manual-token both skip that step,
+    // so blocking them would leave a sandboxed user no way to save at all.
     let saving_not_supported = {
         let service = server_service();
         !host_access()
             && service.uses_browser_signin()
             && (service != MusicService::YtMusic || !yt_anonymous())
+            && (service != MusicService::AppleMusic || !apple_music_use_manual())
     };
 
     let flatpak_access_command =

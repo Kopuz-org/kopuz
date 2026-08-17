@@ -301,7 +301,7 @@ async fn load_license(
     tracing::debug!(
         "am.license: raw response len={} body: {}",
         resp_body.len(),
-        &resp_body[..resp_body.len().min(500)]
+        super::head(&resp_body, 500)
     );
 
     let license_json: serde_json::Value = serde_json::from_str(&resp_body).map_err(|e| {
@@ -675,6 +675,20 @@ async fn pump(
             }
         }
     }
+
+    // A body that simply stops is not an error on the connection, so the loop
+    // above ends the same way a complete one does. The buffer was sized to
+    // `total` and zero-filled, so finishing here would publish the missing tail
+    // as silence — and on the decrypted-cache platforms that silence is then
+    // written to disk and replayed on every later listen.
+    if got < total {
+        sink.fail(format!("asset truncated: {got}/{total} bytes"));
+        if let Some(path) = &staging {
+            let _ = tokio::fs::remove_file(path).await;
+        }
+        return;
+    }
+
     sink.finish();
     tracing::info!(
         "am.stream: downloaded {got}/{total} bytes in {:.2}s",
@@ -685,13 +699,8 @@ async fn pump(
         use tokio::io::AsyncWriteExt;
         let _ = f.flush().await;
         drop(f);
-        if got == total {
-            if let Err(e) = tokio::fs::rename(&staging, &final_path).await {
-                tracing::debug!("am.stream: ciphertext cache publish failed ({e})");
-                let _ = tokio::fs::remove_file(&staging).await;
-            }
-        } else {
-            tracing::debug!("am.stream: short download, discarding the ciphertext cache");
+        if let Err(e) = tokio::fs::rename(&staging, &final_path).await {
+            tracing::debug!("am.stream: ciphertext cache publish failed ({e})");
             let _ = tokio::fs::remove_file(&staging).await;
         }
     }
