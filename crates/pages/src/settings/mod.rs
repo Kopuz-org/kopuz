@@ -770,91 +770,89 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         {hooks::debug_db_section()}
                     }
                 }
+            }
+            }
 
-
-
-                if show_add_server() {
-                    AddServerPopup {
-                        server_name,
-                        server_url,
-                        server_service,
-                        yt_browser,
-                        yt_anonymous,
-                        host_access,
-                        error,
-                        on_close: move |_| show_add_server.set(false),
-                        on_save: handle_add_server
-                    }
+            if show_add_server() {
+                AddServerPopup {
+                    server_name,
+                    server_url,
+                    server_service,
+                    yt_browser,
+                    yt_anonymous,
+                    host_access,
+                    error,
+                    on_close: move |_| show_add_server.set(false),
+                    on_save: handle_add_server
                 }
+            }
 
-                if show_add_local_source() {
-                    AddLocalSourcePopup {
-                        name: local_source_name,
-                        directories: local_source_directories,
-                        error: local_source_error,
-                        on_close: move |_| {
-                            show_add_local_source.set(false);
-                            local_source_name.set(String::new());
-                            local_source_directories.set(Vec::new());
-                            local_source_error.set(None);
-                        },
-                        on_save: move |_| {
-                            let name = local_source_name().trim().to_string();
-                            if name.is_empty() {
-                                local_source_error.set(Some(i18n::t("local_library_name_required").to_string()));
-                                return;
-                            }
-                            let directories = local_source_directories();
-                            if directories.is_empty() {
-                                local_source_error.set(Some(i18n::t("local_library_folder_required").to_string()));
-                                return;
-                            }
-                            let source = config::SavedLocalSource::new(name, directories);
-                            let active = config::Source::LocalLibrary(source.id.clone());
-                            {
-                                let mut cfg = config.write();
-                                cfg.add_local_source(source);
-                                cfg.set_active_local_source(active);
-                            }
-                            show_add_local_source.set(false);
-                            local_source_name.set(String::new());
-                            local_source_directories.set(Vec::new());
-                            local_source_error.set(None);
-                        },
-                    }
+            if show_add_local_source() {
+                AddLocalSourcePopup {
+                    name: local_source_name,
+                    directories: local_source_directories,
+                    error: local_source_error,
+                    on_close: move |_| {
+                        show_add_local_source.set(false);
+                        local_source_name.set(String::new());
+                        local_source_directories.set(Vec::new());
+                        local_source_error.set(None);
+                    },
+                    on_save: move |_| {
+                        let name = local_source_name().trim().to_string();
+                        if name.is_empty() {
+                            local_source_error.set(Some(i18n::t("local_library_name_required").to_string()));
+                            return;
+                        }
+                        let directories = local_source_directories();
+                        if directories.is_empty() {
+                            local_source_error.set(Some(i18n::t("local_library_folder_required").to_string()));
+                            return;
+                        }
+                        let source = config::SavedLocalSource::new(name, directories);
+                        let active = config::Source::LocalLibrary(source.id.clone());
+                        {
+                            let mut cfg = config.write();
+                            cfg.add_local_source(source);
+                            cfg.set_active_local_source(active);
+                        }
+                        show_add_local_source.set(false);
+                        local_source_name.set(String::new());
+                        local_source_directories.set(Vec::new());
+                        local_source_error.set(None);
+                    },
                 }
+            }
 
-                if show_add_registry() {
-                    AddRegistryPopup {
-                        registry_url,
-                        error: registry_error,
-                        loading: registry_loading,
-                        on_close: move |_| show_add_registry.set(false),
-                        on_save: handle_add_registry
-                    }
+            if show_add_registry() {
+                AddRegistryPopup {
+                    registry_url,
+                    error: registry_error,
+                    loading: registry_loading,
+                    on_close: move |_| show_add_registry.set(false),
+                    on_save: handle_add_registry
                 }
+            }
 
-                if show_login() {
-                    LoginPopup {
-                        username,
-                        password,
-                        service_name: config
-                            .read()
-                            .server
-                            .as_ref()
-                            .map(|server| server.service.display_name().to_string())
-                            .unwrap_or_else(|| i18n::t("server").to_string()),
-                        error: login_error,
-                        loading: is_loading,
-                        on_close: move |_| {
-                            show_login.set(false);
-                            username.set(String::new());
-                            password.set(String::new());
-                            login_error.set(None);
-                        },
-                        on_save: handle_login
-                    }
-                }
+            if show_login() {
+                LoginPopup {
+                    username,
+                    password,
+                    service_name: config
+                        .read()
+                        .server
+                        .as_ref()
+                        .map(|server| server.service.display_name().to_string())
+                        .unwrap_or_else(|| i18n::t("server").to_string()),
+                    error: login_error,
+                    loading: is_loading,
+                    on_close: move |_| {
+                        show_login.set(false);
+                        username.set(String::new());
+                        password.set(String::new());
+                        login_error.set(None);
+                    },
+                    on_save: handle_login
                 }
             }
         }

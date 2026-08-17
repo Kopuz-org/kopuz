@@ -250,6 +250,11 @@ fn transport_classes(variant: ControlsVariant) -> TransportClasses {
     }
 }
 
+/// Transport and both sliders force `dir="ltr"`. Time runs left-to-right in
+/// every locale, and the native `input[type=range]` flips its value mapping
+/// under RTL while the fills below it are drawn from the physical left — so
+/// inheriting the app direction would make the sliders track the pointer
+/// backwards and put elapsed time on the wrong end.
 #[component]
 pub fn TransportButtons(is_playing: Signal<bool>, variant: ControlsVariant) -> Element {
     let mut ctrl = use_context::<PlayerController>();
@@ -262,6 +267,7 @@ pub fn TransportButtons(is_playing: Signal<bool>, variant: ControlsVariant) -> E
     rsx! {
         div {
             class: classes.wrapper,
+            dir: "ltr",
             style: if variant == ControlsVariant::Fullscreen { "max-width: 640px;" } else { "" },
             button {
                 class: classes.side,
@@ -330,6 +336,7 @@ pub fn SeekSlider(
         ControlsVariant::Fullscreen => rsx! {
             div {
                 class: "w-full mb-3",
+                dir: "ltr",
                 style: "max-width: 640px;",
                 div {
                     class: "flex items-center gap-3",
@@ -382,6 +389,7 @@ pub fn SeekSlider(
         ControlsVariant::Bar => rsx! {
             div {
                 class: "flex items-center gap-2 w-full",
+                dir: "ltr",
                 span { class: "text-[10px] text-slate-500 w-8 text-right font-mono", "{fmt_time(display_progress)}" }
                 div {
                     class: format!("flex-1 h-1 bg-white/10 rounded-full relative {}", if can_seek { "group cursor-pointer" } else { "" }),
@@ -432,6 +440,7 @@ pub fn VolumeSlider(
         ControlsVariant::Fullscreen => rsx! {
             div {
                 class: "flex items-center gap-5 w-full",
+                dir: "ltr",
                 style: "max-width: 640px;",
                 i { class: "fa-solid fa-volume-low text-white/40" }
                 div {
@@ -470,6 +479,7 @@ pub fn VolumeSlider(
         ControlsVariant::Bar => rsx! {
             div {
                 class: "flex items-center gap-2 group",
+                dir: "ltr",
                 button {
                     class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| toggle_mute.call(()),

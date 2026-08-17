@@ -66,7 +66,7 @@ pub fn BottombarNormal(
                     span { class: "text-[13px] font-bold text-white truncate leading-tight", "{current_song_title}" }
                     span { class: "text-[11px] font-medium text-white/60 truncate leading-tight", "{current_song_artist}" }
                 }
-                div { class: "flex items-center gap-1 pr-1",
+                div { class: "flex items-center gap-1 pr-1", dir: "ltr",
                     button {
                         class: "w-12 h-12 flex items-center justify-center text-white text-xl active:scale-90 transition-transform",
                         onclick: move |evt| { evt.stop_propagation(); ctrl.toggle(); },

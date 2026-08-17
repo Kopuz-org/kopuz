@@ -294,7 +294,7 @@ Then build and install Kopuz:
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
-dx build --release --package kopuz
+git submodule update --init --recursive --remote
 flatpak-builder --user --install --force-clean \
   build-dir packaging/flatpak/moe.kopuz.kopuz.json
 flatpak run moe.kopuz.kopuz
@@ -871,3 +871,7 @@ longer than needed.
 
 - Logo design by: Lucas Amorim -
   [His Instagram Account](https://www.instagram.com/yattets/)
+
+## Star History
+
+[![Star History Chart](https://star-history.dera.page/svg?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://star-history.dera.page/#Kopuz-org/kopuz&type=date&legend=top-left)

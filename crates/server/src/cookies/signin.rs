@@ -63,7 +63,9 @@ where
                 browser.id().to_uppercase().replace('-', "_")
             )
         };
-        find_browser_bin(browser).await.ok_or(error)?
+        find_browser_bin(browser, profile.display().to_string())
+            .await
+            .ok_or(error)?
     };
     tracing::info!(%bin, profile = %profile.display(), "launching sign-in browser");
     let mut cmd = browser_command(&bin);

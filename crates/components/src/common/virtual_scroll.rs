@@ -8,6 +8,15 @@ pub struct VirtualScrollInfo {
     pub bottom_pad: f64,
 }
 
+/// `start_index` is clamped to the last full window rather than the last item: a
+/// scroll offset left over from a longer list (the signal outlives the DOM
+/// element across a re-render, and a playlist's rows arrive after its first
+/// paint) would otherwise pin the window to the final row and render a handful
+/// of tracks adrift in a viewport-sized spacer.
+///
+/// `item_height` has to be the row's real height — the pads are laid out in
+/// multiples of it, so an estimate that disagrees with the DOM drifts the list
+/// out from under the scrollbar.
 pub fn use_virtual_scroll(
     scroll_top: f64,
     container_height: f64,
@@ -22,7 +31,7 @@ pub fn use_virtual_scroll(
     let buffer_size = 10;
 
     let start_index = {
-        let max_start = total_items.saturating_sub(1);
+        let max_start = total_items.saturating_sub(window_size + 2 * buffer_size);
         let calc = (scroll_top - (buffer_size as f64) * item_height) / item_height;
         (calc.floor().max(0.0) as usize).min(max_start)
     };
@@ -56,6 +65,48 @@ pub fn use_virtual_scroll(
         items_to_render,
         top_pad,
         bottom_pad,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::use_virtual_scroll;
+
+    const ROW: f64 = 44.0;
+
+    #[test]
+    fn stale_scroll_offset_against_a_short_list_renders_from_the_top() {
+        let info = use_virtual_scroll(5_000.0, 660.0, 15, ROW);
+
+        assert_eq!(info.start_index, 0);
+        assert_eq!(info.items_to_render, 15);
+        assert_eq!(info.top_pad, 0.0);
+        assert_eq!(info.bottom_pad, 0.0);
+    }
+
+    #[test]
+    fn scrolled_to_the_end_of_a_long_list_keeps_a_full_window() {
+        let total = 200;
+        let info = use_virtual_scroll(total as f64 * ROW - 660.0, 660.0, total, ROW);
+
+        assert!(info.items_to_render >= 30);
+        assert_eq!(info.start_index + info.items_to_render, total);
+        assert_eq!(
+            info.top_pad + info.items_to_render as f64 * ROW + info.bottom_pad,
+            total as f64 * ROW
+        );
+    }
+
+    #[test]
+    fn pads_and_rendered_rows_always_sum_to_the_full_list_height() {
+        for scroll_top in [0.0, 500.0, 4_000.0, 100_000.0] {
+            let info = use_virtual_scroll(scroll_top, 660.0, 120, ROW);
+            assert_eq!(
+                info.top_pad + info.items_to_render as f64 * ROW + info.bottom_pad,
+                120.0 * ROW,
+                "scroll_top {scroll_top}"
+            );
+        }
     }
 }
 
