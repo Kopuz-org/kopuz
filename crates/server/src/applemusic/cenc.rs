@@ -168,7 +168,7 @@ fn extract_track_info(
                 if etype == ENCA || etype == ENCV {
                     let children_start = es + 28;
                     let default_iv = get_tenc_iv_size(data, children_start, ee);
-                    tracing::info!("am.decrypt: track {track_id}: tenc iv_size={default_iv}");
+                    tracing::debug!("am.decrypt: track {track_id}: tenc iv_size={default_iv}");
                     track_infos.push(TrackInfo {
                         track_id,
                         default_iv_size: default_iv,
@@ -493,7 +493,9 @@ pub fn index_fmp4(data: &[u8]) -> Result<Fmp4Layout, String> {
         pos = moof_be;
     }
 
-    tracing::info!(
+    // Debug, not info: a streaming track re-walks this on every new fragment, so
+    // at info it drowns the log and makes indexing look like the slow step.
+    tracing::debug!(
         "am.decrypt: indexed {} samples, init {} bytes",
         layout.samples.len(),
         layout.init_end

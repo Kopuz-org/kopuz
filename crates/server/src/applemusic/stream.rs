@@ -422,23 +422,48 @@ pub async fn resolve_and_decrypt(
     );
 
     // The bytes don't depend on the licence — the asset URL is already in hand and
-    // the CDM is only needed to *read* what arrives.
-    let downloading = {
-        let url = playback.file_url.clone();
-        let token = media_user_token.to_string();
-        tracing::info!("am.stream: downloading encrypted fMP4 from {url}");
-        tokio::spawn(async move { download_asset(&url, &token).await })
+    // the CDM is only needed to *read* what arrives — so the body streams into the
+    // track's buffer while the licence round-trip is in flight. Playback starts on
+    // the first fragment rather than the last.
+    let track = match open_asset_stream(&playback.file_url, media_user_token).await? {
+        AssetStream::Sized { response, total } => {
+            let (track, sink) = super::progressive::ProgressiveTrack::streaming(total);
+            tokio::spawn(pump(response, sink, total));
+            track
+        }
+        // No Content-Length: nothing to size a buffer with, so fall back to
+        // downloading the whole body before starting, as this used to do.
+        AssetStream::Unsized { response } => {
+            let bytes = read_whole_body(response).await?;
+            let total = bytes.len() as u64;
+            tracing::info!("am.stream: downloaded {total} bytes (no Content-Length)");
+            let (track, sink) = super::progressive::ProgressiveTrack::streaming(total);
+            sink.push(&bytes);
+            sink.finish();
+            track
+        }
     };
 
     // Borrow the CDM from an installed browser. Its device key stays sealed, so
     // no key material ships with kopuz.
+    let phase = std::time::Instant::now();
     let cdm = super::widevine::Cdm::open_system().await?;
+    tracing::info!(
+        "am.timing: cdm ready in {:.2}s",
+        phase.elapsed().as_secs_f64()
+    );
+    let phase = std::time::Instant::now();
     // Held only for challenge → licence → update. Decryption runs without it, so
     // a track already playing never blocks the next one from starting.
     let license = cdm.begin_license().await;
     // The session outlives the licence exchange: it holds the content keys, so it
     // travels with the track and is closed when the track is done with it.
     let (license_request, cdm_session) = cdm.challenge(&license, &init_data)?;
+    tracing::info!(
+        "am.timing: challenge in {:.2}s (includes waiting for the licence lock)",
+        phase.elapsed().as_secs_f64()
+    );
+    let phase = std::time::Instant::now();
     tracing::debug!(
         "am.stream: license challenge generated ({} bytes)",
         license_request.len()
@@ -458,29 +483,89 @@ pub async fn resolve_and_decrypt(
     )
     .await?;
 
+    tracing::info!(
+        "am.timing: licence exchanged in {:.2}s",
+        phase.elapsed().as_secs_f64()
+    );
     drop(license);
 
-    // By here the download has usually had the licence round-trip to run in, so
-    // this is often already finished.
-    let encrypted_bytes = downloading
+    // Hands over the keys and waits only for the init segment plus the prebuffer,
+    // which by now has usually had the whole licence round-trip to arrive in.
+    track.begin_decrypt(cdm, cdm_session, key_id, progress, move |decrypted| {
+        store_decrypted_blocking(&cache_path, &decrypted);
+    })?;
+    Ok(track)
+}
+
+/// A response body being handed to the track, and how long it is.
+enum AssetStream {
+    Sized {
+        response: reqwest::Response,
+        total: u64,
+    },
+    Unsized {
+        response: reqwest::Response,
+    },
+}
+
+/// Start the asset request and read its headers.
+///
+/// Carries the user token: library assets are the user's own files and are served
+/// only to them.
+async fn open_asset_stream(url: &str, media_user_token: &str) -> Result<AssetStream, String> {
+    tracing::info!("am.stream: downloading encrypted fMP4 from {url}");
+    let resp = reqwest::Client::new()
+        .get(url)
+        .header("User-Agent", USER_AGENT)
+        .header("x-apple-music-user-token", media_user_token)
+        .header("Cookie", format!("media-user-token={media_user_token}"))
+        .send()
         .await
-        .map_err(|e| format!("download task: {e}"))??;
+        .map_err(|e| format!("download asset: {e}"))?;
 
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("download asset HTTP {status}"));
+    }
+    match resp.content_length() {
+        Some(total) if total > 0 => Ok(AssetStream::Sized {
+            response: resp,
+            total,
+        }),
+        _ => Ok(AssetStream::Unsized { response: resp }),
+    }
+}
+
+/// Feed the body into the track as it arrives.
+async fn pump(mut response: reqwest::Response, sink: super::progressive::ChunkSink, total: u64) {
+    let started = std::time::Instant::now();
+    let mut got = 0u64;
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                got += chunk.len() as u64;
+                sink.push(&chunk);
+            }
+            Ok(None) => break,
+            Err(e) => {
+                sink.fail(format!("download asset: {e}"));
+                return;
+            }
+        }
+    }
+    sink.finish();
     tracing::info!(
-        "am.stream: downloaded {} bytes, decrypting through the CDM",
-        encrypted_bytes.len()
+        "am.stream: downloaded {got}/{total} bytes in {:.2}s",
+        started.elapsed().as_secs_f64()
     );
+}
 
-    super::progressive::ProgressiveTrack::spawn(
-        encrypted_bytes,
-        cdm,
-        cdm_session,
-        key_id,
-        progress,
-        move |decrypted| {
-            store_decrypted_blocking(&cache_path, &decrypted);
-        },
-    )
+async fn read_whole_body(response: reqwest::Response) -> Result<Vec<u8>, String> {
+    response
+        .bytes()
+        .await
+        .map(|b| b.to_vec())
+        .map_err(|e| format!("read asset bytes: {e}"))
 }
 
 /// Download a track asset. Carries the user token: library assets are the
