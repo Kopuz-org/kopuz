@@ -511,3 +511,19 @@ spotify_connect_device_other = Other device
 spotify_connect_device_this = This app
 spotify_play_on = Play on
 spotify_this_app = kopuz (this app)
+
+# Plugin sources (generic — a plugin supplies its own name and prompts).
+plugins = Plugins
+plugins_none = No plugins installed. Drop a plugin folder into the directory above, then rescan.
+plugin_rescan = Rescan plugins
+plugin_api_version = API { $version }
+plugin_sign_in = Sign in
+plugin_not_found = Plugin { $id } is not installed
+plugin_pick_one = Pick a plugin from the list
+plugin_no_setup = This plugin collects whatever it needs during sign-in.
+plugin_connecting = Starting the plugin…
+plugin_open_sign_in = Open sign-in page
+plugin_signed_in = Signed in.
+plugin_working = Working…
+plugin_retry = Try again
+continue_action = Continue

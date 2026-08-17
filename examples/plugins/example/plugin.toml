@@ -1,0 +1,22 @@
+# Identity. Namespaces every track this plugin contributes to the database, so
+# changing it orphans the user's synced library. Charset is [a-z0-9_-].
+id = "example"
+
+# Shown in the sidebar badge and the settings row.
+name = "Example"
+version = "1.0.0"
+
+# Lua API generation this script targets. A mismatch with the host's is a
+# refusal to load, not a compatibility probe.
+api = 1
+
+# Chunk to load, relative to this directory. "init.lua" is the default; it is
+# spelled out here because that is the file a reader goes looking for.
+entry = "init.lua"
+
+# Badge for the source switcher and settings list.
+icon = "fa-solid fa-puzzle-piece"
+accent = "#8a8a8a"
+
+# Capabilities are deliberately absent: they come from setup() so they cannot
+# claim something the script does not implement.

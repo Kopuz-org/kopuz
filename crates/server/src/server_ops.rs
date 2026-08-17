@@ -15,6 +15,9 @@ pub struct ServerConn {
     pub token: String,
     pub user_id: String,
     pub device_id: String,
+    /// Which installed plugin backs a [`MusicService::Plugin`] source. `None`
+    /// for every built-in service.
+    pub plugin_id: Option<String>,
 }
 
 impl ServerConn {
@@ -27,9 +30,19 @@ impl ServerConn {
     /// authenticated request that silently fails.
     pub fn resolve(config: &config::AppConfig) -> Option<Self> {
         let server = config.server.as_ref()?;
-        let token = server.access_token.clone()?;
+        // A plugin owns its own credentials, so there is no token for Kopuz to
+        // require — but it must name the plugin that backs it.
+        let plugin_id = if server.service == MusicService::Plugin {
+            Some(server.plugin_id.clone()?)
+        } else {
+            None
+        };
+        let token = match server.service {
+            MusicService::Plugin => server.access_token.clone().unwrap_or_default(),
+            _ => server.access_token.clone()?,
+        };
         let user_id = match server.service {
-            MusicService::YtMusic | MusicService::Spotify => {
+            MusicService::YtMusic | MusicService::Spotify | MusicService::Plugin => {
                 server.user_id.clone().unwrap_or_default()
             }
             _ => server.user_id.clone()?,
@@ -40,6 +53,7 @@ impl ServerConn {
             token,
             user_id,
             device_id: config.device_id.clone(),
+            plugin_id,
         })
     }
 }

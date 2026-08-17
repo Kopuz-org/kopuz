@@ -69,6 +69,10 @@ pub async fn apply_source_switch(
                 return false;
             };
             let is_anon = saved.service == MusicService::YtMusic && saved.yt_anonymous;
+            // A plugin holds its own credentials, so there is nothing for Kopuz
+            // to have stored; whether it is signed in is the plugin's answer to
+            // `validate`, not a token in our database.
+            let is_plugin = saved.service == MusicService::Plugin && saved.plugin_id.is_some();
             // Creds live with the server in the DB — reuse the stored token instead
             // of re-prompting sign-in on every switch.
             let stored = db.load_server(&saved.id).await.ok().flatten();
@@ -81,7 +85,7 @@ pub async fn apply_source_switch(
                 service: saved.service,
                 // Anonymous YT keeps an empty (non-None) token so the backend
                 // treats it as anon rather than "needs sign-in".
-                access_token: if is_anon {
+                access_token: if is_anon || is_plugin {
                     Some(String::new())
                 } else {
                     stored_token
@@ -90,13 +94,14 @@ pub async fn apply_source_switch(
                 id: Some(saved.id.clone()),
                 yt_browser: saved.yt_browser,
                 yt_anonymous: is_anon,
+                plugin_id: saved.plugin_id.clone(),
             };
             {
                 let mut cfg = config.write();
                 cfg.set_active_server_snapshot(active);
             }
             tracing::info!(target: "kopuz::source", server = %id, "source switched");
-            has_creds || is_anon
+            has_creds || is_anon || is_plugin
         }
     }
 }

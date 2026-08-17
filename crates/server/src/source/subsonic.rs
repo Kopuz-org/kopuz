@@ -450,6 +450,7 @@ mod tests {
             token: "password".to_string(),
             user_id: "user".to_string(),
             device_id: "test".to_string(),
+            plugin_id: None,
         };
         let src = SubsonicSource::new(db, Source::Server("test".to_string()), &conn);
 

@@ -58,6 +58,13 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .collect::<Vec<_>>()
     });
     let mut show_add_server = use_signal(|| false);
+    let plugin_id = use_signal(|| Option::<String>::None);
+    let plugin_auth = use_signal(|| Option::<crate::settings_actions::PluginAuthState>::None);
+    let plugins_dir = use_hook(|| {
+        ::server::plugin::manifest::plugins_dir()
+            .display()
+            .to_string()
+    });
     let mut show_add_local_source = use_signal(|| false);
     let mut show_login = use_signal(|| false);
 
@@ -129,12 +136,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             server_name,
             server_url,
             server_service,
+            plugin_id,
             yt_browser,
             yt_anonymous,
             error,
             show_add_server,
             show_login,
             ctrl.playback_error,
+            plugin_auth,
         );
     };
 
@@ -155,6 +164,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             error,
             show_login,
             ctrl.playback_error,
+            plugin_auth,
         );
     };
 
@@ -544,6 +554,36 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         on_spotify_prefer_active_device: move |v: bool| {
                                             config.write().spotify_prefer_active_device = v;
                                         },
+                                        on_plugin_auth: move |server_id: String| {
+                                            let Some(plugin_id) = config
+                                                .peek()
+                                                .find_saved_server(&server_id)
+                                                .and_then(|s| s.plugin_id.clone())
+                                            else {
+                                                return;
+                                            };
+                                            let name = ::server::registry()
+                                                .manifest(&plugin_id)
+                                                .map(|m| m.name)
+                                                .unwrap_or_else(|| plugin_id.clone());
+                                            crate::settings_actions::plugin_auth_begin(
+                                                plugin_auth,
+                                                error,
+                                                plugin_id,
+                                                name,
+                                            );
+                                        },
+                                    }
+                                }
+                            }
+                        }
+
+                        div { id: "settings-plugins",
+                            SettingItem {
+                                title: i18n::t("plugins").to_string(),
+                                control: rsx! {
+                                    components::settings_items::PluginsSection {
+                                        plugins_dir: plugins_dir.clone(),
                                     }
                                 }
                             }
@@ -750,12 +790,27 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         server_name,
                         server_url,
                         server_service,
+                        plugin_id,
                         yt_browser,
                         yt_anonymous,
                         host_access,
                         error,
                         on_close: move |_| show_add_server.set(false),
                         on_save: handle_add_server
+                    }
+                }
+
+                if let Some(state) = plugin_auth() {
+                    components::plugin_auth_popup::PluginAuthPopup {
+                        plugin_name: state.plugin_name.clone(),
+                        prompt: state.prompt.clone(),
+                        busy: state.busy,
+                        on_submit: move |values| {
+                            crate::settings_actions::plugin_auth_submit(plugin_auth, error, values);
+                        },
+                        on_cancel: move |_| {
+                            crate::settings_actions::plugin_auth_cancel(plugin_auth);
+                        },
                     }
                 }
 

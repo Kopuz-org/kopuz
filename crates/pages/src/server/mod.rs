@@ -48,7 +48,14 @@ pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, 
             )
             .ok()?
         }
-        MusicService::YtMusic | MusicService::SoundCloud | MusicService::Spotify => return None,
+        // Downloads for plugin sources are out of scope: the offline path does
+        // not go through `resolve_stream`, so there is nothing to build a URL
+        // from. The host forces `downloads` off for plugin sources so the UI
+        // never offers the affordance — see docs/plugins.md.
+        MusicService::YtMusic
+        | MusicService::SoundCloud
+        | MusicService::Spotify
+        | MusicService::Plugin => return None,
     };
     Some((url, ext))
 }

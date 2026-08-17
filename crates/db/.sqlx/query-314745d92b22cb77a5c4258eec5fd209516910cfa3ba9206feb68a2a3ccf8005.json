@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous FROM servers",
+  "query": "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, plugin_id FROM servers",
   "describe": {
     "columns": [
       {
@@ -42,6 +42,11 @@
         "name": "yt_anonymous",
         "ordinal": 7,
         "type_info": "Integer"
+      },
+      {
+        "name": "plugin_id",
+        "ordinal": 8,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -55,8 +60,9 @@
       true,
       true,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "ec8db797a85ee4aee17c76f32eaf85178382a7c9a01e8b150bc1f7c2811ede8d"
+  "hash": "314745d92b22cb77a5c4258eec5fd209516910cfa3ba9206feb68a2a3ccf8005"
 }

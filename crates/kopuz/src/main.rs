@@ -611,6 +611,22 @@ fn App() -> Element {
                 })
                 .join();
             }
+            // Gives each loaded plugin its `unload()` so it can flush whatever it
+            // was holding. tao calls process::exit() straight after this and that
+            // runs no destructors, so an unload left to Drop would never happen.
+            // Same fresh-thread reason as the flush above: block_on cannot run
+            // inside dioxus's runtime.
+            let _ = std::thread::spawn(|| {
+                let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                else {
+                    return;
+                };
+                rt.block_on(::server::plugin::shutdown_all());
+            })
+            .join();
+
             // After the persists, so they (and any failure warnings) land in
             // latest.log and the trace. Idempotent across CloseRequested/
             // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.

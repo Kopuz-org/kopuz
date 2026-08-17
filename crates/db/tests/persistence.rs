@@ -56,6 +56,7 @@ async fn seed_active_server(db: &db::Db, id: &str) {
             service: MusicService::YtMusic,
             yt_browser: None,
             yt_anonymous: false,
+            plugin_id: None,
         }],
         server: Some(MusicServer {
             name: "yt".into(),
@@ -66,6 +67,7 @@ async fn seed_active_server(db: &db::Db, id: &str) {
             id: Some(id.into()),
             yt_browser: None,
             yt_anonymous: false,
+            plugin_id: None,
         }),
         active_source: config::Source::Server(id.into()),
         ..Default::default()

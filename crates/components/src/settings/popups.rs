@@ -45,11 +45,24 @@ pub fn AddLocalSourcePopup(
     }
 }
 
+/// The built-in services, in dropdown order: option value, enum, label key.
+/// `None` for the label key means the label is the service's own display name.
+const BUILT_IN_SERVICES: &[(&str, MusicService, Option<&str>)] = &[
+    ("jellyfin", MusicService::Jellyfin, Some("jellyfin")),
+    ("subsonic", MusicService::Subsonic, Some("subsonic")),
+    ("custom", MusicService::Custom, Some("custom_manual")),
+    ("ytmusic", MusicService::YtMusic, None),
+    ("soundcloud", MusicService::SoundCloud, None),
+    ("spotify", MusicService::Spotify, None),
+];
+
 #[component]
 pub fn AddServerPopup(
     server_name: Signal<String>,
     server_url: Signal<String>,
     server_service: Signal<MusicService>,
+    /// The selected plugin when `server_service` is `Plugin`.
+    plugin_id: Signal<Option<String>>,
     /// Selected Chromium-family browser when service is YouTube Music.
     yt_browser: Signal<Browser>,
     /// YouTube Music anonymous mode — true = no sign-in, browse + play
@@ -60,13 +73,23 @@ pub fn AddServerPopup(
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
 ) -> Element {
-    let _service_value = match server_service() {
-        MusicService::Jellyfin => "jellyfin",
-        MusicService::Subsonic => "subsonic",
-        MusicService::Custom => "custom",
-        MusicService::YtMusic => "ytmusic",
-        MusicService::SoundCloud => "soundcloud",
-        MusicService::Spotify => "spotify",
+    // Discovered plugins join the dropdown as data. Nothing here names a
+    // provider — a plugin's entry is its manifest's own id and name.
+    let plugins = use_hook(|| {
+        ::server::registry()
+            .manifests()
+            .into_iter()
+            .map(|m| (m.id, m.name))
+            .collect::<Vec<_>>()
+    });
+    let selected_value = match (server_service(), plugin_id()) {
+        (MusicService::Plugin, Some(id)) => format!("plugin:{id}"),
+        (MusicService::Plugin, None) => String::new(),
+        (service, _) => BUILT_IN_SERVICES
+            .iter()
+            .find(|(_, s, _)| *s == service)
+            .map(|(value, ..)| (*value).to_string())
+            .unwrap_or_default(),
     };
 
     let server_name_label = i18n::t("server_name").to_string();
@@ -136,46 +159,47 @@ pub fn AddServerPopup(
 
                 select {
                     onchange: move |e| {
-                        let service = match e.value().as_str() {
-                            "subsonic" => MusicService::Subsonic,
-                            "custom" => MusicService::Custom,
-                            "ytmusic" => MusicService::YtMusic,
-                            "soundcloud" => MusicService::SoundCloud,
-                            "spotify" => MusicService::Spotify,
-                            _ => MusicService::Jellyfin,
-                        };
-                        server_service.set(service);
+                        let value = e.value();
+                        match value.strip_prefix("plugin:") {
+                            Some(id) => {
+                                server_service.set(MusicService::Plugin);
+                                plugin_id.set(Some(id.to_string()));
+                            }
+                            None => {
+                                plugin_id.set(None);
+                                server_service
+                                    .set(
+                                        BUILT_IN_SERVICES
+                                            .iter()
+                                            .find(|(v, ..)| *v == value)
+                                            .map(|(_, service, _)| *service)
+                                            .unwrap_or(MusicService::Jellyfin),
+                                    );
+                            }
+                        }
                     },
                     onkeydown: move |e| e.stop_propagation(),
-                    option {
-                        value: "jellyfin",
-                        selected: server_service() == MusicService::Jellyfin,
-                        "{i18n::t(\"jellyfin\")}"
+                    for (value , service , label_key) in BUILT_IN_SERVICES.iter().copied() {
+                        option {
+                            key: "{value}",
+                            value: "{value}",
+                            selected: selected_value == value,
+                            {
+                                match label_key {
+                                    Some("custom_manual") => custom_manual.clone(),
+                                    Some(key) => i18n::t(key).to_string(),
+                                    None => service.display_name().to_string(),
+                                }
+                            }
+                        }
                     }
-                    option {
-                        value: "subsonic",
-                        selected: server_service() == MusicService::Subsonic,
-                        "{i18n::t(\"subsonic\")}"
-                    }
-                    option {
-                        value: "custom",
-                        selected: server_service() == MusicService::Custom,
-                        "{custom_manual}"
-                    }
-                    option {
-                        value: "ytmusic",
-                        selected: server_service() == MusicService::YtMusic,
-                        "YouTube Music"
-                    }
-                    option {
-                        value: "soundcloud",
-                        selected: server_service() == MusicService::SoundCloud,
-                        "SoundCloud"
-                    }
-                    option {
-                        value: "spotify",
-                        selected: server_service() == MusicService::Spotify,
-                        "Spotify (experimental)"
+                    for (id , name) in plugins.iter() {
+                        option {
+                            key: "plugin:{id}",
+                            value: "plugin:{id}",
+                            selected: selected_value == format!("plugin:{id}"),
+                            "{name}"
+                        }
                     }
                 }
 
@@ -401,6 +425,11 @@ fn ServerServiceFields(
                     }
                 }
             }
+        },
+        // A plugin collects whatever it needs in its own wizard, so there is
+        // nothing for Kopuz to ask here.
+        MusicService::Plugin => rsx! {
+            p { class: "text-xs text-white/60", "{i18n::t(\"plugin_no_setup\")}" }
         },
         MusicService::Spotify => rsx! {
             input {

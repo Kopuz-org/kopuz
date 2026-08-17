@@ -68,37 +68,62 @@ const SWITCHER_CSS: &str = r#"
 const LOCAL_ACCENT: &str = "var(--color-indigo-500)";
 
 /// One selectable source: key, label, icon class, accent colour, mono subline.
-fn entries(config: &AppConfig) -> Vec<(Source, String, &'static str, &'static str, String)> {
-    let mut v = vec![(
-        Source::Local,
-        i18n::t("local").to_string(),
-        "fa-solid fa-hard-drive",
-        LOCAL_ACCENT,
-        i18n::t("source_on_this_device").to_string(),
-    )];
+/// Icon and accent are owned strings because a plugin's come from its manifest
+/// rather than from a match arm.
+struct Entry {
+    source: Source,
+    label: String,
+    icon: String,
+    accent: String,
+    subline: String,
+}
+
+fn entries(config: &AppConfig) -> Vec<Entry> {
+    let mut v = vec![Entry {
+        source: Source::Local,
+        label: i18n::t("local").to_string(),
+        icon: "fa-solid fa-hard-drive".to_string(),
+        accent: LOCAL_ACCENT.to_string(),
+        subline: i18n::t("source_on_this_device").to_string(),
+    }];
     for local in &config.local_sources {
-        v.push((
-            Source::LocalLibrary(local.id.clone()),
-            local.name.clone(),
-            "fa-solid fa-folder-tree",
-            LOCAL_ACCENT,
-            i18n::t("source_on_this_device").to_string(),
-        ));
+        v.push(Entry {
+            source: Source::LocalLibrary(local.id.clone()),
+            label: local.name.clone(),
+            icon: "fa-solid fa-folder-tree".to_string(),
+            accent: LOCAL_ACCENT.to_string(),
+            subline: i18n::t("source_on_this_device").to_string(),
+        });
     }
+    // A plugin's brand comes from its manifest, not from Rust — that is what
+    // keeps the switcher provider-agnostic.
+    let manifests = server::registry().manifests();
     for s in &config.servers {
         let (icon, accent) = service_style(s.service);
-        v.push((
-            Source::Server(s.id.clone()),
-            s.name.clone(),
-            icon,
-            accent,
-            s.service.display_name().to_uppercase(),
-        ));
+        let manifest = s
+            .plugin_id
+            .as_deref()
+            .and_then(|id| manifests.iter().find(|m| m.id == id));
+        v.push(Entry {
+            source: Source::Server(s.id.clone()),
+            label: s.name.clone(),
+            icon: manifest
+                .and_then(|m| m.icon.clone())
+                .unwrap_or_else(|| icon.to_string()),
+            accent: manifest
+                .and_then(|m| m.accent.clone())
+                .unwrap_or_else(|| accent.to_string()),
+            subline: manifest
+                .map(|m| m.name.to_uppercase())
+                .unwrap_or_else(|| s.service.display_name().to_uppercase()),
+        });
     }
     v
 }
 
-/// Icon + accent colour per service, so each source reads at a glance.
+/// Icon + accent colour per service, so each source reads at a glance. The
+/// plugin arm is the neutral fallback for a plugin whose manifest declares
+/// neither (or is no longer installed).
 fn service_style(service: MusicService) -> (&'static str, &'static str) {
     match service {
         MusicService::YtMusic => ("fa-brands fa-youtube", "#ff3355"),
@@ -106,6 +131,7 @@ fn service_style(service: MusicService) -> (&'static str, &'static str) {
         MusicService::Spotify => ("fa-brands fa-spotify", "#1DB954"),
         MusicService::Jellyfin => ("fa-solid fa-server", "#b277ee"),
         MusicService::Subsonic | MusicService::Custom => ("fa-solid fa-compact-disc", "#f0a84b"),
+        MusicService::Plugin => ("fa-solid fa-puzzle-piece", "#8a8a8a"),
     }
 }
 
@@ -129,13 +155,13 @@ pub fn SourceSwitcher(
     let surface_vars = "--ss-surface:var(--color-neutral-900);--ss-fg:var(--color-white);";
     let (active_label, active_icon, active_accent) = sources
         .iter()
-        .find(|(s, ..)| *s == active)
-        .map(|(_, l, i, a, _)| (l.clone(), *i, *a))
+        .find(|e| e.source == active)
+        .map(|e| (e.label.clone(), e.icon.clone(), e.accent.clone()))
         .unwrap_or_else(|| {
             (
                 i18n::t("local").to_string(),
-                "fa-solid fa-hard-drive",
-                LOCAL_ACCENT,
+                "fa-solid fa-hard-drive".to_string(),
+                LOCAL_ACCENT.to_string(),
             )
         });
 
@@ -179,7 +205,7 @@ pub fn SourceSwitcher(
                         span { class: "c", "{count}" }
                     }
                     div { class: "ss-list",
-                        for (src , label , icon , accent , sub) in sources.into_iter() {
+                        for Entry { source : src , label , icon , accent , subline : sub } in sources.into_iter() {
                             {
                                 let is_active = src == active;
                                 let switch = switch.clone();
