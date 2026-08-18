@@ -157,6 +157,46 @@ object MediaSessionHelper {
         return bmp
     }
 
+    const val REPEAT_OFF = 0
+    const val REPEAT_ALL = 1
+    const val REPEAT_ONE = 2
+
+    @Volatile private var shuffleOn = false
+    @Volatile private var repeatMode = REPEAT_OFF
+
+    // Last rendered track, so a shuffle/repeat change can redraw the notification
+    // without waiting for the next playback update to carry the metadata again.
+    private class LastRender(
+        val title: String,
+        val artist: String,
+        val album: String,
+        val durationMs: Long,
+        val positionMs: Long,
+        val playing: Boolean,
+        val artworkPath: String?,
+    )
+
+    @Volatile private var lastRender: LastRender? = null
+
+    @JvmStatic
+    fun updateModes(context: Context, shuffle: Boolean, repeat: Int) {
+        if (shuffle == shuffleOn && repeat == repeatMode) return
+        shuffleOn = shuffle
+        repeatMode = repeat
+        val last = lastRender ?: return
+        // Cached art only: this runs on the caller's thread, and loadArt would go to
+        // disk or the network for anything else.
+        val art = if (last.artworkPath != null && last.artworkPath == cachedArtPath) {
+            cachedArtBitmap
+        } else {
+            null
+        }
+        render(
+            context, last.title, last.artist, last.album, last.durationMs,
+            last.positionMs, last.playing, art,
+        )
+    }
+
     @JvmStatic
     fun updateNowPlaying(
         context: Context,
@@ -168,6 +208,8 @@ object MediaSessionHelper {
         playing: Boolean,
         artworkPath: String?,
     ) {
+        lastRender =
+            LastRender(title, artist, album, durationMs, positionMs, playing, artworkPath)
         // Grab focus + arm the noisy receiver as soon as we start playing.
         if (playing) {
             if (!hasFocus) hasFocus = requestFocus()
@@ -244,11 +286,29 @@ object MediaSessionHelper {
             .setDeleteIntent(pendingBroadcast(context, "stop"))
         contentIntent(context)?.let { notifBuilder.setContentIntent(it) }
         if (art != null) notifBuilder.setLargeIcon(art)
+        val repeatIcon =
+            if (repeatMode == REPEAT_ONE) R.drawable.kopuz_ic_repeat_one
+            else R.drawable.kopuz_ic_repeat
+        val repeatLabel = when (repeatMode) {
+            REPEAT_ALL -> "Repeat: queue"
+            REPEAT_ONE -> "Repeat: track"
+            else -> "Repeat: off"
+        }
+        val shuffleLabel = if (shuffleOn) "Shuffle: on" else "Shuffle: off"
+
         val notif = notifBuilder
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(s.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
+                    // Prev/play/next stay in the collapsed view; shuffle and repeat
+                    // only appear once the notification is expanded.
+                    .setShowActionsInCompactView(1, 2, 3)
+            )
+            .addAction(
+                Notification.Action.Builder(
+                    R.drawable.kopuz_ic_shuffle, shuffleLabel,
+                    pendingBroadcast(context, "shuffle")
+                ).build()
             )
             .addAction(
                 Notification.Action.Builder(
@@ -266,6 +326,12 @@ object MediaSessionHelper {
                 Notification.Action.Builder(
                     android.R.drawable.ic_media_next, "Next",
                     pendingBroadcast(context, "next")
+                ).build()
+            )
+            .addAction(
+                Notification.Action.Builder(
+                    repeatIcon, repeatLabel,
+                    pendingBroadcast(context, "loop")
                 ).build()
             )
             .build()

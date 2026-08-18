@@ -93,6 +93,31 @@ pub enum SystemEvent {
     Next,
     Prev,
     Stop,
+    /// Notification shuffle button. The notification has no authority over the
+    /// mode — the queue does — so a tap asks for a flip rather than a value.
+    ToggleShuffle,
+    /// Notification repeat button, cycling off → queue → track.
+    CycleRepeat,
+}
+
+/// Mirrors the desktop `RepeatMode` so the UI can push one mode enum to every
+/// platform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepeatMode {
+    Off,
+    Playlist,
+    Track,
+}
+
+impl RepeatMode {
+    /// Matches `MediaSessionHelper.REPEAT_*`.
+    fn as_java(self) -> i32 {
+        match self {
+            Self::Off => 0,
+            Self::Playlist => 1,
+            Self::Track => 2,
+        }
+    }
 }
 
 static JVM: OnceLock<JavaVM> = OnceLock::new();
@@ -494,6 +519,39 @@ pub fn update_now_playing(
     }
 }
 
+/// Push the queue's shuffle/repeat state to the notification so its buttons show
+/// what is actually in effect.
+pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
+    init();
+    let Some(vm) = JVM.get() else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let ctx = ndk_context::android_context();
+    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/MediaSessionHelper")?;
+        env.call_static_method(
+            &class,
+            "updateModes",
+            "(Landroid/content/Context;ZI)V",
+            &[
+                JValue::Object(&activity),
+                JValue::Bool(shuffle as u8),
+                JValue::Int(repeat.as_java()),
+            ],
+        )?
+        .v()?;
+        Ok(())
+    })(&mut env);
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "MediaSessionHelper.updateModes failed");
+        clear_jni_exception(&mut env);
+    }
+}
+
 pub fn wake_run_loop() {
     let vm = match JVM.get() {
         Some(v) => v,
@@ -602,6 +660,8 @@ pub extern "system" fn Java_com_temidaradev_kopuz_MediaReceiver_nativeOnAction(
             BACK_PENDING.store(true, Ordering::SeqCst);
             super::back_wake();
         }
+        "shuffle" => dispatch_event(SystemEvent::ToggleShuffle),
+        "loop" => dispatch_event(SystemEvent::CycleRepeat),
         "media-granted" => set_media_permission(PERMISSION_GRANTED),
         "media-denied" => {
             tracing::warn!("media permission denied — the library scan cannot read shared storage");

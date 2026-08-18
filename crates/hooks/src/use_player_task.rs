@@ -1,4 +1,4 @@
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use crate::use_player_controller::LoopMode;
 use crate::use_player_controller::PlayerController;
 use config::AppConfig;
@@ -25,6 +25,10 @@ enum BgCmd {
     Next,
     Prev,
     Seek(f64),
+    #[cfg(target_os = "android")]
+    ToggleShuffle,
+    #[cfg(target_os = "android")]
+    CycleRepeat,
 }
 
 static BG_CMD_TX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<BgCmd>>> =
@@ -209,8 +213,8 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
     });
 
-    // Keep MPRIS shuffle/repeat in sync with the UI's own toggles.
-    #[cfg(target_os = "linux")]
+    // Keep MPRIS / the Android notification in sync with the UI's own toggles.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     use_effect(move || {
         let shuffle = *ctrl.shuffle.read();
         let repeat = match *ctrl.loop_mode.read() {
@@ -295,6 +299,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                 SystemEvent::Next => BgCmd::Next,
                 SystemEvent::Prev => BgCmd::Prev,
                 SystemEvent::Stop => BgCmd::Pause,
+                SystemEvent::ToggleShuffle => BgCmd::ToggleShuffle,
+                SystemEvent::CycleRepeat => BgCmd::CycleRepeat,
             };
             send_bg_cmd(cmd);
         });
@@ -804,6 +810,20 @@ pub fn use_player_task(ctrl: PlayerController) {
                             ctrl.seek(pos);
                         }
                         BgCmd::Seek(_) => {}
+                        #[cfg(target_os = "android")]
+                        BgCmd::ToggleShuffle => {
+                            let on = *ctrl.shuffle.peek();
+                            ctrl.set_shuffle(!on);
+                        }
+                        #[cfg(target_os = "android")]
+                        BgCmd::CycleRepeat => {
+                            let next = match *ctrl.loop_mode.peek() {
+                                LoopMode::None => LoopMode::Queue,
+                                LoopMode::Queue => LoopMode::Track,
+                                LoopMode::Track => LoopMode::None,
+                            };
+                            ctrl.set_loop_mode(next);
+                        }
                     }
                 }
 
