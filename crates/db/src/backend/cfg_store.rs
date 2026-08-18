@@ -1,5 +1,5 @@
 //! Config persistence as a DB-backed cache of the in-memory `AppConfig` (#347,
-//! step 4).
+//! step 4), layered with the standalone settings file (#530).
 //!
 //! The single-row `app_config` blob holds everything EXCEPT creds and play
 //! counts: `server`/`servers` live in the `servers` table (creds with the
@@ -7,8 +7,18 @@
 //! back onto the `AppConfig` the UI reads; [`save_config`] strips them out of
 //! the blob and syncs the tables. Net effect: same `AppConfig` shape in memory,
 //! creds never in the blob.
+//!
+//! On top of the blob sits the settings file (`settings.toml` + drop-ins +
+//! env, see `config::store`): its keys override the blob on load, and every
+//! save mirrors the settings back into it — unless it is Nix-managed
+//! (immutable), in which case the blob alone keeps persisting runtime state
+//! and the file's keys simply keep winning. Keys a layer the app cannot write
+//! pins (managed file, drop-in, env) are excluded from both persisted forms:
+//! their value belongs to the layer, so saving it as base config would keep it
+//! applying once the layer is removed.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use config::{AppConfig, Browser, MusicServer, MusicService, SavedServer, Source};
 use sqlx::SqlitePool;
@@ -18,16 +28,25 @@ use crate::DbError;
 /// How many recent entries to keep per source.
 const RECENT_LIMIT: i64 = 50;
 
-pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError> {
-    let Some(json): Option<String> =
-        sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-            .fetch_optional(pool)
-            .await?
-    else {
-        return Ok(None);
-    };
+pub async fn load_config(
+    pool: &SqlitePool,
+    settings_path: &Path,
+) -> Result<Option<AppConfig>, DbError> {
+    let json: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
+        .fetch_optional(pool)
+        .await?;
 
-    let mut cfg: AppConfig = serde_json::from_str(&json)?;
+    let layers = config::store::FileLayers::read(settings_path);
+    // First launch with no settings file either: report "never configured".
+    if json.is_none() && !layers.has_overrides() {
+        return Ok(None);
+    }
+
+    let value: serde_json::Value = match &json {
+        Some(json) => serde_json::from_str(json)?,
+        None => serde_json::json!({}),
+    };
+    let mut cfg: AppConfig = layers.merge_and_parse(value)?;
     // The in-memory shape migrations the legacy file load used to run.
     cfg.migrate_home_sections();
     cfg.migrate_sidebar_order();
@@ -93,7 +112,11 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
 }
 
 #[tracing::instrument(name = "config.save", skip_all)]
-pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbError> {
+pub async fn save_config(
+    pool: &SqlitePool,
+    cfg: &AppConfig,
+    settings_path: &Path,
+) -> Result<(), DbError> {
     let now = now_secs();
     let mut tx = pool.begin().await?;
 
@@ -185,6 +208,7 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
     // cost hundreds of statements — the downloads-stutter bug.
 
     // Store the blob, stripped of creds/servers/counts, stamped with the active id.
+    let layers = config::store::FileLayers::read(settings_path);
     let mut blob = serde_json::to_value(cfg)?;
     if let Some(obj) = blob.as_object_mut() {
         obj.remove("server");
@@ -200,6 +224,27 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
             },
         );
     }
+    // A key pinned by an unwritable layer holds that layer's value, merged in
+    // by `load_config` — persisting it would make the override the base config
+    // and keep it applying after the layer is gone. Keep what the blob had.
+    if !layers.locked_keys.is_empty() {
+        let prior: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
+            .fetch_optional(&mut *tx)
+            .await?;
+        let prior: serde_json::Value = prior
+            .as_deref()
+            .and_then(|json| serde_json::from_str(json).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(obj) = blob.as_object_mut() {
+            for key in &layers.locked_keys {
+                match prior.get(key.as_str()) {
+                    Some(value) => obj.insert(key.clone(), value.clone()),
+                    None => obj.remove(key.as_str()),
+                };
+            }
+        }
+    }
+
     let blob_str = serde_json::to_string(&blob)?;
     sqlx::query!(
         "INSERT INTO app_config (id, json) VALUES (1, ?1) \
@@ -210,6 +255,14 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
     .await?;
 
     tx.commit().await?;
+
+    // Mirror the settings into the standalone file too (skipped when it is
+    // Nix-managed). Best-effort: the DB save above already succeeded, and a
+    // missing file write only means the blob's values apply on next load.
+    if let Err(e) = config::store::save_settings_file(settings_path, &blob, &layers.locked_keys) {
+        tracing::warn!(path = %settings_path.display(), "failed to write settings file: {e}");
+    }
+
     Ok(())
 }
 

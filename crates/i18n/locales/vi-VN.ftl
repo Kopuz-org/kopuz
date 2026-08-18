@@ -511,3 +511,5 @@ spotify_connect_device_other = Thiết bị khác
 spotify_connect_device_this = Ứng dụng này
 spotify_play_on = Phát trên
 spotify_this_app = kopuz (ứng dụng này)
+settings_managed_notice = Một số cài đặt được quản lý bởi cấu hình hệ thống (Nix/hjem) và không thể thay đổi tại đây.
+setting_managed_by_system = Được quản lý bởi cấu hình hệ thống

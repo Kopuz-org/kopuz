@@ -511,3 +511,5 @@ spotify_connect_device_other = Other device
 spotify_connect_device_this = This app
 spotify_play_on = Play on
 spotify_this_app = kopuz (this app)
+settings_managed_notice = Some settings are managed by your system configuration (Nix/hjem) and can't be changed here.
+setting_managed_by_system = Managed by your system configuration

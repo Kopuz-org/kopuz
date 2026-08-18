@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 mod source;
+pub mod store;
 mod views;
 pub use source::{
     Browser, JellyfinServer, MusicServer, MusicService, SavedLocalSource, SavedServer, Source,

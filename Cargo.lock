@@ -4383,6 +4383,8 @@ dependencies = [
  "directories",
  "serde",
  "serde_json",
+ "tempfile",
+ "toml 0.8.2",
  "tracing",
  "uuid 1.23.5",
 ]
@@ -4401,6 +4403,7 @@ dependencies = [
  "sha2 0.11.0",
  "sqlx",
  "tokio",
+ "toml 0.8.2",
  "tracing",
 ]
 

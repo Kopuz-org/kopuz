@@ -202,6 +202,59 @@ in {
 }
 ```
 
+#### Declarative configuration (hjem)
+
+Kopuz reads its settings from `~/.config/kopuz/settings.toml`, so you can manage
+them declaratively by linking that file with
+[hjem](https://github.com/feel-co/hjem):
+
+```nix
+{
+  hjem.users.alice.files.".config/kopuz/settings.toml".source =
+    (pkgs.formats.toml {}).generate "kopuz-settings.toml" {
+      theme = "gruvbox";
+      language = "en";
+      crossfade_seconds = 3;
+      equalizer.enabled = true;
+    };
+}
+```
+
+Or inline, without the `pkgs.formats` helper:
+
+```nix
+{
+  hjem.users.alice.files.".config/kopuz/settings.toml".text = ''
+    theme = "gruvbox"
+    language = "en"
+    crossfade_seconds = 3
+
+    [equalizer]
+    enabled = true
+  '';
+}
+```
+
+hjem links the file out of the Nix store, and Kopuz detects that it is immutable
+(a store symlink or read-only) and never writes to it. If Kopuz has already run
+once, remove the `settings.toml` it wrote (or turn on hjem's clobber option) so
+activation can replace it with the link. Keys you set there always win and show
+up grayed out in the settings UI; everything you leave out remains freely
+changeable in-app (runtime state keeps persisting in `kopuz.db`).
+
+To try config changes without a rebuild, use either of the ad-hoc override
+layers, both of which out-rank `settings.toml`:
+
+- **Drop-ins:** any `*.toml` in `~/.config/kopuz/settings.d/`, applied in
+  lexicographic order.
+- **Environment variables:** `KOPUZ_CONFIG_<FIELD>=value`, e.g.
+  `KOPUZ_CONFIG_THEME=nord kopuz`. Field names match `settings.toml` keys
+  uppercased; nest tables with `__` (`KOPUZ_CONFIG_EQUALIZER__ENABLED=true`).
+  Values are parsed as TOML (`3`, `true`, `["/a", "/b"]`), falling back to plain
+  strings.
+
+`KOPUZ_CONFIG_PATH` relocates the settings file itself.
+
 ### AUR (Arch Linux)
 
 Install from the AUR using your preferred helper:
@@ -241,7 +294,7 @@ Then build and install Kopuz:
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
-dx build --release --package kopuz
+git submodule update --init --recursive --remote
 flatpak-builder --user --install --force-clean \
   build-dir packaging/flatpak/moe.kopuz.kopuz.json
 flatpak run moe.kopuz.kopuz
@@ -441,29 +494,35 @@ xattr -d com.apple.quarantine /Applications/Kopuz.app
 
 ### Where does Kopuz keep its files?
 
-Your settings, scanned library, playlists, and favorites all live in a single
-**SQLite** database, `kopuz.db`, in the config directory. Album art and
+Your scanned library, playlists, favorites, and runtime state live in a single
+**SQLite** database, `kopuz.db`, in the config directory. Settings are mirrored
+to a human-editable `settings.toml` next to it — hand-edits (and hjem-managed
+values, see the hjem section above) apply on the next launch. Album art and
 downloaded tracks stay on disk in the cache directory. (Debug builds use a
-separate `kopuz-debug.db` so `dx serve` never touches your real data. You can
-override the DB location with the `KOPUZ_DB_PATH` env var.)
+separate `kopuz-debug.db` and `settings-debug.toml` so `dx serve` never touches
+your real data. You can override the DB location with the `KOPUZ_DB_PATH` env
+var and the settings file with `KOPUZ_CONFIG_PATH`.)
 
 On **macOS**:
 
-- `~/Library/Application Support/com.temidaradev.kopuz/kopuz.db` - settings,
-  library, playlists, favorites
+- `~/Library/Application Support/com.temidaradev.kopuz/settings.toml` - settings
+- `~/Library/Application Support/com.temidaradev.kopuz/kopuz.db` - library,
+  playlists, favorites, runtime state
 - `~/Library/Caches/com.temidaradev.kopuz/covers/` - cached album art
 - `~/Library/Caches/com.temidaradev.kopuz/offline_tracks/` - downloaded tracks
 
 On **Linux** (XDG spec):
 
-- `~/.config/kopuz/kopuz.db` - settings, library, playlists, favorites
+- `~/.config/kopuz/settings.toml` - settings
+- `~/.config/kopuz/kopuz.db` - library, playlists, favorites, runtime state
 - `~/.cache/kopuz/covers/` - cached album art
 - `~/.cache/kopuz/offline_tracks/` - downloaded tracks
 
 On **Windows** (AppData):
 
-- `%APPDATA%\temidaradev\kopuz\config\kopuz.db` - settings, library, playlists,
-  favorites
+- `%APPDATA%\temidaradev\kopuz\config\settings.toml` - settings
+- `%APPDATA%\temidaradev\kopuz\config\kopuz.db` - library, playlists, favorites,
+  runtime state
 - `%LOCALAPPDATA%\temidaradev\kopuz\cache\covers\` - cached album art
 - `%LOCALAPPDATA%\temidaradev\kopuz\cache\offline_tracks\` - downloaded tracks
 
@@ -812,3 +871,7 @@ longer than needed.
 
 - Logo design by: Lucas Amorim -
   [His Instagram Account](https://www.instagram.com/yattets/)
+
+## Star History
+
+[![Star History Chart](https://star-history.dera.page/svg?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://star-history.dera.page/#Kopuz-org/kopuz&type=date&legend=top-left)

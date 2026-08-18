@@ -35,4 +35,5 @@ sha2 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
+toml = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }

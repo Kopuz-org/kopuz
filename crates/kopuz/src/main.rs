@@ -452,6 +452,17 @@ fn App() -> Element {
     // these after the spawning page — and in principle this component — is
     // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
     let mut config = use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
+    // Snapshot of the file/env config layers (issue #530): which settings file
+    // is in play, whether it is Nix-managed, and which keys are pinned by an
+    // unwritable layer — the settings UI grays those out.
+    use_context_provider(|| {
+        let db_path = db::default_db_path();
+        let db_dir = match db_path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            _ => std::path::PathBuf::from("."),
+        };
+        config::store::FileLayers::read(&config::store::settings_path_for(&db_dir))
+    });
     let db = app_db::DB_HANDLE
         .get()
         .cloned()

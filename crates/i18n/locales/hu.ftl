@@ -517,3 +517,5 @@ spotify_connect_device_other = Másik eszköz
 spotify_connect_device_this = Ez az alkalmazás
 spotify_play_on = Lejátszás itt
 spotify_this_app = kopuz (ez az alkalmazás)
+settings_managed_notice = Egyes beállításokat a rendszerkonfiguráció (Nix/hjem) kezel, és itt nem módosíthatók.
+setting_managed_by_system = A rendszerkonfiguráció kezeli

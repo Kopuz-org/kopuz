@@ -511,3 +511,5 @@ spotify_connect_device_other = Ibang device
 spotify_connect_device_this = Ang app na ito
 spotify_play_on = I-play sa
 spotify_this_app = kopuz (ang app na ito)
+settings_managed_notice = Ang ilang setting ay pinamamahalaan ng configuration ng system (Nix/hjem) at hindi mababago rito.
+setting_managed_by_system = Pinamamahalaan ng configuration ng system

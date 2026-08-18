@@ -517,3 +517,5 @@ spotify_connect_device_other = Başka cihaz
 spotify_connect_device_this = Bu uygulama
 spotify_play_on = Şurada çal
 spotify_this_app = kopuz (bu uygulama)
+settings_managed_notice = Bazı ayarlar sistem yapılandırmanız (Nix/hjem) tarafından yönetiliyor ve buradan değiştirilemez.
+setting_managed_by_system = Sistem yapılandırması tarafından yönetiliyor

@@ -220,6 +220,7 @@ manifest) yüklemek için:
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
+git submodule update --init --recursive --remote
 flatpak-builder --user --install --force-clean build-dir packaging/flatpak/moe.kopuz.kopuz.json
 flatpak run moe.kopuz.kopuz
 ```
@@ -564,4 +565,4 @@ görüntüleri bellekte ihtiyaç duyulandan daha uzun süre tutmuyoruz.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/chart?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://www.star-history.com/?repos=Kopuz-org%2Fkopuz&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://star-history.dera.page/#Kopuz-org/kopuz&type=date&legend=top-left)
