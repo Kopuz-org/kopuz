@@ -57,6 +57,19 @@ class MainActivity : WryActivity() {
         MediaReceiver.nativeOnAction("back")
     }
 
+    // The native event loop parks while the activity is hidden, so Rust has to know
+    // when that starts and stops: backgrounded it keeps the loop ticking itself,
+    // foregrounded the loop runs on its own and the ticker is dead weight.
+    override fun onPause() {
+        super.onPause()
+        MediaReceiver.nativeOnAction("bg-enter")
+    }
+
+    override fun onResume() {
+        super.onResume()
+        MediaReceiver.nativeOnAction("bg-exit")
+    }
+
     override fun onDestroy() {
         if (instance === this) instance = null
         super.onDestroy()

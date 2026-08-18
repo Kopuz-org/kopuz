@@ -17,7 +17,7 @@ pub fn Home(
     rsx! {
         div {
             class: if cfg!(target_os = "android") {
-                "px-4 pt-2 pb-28 space-y-8 w-full"
+                "px-4 pt-2 pb-6 space-y-8 w-full"
             } else if is_vaxry {
                 "px-6 pt-4 pb-24 w-full"
             } else {

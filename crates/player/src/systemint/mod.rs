@@ -26,9 +26,10 @@ mod android;
 
 #[cfg(target_os = "android")]
 pub use android::{
-    RepeatMode, SystemEvent, await_media_permission, get_android_music_dir, get_files_dir,
-    has_media_permission, init, move_task_to_back, request_permissions, set_background_handler,
-    stop_session, take_back_pressed, update_modes, update_now_playing, wake_run_loop,
+    RepeatMode, SystemEvent, await_media_permission, capture_event_loop, get_android_music_dir,
+    get_files_dir, has_media_permission, init, move_task_to_back, request_permissions,
+    set_background_handler, set_keepalive, stop_session, take_back_pressed, update_modes,
+    update_now_playing, wake_run_loop,
 };
 
 #[cfg(not(target_os = "android"))]

@@ -120,6 +120,11 @@ object MediaSessionHelper {
                 override fun onSkipToNext() = MediaReceiver.nativeOnAction("next")
                 override fun onSkipToPrevious() = MediaReceiver.nativeOnAction("prev")
                 override fun onStop() = MediaReceiver.nativeOnAction("stop")
+                // Where the shuffle/repeat taps land: the system media player builds
+                // its buttons from the session, so those two are custom actions.
+                override fun onCustomAction(action: String, extras: android.os.Bundle?) {
+                    MediaReceiver.nativeOnAction(action)
+                }
             })
             isActive = true
         }
@@ -233,6 +238,25 @@ object MediaSessionHelper {
         }
     }
 
+    // Dotted glyph for active, plain for off — a custom action renders as an icon
+    // only, so the state has to be visible in the drawing itself.
+    private fun repeatIcon() = when (repeatMode) {
+        REPEAT_ONE -> R.drawable.kopuz_ic_repeat_one_on
+        REPEAT_ALL -> R.drawable.kopuz_ic_repeat_on
+        else -> R.drawable.kopuz_ic_repeat
+    }
+
+    private fun shuffleIcon() =
+        if (shuffleOn) R.drawable.kopuz_ic_shuffle_on else R.drawable.kopuz_ic_shuffle
+
+    private fun repeatLabel() = when (repeatMode) {
+        REPEAT_ALL -> "Repeat: queue"
+        REPEAT_ONE -> "Repeat: track"
+        else -> "Repeat: off"
+    }
+
+    private fun shuffleLabel() = if (shuffleOn) "Shuffle: on" else "Shuffle: off"
+
     private fun render(
         context: Context,
         title: String,
@@ -268,6 +292,16 @@ object MediaSessionHelper {
                     PlaybackState.ACTION_SKIP_TO_NEXT or
                     PlaybackState.ACTION_SKIP_TO_PREVIOUS
                 )
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder(
+                        "shuffle", shuffleLabel(), shuffleIcon()
+                    ).build()
+                )
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder(
+                        "loop", repeatLabel(), repeatIcon()
+                    ).build()
+                )
                 .build()
         )
 
@@ -286,16 +320,6 @@ object MediaSessionHelper {
             .setDeleteIntent(pendingBroadcast(context, "stop"))
         contentIntent(context)?.let { notifBuilder.setContentIntent(it) }
         if (art != null) notifBuilder.setLargeIcon(art)
-        val repeatIcon =
-            if (repeatMode == REPEAT_ONE) R.drawable.kopuz_ic_repeat_one
-            else R.drawable.kopuz_ic_repeat
-        val repeatLabel = when (repeatMode) {
-            REPEAT_ALL -> "Repeat: queue"
-            REPEAT_ONE -> "Repeat: track"
-            else -> "Repeat: off"
-        }
-        val shuffleLabel = if (shuffleOn) "Shuffle: on" else "Shuffle: off"
-
         val notif = notifBuilder
             .setStyle(
                 Notification.MediaStyle()
@@ -306,7 +330,7 @@ object MediaSessionHelper {
             )
             .addAction(
                 Notification.Action.Builder(
-                    R.drawable.kopuz_ic_shuffle, shuffleLabel,
+                    shuffleIcon(), shuffleLabel(),
                     pendingBroadcast(context, "shuffle")
                 ).build()
             )
@@ -330,7 +354,7 @@ object MediaSessionHelper {
             )
             .addAction(
                 Notification.Action.Builder(
-                    repeatIcon, repeatLabel,
+                    repeatIcon(), repeatLabel(),
                     pendingBroadcast(context, "loop")
                 ).build()
             )

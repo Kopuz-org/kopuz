@@ -53,16 +53,12 @@ class MusicService : Service() {
         if (playing) {
             acquireWakeLock()
         } else {
-            // Paused: drop the CPU wake lock (battery) and detach foreground so the
-            // notification becomes dismissible and the OS can reclaim the service —
-            // but keep the notification visible via STOP_FOREGROUND_DETACH.
+            // Paused: the CPU wake lock is pure battery drain with nothing decoding,
+            // but the service stays in the foreground. Detaching it here used to let
+            // the process fall into the cached bucket, where Android freezes it after
+            // a few seconds — transport controls then did nothing until the app was
+            // reopened. Playback is only really over on stopSession().
             releaseWakeLock()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_DETACH)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(false)
-            }
         }
 
         return START_STICKY

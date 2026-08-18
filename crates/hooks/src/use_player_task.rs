@@ -289,6 +289,9 @@ pub fn use_player_task(ctrl: PlayerController) {
     #[cfg(target_os = "android")]
     use_hook(move || {
         init_bg_channel();
+        // Runs on the event loop thread, which is the only place its looper can be
+        // picked up — see `capture_event_loop`.
+        player::systemint::capture_event_loop();
 
         player::systemint::set_background_handler(move |event| {
             use player::systemint::SystemEvent;

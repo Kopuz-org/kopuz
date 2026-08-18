@@ -144,6 +144,9 @@ fn dispatch_event(event: SystemEvent) {
     {
         handler(event);
     }
+    // The handler only queues; without this the command waits for the activity to
+    // come back into view.
+    wake_run_loop();
 }
 
 pub fn init() {
@@ -552,24 +555,77 @@ pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
     }
 }
 
-pub fn wake_run_loop() {
-    let vm = match JVM.get() {
-        Some(v) => v,
-        None => return,
-    };
-    let mut env = match vm.attach_current_thread() {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    let result: Result<(), jni::errors::Error> = (|| {
-        let class = find_app_class(&mut env, "com/temidaradev/kopuz/MediaSessionHelper")?;
-        env.call_static_method(&class, "wakeMainThread", "()V", &[])?
-            .v()?;
-        Ok(())
-    })();
-    if result.is_err() {
-        clear_jni_exception(&mut env);
+// The event loop parks in `ALooper_pollAll` whenever the activity is not visible,
+// which stops dioxus polling its tasks: media buttons queue up undelivered, the
+// queue never advances at the end of a track, and now-playing stops updating —
+// all while audio keeps running on the engine's own threads. tao wakes that same
+// looper for its proxy events, so holding a handle to it lets any thread do the
+// same.
+unsafe extern "C" {
+    fn ALooper_forThread() -> *mut std::ffi::c_void;
+    fn ALooper_acquire(looper: *mut std::ffi::c_void);
+    fn ALooper_wake(looper: *mut std::ffi::c_void);
+}
+
+static EVENT_LOOP: std::sync::atomic::AtomicPtr<std::ffi::c_void> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+static KEEPALIVE: AtomicBool = AtomicBool::new(false);
+
+/// Capture the looper of the calling thread as the one to wake. Must be called
+/// from the event loop thread (a dioxus hook body qualifies); every other thread
+/// has a different looper, or none at all.
+pub fn capture_event_loop() {
+    if !EVENT_LOOP.load(Ordering::SeqCst).is_null() {
+        return;
     }
+    // SAFETY: both are thread-safe NDK calls; `acquire` keeps the looper alive for
+    // the process, which is exactly as long as the pointer is readable.
+    let looper = unsafe { ALooper_forThread() };
+    if looper.is_null() {
+        tracing::warn!("no looper on the event loop thread; background control will stall");
+        return;
+    }
+    unsafe { ALooper_acquire(looper) };
+    EVENT_LOOP.store(looper, Ordering::SeqCst);
+    start_keepalive();
+}
+
+/// Wake the event loop so dioxus polls its tasks now.
+pub fn wake_run_loop() {
+    let looper = EVENT_LOOP.load(Ordering::SeqCst);
+    if !looper.is_null() {
+        // SAFETY: `looper` was acquired above and is valid for the process.
+        unsafe { ALooper_wake(looper) };
+    }
+}
+
+/// While the activity is hidden the loop has to be turned by hand — the same task
+/// loop drains the notification buttons, advances the queue at the end of a track
+/// and refreshes now-playing, and none of it runs while the loop is parked.
+/// Foregrounded the loop runs on its own, so the ticker stands down.
+pub fn set_keepalive(active: bool) {
+    if KEEPALIVE.swap(active, Ordering::SeqCst) == active {
+        return;
+    }
+    if active {
+        wake_run_loop();
+    }
+}
+
+fn start_keepalive() {
+    std::thread::Builder::new()
+        .name("kopuz-loop-keepalive".into())
+        .spawn(|| {
+            loop {
+                if KEEPALIVE.load(Ordering::SeqCst) {
+                    wake_run_loop();
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                } else {
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                }
+            }
+        })
+        .ok();
 }
 
 pub fn stop_session() {
@@ -660,6 +716,9 @@ pub extern "system" fn Java_com_temidaradev_kopuz_MediaReceiver_nativeOnAction(
             BACK_PENDING.store(true, Ordering::SeqCst);
             super::back_wake();
         }
+        // Activity lifecycle, not a media command: no listener to dispatch to.
+        "bg-enter" => set_keepalive(true),
+        "bg-exit" => set_keepalive(false),
         "shuffle" => dispatch_event(SystemEvent::ToggleShuffle),
         "loop" => dispatch_event(SystemEvent::CycleRepeat),
         "media-granted" => set_media_permission(PERMISSION_GRANTED),

@@ -119,7 +119,7 @@ pub fn Radio(props: RadioProps) -> Element {
     rsx! {
             div {
                 class: if cfg!(target_os = "android") {
-                    "px-4 pt-2 pb-28 w-full h-full overflow-y-auto"
+                    "px-4 pt-2 pb-6 w-full h-full overflow-y-auto"
                 } else if is_vaxry {
                     "px-6 pt-6 pb-24 w-full h-full overflow-y-auto"
                 } else {
