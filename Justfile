@@ -20,8 +20,8 @@ clean:
     rm -rf target/dx dist build-dir .flatpak-builder
 
 flatpak:
-    @chmod +x packaging/flatpak/build-flatpak.sh
-    ./packaging/flatpak/build-flatpak.sh
+    @chmod +x packaging/build-flatpak.sh
+    ./packaging/build-flatpak.sh
 
 flatpak-install: flatpak
 

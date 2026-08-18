@@ -31,6 +31,13 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   prepare.
 - **Crate wall:** only `kopuz-db` and `kopuz-hooks` depend on `db`. UI crates
   (`pages`, `components`) read through hooks, never `db` directly.
+- **Settings file:** `AppConfig` persists to the `app_config` blob AND a
+  standalone `settings.toml` next to the DB (`crates/config/src/store.rs`; the
+  dead legacy store was `config.json`, which the importer renames).
+  Load layers blob → file → `settings.d/*.toml` drop-ins → `KOPUZ_CONFIG_*`
+  env; values travel as `serde_json::Value` and convert at the TOML edge. An
+  hjem-managed file (store symlink / read-only) is never written and its keys
+  render locked in the settings UI.
 
 ## Sources & covers (`crates/server`)
 

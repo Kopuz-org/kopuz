@@ -27,6 +27,13 @@
   </screenshots>
 
   <releases>
+    <release version="0.15.0" date="2026-08-18">
+      <description>
+        <p>
+          Settings move out of the database into a hand-editable settings.toml, with drop-in and environment overrides and support for declarative management through hjem. Word-timed lyrics now fill glyph by glyph, remote audio streams over HTTP ranges with a visible buffer, and Subsonic servers that offer a server-side song radio queue drive the radio. The Flatpak builds from source under the moe.kopuz.kopuz app id with host spawn made opt-in, settings show the version and build commit, and fixes cover CD-layout scroll performance, playlist scrolling and covers, RTL transport controls, light-mode sidebar text, and app-wide space play/pause.
+        </p>
+      </description>
+    </release>
     <release version="0.14.0" date="2026-08-04">
       <description>
         <p>

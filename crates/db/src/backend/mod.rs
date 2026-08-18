@@ -24,6 +24,8 @@ mod writes;
 
 pub struct Native {
     pool: ArcSwap<SqlitePool>,
+    /// The standalone settings file (issue #530), kept next to the DB.
+    settings_path: std::path::PathBuf,
 }
 
 impl Native {
@@ -36,8 +38,13 @@ impl Native {
         migrations::snapshot_if_pending(path).await;
         let pool = open_pool(path).await?;
         migrations::run_migrations(&pool).await?;
+        let db_dir = match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => Path::new("."),
+        };
         Ok(Self {
             pool: ArcSwap::from_pointee(pool),
+            settings_path: config::store::settings_path_for(db_dir),
         })
     }
 
@@ -79,7 +86,7 @@ fn with_ext(path: &Path, suffix: &str) -> std::path::PathBuf {
 #[async_trait::async_trait]
 impl ReadStore for Native {
     async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError> {
-        cfg_store::load_config(&self.pool()).await
+        cfg_store::load_config(&self.pool(), &self.settings_path).await
     }
 
     async fn tracks_page(
@@ -230,7 +237,7 @@ impl ReadStore for Native {
 #[async_trait::async_trait]
 impl Storage for Native {
     async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError> {
-        cfg_store::save_config(&self.pool(), cfg).await
+        cfg_store::save_config(&self.pool(), cfg, &self.settings_path).await
     }
 
     async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {

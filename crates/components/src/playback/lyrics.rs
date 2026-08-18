@@ -34,6 +34,7 @@ const FULLSCREEN_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-2xl italic
 const RIGHTBAR_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-lg italic font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-right w-full";
 const RIGHTBAR_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-lg italic font-semibold transition-colors duration-300 whitespace-pre-wrap text-right w-full";
 const LYRIC_SEAMLESS_GAP_SECONDS: f64 = 3.0;
+const LYRIC_CHUNK_FALLBACK_SECONDS: f64 = 0.35;
 pub use crate::shared::LayoutMode;
 
 fn lyric_line_class(
@@ -236,19 +237,24 @@ fn active_secondary_lines(
             (line.background && line.parent_line_index == Some(main_line_index))
                 || (!line.background && main_line_index != usize::MAX)
         })
-        .map(|(index, line)| format!("[{},{}]", index, active_chunk_index(line, current_time)))
+        .map(|(index, _)| index.to_string())
         .collect::<Vec<_>>()
         .join(",");
 
     format!("[{}]", entries)
 }
 
-fn active_chunk_index(line: &utils::lyrics::LyricLine, current_time: f64) -> i64 {
+/// Providers only timestamp the start of a chunk, so a chunk runs until the
+/// next one starts and the last one until the line ends. The wipe needs a span
+/// to interpolate over, hence the fallback when neither is available.
+fn chunk_end_time(line: &utils::lyrics::LyricLine, index: usize) -> f64 {
+    let start = line.chunks[index].start_time;
     line.chunks
-        .partition_point(|word| word.start_time <= current_time)
-        .checked_sub(1)
-        .map(|index| index as i64)
-        .unwrap_or(-1)
+        .get(index.saturating_add(1))
+        .map(|next| next.start_time)
+        .or(line.end_time)
+        .filter(|&end| end > start)
+        .unwrap_or(start + LYRIC_CHUNK_FALLBACK_SECONDS)
 }
 
 #[component]
@@ -310,22 +316,121 @@ pub fn LyricsView(
                 window.__{layout}_autoSync = true;
                 window.__{layout}_programmaticScroll = false;
 
-                const resetWords = (lineEl) => {{
-                    lineEl?.querySelectorAll('[data-lyric-chunk]').forEach((word) => {{
-                        word.style.opacity = '';
-                        word.style.textShadow = '';
-                    }});
+                const UNSUNG_ALPHA = 0.45;
+                const GLOW_DECAY_SECONDS = 0.6;
+                // A chunk runs until the next one starts, which over a pause or a line
+                // tail is far longer than the syllable itself. Cap the wipe so it lands
+                // on the beat and holds instead of creeping through the silence.
+                const MAX_WIPE_SECONDS = 1.2;
+                const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+
+                // Playback time only arrives every ~16-50ms; extrapolate between
+                // updates so the wipe runs at frame rate instead of stepping.
+                const clock = {{ time: 0, at: 0, playing: false }};
+                const nowSeconds = () => clock.playing
+                    ? clock.time + (performance.now() - clock.at) / 1000
+                    : clock.time;
+
+                const chunkAlpha = (lineEl) => lineEl.dataset.backgroundLine === 'true' ? 0.7 : 1;
+
+                // The gradient is 2.2 chunk-widths with a soft band in the middle, so
+                // sliding it from 99% to 1% wipes the fill across the glyphs and still
+                // parks the band clear of both edges without leaving the chunk box
+                // (a position outside 0-100% would expose an unpainted sliver).
+                const primeChunks = (lineEl, chunks) => {{
+                    if (lineEl.dataset.lyricPrimedFor === lineEl.className) return;
+                    lineEl.dataset.lyricPrimedFor = lineEl.className;
+                    const alpha = chunkAlpha(lineEl);
+                    const sung = `rgba(255,255,255,${{alpha}})`;
+                    const unsung = `rgba(255,255,255,${{alpha * UNSUNG_ALPHA}})`;
+                    const image = `linear-gradient(to right, ${{sung}} 0%, ${{sung}} 46%, ${{unsung}} 54%, ${{unsung}} 100%)`;
+                    for (const chunk of chunks) {{
+                        chunk.style.backgroundImage = image;
+                        chunk.style.backgroundSize = '220% 100%';
+                        chunk.style.backgroundRepeat = 'no-repeat';
+                        chunk.style.webkitBackgroundClip = 'text';
+                        chunk.style.backgroundClip = 'text';
+                        chunk.style.color = 'transparent';
+                        chunk.style.webkitTextFillColor = 'transparent';
+                    }}
                 }};
 
-                const updateWords = (lineEl, activeChunkIndex) => {{
-                    lineEl?.querySelectorAll('[data-lyric-chunk]').forEach((word, index) => {{
-                        if (activeChunkIndex >= 0 && index <= activeChunkIndex) {{
-                            word.style.opacity = '1';
-                            word.style.textShadow = '0 0 6px rgba(255,255,255,0.35)';
-                        }} else {{
-                            word.style.opacity = '0.45';
-                            word.style.textShadow = '';
+                const paintChunks = (lineEl, time) => {{
+                    if (!lineEl?.isConnected) return false;
+                    const chunks = lineEl.querySelectorAll('[data-lyric-chunk]');
+                    if (!chunks.length) return false;
+                    primeChunks(lineEl, chunks);
+                    const alpha = chunkAlpha(lineEl);
+
+                    for (const chunk of chunks) {{
+                        const start = Number(chunk.dataset.chunkStart);
+                        const end = Number(chunk.dataset.chunkEnd);
+                        const span = Math.min(end - start, MAX_WIPE_SECONDS);
+                        let fill = span > 0 ? (time - start) / span : (time >= start ? 1 : 0);
+                        fill = Math.min(1, Math.max(0, fill));
+                        if (reduceMotion) fill = time >= start ? 1 : 0;
+
+                        const nextFill = Math.round(fill * 200) / 200;
+                        if (chunk.__lyricFill !== nextFill) {{
+                            chunk.__lyricFill = nextFill;
+                            chunk.style.backgroundPositionX = `${{(99 - nextFill * 98).toFixed(2)}}%`;
                         }}
+
+                        let glow = 0;
+                        if (!reduceMotion) {{
+                            // Lit while the chunk is the one being sung, then settles.
+                            glow = time < start
+                                ? 0
+                                : (time <= end ? 1 : 1 - (time - end) / GLOW_DECAY_SECONDS);
+                            glow = Math.min(1, Math.max(0, glow));
+                        }}
+
+                        const nextGlow = Math.round(glow * 20) / 20;
+                        if (chunk.__lyricGlow !== nextGlow) {{
+                            chunk.__lyricGlow = nextGlow;
+                            chunk.style.textShadow = nextGlow > 0
+                                ? `0 0 ${{(4 + nextGlow * 6).toFixed(1)}}px rgba(255,255,255,${{(nextGlow * 0.3 * alpha).toFixed(3)}})`
+                                : '';
+                        }}
+                    }}
+
+                    return true;
+                }};
+
+                let paintFrame = null;
+                const paintTick = () => {{
+                    paintFrame = null;
+                    const time = nowSeconds();
+                    let painted = currEl ? paintChunks(currEl, time) : false;
+                    for (const lineEl of activeSecondaryEls) {{
+                        painted = paintChunks(lineEl, time) || painted;
+                    }}
+                    if (painted) {{
+                        paintFrame = requestAnimationFrame(paintTick);
+                    }}
+                }};
+
+                const schedulePaint = () => {{
+                    if (paintFrame === null) {{
+                        paintFrame = requestAnimationFrame(paintTick);
+                    }}
+                }};
+
+                const resetWords = (lineEl) => {{
+                    if (!lineEl) return;
+                    delete lineEl.dataset.lyricPrimedFor;
+                    lineEl.querySelectorAll('[data-lyric-chunk]').forEach((chunk) => {{
+                        chunk.style.backgroundImage = '';
+                        chunk.style.backgroundSize = '';
+                        chunk.style.backgroundRepeat = '';
+                        chunk.style.backgroundPositionX = '';
+                        chunk.style.webkitBackgroundClip = '';
+                        chunk.style.backgroundClip = '';
+                        chunk.style.color = '';
+                        chunk.style.webkitTextFillColor = '';
+                        chunk.style.textShadow = '';
+                        chunk.__lyricFill = undefined;
+                        chunk.__lyricGlow = undefined;
                     }});
                 }};
 
@@ -408,7 +513,7 @@ pub fn LyricsView(
                     resetWords(lineEl);
                 }};
 
-                const activateLine = (lineEl, chunkIndex, scale = null) => {{
+                const activateLine = (lineEl, scale = null) => {{
                     if (!lineEl) return;
                     const scaleValue = scale || activeScaleFor(lineEl);
                     const origin = lineEl.dataset.transformOrigin || 'center';
@@ -416,14 +521,16 @@ pub fn LyricsView(
                     lineEl.style.transformOrigin = origin;
                     applyLineLayout(lineEl);
                     lineEl.style.transform = `scale(${{scaleValue}})`;
-                    if (lineEl.querySelector('[data-lyric-chunk]')) {{
-                        updateWords(lineEl, chunkIndex);
-                    }}
+                    paintChunks(lineEl, nowSeconds());
                 }};
 
-                window.__{layout}_updateLyrics = (nextIndex, nextChunkIndex, activeLinesJson = '[]') => {{
+                window.__{layout}_updateLyrics = (nextIndex, currentTime, playing, activeLinesJson = '[]') => {{
+                    clock.time = currentTime;
+                    clock.at = performance.now();
+                    clock.playing = playing;
+
                     let nextEl = document.getElementById(`{layout}-lyrics-${{nextIndex}}`)
-                    let nextSecondary = new Map(JSON.parse(activeLinesJson));
+                    let nextSecondary = new Set(JSON.parse(activeLinesJson));
                     for (const lineEl of activeSecondaryEls) {{
                         const idx = Number(lineEl.dataset.lyricIndex);
                         if (!nextSecondary.has(idx) && lineEl !== nextEl) {{
@@ -438,7 +545,7 @@ pub fn LyricsView(
                         }}
 
                         if (nextEl) {{
-                            activateLine(nextEl, nextChunkIndex);
+                            activateLine(nextEl);
                             fadeLineIn(nextEl);
                             scrollLineIntoComfortView(nextEl);
                         }}
@@ -447,15 +554,17 @@ pub fn LyricsView(
                     }}
 
                     if (nextEl) {{
-                        activateLine(nextEl, nextChunkIndex);
+                        activateLine(nextEl);
                     }}
 
-                    for (const [idx, chunkIndex] of nextSecondary.entries()) {{
+                    for (const idx of nextSecondary) {{
                         const lineEl = document.getElementById(`{layout}-lyrics-${{idx}}`);
                         if (!lineEl || lineEl === nextEl) continue;
-                        activateLine(lineEl, chunkIndex);
+                        activateLine(lineEl);
                         activeSecondaryEls.add(lineEl);
                     }}
+
+                    schedulePaint();
                 }}
 
                 window.__{layout}_setAutoSync = (val) => {{
@@ -469,6 +578,10 @@ pub fn LyricsView(
                     if (scrollAnimationFrame) {{
                         cancelAnimationFrame(scrollAnimationFrame);
                         scrollAnimationFrame = null;
+                    }}
+                    if (paintFrame !== null) {{
+                        cancelAnimationFrame(paintFrame);
+                        paintFrame = null;
                     }}
                     document
                         .getElementById('{layout}-lyrics-content')
@@ -500,11 +613,10 @@ pub fn LyricsView(
 
                 loop {
                     let current_time = ctrl.displayed_progress_secs_f64();
+                    let playing = *ctrl.is_playing.peek();
                     if let Some(current_line_index) =
                         active_main_line_index(&lines, &main_line_indices, current_time)
                     {
-                        let current_chunk_index =
-                            active_chunk_index(&lines[current_line_index], current_time);
                         let active_secondary_lines = active_secondary_lines(
                             &lines,
                             &main_line_indices,
@@ -512,7 +624,7 @@ pub fn LyricsView(
                             current_line_index,
                         );
                         let _ = eval(&format!(
-                            "window.__{layout}_updateLyrics({current_line_index}, {current_chunk_index}, '{}')",
+                            "window.__{layout}_updateLyrics({current_line_index}, {current_time}, {playing}, '{}')",
                             active_secondary_lines
                         ));
 
@@ -536,7 +648,7 @@ pub fn LyricsView(
                             usize::MAX,
                         );
                         let _ = eval(&format!(
-                            "window.__{layout}_updateLyrics(-1, -1, '{}')",
+                            "window.__{layout}_updateLyrics(-1, {current_time}, {playing}, '{}')",
                             active_secondary_lines
                         ));
                         sleep_duration_ms = 50;
@@ -601,7 +713,8 @@ pub fn LyricsView(
                                                 key: "{chunk_i}",
                                                 id: "{layout}-lyrics-{i}-word-{chunk_i}",
                                                 "data-lyric-chunk": "true",
-                                                class: "transition-opacity duration-150",
+                                                "data-chunk-start": "{word.start_time}",
+                                                "data-chunk-end": "{chunk_end_time(line, chunk_i)}",
                                                 "{word.text}"
                                             }
                                         }

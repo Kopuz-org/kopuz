@@ -144,8 +144,9 @@ pub type ArtistImages = (
 /// a supertrait of [`Storage`], so any `dyn Storage` is also a `dyn ReadStore`.
 #[async_trait::async_trait]
 pub trait ReadStore: Send + Sync {
-    /// Load the persisted `AppConfig` (the single-row JSON blob), or `None` if
-    /// the app has never been configured.
+    /// Load the persisted `AppConfig`: the single-row JSON blob overlaid with
+    /// the settings file, drop-ins, and `KOPUZ_CONFIG_*` env vars. `None` if
+    /// the app has never been configured (no blob and no file layers).
     async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError>;
 
     /// One window of a track listing (sorted + filtered in SQL — only this slice
@@ -277,7 +278,8 @@ pub trait ReadStore: Send + Sync {
 /// read-only [`ReadStore`]. One impl per target (sqlx native / in-mem stub).
 #[async_trait::async_trait]
 pub trait Storage: ReadStore {
-    /// Persist the whole `AppConfig` as the single-row JSON blob.
+    /// Persist the whole `AppConfig`: the single-row JSON blob, plus a mirror
+    /// of the settings into the standalone config file when it is writable.
     async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
 
     /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
@@ -572,33 +574,50 @@ pub fn default_db_path() -> std::path::PathBuf {
     config_dir().join(name)
 }
 
-/// Blocking pre-boot read of the config blob — for the few values needed before
+/// Blocking pre-boot read of the config — for the few values needed before
 /// the app (and its async runtime/log subscriber) exists: the tracing toggle and
-/// the titlebar mode. Opens the DB read-only without running migrations; `None`
-/// if the DB or blob doesn't exist yet (first launch). Server/creds fields are
-/// NOT hydrated — blob fields only.
+/// the titlebar mode. Opens the DB read-only without running migrations and
+/// overlays the settings file / drop-ins / env; `None` when neither the blob
+/// nor any file layer exists yet (first launch). Server/creds fields are NOT
+/// hydrated — blob fields only.
 pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
-    if !db_path.exists() {
+    let db_dir = match db_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => std::path::Path::new("."),
+    };
+    let layers = config::store::FileLayers::read(&config::store::settings_path_for(db_dir));
+
+    let blob: Option<serde_json::Value> = if db_path.exists() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        rt.block_on(async {
+            let opts = sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(db_path)
+                .create_if_missing(false)
+                .read_only(true);
+            use sqlx::ConnectOptions;
+            let mut conn = opts.connect().await.ok()?;
+            let json: Option<String> =
+                sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
+                    .fetch_optional(&mut conn)
+                    .await
+                    .ok()
+                    .flatten();
+            json.and_then(|j| serde_json::from_str(&j).ok())
+        })
+    } else {
+        None
+    };
+
+    // A settings file alone (fresh install on a Nix-configured machine) is
+    // enough to peek at — the blob only appears after the first save.
+    if blob.is_none() && !layers.has_overrides() {
         return None;
     }
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .ok()?;
-    rt.block_on(async {
-        let opts = sqlx::sqlite::SqliteConnectOptions::new()
-            .filename(db_path)
-            .create_if_missing(false)
-            .read_only(true);
-        use sqlx::ConnectOptions;
-        let mut conn = opts.connect().await.ok()?;
-        let json: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-            .fetch_optional(&mut conn)
-            .await
-            .ok()
-            .flatten();
-        json.and_then(|j| serde_json::from_str(&j).ok())
-    })
+    let value = blob.unwrap_or_else(|| serde_json::json!({}));
+    layers.merge_and_parse(value).ok()
 }
 
 /// The RELEASE database path (`kopuz.db`), independent of build profile — the

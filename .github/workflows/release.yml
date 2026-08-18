@@ -146,7 +146,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
 
       - name: Install dioxus-cli
         run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
@@ -228,7 +228,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
 
       - name: Install dioxus-cli
         run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
@@ -322,7 +322,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
 
       - name: Install dioxus-cli
         run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
@@ -445,3 +445,61 @@ jobs:
             dist/*.msi.sha256
             dist/*.apk
             dist/*.apk.sha256
+
+  homebrew:
+    if: github.ref_type == 'tag'
+    needs: publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: Kopuz-org/homebrew-tap
+          token: ${{ secrets.PAT }}
+
+      - name: Download macOS package
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kopuz-release-macos-*
+          path: dist
+          merge-multiple: true
+
+      - name: Update cask
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          version="${TAG#v}"
+          dmg="dist/Kopuz_${version}_aarch64.dmg"
+
+          if [[ ! -f "$dmg" ]]; then
+            echo "expected $dmg in the release artifacts"
+            exit 1
+          fi
+
+          sha="$(sha256sum "$dmg" | cut -d' ' -f1)"
+
+          sed -i \
+            -e "s/^  version \".*\"$/  version \"${version}\"/" \
+            -e "s/^  sha256 \".*\"$/  sha256 \"${sha}\"/" \
+            Casks/kopuz.rb
+
+          grep -q "version \"${version}\"" Casks/kopuz.rb
+          grep -q "sha256 \"${sha}\"" Casks/kopuz.rb
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git add Casks/kopuz.rb
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "kopuz ${{ github.ref_name }}"
+            git push
+          fi

@@ -14,11 +14,57 @@ use tracing::Instrument;
 static APP_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[component]
-pub fn SettingItem(title: String, control: Element) -> Element {
+pub fn SettingItem(
+    title: String,
+    control: Element,
+    /// The top-level `AppConfig` field this row edits. When the field is
+    /// pinned by a managed config layer (Nix/hjem file, drop-in, env var),
+    /// the row renders locked. Empty = never locked.
+    #[props(default)]
+    config_key: String,
+    /// The other top-level fields a composite control edits (the Last.fm
+    /// credentials, say). The row locks when *any* of its keys is managed —
+    /// locking on `config_key` alone would leave the rest editable.
+    #[props(default)]
+    extra_config_keys: Vec<&'static str>,
+    /// Put the control below the title at full width instead of beside it —
+    /// for controls too wide for a row (the equalizer graph).
+    #[props(default)]
+    stacked: bool,
+) -> Element {
+    let locked = try_consume_context::<config::store::FileLayers>().is_some_and(|layers| {
+        (!config_key.is_empty() && layers.is_locked(&config_key))
+            || extra_config_keys.iter().any(|key| layers.is_locked(key))
+    });
     rsx! {
-        div { class: "settings-row flex items-center justify-between gap-5 px-5 py-2.5",
-            p { class: "min-w-0 text-sm text-white/90 font-medium", "{title}" }
-            {control}
+        div {
+            class: if stacked { "settings-row px-5 py-4" } else { "settings-row flex items-center justify-between gap-5 px-5 py-2.5" },
+            div {
+                class: if stacked { "flex items-center gap-2 mb-3" } else { "min-w-0 flex items-center gap-2" },
+                p { class: "min-w-0 text-sm text-white/90 font-medium", "{title}" }
+                if locked {
+                    i {
+                        class: "fa-solid fa-lock text-[10px] text-white/40",
+                        title: i18n::t("setting_managed_by_system"),
+                    }
+                }
+            }
+            if locked {
+                // `inert` is what actually disables the control: it takes the
+                // whole subtree out of the tab order and drops click/key
+                // events, so a managed setting can't be changed by keyboard
+                // either. The class/aria only cover the look and the a11y
+                // label.
+                div {
+                    class: "opacity-50 pointer-events-none select-none",
+                    inert: true,
+                    aria_disabled: true,
+                    title: i18n::t("setting_managed_by_system"),
+                    {control}
+                }
+            } else {
+                {control}
+            }
         }
     }
 }
