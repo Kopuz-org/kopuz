@@ -1,7 +1,8 @@
 use jni::objects::{GlobalRef, JClass, JObject, JString, JValue};
 use jni::{JNIEnv, JavaVM};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::Notify;
 
 // Set from the JNI thread when the hardware/gesture back is pressed; drained on the
 // runtime by take_back_pressed(). Decoupled because dioxus signals can only be touched
@@ -11,6 +12,77 @@ static BACK_PENDING: AtomicBool = AtomicBool::new(false);
 /// Returns true once per back press, clearing the pending flag.
 pub fn take_back_pressed() -> bool {
     BACK_PENDING.swap(false, Ordering::SeqCst)
+}
+
+const PERMISSION_UNANSWERED: u8 = 0;
+const PERMISSION_GRANTED: u8 = 1;
+const PERMISSION_DENIED: u8 = 2;
+static MEDIA_PERMISSION: AtomicU8 = AtomicU8::new(PERMISSION_UNANSWERED);
+
+fn permission_notify() -> &'static Notify {
+    static N: OnceLock<Notify> = OnceLock::new();
+    N.get_or_init(Notify::new)
+}
+
+/// Whether the app already holds the permission to read shared media. Android
+/// skips the dialog for one that is already granted, so a caller that only waited
+/// for the answer would wait forever.
+pub fn has_media_permission() -> bool {
+    let Some(vm) = JVM.get() else {
+        return false;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return false;
+    };
+    let ctx = ndk_context::android_context();
+    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let granted: Result<bool, jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/MediaSessionHelper")?;
+        env.call_static_method(
+            &class,
+            "hasMediaPermission",
+            "(Landroid/content/Context;)Z",
+            &[JValue::Object(&activity)],
+        )?
+        .z()
+    })(&mut env);
+    match granted {
+        Ok(granted) => granted,
+        Err(e) => {
+            tracing::warn!(error = %e, "MediaSessionHelper.hasMediaPermission failed");
+            clear_jni_exception(&mut env);
+            false
+        }
+    }
+}
+
+/// Records the user's answer and releases anyone waiting on it. `notify_one` stores
+/// a permit for a waiter that has not registered yet, `notify_waiters` covers the
+/// ones that already have; an answer landing in that gap would otherwise be lost.
+fn set_media_permission(answer: u8) {
+    MEDIA_PERMISSION.store(answer, Ordering::SeqCst);
+    permission_notify().notify_waiters();
+    permission_notify().notify_one();
+}
+
+/// Resolves once the user has answered the media permission dialog: `true` for a
+/// grant, `false` for a denial or a dismissal (Android reports an empty result for
+/// a dialog swiped away, which counts as a denial).
+///
+/// The answer stays readable after the fact, so a late caller still sees it;
+/// `request_permissions` clears it before each new dialog.
+pub async fn await_media_permission() -> bool {
+    if has_media_permission() {
+        return true;
+    }
+    loop {
+        let answered = permission_notify().notified();
+        match MEDIA_PERMISSION.load(Ordering::SeqCst) {
+            PERMISSION_GRANTED => return true,
+            PERMISSION_DENIED => return false,
+            _ => answered.await,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -26,10 +98,10 @@ pub enum SystemEvent {
 static JVM: OnceLock<JavaVM> = OnceLock::new();
 // App classloader cached from main thread so FindClass works from any thread.
 static CLASSLOADER: OnceLock<GlobalRef> = OnceLock::new();
-static BACKGROUND_HANDLER: OnceLock<Arc<Mutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>> =
-    OnceLock::new();
+type BackgroundHandler = Arc<Mutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>;
+static BACKGROUND_HANDLER: OnceLock<BackgroundHandler> = OnceLock::new();
 
-fn get_bg_handler() -> Arc<Mutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>> {
+fn get_bg_handler() -> BackgroundHandler {
     BACKGROUND_HANDLER
         .get_or_init(|| Arc::new(Mutex::new(None)))
         .clone()
@@ -42,10 +114,10 @@ pub fn set_background_handler(handler: impl Fn(SystemEvent) + Send + Sync + 'sta
 }
 
 fn dispatch_event(event: SystemEvent) {
-    if let Ok(guard) = get_bg_handler().lock() {
-        if let Some(ref handler) = *guard {
-            handler(event);
-        }
+    if let Ok(guard) = get_bg_handler().lock()
+        && let Some(ref handler) = *guard
+    {
+        handler(event);
     }
 }
 
@@ -312,12 +384,12 @@ fn data_url_to_file(url: &str) -> Option<String> {
     // Hash is part of the filename so a new track yields a new path — the Kotlin
     // side caches its decoded bitmap by path and would otherwise keep showing the
     // previous track's art when the filename stayed constant.
-    if let Ok(guard) = LAST_DATA_ART.lock() {
-        if let Some((last_hash, path)) = guard.as_ref() {
-            if *last_hash == hash && std::path::Path::new(path).exists() {
-                return Some(path.clone());
-            }
-        }
+    if let Ok(guard) = LAST_DATA_ART.lock()
+        && let Some((last_hash, path)) = guard.as_ref()
+        && *last_hash == hash
+        && std::path::Path::new(path).exists()
+    {
+        return Some(path.clone());
     }
 
     let files_dir = get_files_dir()?;
@@ -326,10 +398,10 @@ fn data_url_to_file(url: &str) -> Option<String> {
     std::fs::write(&path, &bytes).ok()?;
     if let Ok(mut guard) = LAST_DATA_ART.lock() {
         // Remove the previously written art file so they don't accumulate.
-        if let Some((_, old_path)) = guard.as_ref() {
-            if old_path != &path {
-                let _ = std::fs::remove_file(old_path);
-            }
+        if let Some((_, old_path)) = guard.as_ref()
+            && old_path != &path
+        {
+            let _ = std::fs::remove_file(old_path);
         }
         *guard = Some((hash, path.clone()));
     }
@@ -394,7 +466,7 @@ pub fn update_now_playing(
         let j_art_owned;
         let j_art: &JObject = if let Some(ref path) = resolved_art {
             j_art_owned = env.new_string(path)?;
-            &*j_art_owned
+            &j_art_owned
         } else {
             &null_obj
         };
@@ -437,7 +509,7 @@ pub fn wake_run_loop() {
             .v()?;
         Ok(())
     })();
-    if let Err(_) = result {
+    if result.is_err() {
         clear_jni_exception(&mut env);
     }
 }
@@ -472,6 +544,7 @@ pub fn stop_session() {
 
 pub fn request_permissions() {
     init();
+    MEDIA_PERMISSION.store(PERMISSION_UNANSWERED, Ordering::SeqCst);
     let vm = match JVM.get() {
         Some(v) => v,
         None => return,
@@ -528,6 +601,11 @@ pub extern "system" fn Java_com_temidaradev_kopuz_MediaReceiver_nativeOnAction(
         "back" => {
             BACK_PENDING.store(true, Ordering::SeqCst);
             super::back_wake();
+        }
+        "media-granted" => set_media_permission(PERMISSION_GRANTED),
+        "media-denied" => {
+            tracing::warn!("media permission denied — the library scan cannot read shared storage");
+            set_media_permission(PERMISSION_DENIED);
         }
         _ => {}
     }

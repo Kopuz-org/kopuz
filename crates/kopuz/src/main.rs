@@ -28,6 +28,7 @@ mod artwork_protocol;
 #[cfg(not(target_os = "android"))]
 mod chrome_trace;
 mod desktop_shell;
+#[cfg(not(target_os = "android"))]
 mod legacy;
 mod logging;
 mod queue_state;

@@ -18,7 +18,6 @@ workspace = true
 [dependencies]
 tracing = { workspace = true }
 directories = { workspace = true }
-jellyfin-sdk-rust = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
