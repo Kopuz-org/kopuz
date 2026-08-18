@@ -101,6 +101,21 @@ pub trait MediaSource: Send + Sync {
     /// the remote's URL / deciphered stream).
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError>;
 
+    /// The bytes of one track, for sources that can't express it as a URL.
+    ///
+    /// Almost nothing needs this: a download is normally a GET of whatever
+    /// [`resolve_stream`](Self::resolve_stream) hands out, and that is what the
+    /// unsupported default here leaves the caller to do. Apple Music overrides
+    /// it because its assets are encrypted — the URL yields ciphertext, so a
+    /// playable file only exists after a licence and a decrypt pass.
+    async fn download_track(
+        &self,
+        _item_id: &str,
+        _progress: Option<utils::stream_buffer::BufferProgressCallback>,
+    ) -> Result<Vec<u8>, SourceError> {
+        Err(SourceError::unsupported("track download"))
+    }
+
     /// Check stored creds against the source (local is always [`Valid`](AuthOutcome::Valid)).
     async fn validate(&self) -> AuthOutcome;
 
@@ -879,7 +894,7 @@ impl MediaSource for AppleMusicSource {
             scan_folders: false,
             folders: false,
             sync: true,
-            downloads: false,
+            downloads: true,
             discover: false,
             radio: false,
             playlists: PlaylistOps::AddRemove,
@@ -887,6 +902,26 @@ impl MediaSource for AppleMusicSource {
             albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Instant,
         }
+    }
+
+    async fn download_track(
+        &self,
+        item_id: &str,
+        progress: Option<utils::stream_buffer::BufferProgressCallback>,
+    ) -> Result<Vec<u8>, SourceError> {
+        let token = self
+            .client
+            .media_user_token()
+            .ok_or_else(|| SourceError::InvalidInput("no Apple Music user token".into()))?;
+        crate::applemusic::stream::download_decrypted(
+            item_id,
+            token,
+            self.client.storefront(),
+            self.client.language(),
+            progress,
+        )
+        .await
+        .map_err(SourceError::Backend)
     }
 
     async fn resolve_stream(&self, _item_id: &str) -> Result<StreamInfo, SourceError> {

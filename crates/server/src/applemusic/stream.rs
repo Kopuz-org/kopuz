@@ -586,6 +586,37 @@ async fn licence_and_decrypt(
     Ok(track)
 }
 
+/// The whole track, decrypted, for storing offline.
+///
+/// Same pipeline as playback — there is no separate download endpoint, and the
+/// asset is encrypted either way, so a plain HTTP GET would only ever yield
+/// ciphertext. The difference is pacing: playback decrypts just ahead of the
+/// listener, this asks for all of it at once.
+///
+/// The result is a self-contained MP4 (`enca` relabelled back to `mp4a`), so it
+/// needs no further processing to be playable by anything else. A track already
+/// in the decrypted cache costs nothing but the read.
+pub async fn download_decrypted(
+    adam_id: &str,
+    media_user_token: &str,
+    storefront: &str,
+    language: &str,
+    progress: Option<utils::stream_buffer::BufferProgressCallback>,
+) -> Result<Vec<u8>, String> {
+    let track = resolve_and_decrypt(adam_id, media_user_token, storefront, language, progress)
+        .await
+        .map_err(|e| format!("resolve for download: {e}"))?;
+
+    // Decryption is CPU-bound and the wait is a blocking one, so neither belongs
+    // on a runtime worker.
+    tokio::task::spawn_blocking(move || {
+        track.request_all();
+        track.wait_until_decrypted()
+    })
+    .await
+    .map_err(|e| format!("download task: {e}"))?
+}
+
 /// A response body being handed to the track, and how long it is.
 enum AssetStream {
     Sized {

@@ -77,6 +77,11 @@ struct State {
     /// `cdm` — releasing it any earlier would take the keys with it, mid-track.
     session: Option<CdmSession>,
     error: Option<String>,
+    /// The background fill has stopped, whether it finished the track, hit an
+    /// error, or gave up. Only [`ProgressiveTrack::wait_until_decrypted`] reads
+    /// it, and it needs every one of those endings — a downloader waiting on
+    /// "finished" alone would wait for ever on the other two.
+    fill_done: bool,
 }
 
 impl State {
@@ -218,6 +223,7 @@ impl ProgressiveTrack {
             cdm: None,
             session: None,
             error: None,
+            fill_done: false,
         }));
         let track = Self {
             state: state.clone(),
@@ -246,6 +252,9 @@ impl ProgressiveTrack {
                 cdm: None,
                 session: None,
                 error: None,
+                // Nothing left to decrypt, so a caller waiting on the whole
+                // track is already satisfied.
+                fill_done: true,
             })),
             read_pos: Arc::new(AtomicUsize::new(0)),
             total,
@@ -255,6 +264,48 @@ impl ProgressiveTrack {
 
     pub fn total_size(&self) -> u64 {
         self.total
+    }
+
+    /// Ask for the whole track as fast as it decrypts, rather than at the pace
+    /// a listener needs it.
+    ///
+    /// The background fill deliberately stays a bounded distance ahead of the
+    /// playhead. That is right for playback and wrong for a download: with no
+    /// reader advancing the playhead it would decrypt one lookahead window and
+    /// then park indefinitely. Parking the playhead at the end instead lets it
+    /// run straight through.
+    pub fn request_all(&self) {
+        self.read_pos.store(self.total as usize, Ordering::Relaxed);
+    }
+
+    /// Block until the whole track is decrypted, then hand back the bytes.
+    ///
+    /// Pair with [`request_all`](Self::request_all) — on its own this waits for
+    /// a playhead that a download never moves. Blocking, so it belongs on a
+    /// blocking thread rather than an async task.
+    pub fn wait_until_decrypted(&self) -> Result<Vec<u8>, String> {
+        loop {
+            {
+                let s = self
+                    .state
+                    .lock()
+                    .map_err(|_| "decrypt state poisoned".to_string())?;
+                if let Some(e) = &s.error {
+                    return Err(e.clone());
+                }
+                if s.fill_done {
+                    if s.downloaded != s.buf.len() {
+                        return Err(format!(
+                            "decrypt stopped early: {} of {} bytes",
+                            s.downloaded,
+                            s.buf.len()
+                        ));
+                    }
+                    return Ok(s.buf.clone());
+                }
+            }
+            std::thread::sleep(WAIT_POLL);
+        }
     }
 
     /// Install the content keys and start decrypting.
@@ -434,6 +485,23 @@ impl ProgressiveTrack {
     }
 }
 
+/// Marks the fill finished however it ends.
+///
+/// [`fill`] returns early on a poisoned lock, a decrypt error, and a fragment
+/// timeout. A downloader blocked in
+/// [`wait_until_decrypted`](ProgressiveTrack::wait_until_decrypted) has to be
+/// released on those paths too, and a guard covers them without every `return`
+/// having to remember.
+struct FillGuard(Arc<Mutex<State>>);
+
+impl Drop for FillGuard {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.0.lock() {
+            s.fill_done = true;
+        }
+    }
+}
+
 /// Decrypt every sample in order, waiting for fragments that haven't arrived.
 fn fill(
     state: Arc<Mutex<State>>,
@@ -443,6 +511,7 @@ fn fill(
     progress: Option<BufferProgressCallback>,
     on_complete: impl FnOnce(Vec<u8>),
 ) {
+    let _done = FillGuard(state.clone());
     let mut reported = prebuffer_end;
     let mut index = 0usize;
     let mut stalled_since: Option<Instant> = None;
@@ -831,5 +900,48 @@ mod tests {
         let started = Instant::now();
         assert!(track.read(&mut buf).is_ok());
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// A cache hit has nothing left to decrypt, so a download of one must not
+    /// sit waiting for a fill that will never run.
+    #[test]
+    fn a_cache_hit_is_already_complete_for_a_download() {
+        let bytes = vec![7u8; 4096];
+        let track = ProgressiveTrack::ready(bytes.clone());
+        track.request_all();
+        let started = Instant::now();
+        assert_eq!(
+            track.wait_until_decrypted().expect("already decrypted"),
+            bytes
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// The background fill paces itself against the playhead. A download has no
+    /// playhead, so without `request_all` it would decrypt one lookahead window
+    /// and park — this pins that the throttle is what moves.
+    #[test]
+    fn requesting_everything_moves_the_playhead_to_the_end() {
+        let (track, _sink) = ProgressiveTrack::streaming(8 * 1024 * 1024);
+        assert_eq!(track.read_pos.load(Ordering::Relaxed), 0);
+        track.request_all();
+        assert_eq!(track.read_pos.load(Ordering::Relaxed), 8 * 1024 * 1024);
+    }
+
+    /// The fill thread has three ways out — finished, decrypt error, and giving
+    /// up on fragments — and a waiting downloader has to be released on all of
+    /// them. This drives the one that isn't the happy path.
+    #[test]
+    fn a_failed_track_releases_a_waiting_download() {
+        let (track, sink) = ProgressiveTrack::streaming(1024 * 1024);
+        sink.fail("asset truncated".to_string());
+        track.request_all();
+        let started = Instant::now();
+        let err = track.wait_until_decrypted().expect_err("the track failed");
+        assert!(err.contains("truncated"), "{err}");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "must not wait on a fill that never runs"
+        );
     }
 }

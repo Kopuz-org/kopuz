@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tracing::Instrument;
 
+use ::server::source::SourceError;
 pub use ::server::{DownloadItem, DownloadProgress, DownloadQueue, DownloadStatus};
 
 thread_local! {
@@ -143,7 +144,7 @@ pub fn queue_downloads(
 
 async fn download_worker(
     mut queue: Signal<DownloadQueue>,
-    mut config: Signal<AppConfig>,
+    config: Signal<AppConfig>,
     active_source: Signal<::server::source::ActiveSource>,
     session_start: Instant,
     cancel_flag: Arc<AtomicBool>,
@@ -182,6 +183,21 @@ async fn download_worker(
 
         let service = config.read().server.as_ref().map(|x| x.service);
 
+        // A source that can't express its audio as a URL hands back the bytes
+        // instead. Asking the source rather than testing the service keeps this
+        // out of the UI: everything else declines and falls through to the URL
+        // path below.
+        match download_from_source(&id, active_source, &mut queue, &session_start, &cancel_flag)
+            .await
+        {
+            Err(SourceError::Unsupported(_)) => {}
+            outcome => {
+                let outcome = outcome.map_err(|e| e.to_string());
+                finish_item(outcome, &id, &mut queue, active_source, config).await;
+                continue;
+            }
+        }
+
         let resolved: Option<(String, &'static str, Option<String>, Option<u64>)> =
             if matches!(service, Some(MusicService::YtMusic)) {
                 let source = active_source.peek().clone();
@@ -212,7 +228,7 @@ async fn download_worker(
             }
         };
 
-        match download_with_progress(
+        let outcome = download_with_progress(
             &id,
             &url,
             ext_hint,
@@ -222,30 +238,131 @@ async fn download_worker(
             &session_start,
             &cancel_flag,
         )
-        .await
-        {
-            Ok(path) => {
-                let path_str = path.to_string_lossy().into_owned();
-                // Durable FIRST as a single json_set (the whole-config save per
-                // completed song was the audio-stutter bug), then the in-memory
-                // mirror for live reads.
-                let source = active_source.peek().clone();
-                let _ = source.set_offline_track(&id, Some(&path_str)).await;
-                config.write().offline_tracks.insert(id.clone(), path_str);
-                if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
-                    item.status = DownloadStatus::Done;
-                }
-                clear_progress(&id);
+        .await;
+        finish_item(outcome, &id, &mut queue, active_source, config).await;
+    }
+}
+
+/// Record a finished download: registry, queue status and progress.
+async fn finish_item(
+    outcome: Result<std::path::PathBuf, String>,
+    id: &str,
+    queue: &mut Signal<DownloadQueue>,
+    active_source: Signal<::server::source::ActiveSource>,
+    mut config: Signal<AppConfig>,
+) {
+    match outcome {
+        Ok(path) => {
+            let path_str = path.to_string_lossy().into_owned();
+            // Durable FIRST as a single json_set (the whole-config save per
+            // completed song was the audio-stutter bug), then the in-memory
+            // mirror for live reads.
+            let source = active_source.peek().clone();
+            let _ = source.set_offline_track(id, Some(&path_str)).await;
+            config
+                .write()
+                .offline_tracks
+                .insert(id.to_string(), path_str);
+            if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
+                item.status = DownloadStatus::Done;
             }
-            Err(e) => {
-                tracing::error!(%id, error = %e, "download failed");
-                if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
-                    item.status = DownloadStatus::Failed;
-                }
-                clear_progress(&id);
+        }
+        Err(e) => {
+            tracing::error!(%id, error = %e, "download failed");
+            if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
+                item.status = DownloadStatus::Failed;
             }
         }
     }
+    clear_progress(id);
+}
+
+/// Download a track whose bytes only the source can produce.
+///
+/// Returns [`SourceError::Unsupported`] for every source that can express its
+/// audio as a URL, which is the signal to use the URL path instead.
+///
+/// Nothing is chunked here and there is no partial file to clean up: the source
+/// hands back a finished file and it is written once, at the end.
+async fn download_from_source(
+    id: &str,
+    active_source: Signal<::server::source::ActiveSource>,
+    queue: &mut Signal<DownloadQueue>,
+    session_start: &Instant,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<std::path::PathBuf, SourceError> {
+    let source = active_source.peek().clone();
+
+    // The source reports from whatever thread does its work — for Apple Music a
+    // dedicated decrypt thread — and both the progress signal and the queue are
+    // owned by the UI thread. So the callback only stores numbers, and the loop
+    // below publishes them from here, where those signals actually exist.
+    let done = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let total = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let progress = {
+        let (done, total) = (done.clone(), total.clone());
+        Arc::new(move |_from: u64, at: u64, of: Option<u64>| {
+            done.store(at, Ordering::Relaxed);
+            if let Some(of) = of {
+                total.store(of, Ordering::Relaxed);
+            }
+        }) as ::utils::stream_buffer::BufferProgressCallback
+    };
+
+    let mut published = 0u64;
+    let mut publish = |queue: &mut Signal<DownloadQueue>| {
+        let (at, of) = (done.load(Ordering::Relaxed), total.load(Ordering::Relaxed));
+        if of > 0 {
+            let mut q = queue.write();
+            if let Some(item) = q.items.iter_mut().find(|i| i.id == id) {
+                item.bytes_total = of;
+                item.bytes_done = at;
+            }
+        }
+        if at > published {
+            publish_progress(
+                id,
+                at,
+                at - published,
+                session_start.elapsed().as_secs_f64(),
+            );
+            published = at;
+        }
+    };
+
+    let bytes = {
+        let fetch = source.download_track(id, Some(progress));
+        tokio::pin!(fetch);
+        loop {
+            tokio::select! {
+                finished = &mut fetch => break finished?,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => publish(queue),
+            }
+        }
+    };
+
+    if cancel_flag.load(Ordering::Relaxed) {
+        return Err(SourceError::Backend("cancelled".to_string()));
+    }
+
+    {
+        let mut q = queue.write();
+        if let Some(item) = q.items.iter_mut().find(|i| i.id == id) {
+            item.bytes_total = bytes.len() as u64;
+            item.bytes_done = bytes.len() as u64;
+        }
+    }
+
+    let dir = super::offline_cache_dir();
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| SourceError::Backend(format!("create download dir: {e}")))?;
+    // Decrypted Apple Music assets are MP4; nothing else reaches this path yet.
+    let path = dir.join(format!("{id}.m4a"));
+    tokio::fs::write(&path, &bytes)
+        .await
+        .map_err(|e| SourceError::Backend(format!("write download: {e}")))?;
+    Ok(path)
 }
 
 pub fn delete_downloads(
