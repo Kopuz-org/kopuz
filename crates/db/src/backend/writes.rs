@@ -19,6 +19,7 @@ fn service_str(s: config::MusicService) -> &'static str {
     }
 }
 
+/// Insert or refresh tracks.
 #[tracing::instrument(skip_all, fields(count = tracks.len(), source = %source.as_str()))]
 pub async fn upsert_tracks(
     pool: &SqlitePool,
@@ -44,7 +45,9 @@ pub async fn upsert_tracks(
                 playlist_item_id, artists_json, cover_path) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19) \
              ON CONFLICT(source, track_key) DO UPDATE SET \
-               path=?3, service=?4, source_album_id=?5, title=?6, artist=?7, album=?8, duration=?9, \
+               path=?3, service=?4, \
+               source_album_id=CASE WHEN ?5 != '' THEN ?5 ELSE tracks.source_album_id END, \
+               title=?6, artist=?7, album=?8, duration=?9, \
                khz=?10, bitrate=?11, track_number=?12, disc_number=?13, mb_release_id=?14, \
                mb_recording_id=?15, mb_track_id=?16, playlist_item_id=?17, artists_json=?18, cover_path=?19",
             src,
