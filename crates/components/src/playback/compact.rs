@@ -93,7 +93,7 @@ pub fn CompactPlayer() -> Element {
             ),
             onmousedown: move |_| {
                 #[cfg(not(target_os = "android"))]
-                dioxus::desktop::window().drag();
+                crate::window_host::drag();
             },
 
             if !cover.is_empty() {

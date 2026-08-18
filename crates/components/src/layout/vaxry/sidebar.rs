@@ -1,5 +1,5 @@
 #[cfg(target_os = "macos")]
-use dioxus::desktop::window;
+use crate::window_host;
 use dioxus::prelude::*;
 use kopuz_route::Route;
 
@@ -211,7 +211,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                     class: "h-10 flex-shrink-0",
                     onmousedown: move |_| {
                         #[cfg(target_os = "macos")]
-                        window().drag();
+                        window_host::drag();
                     }
                 }
             }

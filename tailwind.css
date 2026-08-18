@@ -14,18 +14,18 @@
    thumb on each side, so clicks land offset from the cursor. A zero-width
    thumb makes the mapping match the pointer exactly. */
 .slider-hit {
-  -webkit-appearance: none;
   appearance: none;
   background: transparent;
 }
-.slider-hit::-webkit-slider-thumb {
-  -webkit-appearance: none;
+/* Vendor pseudo-elements are the only way to reach a native range thumb; there
+   is no standard selector for it, and only a webview renders one at all. */
+[data-renderer="webview"] .slider-hit::-webkit-slider-thumb {
   appearance: none;
   width: 0;
   height: 0;
   border: none;
 }
-.slider-hit::-moz-range-thumb {
+[data-renderer="webview"] .slider-hit::-moz-range-thumb {
   width: 0;
   height: 0;
   border: none;

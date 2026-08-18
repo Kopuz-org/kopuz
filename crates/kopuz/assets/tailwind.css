@@ -3199,18 +3199,16 @@
   }
 }
 .slider-hit {
-  -webkit-appearance: none;
   appearance: none;
   background: transparent;
 }
-.slider-hit::-webkit-slider-thumb {
-  -webkit-appearance: none;
+[data-renderer="webview"] .slider-hit::-webkit-slider-thumb {
   appearance: none;
   width: 0;
   height: 0;
   border: none;
 }
-.slider-hit::-moz-range-thumb {
+[data-renderer="webview"] .slider-hit::-moz-range-thumb {
   width: 0;
   height: 0;
   border: none;

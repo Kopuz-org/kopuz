@@ -13,7 +13,13 @@ homepage = "https://github.com/Kopuz-org/kopuz"
 keywords = ["music", "player", "audio", "dioxus"]
 
 [workspace.dependencies]
-dioxus = { version = "0.7.9", features = [] }
+# 0.8 alpha: the line dioxus-native tracks. Its blitz/winit pins (blitz 0.3-beta,
+# winit 0.31-beta) are what the window_host seam is written against.
+dioxus = { version = "0.8.0-alpha.1", features = [] }
+# Native (Blitz/wgpu) renderer + its window-host API. Crates add their own features.
+dioxus-native = "0.8.0-alpha.1"
+blitz-traits = "=0.3.0-beta.1"
+winit = "=0.31.0-beta.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
@@ -27,7 +33,9 @@ tokio = { version = "1.0", features = [
 async-recursion = "1.0"
 discord-rich-presence = "1.1.0"
 lofty = "0.24.0"
-image = { version = "0.25", default-features = false, features = [
+# Pinned exact: blitz-dom (dioxus-native) requires image =0.25.6, so the
+# resolver needs every consumer to agree on that one version.
+image = { version = "=0.25.6", default-features = false, features = [
   "jpeg",
   "png",
   "webp",
@@ -151,3 +159,4 @@ strip = "symbols"
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+

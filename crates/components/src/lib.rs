@@ -1,5 +1,13 @@
 //! Reusable Dioxus UI components for the Kopuz music player.
 
+/// `KOPUZ_BLITZ=1` selects the native (Blitz/wgpu) renderer instead of the
+/// webview. Process-constant (read once), so renderer-conditional hooks keep a
+/// stable order across renders.
+pub fn blitz_active() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("KOPUZ_BLITZ").is_some_and(|v| v == "1"))
+}
+
 pub mod common;
 pub mod layout;
 pub mod navigation;
@@ -13,7 +21,7 @@ pub mod track;
 pub use common::controls::{
     dots_menu, reorder_buttons, selection_bar, sort_control, view_mode_toggle,
 };
-pub use common::{constants, shared, virtual_scroll};
+pub use common::{constants, shared, virtual_scroll, window_host};
 pub use layout::{
     bottombar, download_overlay, fullscreen, header, normal, rightbar, showcase, sidebar,
     stat_card, titlebar, vaxry,

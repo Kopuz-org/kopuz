@@ -1,29 +1,17 @@
 /* App-wide styling */
 
-/* Themed scrollbars — uses CSS vars so all themes apply automatically */
-::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+/* Themed scrollbars — standard css-scrollbars-1; uses CSS vars so themes
+   apply automatically. Transparent track resolves to the app's black
+   background. Both WebKitGTK and blitz honor these; the ::-webkit-scrollbar
+   pseudo-elements this replaces are webview-only. */
+html {
+    scrollbar-color: var(--color-slate-500, #64748b) transparent;
 }
 
-::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-    background: var(--color-slate-500, #64748b);
-    border-radius: 5px;
-    border: 2px solid transparent;
-    background-clip: padding-box;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: var(--color-slate-400, #94a3b8);
-    background-clip: padding-box;
-}
-
-::-webkit-scrollbar-corner {
-    background: transparent;
+/* Referenced throughout the markup (horizontal shelves); previously
+   undefined, so the renderer showed its scrollbars on these by accident. */
+.scrollbar-hide {
+    scrollbar-width: none;
 }
 
 @keyframes scan-slide {
@@ -245,8 +233,6 @@ body {
     max-width: 100%;
     cursor: copy;
     user-select: all;
-    -webkit-user-select: all;
-    -webkit-line-clamp: 1;
     line-clamp: 1;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -311,8 +297,12 @@ body {
 
 [data-platform="android"],
 [data-platform="android"] * {
-    -webkit-user-select: none !important;
     user-select: none !important;
+}
+
+/* No standard equivalent, and only a webview implements them. */
+[data-renderer="webview"][data-platform="android"],
+[data-renderer="webview"][data-platform="android"] * {
     -webkit-touch-callout: none !important;
     -webkit-tap-highlight-color: transparent !important;
 }
@@ -320,7 +310,6 @@ body {
 [data-platform="android"] input,
 [data-platform="android"] textarea,
 [data-platform="android"] [contenteditable="true"] {
-    -webkit-user-select: text !important;
     user-select: text !important;
 }
 
