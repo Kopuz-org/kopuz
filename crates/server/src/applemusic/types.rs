@@ -354,6 +354,10 @@ pub struct LibrarySongAttributes {
 pub struct LibrarySongRelationships {
     #[serde(default)]
     pub catalog: RelationshipData<Vec<LibraryCatalogRef>>,
+    /// The library album this song sits in. Needs `include=albums`; without it
+    /// the field is simply absent rather than empty.
+    #[serde(default)]
+    pub albums: RelationshipData<Vec<LibraryCatalogRef>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

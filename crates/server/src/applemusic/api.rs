@@ -38,6 +38,87 @@ fn playlist_entry_delete_path(playlist_id: &str, entry_id: &str) -> String {
     )
 }
 
+/// Asks for the `tags` attribute, which is how Apple marks its own playlists.
+///
+/// It has to be requested by resource type: a plain `extend=tags` is accepted
+/// and silently ignored, which is why the tag looked unavailable and the
+/// favorites playlist ended up being matched by its English name instead. This
+/// is the form Apple's own web client sends.
+const PLAYLIST_TAGS_EXTEND: &str = "extend%5Blibrary-playlists%5D=tags";
+
+/// The tag Apple puts on the favorites playlist, and on nothing else.
+const FAVORITES_TAG: &str = "favorited";
+
+/// The English name of the favorites playlist. A fallback only: Apple localises
+/// it, so `l=fr` returns "Morceaux préférés" and matching on the name alone
+/// loses every favorite outside English.
+const FAVORITES_NAME_EN: &str = "Favorite Songs";
+
+/// Whether this is the playlist Apple keeps the user's favorites in.
+///
+/// The tag is Apple's own marker and the only locale-independent one — there is
+/// no identity filter on the endpoint, and the name is translated.
+fn is_favorites_playlist(attributes: &LibraryPlaylistAttributes) -> bool {
+    attributes
+        .tags
+        .as_ref()
+        .is_some_and(|tags| tags.iter().any(|tag| tag == FAVORITES_TAG))
+}
+
+/// Relationships for the songs *inside* a playlist.
+///
+/// A plain `include=` on the playlist request applies to the playlist, so its
+/// tracks come back with no relationships at all however many values are listed
+/// there — the entries have to be asked for by resource type. Without this a
+/// playlist track has no album, and therefore no genre.
+const PLAYLIST_TRACK_INCLUDE: &str = "include%5Blibrary-songs%5D=albums,artists";
+
+/// The same relationships, as the `…/tracks` endpoint the pagination cursor
+/// points at wants them — that endpoint returns songs directly, so it takes a
+/// plain `include`. Adding `catalog` here is not an option: the endpoint answers
+/// 500 for it.
+const PLAYLIST_TRACK_PAGE_INCLUDE: &str = "include=albums,artists";
+
+/// Re-attach the parameters of `original` that `next` dropped.
+///
+/// Apple's pagination cursor is not the request it came from: for library
+/// endpoints it comes back as `?l=…&offset=…`, keeping only some of what it was
+/// given. Two things go missing and both matter — `include`, so every page after
+/// the first arrives with no relationships at all, and `limit`, so the walk
+/// silently falls back to 25 rows a page and makes four times the requests.
+///
+/// Whatever `next` does carry wins: `offset` is the cursor's whole purpose, and
+/// a parameter Apple chose to echo is Apple's answer for that page.
+fn carry_query_forward(next: &str, original: &str) -> String {
+    let (_, original_query) = match original.split_once('?') {
+        Some(parts) => parts,
+        None => return next.to_string(),
+    };
+    let (next_path, next_query) = match next.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (next, ""),
+    };
+
+    let key_of = |param: &str| param.split_once('=').map_or(param, |(k, _)| k).to_string();
+    let present: Vec<String> = next_query
+        .split('&')
+        .filter(|p| !p.is_empty())
+        .map(key_of)
+        .collect();
+
+    let mut merged: Vec<&str> = next_query.split('&').filter(|p| !p.is_empty()).collect();
+    for param in original_query.split('&').filter(|p| !p.is_empty()) {
+        if !present.contains(&key_of(param)) {
+            merged.push(param);
+        }
+    }
+
+    if merged.is_empty() {
+        return next_path.to_string();
+    }
+    format!("{next_path}?{}", merged.join("&"))
+}
+
 pub struct AppleMusicApi {
     http: Client,
     media_user_token: Option<String>,
@@ -310,6 +391,9 @@ impl AppleMusicApi {
 
     /// Generic paginated library fetch — returns the full `data` array from
     /// each page, following `next` until exhausted.
+    ///
+    /// Each `next` is put back through [`carry_query_forward`], because Apple
+    /// echoes only some of the parameters it was given.
     async fn library_page<T: serde::de::DeserializeOwned>(
         &self,
         initial_path: &str,
@@ -364,6 +448,7 @@ impl AppleMusicApi {
                 .and_then(|n| n.as_str())
                 .filter(|s| !s.is_empty())
                 .map(|s| s.strip_prefix(BASE).unwrap_or(s).to_string())
+                .map(|s| carry_query_forward(&s, initial_path))
                 .filter(|s| *s != path);
             if next.is_none() {
                 break;
@@ -373,10 +458,13 @@ impl AppleMusicApi {
         Ok(all)
     }
 
+    /// `include=albums` is what ties a track to its album row: the library song
+    /// carries an album *name* but not its id, and genre is stored per album, so
+    /// without the relationship nothing in the library can be grouped by genre.
     pub async fn get_library_songs(&self) -> Result<Vec<LibrarySongResource>, String> {
         tracing::debug!("am.get_library_songs: starting");
         self.library_page(&format!(
-            "/v1/me/library/songs?l={}&limit=100&sort=dateAdded&include=catalog",
+            "/v1/me/library/songs?l={}&limit=100&sort=dateAdded&include=catalog,albums",
             self.language
         ))
         .await
@@ -394,7 +482,7 @@ impl AppleMusicApi {
     pub async fn get_library_playlists(&self) -> Result<Vec<LibraryPlaylistResource>, String> {
         tracing::debug!("am.get_library_playlists: starting");
         self.library_page(&format!(
-            "/v1/me/library/playlists?l={}&limit=100",
+            "/v1/me/library/playlists?l={}&limit=100&{PLAYLIST_TAGS_EXTEND}",
             self.language
         ))
         .await
@@ -418,7 +506,7 @@ impl AppleMusicApi {
     ) -> Result<Vec<TrackData>, String> {
         tracing::info!("am.get_library_playlist_tracks: playlist_id={playlist_id}");
         let path = format!(
-            "/v1/me/library/playlists/{}?l={}&include=tracks,artists&omit[resource]=autos",
+            "/v1/me/library/playlists/{}?l={}&include=tracks,artists&{PLAYLIST_TRACK_INCLUDE}&omit[resource]=autos",
             playlist_id, self.language
         );
         let resp = self.get(&path).await?;
@@ -467,11 +555,12 @@ impl AppleMusicApi {
         let mut page_num = 1u32;
         while let Some(next_path) = next.take() {
             page_num += 1;
-            // Strip absolute prefix so self.get() adds auth headers
-            let path = next_path
-                .strip_prefix(BASE)
-                .unwrap_or(&next_path)
-                .to_string();
+            // Strip absolute prefix so self.get() adds auth headers. The cursor
+            // carries only `l` and `offset`, so the relationships have to be
+            // asked for again or every page but the first arrives bare.
+            let path = next_path.strip_prefix(BASE).unwrap_or(&next_path);
+            let separator = if path.contains('?') { '&' } else { '?' };
+            let path = format!("{path}{separator}{PLAYLIST_TRACK_PAGE_INCLUDE}");
             tracing::info!("am.get_library_playlist_tracks: page {page_num}, path={path}");
             let resp = self.get(&path).await?;
             if !resp.status().is_success() {
@@ -519,7 +608,7 @@ impl AppleMusicApi {
         Ok(all)
     }
 
-    /// Find the "Favorite Songs" playlist in the user's library.
+    /// Find the Favorite Songs playlist in the user's library.
     /// Apple Music doesn't have a separate favorites endpoint — the
     /// Favorite Songs playlist IS the favorites.
     pub async fn find_favorite_songs_playlist(&self) -> Result<Option<String>, String> {
@@ -529,18 +618,28 @@ impl AppleMusicApi {
             "am.find_favorite_songs: {} playlists to scan",
             playlists.len()
         );
-        for pl in &playlists {
-            if pl.attributes.name == "Favorite Songs" {
-                tracing::debug!("am.find_favorite_songs: found by name — id={}", pl.id);
-                return Ok(Some(pl.id.clone()));
-            }
-            if let Some(tags) = &pl.attributes.tags
-                && tags.iter().any(|t| t == "favorited")
-            {
-                tracing::debug!("am.find_favorite_songs: found by tag — id={}", pl.id);
-                return Ok(Some(pl.id.clone()));
-            }
+
+        if let Some(pl) = playlists
+            .iter()
+            .find(|pl| is_favorites_playlist(&pl.attributes))
+        {
+            tracing::debug!(
+                "am.find_favorite_songs: found by tag — id={} name={:?}",
+                pl.id,
+                pl.attributes.name
+            );
+            return Ok(Some(pl.id.clone()));
         }
+
+        // Only correct in English, so it runs second.
+        if let Some(pl) = playlists
+            .iter()
+            .find(|pl| pl.attributes.name == FAVORITES_NAME_EN)
+        {
+            tracing::debug!("am.find_favorite_songs: found by name — id={}", pl.id);
+            return Ok(Some(pl.id.clone()));
+        }
+
         tracing::warn!(
             "am.find_favorite_songs: no Favorite Songs playlist found among {} playlists",
             playlists.len()
@@ -548,7 +647,13 @@ impl AppleMusicApi {
         Ok(None)
     }
 
-    /// Fetch favorited track IDs from the "Favorite Songs" playlist.
+    /// Fetch favorited track IDs from the Favorite Songs playlist.
+    ///
+    /// The ids come out of the same conversion the tracks themselves go
+    /// through, rather than being read off the response here. A playlist row
+    /// carries both a row id and a catalog id, and everything else keys tracks
+    /// by the catalog one — returning the row id instead marks a track that no
+    /// track in the library answers to, so nothing ever shows as favorited.
     pub async fn get_favorites(&self) -> Result<Vec<String>, String> {
         tracing::debug!("am.get_favorites: starting");
         let Some(playlist_id) = self.find_favorite_songs_playlist().await? else {
@@ -557,7 +662,10 @@ impl AppleMusicApi {
         };
         let tracks = self.get_library_playlist_tracks(&playlist_id).await?;
         tracing::debug!("am.get_favorites: {} favorited tracks", tracks.len());
-        Ok(tracks.into_iter().map(|t| t.id).collect())
+        Ok(tracks
+            .iter()
+            .map(|t| super::track_from_playlist_entry(t).id.key().into_owned())
+            .collect())
     }
 
     // ── Library mutations ───────────────────────────────────────────
@@ -897,5 +1005,113 @@ mod tests {
                 {"id": "456", "type": "songs"},
             ])
         );
+    }
+
+    /// The exact cursor the live library endpoint returns. Apple keeps `l`,
+    /// `offset` and `sort`, and drops `limit` and `include` — so every page
+    /// after the first came back without relationships and at a quarter of the
+    /// page size, which is why library tracks had no album to join a genre to.
+    #[test]
+    fn pagination_restores_the_parameters_apple_drops() {
+        let original = "/v1/me/library/songs?l=en&limit=100&sort=dateAdded&include=catalog,albums";
+        let merged = carry_query_forward("/v1/me/library/songs?l=en-US&offset=100", original);
+
+        assert!(merged.contains("include=catalog,albums"), "{merged}");
+        assert!(merged.contains("limit=100"), "{merged}");
+        assert!(merged.contains("offset=100"), "{merged}");
+        assert!(
+            merged.starts_with("/v1/me/library/songs?"),
+            "the path is untouched: {merged}"
+        );
+    }
+
+    /// The cursor's own values are the server's answer for that page. Taking
+    /// ours instead would re-request page one forever, since `offset` is the
+    /// only thing that advances.
+    #[test]
+    fn the_cursor_wins_where_the_two_disagree() {
+        let merged = carry_query_forward(
+            "/v1/me/library/albums?l=en-US&offset=100&sort=name",
+            "/v1/me/library/albums?l=en&limit=100&sort=name",
+        );
+        assert!(merged.contains("l=en-US"), "{merged}");
+        assert!(
+            !merged.contains("l=en&"),
+            "ours must not be re-added: {merged}"
+        );
+        assert_eq!(merged.matches("sort=").count(), 1, "{merged}");
+        assert_eq!(merged.matches("offset=").count(), 1, "{merged}");
+    }
+
+    #[test]
+    fn pagination_handles_cursors_and_requests_without_a_query() {
+        // A cursor with no query at all still needs our parameters.
+        let merged = carry_query_forward("/v1/me/library/songs", "/v1/me/library/songs?limit=100");
+        assert_eq!(merged, "/v1/me/library/songs?limit=100");
+
+        // Nothing to carry forward.
+        assert_eq!(
+            carry_query_forward("/v1/me/library/songs?offset=100", "/v1/me/library/songs"),
+            "/v1/me/library/songs?offset=100"
+        );
+    }
+
+    /// `include=catalog,albums` carries a comma, and a bare `mode=all`-style
+    /// flag carries no `=` at all. Splitting a parameter on the wrong character
+    /// would turn either into a different key and duplicate it.
+    #[test]
+    fn parameter_keys_survive_commas_and_valueless_flags() {
+        let merged = carry_query_forward(
+            "/v1/me/library/songs?offset=100&include=catalog",
+            "/v1/me/library/songs?include=catalog,albums&extend",
+        );
+        assert_eq!(
+            merged.matches("include=").count(),
+            1,
+            "the cursor's own include must not be duplicated: {merged}"
+        );
+        assert!(merged.contains("include=catalog&"), "{merged}");
+        assert!(merged.contains("extend"), "{merged}");
+    }
+
+    fn playlist_attributes(json: serde_json::Value) -> LibraryPlaylistAttributes {
+        serde_json::from_value(json).expect("playlist attributes parse")
+    }
+
+    /// The favorites playlist is found by Apple's own tag, not by its name.
+    /// The name is localised — the same account returns "Morceaux préférés"
+    /// under `l=fr` — so a name match loses every favorite outside English.
+    #[test]
+    fn the_favorites_playlist_is_found_by_tag_not_by_name() {
+        let favorites = playlist_attributes(serde_json::json!({
+            "name": "Morceaux préférés", "tags": ["favorited"],
+        }));
+        assert!(is_favorites_playlist(&favorites));
+
+        let ordinary = playlist_attributes(serde_json::json!({ "name": "bgm" }));
+        assert!(!is_favorites_playlist(&ordinary));
+    }
+
+    /// The tag has to be asked for by resource type. A plain `extend=tags` is
+    /// accepted and ignored, and the attribute then never arrives — which is
+    /// how the tag check came to look useless and get replaced by a name match.
+    #[test]
+    fn the_playlist_request_asks_for_tags_by_resource_type() {
+        assert_eq!(PLAYLIST_TAGS_EXTEND, "extend%5Blibrary-playlists%5D=tags");
+        let decoded = PLAYLIST_TAGS_EXTEND.replace("%5B", "[").replace("%5D", "]");
+        assert_eq!(decoded, "extend[library-playlists]=tags");
+    }
+
+    /// Untagged playlists must not match, whether the attribute is absent
+    /// entirely or present and carrying something else.
+    #[test]
+    fn only_the_favorited_tag_counts() {
+        for attributes in [
+            serde_json::json!({ "name": "bgm" }),
+            serde_json::json!({ "name": "bgm", "tags": [] }),
+            serde_json::json!({ "name": "bgm", "tags": ["shared", "collaborative"] }),
+        ] {
+            assert!(!is_favorites_playlist(&playlist_attributes(attributes)));
+        }
     }
 }

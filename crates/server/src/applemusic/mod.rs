@@ -162,10 +162,21 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
         playback_id
     );
 
+    // Genre lives on the album row, and the only thing joining a track to it is
+    // this id — so an empty one costs the track its genre everywhere, not just
+    // on the album page.
+    let album_id = song
+        .relationships
+        .albums
+        .data
+        .first()
+        .map(|a| format!("applemusic:{}", a.id))
+        .unwrap_or_default();
+
     Track {
         id: apple_music_id(playback_id),
         cover,
-        album_id: String::new(),
+        album_id,
         title: song.attributes.name.clone(),
         artist: song.attributes.artistName.clone(),
         album: song.attributes.albumName.clone(),
