@@ -943,6 +943,54 @@ impl MediaSource for AppleMusicSource {
             .collect())
     }
 
+    /// The playlist equivalent of [`start_radio`], and what Apple's own client
+    /// calls autoplay: a station built from what the playlist contains, rather
+    /// than from one song.
+    async fn start_playlist_radio(
+        &self,
+        playlist_ref: &str,
+    ) -> Result<Vec<reader::Track>, SourceError> {
+        const QUEUE_TARGET: usize = 30;
+        /// Apple's own client sends ten. More than one matters: a playlist that
+        /// opens with uploads would be refused on those alone, while a later
+        /// catalog track still gives it something to work from.
+        const SEEDS: usize = 10;
+
+        if playlist_ref.trim().is_empty() {
+            return Err(SourceError::InvalidInput("playlist has no id".into()));
+        }
+
+        let tracks = self
+            .client
+            .get_library_playlist_tracks(playlist_ref)
+            .await
+            .map_err(SourceError::Backend)?;
+        // The library row id, not the catalog id: the seeds name rows of *this*
+        // playlist, which is what ties them to the container.
+        let seeds: Vec<String> = tracks.iter().take(SEEDS).map(|t| t.id.clone()).collect();
+        if seeds.is_empty() {
+            return Err(SourceError::InvalidInput(
+                "an empty playlist can't start a station".into(),
+            ));
+        }
+
+        let station = self
+            .client
+            .playlist_station_id(playlist_ref, &seeds)
+            .await
+            .map_err(SourceError::Backend)?;
+
+        let songs = self
+            .client
+            .station_queue(&station, QUEUE_TARGET)
+            .await
+            .map_err(SourceError::Backend)?;
+        Ok(songs
+            .iter()
+            .map(crate::applemusic::track_from_song_data)
+            .collect())
+    }
+
     async fn download_track(
         &self,
         item_id: &str,

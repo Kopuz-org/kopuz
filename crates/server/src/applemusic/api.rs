@@ -670,6 +670,62 @@ impl AppleMusicApi {
 
     // ── Stations ────────────────────────────────────────────────────
 
+    /// The station that continues a library playlist once it runs out — what
+    /// Apple's own client calls autoplay.
+    ///
+    /// Asking for it means handing Apple some of the playlist's tracks, each
+    /// tagged with the playlist it came from, and it answers with a
+    /// `playlistSeeded` station that [`station_queue`](Self::station_queue)
+    /// then drives exactly like a song-seeded one.
+    ///
+    /// The round trip can't be skipped by assembling the id. For a *catalog*
+    /// playlist the station is `ra.cp-{id}`, but a library playlist's station is
+    /// named after its catalog counterpart — `p.DV7rz0Kh4zPvMY1` yields
+    /// `ra.cp-pl.u-GgA52LRcx6RVPBA` — and that mapping is only known to Apple.
+    pub async fn playlist_station_id(
+        &self,
+        playlist_id: &str,
+        seed_track_ids: &[String],
+    ) -> Result<String, String> {
+        if seed_track_ids.is_empty() {
+            return Err("an empty playlist can't seed a station".to_string());
+        }
+        // The container type has to name the library, not the catalog: passing
+        // `playlists` with a library id is rejected as a malformed id.
+        let body = serde_json::json!({
+            "data": seed_track_ids
+                .iter()
+                .map(|id| serde_json::json!({
+                    "id": id,
+                    "type": "library-songs",
+                    "meta": { "container": { "id": playlist_id, "type": "library-playlists" } },
+                }))
+                .collect::<Vec<_>>(),
+        });
+
+        let resp = self.post("/v1/me/stations/continuous", &body).await?;
+        let status = resp.status();
+        if !status.is_success() {
+            // What a playlist of uploads gets: Apple has no catalog song to
+            // build a station out of, so there is nothing to fall back to.
+            tracing::debug!("am.station: continuous refused the playlist ({status})");
+            return Err(
+                "Apple Music can't build a station from this playlist — its tracks aren't in the catalog"
+                    .to_string(),
+            );
+        }
+
+        let parsed: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("parse continuous station: {e}"))?;
+        parsed
+            .pointer("/results/station/id")
+            .and_then(|id| id.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| "the continuous response carried no station".to_string())
+    }
+
     /// The id of the station seeded by a catalog song, if it has one.
     ///
     /// Read from the song rather than assembled as `ra.{id}`. The shorthand does
@@ -1274,6 +1330,57 @@ mod tests {
             let song: TrackData = serde_json::from_value(song).expect("song parses");
             assert!(song.relationships.station.data.is_empty());
         }
+    }
+
+    /// The two things Apple rejects a continuous request for, both silently
+    /// wrong rather than obviously so: a container typed `playlists` when the
+    /// id is a library one ("Invalid ID format"), and seeds typed as anything
+    /// but `library-songs`.
+    #[test]
+    fn a_continuous_request_names_the_library_container() {
+        let seeds = ["i.abc".to_string(), "i.def".to_string()];
+        let body = serde_json::json!({
+            "data": seeds.iter().map(|id| serde_json::json!({
+                "id": id,
+                "type": "library-songs",
+                "meta": { "container": { "id": "p.XYZ", "type": "library-playlists" } },
+            })).collect::<Vec<_>>(),
+        });
+
+        let entries = body["data"].as_array().expect("data is an array");
+        assert_eq!(entries.len(), 2);
+        for entry in entries {
+            assert_eq!(entry["type"], "library-songs");
+            assert_eq!(entry["meta"]["container"]["type"], "library-playlists");
+            assert_eq!(entry["meta"]["container"]["id"], "p.XYZ");
+        }
+        assert_eq!(entries[0]["id"], "i.abc");
+    }
+
+    /// A library playlist's station is named after its *catalog* counterpart,
+    /// so the id can only come from the response. Building it from the library
+    /// id would produce a station that doesn't exist.
+    #[test]
+    fn the_continuous_station_id_is_read_from_the_response() {
+        let response = serde_json::json!({
+            "results": { "station": {
+                "id": "ra.cp-pl.u-GgA52LRcx6RVPBA",
+                "type": "stations",
+                "attributes": { "kind": "playlistSeeded" }
+            }}
+        });
+        let id = response
+            .pointer("/results/station/id")
+            .and_then(|id| id.as_str());
+        assert_eq!(id, Some("ra.cp-pl.u-GgA52LRcx6RVPBA"));
+        assert!(
+            !id.unwrap().contains("p.DV7rz0Kh4zPvMY1"),
+            "the station is not named after the library playlist"
+        );
+
+        // A refusal carries no station rather than an empty one.
+        let refused = serde_json::json!({ "results": {} });
+        assert!(refused.pointer("/results/station/id").is_none());
     }
 
     /// Station tracks arrive with no relationships at all, so the artist has to

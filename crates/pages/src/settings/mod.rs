@@ -792,24 +792,21 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             }
             }
 
-
-
-                if show_add_server() {
-                    AddServerPopup {
-                        server_name,
-                        server_url,
-                        server_service,
-                        yt_browser,
-                        yt_anonymous,
-                        apple_music_storefront,
-                        apple_music_language,
-                        apple_music_manual_token,
-                        apple_music_use_manual,
-                        host_access,
-                        error,
-                        on_close: move |_| show_add_server.set(false),
-                        on_save: handle_add_server
-                    }
+            if show_add_server() {
+                AddServerPopup {
+                    server_name,
+                    server_url,
+                    server_service,
+                    yt_browser,
+                    yt_anonymous,
+                    apple_music_storefront,
+                    apple_music_language,
+                    apple_music_manual_token,
+                    apple_music_use_manual,
+                    host_access,
+                    error,
+                    on_close: move |_| show_add_server.set(false),
+                    on_save: handle_add_server
                 }
             }
 
