@@ -112,6 +112,11 @@ pub struct TrackRelationships {
     pub artists: RelationshipData<Vec<ArtistRef>>,
     #[serde(default)]
     pub albums: RelationshipData<Vec<AlbumRef>>,
+    /// The song-seeded station for this track. Needs `include=station`, and is
+    /// absent for anything Apple doesn't sell — an uploaded library track has
+    /// no catalog song and so no station either.
+    #[serde(default)]
+    pub station: RelationshipData<Vec<LibraryCatalogRef>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

@@ -896,12 +896,51 @@ impl MediaSource for AppleMusicSource {
             sync: true,
             downloads: true,
             discover: false,
-            radio: false,
+            radio: true,
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Instant,
         }
+    }
+
+    /// Apple's stations are song-seeded, so the seed has to be a song Apple
+    /// sells: an uploaded library track has no catalog entry and therefore no
+    /// station. `resolve_catalog_id` hands back the library id unchanged in
+    /// that case, which is what the numeric check catches.
+    async fn start_radio(&self, seed_ref: &str) -> Result<Vec<reader::Track>, SourceError> {
+        const QUEUE_TARGET: usize = 30;
+
+        if seed_ref.trim().is_empty() {
+            return Err(SourceError::InvalidInput("track has no id".into()));
+        }
+        let catalog_id = self
+            .client
+            .resolve_catalog_id(seed_ref)
+            .await
+            .map_err(SourceError::Backend)?;
+        if !catalog_id.chars().all(|c| c.is_ascii_digit()) {
+            return Err(SourceError::InvalidInput(
+                "this track isn't in the Apple Music catalog, so it can't seed a station".into(),
+            ));
+        }
+
+        let station = self
+            .client
+            .song_station_id(&catalog_id)
+            .await
+            .map_err(SourceError::Backend)?
+            .ok_or_else(|| SourceError::Backend("this track has no station".to_string()))?;
+
+        let songs = self
+            .client
+            .station_queue(&station, QUEUE_TARGET)
+            .await
+            .map_err(SourceError::Backend)?;
+        Ok(songs
+            .iter()
+            .map(crate::applemusic::track_from_song_data)
+            .collect())
     }
 
     async fn download_track(

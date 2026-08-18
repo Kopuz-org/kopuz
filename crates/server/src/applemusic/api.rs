@@ -668,6 +668,127 @@ impl AppleMusicApi {
             .collect())
     }
 
+    // ── Stations ────────────────────────────────────────────────────
+
+    /// The id of the station seeded by a catalog song, if it has one.
+    ///
+    /// Read from the song rather than assembled as `ra.{id}`. The shorthand does
+    /// hold for the songs checked, but it's undocumented, and the relationship
+    /// also answers the question that actually matters — whether a station
+    /// exists at all.
+    pub async fn song_station_id(&self, catalog_id: &str) -> Result<Option<String>, String> {
+        let path = format!(
+            "/v1/catalog/{}/songs/{}?l={}&include=station",
+            self.storefront, catalog_id, self.language
+        );
+        let resp = self.get(&path).await?;
+        if !resp.status().is_success() {
+            return Err(format!("station lookup: HTTP {}", resp.status()));
+        }
+        let parsed: SongResp = resp
+            .json()
+            .await
+            .map_err(|e| format!("parse station lookup: {e}"))?;
+        Ok(parsed
+            .data
+            .first()
+            .and_then(|song| song.relationships.station.data.first())
+            .map(|station| station.id.clone()))
+    }
+
+    /// One turn of a station: the next couple of tracks.
+    ///
+    /// A POST with no body — the endpoint takes no count and ignores one, which
+    /// is why [`station_queue`](Self::station_queue) exists.
+    async fn next_station_tracks(&self, station_id: &str) -> Result<Vec<TrackData>, String> {
+        let path = format!("/v1/me/stations/next-tracks/{station_id}");
+        let resp = self.post_empty(&path).await?;
+        if !resp.status().is_success() {
+            return Err(format!("station next-tracks: HTTP {}", resp.status()));
+        }
+        let parsed: SongResp = resp
+            .json()
+            .await
+            .map_err(|e| format!("parse station tracks: {e}"))?;
+        Ok(parsed.data)
+    }
+
+    /// Build a queue of about `target` distinct tracks from a station.
+    ///
+    /// Apple returns exactly two tracks per call, so a queue is many calls
+    /// stitched together. They advance a shared cursor, so firing them all off
+    /// at once repeats tracks — measured at 25% duplicates across six
+    /// concurrent calls and 42% across twelve, against none when sequential.
+    /// Small rounds are the compromise: four at a time reaches thirty distinct
+    /// tracks in about a fifth of the requests' sequential wall-clock, and the
+    /// dedup below absorbs what overlap remains.
+    ///
+    /// A station that starts repeating itself ends the walk rather than
+    /// spinning out the round budget.
+    pub async fn station_queue(
+        &self,
+        station_id: &str,
+        target: usize,
+    ) -> Result<Vec<TrackData>, String> {
+        const ROUND: usize = 4;
+        const MAX_ROUNDS: usize = 15;
+
+        let mut queue: Vec<TrackData> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut barren_rounds = 0;
+
+        for round in 0..MAX_ROUNDS {
+            if queue.len() >= target {
+                break;
+            }
+            let batch = futures_util::future::join_all(
+                (0..ROUND).map(|_| self.next_station_tracks(station_id)),
+            )
+            .await;
+
+            let before = queue.len();
+            for result in batch {
+                match result {
+                    Ok(tracks) => {
+                        for track in tracks {
+                            if seen.insert(track.id.clone()) {
+                                queue.push(track);
+                            }
+                        }
+                    }
+                    // One failed call in a round isn't fatal — the others in the
+                    // same round usually carry it.
+                    Err(e) => tracing::debug!("am.station: a next-tracks call failed ({e})"),
+                }
+            }
+
+            if queue.len() == before {
+                barren_rounds += 1;
+                if barren_rounds == 2 {
+                    tracing::info!(
+                        "am.station: stopped after {} tracks — the station stopped offering new ones",
+                        queue.len()
+                    );
+                    break;
+                }
+            } else {
+                barren_rounds = 0;
+            }
+            tracing::debug!(
+                "am.station: round {} — {} distinct tracks so far",
+                round + 1,
+                queue.len()
+            );
+        }
+
+        if queue.is_empty() {
+            return Err("the station returned no tracks".to_string());
+        }
+        queue.truncate(target);
+        tracing::info!("am.station: queued {} tracks", queue.len());
+        Ok(queue)
+    }
+
     // ── Library mutations ───────────────────────────────────────────
 
     /// Favourite (or un-favourite) a catalog song.
@@ -1113,5 +1234,68 @@ mod tests {
         ] {
             assert!(!is_favorites_playlist(&playlist_attributes(attributes)));
         }
+    }
+
+    /// The station relationship is what says whether a song can seed radio at
+    /// all, so it has to survive deserialisation — an ignored field would read
+    /// as "no station" and refuse every seed.
+    #[test]
+    fn a_songs_station_is_read_from_its_relationship() {
+        let song: TrackData = serde_json::from_value(serde_json::json!({
+            "id": "1760828970",
+            "type": "songs",
+            "relationships": {
+                "station": { "data": [{ "id": "ra.1760828970", "type": "stations" }] }
+            }
+        }))
+        .expect("song parses");
+        assert_eq!(
+            song.relationships
+                .station
+                .data
+                .first()
+                .map(|s| s.id.as_str()),
+            Some("ra.1760828970")
+        );
+    }
+
+    /// Anything Apple doesn't sell has no station. The field is simply absent
+    /// then, rather than present and empty, so both have to read as "none".
+    #[test]
+    fn a_song_without_a_station_reports_none() {
+        for song in [
+            serde_json::json!({ "id": "1", "type": "songs" }),
+            serde_json::json!({ "id": "1", "type": "songs", "relationships": {} }),
+            serde_json::json!({
+                "id": "1", "type": "songs",
+                "relationships": { "station": { "data": [] } }
+            }),
+        ] {
+            let song: TrackData = serde_json::from_value(song).expect("song parses");
+            assert!(song.relationships.station.data.is_empty());
+        }
+    }
+
+    /// Station tracks arrive with no relationships at all, so the artist has to
+    /// come off the attributes. Reading it from the (absent) artists
+    /// relationship would leave every radio track with a blank artist.
+    #[test]
+    fn a_station_track_keeps_its_artist_without_relationships() {
+        let song: TrackData = serde_json::from_value(serde_json::json!({
+            "id": "1817382430",
+            "type": "songs",
+            "attributes": {
+                "name": "DARK THINGS",
+                "artistName": "STARSET",
+                "albumName": "an album",
+                "durationInMillis": 246774_u64
+            }
+        }))
+        .expect("station track parses");
+        let track = super::super::track_from_song_data(&song);
+        assert_eq!(track.artist, "STARSET");
+        assert_eq!(track.title, "DARK THINGS");
+        assert_eq!(track.duration, 246);
+        assert_eq!(track.id.key(), "1817382430");
     }
 }
