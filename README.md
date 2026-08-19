@@ -255,6 +255,22 @@ layers, both of which out-rank `settings.toml`:
 
 `KOPUZ_CONFIG_PATH` relocates the settings file itself.
 
+### Homebrew (macOS)
+
+Apple Silicon only. The cask lives in our tap:
+
+```bash
+brew install --cask kopuz-org/tap/kopuz
+```
+
+The build is signed ad-hoc rather than notarized, so Gatekeeper blocks the first
+launch. Install with `--no-quarantine`, or clear the flag afterwards as
+described in the [macOS](#macos) section:
+
+```bash
+brew install --cask --no-quarantine kopuz-org/tap/kopuz
+```
+
 ### AUR (Arch Linux)
 
 Install from the AUR using your preferred helper:
