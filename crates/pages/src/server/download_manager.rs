@@ -183,17 +183,19 @@ async fn download_worker(
 
         let service = config.read().server.as_ref().map(|x| x.service);
 
+        // Pinned for the whole download, so the file is registered against the
+        // source that produced it even if the active one changes meanwhile.
+        let source = active_source.peek().clone();
+
         // A source that can't express its audio as a URL hands back the bytes
         // instead. Asking the source rather than testing the service keeps this
         // out of the UI: everything else declines and falls through to the URL
         // path below.
-        match download_from_source(&id, active_source, &mut queue, &session_start, &cancel_flag)
-            .await
-        {
+        match download_from_source(&id, &source, &mut queue, &session_start, &cancel_flag).await {
             Err(SourceError::Unsupported(_)) => {}
             outcome => {
                 let outcome = outcome.map_err(|e| e.to_string());
-                finish_item(outcome, &id, &mut queue, active_source, config).await;
+                finish_item(outcome, &id, &mut queue, &source, config).await;
                 continue;
             }
         }
@@ -239,30 +241,50 @@ async fn download_worker(
             &cancel_flag,
         )
         .await;
-        finish_item(outcome, &id, &mut queue, active_source, config).await;
+        finish_item(outcome, &id, &mut queue, &source, config).await;
     }
 }
 
 /// Record a finished download: registry, queue status and progress.
+///
+/// `source` is the one the download actually ran against, passed in rather than
+/// re-read here: a source switch while a track was downloading would otherwise
+/// register the file against whichever backend happens to be active by the time
+/// it lands.
 async fn finish_item(
     outcome: Result<std::path::PathBuf, String>,
     id: &str,
     queue: &mut Signal<DownloadQueue>,
-    active_source: Signal<::server::source::ActiveSource>,
+    source: &::server::source::ActiveSource,
     mut config: Signal<AppConfig>,
 ) {
-    match outcome {
+    let outcome = match outcome {
         Ok(path) => {
             let path_str = path.to_string_lossy().into_owned();
             // Durable FIRST as a single json_set (the whole-config save per
             // completed song was the audio-stutter bug), then the in-memory
-            // mirror for live reads.
-            let source = active_source.peek().clone();
-            let _ = source.set_offline_track(id, Some(&path_str)).await;
-            config
-                .write()
-                .offline_tracks
-                .insert(id.to_string(), path_str);
+            // mirror for live reads. A file the registry doesn't know about is
+            // one nothing will ever play or clean up, so a failure here means
+            // the download failed — and the bytes go with it.
+            match source.set_offline_track(id, Some(&path_str)).await {
+                Ok(()) => {
+                    config
+                        .write()
+                        .offline_tracks
+                        .insert(id.to_string(), path_str);
+                    Ok(())
+                }
+                Err(e) => {
+                    let _ = tokio::fs::remove_file(&path).await;
+                    Err(format!("register the downloaded file: {e}"))
+                }
+            }
+        }
+        Err(e) => Err(e),
+    };
+
+    match outcome {
+        Ok(()) => {
             if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
                 item.status = DownloadStatus::Done;
             }
@@ -286,13 +308,11 @@ async fn finish_item(
 /// hands back a finished file and it is written once, at the end.
 async fn download_from_source(
     id: &str,
-    active_source: Signal<::server::source::ActiveSource>,
+    source: &::server::source::ActiveSource,
     queue: &mut Signal<DownloadQueue>,
     session_start: &Instant,
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<std::path::PathBuf, SourceError> {
-    let source = active_source.peek().clone();
-
     // The source reports from whatever thread does its work — for Apple Music a
     // dedicated decrypt thread — and both the progress signal and the queue are
     // owned by the UI thread. So the callback only stores numbers, and the loop
@@ -336,7 +356,17 @@ async fn download_from_source(
         loop {
             tokio::select! {
                 finished = &mut fetch => break finished?,
-                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => publish(queue),
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                    publish(queue);
+                    // Checked here rather than only after the download resolves:
+                    // a source-provided download is one long await, so waiting
+                    // for it to return means cancel does nothing until the track
+                    // has finished anyway. Dropping `fetch` on the way out is
+                    // what stops the transfer.
+                    if cancel_flag.load(Ordering::Relaxed) {
+                        return Err(SourceError::Backend("cancelled".to_string()));
+                    }
+                }
             }
         }
     };

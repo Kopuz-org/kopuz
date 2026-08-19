@@ -294,12 +294,10 @@ impl ProgressiveTrack {
                     return Err(e.clone());
                 }
                 if s.fill_done {
-                    if s.downloaded != s.buf.len() {
-                        return Err(format!(
-                            "decrypt stopped early: {} of {} bytes",
-                            s.downloaded,
-                            s.buf.len()
-                        ));
+                    if let Some(reason) =
+                        shortfall(s.downloaded, s.buf.len(), s.complete, &s.decrypted)
+                    {
+                        return Err(reason);
                     }
                     return Ok(s.buf.clone());
                 }
@@ -483,6 +481,38 @@ impl ProgressiveTrack {
         }
         Ok(())
     }
+}
+
+/// Why a finished fill hasn't produced a whole plaintext track, or `None` when
+/// it has.
+///
+/// The byte count alone isn't proof. [`fill`] also stops when it has waited out
+/// [`WAIT_TIMEOUT`] for fragments that never came, and that exit records no
+/// error — so a body that arrived in full but was never marked finished would
+/// otherwise look like success while its trailing samples are still ciphertext.
+/// A caller writing that to the cache would keep the corruption for good.
+fn shortfall(
+    downloaded: usize,
+    total: usize,
+    complete: bool,
+    decrypted: &[bool],
+) -> Option<String> {
+    if downloaded != total {
+        return Some(format!(
+            "decrypt stopped early: {downloaded} of {total} bytes"
+        ));
+    }
+    if !complete {
+        return Some("the download never finished".to_string());
+    }
+    let undone = decrypted.iter().filter(|done| !**done).count();
+    if undone > 0 {
+        return Some(format!(
+            "{undone} of {} samples are still encrypted",
+            decrypted.len()
+        ));
+    }
+    None
 }
 
 /// Marks the fill finished however it ends.
@@ -943,5 +973,32 @@ mod tests {
             started.elapsed() < Duration::from_secs(1),
             "must not wait on a fill that never runs"
         );
+    }
+
+    /// The fill stops for three reasons and only one of them is success, but
+    /// just one records an error. A downloader that trusted the byte count
+    /// alone would write a part-encrypted track to the cache and keep it — so
+    /// every way of falling short has to be rejected here.
+    #[test]
+    fn only_a_wholly_decrypted_track_counts_as_done() {
+        let whole = [true, true, true];
+        assert_eq!(shortfall(1000, 1000, true, &whole), None);
+
+        // Nothing to decrypt: a cache hit arrives already plaintext.
+        assert_eq!(shortfall(1000, 1000, true, &[]), None);
+
+        let short = shortfall(900, 1000, true, &whole).expect("bytes missing");
+        assert!(short.contains("900 of 1000"), "{short}");
+
+        // Every byte arrived, but the body was never marked finished — the
+        // "gave up waiting for fragments" exit, which records no error.
+        let unfinished = shortfall(1000, 1000, false, &whole).expect("never finished");
+        assert!(unfinished.contains("never finished"), "{unfinished}");
+
+        // Bytes all present and the download finished, but the fill stopped
+        // before working through them.
+        let partial =
+            shortfall(1000, 1000, true, &[true, false, false]).expect("samples still encrypted");
+        assert!(partial.contains("2 of 3"), "{partial}");
     }
 }

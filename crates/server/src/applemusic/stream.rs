@@ -673,13 +673,24 @@ async fn pump(
     // mistaken for a cache entry.
     let staging = tee.as_ref().map(|p| p.with_extension("part"));
     let mut file = match &staging {
-        Some(path) => match tokio::fs::File::create(path).await {
-            Ok(f) => Some(f),
-            Err(e) => {
-                tracing::debug!("am.stream: no ciphertext cache ({e})");
-                None
+        Some(path) => {
+            // Nothing else on this policy creates the directory — the plaintext
+            // path does it in `store_decrypted_blocking`, which this one skips
+            // by design. Without it every write here fails on a fresh install
+            // and the cache silently never populates.
+            if let Some(dir) = path.parent()
+                && let Err(e) = tokio::fs::create_dir_all(dir).await
+            {
+                tracing::debug!("am.stream: ciphertext cache dir {}: {e}", dir.display());
             }
-        },
+            match tokio::fs::File::create(path).await {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    tracing::debug!("am.stream: no ciphertext cache ({e})");
+                    None
+                }
+            }
+        }
         None => None,
     };
 
@@ -813,6 +824,9 @@ fn sidecar_path(audio: &std::path::Path) -> std::path::PathBuf {
 
 fn write_sidecar(audio: &std::path::Path, info: &CachedKeyInfo) -> std::io::Result<()> {
     let path = sidecar_path(audio);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
     let json = serde_json::to_vec(info).map_err(std::io::Error::other)?;
     std::fs::write(path, json)
 }

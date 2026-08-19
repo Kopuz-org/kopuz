@@ -350,6 +350,19 @@ pub fn add_server(
         return;
     }
 
+    // Manual mode is the one path that never opens a browser, so an empty field
+    // here isn't "sign in later" — it saves a server with no credential and no
+    // way to acquire one.
+    if selected_service == MusicService::AppleMusic
+        && *apple_music_use_manual.peek()
+        && apple_music_manual_token().trim().is_empty()
+    {
+        error.set(Some(
+            "Enter your Apple Music media-user-token, or switch to browser sign-in".to_string(),
+        ));
+        return;
+    }
+
     let name_input = server_name();
     let url_input = server_url();
 

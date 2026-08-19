@@ -759,12 +759,22 @@ pub fn audio_config(data: &[u8]) -> Option<AudioConfig> {
     // AudioSampleEntry: 6 reserved + 2 data_reference_index, then 8 bytes of
     // version/revision/vendor, channelcount(2), samplesize(2), pre_defined(2),
     // reserved(2), samplerate(4, 16.16 fixed point).
-    let channels = u16::from_be_bytes([data[entry_body + 16], data[entry_body + 17]]);
+    //
+    // `read_box` only vouches for the box being inside the buffer, not for the
+    // body being long enough to hold the fields the type implies — a sample
+    // entry declaring size 8 passes it. Reading through `get` turns a short one
+    // into `None` instead of an index past the end.
+    let channels = u16::from_be_bytes(
+        data.get(entry_body + 16..entry_body + 18)?
+            .try_into()
+            .ok()?,
+    );
     // Only the integer half of the 16.16 rate is meaningful for AAC.
-    let sample_rate = u32::from(u16::from_be_bytes([
-        data[entry_body + 24],
-        data[entry_body + 25],
-    ]));
+    let sample_rate = u32::from(u16::from_be_bytes(
+        data.get(entry_body + 24..entry_body + 26)?
+            .try_into()
+            .ok()?,
+    ));
 
     let (esds_bs, esds_be, _) = find_child(data, entry_body + 28, entry_end, ESDS)?;
     // esds body starts with version+flags.
@@ -819,6 +829,26 @@ mod tests {
 
         let (start, end) = find_descriptor(&esds, 0, esds.len(), 5).expect("specific info");
         assert_eq!(&esds[start..end], &[0x12, 0x10]);
+    }
+
+    /// `read_box` vouches only for the box lying inside the buffer, not for its
+    /// body holding the fields the type implies. A sample entry declaring size 8
+    /// is a legal box and far too short for an `AudioSampleEntry`, and the
+    /// channel and sample-rate reads sit at +16 and +24 — well past its end.
+    #[test]
+    fn a_short_sample_entry_is_rejected_rather_than_indexed_past() {
+        for body in [Vec::new(), vec![0u8; 8], vec![0u8; 17], vec![0u8; 25]] {
+            let stsd = concat(&[vec![0, 0, 0, 0, 0, 0, 0, 1], boxed(b"mp4a", &body)]);
+            let data = concat(&[
+                boxed(b"ftyp", b"isom"),
+                boxed(b"moov", &boxed(b"trak", &boxed(b"stsd", &stsd))),
+            ]);
+            assert!(
+                audio_config(&data).is_none(),
+                "a {}-byte sample entry must not be read as a config",
+                body.len()
+            );
+        }
     }
 
     #[test]

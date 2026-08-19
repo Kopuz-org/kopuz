@@ -185,7 +185,11 @@ pub struct Cdm {
 /// playing silence.
 #[cfg(target_os = "android")]
 impl Cdm {
-    pub fn open(_path: impl AsRef<Path>) -> Result<Self, String> {
+    /// Every entry point returns this. Written once rather than routed through
+    /// `open`, so that if `open` ever gains a real implementation these don't
+    /// silently start reporting success — an empty challenge read as `Ok` would
+    /// be worse than the unsupported error.
+    fn unsupported<T>() -> Result<T, String> {
         Err(
             "Apple Music playback isn't supported on Android yet: Widevine there \
              decrypts only inside MediaCodec, which needs a separate playback path"
@@ -193,8 +197,14 @@ impl Cdm {
         )
     }
 
-    pub fn open_system() -> Result<Self, String> {
-        Self::open("")
+    // `async` to match the desktop signatures: the callers await these, so a
+    // synchronous stub doesn't compile for Android at all.
+    pub async fn open(_path: impl AsRef<Path>) -> Result<Self, String> {
+        Self::unsupported()
+    }
+
+    pub async fn open_system() -> Result<Self, String> {
+        Self::unsupported()
     }
 
     pub async fn begin_license(&self) -> LicenseSession {
@@ -206,7 +216,7 @@ impl Cdm {
         _session: &LicenseSession,
         _pssh_box: &[u8],
     ) -> Result<(Vec<u8>, CdmSession), String> {
-        Self::open("").map(|_| (Vec::new(), CdmSession))
+        Self::unsupported()
     }
 
     pub fn update(
@@ -215,7 +225,7 @@ impl Cdm {
         _cdm_session: &CdmSession,
         _license: &[u8],
     ) -> Result<(), String> {
-        Self::open("").map(|_| ())
+        Self::unsupported()
     }
 
     pub fn decrypt(
@@ -225,7 +235,7 @@ impl Cdm {
         _iv: &[u8],
         _subsamples: &[(u32, u32)],
     ) -> Result<Vec<u8>, String> {
-        Self::open("").map(|_| Vec::new())
+        Self::unsupported()
     }
 }
 
