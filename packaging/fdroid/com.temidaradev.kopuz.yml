@@ -38,7 +38,28 @@ Builds:
       - dx build --package kopuz --platform android --release --locked
       - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
 
+  - versionName: 0.15.1
+    versionCode: 1501
+    commit: v0.15.1
+    ndk: 26.3.11579264
+    sudo:
+      - apt-get update
+      - apt-get install -y build-essential cmake pkg-config curl
+      - curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+    init:
+      - $$rustup$$/rustup toolchain install stable --profile minimal
+      - $$rustup$$/rustup target add aarch64-linux-android
+      - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
+      - npm ci
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css
+    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+    build:
+      - export SQLX_OFFLINE=true
+      - export ANDROID_NDK_HOME=$$NDK$$
+      - dx build --package kopuz --platform android --release --locked
+      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.14.0
-CurrentVersionCode: 1400
+CurrentVersion: 0.15.1
+CurrentVersionCode: 1501

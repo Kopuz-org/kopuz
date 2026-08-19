@@ -326,6 +326,16 @@ fn main() {
     let _ = fs::remove_dir_all(&helper_dst);
     copy_kt_dir(&helper_src, &helper_dst);
 
+    // 1b. rustls-platform-verifier's Kotlin half, vendored as source (see the
+    //     header of the vendored file) — every TLS handshake resolves through
+    //     it, and without it HTTPS dies on ClassNotFoundException. Compiled
+    //     with the app instead of bundling the crate's prebuilt .aar, which
+    //     F-Droid's binary scanner rejects.
+    let verifier_src = android_src.join("java/org/rustls/platformverifier");
+    let verifier_dst = kotlin_root.join("org/rustls/platformverifier");
+    let _ = fs::remove_dir_all(&verifier_dst);
+    copy_kt_dir(&verifier_src, &verifier_dst);
+
     // 2. Override the generated MainActivity (package dev.dioxus.main) so it wires
     //    up MediaSessionHelper and requests the notification permission at startup.
     let main_activity_src = android_src.join("kotlin/dev/dioxus/main/MainActivity.kt");
@@ -371,8 +381,8 @@ fn main() {
     //    refuse to install over its predecessor. Derive it from the crate version.
     if let Some(app_dir) = main_dir.parent().and_then(Path::parent) {
         patch_version_code(&app_dir.join("build.gradle.kts"));
-        // 7. Ship the Kotlin half of rustls-platform-verifier; see the fn docs.
-        bundle_rustls_verifier(app_dir);
+        patch_sdk_levels(&app_dir.join("build.gradle.kts"));
+        let _ = fs::remove_dir_all(app_dir.join("libs"));
     }
 }
 
@@ -499,44 +509,6 @@ fn android_version_code() -> u32 {
 
 /// Rewrite `versionCode = <n>` in the generated module Gradle script. Idempotent:
 /// re-running with the same crate version is a no-op.
-/// `rustls-platform-verifier` verifies certificates through Android's trust store,
-/// and reaches it via `org.rustls.platformverifier.CertificateVerifier` — Kotlin
-/// that ships as an `.aar` inside the `rustls-platform-verifier-android` crate and
-/// has to be added to the Gradle project by hand. Without it every TLS handshake
-/// dies on `ClassNotFoundException` and the app looks like it has no connection.
-fn bundle_rustls_verifier(app_dir: &Path) {
-    let Some(aar) = find_rustls_verifier_aar() else {
-        warn("rustls-platform-verifier .aar not found; HTTPS will fail on device");
-        return;
-    };
-    let libs = app_dir.join("libs");
-    let dst = libs.join("rustls-platform-verifier.aar");
-    if let Err(e) = fs::create_dir_all(&libs) {
-        warn(&format!("cannot create {}: {e}", libs.display()));
-        return;
-    }
-    copy_file(&aar, &dst);
-
-    let gradle = app_dir.join("build.gradle.kts");
-    let Ok(content) = fs::read_to_string(&gradle) else {
-        warn(&format!("cannot read {}", gradle.display()));
-        return;
-    };
-    const DEP: &str = "    implementation(files(\"libs/rustls-platform-verifier.aar\"))";
-    if content.contains(DEP.trim()) {
-        return;
-    }
-    let Some(start) = content.find("dependencies {") else {
-        warn(&format!("no dependencies block in {}", gradle.display()));
-        return;
-    };
-    let insert = start + "dependencies {".len();
-    let patched = format!("{}\n{DEP}{}", &content[..insert], &content[insert..]);
-    if let Err(e) = fs::write(&gradle, patched) {
-        warn(&format!("cannot write {}: {e}", gradle.display()));
-    }
-}
-
 fn write_media_icons(res: &Path) {
     for icon in MEDIA_ICONS {
         // The dot needs room under the glyph, so an active icon shrinks it slightly
@@ -578,48 +550,21 @@ fn write_media_icons(res: &Path) {
     }
 }
 
-/// Newest `rustls-platform-verifier-*.aar` in the cargo registry checkout of the
-/// companion crate.
-fn find_rustls_verifier_aar() -> Option<PathBuf> {
-    let cargo_home = std::env::var_os("CARGO_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo")))?;
-
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    for index in fs::read_dir(cargo_home.join("registry/src"))
-        .ok()?
-        .flatten()
+/// Google Play requires new apps and updates to target the previous year's API
+/// level (35 as of the Aug 2025 deadline); dx templates 34 and never moves it.
+fn patch_sdk_levels(gradle: &Path) {
+    let Ok(content) = fs::read_to_string(gradle) else {
+        warn(&format!("cannot read {}", gradle.display()));
+        return;
+    };
+    let patched = content
+        .replace("compileSdk = 34", "compileSdk = 35")
+        .replace("targetSdk = 34", "targetSdk = 35");
+    if patched != content
+        && let Err(e) = fs::write(gradle, patched)
     {
-        let Ok(packages) = fs::read_dir(index.path()) else {
-            continue;
-        };
-        for package in packages.flatten() {
-            if !package
-                .file_name()
-                .to_string_lossy()
-                .starts_with("rustls-platform-verifier-android-")
-            {
-                continue;
-            }
-            let maven = package.path().join("maven/rustls/rustls-platform-verifier");
-            let Ok(versions) = fs::read_dir(&maven) else {
-                continue;
-            };
-            for version in versions.flatten() {
-                let Ok(files) = fs::read_dir(version.path()) else {
-                    continue;
-                };
-                candidates.extend(
-                    files
-                        .flatten()
-                        .map(|f| f.path())
-                        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("aar")),
-                );
-            }
-        }
+        warn(&format!("cannot write {}: {e}", gradle.display()));
     }
-    candidates.sort();
-    candidates.pop()
 }
 
 fn patch_version_code(gradle: &Path) {
