@@ -379,9 +379,9 @@ CI reads the same values from the repository secrets: `ANDROID_KEYSTORE_BASE64`
 (the keystore, base64-encoded), `ANDROID_KEYSTORE_PASSWORD` and
 `ANDROID_KEY_ALIAS` are required, while `ANDROID_KEY_PASSWORD` is optional and,
 when set, overrides the default derived from `ANDROID_KEYSTORE_PASSWORD`. A
-tagged build fails outright if a required one is missing, so a release can
-never ship unsigned; validation runs on branches and forks build an unsigned
-APK instead.
+tagged build fails outright if a required one is missing, so a release can never
+ship unsigned; validation runs on branches and forks build an unsigned APK
+instead.
 
 The Android `versionCode` is derived from the crate version as
 `major * 10000 + minor * 100 + patch`, so bumping `version` in `Cargo.toml` is
