@@ -826,11 +826,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                         #[cfg(target_os = "android")]
                         BgCmd::CycleRepeat => {
-                            let next = match *ctrl.loop_mode.peek() {
-                                LoopMode::None => LoopMode::Queue,
-                                LoopMode::Queue => LoopMode::Track,
-                                LoopMode::Track => LoopMode::None,
-                            };
+                            let next = ctrl.loop_mode.peek().next();
                             ctrl.set_loop_mode(next);
                         }
                     }

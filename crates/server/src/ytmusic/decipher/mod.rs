@@ -536,8 +536,6 @@ impl JsEngine for SubprocessEngine {
     }
 }
 
-// ---- WebView engine bridge ---------------------------------------------
-
 /// A unit of work for the UI-layer solver loop: a JS `program` to run in the
 /// resident WebView, plus a one-shot `reply` for whatever it prints.
 pub struct SolveRequest {
@@ -565,6 +563,13 @@ impl JsEngine for ChannelEngine {
             rx.await
                 .map_err(|_| "webview solver dropped the reply".to_string())?
         })
+    }
+
+    /// The WebView page's `globalThis` survives between evals, so the solver
+    /// can install the player functions once and reuse them per track; a page
+    /// reload is caught by the `CACHE_MISS` handshake and reinstalls.
+    fn is_persistent(&self) -> bool {
+        true
     }
 }
 

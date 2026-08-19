@@ -232,18 +232,14 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                     }
                 }
             } else {
-                // The phone rows are a two-line list, not a column grid, so the
-                // column headings have nothing to label there.
-                if !cfg!(target_os = "android") {
-                    div { class: "shrink-0",
-                        Header {
-                            is_vaxry: true,
-                            is_album: props.is_album,
-                            is_selection_mode: props.is_selection_mode,
-                            on_select_all: props.on_select_all,
-                            all_selected: props.all_selected,
-                            sort_state,
-                        }
+                div { class: "shrink-0",
+                    Header {
+                        is_vaxry: true,
+                        is_album: props.is_album,
+                        is_selection_mode: props.is_selection_mode,
+                        on_select_all: props.on_select_all,
+                        all_selected: props.all_selected,
+                        sort_state,
                     }
                 }
 

@@ -3,6 +3,13 @@
  * (android/rustls-platform-verifier/src/main/java/org/rustls/platformverifier/CertificateVerifier.kt).
  * Upstream license: Apache-2.0 OR MIT. Compiled from source instead of
  * bundling the prebuilt .aar so F-Droid builds pass the binary scanner.
+ *
+ * Local changes (report upstream when convenient):
+ * - The system-root collision loop advances its index before the `continue`
+ *   branches; upstream only increments at the loop tail, spinning forever on
+ *   a deleted or non-X509 anchor alias.
+ * - `BuildConfig.TEST` is supplied by the sibling BuildConfig.kt shim (always
+ *   false) since the upstream gradle module that generates it isn't used here.
  */
 package org.rustls.platformverifier
 
@@ -444,6 +451,8 @@ internal object CertificateVerifier {
 
                     val anchor = loadedSystemKeystore.getCertificate("system:$alias")
 
+                    i += 1
+
                     // It's possible for `anchor` to be `null` if the user deleted a trust anchor.
                     // Continue iterating as there may be further collisions after the deleted anchor.
                     if (anchor == null) {
@@ -463,8 +472,6 @@ internal object CertificateVerifier {
                             return true
                         }
                     }
-
-                    i += 1
                 }
             }
         }

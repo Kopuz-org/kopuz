@@ -203,6 +203,17 @@ fn apply_browser_login(
     }
 }
 
+/// What actually rendered the sign-in page, for error messages: the chosen
+/// desktop browser, or the in-app WebView on Android (where the browser
+/// setting is not consulted at all).
+fn signin_surface(browser: Browser) -> String {
+    if cfg!(target_os = "android") {
+        "WebView".to_string()
+    } else {
+        browser.to_string()
+    }
+}
+
 /// Surface a browser sign-in failure to both the settings error line and the
 /// player error banner.
 fn report_signin_failure(
@@ -237,7 +248,10 @@ pub fn ytmusic_auto_login(
                 report_signin_failure(
                     error,
                     playback_error,
-                    format!("YT Music sign-in failed ({browser}): {err}"),
+                    format!(
+                        "YT Music sign-in failed ({}): {err}",
+                        signin_surface(browser)
+                    ),
                 );
                 return;
             }
@@ -287,7 +301,10 @@ pub fn soundcloud_auto_login(
                 report_signin_failure(
                     error,
                     playback_error,
-                    format!("SoundCloud sign-in failed ({browser}): {err}"),
+                    format!(
+                        "SoundCloud sign-in failed ({}): {err}",
+                        signin_surface(browser)
+                    ),
                 );
                 return;
             }

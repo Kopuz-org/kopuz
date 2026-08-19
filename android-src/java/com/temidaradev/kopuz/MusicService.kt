@@ -47,16 +47,24 @@ class MusicService : Service() {
             e.printStackTrace()
         }
 
-        // Held for the whole session, not just while decoding — the macOS side takes
-        // an IOKit no-idle-sleep assertion for the same reason. With the screen off
-        // and no lock, the CPU suspends: the loop that drains transport commands and
-        // advances the queue stops getting timer ticks, so the app goes deaf until
-        // something else happens to wake the device. Released on stopSession/onDestroy.
-        acquireWakeLock()
+        if (intent?.getBooleanExtra(EXTRA_PLAYING, true) != false) {
+            acquireWakeLock()
+        } else {
+            releaseWakeLock()
+        }
 
         return START_STICKY
     }
 
+    /**
+     * Held while playing — the macOS side takes an IOKit no-idle-sleep
+     * assertion for the same reason. With the screen off and no lock, the CPU
+     * suspends: the loop that drains transport commands and advances the queue
+     * stops getting timer ticks, so the app goes deaf until something else
+     * wakes the device. Paused playback needs none of that (a notification tap
+     * wakes the process by itself), so onStartCommand releases the lock
+     * instead of burning battery; stopSession/onDestroy release it too.
+     */
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager

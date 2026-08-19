@@ -361,9 +361,15 @@ fn main() {
         /// DOM had it.
         const APPLY_EDITS_WITHOUT_RAF: &str = r#"<script>
 (function () {
+    var attempts = 0;
     function patch() {
         var i = window.interpreter;
         if (!i || !i.rafEdits || !i.markEditsFinished) {
+            attempts += 1;
+            if (attempts > 600) {
+                console.error("kopuz: interpreter never appeared; edit-ack patch not applied");
+                return;
+            }
             setTimeout(patch, 50);
             return;
         }

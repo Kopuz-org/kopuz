@@ -60,6 +60,10 @@ impl PrefetchSlot {
             guard = self.ready.wait(guard).unwrap_or_else(|e| e.into_inner());
         }
     }
+
+    fn try_take(&self) -> Option<IoResult<Vec<u8>>> {
+        self.result.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
 }
 
 pub struct RangeStreamSource {
@@ -132,6 +136,17 @@ impl RangeStreamSource {
         }
     }
 
+    /// Drop the prefetch slot only once its worker has finished; a still-running
+    /// worker stays tracked so at most one range download is ever in flight,
+    /// no matter how often the caller seeks around it.
+    fn discard_prefetch_if_done(&mut self) {
+        if let Some(prefetch) = &self.prefetch
+            && prefetch.slot.try_take().is_some()
+        {
+            self.prefetch = None;
+        }
+    }
+
     fn fetch_chunk(&mut self, start: u64) -> IoResult<()> {
         if let Some(prefetch) = self.prefetch.take_if(|p| p.start == start) {
             match prefetch.slot.take_blocking() {
@@ -144,25 +159,35 @@ impl RangeStreamSource {
                 }
             }
         }
-        self.prefetch = None;
+        self.discard_prefetch_if_done();
         let bytes = fetch_range(&self.client, &self.url, start, self.total_size)?;
         self.install_chunk(start, bytes);
         Ok(())
     }
 
     /// Kick off the next window's download once sequential reading is past the
-    /// middle of the current one. One request in flight at most; a seek that
-    /// lands elsewhere just abandons the slot (`fetch_chunk` refetches inline).
+    /// middle of the current one. At most one worker is in flight: a slot left
+    /// over from before a seek keeps blocking new spawns until its download
+    /// completes, and is discarded the first time it's seen finished.
     fn maybe_prefetch_next(&mut self) {
         let next_start = self.chunk_start + self.chunk.len() as u64;
         if next_start >= self.total_size
             || self.pos < self.chunk_start + (self.chunk.len() / 2) as u64
-            || self
+        {
+            return;
+        }
+        if self.prefetch.is_some() {
+            if self
                 .prefetch
                 .as_ref()
                 .is_some_and(|p| p.start == next_start)
-        {
-            return;
+            {
+                return;
+            }
+            self.discard_prefetch_if_done();
+            if self.prefetch.is_some() {
+                return;
+            }
         }
         let slot = std::sync::Arc::new(PrefetchSlot::default());
         let worker_slot = slot.clone();

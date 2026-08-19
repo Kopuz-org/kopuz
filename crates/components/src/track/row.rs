@@ -349,8 +349,10 @@ pub fn TrackRow(
                         },
                         "{track.title}"
                     }
-                    span { class: "text-[11px] text-white/45 truncate leading-tight", dir: "ltr",
-                        "{track.artist} • {duration_str}"
+                    span { class: "text-[11px] text-white/45 truncate leading-tight",
+                        span { dir: "auto", "{track.artist}" }
+                        " • "
+                        span { dir: "ltr", "{duration_str}" }
                     }
                 }
 

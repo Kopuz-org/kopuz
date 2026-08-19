@@ -38,6 +38,31 @@ dx build --package kopuz --platform android --release
 echo "[2/4] Assembling the release APK..."
 (cd "$gradle_project" && ./gradlew assembleRelease)
 
+# Google Play rejects 4 KB-aligned native libs (16 KB page mandate). The linker
+# flag lives in .cargo/config.toml but an exported RUSTFLAGS silently overrides
+# it, so verify the shipped library instead of trusting the config.
+readelf_bin="$(command -v llvm-readelf || command -v readelf || true)"
+if [[ -z "$readelf_bin" && -n "${ANDROID_NDK_HOME:-}" ]]; then
+  for cand in "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf; do
+    [[ -x "$cand" ]] && readelf_bin="$cand" && break
+  done
+fi
+if [[ -n "$readelf_bin" ]]; then
+  align_tmp="$(mktemp -d)"
+  unzip -o -q "$unsigned" 'lib/*/*.so' -d "$align_tmp"
+  while IFS= read -r so; do
+    if "$readelf_bin" -l -W "$so" | awk '$1=="LOAD" && $NF=="0x1000" {bad=1} END{exit bad}'; then
+      :
+    else
+      echo "$so is 4 KB-aligned; RUSTFLAGS overrode the 16 KB max-page-size flag" >&2
+      exit 1
+    fi
+  done < <(find "$align_tmp" -name '*.so')
+  rm -rf "$align_tmp"
+else
+  echo "warning: no readelf found; skipping the 16 KB alignment check" >&2
+fi
+
 mkdir -p "$out_dir"
 rm -f "$out"
 

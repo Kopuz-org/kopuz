@@ -70,17 +70,29 @@ fn set_media_permission(answer: u8) {
 /// a dialog swiped away, which counts as a denial).
 ///
 /// The answer stays readable after the fact, so a late caller still sees it;
-/// `request_permissions` clears it before each new dialog.
+/// `request_permissions` clears it before each new dialog. Every wait is
+/// bounded and re-checks the actual permission, so a lost native callback
+/// degrades to the real permission state after two minutes instead of hanging
+/// the caller forever.
 pub async fn await_media_permission() -> bool {
     if has_media_permission() {
         return true;
     }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     loop {
         let answered = permission_notify().notified();
         match MEDIA_PERMISSION.load(Ordering::SeqCst) {
             PERMISSION_GRANTED => return true,
             PERMISSION_DENIED => return false,
-            _ => answered.await,
+            _ => {
+                if std::time::Instant::now() >= deadline {
+                    return has_media_permission();
+                }
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(2), answered).await;
+                if has_media_permission() {
+                    return true;
+                }
+            }
         }
     }
 }
@@ -593,6 +605,7 @@ pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
 unsafe extern "C" {
     fn ALooper_forThread() -> *mut std::ffi::c_void;
     fn ALooper_acquire(looper: *mut std::ffi::c_void);
+    fn ALooper_release(looper: *mut std::ffi::c_void);
     fn ALooper_wake(looper: *mut std::ffi::c_void);
 }
 
@@ -604,9 +617,6 @@ static KEEPALIVE: AtomicBool = AtomicBool::new(false);
 /// from the event loop thread (a dioxus hook body qualifies); every other thread
 /// has a different looper, or none at all.
 pub fn capture_event_loop() {
-    if !EVENT_LOOP.load(Ordering::SeqCst).is_null() {
-        return;
-    }
     // SAFETY: both are thread-safe NDK calls; `acquire` keeps the looper alive for
     // the process, which is exactly as long as the pointer is readable.
     let looper = unsafe { ALooper_forThread() };
@@ -615,7 +625,19 @@ pub fn capture_event_loop() {
         return;
     }
     unsafe { ALooper_acquire(looper) };
-    EVENT_LOOP.store(looper, Ordering::SeqCst);
+    if EVENT_LOOP
+        .compare_exchange(
+            std::ptr::null_mut(),
+            looper,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        // SAFETY: balances the acquire above; a concurrent caller won the slot.
+        unsafe { ALooper_release(looper) };
+        return;
+    }
     start_keepalive();
 }
 
@@ -639,6 +661,17 @@ pub fn set_keepalive(active: bool) {
     if active {
         wake_run_loop();
     }
+    let (lock, signal) = keepalive_signal();
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+    signal.notify_all();
+}
+
+/// Parks the keepalive thread while the app is foregrounded; `set_keepalive`
+/// signals it on every state flip so ticking starts and stops promptly instead
+/// of on a polling interval.
+fn keepalive_signal() -> &'static (Mutex<()>, std::sync::Condvar) {
+    static SIGNAL: OnceLock<(Mutex<()>, std::sync::Condvar)> = OnceLock::new();
+    SIGNAL.get_or_init(|| (Mutex::new(()), std::sync::Condvar::new()))
 }
 
 fn start_keepalive() {
@@ -653,7 +686,11 @@ fn start_keepalive() {
                     wake_run_loop();
                     std::thread::sleep(std::time::Duration::from_millis(250));
                 } else {
-                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    let (lock, signal) = keepalive_signal();
+                    let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+                    while !KEEPALIVE.load(Ordering::SeqCst) {
+                        guard = signal.wait(guard).unwrap_or_else(|e| e.into_inner());
+                    }
                 }
             }
         })

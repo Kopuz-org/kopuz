@@ -136,7 +136,8 @@ fn warn(msg: &str) {
 ///
 /// A missing anchor is a hard build failure on purpose: shipping without the
 /// patch silently re-breaks background playback, so a wry template change has
-/// to surface here, not on users' phones.
+/// to surface here, not on users' phones. dx rewrites the file every build, so
+/// the call site re-runs whenever it changes.
 fn patch_rust_webview(path: &Path) {
     let content = fs::read_to_string(path).unwrap_or_else(|e| {
         panic!(
@@ -144,11 +145,13 @@ fn patch_rust_webview(path: &Path) {
             path.display()
         )
     });
-    if content.contains("onWindowVisibilityChanged") {
+    const MARKER: &str = "// kopuz: page-freeze patch";
+    if content.contains(MARKER) {
         return;
     }
     const ANCHOR: &str = "): WebView(context) {";
     const OVERRIDES: &str = r#"): WebView(context) {
+    // kopuz: page-freeze patch
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(android.view.View.VISIBLE)
     }
@@ -326,11 +329,6 @@ fn main() {
     let _ = fs::remove_dir_all(&helper_dst);
     copy_kt_dir(&helper_src, &helper_dst);
 
-    // 1b. rustls-platform-verifier's Kotlin half, vendored as source (see the
-    //     header of the vendored file) — every TLS handshake resolves through
-    //     it, and without it HTTPS dies on ClassNotFoundException. Compiled
-    //     with the app instead of bundling the crate's prebuilt .aar, which
-    //     F-Droid's binary scanner rejects.
     let verifier_src = android_src.join("java/org/rustls/platformverifier");
     let verifier_dst = kotlin_root.join("org/rustls/platformverifier");
     let _ = fs::remove_dir_all(&verifier_dst);
@@ -342,8 +340,6 @@ fn main() {
     let main_activity_dst = out_dir.join("MainActivity.kt");
     copy_file(&main_activity_src, &main_activity_dst);
 
-    // 2b. Keep Chromium from ever considering the page hidden; see the fn docs.
-    // dx rewrites the file every build, so re-run whenever it changes.
     let rust_webview = out_dir.join("RustWebView.kt");
     println!("cargo:rerun-if-changed={}", rust_webview.display());
     patch_rust_webview(&rust_webview);
@@ -507,8 +503,6 @@ fn android_version_code() -> u32 {
     major * 10_000 + minor * 100 + patch
 }
 
-/// Rewrite `versionCode = <n>` in the generated module Gradle script. Idempotent:
-/// re-running with the same crate version is a no-op.
 fn write_media_icons(res: &Path) {
     for icon in MEDIA_ICONS {
         // The dot needs room under the glyph, so an active icon shrinks it slightly
@@ -567,6 +561,8 @@ fn patch_sdk_levels(gradle: &Path) {
     }
 }
 
+/// Rewrite `versionCode = <n>` in the generated module Gradle script. Idempotent:
+/// re-running with the same crate version is a no-op.
 fn patch_version_code(gradle: &Path) {
     let Ok(content) = fs::read_to_string(gradle) else {
         warn(&format!("cannot read {}", gradle.display()));

@@ -23,8 +23,9 @@ class MainActivity : WryActivity() {
         instance = this
         enableEdgeToEdge()
         MediaSessionHelper.init(this)
-        requestNotificationPermission()
-        requestMediaPermission()
+        if (!requestNotificationPermission()) {
+            requestMediaPermission()
+        }
         requestBatteryOptimizationExemption()
     }
 
@@ -117,7 +118,14 @@ class MainActivity : WryActivity() {
         }
     }
 
-    private fun requestNotificationPermission() {
+    /**
+     * Returns whether a permission dialog was actually launched. One dialog at
+     * a time: firing the notification and media requests back to back lets the
+     * second cancel the first on some Android builds, so onCreate requests
+     * media immediately only when this launched nothing, and
+     * onRequestPermissionsResult chains it after the 1001 result otherwise.
+     */
+    private fun requestNotificationPermission(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED
@@ -127,8 +135,10 @@ class MainActivity : WryActivity() {
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                     1001
                 )
+                return true
             }
         }
+        return false
     }
 
     // Without this the library scan finds nothing: the manifest entry alone does not
@@ -153,6 +163,10 @@ class MainActivity : WryActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001) {
+            requestMediaPermission()
+            return
+        }
         if (requestCode != 1 && requestCode != 1002) return
         val granted = grantResults.isNotEmpty() &&
             grantResults.all { it == PackageManager.PERMISSION_GRANTED }
