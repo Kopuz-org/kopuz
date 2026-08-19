@@ -330,6 +330,7 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
     let mut options = vec![
         ("album-art".into(), i18n::t("album_art_gradient")),
         ("default".into(), i18n::t("default_theme")),
+        ("amoled".into(), i18n::t("amoled_black")),
         (utils::live_theme::THEME_ID.into(), i18n::t("live_theme")),
         ("gruvbox".into(), i18n::t("gruvbox_material")),
         ("gruvbox-classic".into(), i18n::t("gruvbox_classic")),

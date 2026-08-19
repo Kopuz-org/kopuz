@@ -258,6 +258,7 @@ kanagawa_dragon = Kanagawa Dragon
 everforest = Everforest
 rosepine = Rosé Pine
 default_light = Προεπιλογή Ανοιχτό
+amoled_black = AMOLED Μαύρο
 catppuccin_latte = Catppuccin Latte
 rosepine_dawn = Rosé Pine Dawn
 everforest_light = Everforest Light

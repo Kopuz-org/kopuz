@@ -18,6 +18,32 @@
     --color-neutral-900: #171717;
 }
 
+/* AMOLED pure black — on OLED panels every lit pixel costs battery, so the
+   base and every elevated surface collapse to true #000 and the heavy backdrop
+   blurs are dropped (they keep the GPU busy for no visible gain over black).
+   The accent ramp stays the default copper. */
+.theme-amoled {
+    --color-black: #000000;
+    --color-white: #ffffff;
+    --color-slate-400: #a3a3a3;
+    --color-slate-500: #6b6b6b;
+    --color-green-500: #22c55e;
+    --color-indigo-400: #e8a866;
+    --color-indigo-500: #d9842f;
+    --color-indigo-600: #b86a22;
+    --color-indigo-900: #1c1206;
+    --color-purple-600: #cf7a3a;
+    --color-purple-700: #a85f28;
+    --color-red-400: #f87171;
+    --color-neutral-900: #000000;
+}
+
+.theme-amoled .backdrop-blur-xl,
+.theme-amoled .backdrop-blur-2xl {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
 /* Gruvbox Classic Dark */
 .theme-gruvbox-classic {
     --color-black: #282828;
