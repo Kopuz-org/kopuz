@@ -116,6 +116,9 @@ const INSIDE_APPLICATION: &str = r#"        <service
                 <action android:name="com.temidaradev.kopuz.ACTION_MEDIA" />
             </intent-filter>
         </receiver>
+        <activity
+            android:name="com.temidaradev.kopuz.LoginActivity"
+            android:exported="false" />
 "#;
 
 fn warn(msg: &str) {
@@ -130,14 +133,17 @@ fn warn(msg: &str) {
 /// exempt it), so the generated `RustWebView` is patched to report its window
 /// as always visible: the page never counts as hidden, never freezes, and
 /// background playback control keeps working.
+///
+/// A missing anchor is a hard build failure on purpose: shipping without the
+/// patch silently re-breaks background playback, so a wry template change has
+/// to surface here, not on users' phones.
 fn patch_rust_webview(path: &Path) {
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            warn(&format!("cannot read {}: {e}", path.display()));
-            return;
-        }
-    };
+    let content = fs::read_to_string(path).unwrap_or_else(|e| {
+        panic!(
+            "cannot read {} — dx should have generated it before cargo ran: {e}",
+            path.display()
+        )
+    });
     if content.contains("onWindowVisibilityChanged") {
         return;
     }
@@ -151,16 +157,15 @@ fn patch_rust_webview(path: &Path) {
         super.onVisibilityAggregated(true)
     }
 "#;
-    if !content.contains(ANCHOR) {
-        warn(&format!(
-            "RustWebView.kt anchor not found; page-freeze patch skipped ({})",
-            path.display()
-        ));
-        return;
-    }
+    assert!(
+        content.contains(ANCHOR),
+        "RustWebView.kt anchor `{ANCHOR}` not found ({}); the wry template \
+         changed — update patch_rust_webview to match it",
+        path.display()
+    );
     let patched = content.replacen(ANCHOR, OVERRIDES, 1);
     if let Err(e) = fs::write(path, patched) {
-        warn(&format!("cannot write {}: {e}", path.display()));
+        panic!("cannot write {}: {e}", path.display());
     }
 }
 
@@ -353,6 +358,7 @@ fn main() {
     //    build them here.
     generate_launcher_icons(&main_dir.join("res"));
     write_media_icons(&main_dir.join("res"));
+    write_notification_icon(&asset_crate_dir, &main_dir.join("res"));
 
     // 5b. Replace dx's network security config; the manifest already points at it.
     copy_str(
@@ -368,6 +374,104 @@ fn main() {
         // 7. Ship the Kotlin half of rustls-platform-verifier; see the fn docs.
         bundle_rustls_verifier(app_dir);
     }
+}
+
+/// Status-bar icon for the media notification, generated from the brand
+/// symbol SVG. Android renders small icons as pure alpha masks, so only the
+/// symbol's light "details" layer (the instrument) is emitted, all white —
+/// the dark disc behind it would flatten the icon into a featureless circle.
+/// The strings and pegs survive as the negative space between those paths.
+/// The viewport is padded to a square so the 24dp icon keeps the symbol's
+/// aspect ratio.
+fn write_notification_icon(asset_dir: &Path, res: &Path) {
+    let svg_path = asset_dir.join("assets/logo-symbol.svg");
+    let svg = match fs::read_to_string(&svg_path) {
+        Ok(s) => s,
+        Err(e) => {
+            warn(&format!("cannot read {}: {e}", svg_path.display()));
+            return;
+        }
+    };
+    println!("cargo:rerun-if-changed={}", svg_path.display());
+
+    let viewport = svg
+        .split_once("viewBox=\"")
+        .and_then(|(_, rest)| rest.split_once('"'))
+        .and_then(|(vb, _)| {
+            let mut dims = vb.split_whitespace().skip(2).map(str::parse::<f32>);
+            match (dims.next(), dims.next()) {
+                (Some(Ok(w)), Some(Ok(h))) => Some((w, h)),
+                _ => None,
+            }
+        });
+    let Some((width, height)) = viewport else {
+        warn("logo-symbol.svg has no viewBox; notification icon skipped");
+        return;
+    };
+    let side = width.max(height);
+    let (tx, ty) = ((side - width) / 2.0, (side - height) / 2.0);
+
+    fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+        let (_, rest) = tag.split_once(&format!("{name}=\""))?;
+        rest.split_once('"').map(|(value, _)| value)
+    }
+
+    fn is_light(fill: &str) -> bool {
+        let hex = fill.strip_prefix('#').unwrap_or(fill);
+        if hex.len() != 6 {
+            return false;
+        }
+        let Ok(rgb) = u32::from_str_radix(hex, 16) else {
+            return false;
+        };
+        let (r, g, b) = (rgb >> 16 & 0xff, rgb >> 8 & 0xff, rgb & 0xff);
+        (r + g + b) / 3 > 128
+    }
+
+    let mut paths = String::new();
+    let mut rest = svg.as_str();
+    while let Some(start) = rest.find("<path ") {
+        let after = &rest[start..];
+        let Some(end) = after.find('>') else { break };
+        let tag = &after[..end];
+        if let Some(d) = attr(tag, "d")
+            && attr(tag, "fill").is_some_and(is_light)
+        {
+            paths.push_str(&format!(
+                "        <path android:fillColor=\"#FFFFFFFF\" android:pathData=\"{d}\" />\n"
+            ));
+        }
+        rest = &after[end + 1..];
+    }
+    if paths.is_empty() {
+        warn("logo-symbol.svg has no light <path>; notification icon skipped");
+        return;
+    }
+
+    for (suffix, _) in [
+        ("mdpi", 0),
+        ("hdpi", 0),
+        ("xhdpi", 0),
+        ("xxhdpi", 0),
+        ("xxxhdpi", 0),
+    ] {
+        let _ = fs::remove_file(res.join(format!("drawable-{suffix}/kopuz_ic_notification.png")));
+    }
+
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<!-- AUTO-GENERATED by kopuz/build.rs from assets/logo-symbol.svg -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="{side}"
+    android:viewportHeight="{side}">
+    <group android:translateX="{tx}" android:translateY="{ty}">
+{paths}    </group>
+</vector>
+"#
+    );
+    copy_str(&res.join("drawable/kopuz_ic_notification.xml"), &xml);
 }
 
 /// Android needs a single monotonically increasing integer. `major.minor.patch`

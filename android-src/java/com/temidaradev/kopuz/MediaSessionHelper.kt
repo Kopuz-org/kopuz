@@ -314,7 +314,7 @@ object MediaSessionHelper {
         val notifBuilder = Notification.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText("$artist — $album")
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.kopuz_ic_notification)
             .setOngoing(playing)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setDeleteIntent(pendingBroadcast(context, "stop"))

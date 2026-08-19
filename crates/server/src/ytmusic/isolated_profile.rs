@@ -9,7 +9,7 @@ use config::Browser;
 
 use crate::cookies;
 
-const SIGNIN_URL: &str = "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
+pub const SIGNIN_URL: &str = "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
 const PROFILE_PREFIX: &str = "yt-profile";
 
 pub fn profile_dir(server_id: &str) -> PathBuf {

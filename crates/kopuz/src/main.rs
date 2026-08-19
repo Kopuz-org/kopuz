@@ -480,6 +480,9 @@ fn App() -> Element {
     // first would leave the final queue/config persists (and any failure
     // warnings) out of latest.log and the trace.
 
+    #[cfg(target_os = "android")]
+    app_lifecycle::use_webview_decipher_engine();
+
     // The whole-Library signal is GONE — pages/components read the DB through
     // query hooks, and every track self-resolves its cover via the cover seam
     // (a local row's cover_path is projected from its album in the DB read layer).
@@ -2220,8 +2223,10 @@ fn App() -> Element {
                                 Route::Settings => i18n::t("settings"),
                                 _ => i18n::t("home"),
                             };
+                            let has_image_background = config.read().cover_art_background
+                                || !config.read().custom_background_path.is_empty();
                             rsx! {
-                                div { class: "shrink-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 flex items-center h-11 px-3 shadow-xl",
+                                div { class: if has_image_background { "shrink-0 z-[60] bg-black/30 backdrop-blur-xl border-b border-white/5 flex items-center h-11 px-3" } else { "shrink-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 flex items-center h-11 px-3 shadow-xl" },
                                     if is_details {
                                         button {
                                             class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",

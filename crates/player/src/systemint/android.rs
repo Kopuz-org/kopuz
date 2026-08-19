@@ -762,6 +762,109 @@ pub extern "system" fn Java_com_temidaradev_kopuz_MediaReceiver_nativeOnAction(
     }
 }
 
+/// Open the in-app sign-in browser (`LoginActivity`) at `url`, wiping WebView
+/// cookies first so only the fresh session satisfies the caller's poll.
+pub fn login_open(url: &str) {
+    init();
+    let Some(vm) = JVM.get() else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let ctx = ndk_context::android_context();
+    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        let j_url = env.new_string(url)?;
+        env.call_static_method(
+            &class,
+            "open",
+            "(Landroid/content/Context;Ljava/lang/String;)V",
+            &[JValue::Object(&activity), JValue::Object(&j_url)],
+        )?
+        .v()?;
+        Ok(())
+    })(&mut env);
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "LoginActivity.open failed");
+        clear_jni_exception(&mut env);
+    }
+}
+
+/// The `Cookie:`-header string the WebView holds for `url`, if any.
+pub fn login_cookies(url: &str) -> Option<String> {
+    let vm = JVM.get()?;
+    let mut env = vm.attach_current_thread().ok()?;
+    let result: Result<Option<String>, jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        let j_url = env.new_string(url)?;
+        let obj = env
+            .call_static_method(
+                &class,
+                "cookies",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                &[JValue::Object(&j_url)],
+            )?
+            .l()?;
+        if obj.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(env.get_string(&JString::from(obj))?.into()))
+        }
+    })(&mut env);
+    match result {
+        Ok(cookies) => cookies,
+        Err(e) => {
+            tracing::warn!(error = %e, "LoginActivity.cookies failed");
+            clear_jni_exception(&mut env);
+            None
+        }
+    }
+}
+
+/// Whether the sign-in browser is still on screen; `false` after the user
+/// backs out, which the polling caller reports as a cancelled sign-in.
+pub fn login_is_open() -> bool {
+    let Some(vm) = JVM.get() else {
+        return false;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return false;
+    };
+    let result: Result<bool, jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        env.call_static_method(&class, "isOpen", "()Z", &[])?.z()
+    })(&mut env);
+    match result {
+        Ok(open) => open,
+        Err(e) => {
+            tracing::warn!(error = %e, "LoginActivity.isOpen failed");
+            clear_jni_exception(&mut env);
+            false
+        }
+    }
+}
+
+/// Dismiss the sign-in browser once the caller has what it needs.
+pub fn login_close() {
+    let Some(vm) = JVM.get() else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        env.call_static_method(&class, "close", "()V", &[])?.v()?;
+        Ok(())
+    })(&mut env);
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "LoginActivity.close failed");
+        clear_jni_exception(&mut env);
+    }
+}
+
 /// Send the app to the background (like Home) instead of finishing it, so playback
 /// survives. Delegates to MainActivity.moveToBack(), which marshals onto the UI thread.
 pub fn move_task_to_back() {

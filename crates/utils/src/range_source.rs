@@ -28,6 +28,40 @@ use crate::stream_buffer::BufferProgressCallback;
 const CHUNK: usize = 512 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// An in-flight background fetch of the window at `start`, so sequential
+/// playback overlaps the next window's download with decoding the current one
+/// instead of stalling the decoder a full network round-trip at every 512 KiB
+/// boundary — the mid-song stutter on slow links. A Mutex+Condvar slot rather
+/// than an mpsc receiver because the decoder wants the whole source `Sync`.
+struct Prefetch {
+    start: u64,
+    slot: std::sync::Arc<PrefetchSlot>,
+}
+
+#[derive(Default)]
+struct PrefetchSlot {
+    result: std::sync::Mutex<Option<IoResult<Vec<u8>>>>,
+    ready: std::sync::Condvar,
+}
+
+impl PrefetchSlot {
+    fn put(&self, value: IoResult<Vec<u8>>) {
+        let mut guard = self.result.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(value);
+        self.ready.notify_all();
+    }
+
+    fn take_blocking(&self) -> IoResult<Vec<u8>> {
+        let mut guard = self.result.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(value) = guard.take() {
+                return value;
+            }
+            guard = self.ready.wait(guard).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+}
+
 pub struct RangeStreamSource {
     url: String,
     client: reqwest::blocking::Client,
@@ -35,6 +69,7 @@ pub struct RangeStreamSource {
     pos: u64,
     chunk: Vec<u8>,
     chunk_start: u64,
+    prefetch: Option<Prefetch>,
     progress: Option<BufferProgressCallback>,
 }
 
@@ -53,12 +88,7 @@ impl RangeStreamSource {
     ) -> IoResult<Self> {
         let ua =
             user_agent.unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());
-        let client = reqwest::blocking::Client::builder()
-            .tcp_nodelay(true)
-            .user_agent(ua)
-            .timeout(REQUEST_TIMEOUT)
-            .build()
-            .map_err(IoError::other)?;
+        let client = shared_client(&ua)?;
 
         // One-byte probe — cheap, and the server returns the full
         // `Content-Range: bytes 0-0/<TOTAL>` we want.
@@ -84,6 +114,7 @@ impl RangeStreamSource {
             pos: 0,
             chunk: Vec::with_capacity(CHUNK),
             chunk_start: 0,
+            prefetch: None,
             progress,
         })
     }
@@ -92,38 +123,59 @@ impl RangeStreamSource {
         self.total_size
     }
 
-    fn fetch_chunk(&mut self, start: u64) -> IoResult<()> {
-        let end = (start + CHUNK as u64 - 1).min(self.total_size - 1);
-        let resp = self
-            .client
-            .get(&self.url)
-            .header("Range", format!("bytes={start}-{end}"))
-            .send()
-            .map_err(IoError::other)?;
-        if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-            return Err(IoError::other(format!(
-                "range fetch {start}-{end} expected HTTP 206, got {}",
-                resp.status()
-            )));
-        }
-        let bytes = resp.bytes().map_err(IoError::other)?;
-        let expected = (end - start + 1) as usize;
-        if bytes.len() != expected {
-            return Err(IoError::new(
-                ErrorKind::UnexpectedEof,
-                format!(
-                    "range fetch {start}-{end} returned {} bytes, expected {expected}",
-                    bytes.len()
-                ),
-            ));
-        }
-        self.chunk.clear();
-        self.chunk.extend_from_slice(&bytes);
+    fn install_chunk(&mut self, start: u64, bytes: Vec<u8>) {
+        let end = start + bytes.len() as u64;
+        self.chunk = bytes;
         self.chunk_start = start;
         if let Some(progress) = &self.progress {
-            progress(start, end + 1, Some(self.total_size));
+            progress(start, end, Some(self.total_size));
         }
+    }
+
+    fn fetch_chunk(&mut self, start: u64) -> IoResult<()> {
+        if let Some(prefetch) = self.prefetch.take_if(|p| p.start == start) {
+            match prefetch.slot.take_blocking() {
+                Ok(bytes) => {
+                    self.install_chunk(start, bytes);
+                    return Ok(());
+                }
+                Err(error) => {
+                    tracing::debug!(%error, start, "prefetched range failed; refetching inline");
+                }
+            }
+        }
+        self.prefetch = None;
+        let bytes = fetch_range(&self.client, &self.url, start, self.total_size)?;
+        self.install_chunk(start, bytes);
         Ok(())
+    }
+
+    /// Kick off the next window's download once sequential reading is past the
+    /// middle of the current one. One request in flight at most; a seek that
+    /// lands elsewhere just abandons the slot (`fetch_chunk` refetches inline).
+    fn maybe_prefetch_next(&mut self) {
+        let next_start = self.chunk_start + self.chunk.len() as u64;
+        if next_start >= self.total_size
+            || self.pos < self.chunk_start + (self.chunk.len() / 2) as u64
+            || self
+                .prefetch
+                .as_ref()
+                .is_some_and(|p| p.start == next_start)
+        {
+            return;
+        }
+        let slot = std::sync::Arc::new(PrefetchSlot::default());
+        let worker_slot = slot.clone();
+        let client = self.client.clone();
+        let url = self.url.clone();
+        let total_size = self.total_size;
+        std::thread::spawn(move || {
+            worker_slot.put(fetch_range(&client, &url, next_start, total_size));
+        });
+        self.prefetch = Some(Prefetch {
+            start: next_start,
+            slot,
+        });
     }
 
     fn pos_in_cache(&self, pos: u64) -> bool {
@@ -131,6 +183,64 @@ impl RangeStreamSource {
             && pos >= self.chunk_start
             && pos < self.chunk_start + self.chunk.len() as u64
     }
+}
+
+/// One pooled client per user-agent string, shared by every source for the
+/// life of the process. A fresh client per track meant a fresh connection pool
+/// per track: every song opened with a full TCP + TLS handshake (on Android
+/// that includes the platform-verifier JNI round-trip), which is most of the
+/// "takes forever to start" on high-RTT phone links. Keep-alive across tracks
+/// makes each chunk a single pipelined request on a warm connection.
+fn shared_client(ua: &str) -> IoResult<reqwest::blocking::Client> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    static CLIENTS: OnceLock<Mutex<HashMap<String, reqwest::blocking::Client>>> = OnceLock::new();
+    let clients = CLIENTS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut clients = clients.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(client) = clients.get(ua) {
+        return Ok(client.clone());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .tcp_nodelay(true)
+        .user_agent(ua)
+        .timeout(REQUEST_TIMEOUT)
+        .pool_idle_timeout(Duration::from_secs(300))
+        .build()
+        .map_err(IoError::other)?;
+    clients.insert(ua.to_string(), client.clone());
+    Ok(client)
+}
+
+fn fetch_range(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    start: u64,
+    total_size: u64,
+) -> IoResult<Vec<u8>> {
+    let end = (start + CHUNK as u64 - 1).min(total_size - 1);
+    let resp = client
+        .get(url)
+        .header("Range", format!("bytes={start}-{end}"))
+        .send()
+        .map_err(IoError::other)?;
+    if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        return Err(IoError::other(format!(
+            "range fetch {start}-{end} expected HTTP 206, got {}",
+            resp.status()
+        )));
+    }
+    let bytes = resp.bytes().map_err(IoError::other)?;
+    let expected = (end - start + 1) as usize;
+    if bytes.len() != expected {
+        return Err(IoError::new(
+            ErrorKind::UnexpectedEof,
+            format!(
+                "range fetch {start}-{end} returned {} bytes, expected {expected}",
+                bytes.len()
+            ),
+        ));
+    }
+    Ok(bytes.to_vec())
 }
 
 impl Read for RangeStreamSource {
@@ -149,6 +259,7 @@ impl Read for RangeStreamSource {
         let to_copy = available.min(buf.len());
         buf[..to_copy].copy_from_slice(&self.chunk[offset..offset + to_copy]);
         self.pos += to_copy as u64;
+        self.maybe_prefetch_next();
         Ok(to_copy)
     }
 }
