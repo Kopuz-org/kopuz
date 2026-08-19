@@ -366,6 +366,7 @@ kanagawa_dragon = Kanagawa Dragon
 everforest = Everforest
 rosepine = Rosé Pine
 default_light = സ്ഥിരസ്ഥിതി ലൈറ്റ്
+amoled_black = AMOLED ബ്ലാക്ക്
 catppuccin_latte = Catppuccin Latte
 rosepine_dawn = Rosé Pine Dawn
 everforest_light = Everforest Light

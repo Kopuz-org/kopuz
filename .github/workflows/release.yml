@@ -146,7 +146,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
 
       - name: Install dioxus-cli
         run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
@@ -228,7 +228,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
 
       - name: Install dioxus-cli
         run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
@@ -296,9 +296,138 @@ jobs:
             dist/*.msi.sha256
           if-no-files-found: error
 
+  android:
+    # 24.04, not 22.04: the binstall'd dx is built against glibc 2.39, and an
+    # APK has no host-glibc compatibility concerns (unlike the Linux job).
+    runs-on: ubuntu-24.04
+
+    # The signing secrets are scoped to the three steps that need them (guard,
+    # decode, APK build) instead of the whole job, so the toolchain-install and
+    # npm steps never see them. The `secrets` context is not available in step
+    # `if` expressions, so the decode gate reads this job-level boolean, which
+    # carries no secret material.
+    env:
+      HAS_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
+
+      - name: Install dioxus-cli
+        run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build CSS
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./crates/player/**/*.rs,./crates/reader/**/*.rs'
+
+      - name: Read and verify version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[] | select(.name == "kopuz") | .version'
+          )"
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" && "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match Cargo version ${version}"
+            exit 1
+          fi
+
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # A tag is a published release, so it has to carry the project signature —
+      # an unsigned APK there would strand everyone who installed a signed one.
+      # Validation runs without the secrets (forks, pull requests) stay unsigned.
+      - name: Require signing secrets on tags
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KOPUZ_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KOPUZ_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          [[ -n "${ANDROID_KEYSTORE_BASE64}" ]] || missing+=(ANDROID_KEYSTORE_BASE64)
+          [[ -n "${KOPUZ_ANDROID_KEYSTORE_PASSWORD}" ]] || missing+=(ANDROID_KEYSTORE_PASSWORD)
+          [[ -n "${KOPUZ_ANDROID_KEY_ALIAS}" ]] || missing+=(ANDROID_KEY_ALIAS)
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "Refusing to publish an unsigned APK. Missing secrets: ${missing[*]}"
+            exit 1
+          fi
+
+      - name: Decode the signing keystore
+        if: env.HAS_ANDROID_KEYSTORE == 'true'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/kopuz.keystore"
+          echo "KOPUZ_ANDROID_KEYSTORE=$RUNNER_TEMP/kopuz.keystore" >> "$GITHUB_ENV"
+
+      # ANDROID_NDK_LATEST_HOME is a runner machine variable, invisible to the
+      # `env` expression context — it only resolves as a shell expansion here.
+      - name: Build the release APK
+        env:
+          KOPUZ_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KOPUZ_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KOPUZ_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_NDK_LATEST_HOME}"
+          export NDK_HOME="$ANDROID_NDK_HOME"
+          ./packaging/android/build-apk.sh
+
+      - name: Create Android checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+          apks=(target/android/*.apk)
+          if [[ ${#apks[@]} -ne 1 ]]; then
+            echo "Expected exactly one APK, found ${#apks[@]}"
+            exit 1
+          fi
+
+          sha256sum "${apks[0]}" | awk '{print $1 "  " substr($2, index($2, "kopuz-"))}' \
+            > "${apks[0]}.sha256"
+
+      - name: Upload Android package
+        uses: actions/upload-artifact@v4
+        with:
+          name: kopuz-release-android-${{ steps.version.outputs.version }}
+          path: |
+            target/android/*.apk
+            target/android/*.apk.sha256
+          if-no-files-found: error
+
   publish:
     if: github.ref_type == 'tag'
-    needs: [linux, macos, windows]
+    needs: [linux, macos, windows, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -328,6 +457,8 @@ jobs:
             dist/*.exe.sha256
             dist/*.msi
             dist/*.msi.sha256
+            dist/*.apk
+            dist/*.apk.sha256
 
   homebrew:
     if: github.ref_type == 'tag'
@@ -339,7 +470,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Kopuz-org/homebrew-tap
-          token: ${{ secrets.PAT }}
+          persist-credentials: false
 
       - name: Download macOS package
         uses: actions/download-artifact@v4
@@ -374,6 +505,8 @@ jobs:
           grep -q "sha256 \"${sha}\"" Casks/kopuz.rb
 
       - name: Commit changes
+        env:
+          TAP_PAT: ${{ secrets.PAT }}
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
@@ -384,5 +517,5 @@ jobs:
             echo "No changes"
           else
             git commit -m "kopuz ${{ github.ref_name }}"
-            git push
+            git push "https://x-access-token:${TAP_PAT}@github.com/Kopuz-org/homebrew-tap" HEAD
           fi

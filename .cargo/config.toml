@@ -4,3 +4,9 @@ rustc-wrapper = ""
 [env]
 # Use the committed crates/db/.sqlx query cache instead of a live DB at build time.
 SQLX_OFFLINE = "true"
+
+# Google Play mandates 16 KB page-size support for native libraries (all new
+# apps and updates since Nov 2025); NDK r26 still links 4 KB-aligned ELF
+# segments by default, which Play Console rejects.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

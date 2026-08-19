@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "android"))]
 use components::settings_items::{SettingItem, SettingsSection, ToggleSetting};
 use config::AppConfig;
 use dioxus::prelude::*;

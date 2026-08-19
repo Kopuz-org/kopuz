@@ -150,6 +150,13 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
         *width.read()
     };
 
+    let mut drawer_swipe = crate::gestures::use_swipe();
+    let mut on_drawer_swipe = move |evt: TouchEvent| {
+        if drawer_swipe.finish(&evt) == Some(crate::gestures::SwipeDirection::Left) {
+            mobile_collapsed.set(true);
+        }
+    };
+
     let onmousemove = move |evt: MouseEvent| {
         if *is_resizing.read() {
             let new_width = evt.client_coordinates().x as i32;
@@ -230,12 +237,20 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
             div {
                 class: "fixed inset-0 bg-black/80 backdrop-blur-[2px] z-[90]",
                 onclick: move |_| mobile_collapsed.set(true),
+                ontouchstart: move |evt| drawer_swipe.start(&evt),
+                ontouchmove: move |evt| drawer_swipe.update(&evt),
+                ontouchend: on_drawer_swipe,
+                ontouchcancel: move |_| drawer_swipe.reset(),
             }
         }
 
         div {
             class: "{root_class}",
             style: "{root_style}",
+            ontouchstart: move |evt| if is_android { drawer_swipe.start(&evt) },
+            ontouchmove: move |evt| if is_android { drawer_swipe.update(&evt) },
+            ontouchend: move |evt| if is_android { on_drawer_swipe(evt) },
+            ontouchcancel: move |_| drawer_swipe.reset(),
 
             if is_android {
                 div {

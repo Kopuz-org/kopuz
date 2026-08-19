@@ -39,9 +39,6 @@ class MusicService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        // Default to playing if the extra is missing (e.g. a sticky restart).
-        val playing = intent?.getBooleanExtra(EXTRA_PLAYING, true) ?: true
-
         // Must call startForeground within 5s of startForegroundService regardless of
         // play state, or the system kills us with a ForegroundServiceDidNotStartInTime.
         try {
@@ -50,24 +47,24 @@ class MusicService : Service() {
             e.printStackTrace()
         }
 
-        if (playing) {
+        if (intent?.getBooleanExtra(EXTRA_PLAYING, true) != false) {
             acquireWakeLock()
         } else {
-            // Paused: drop the CPU wake lock (battery) and detach foreground so the
-            // notification becomes dismissible and the OS can reclaim the service —
-            // but keep the notification visible via STOP_FOREGROUND_DETACH.
             releaseWakeLock()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_DETACH)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(false)
-            }
         }
 
         return START_STICKY
     }
 
+    /**
+     * Held while playing — the macOS side takes an IOKit no-idle-sleep
+     * assertion for the same reason. With the screen off and no lock, the CPU
+     * suspends: the loop that drains transport commands and advances the queue
+     * stops getting timer ticks, so the app goes deaf until something else
+     * wakes the device. Paused playback needs none of that (a notification tap
+     * wakes the process by itself), so onStartCommand releases the lock
+     * instead of burning battery; stopSession/onDestroy release it too.
+     */
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager

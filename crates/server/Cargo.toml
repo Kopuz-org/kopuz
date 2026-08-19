@@ -18,7 +18,6 @@ workspace = true
 [dependencies]
 tracing = { workspace = true }
 directories = { workspace = true }
-jellyfin-sdk-rust = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -50,8 +49,10 @@ symphonia = { workspace = true }
 cc = "1"
 
 # Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
-# library) there, which can't cross-compile.
-[target.'cfg(not(target_os = "windows"))'.dependencies]
+# library) there, which can't cross-compile. Not on Android either: rookie only
+# defines its Chromium keyring backend for the desktop targets, and there is no
+# desktop browser profile to import from anyway.
+[target.'cfg(not(any(target_os = "windows", target_os = "android")))'.dependencies]
 rookie = "0.5"
 
 # Headless JS for YouTube (desktop only; no V8 on Android): deno_core runs the

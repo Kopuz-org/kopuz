@@ -1,4 +1,4 @@
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use crate::use_player_controller::LoopMode;
 use crate::use_player_controller::PlayerController;
 use config::AppConfig;
@@ -25,6 +25,10 @@ enum BgCmd {
     Next,
     Prev,
     Seek(f64),
+    #[cfg(target_os = "android")]
+    ToggleShuffle,
+    #[cfg(target_os = "android")]
+    CycleRepeat,
 }
 
 static BG_CMD_TX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<BgCmd>>> =
@@ -209,8 +213,8 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
     });
 
-    // Keep MPRIS shuffle/repeat in sync with the UI's own toggles.
-    #[cfg(target_os = "linux")]
+    // Keep MPRIS / the Android notification in sync with the UI's own toggles.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     use_effect(move || {
         let shuffle = *ctrl.shuffle.read();
         let repeat = match *ctrl.loop_mode.read() {
@@ -285,7 +289,16 @@ pub fn use_player_task(ctrl: PlayerController) {
     #[cfg(target_os = "android")]
     use_hook(move || {
         init_bg_channel();
-
+        // Runs on the event loop thread, which is the only place its looper can be
+        // picked up — see `capture_event_loop`.
+        player::systemint::capture_event_loop();
+        // Same trick as macOS: the keepalive ticker pokes this while the activity is
+        // hidden, so the loop below keeps draining commands and advancing the queue.
+        player::systemint::set_tokio_waker(|| {
+            if let Some(notify) = BG_NOTIFY.get() {
+                notify.notify_one();
+            }
+        });
         player::systemint::set_background_handler(move |event| {
             use player::systemint::SystemEvent;
             let cmd = match event {
@@ -295,6 +308,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                 SystemEvent::Next => BgCmd::Next,
                 SystemEvent::Prev => BgCmd::Prev,
                 SystemEvent::Stop => BgCmd::Pause,
+                SystemEvent::ToggleShuffle => BgCmd::ToggleShuffle,
+                SystemEvent::CycleRepeat => BgCmd::CycleRepeat,
             };
             send_bg_cmd(cmd);
         });
@@ -804,6 +819,16 @@ pub fn use_player_task(ctrl: PlayerController) {
                             ctrl.seek(pos);
                         }
                         BgCmd::Seek(_) => {}
+                        #[cfg(target_os = "android")]
+                        BgCmd::ToggleShuffle => {
+                            let on = *ctrl.shuffle.peek();
+                            ctrl.set_shuffle(!on);
+                        }
+                        #[cfg(target_os = "android")]
+                        BgCmd::CycleRepeat => {
+                            let next = ctrl.loop_mode.peek().next();
+                            ctrl.set_loop_mode(next);
+                        }
                     }
                 }
 

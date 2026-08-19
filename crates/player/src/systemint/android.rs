@@ -1,7 +1,8 @@
 use jni::objects::{GlobalRef, JClass, JObject, JString, JValue};
 use jni::{JNIEnv, JavaVM};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::Notify;
 
 // Set from the JNI thread when the hardware/gesture back is pressed; drained on the
 // runtime by take_back_pressed(). Decoupled because dioxus signals can only be touched
@@ -13,6 +14,89 @@ pub fn take_back_pressed() -> bool {
     BACK_PENDING.swap(false, Ordering::SeqCst)
 }
 
+const PERMISSION_UNANSWERED: u8 = 0;
+const PERMISSION_GRANTED: u8 = 1;
+const PERMISSION_DENIED: u8 = 2;
+static MEDIA_PERMISSION: AtomicU8 = AtomicU8::new(PERMISSION_UNANSWERED);
+
+fn permission_notify() -> &'static Notify {
+    static N: OnceLock<Notify> = OnceLock::new();
+    N.get_or_init(Notify::new)
+}
+
+/// Whether the app already holds the permission to read shared media. Android
+/// skips the dialog for one that is already granted, so a caller that only waited
+/// for the answer would wait forever.
+pub fn has_media_permission() -> bool {
+    let Some(vm) = JVM.get() else {
+        return false;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return false;
+    };
+    let ctx = ndk_context::android_context();
+    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let granted: Result<bool, jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/MediaSessionHelper")?;
+        env.call_static_method(
+            &class,
+            "hasMediaPermission",
+            "(Landroid/content/Context;)Z",
+            &[JValue::Object(&activity)],
+        )?
+        .z()
+    })(&mut env);
+    match granted {
+        Ok(granted) => granted,
+        Err(e) => {
+            tracing::warn!(error = %e, "MediaSessionHelper.hasMediaPermission failed");
+            clear_jni_exception(&mut env);
+            false
+        }
+    }
+}
+
+/// Records the user's answer and releases anyone waiting on it. `notify_one` stores
+/// a permit for a waiter that has not registered yet, `notify_waiters` covers the
+/// ones that already have; an answer landing in that gap would otherwise be lost.
+fn set_media_permission(answer: u8) {
+    MEDIA_PERMISSION.store(answer, Ordering::SeqCst);
+    permission_notify().notify_waiters();
+    permission_notify().notify_one();
+}
+
+/// Resolves once the user has answered the media permission dialog: `true` for a
+/// grant, `false` for a denial or a dismissal (Android reports an empty result for
+/// a dialog swiped away, which counts as a denial).
+///
+/// The answer stays readable after the fact, so a late caller still sees it;
+/// `request_permissions` clears it before each new dialog. Every wait is
+/// bounded and re-checks the actual permission, so a lost native callback
+/// degrades to the real permission state after two minutes instead of hanging
+/// the caller forever.
+pub async fn await_media_permission() -> bool {
+    if has_media_permission() {
+        return true;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        let answered = permission_notify().notified();
+        match MEDIA_PERMISSION.load(Ordering::SeqCst) {
+            PERMISSION_GRANTED => return true,
+            PERMISSION_DENIED => return false,
+            _ => {
+                if std::time::Instant::now() >= deadline {
+                    return has_media_permission();
+                }
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(2), answered).await;
+                if has_media_permission() {
+                    return true;
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum SystemEvent {
     Play,
@@ -21,15 +105,69 @@ pub enum SystemEvent {
     Next,
     Prev,
     Stop,
+    /// Notification shuffle button. The notification has no authority over the
+    /// mode — the queue does — so a tap asks for a flip rather than a value.
+    ToggleShuffle,
+    /// Notification repeat button, cycling off → queue → track.
+    CycleRepeat,
+}
+
+/// Mirrors the desktop `RepeatMode` so the UI can push one mode enum to every
+/// platform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepeatMode {
+    Off,
+    Playlist,
+    Track,
+}
+
+impl RepeatMode {
+    /// Matches `MediaSessionHelper.REPEAT_*`.
+    fn as_java(self) -> i32 {
+        match self {
+            Self::Off => 0,
+            Self::Playlist => 1,
+            Self::Track => 2,
+        }
+    }
 }
 
 static JVM: OnceLock<JavaVM> = OnceLock::new();
 // App classloader cached from main thread so FindClass works from any thread.
 static CLASSLOADER: OnceLock<GlobalRef> = OnceLock::new();
-static BACKGROUND_HANDLER: OnceLock<Arc<Mutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>> =
-    OnceLock::new();
+type BackgroundHandler = Arc<Mutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>;
+static BACKGROUND_HANDLER: OnceLock<BackgroundHandler> = OnceLock::new();
 
-fn get_bg_handler() -> Arc<Mutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>> {
+type TokioWaker = Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
+static TOKIO_WAKER: OnceLock<TokioWaker> = OnceLock::new();
+
+fn get_tokio_waker() -> TokioWaker {
+    TOKIO_WAKER
+        .get_or_init(|| Arc::new(Mutex::new(None)))
+        .clone()
+}
+
+/// Register the poke that makes dioxus poll its tasks. Dioxus only advances its
+/// tokio runtime inside `poll_vdom`, which runs when the event loop receives a
+/// proxy event — so with the activity hidden nothing time-based ever fires and the
+/// player task loop stops: no queue advance at the end of a track, no now-playing
+/// refresh, and media buttons only land because the JNI callback happens to wake it.
+/// The waker is what the keepalive ticker below calls to keep that loop turning.
+pub fn set_tokio_waker(waker: impl Fn() + Send + Sync + 'static) {
+    let arc = get_tokio_waker();
+    let mut guard = arc.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = Some(Box::new(waker));
+}
+
+fn wake_tokio() {
+    if let Ok(guard) = get_tokio_waker().lock()
+        && let Some(ref waker) = *guard
+    {
+        waker();
+    }
+}
+
+fn get_bg_handler() -> BackgroundHandler {
     BACKGROUND_HANDLER
         .get_or_init(|| Arc::new(Mutex::new(None)))
         .clone()
@@ -42,11 +180,14 @@ pub fn set_background_handler(handler: impl Fn(SystemEvent) + Send + Sync + 'sta
 }
 
 fn dispatch_event(event: SystemEvent) {
-    if let Ok(guard) = get_bg_handler().lock() {
-        if let Some(ref handler) = *guard {
-            handler(event);
-        }
+    if let Ok(guard) = get_bg_handler().lock()
+        && let Some(ref handler) = *guard
+    {
+        handler(event);
     }
+    // The handler only queues; without this the command waits for the activity to
+    // come back into view.
+    wake_run_loop();
 }
 
 pub fn init() {
@@ -312,12 +453,12 @@ fn data_url_to_file(url: &str) -> Option<String> {
     // Hash is part of the filename so a new track yields a new path — the Kotlin
     // side caches its decoded bitmap by path and would otherwise keep showing the
     // previous track's art when the filename stayed constant.
-    if let Ok(guard) = LAST_DATA_ART.lock() {
-        if let Some((last_hash, path)) = guard.as_ref() {
-            if *last_hash == hash && std::path::Path::new(path).exists() {
-                return Some(path.clone());
-            }
-        }
+    if let Ok(guard) = LAST_DATA_ART.lock()
+        && let Some((last_hash, path)) = guard.as_ref()
+        && *last_hash == hash
+        && std::path::Path::new(path).exists()
+    {
+        return Some(path.clone());
     }
 
     let files_dir = get_files_dir()?;
@@ -326,10 +467,10 @@ fn data_url_to_file(url: &str) -> Option<String> {
     std::fs::write(&path, &bytes).ok()?;
     if let Ok(mut guard) = LAST_DATA_ART.lock() {
         // Remove the previously written art file so they don't accumulate.
-        if let Some((_, old_path)) = guard.as_ref() {
-            if old_path != &path {
-                let _ = std::fs::remove_file(old_path);
-            }
+        if let Some((_, old_path)) = guard.as_ref()
+            && old_path != &path
+        {
+            let _ = std::fs::remove_file(old_path);
         }
         *guard = Some((hash, path.clone()));
     }
@@ -394,7 +535,7 @@ pub fn update_now_playing(
         let j_art_owned;
         let j_art: &JObject = if let Some(ref path) = resolved_art {
             j_art_owned = env.new_string(path)?;
-            &*j_art_owned
+            &j_art_owned
         } else {
             &null_obj
         };
@@ -422,24 +563,138 @@ pub fn update_now_playing(
     }
 }
 
-pub fn wake_run_loop() {
-    let vm = match JVM.get() {
-        Some(v) => v,
-        None => return,
+/// Push the queue's shuffle/repeat state to the notification so its buttons show
+/// what is actually in effect.
+pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
+    init();
+    let Some(vm) = JVM.get() else {
+        return;
     };
-    let mut env = match vm.attach_current_thread() {
-        Ok(e) => e,
-        Err(_) => return,
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
     };
-    let result: Result<(), jni::errors::Error> = (|| {
-        let class = find_app_class(&mut env, "com/temidaradev/kopuz/MediaSessionHelper")?;
-        env.call_static_method(&class, "wakeMainThread", "()V", &[])?
-            .v()?;
+    let ctx = ndk_context::android_context();
+    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/MediaSessionHelper")?;
+        env.call_static_method(
+            &class,
+            "updateModes",
+            "(Landroid/content/Context;ZI)V",
+            &[
+                JValue::Object(&activity),
+                JValue::Bool(shuffle as u8),
+                JValue::Int(repeat.as_java()),
+            ],
+        )?
+        .v()?;
         Ok(())
-    })();
-    if let Err(_) = result {
+    })(&mut env);
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "MediaSessionHelper.updateModes failed");
         clear_jni_exception(&mut env);
     }
+}
+
+// The event loop parks in `ALooper_pollAll` whenever the activity is not visible,
+// which stops dioxus polling its tasks: media buttons queue up undelivered, the
+// queue never advances at the end of a track, and now-playing stops updating —
+// all while audio keeps running on the engine's own threads. tao wakes that same
+// looper for its proxy events, so holding a handle to it lets any thread do the
+// same.
+unsafe extern "C" {
+    fn ALooper_forThread() -> *mut std::ffi::c_void;
+    fn ALooper_acquire(looper: *mut std::ffi::c_void);
+    fn ALooper_release(looper: *mut std::ffi::c_void);
+    fn ALooper_wake(looper: *mut std::ffi::c_void);
+}
+
+static EVENT_LOOP: std::sync::atomic::AtomicPtr<std::ffi::c_void> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+static KEEPALIVE: AtomicBool = AtomicBool::new(false);
+
+/// Capture the looper of the calling thread as the one to wake. Must be called
+/// from the event loop thread (a dioxus hook body qualifies); every other thread
+/// has a different looper, or none at all.
+pub fn capture_event_loop() {
+    // SAFETY: both are thread-safe NDK calls; `acquire` keeps the looper alive for
+    // the process, which is exactly as long as the pointer is readable.
+    let looper = unsafe { ALooper_forThread() };
+    if looper.is_null() {
+        tracing::warn!("no looper on the event loop thread; background control will stall");
+        return;
+    }
+    unsafe { ALooper_acquire(looper) };
+    if EVENT_LOOP
+        .compare_exchange(
+            std::ptr::null_mut(),
+            looper,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        // SAFETY: balances the acquire above; a concurrent caller won the slot.
+        unsafe { ALooper_release(looper) };
+        return;
+    }
+    start_keepalive();
+}
+
+/// Wake the event loop so dioxus polls its tasks now.
+pub fn wake_run_loop() {
+    let looper = EVENT_LOOP.load(Ordering::SeqCst);
+    if !looper.is_null() {
+        // SAFETY: `looper` was acquired above and is valid for the process.
+        unsafe { ALooper_wake(looper) };
+    }
+}
+
+/// While the activity is hidden the loop has to be turned by hand — the same task
+/// loop drains the notification buttons, advances the queue at the end of a track
+/// and refreshes now-playing, and none of it runs while the loop is parked.
+/// Foregrounded the loop runs on its own, so the ticker stands down.
+pub fn set_keepalive(active: bool) {
+    if KEEPALIVE.swap(active, Ordering::SeqCst) == active {
+        return;
+    }
+    if active {
+        wake_run_loop();
+    }
+    let (lock, signal) = keepalive_signal();
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+    signal.notify_all();
+}
+
+/// Parks the keepalive thread while the app is foregrounded; `set_keepalive`
+/// signals it on every state flip so ticking starts and stops promptly instead
+/// of on a polling interval.
+fn keepalive_signal() -> &'static (Mutex<()>, std::sync::Condvar) {
+    static SIGNAL: OnceLock<(Mutex<()>, std::sync::Condvar)> = OnceLock::new();
+    SIGNAL.get_or_init(|| (Mutex::new(()), std::sync::Condvar::new()))
+}
+
+fn start_keepalive() {
+    std::thread::Builder::new()
+        .name("kopuz-loop-keepalive".into())
+        .spawn(|| {
+            loop {
+                if KEEPALIVE.load(Ordering::SeqCst) {
+                    // Both halves matter: the waker gives the runtime a reason to
+                    // poll, `wake_run_loop` gets the parked event loop to notice.
+                    wake_tokio();
+                    wake_run_loop();
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                } else {
+                    let (lock, signal) = keepalive_signal();
+                    let mut guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+                    while !KEEPALIVE.load(Ordering::SeqCst) {
+                        guard = signal.wait(guard).unwrap_or_else(|e| e.into_inner());
+                    }
+                }
+            }
+        })
+        .ok();
 }
 
 pub fn stop_session() {
@@ -472,6 +727,7 @@ pub fn stop_session() {
 
 pub fn request_permissions() {
     init();
+    MEDIA_PERMISSION.store(PERMISSION_UNANSWERED, Ordering::SeqCst);
     let vm = match JVM.get() {
         Some(v) => v,
         None => return,
@@ -529,7 +785,120 @@ pub extern "system" fn Java_com_temidaradev_kopuz_MediaReceiver_nativeOnAction(
             BACK_PENDING.store(true, Ordering::SeqCst);
             super::back_wake();
         }
+        // Activity lifecycle, not a media command: no listener to dispatch to.
+        "bg-enter" => set_keepalive(true),
+        "bg-exit" => set_keepalive(false),
+        "shuffle" => dispatch_event(SystemEvent::ToggleShuffle),
+        "loop" => dispatch_event(SystemEvent::CycleRepeat),
+        "media-granted" => set_media_permission(PERMISSION_GRANTED),
+        "media-denied" => {
+            tracing::warn!("media permission denied — the library scan cannot read shared storage");
+            set_media_permission(PERMISSION_DENIED);
+        }
         _ => {}
+    }
+}
+
+/// Open the in-app sign-in browser (`LoginActivity`) at `url`, wiping WebView
+/// cookies first so only the fresh session satisfies the caller's poll.
+pub fn login_open(url: &str) {
+    init();
+    let Some(vm) = JVM.get() else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let ctx = ndk_context::android_context();
+    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        let j_url = env.new_string(url)?;
+        env.call_static_method(
+            &class,
+            "open",
+            "(Landroid/content/Context;Ljava/lang/String;)V",
+            &[JValue::Object(&activity), JValue::Object(&j_url)],
+        )?
+        .v()?;
+        Ok(())
+    })(&mut env);
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "LoginActivity.open failed");
+        clear_jni_exception(&mut env);
+    }
+}
+
+/// The `Cookie:`-header string the WebView holds for `url`, if any.
+pub fn login_cookies(url: &str) -> Option<String> {
+    let vm = JVM.get()?;
+    let mut env = vm.attach_current_thread().ok()?;
+    let result: Result<Option<String>, jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        let j_url = env.new_string(url)?;
+        let obj = env
+            .call_static_method(
+                &class,
+                "cookies",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                &[JValue::Object(&j_url)],
+            )?
+            .l()?;
+        if obj.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(env.get_string(&JString::from(obj))?.into()))
+        }
+    })(&mut env);
+    match result {
+        Ok(cookies) => cookies,
+        Err(e) => {
+            tracing::warn!(error = %e, "LoginActivity.cookies failed");
+            clear_jni_exception(&mut env);
+            None
+        }
+    }
+}
+
+/// Whether the sign-in browser is still on screen; `false` after the user
+/// backs out, which the polling caller reports as a cancelled sign-in.
+pub fn login_is_open() -> bool {
+    let Some(vm) = JVM.get() else {
+        return false;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return false;
+    };
+    let result: Result<bool, jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        env.call_static_method(&class, "isOpen", "()Z", &[])?.z()
+    })(&mut env);
+    match result {
+        Ok(open) => open,
+        Err(e) => {
+            tracing::warn!(error = %e, "LoginActivity.isOpen failed");
+            clear_jni_exception(&mut env);
+            false
+        }
+    }
+}
+
+/// Dismiss the sign-in browser once the caller has what it needs.
+pub fn login_close() {
+    let Some(vm) = JVM.get() else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
+        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        env.call_static_method(&class, "close", "()V", &[])?.v()?;
+        Ok(())
+    })(&mut env);
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "LoginActivity.close failed");
+        clear_jni_exception(&mut env);
     }
 }
 

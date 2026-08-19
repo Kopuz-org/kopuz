@@ -29,6 +29,74 @@ async fn try_resume_ytmusic(seed: Option<String>) -> Option<String> {
     None
 }
 
+/// Poll-driven Android sign-in: opens the in-app login WebView at `signin_url`
+/// and waits until `extract` finds what it needs in the cookies the WebView
+/// accumulates for `cookie_url`. Mirrors the desktop flow in
+/// `server::cookies::signin`, with Android's app-global CookieManager standing
+/// in for the spawned browser profile.
+#[cfg(target_os = "android")]
+async fn webview_signin(
+    signin_url: &str,
+    cookie_url: &str,
+    extract: impl Fn(&str) -> Option<String>,
+) -> Result<String, String> {
+    use std::time::{Duration, Instant};
+    player::systemint::login_open(signin_url);
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let mut seen_open = false;
+    loop {
+        utils::sleep(Duration::from_secs(2)).await;
+        if let Some(header) = player::systemint::login_cookies(cookie_url)
+            && let Some(value) = extract(&header)
+        {
+            player::systemint::login_close();
+            return Ok(value);
+        }
+        if player::systemint::login_is_open() {
+            seen_open = true;
+        } else if seen_open {
+            return Err("the sign-in window was closed".to_string());
+        }
+        if Instant::now() >= deadline {
+            player::systemint::login_close();
+            return Err("sign-in timed out".to_string());
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn cookie_value(header: &str, name: &str) -> Option<String> {
+    header.split(';').find_map(|pair| {
+        let (key, value) = pair.trim().split_once('=')?;
+        (key == name && !value.is_empty()).then(|| value.to_string())
+    })
+}
+
+#[cfg(target_os = "android")]
+async fn ensure_ytmusic_signed_in(
+    config_cookies: Option<String>,
+    _browser: Browser,
+    _server_id: &str,
+) -> Result<String, String> {
+    if let Some(cookies) = try_resume_ytmusic(config_cookies).await {
+        return Ok(cookies);
+    }
+    let cookies = webview_signin(
+        ::server::ytmusic::isolated_profile::SIGNIN_URL,
+        "https://music.youtube.com",
+        |header| {
+            (cookie_value(header, "SAPISID").is_some() && cookie_value(header, "SID").is_some())
+                .then(|| header.to_string())
+        },
+    )
+    .await?;
+    if !validate_ytmusic(&cookies).await {
+        return Err("Sign-in completed but YT validation still failed".to_string());
+    }
+    Ok(cookies)
+}
+
+#[cfg(not(target_os = "android"))]
 async fn ensure_ytmusic_signed_in(
     config_cookies: Option<String>,
     browser: Browser,
@@ -135,6 +203,17 @@ fn apply_browser_login(
     }
 }
 
+/// What actually rendered the sign-in page, for error messages: the chosen
+/// desktop browser, or the in-app WebView on Android (where the browser
+/// setting is not consulted at all).
+fn signin_surface(browser: Browser) -> String {
+    if cfg!(target_os = "android") {
+        "WebView".to_string()
+    } else {
+        browser.to_string()
+    }
+}
+
 /// Surface a browser sign-in failure to both the settings error line and the
 /// player error banner.
 fn report_signin_failure(
@@ -169,7 +248,10 @@ pub fn ytmusic_auto_login(
                 report_signin_failure(
                     error,
                     playback_error,
-                    format!("YT Music sign-in failed ({browser}): {err}"),
+                    format!(
+                        "YT Music sign-in failed ({}): {err}",
+                        signin_surface(browser)
+                    ),
                 );
                 return;
             }
@@ -196,19 +278,33 @@ pub fn soundcloud_auto_login(
         )
     };
     spawn(async move {
-        let token = match ::server::soundcloud::signin::launch_signin_and_extract(
+        #[cfg(not(target_os = "android"))]
+        let signin = ::server::soundcloud::signin::launch_signin_and_extract(
             browser,
             &server_id,
             std::time::Duration::from_secs(300),
         )
-        .await
-        {
+        .await;
+        #[cfg(target_os = "android")]
+        let signin = {
+            let _ = &server_id;
+            webview_signin(
+                "https://soundcloud.com/signin",
+                "https://soundcloud.com",
+                |header| cookie_value(header, "oauth_token"),
+            )
+            .await
+        };
+        let token = match signin {
             Ok(token) => token,
             Err(err) => {
                 report_signin_failure(
                     error,
                     playback_error,
-                    format!("SoundCloud sign-in failed ({browser}): {err}"),
+                    format!(
+                        "SoundCloud sign-in failed ({}): {err}",
+                        signin_surface(browser)
+                    ),
                 );
                 return;
             }

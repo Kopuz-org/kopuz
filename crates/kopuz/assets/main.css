@@ -62,6 +62,14 @@ button:focus {
     outline: none;
 }
 
+/* The root is focusable only so it can receive the keyboard shortcuts, and it is
+   focused explicitly on startup. It fills the viewport, so the focus ring the
+   webview draws for it lands on the screen edges as stray accent-coloured lines. */
+#app-root:focus,
+#app-root:focus-visible {
+    outline: none;
+}
+
 .overflow-y-auto {
     will-change: scroll-position;
 }

@@ -94,7 +94,7 @@ pub fn Album(
 
     rsx! {
         div {
-            class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+            class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
 
             if album_id.read().is_empty() {
                 div { class: "flex-1 min-h-0 flex flex-col",

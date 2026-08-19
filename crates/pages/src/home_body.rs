@@ -895,6 +895,7 @@ fn render_continue_listening(
             div {
                 id: "jelly-continue-scroll",
                 class: "flex overflow-x-auto gap-5 pb-6 pt-2 scrollbar-hide scroll-smooth -mx-2 px-2",
+                ontouchstart: move |evt| evt.stop_propagation(),
                 for (track, album_opt, cover_url) in tracks {
                     {
                         let title = track.title.clone();
@@ -966,6 +967,7 @@ fn render_listen_now(
             }
             if use_cards {
                 div { class: "flex overflow-x-auto gap-4 pb-4 scrollbar-hide scroll-smooth -mx-2 px-2",
+                    ontouchstart: move |evt| evt.stop_propagation(),
                     for (album_id, title, artist, cover_url) in jellyfin_shuffled.iter().skip(1).take(10).cloned() {
                         div {
                             class: "flex-none w-40 group cursor-pointer",
@@ -1067,6 +1069,7 @@ fn render_top_artists(
             div {
                 id: "jelly-artists-scroll",
                 class: "flex overflow-x-auto gap-6 pb-6 pt-2 overflow-y-visible scrollbar-hide scroll-smooth -mx-2 px-2",
+                ontouchstart: move |evt| evt.stop_propagation(),
                 for (artist, cover_url) in artists {
                     div {
                         class: "flex-none w-32 md:w-40 group cursor-pointer",
@@ -1130,6 +1133,7 @@ fn render_albums_row(
             div {
                 id: "{scroll_id}",
                 class: "flex overflow-x-auto gap-5 pb-6 pt-2 overflow-y-visible scrollbar-hide scroll-smooth -mx-2 px-2",
+                ontouchstart: move |evt| evt.stop_propagation(),
                 for (album_id, title, artist, cover_url) in albums {
                     div {
                         class: "flex-none w-36 md:w-48 group cursor-pointer",
@@ -1197,6 +1201,7 @@ fn render_playlists(
             div {
                 id: "jelly-playlists-scroll",
                 class: "flex overflow-x-auto gap-6 pb-6 pt-2 scrollbar-hide scroll-smooth -mx-2 px-2",
+                ontouchstart: move |evt| evt.stop_propagation(),
                 for (id, name, track_count, cover_url) in recent_playlists {
                     {
                         rsx! {

@@ -69,6 +69,17 @@ object MediaSessionHelper {
     private var noisyReceiver: BroadcastReceiver? = null
 
     @JvmStatic
+    fun hasMediaPermission(context: Context): Boolean {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            android.Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        return context.checkSelfPermission(permission) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
+
+    @JvmStatic
     fun requestPermissions(activity: android.app.Activity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (activity.checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -109,6 +120,11 @@ object MediaSessionHelper {
                 override fun onSkipToNext() = MediaReceiver.nativeOnAction("next")
                 override fun onSkipToPrevious() = MediaReceiver.nativeOnAction("prev")
                 override fun onStop() = MediaReceiver.nativeOnAction("stop")
+                // Where the shuffle/repeat taps land: the system media player builds
+                // its buttons from the session, so those two are custom actions.
+                override fun onCustomAction(action: String, extras: android.os.Bundle?) {
+                    MediaReceiver.nativeOnAction(action)
+                }
             })
             isActive = true
         }
@@ -146,6 +162,46 @@ object MediaSessionHelper {
         return bmp
     }
 
+    const val REPEAT_OFF = 0
+    const val REPEAT_ALL = 1
+    const val REPEAT_ONE = 2
+
+    @Volatile private var shuffleOn = false
+    @Volatile private var repeatMode = REPEAT_OFF
+
+    // Last rendered track, so a shuffle/repeat change can redraw the notification
+    // without waiting for the next playback update to carry the metadata again.
+    private class LastRender(
+        val title: String,
+        val artist: String,
+        val album: String,
+        val durationMs: Long,
+        val positionMs: Long,
+        val playing: Boolean,
+        val artworkPath: String?,
+    )
+
+    @Volatile private var lastRender: LastRender? = null
+
+    @JvmStatic
+    fun updateModes(context: Context, shuffle: Boolean, repeat: Int) {
+        if (shuffle == shuffleOn && repeat == repeatMode) return
+        shuffleOn = shuffle
+        repeatMode = repeat
+        val last = lastRender ?: return
+        // Cached art only: this runs on the caller's thread, and loadArt would go to
+        // disk or the network for anything else.
+        val art = if (last.artworkPath != null && last.artworkPath == cachedArtPath) {
+            cachedArtBitmap
+        } else {
+            null
+        }
+        render(
+            context, last.title, last.artist, last.album, last.durationMs,
+            last.positionMs, last.playing, art,
+        )
+    }
+
     @JvmStatic
     fun updateNowPlaying(
         context: Context,
@@ -157,6 +213,8 @@ object MediaSessionHelper {
         playing: Boolean,
         artworkPath: String?,
     ) {
+        lastRender =
+            LastRender(title, artist, album, durationMs, positionMs, playing, artworkPath)
         // Grab focus + arm the noisy receiver as soon as we start playing.
         if (playing) {
             if (!hasFocus) hasFocus = requestFocus()
@@ -179,6 +237,25 @@ object MediaSessionHelper {
             }.apply { isDaemon = true }.start()
         }
     }
+
+    // Dotted glyph for active, plain for off — a custom action renders as an icon
+    // only, so the state has to be visible in the drawing itself.
+    private fun repeatIcon() = when (repeatMode) {
+        REPEAT_ONE -> R.drawable.kopuz_ic_repeat_one_on
+        REPEAT_ALL -> R.drawable.kopuz_ic_repeat_on
+        else -> R.drawable.kopuz_ic_repeat
+    }
+
+    private fun shuffleIcon() =
+        if (shuffleOn) R.drawable.kopuz_ic_shuffle_on else R.drawable.kopuz_ic_shuffle
+
+    private fun repeatLabel() = when (repeatMode) {
+        REPEAT_ALL -> "Repeat: queue"
+        REPEAT_ONE -> "Repeat: track"
+        else -> "Repeat: off"
+    }
+
+    private fun shuffleLabel() = if (shuffleOn) "Shuffle: on" else "Shuffle: off"
 
     private fun render(
         context: Context,
@@ -215,6 +292,16 @@ object MediaSessionHelper {
                     PlaybackState.ACTION_SKIP_TO_NEXT or
                     PlaybackState.ACTION_SKIP_TO_PREVIOUS
                 )
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder(
+                        "shuffle", shuffleLabel(), shuffleIcon()
+                    ).build()
+                )
+                .addCustomAction(
+                    PlaybackState.CustomAction.Builder(
+                        "loop", repeatLabel(), repeatIcon()
+                    ).build()
+                )
                 .build()
         )
 
@@ -227,7 +314,7 @@ object MediaSessionHelper {
         val notifBuilder = Notification.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText("$artist — $album")
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.kopuz_ic_notification)
             .setOngoing(playing)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setDeleteIntent(pendingBroadcast(context, "stop"))
@@ -237,7 +324,15 @@ object MediaSessionHelper {
             .setStyle(
                 Notification.MediaStyle()
                     .setMediaSession(s.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2)
+                    // Prev/play/next stay in the collapsed view; shuffle and repeat
+                    // only appear once the notification is expanded.
+                    .setShowActionsInCompactView(1, 2, 3)
+            )
+            .addAction(
+                Notification.Action.Builder(
+                    shuffleIcon(), shuffleLabel(),
+                    pendingBroadcast(context, "shuffle")
+                ).build()
             )
             .addAction(
                 Notification.Action.Builder(
@@ -255,6 +350,12 @@ object MediaSessionHelper {
                 Notification.Action.Builder(
                     android.R.drawable.ic_media_next, "Next",
                     pendingBroadcast(context, "next")
+                ).build()
+            )
+            .addAction(
+                Notification.Action.Builder(
+                    repeatIcon(), repeatLabel(),
+                    pendingBroadcast(context, "loop")
                 ).build()
             )
             .build()

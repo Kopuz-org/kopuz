@@ -95,7 +95,7 @@ pub fn PlaylistsPage(
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
 
     rsx! {
-        div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+        div { class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             if let Some(pid) = selected_playlist_id.read().clone() {
                 {
                     let pid_for_dl = pid.clone();

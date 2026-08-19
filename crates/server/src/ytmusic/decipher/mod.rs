@@ -32,6 +32,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use tokio::sync::{mpsc, oneshot};
 
 // Headless deno_core engine (post-WebView). Android keeps the WebView.
 #[cfg(not(target_os = "android"))]
@@ -533,6 +534,52 @@ impl JsEngine for SubprocessEngine {
             Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
         })
     }
+}
+
+/// A unit of work for the UI-layer solver loop: a JS `program` to run in the
+/// resident WebView, plus a one-shot `reply` for whatever it prints.
+pub struct SolveRequest {
+    pub program: String,
+    pub reply: oneshot::Sender<Result<String, String>>,
+}
+
+/// [`JsEngine`] that forwards each program to a solver loop running in the UI
+/// layer, which executes it via `dioxus::document::eval` inside the resident
+/// WebView. Desktop runs the in-process `DenoCoreEngine` instead; Android has
+/// no V8, so this is its only working engine (the subprocess fallback needs a
+/// system JS runtime no phone ships). Built by [`webview_channel`]; the UI
+/// registers it via [`set_engine`] and drains the returned receiver.
+pub struct ChannelEngine {
+    tx: mpsc::UnboundedSender<SolveRequest>,
+}
+
+impl JsEngine for ChannelEngine {
+    fn run<'a>(&'a self, program: String) -> BoxFuture<'a, Result<String, String>> {
+        Box::pin(async move {
+            let (reply, rx) = oneshot::channel();
+            self.tx
+                .send(SolveRequest { program, reply })
+                .map_err(|_| "webview solver loop is gone".to_string())?;
+            rx.await
+                .map_err(|_| "webview solver dropped the reply".to_string())?
+        })
+    }
+
+    /// The WebView page's `globalThis` survives between evals, so the solver
+    /// can install the player functions once and reuse them per track; a page
+    /// reload is caught by the `CACHE_MISS` handshake and reinstalls.
+    fn is_persistent(&self) -> bool {
+        true
+    }
+}
+
+/// Create a WebView-backed engine plus the receiver its solver loop drains.
+/// The UI calls this once at startup, `set_engine`s the returned engine, and
+/// spawns a Dioxus task that runs each `SolveRequest.program` via
+/// `document::eval` and answers on `reply`.
+pub fn webview_channel() -> (Box<dyn JsEngine>, mpsc::UnboundedReceiver<SolveRequest>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    (Box::new(ChannelEngine { tx }), rx)
 }
 
 #[cfg(test)]

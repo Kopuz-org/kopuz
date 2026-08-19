@@ -330,6 +330,7 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
     let mut options = vec![
         ("album-art".into(), i18n::t("album_art_gradient")),
         ("default".into(), i18n::t("default_theme")),
+        ("amoled".into(), i18n::t("amoled_black")),
         (utils::live_theme::THEME_ID.into(), i18n::t("live_theme")),
         ("gruvbox".into(), i18n::t("gruvbox_material")),
         ("gruvbox-classic".into(), i18n::t("gruvbox_classic")),
@@ -532,21 +533,26 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
         button {
             onclick: move |_| {
                 player::systemint::request_permissions();
-                let mut paths = Vec::new();
-                if let Some(android_music) = player::systemint::get_android_music_dir() {
-                    paths.push(std::path::PathBuf::from(android_music));
-                }
-                paths.push(std::path::PathBuf::from("/storage/emulated/0/Music"));
-                paths.push(std::path::PathBuf::from("/sdcard/Music"));
-                if let Ok(home) = std::env::var("HOME") {
-                    paths.push(std::path::PathBuf::from(home).join("Music"));
-                }
-                for path in paths {
-                    if path.exists() {
-                        on_add.call(path);
-                        break;
+                spawn(async move {
+                    if !player::systemint::await_media_permission().await {
+                        return;
                     }
-                }
+                    let mut paths = Vec::new();
+                    if let Some(android_music) = player::systemint::get_android_music_dir() {
+                        paths.push(std::path::PathBuf::from(android_music));
+                    }
+                    paths.push(std::path::PathBuf::from("/storage/emulated/0/Music"));
+                    paths.push(std::path::PathBuf::from("/sdcard/Music"));
+                    if let Ok(home) = std::env::var("HOME") {
+                        paths.push(std::path::PathBuf::from(home).join("Music"));
+                    }
+                    for path in paths {
+                        if path.exists() {
+                            on_add.call(path);
+                            break;
+                        }
+                    }
+                });
             },
             class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
             "{add_text}"
