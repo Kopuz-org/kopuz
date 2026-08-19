@@ -122,6 +122,48 @@ fn warn(msg: &str) {
     println!("cargo:warning={msg}");
 }
 
+/// Chromium freezes a hidden page's JS exactly 60s after the activity leaves
+/// the foreground, and dioxus parks every task behind the render
+/// acknowledgement that frozen page can no longer send — the media
+/// notification goes dead and the queue stops advancing while audio plays on.
+/// Freezing is keyed purely off page visibility (a held Web Lock does not
+/// exempt it), so the generated `RustWebView` is patched to report its window
+/// as always visible: the page never counts as hidden, never freezes, and
+/// background playback control keeps working.
+fn patch_rust_webview(path: &Path) {
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            warn(&format!("cannot read {}: {e}", path.display()));
+            return;
+        }
+    };
+    if content.contains("onWindowVisibilityChanged") {
+        return;
+    }
+    const ANCHOR: &str = "): WebView(context) {";
+    const OVERRIDES: &str = r#"): WebView(context) {
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(android.view.View.VISIBLE)
+    }
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(true)
+    }
+"#;
+    if !content.contains(ANCHOR) {
+        warn(&format!(
+            "RustWebView.kt anchor not found; page-freeze patch skipped ({})",
+            path.display()
+        ));
+        return;
+    }
+    let patched = content.replacen(ANCHOR, OVERRIDES, 1);
+    if let Err(e) = fs::write(path, patched) {
+        warn(&format!("cannot write {}: {e}", path.display()));
+    }
+}
+
 /// Inline the vendored woff2 fonts into the bundled font CSS as base64 `data:`
 /// URIs, writing the result to `OUT_DIR`. `main.rs` pulls these in via
 /// `include_str!(concat!(env!("OUT_DIR"), "/..."))`, so the fonts are compiled
@@ -284,6 +326,12 @@ fn main() {
     let main_activity_src = android_src.join("kotlin/dev/dioxus/main/MainActivity.kt");
     let main_activity_dst = out_dir.join("MainActivity.kt");
     copy_file(&main_activity_src, &main_activity_dst);
+
+    // 2b. Keep Chromium from ever considering the page hidden; see the fn docs.
+    // dx rewrites the file every build, so re-run whenever it changes.
+    let rust_webview = out_dir.join("RustWebView.kt");
+    println!("cargo:rerun-if-changed={}", rust_webview.display());
+    patch_rust_webview(&rust_webview);
 
     // 3. Patch the freshly-generated manifest with permissions + service + receiver.
     //    dx rewrites this file every build, so re-run whenever it changes.

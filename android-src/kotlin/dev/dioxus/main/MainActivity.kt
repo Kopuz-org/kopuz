@@ -57,11 +57,39 @@ class MainActivity : WryActivity() {
         MediaReceiver.nativeOnAction("back")
     }
 
-    // The native event loop parks while the activity is hidden, so Rust has to know
-    // when that starts and stops: backgrounded it keeps the loop ticking itself,
-    // foregrounded the loop runs on its own and the ticker is dead weight.
+    private var webView: android.webkit.WebView? = null
+
+    /**
+     * Dioxus only polls its futures after the WebView acknowledges the previous
+     * render, and that JS runs in the WebView's sandboxed renderer *process* — a
+     * separate process our foreground service does not protect. By default the
+     * WebView waives the renderer's priority whenever it is not visible, so about
+     * a minute after backgrounding the cached-app freezer freezes the renderer:
+     * no more edit acks, every Rust task stalls, notification taps queue up and
+     * the track never auto-advances until the app is reopened. Keeping the
+     * priority at IMPORTANT with waiving disabled binds the renderer to this
+     * process's (service-protected) importance so it stays runnable.
+     */
+    override fun onWebViewCreate(webView: android.webkit.WebView) {
+        this.webView = webView
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.setRendererPriorityPolicy(
+                android.webkit.WebView.RENDERER_PRIORITY_IMPORTANT,
+                false
+            )
+        }
+    }
+
+    // WryActivity.onPause() suspends the WebView, which stops its JavaScript. Dioxus
+    // only polls its futures once the WebView has acknowledged the previous render
+    // (see poll_edits_flushed in dioxus-desktop), so a suspended WebView freezes
+    // every task in the app: notification buttons queue up undelivered and a track
+    // ending never advances the queue, all while audio keeps playing on the engine's
+    // own threads. Resuming it right back keeps that loop turning in the background.
     override fun onPause() {
         super.onPause()
+        webView?.onResume()
+        webView?.resumeTimers()
         MediaReceiver.nativeOnAction("bg-enter")
     }
 

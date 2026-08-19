@@ -292,7 +292,13 @@ pub fn use_player_task(ctrl: PlayerController) {
         // Runs on the event loop thread, which is the only place its looper can be
         // picked up — see `capture_event_loop`.
         player::systemint::capture_event_loop();
-
+        // Same trick as macOS: the keepalive ticker pokes this while the activity is
+        // hidden, so the loop below keeps draining commands and advancing the queue.
+        player::systemint::set_tokio_waker(|| {
+            if let Some(notify) = BG_NOTIFY.get() {
+                notify.notify_one();
+            }
+        });
         player::systemint::set_background_handler(move |event| {
             use player::systemint::SystemEvent;
             let cmd = match event {

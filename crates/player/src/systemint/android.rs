@@ -126,6 +126,35 @@ static CLASSLOADER: OnceLock<GlobalRef> = OnceLock::new();
 type BackgroundHandler = Arc<Mutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>;
 static BACKGROUND_HANDLER: OnceLock<BackgroundHandler> = OnceLock::new();
 
+type TokioWaker = Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
+static TOKIO_WAKER: OnceLock<TokioWaker> = OnceLock::new();
+
+fn get_tokio_waker() -> TokioWaker {
+    TOKIO_WAKER
+        .get_or_init(|| Arc::new(Mutex::new(None)))
+        .clone()
+}
+
+/// Register the poke that makes dioxus poll its tasks. Dioxus only advances its
+/// tokio runtime inside `poll_vdom`, which runs when the event loop receives a
+/// proxy event — so with the activity hidden nothing time-based ever fires and the
+/// player task loop stops: no queue advance at the end of a track, no now-playing
+/// refresh, and media buttons only land because the JNI callback happens to wake it.
+/// The waker is what the keepalive ticker below calls to keep that loop turning.
+pub fn set_tokio_waker(waker: impl Fn() + Send + Sync + 'static) {
+    let arc = get_tokio_waker();
+    let mut guard = arc.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = Some(Box::new(waker));
+}
+
+fn wake_tokio() {
+    if let Ok(guard) = get_tokio_waker().lock()
+        && let Some(ref waker) = *guard
+    {
+        waker();
+    }
+}
+
 fn get_bg_handler() -> BackgroundHandler {
     BACKGROUND_HANDLER
         .get_or_init(|| Arc::new(Mutex::new(None)))
@@ -618,6 +647,9 @@ fn start_keepalive() {
         .spawn(|| {
             loop {
                 if KEEPALIVE.load(Ordering::SeqCst) {
+                    // Both halves matter: the waker gives the runtime a reason to
+                    // poll, `wake_run_loop` gets the parked event loop to notice.
+                    wake_tokio();
                     wake_run_loop();
                     std::thread::sleep(std::time::Duration::from_millis(250));
                 } else {

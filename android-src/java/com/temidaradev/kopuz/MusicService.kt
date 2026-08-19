@@ -39,9 +39,6 @@ class MusicService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        // Default to playing if the extra is missing (e.g. a sticky restart).
-        val playing = intent?.getBooleanExtra(EXTRA_PLAYING, true) ?: true
-
         // Must call startForeground within 5s of startForegroundService regardless of
         // play state, or the system kills us with a ForegroundServiceDidNotStartInTime.
         try {
@@ -50,16 +47,12 @@ class MusicService : Service() {
             e.printStackTrace()
         }
 
-        if (playing) {
-            acquireWakeLock()
-        } else {
-            // Paused: the CPU wake lock is pure battery drain with nothing decoding,
-            // but the service stays in the foreground. Detaching it here used to let
-            // the process fall into the cached bucket, where Android freezes it after
-            // a few seconds — transport controls then did nothing until the app was
-            // reopened. Playback is only really over on stopSession().
-            releaseWakeLock()
-        }
+        // Held for the whole session, not just while decoding — the macOS side takes
+        // an IOKit no-idle-sleep assertion for the same reason. With the screen off
+        // and no lock, the CPU suspends: the loop that drains transport commands and
+        // advances the queue stops getting timer ticks, so the app goes deaf until
+        // something else happens to wake the device. Released on stopSession/onDestroy.
+        acquireWakeLock()
 
         return START_STICKY
     }

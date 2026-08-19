@@ -349,7 +349,45 @@ fn main() {
 
         let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
 
+        /// Dioxus gates all task polling on the webview acknowledging the previous
+        /// edit batch, and the stock interpreter only sends that ack from a
+        /// `requestAnimationFrame` callback — which Chromium suspends while the
+        /// activity is backgrounded. One render after backgrounding, the ack never
+        /// arrives, `poll_edits_flushed` stays pending forever, and every future in
+        /// the app stalls (no queue advance, notification taps pile up undelivered).
+        /// This script rebinds the edit path to apply batches and ack immediately —
+        /// the interpreter's own headless behavior. The counter stops a stale rAF
+        /// callback from acking twice, which would release the next batch before the
+        /// DOM had it.
+        const APPLY_EDITS_WITHOUT_RAF: &str = r#"<script>
+(function () {
+    function patch() {
+        var i = window.interpreter;
+        if (!i || !i.rafEdits || !i.markEditsFinished) {
+            setTimeout(patch, 50);
+            return;
+        }
+        var pending = 0;
+        var mark = i.markEditsFinished.bind(i);
+        i.markEditsFinished = function () {
+            if (pending > 0) {
+                pending -= 1;
+                mark();
+            }
+        };
+        i.rafEdits = function (bytes) {
+            pending += 1;
+            i.enqueueBytes(bytes);
+            i.flushQueuedBytes();
+            i.markEditsFinished();
+        };
+    }
+    patch();
+})();
+</script>"#;
+
         let config = dioxus::mobile::Config::new()
+            .with_custom_head(APPLY_EDITS_WITHOUT_RAF.to_string())
             .with_background_color((0, 0, 0, 255))
             // artwork://local?p=<percent-encoded-absolute-path> — the Android WebView mostly
             // receives base64 data URLs from utils, but keep a synchronous handler for any
