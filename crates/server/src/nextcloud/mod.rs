@@ -482,7 +482,10 @@ async fn write_cached(dir: &Path, target: &Path, bytes: &[u8]) -> Option<PathBuf
         target.extension().and_then(|e| e.to_str()).unwrap_or("bin"),
         std::process::id(),
     ));
-    tokio::fs::write(&staging, bytes).await.ok()?;
+    if tokio::fs::write(&staging, bytes).await.is_err() {
+        let _ = tokio::fs::remove_file(&staging).await;
+        return None;
+    }
     if tokio::fs::rename(&staging, target).await.is_err() {
         let _ = tokio::fs::remove_file(&staging).await;
         return None;

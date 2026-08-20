@@ -107,7 +107,7 @@ mod tests {
         use config::MusicService::*;
 
         for service in [
-            Jellyfin, Subsonic, Custom, YtMusic, SoundCloud, Spotify, Nextcloud,
+            Jellyfin, Subsonic, Custom, YtMusic, AppleMusic, SoundCloud, Spotify, Nextcloud,
         ] {
             let stored = crate::backend::writes::service_str(service);
             assert_eq!(parse_service(stored), service, "{stored} did not survive");

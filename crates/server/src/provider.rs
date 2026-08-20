@@ -59,7 +59,10 @@ impl ProviderClient {
                 // Security), which is revocable and survives 2FA.
                 let client =
                     crate::nextcloud::NextcloudClient::new(&self.server_url, username, password)?;
-                client.ping().await.map_err(|e| e.to_string())?;
+                client
+                    .ping()
+                    .await
+                    .map_err(|e| utils::redact::redact_url(&e.to_string()))?;
                 Ok(AuthSession {
                     access_token: password.to_string(),
                     user_id: username.to_string(),
