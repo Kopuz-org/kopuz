@@ -219,21 +219,18 @@ pub async fn replace_favorites_clean(
     )
     .execute(&mut *tx)
     .await?;
-    // Add the remote set as clean rows in the remote's order (rank = index,
-    // newest first). On conflict, update only the rank — applying a remote
-    // reorder — and leave a dirty row's flag intact.
-    for (i, r) in refs.iter().enumerate() {
-        let rank = i as i64;
-        sqlx::query!(
-            "INSERT INTO favorites (server_id, ref, dirty, rank) VALUES (?1, ?2, 0, ?3) \
-             ON CONFLICT(server_id, ref) DO UPDATE SET rank = excluded.rank",
-            server_id,
-            r,
-            rank
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
+    // Add the remote set in one statement. `json_each.key` is the array index,
+    // which is also the remote newest-first rank. Updating only rank preserves a
+    // dirty row's pending local toggle.
+    sqlx::query(
+        "INSERT INTO favorites (server_id, ref, dirty, rank) \
+         SELECT ?1, CAST(value AS TEXT), 0, CAST(key AS INTEGER) FROM json_each(?2) WHERE true \
+         ON CONFLICT(server_id, ref) DO UPDATE SET rank = excluded.rank",
+    )
+    .bind(server_id)
+    .bind(&keep_json)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -251,20 +248,20 @@ pub async fn upsert_favorites_page(
     start_rank: i64,
     epoch: i64,
 ) -> Result<(), DbError> {
+    let refs_json = serde_json::to_string(refs)?;
     let mut tx = pool.begin().await?;
-    for (i, r) in refs.iter().enumerate() {
-        let rank = start_rank + i as i64;
-        sqlx::query!(
-            "INSERT INTO favorites (server_id, ref, dirty, rank, epoch) VALUES (?1, ?2, 0, ?3, ?4) \
-             ON CONFLICT(server_id, ref) DO UPDATE SET rank = excluded.rank, epoch = excluded.epoch",
-            server_id,
-            r,
-            rank,
-            epoch
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
+    sqlx::query(
+        "INSERT INTO favorites (server_id, ref, dirty, rank, epoch) \
+         SELECT ?1, CAST(value AS TEXT), 0, ?3 + CAST(key AS INTEGER), ?4 \
+         FROM json_each(?2) WHERE true \
+         ON CONFLICT(server_id, ref) DO UPDATE SET rank = excluded.rank, epoch = excluded.epoch",
+    )
+    .bind(server_id)
+    .bind(refs_json)
+    .bind(start_rank)
+    .bind(epoch)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }
