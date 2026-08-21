@@ -579,7 +579,13 @@ pub fn Artist(
                                             let Some(path) = id.local_path() else {
                                                 continue;
                                             };
-                                            if std::fs::remove_file(path).is_ok() {
+                                            if crate::local_files::remove(
+                                                &config.read(),
+                                                &source(),
+                                                path,
+                                            )
+                                            .is_ok_and(|removed| removed)
+                                            {
                                                 keys.push(id.key().into_owned());
                                             }
                                         }
@@ -791,11 +797,13 @@ pub fn Artist(
                                                                         AlbumAction::DeleteAlbum => {
                                                                             let s = active_source.peek().clone();
                                                                             let album_id = id.clone();
+                                                                            let delete_config = config.read().clone();
+                                                                            let delete_source = source();
                                                                             spawn(async move {
                                                                                 let to_delete = s.album_tracks(&album_id).await.unwrap_or_default();
                                                                                 for track in &to_delete {
                                                                                     if let Some(path) = track.id.local_path() {
-                                                                                        let _ = std::fs::remove_file(path);
+                                                                                        let _ = crate::local_files::remove(&delete_config, &delete_source, path);
                                                                                     }
                                                                                 }
                                                                                 if s.delete_album(&album_id).await.is_ok() {
@@ -950,7 +958,8 @@ pub fn Artist(
                                     if caps().delete_from_disk
                                         && let Some(track) = artist_tracks().get(idx)
                                         && let Some(p) = track.id.local_path()
-                                        && std::fs::remove_file(p).is_ok()
+                                        && crate::local_files::remove(&config.read(), &source(), p)
+                                            .is_ok_and(|removed| removed)
                                     {
                                         let s = active_source.peek().clone();
                                         let key = track.id.key().into_owned();

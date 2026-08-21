@@ -4395,6 +4395,8 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
  "tokio",
  "tracing",
  "uuid 1.23.5",
