@@ -28,7 +28,7 @@
 }:
 let
   pname = "kopuz";
-  version = "0.15.0";
+  version = "0.15.1";
 
   # `deno_core` pulls in the `v8` crate, whose build script fetches a prebuilt
   # librusty_v8 archive — impossible in the network-less Nix sandbox. Fetch it as
