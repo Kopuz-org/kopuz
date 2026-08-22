@@ -9,6 +9,8 @@ use dioxus::desktop::tao::dpi::LogicalSize;
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
 #[cfg(target_os = "windows")]
 use dioxus::desktop::tao::platform::windows::WindowExtWindows;
+#[cfg(target_os = "linux")]
+use dioxus::desktop::wry::WebViewExtUnix;
 use dioxus::prelude::*;
 use discord_presence::Presence;
 use kopuz_route::Route;
@@ -18,6 +20,8 @@ use queue_state::PersistedQueueState;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::Instrument;
+#[cfg(target_os = "linux")]
+use webkit2gtk::{SettingsExt, WebViewExt};
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 
@@ -488,6 +492,15 @@ fn App() -> Element {
 
     #[cfg(target_os = "android")]
     app_lifecycle::use_webview_decipher_engine();
+
+    #[cfg(target_os = "linux")]
+    use_hook(|| {
+        let webview = dioxus::desktop::window().webview.webview();
+        if let Some(settings) = webview.settings() {
+            // Kopuz never navigates away from its single Dioxus document.
+            settings.set_enable_page_cache(false);
+        }
+    });
 
     // The whole-Library signal is GONE — pages/components read the DB through
     // query hooks, and every track self-resolves its cover via the cover seam
