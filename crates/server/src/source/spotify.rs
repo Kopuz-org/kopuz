@@ -6,7 +6,7 @@ use crate::server_ops::ServerConn;
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync,
-    LibrarySnapshot, MediaSource, PlaylistMeta, PlaylistOps, SourceError, StreamInfo,
+    LibrarySnapshot, MediaSource, PlaylistMeta, PlaylistOps, RadioSeeds, SourceError, StreamInfo,
 };
 
 /// Read-only Spotify Web API source. Playback does NOT flow through this impl:
@@ -59,7 +59,7 @@ impl MediaSource for SpotifySource {
             sync: true,
             downloads: false,
             discover: true,
-            radio: false,
+            radio: RadioSeeds::NONE,
             playlists: PlaylistOps::None,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,

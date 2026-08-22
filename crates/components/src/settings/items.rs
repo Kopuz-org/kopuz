@@ -14,11 +14,57 @@ use tracing::Instrument;
 static APP_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[component]
-pub fn SettingItem(title: String, control: Element) -> Element {
+pub fn SettingItem(
+    title: String,
+    control: Element,
+    /// The top-level `AppConfig` field this row edits. When the field is
+    /// pinned by a managed config layer (Nix/hjem file, drop-in, env var),
+    /// the row renders locked. Empty = never locked.
+    #[props(default)]
+    config_key: String,
+    /// The other top-level fields a composite control edits (the Last.fm
+    /// credentials, say). The row locks when *any* of its keys is managed —
+    /// locking on `config_key` alone would leave the rest editable.
+    #[props(default)]
+    extra_config_keys: Vec<&'static str>,
+    /// Put the control below the title at full width instead of beside it —
+    /// for controls too wide for a row (the equalizer graph).
+    #[props(default)]
+    stacked: bool,
+) -> Element {
+    let locked = try_consume_context::<config::store::FileLayers>().is_some_and(|layers| {
+        (!config_key.is_empty() && layers.is_locked(&config_key))
+            || extra_config_keys.iter().any(|key| layers.is_locked(key))
+    });
     rsx! {
-        div { class: "settings-row flex items-center justify-between gap-5 px-5 py-2.5",
-            p { class: "min-w-0 text-sm text-white/90 font-medium", "{title}" }
-            {control}
+        div {
+            class: if stacked { "settings-row px-5 py-4" } else { "settings-row flex items-center justify-between gap-5 px-5 py-2.5" },
+            div {
+                class: if stacked { "flex items-center gap-2 mb-3" } else { "min-w-0 flex items-center gap-2" },
+                p { class: "min-w-0 text-sm text-white/90 font-medium", "{title}" }
+                if locked {
+                    i {
+                        class: "fa-solid fa-lock text-[10px] text-white/40",
+                        title: i18n::t("setting_managed_by_system"),
+                    }
+                }
+            }
+            if locked {
+                // `inert` is what actually disables the control: it takes the
+                // whole subtree out of the tab order and drops click/key
+                // events, so a managed setting can't be changed by keyboard
+                // either. The class/aria only cover the look and the a11y
+                // label.
+                div {
+                    class: "opacity-50 pointer-events-none select-none",
+                    inert: true,
+                    aria_disabled: true,
+                    title: i18n::t("setting_managed_by_system"),
+                    {control}
+                }
+            } else {
+                {control}
+            }
         }
     }
 }
@@ -284,6 +330,7 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
     let mut options = vec![
         ("album-art".into(), i18n::t("album_art_gradient")),
         ("default".into(), i18n::t("default_theme")),
+        ("amoled".into(), i18n::t("amoled_black")),
         (utils::live_theme::THEME_ID.into(), i18n::t("live_theme")),
         ("gruvbox".into(), i18n::t("gruvbox_material")),
         ("gruvbox-classic".into(), i18n::t("gruvbox_classic")),
@@ -486,21 +533,26 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
         button {
             onclick: move |_| {
                 player::systemint::request_permissions();
-                let mut paths = Vec::new();
-                if let Some(android_music) = player::systemint::get_android_music_dir() {
-                    paths.push(std::path::PathBuf::from(android_music));
-                }
-                paths.push(std::path::PathBuf::from("/storage/emulated/0/Music"));
-                paths.push(std::path::PathBuf::from("/sdcard/Music"));
-                if let Ok(home) = std::env::var("HOME") {
-                    paths.push(std::path::PathBuf::from(home).join("Music"));
-                }
-                for path in paths {
-                    if path.exists() {
-                        on_add.call(path);
-                        break;
+                spawn(async move {
+                    if !player::systemint::await_media_permission().await {
+                        return;
                     }
-                }
+                    let mut paths = Vec::new();
+                    if let Some(android_music) = player::systemint::get_android_music_dir() {
+                        paths.push(std::path::PathBuf::from(android_music));
+                    }
+                    paths.push(std::path::PathBuf::from("/storage/emulated/0/Music"));
+                    paths.push(std::path::PathBuf::from("/sdcard/Music"));
+                    if let Ok(home) = std::env::var("HOME") {
+                        paths.push(std::path::PathBuf::from(home).join("Music"));
+                    }
+                    for path in paths {
+                        if path.exists() {
+                            on_add.call(path);
+                            break;
+                        }
+                    }
+                });
             },
             class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
             "{add_text}"
@@ -528,6 +580,9 @@ pub fn ServerSettings(
     /// than starting on this app's in-app device.
     spotify_prefer_active_device: bool,
     on_spotify_prefer_active_device: EventHandler<bool>,
+    /// Folder picker for the active server, when it browses a folder tree. Only
+    /// the active server has its creds hydrated, so only it can be browsed.
+    remote_folders: Option<crate::settings_remote_folders::RemoteFolderSettings>,
 ) -> Element {
     let login_text = i18n::t("login");
     let delete_text = i18n::t("delete");
@@ -547,6 +602,10 @@ pub fn ServerSettings(
                     let id_switch = id.clone();
                     let id_delete = id.clone();
                     let is_spotify = srv.service == MusicService::Spotify;
+                    // Folders are the whole library definition here, so the
+                    // picker sits on the card the way it does for a local
+                    // library, not behind a separate dialog.
+                    let picker = is_active.then(|| remote_folders.clone()).flatten();
                     let browsers = spotify_browsers.clone();
                     let chosen = spotify_browser.clone();
                     let prefer_active = spotify_prefer_active_device;
@@ -600,6 +659,12 @@ pub fn ServerSettings(
                                     "{delete_text}"
                                 }
                             }
+                            }
+                            if let Some(picker) = picker {
+                                div { class: "flex flex-col gap-2 border-t border-white/10 pt-2",
+                                    p { class: "text-xs text-white/60", "{i18n::t(\"remote_music_folders\")}" }
+                                    crate::settings_remote_folders::RemoteFolderPicker { settings: picker }
+                                }
                             }
                             if is_spotify {
                                 div { class: "flex items-center justify-between gap-4 border-t border-white/10 pt-2",

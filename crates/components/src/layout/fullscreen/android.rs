@@ -29,6 +29,59 @@ pub(crate) fn FullscreenAndroid(
 ) -> Element {
     let mut active_tab = use_signal(|| 0usize);
     let tab = *active_tab.read();
+
+    let mut swipe = crate::gestures::use_swipe();
+
+    let mut pull_armed = use_signal(|| true);
+    let scroller_id = match tab {
+        1 => Some("fullscreen-queue-list"),
+        2 => Some("fullscreen-lyrics-content"),
+        _ => None,
+    };
+    let mut begin_pull = move |evt: &TouchEvent| {
+        swipe.start(evt);
+        let Some(id) = scroller_id else {
+            pull_armed.set(true);
+            return;
+        };
+        pull_armed.set(false);
+        spawn(async move {
+            let mut at_top = dioxus::document::eval(&format!(
+                "const el = document.getElementById('{id}'); dioxus.send(el ? el.scrollTop : 0);"
+            ));
+            if let Ok(scroll_top) = at_top.recv::<f64>().await
+                && scroll_top <= 1.0
+            {
+                pull_armed.set(true);
+            }
+        });
+    };
+
+    let pull = if *pull_armed.read() {
+        swipe.pull_down()
+    } else {
+        0.0
+    };
+    let sheet_style = if pull > 0.0 {
+        format!(
+            "{} transform: translateY({pull}px);",
+            background_style.read()
+        )
+    } else {
+        format!(
+            "{} transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);",
+            background_style.read()
+        )
+    };
+    const DISMISS_AT: f64 = 140.0;
+    let on_pull_end = move |evt: TouchEvent| {
+        let armed = *pull_armed.peek();
+        let dismissed = armed && swipe.pull_down() >= DISMISS_AT;
+        let swiped_down = swipe.finish(&evt) == Some(crate::gestures::SwipeDirection::Down);
+        if armed && (swiped_down || dismissed) {
+            is_fullscreen.set(false);
+        }
+    };
     let close_text = i18n::t("close").to_string();
     let music_text = i18n::t("music").to_string();
     let up_next_text = i18n::t("up_next").to_string();
@@ -48,8 +101,10 @@ pub(crate) fn FullscreenAndroid(
 
     rsx! {
         div {
-            class: "fixed inset-0 z-50 flex flex-col text-white select-none",
-            style: "{background_style.read()}",
+            // Above the mobile top bar (z-60) — at z-50 that bar painted over
+            // this sheet's own header, hiding the close button and the tabs.
+            class: "fixed inset-0 z-[70] flex flex-col text-white select-none",
+            style: "{sheet_style}",
 
             if let Some(cover) = cover_background() {
                 crate::CoverArtBackground { cover }
@@ -57,6 +112,10 @@ pub(crate) fn FullscreenAndroid(
 
             div {
                 class: "flex items-center gap-2 px-3 pt-[env(safe-area-inset-top)] pb-1 shrink-0",
+                ontouchstart: move |evt| begin_pull(&evt),
+                ontouchmove: move |evt| swipe.update(&evt),
+                ontouchend: on_pull_end,
+                ontouchcancel: move |_| swipe.reset(),
                 button {
                     class: "w-10 h-10 flex items-center justify-center text-white/60 active:scale-95 transition-all shrink-0",
                     "aria-label": "{close_text}",
@@ -70,34 +129,42 @@ pub(crate) fn FullscreenAndroid(
                 }
             }
 
-            if tab == 0 {
-                div {
-                    class: "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]",
-                    TrackMetadata {
-                        is_fullscreen,
-                        current_song_cover_url,
-                        current_song_title,
-                        current_song_artist,
-                        current_song_album,
-                        current_song_bitrate,
+            div {
+                class: "flex-1 min-h-0 flex flex-col",
+                ontouchstart: move |evt| begin_pull(&evt),
+                ontouchmove: move |evt| swipe.update(&evt),
+                ontouchend: on_pull_end,
+                ontouchcancel: move |_| swipe.reset(),
+
+                if tab == 0 {
+                    div {
+                        class: "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]",
+                        TrackMetadata {
+                            is_fullscreen,
+                            current_song_cover_url,
+                            current_song_title,
+                            current_song_artist,
+                            current_song_album,
+                            current_song_bitrate,
+                        }
+                        SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Fullscreen }
+                        TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
+                        VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
                     }
-                    SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Fullscreen }
-                    TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
-                    VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
-                }
-            } else if tab == 1 {
-                QueueListView {
-                    items,
-                    config,
-                    current_queue_index,
-                    layout: crate::queue_list_view::LayoutMode::Fullscreen,
-                }
-            } else {
-                LyricsView {
-                    lyrics,
-                    current_song_progress,
-                    config,
-                    layout: crate::lyrics_view::LayoutMode::Fullscreen,
+                } else if tab == 1 {
+                    QueueListView {
+                        items,
+                        config,
+                        current_queue_index,
+                        layout: crate::queue_list_view::LayoutMode::Fullscreen,
+                    }
+                } else {
+                    LyricsView {
+                        lyrics,
+                        current_song_progress,
+                        config,
+                        layout: crate::lyrics_view::LayoutMode::Fullscreen,
+                    }
                 }
             }
         }

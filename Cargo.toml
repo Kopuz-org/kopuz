@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.14.0"
+version = "0.15.1"
 edition = "2024"
 rust-version = "1.95.0"
 description = "A modern, lightweight music player built with Rust and Dioxus."
@@ -16,6 +16,7 @@ keywords = ["music", "player", "audio", "dioxus"]
 dioxus = { version = "0.7.9", features = [] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "0.8"
 tokio = { version = "1.0", features = [
   "rt",
   "time",
@@ -42,8 +43,9 @@ uuid = { version = "1.20.0", features = [
 ] }
 cpal = "0.18.1"
 symphonia = { version = "0.6", features = ["all"] }
+quick-xml = "0.37"
 rtrb = "0.3"
-jellyfin-sdk-rust = "0.1.2"
+nextcloud-rs = "0.1"
 reqwest = { version = "0.13", default-features = false, features = [
   "rustls",
   "http2",
@@ -83,7 +85,10 @@ windows = "0.62"
 winres = "0.1"
 symphonia-adapter-libopus = "0.3"
 mpris-server = "0.10.0"
-jni = "0.22"
+# 0.22 replaced `JNIEnv` with `EnvUnowned` and made `GlobalRef` generic;
+# `player/systemint/android.rs` is written against 0.21, which dioxus already
+# pulls in. Bumping this again means porting that file first.
+jni = "0.21"
 ndk-context = "0.1"
 thiserror = "2.0"
 tokio-tungstenite = "0.30.0"
@@ -103,21 +108,21 @@ deno_core = "0.331"
 rustypipe-botguard = "0.1.2"
 
 # Workspace components
-i18n = { package = "kopuz-i18n", version = "0.14.0", path = "./crates/i18n" }
-player = { package = "kopuz-player", version = "0.14.0", path = "./crates/player" }
-reader = { package = "kopuz-reader", version = "0.14.0", path = "./crates/reader" }
-components = { package = "kopuz-components", version = "0.14.0", path = "./crates/components" }
-hooks = { package = "kopuz-hooks", version = "0.14.0", path = "./crates/hooks" }
-pages = { package = "kopuz-pages", version = "0.14.0", path = "./crates/pages" }
-utils = { package = "kopuz-utils", version = "0.14.0", path = "./crates/utils" }
-config = { package = "kopuz-config", version = "0.14.0", path = "./crates/config" }
-db = { package = "kopuz-db", version = "0.14.0", path = "./crates/db" }
-kopuz = { version = "0.14.0", path = "./crates/kopuz" }
-server = { package = "kopuz-server", version = "0.14.0", path = "./crates/server" }
-kopuz_route = { package = "kopuz-route", version = "0.14.0", path = "./crates/kopuz_route" }
-discord-presence = { package = "kopuz-discord-presence", version = "0.14.0", path = "./crates/discord-presence" }
-scrobble = { package = "kopuz-scrobble", version = "0.14.0", path = "./crates/scrobble" }
-radio = { package = "kopuz-radio", version = "0.14.0", path = "./crates/radio" }
+i18n = { package = "kopuz-i18n", version = "0.15.1", path = "./crates/i18n" }
+player = { package = "kopuz-player", version = "0.15.1", path = "./crates/player" }
+reader = { package = "kopuz-reader", version = "0.15.1", path = "./crates/reader" }
+components = { package = "kopuz-components", version = "0.15.1", path = "./crates/components" }
+hooks = { package = "kopuz-hooks", version = "0.15.1", path = "./crates/hooks" }
+pages = { package = "kopuz-pages", version = "0.15.1", path = "./crates/pages" }
+utils = { package = "kopuz-utils", version = "0.15.1", path = "./crates/utils" }
+config = { package = "kopuz-config", version = "0.15.1", path = "./crates/config" }
+db = { package = "kopuz-db", version = "0.15.1", path = "./crates/db" }
+kopuz = { version = "0.15.1", path = "./crates/kopuz" }
+server = { package = "kopuz-server", version = "0.15.1", path = "./crates/server" }
+kopuz_route = { package = "kopuz-route", version = "0.15.1", path = "./crates/kopuz_route" }
+discord-presence = { package = "kopuz-discord-presence", version = "0.15.1", path = "./crates/discord-presence" }
+scrobble = { package = "kopuz-scrobble", version = "0.15.1", path = "./crates/scrobble" }
+radio = { package = "kopuz-radio", version = "0.15.1", path = "./crates/radio" }
 
 # Steer code toward the tracing subscriber (see crates/kopuz/src/logging.rs).
 # Inherited per-crate via `[lints] workspace = true`. Build scripts (cargo:
@@ -131,7 +136,8 @@ strip = "symbols"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+# reader::probe catches panics from symphonia on malformed remote bytes.
+panic = "unwind"
 
 [profile.dev.package."*"]
 opt-level = 3
@@ -149,4 +155,4 @@ inherits = "release"
 strip = "symbols"
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+panic = "unwind"

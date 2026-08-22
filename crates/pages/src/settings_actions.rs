@@ -4,6 +4,12 @@ use dioxus::prelude::*;
 use hooks::ReadDb;
 use tracing::Instrument;
 
+pub(crate) async fn ensure_host_access(mut host_access: Signal<bool>) -> Option<()> {
+    let host = ::server::cookies::has_host_spawn().await;
+    host_access.set(host);
+    None
+}
+
 async fn validate_ytmusic(cookies: &str) -> bool {
     ::server::provider::validate_ytmusic_cookies(cookies).await
 }
@@ -23,6 +29,74 @@ async fn try_resume_ytmusic(seed: Option<String>) -> Option<String> {
     None
 }
 
+/// Poll-driven Android sign-in: opens the in-app login WebView at `signin_url`
+/// and waits until `extract` finds what it needs in the cookies the WebView
+/// accumulates for `cookie_url`. Mirrors the desktop flow in
+/// `server::cookies::signin`, with Android's app-global CookieManager standing
+/// in for the spawned browser profile.
+#[cfg(target_os = "android")]
+async fn webview_signin(
+    signin_url: &str,
+    cookie_url: &str,
+    extract: impl Fn(&str) -> Option<String>,
+) -> Result<String, String> {
+    use std::time::{Duration, Instant};
+    player::systemint::login_open(signin_url);
+    let deadline = Instant::now() + Duration::from_secs(300);
+    let mut seen_open = false;
+    loop {
+        utils::sleep(Duration::from_secs(2)).await;
+        if let Some(header) = player::systemint::login_cookies(cookie_url)
+            && let Some(value) = extract(&header)
+        {
+            player::systemint::login_close();
+            return Ok(value);
+        }
+        if player::systemint::login_is_open() {
+            seen_open = true;
+        } else if seen_open {
+            return Err("the sign-in window was closed".to_string());
+        }
+        if Instant::now() >= deadline {
+            player::systemint::login_close();
+            return Err("sign-in timed out".to_string());
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn cookie_value(header: &str, name: &str) -> Option<String> {
+    header.split(';').find_map(|pair| {
+        let (key, value) = pair.trim().split_once('=')?;
+        (key == name && !value.is_empty()).then(|| value.to_string())
+    })
+}
+
+#[cfg(target_os = "android")]
+async fn ensure_ytmusic_signed_in(
+    config_cookies: Option<String>,
+    _browser: Browser,
+    _server_id: &str,
+) -> Result<String, String> {
+    if let Some(cookies) = try_resume_ytmusic(config_cookies).await {
+        return Ok(cookies);
+    }
+    let cookies = webview_signin(
+        ::server::ytmusic::isolated_profile::SIGNIN_URL,
+        "https://music.youtube.com",
+        |header| {
+            (cookie_value(header, "SAPISID").is_some() && cookie_value(header, "SID").is_some())
+                .then(|| header.to_string())
+        },
+    )
+    .await?;
+    if !validate_ytmusic(&cookies).await {
+        return Err("Sign-in completed but YT validation still failed".to_string());
+    }
+    Ok(cookies)
+}
+
+#[cfg(not(target_os = "android"))]
 async fn ensure_ytmusic_signed_in(
     config_cookies: Option<String>,
     browser: Browser,
@@ -129,6 +203,17 @@ fn apply_browser_login(
     }
 }
 
+/// What actually rendered the sign-in page, for error messages: the chosen
+/// desktop browser, or the in-app WebView on Android (where the browser
+/// setting is not consulted at all).
+fn signin_surface(browser: Browser) -> String {
+    if cfg!(target_os = "android") {
+        "WebView".to_string()
+    } else {
+        browser.to_string()
+    }
+}
+
 /// Surface a browser sign-in failure to both the settings error line and the
 /// player error banner.
 fn report_signin_failure(
@@ -163,7 +248,10 @@ pub fn ytmusic_auto_login(
                 report_signin_failure(
                     error,
                     playback_error,
-                    format!("YT Music sign-in failed ({browser}): {err}"),
+                    format!(
+                        "YT Music sign-in failed ({}): {err}",
+                        signin_surface(browser)
+                    ),
                 );
                 return;
             }
@@ -190,19 +278,33 @@ pub fn soundcloud_auto_login(
         )
     };
     spawn(async move {
-        let token = match ::server::soundcloud::signin::launch_signin_and_extract(
+        #[cfg(not(target_os = "android"))]
+        let signin = ::server::soundcloud::signin::launch_signin_and_extract(
             browser,
             &server_id,
             std::time::Duration::from_secs(300),
         )
-        .await
-        {
+        .await;
+        #[cfg(target_os = "android")]
+        let signin = {
+            let _ = &server_id;
+            webview_signin(
+                "https://soundcloud.com/signin",
+                "https://soundcloud.com",
+                |header| cookie_value(header, "oauth_token"),
+            )
+            .await
+        };
+        let token = match signin {
             Ok(token) => token,
             Err(err) => {
                 report_signin_failure(
                     error,
                     playback_error,
-                    format!("SoundCloud sign-in failed ({browser}): {err}"),
+                    format!(
+                        "SoundCloud sign-in failed ({}): {err}",
+                        signin_surface(browser)
+                    ),
                 );
                 return;
             }
@@ -254,6 +356,55 @@ pub fn spotify_auto_login(
         error.set(None);
     });
 }
+pub fn applemusic_auto_login(
+    mut config: Signal<AppConfig>,
+    yt_browser: Signal<Browser>,
+    mut error: Signal<Option<String>>,
+    mut playback_error: Signal<Option<String>>,
+) {
+    let (browser, server_id) = {
+        let cfg = config.peek();
+        let srv = cfg.server.as_ref();
+        (
+            srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
+            srv.and_then(|s| s.id.clone()).unwrap_or_default(),
+        )
+    };
+    let mut report = move |msg: String| {
+        error.set(Some(msg.clone()));
+        playback_error.set(Some(msg));
+    };
+    spawn(async move {
+        let token = match ::server::applemusic::signin::launch_signin_and_extract(
+            browser,
+            &server_id,
+            std::time::Duration::from_secs(300),
+        )
+        .await
+        {
+            Ok(token) => token,
+            Err(err) => {
+                report(format!("Apple Music sign-in failed ({browser}): {err}"));
+                return;
+            }
+        };
+        {
+            let mut cfg = config.write();
+            let saved_id = cfg.server.as_ref().and_then(|server| server.id.clone());
+            if let Some(server) = cfg.server.as_mut() {
+                server.access_token = Some(token);
+                server.user_id = Some("me".to_string());
+                server.yt_browser = Some(browser);
+            }
+            if let Some(id) = saved_id
+                && let Some(saved) = cfg.servers.iter_mut().find(|server| server.id == id)
+            {
+                saved.yt_browser = Some(browser);
+            }
+        }
+        error.set(None);
+    });
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn add_server(
@@ -267,6 +418,10 @@ pub fn add_server(
     mut show_add_server: Signal<bool>,
     mut show_login: Signal<bool>,
     playback_error: Signal<Option<String>>,
+    apple_music_storefront: Signal<String>,
+    apple_music_language: Signal<String>,
+    mut apple_music_manual_token: Signal<String>,
+    apple_music_use_manual: Signal<bool>,
 ) {
     let selected_service = server_service();
     let is_ytmusic = selected_service == MusicService::YtMusic;
@@ -291,6 +446,19 @@ pub fn add_server(
         return;
     }
 
+    // Manual mode is the one path that never opens a browser, so an empty field
+    // here isn't "sign in later" — it saves a server with no credential and no
+    // way to acquire one.
+    if selected_service == MusicService::AppleMusic
+        && *apple_music_use_manual.peek()
+        && apple_music_manual_token().trim().is_empty()
+    {
+        error.set(Some(
+            "Enter your Apple Music media-user-token, or switch to browser sign-in".to_string(),
+        ));
+        return;
+    }
+
     let name_input = server_name();
     let url_input = server_url();
 
@@ -302,6 +470,8 @@ pub fn add_server(
                 "https://music.youtube.com".to_string()
             } else if is_soundcloud {
                 "https://soundcloud.com".to_string()
+            } else if selected_service == MusicService::AppleMusic {
+                "https://music.apple.com".to_string()
             } else if is_spotify {
                 url_input.trim().to_string()
             } else {
@@ -319,7 +489,22 @@ pub fn add_server(
                 new_server.access_token = Some(String::new());
             }
             new_server.yt_browser = (is_browser_signin && !is_anon).then(|| *yt_browser.peek());
-
+            // Apple Music: set storefront, language, and optionally manual token.
+            // The token only applies in manual mode — the signal keeps its value
+            // between saves, so reading it unconditionally would attach the
+            // previous server's token to one that is about to sign in through
+            // the browser, and leave it there if that sign-in fails.
+            if selected_service == MusicService::AppleMusic {
+                new_server.apple_music_storefront = apple_music_storefront();
+                new_server.apple_music_language = apple_music_language();
+                if *apple_music_use_manual.peek() {
+                    let manual = apple_music_manual_token();
+                    if !manual.is_empty() {
+                        new_server.access_token = Some(manual);
+                        new_server.user_id = Some("me".to_string());
+                    }
+                }
+            }
             let saved = config::SavedServer::from_music_server(&new_server);
             {
                 let mut cfg = config.write();
@@ -330,6 +515,9 @@ pub fn add_server(
             server_name.set(String::new());
             server_url.set(String::new());
             server_service.set(MusicService::Jellyfin);
+            // Cleared with the rest of the form: it has been persisted, and a
+            // credential left in a live signal is one the next server can pick up.
+            apple_music_manual_token.set(String::new());
             error.set(None);
             show_add_server.set(false);
 
@@ -337,6 +525,10 @@ pub fn add_server(
                 ytmusic_auto_login(config, yt_browser, error, playback_error);
             } else if is_soundcloud {
                 soundcloud_auto_login(config, yt_browser, error, playback_error);
+            } else if selected_service == MusicService::AppleMusic
+                && !*apple_music_use_manual.peek()
+            {
+                applemusic_auto_login(config, yt_browser, error, playback_error);
             } else if is_spotify {
                 spotify_auto_login(config, error, playback_error);
             } else if !is_browser_signin {
@@ -372,6 +564,9 @@ pub fn switch_server(
             MusicService::SoundCloud => {
                 soundcloud_auto_login(config, yt_browser, error, playback_error)
             }
+            MusicService::AppleMusic => {
+                applemusic_auto_login(config, yt_browser, error, playback_error)
+            }
             MusicService::Spotify => spotify_auto_login(config, error, playback_error),
             _ => show_login.set(true),
         }
@@ -390,6 +585,9 @@ pub fn delete_saved(mut config: Signal<AppConfig>, id: String) {
         }
         Some(MusicService::SoundCloud) => {
             let _ = ::server::soundcloud::signin::delete_profile(&id);
+        }
+        Some(MusicService::AppleMusic) => {
+            let _ = ::server::applemusic::signin::delete_profile(&id);
         }
         _ => {}
     }

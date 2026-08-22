@@ -28,6 +28,7 @@ image = { workspace = true }
 urlencoding = { workspace = true }
 md5 = { workspace = true }
 hex = { workspace = true }
+quick-xml = { workspace = true }
 lofty = { workspace = true }
 time = { workspace = true, features = ["formatting", "macros"] }
 

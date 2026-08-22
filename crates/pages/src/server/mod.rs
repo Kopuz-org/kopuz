@@ -48,7 +48,22 @@ pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, 
             )
             .ok()?
         }
-        MusicService::YtMusic | MusicService::SoundCloud | MusicService::Spotify => return None,
+        MusicService::Nextcloud => {
+            // No transcode to ask for: quality only picks the fallback
+            // extension, corrected later from the response content type.
+            let username = server.user_id.as_deref()?;
+            let password = server.access_token.as_deref()?;
+            // The URL itself carries the app password, so only the error is logged.
+            ::server::nextcloud::stream_url(&server.url, username, password, item_id)
+                .inspect_err(
+                    |e| tracing::warn!(%item_id, error = %e, "nextcloud download URL build failed"),
+                )
+                .ok()?
+        }
+        MusicService::YtMusic
+        | MusicService::SoundCloud
+        | MusicService::AppleMusic
+        | MusicService::Spotify => return None,
     };
     Some((url, ext))
 }

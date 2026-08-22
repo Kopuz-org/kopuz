@@ -95,7 +95,7 @@ pub fn PlaylistsPage(
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
 
     rsx! {
-        div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+        div { class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             if let Some(pid) = selected_playlist_id.read().clone() {
                 {
                     let pid_for_dl = pid.clone();
@@ -620,7 +620,7 @@ fn PlaylistsGrid(
     let is_yt = caps().albums == ::server::source::AlbumType::YtMusic;
     // The flat remote card has no overflow menu of its own, so radio is its one
     // entry — no kind-tagged action list needed here (unlike the folder card).
-    let can_radio = caps().radio;
+    let can_radio = caps().radio.playlist;
     let radio_text = components::radio_actions::radio_label();
     let radio_actions = vec![MenuAction::new(
         radio_text.as_str(),
@@ -843,7 +843,8 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
     let can_radio = consume_context::<Signal<::server::source::ActiveSource>>()
         .read()
         .capabilities()
-        .radio;
+        .radio
+        .playlist;
 
     let build_playlist_actions = |in_folder: bool| -> (Vec<MenuAction>, Vec<PlaylistCardAction>) {
         let mut entries = vec![(

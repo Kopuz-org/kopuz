@@ -1,3 +1,4 @@
+use components::dots_menu::{DotsMenu, MenuAction};
 use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
@@ -67,6 +68,10 @@ pub fn HomeBody(
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = use_memo(move || active_source.read().capabilities());
     let mut has_fetched = use_signal(|| false);
+    // Which card has its overflow menu open, keyed by track uid / playlist id.
+    // Owned here because the section renderers are plain functions, so they
+    // cannot hold hook state of their own.
+    let active_card_menu = use_signal(|| None::<String>);
 
     let albums_res = use_albums(source);
     let playlists_res = use_playlists();
@@ -566,6 +571,7 @@ pub fn HomeBody(
                                     on_play_album,
                                     on_select_playlist,
                                     on_search_artist,
+                                    active_card_menu,
                                     scroll_container,
                                 )}
                             }
@@ -597,6 +603,7 @@ fn render_server_section(
     on_play_album: EventHandler<String>,
     on_select_playlist: EventHandler<String>,
     on_search_artist: EventHandler<String>,
+    active_card_menu: Signal<Option<String>>,
     scroll_container: impl Fn(&str, i32) + Copy + 'static,
 ) -> Element {
     match key {
@@ -615,6 +622,7 @@ fn render_server_section(
             continue_listening,
             on_select_album,
             on_play_album,
+            active_card_menu,
             scroll_container,
         ),
         "listen_now" => render_listen_now(
@@ -668,6 +676,7 @@ fn render_server_section(
             is_vaxry,
             recent_playlists,
             on_select_playlist,
+            active_card_menu,
             scroll_container,
         ),
         _ => rsx! {},
@@ -860,16 +869,59 @@ fn ServerHeroBanner(
     }
 }
 
+/// The overflow menu on a home song card: the subset of the track row's actions
+/// that needs no modal of its own, so home can start a radio (and queue a track)
+/// without the page growing the row's playlist/metadata plumbing.
+#[derive(Clone, Copy)]
+enum SongCardAction {
+    PlayNext,
+    AddToQueue,
+    StartRadio,
+    Share,
+}
+
+fn song_card_actions(can_radio: bool) -> (Vec<MenuAction>, Vec<SongCardAction>) {
+    let mut entries = vec![
+        (
+            MenuAction::new(i18n::t("play_next"), "fa-solid fa-forward-step"),
+            SongCardAction::PlayNext,
+        ),
+        (
+            MenuAction::new(i18n::t("add_to_queue"), "fa-solid fa-list-ul"),
+            SongCardAction::AddToQueue,
+        ),
+    ];
+    if can_radio {
+        entries.push((
+            MenuAction::new(
+                components::radio_actions::radio_label(),
+                components::radio_actions::RADIO_ICON,
+            ),
+            SongCardAction::StartRadio,
+        ));
+    }
+    entries.push((
+        MenuAction::new(i18n::t("share_musicbrainz"), "fa-solid fa-share-nodes"),
+        SongCardAction::Share,
+    ));
+    entries.into_iter().unzip()
+}
+
 fn render_continue_listening(
     is_vaxry: bool,
     tracks: Vec<(Track, Option<Album>, Option<String>)>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
+    mut active_card_menu: Signal<Option<String>>,
     scroll_container: impl Fn(&str, i32) + Copy + 'static,
 ) -> Element {
     if tracks.is_empty() {
         return rsx! { div {} };
     }
+    let mut ctrl = consume_context::<hooks::PlayerController>();
+    let active_source = consume_context::<Signal<::server::source::ActiveSource>>();
+    let can_radio = active_source.read().capabilities().radio.track;
+    let (song_actions, song_action_kinds) = song_card_actions(can_radio);
     rsx! {
         section { class: if is_vaxry { "mb-10" } else { "mb-12" },
             div { class: "flex items-center justify-between mb-6",
@@ -895,6 +947,7 @@ fn render_continue_listening(
             div {
                 id: "jelly-continue-scroll",
                 class: "flex overflow-x-auto gap-5 pb-6 pt-2 scrollbar-hide scroll-smooth -mx-2 px-2",
+                ontouchstart: move |evt| evt.stop_propagation(),
                 for (track, album_opt, cover_url) in tracks {
                     {
                         let title = track.title.clone();
@@ -907,6 +960,16 @@ fn render_continue_listening(
                         let album_id_click = album_id_opt.clone();
                         let album_id_play = album_id_opt.clone();
                         let key = track.id.uid();
+                        let actions = song_actions.clone();
+                        let action_kinds = song_action_kinds.clone();
+                        // Resolved during render, not in the click closure: the
+                        // handler reads context, which a closure cannot do.
+                        let start_radio = components::radio_actions::track_radio_handler(
+                            track.clone(),
+                        );
+                        let open_key = key.clone();
+                        let is_menu_open = active_card_menu.read().as_deref() == Some(key.as_str());
+                        let menu_track = track.clone();
                         rsx! {
                             div {
                                 key: "{key}",
@@ -930,6 +993,39 @@ fn render_continue_listening(
                                         class: "absolute right-2 bottom-2 w-10 h-10 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all translate-y-2 group-hover:translate-y-0".to_string(),
                                         style: "background: var(--color-indigo-500);".to_string(),
                                         icon_extra: "text-white text-xs".to_string(),
+                                    }
+                                    div {
+                                        class: "absolute right-1 top-1",
+                                        onclick: move |evt| evt.stop_propagation(),
+                                        DotsMenu {
+                                            actions,
+                                            is_open: is_menu_open,
+                                            on_open: move |_| active_card_menu.set(Some(open_key.clone())),
+                                            on_close: move |_| active_card_menu.set(None),
+                                            button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
+                                            anchor: "right".to_string(),
+                                            on_action: move |idx: usize| {
+                                                active_card_menu.set(None);
+                                                match action_kinds.get(idx) {
+                                                    Some(SongCardAction::PlayNext) => {
+                                                        ctrl.queue_play_next(vec![menu_track.clone()]);
+                                                    }
+                                                    Some(SongCardAction::AddToQueue) => {
+                                                        ctrl.add_to_queue(vec![menu_track.clone()]);
+                                                    }
+                                                    Some(SongCardAction::StartRadio) => {
+                                                        if let Some(handler) = start_radio {
+                                                            handler.call(());
+                                                        }
+                                                    }
+                                                    Some(SongCardAction::Share) => {
+                                                        let src = active_source.peek().clone();
+                                                        components::track_row::share_track(menu_track.clone(), src);
+                                                    }
+                                                    None => {}
+                                                }
+                                            },
+                                        }
                                     }
                                 }
                                 h3 { class: "text-white font-semibold truncate text-sm", "{title}" }
@@ -966,6 +1062,7 @@ fn render_listen_now(
             }
             if use_cards {
                 div { class: "flex overflow-x-auto gap-4 pb-4 scrollbar-hide scroll-smooth -mx-2 px-2",
+                    ontouchstart: move |evt| evt.stop_propagation(),
                     for (album_id, title, artist, cover_url) in jellyfin_shuffled.iter().skip(1).take(10).cloned() {
                         div {
                             class: "flex-none w-40 group cursor-pointer",
@@ -1067,6 +1164,7 @@ fn render_top_artists(
             div {
                 id: "jelly-artists-scroll",
                 class: "flex overflow-x-auto gap-6 pb-6 pt-2 overflow-y-visible scrollbar-hide scroll-smooth -mx-2 px-2",
+                ontouchstart: move |evt| evt.stop_propagation(),
                 for (artist, cover_url) in artists {
                     div {
                         class: "flex-none w-32 md:w-40 group cursor-pointer",
@@ -1130,6 +1228,7 @@ fn render_albums_row(
             div {
                 id: "{scroll_id}",
                 class: "flex overflow-x-auto gap-5 pb-6 pt-2 overflow-y-visible scrollbar-hide scroll-smooth -mx-2 px-2",
+                ontouchstart: move |evt| evt.stop_propagation(),
                 for (album_id, title, artist, cover_url) in albums {
                     div {
                         class: "flex-none w-36 md:w-48 group cursor-pointer",
@@ -1167,11 +1266,23 @@ fn render_playlists(
     is_vaxry: bool,
     recent_playlists: Vec<(String, String, usize, Option<String>)>,
     on_select_playlist: EventHandler<String>,
+    mut active_card_menu: Signal<Option<String>>,
     scroll_container: impl Fn(&str, i32) + Copy + 'static,
 ) -> Element {
     if recent_playlists.is_empty() {
         return rsx! { div {} };
     }
+    // Radio is the one playlist action a home card can offer without the
+    // playlists page's folder/rename state, so the whole menu rides its gate.
+    let can_radio = consume_context::<Signal<::server::source::ActiveSource>>()
+        .read()
+        .capabilities()
+        .radio
+        .playlist;
+    let radio_actions = vec![MenuAction::new(
+        components::radio_actions::radio_label(),
+        components::radio_actions::RADIO_ICON,
+    )];
     rsx! {
         section { class: if is_vaxry { "mt-10" } else { "mt-16" },
             div { class: "flex items-center justify-between mb-6",
@@ -1197,8 +1308,13 @@ fn render_playlists(
             div {
                 id: "jelly-playlists-scroll",
                 class: "flex overflow-x-auto gap-6 pb-6 pt-2 scrollbar-hide scroll-smooth -mx-2 px-2",
+                ontouchstart: move |evt| evt.stop_propagation(),
                 for (id, name, track_count, cover_url) in recent_playlists {
                     {
+                        let start_radio = components::radio_actions::playlist_radio_handler(id.clone());
+                        let is_menu_open = active_card_menu.read().as_deref() == Some(id.as_str());
+                        let open_key = id.clone();
+                        let actions = radio_actions.clone();
                         rsx! {
                             div {
                                 key: "{id}",
@@ -1216,6 +1332,26 @@ fn render_playlists(
                                         }
                                     }
                                     div { class: "absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-300" }
+                                    if can_radio {
+                                        div {
+                                            class: "absolute right-1 top-1",
+                                            onclick: move |evt| evt.stop_propagation(),
+                                            DotsMenu {
+                                                actions,
+                                                is_open: is_menu_open,
+                                                on_open: move |_| active_card_menu.set(Some(open_key.clone())),
+                                                on_close: move |_| active_card_menu.set(None),
+                                                button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
+                                                anchor: "right".to_string(),
+                                                on_action: move |_: usize| {
+                                                    active_card_menu.set(None);
+                                                    if let Some(handler) = start_radio {
+                                                        handler.call(());
+                                                    }
+                                                },
+                                            }
+                                        }
+                                    }
                                 }
                                 div {
                                     h3 { class: "text-white font-bold truncate text-sm md:text-base px-1 group-hover:text-indigo-400 transition-colors", "{name}" }

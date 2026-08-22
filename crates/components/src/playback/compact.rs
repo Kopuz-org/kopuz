@@ -122,7 +122,7 @@ pub fn CompactPlayer() -> Element {
                     class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
                     span { class: skin.title, "{ctrl.current_song_title}" }
                     span { class: "text-[11px] text-white/55 truncate leading-tight", "{ctrl.current_song_artist}" }
-                    span { class: "text-[9px] text-white/35 font-mono leading-tight",
+                    span { class: "text-[9px] text-white/35 font-mono leading-tight", dir: "ltr",
                         if is_radio { "LIVE" } else { "{fmt_time(display_progress)} / {fmt_time(duration)}" }
                     }
                 }
@@ -138,6 +138,7 @@ pub fn CompactPlayer() -> Element {
 
             div {
                 class: "relative z-10 shrink-0 flex items-center justify-center gap-2 px-3 pb-2",
+                dir: "ltr",
                 onmousedown: move |evt| evt.stop_propagation(),
                 button {
                     class: skin.ctrl_btn,
@@ -158,6 +159,7 @@ pub fn CompactPlayer() -> Element {
 
             div {
                 class: format!("relative z-10 h-[3px] w-full bg-white/10 shrink-0 overflow-hidden {}", if is_radio || is_loading { "" } else { "group cursor-pointer" }),
+                dir: "ltr",
                 onmousedown: move |evt| evt.stop_propagation(),
                 PlaybackBufferIndicator {
                     ranges: buffered_ranges,

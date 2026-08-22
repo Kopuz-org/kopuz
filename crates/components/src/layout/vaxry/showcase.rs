@@ -64,7 +64,15 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
 
     let scroll_stat = use_signal(|| 0.0_f64);
     let container_height = use_signal(|| 0.0_f64);
-    const ITEM_HEIGHT: f64 = 56.0;
+    /// A vaxry `TrackRow` is `py-1.5` around an `h-8` cell — 44px, not the 56px
+    /// the normal skin uses. Android drops the grid for the shared `h-14` phone
+    /// row instead. Misstating this drifts the spacer pads out of step with the
+    /// real rows as you scroll.
+    const ITEM_HEIGHT: f64 = if cfg!(target_os = "android") {
+        56.0
+    } else {
+        44.0
+    };
 
     let scroll_info = crate::virtual_scroll::use_virtual_scroll(
         *scroll_stat.read(),

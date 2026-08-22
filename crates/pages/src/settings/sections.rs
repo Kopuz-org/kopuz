@@ -3,7 +3,7 @@ use components::settings_items::{
     DiscordPresenceSettings, EqualizerPanel, LastFmSettings, LibreFmSettings, MusicBrainzSettings,
     SampleRateModeSelector, SettingItem, SettingsSection, ToggleSetting,
 };
-use config::{AppConfig, FetchStrategy, OfflineQuality};
+use config::{AppConfig, FetchStrategy, LYRICS_OFFSET_LIMIT_MS, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -14,6 +14,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
             if !cfg!(target_os = "android") {
                 SettingItem {
                     title: i18n::t("discord_presence").to_string(),
+                    config_key: "discord_presence",
                     control: rsx! {
                         DiscordPresenceSettings {
                             enabled: config.read().discord_presence.unwrap_or(true),
@@ -24,6 +25,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                 if config.read().discord_presence.unwrap_or(true) {
                     SettingItem {
                         title: i18n::t("discord_presence_paused").to_string(),
+                        config_key: "discord_presence_paused",
                         control: rsx! {
                             DiscordPresencePausedSettings {
                                 enabled: config.read().discord_presence_paused.unwrap_or(true),
@@ -33,6 +35,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                     }
                     SettingItem {
                         title: i18n::t("discord_presence_source").to_string(),
+                        config_key: "discord_presence_source",
                         control: rsx! {
                             ToggleSetting {
                                 enabled: config.read().discord_presence_source.unwrap_or(true),
@@ -44,6 +47,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("listenbrainz").to_string(),
+                config_key: "musicbrainz_token",
                 control: rsx! {
                     MusicBrainzSettings {
                         current: config.read().musicbrainz_token.clone(),
@@ -55,6 +59,8 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("lastfm").to_string(),
+                config_key: "lastfm_api_key",
+                extra_config_keys: vec!["lastfm_api_secret", "lastfm_session_key"],
                 control: rsx! {
                     LastFmSettings {
                         api_key: config.read().lastfm_api_key.clone(),
@@ -74,6 +80,7 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("librefm").to_string(),
+                config_key: "librefm_session_key",
                 control: rsx! {
                     LibreFmSettings {
                         session_key: config.read().librefm_session_key.clone(),
@@ -93,6 +100,7 @@ pub(super) fn DownloadsSection(mut config: Signal<AppConfig>) -> Element {
         SettingsSection { title: i18n::t("offline_downloads").to_string(),
             SettingItem {
                 title: i18n::t("download_quality").to_string(),
+                config_key: "offline_quality",
                 control: rsx! {
                     select {
                         class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
@@ -115,10 +123,30 @@ pub(super) fn DownloadsSection(mut config: Signal<AppConfig>) -> Element {
 
 #[component]
 pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
+    let ctrl = use_context::<PlayerController>();
+    let lyrics_offset = config.read().lyrics_offset_ms;
+    let lyrics_offset_auto = config.read().lyrics_offset_auto;
+    let lyrics_offset_label = if lyrics_offset_auto {
+        format!(
+            "{} ms",
+            (ctrl.output_latency_secs() * 1000.0).round() as i32
+        )
+    } else if lyrics_offset == 0 {
+        "0 ms".to_string()
+    } else {
+        format!("{lyrics_offset:+} ms")
+    };
+    let lyrics_offset_class = if lyrics_offset_auto {
+        "flex items-center gap-3 min-w-[220px] opacity-40"
+    } else {
+        "flex items-center gap-3 min-w-[220px]"
+    };
+
     rsx! {
         SettingsSection { title: i18n::t("metadata").to_string(),
             SettingItem {
                 title: i18n::t("auto_fetch_covers").to_string(),
+                config_key: "auto_fetch_covers",
                 control: rsx! {
                     ToggleSetting {
                         enabled: config.read().auto_fetch_covers,
@@ -128,6 +156,7 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("prefer_local_lyrics").to_string(),
+                config_key: "prefer_local_lyrics",
                 control: rsx! {
                     ToggleSetting {
                         enabled: config.read().prefer_local_lyrics,
@@ -137,6 +166,7 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("enable_musixmatch_lyrics").to_string(),
+                config_key: "enable_musixmatch_lyrics",
                 control: rsx! {
                     ToggleSetting {
                         enabled: config.read().enable_musixmatch_lyrics,
@@ -145,7 +175,46 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
                 }
             }
             SettingItem {
+                title: i18n::t("lyrics_offset_auto").to_string(),
+                config_key: "lyrics_offset_auto",
+                control: rsx! {
+                    ToggleSetting {
+                        enabled: lyrics_offset_auto,
+                        on_change: move |val| config.write().lyrics_offset_auto = val,
+                    }
+                }
+            }
+            SettingItem {
+                title: i18n::t("lyrics_offset").to_string(),
+                config_key: "lyrics_offset_ms",
+                control: rsx! {
+                    div { class: "{lyrics_offset_class}",
+                        input {
+                            r#type: "range",
+                            min: "{-LYRICS_OFFSET_LIMIT_MS}",
+                            max: "{LYRICS_OFFSET_LIMIT_MS}",
+                            step: "50",
+                            value: "{lyrics_offset}",
+                            disabled: lyrics_offset_auto,
+                            class: "w-40",
+                            style: "accent-color: var(--color-indigo-500);",
+                            oninput: move |evt| {
+                                if let Ok(value) = evt.value().parse::<i32>() {
+                                    config.write().lyrics_offset_ms = value
+                                        .clamp(-LYRICS_OFFSET_LIMIT_MS, LYRICS_OFFSET_LIMIT_MS);
+                                }
+                            }
+                        }
+                        span {
+                            class: "text-xs font-mono text-white/80 w-20 text-right",
+                            "{lyrics_offset_label}"
+                        }
+                    }
+                }
+            }
+            SettingItem {
                 title: i18n::t("cover_fetch_strategy").to_string(),
+                config_key: "cover_fetch_strategy",
                 control: rsx! {
                     {
                         let current = config.read().cover_fetch_strategy;
@@ -202,6 +271,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
         SettingsSection { title: i18n::t("player_settings").to_string(),
             SettingItem {
                 title: i18n::t("crossfade").to_string(),
+                config_key: "crossfade_seconds",
                 control: rsx! {
                     div { class: "flex items-center gap-3 min-w-[220px]",
                         input {
@@ -227,6 +297,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("volume_scroll_step").to_string(),
+                config_key: "volume_scroll_step",
                 control: rsx! {
                     div { class: "flex items-center gap-3 min-w-[220px]",
                         input {
@@ -253,6 +324,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("channel_mode").to_string(),
+                config_key: "channel_mode",
                 control: rsx! {
                     ChannelModeSelector {
                         current: config.read().channel_mode,
@@ -265,6 +337,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("device_change_behavior").to_string(),
+                config_key: "device_change_behavior",
                 control: rsx! {
                     DeviceChangeBehaviorSelector {
                         current: config.read().device_change_behavior,
@@ -277,6 +350,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
             }
             SettingItem {
                 title: i18n::t("sample_rate_mode").to_string(),
+                config_key: "sample_rate_mode",
                 control: rsx! {
                     SampleRateModeSelector {
                         current: config.read().sample_rate_mode,
@@ -287,16 +361,20 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                     }
                 }
             }
-            div { class: "px-5 py-4",
-                p { class: "text-sm text-white/90 font-medium mb-3", "{i18n::t(\"equalizer\")}" }
-                EqualizerPanel {
-                    current: config.read().equalizer.clone(),
-                    on_preview: move |equalizer: config::EqualizerSettings| {
-                        ctrl.player.peek().set_equalizer(equalizer);
-                    },
-                    on_commit: move |equalizer: config::EqualizerSettings| {
-                        config.write().equalizer = equalizer.clone();
-                        ctrl.player.peek().set_equalizer(equalizer);
+            SettingItem {
+                title: i18n::t("equalizer").to_string(),
+                config_key: "equalizer",
+                stacked: true,
+                control: rsx! {
+                    EqualizerPanel {
+                        current: config.read().equalizer.clone(),
+                        on_preview: move |equalizer: config::EqualizerSettings| {
+                            ctrl.player.peek().set_equalizer(equalizer);
+                        },
+                        on_commit: move |equalizer: config::EqualizerSettings| {
+                            config.write().equalizer = equalizer.clone();
+                            ctrl.player.peek().set_equalizer(equalizer);
+                        }
                     }
                 }
             }

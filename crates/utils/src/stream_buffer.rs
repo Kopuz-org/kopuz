@@ -134,7 +134,11 @@ impl StreamBuffer {
                                     .filter(|next| !crate::playlist::is_playlist(None, next))
                             }) {
                                 Some(next) => {
-                                    tracing::debug!(from = %url, to = %next, "resolved playlist to stream URL");
+                                    tracing::debug!(
+                                        from = %crate::redact::redact_url(&url),
+                                        to = %crate::redact::redact_url(&next),
+                                        "resolved playlist to stream URL",
+                                    );
                                     url = next;
                                 }
                                 None => {
@@ -143,7 +147,9 @@ impl StreamBuffer {
                             }
                         }
                         Ok(response) => break Err(format!("HTTP {}", response.status())),
-                        Err(e) => break Err(e.to_string()),
+                        // `without_url`: the URL a request failed on can carry
+                        // credentials, and this string reaches the player UI.
+                        Err(e) => break Err(e.without_url().to_string()),
                     }
                 };
 

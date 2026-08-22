@@ -33,6 +33,19 @@ pub fn BottombarVaxry(
     let fav_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_fav = hooks::use_db_queries::use_track_is_favorite(fav_track);
     let crate::CompactMode(mut compact_mode) = use_context::<crate::CompactMode>();
+
+    // Declared outside the `cfg!` branch below so hook order never depends on the target.
+    let mut bar_swipe = crate::gestures::use_swipe();
+    let on_bar_swipe = move |evt: TouchEvent| {
+        use crate::gestures::SwipeDirection;
+        match bar_swipe.finish(&evt) {
+            Some(SwipeDirection::Up) => is_fullscreen.set(true),
+            Some(SwipeDirection::Left) => ctrl.play_next(),
+            Some(SwipeDirection::Right) => ctrl.play_prev(),
+            _ => {}
+        }
+    };
+
     if cfg!(target_os = "android") {
         let is_loading = *ctrl.is_loading.read();
         let buffered_ranges = ctrl.buffered_ranges.read().clone();
@@ -47,6 +60,10 @@ pub fn BottombarVaxry(
             div {
                 class: "shrink-0 h-[68px] bg-black/85 backdrop-blur-2xl border-t border-white/10 flex items-center px-3 gap-3 relative overflow-hidden mb-[env(safe-area-inset-bottom)]",
                 onclick: move |_| is_fullscreen.set(true),
+                ontouchstart: move |evt| bar_swipe.start(&evt),
+                ontouchmove: move |evt| bar_swipe.update(&evt),
+                ontouchend: on_bar_swipe,
+                ontouchcancel: move |_| bar_swipe.reset(),
                 div { class: "absolute top-0 left-0 h-[2px] bg-white/10 w-full overflow-hidden",
                     PlaybackBufferIndicator {
                         ranges: buffered_ranges,
@@ -66,7 +83,7 @@ pub fn BottombarVaxry(
                     span { class: "text-[13px] font-semibold text-white/90 truncate leading-tight", "{current_song_title}" }
                     span { class: "text-[11px] text-slate-400 truncate leading-tight", "{current_song_artist}" }
                 }
-                div { class: "flex items-center gap-0.5 pr-1",
+                div { class: "flex items-center gap-0.5 pr-1", dir: "ltr",
                     button {
                         class: if fav { "w-10 h-10 flex items-center justify-center text-red-400 active:scale-90 transition-transform" } else { "w-10 h-10 flex items-center justify-center text-slate-400 active:scale-90 transition-transform" },
                         onclick: move |evt| { evt.stop_propagation(); toggle_favorite(ctrl.current_track_snapshot.read().clone()); },
@@ -147,7 +164,7 @@ pub fn BottombarVaxry(
                     div {
                         class: "flex items-baseline gap-1.5 min-w-0",
                         span {
-                            class: "text-xs font-semibold text-white/90 truncate hover:underline cursor-pointer shrink-0 max-w-[40%]",
+                            class: "text-xs font-semibold text-white/90 truncate hover:underline cursor-pointer min-w-0",
                             onclick: move |_| {
                                 let album_id = current_track_snapshot
                                     .as_ref()
@@ -159,7 +176,7 @@ pub fn BottombarVaxry(
                         }
                         span { class: "text-white/20 text-[10px] shrink-0", "—" }
                         span {
-                            class: "text-[11px] text-slate-400 truncate min-w-0 cursor-pointer hover:underline hover:text-slate-300",
+                            class: "text-[11px] text-slate-400 truncate min-w-0 shrink-0 max-w-[40%] cursor-pointer hover:underline hover:text-slate-300",
                             onclick: move |_| {
                                 let artist = current_song_artist.read().clone();
                                 nav_ctrl.navigate_to_artist(artist);

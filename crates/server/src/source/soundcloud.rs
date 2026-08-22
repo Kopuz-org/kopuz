@@ -6,7 +6,7 @@ use crate::server_ops::ServerConn;
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync, MediaSource,
-    PlaylistMeta, PlaylistOps, SourceError, StreamInfo,
+    PlaylistMeta, PlaylistOps, RadioSeeds, SourceError, StreamInfo,
 };
 
 pub(super) struct SoundcloudSource {
@@ -45,7 +45,7 @@ impl MediaSource for SoundcloudSource {
             sync: true,
             downloads: false,
             discover: false,
-            radio: false,
+            radio: RadioSeeds::NONE,
             // No write side wired (api-v2 playlist mutation is DataDome-gated).
             playlists: PlaylistOps::None,
             artist_view: ArtistView::Library,

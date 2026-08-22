@@ -966,6 +966,7 @@ impl Actor {
             base_micros: f.base_micros,
             played_samples: f.played.clone(),
         });
+        let output_latency_micros = self.sink.output_latency_micros();
         let status = match &self.current {
             Some(current) => EngineStatus {
                 token: current.token,
@@ -978,6 +979,7 @@ impl Actor {
                 played_samples: current.played.clone(),
                 channels,
                 sample_rate,
+                output_latency_micros,
             },
             None => EngineStatus {
                 token: self.last_token,
@@ -990,6 +992,7 @@ impl Actor {
                 played_samples: Arc::new(AtomicU64::new(0)),
                 channels: 0,
                 sample_rate: 0,
+                output_latency_micros,
             },
         };
         self.status.store(Arc::new(status));

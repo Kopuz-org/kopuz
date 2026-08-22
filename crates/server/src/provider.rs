@@ -54,6 +54,20 @@ impl ProviderClient {
                     user_id: username.to_string(),
                 })
             }
+            MusicService::Nextcloud => {
+                // The password is expected to be an app password (Settings,
+                // Security), which is revocable and survives 2FA.
+                let client =
+                    crate::nextcloud::NextcloudClient::new(&self.server_url, username, password)?;
+                client
+                    .ping()
+                    .await
+                    .map_err(|e| utils::redact::redact_url(&e.to_string()))?;
+                Ok(AuthSession {
+                    access_token: password.to_string(),
+                    user_id: username.to_string(),
+                })
+            }
             MusicService::YtMusic => Err(
                 "YouTube Music uses OAuth device flow; call login_ytmusic_device() instead"
                     .to_string(),
@@ -61,6 +75,11 @@ impl ProviderClient {
             MusicService::SoundCloud => Err(
                 "SoundCloud uses browser sign-in; extract its OAuth token via the sign-in window \
                  instead of username/password login"
+                    .to_string(),
+            ),
+            MusicService::AppleMusic => Err(
+                "Apple Music uses browser sign-in or manual media-user-token; \
+                 use the sign-in flow instead of username/password login"
                     .to_string(),
             ),
             MusicService::Spotify => Err(

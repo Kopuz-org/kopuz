@@ -7,6 +7,7 @@
 
 use dioxus::prelude::*;
 use hooks::PlayerController;
+use hooks::toast::{toast, toast_error};
 use reader::models::Track;
 use server::source::ActiveSource;
 use std::future::Future;
@@ -18,25 +19,32 @@ pub fn radio_label() -> String {
     i18n::t("start_radio").to_string()
 }
 
-/// Whether the active source can start radio at all. Both seeds ride the one
-/// [`Capabilities::radio`](server::source::Capabilities) flag.
-fn radio_supported(active_source: &Signal<ActiveSource>) -> bool {
-    active_source.read().capabilities().radio
-}
-
 /// Await a radio queue and hand it to the player. An empty or failed mix leaves
-/// the current queue alone — the user's music keeps playing rather than stopping
-/// on a network hiccup.
+/// the current queue alone, so the user's music keeps playing rather than
+/// stopping on a network hiccup.
+///
+/// Both outcomes toast. Building a mix is a remote round trip that can take tens
+/// of seconds (a Subsonic server without analysis-backed similarity resolves it
+/// through Last.fm), so without the opening notice a click looks like it did
+/// nothing, and without the failure notice a timeout is indistinguishable from
+/// success.
 fn spawn_radio<F>(seed: String, fut: F, mut ctrl: PlayerController)
 where
     F: Future<Output = Result<Vec<Track>, server::source::SourceError>> + 'static,
 {
     spawn(
         async move {
+            toast(&i18n::t("radio_starting"));
             match fut.await {
                 Ok(tracks) if !tracks.is_empty() => ctrl.play_queue_linear(tracks),
-                Ok(_) => tracing::debug!(seed = %seed, "radio returned empty queue"),
-                Err(e) => tracing::warn!(seed = %seed, error = %e, "radio failed"),
+                Ok(_) => {
+                    tracing::warn!(seed = %seed, "radio returned empty queue");
+                    toast_error(&i18n::t("radio_empty"));
+                }
+                Err(e) => {
+                    tracing::warn!(seed = %seed, error = %e, "radio failed");
+                    toast_error(&i18n::t("radio_failed"));
+                }
             }
         }
         .instrument(tracing::info_span!("radio.start")),
@@ -75,7 +83,8 @@ pub fn play_playlist_radio(playlist_id: String, source: ActiveSource, ctrl: Play
 pub fn track_radio_handler(track: Track) -> Option<EventHandler<()>> {
     let ctrl = consume_context::<PlayerController>();
     let active_source = consume_context::<Signal<ActiveSource>>();
-    radio_supported(&active_source).then(|| {
+    let supported = active_source.read().capabilities().radio.track;
+    supported.then(|| {
         EventHandler::new(move |_| {
             let src = active_source.peek().clone();
             play_track_radio(track.clone(), src, ctrl)
@@ -84,11 +93,16 @@ pub fn track_radio_handler(track: Track) -> Option<EventHandler<()>> {
 }
 
 /// The playlist counterpart of [`track_radio_handler`]. Same `consume_context`
-/// rationale — playlist cards are rendered in a loop too.
+/// rationale, since playlist cards are rendered in a loop too.
+///
+/// Gated on its own flag: a Subsonic server can seed radio from a song but not
+/// from a playlist, so sharing the track flag put an action on Navidrome
+/// playlist cards that could only return `Unsupported`.
 pub fn playlist_radio_handler(playlist_id: String) -> Option<EventHandler<()>> {
     let ctrl = consume_context::<PlayerController>();
     let active_source = consume_context::<Signal<ActiveSource>>();
-    radio_supported(&active_source).then(|| {
+    let supported = active_source.read().capabilities().radio.playlist;
+    supported.then(|| {
         EventHandler::new(move |_| {
             let src = active_source.peek().clone();
             play_playlist_radio(playlist_id.clone(), src, ctrl)

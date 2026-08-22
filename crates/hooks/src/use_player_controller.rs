@@ -588,11 +588,10 @@ impl PlayerController {
         let from_token = if let Some(from_token) = fading {
             self.clear_pending_crossfade_ui();
             from_token
-        } else if let Some(from_token) = resolving {
+        } else {
+            let from_token = resolving?;
             self.cancel_load_task();
             from_token
-        } else {
-            return None;
         };
 
         self.armed_transition.set(None);
@@ -905,6 +904,14 @@ impl PlayerController {
             self.player.peek().seek(time);
         }
         self.current_song_progress.set(time.as_secs());
+    }
+
+    /// Zero for an external player: its position comes from the service, not us.
+    pub fn output_latency_secs(&self) -> f64 {
+        if *self.external_active.peek() {
+            return 0.0;
+        }
+        self.player.peek().output_latency().as_secs_f64()
     }
 
     pub fn displayed_progress_secs_f64(&self) -> f64 {
@@ -1261,9 +1268,9 @@ impl PlayerController {
                                     }
                                 }
                             }
-                            ResolvedStreamRef::SoundCloudHls(_) | ResolvedStreamRef::Direct(_) => {
-                                (stream_ref, None, None)
-                            }
+                            ResolvedStreamRef::SoundCloudHls(_)
+                            | ResolvedStreamRef::AppleMusicFmp4(_)
+                            | ResolvedStreamRef::Direct(_) => (stream_ref, None, None),
                         };
 
                     // The factory runs on the decode worker (no runtime), so
@@ -1437,6 +1444,57 @@ fn network_factory(
                 let len = Some(bytes.len() as u64);
                 let cursor = std::io::Cursor::new(bytes);
                 let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
+                hint.with_extension("m4a");
+                Ok((source, hint))
+            } else if let ResolvedStreamRef::AppleMusicFmp4(payload) =
+                ResolvedStreamRef::parse(&stream_url)
+            {
+                // Apple Music: Widevine key exchange, then fetch the encrypted
+                // fMP4 and decrypt it into one in-memory buffer — same shape as
+                // the SoundCloud path above. The key exchange has panicked on
+                // malformed CDM responses, so it runs under catch_unwind rather
+                // than taking the decode worker down with it.
+                let (adam_id, storefront, language, token_b64) =
+                    ResolvedStreamRef::apple_music_parts(payload).ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "malformed Apple Music stream ref",
+                        )
+                    })?;
+                let token = String::from_utf8(
+                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, token_b64)
+                        .unwrap_or_default(),
+                )
+                .unwrap_or_default();
+                let (adam_id, storefront, language) = (
+                    adam_id.to_string(),
+                    storefront.to_string(),
+                    language.to_string(),
+                );
+                let track = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    rt_handle.block_on(::server::applemusic::stream::resolve_and_decrypt(
+                        &adam_id,
+                        &token,
+                        &storefront,
+                        &language,
+                        buffer_progress.clone(),
+                    ))
+                }))
+                .unwrap_or_else(|panic| {
+                    let msg = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown panic".to_string());
+                    tracing::error!("am.playback: resolve_and_decrypt panicked: {msg}");
+                    Err(format!("Apple Music decrypt panicked: {msg}"))
+                })
+                .map_err(std::io::Error::other)?;
+                // Always seekable: samples decrypt on demand, so symphonia's probe
+                // jumping to EOF for an `mfra` index costs the handful of samples
+                // it actually reads rather than the whole track.
+                let len = Some(track.total_size());
+                let (source, mut hint) = decoder::from_stream_with_len(track, len);
                 hint.with_extension("m4a");
                 Ok((source, hint))
             } else {

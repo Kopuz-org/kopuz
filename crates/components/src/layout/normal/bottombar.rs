@@ -34,6 +34,18 @@ pub fn BottombarNormal(
     let is_fav = hooks::use_db_queries::use_track_is_favorite(fav_track);
     let crate::CompactMode(mut compact_mode) = use_context::<crate::CompactMode>();
 
+    // Declared outside the `cfg!` branch below so hook order never depends on the target.
+    let mut bar_swipe = crate::gestures::use_swipe();
+    let on_bar_swipe = move |evt: TouchEvent| {
+        use crate::gestures::SwipeDirection;
+        match bar_swipe.finish(&evt) {
+            Some(SwipeDirection::Up) => is_fullscreen.set(true),
+            Some(SwipeDirection::Left) => ctrl.play_next(),
+            Some(SwipeDirection::Right) => ctrl.play_prev(),
+            _ => {}
+        }
+    };
+
     if cfg!(target_os = "android") {
         let is_loading = *ctrl.is_loading.read();
         let buffered_ranges = ctrl.buffered_ranges.read().clone();
@@ -47,6 +59,10 @@ pub fn BottombarNormal(
             div {
                 class: "shrink-0 mx-2 mb-[env(safe-area-inset-bottom)] h-[68px] bg-[#121212]/95 backdrop-blur-3xl border border-white/10 rounded-[24px] flex items-center px-3 gap-3 relative overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.8)]",
                 onclick: move |_| is_fullscreen.set(true),
+                ontouchstart: move |evt| bar_swipe.start(&evt),
+                ontouchmove: move |evt| bar_swipe.update(&evt),
+                ontouchend: on_bar_swipe,
+                ontouchcancel: move |_| bar_swipe.reset(),
                 div { class: "absolute top-0 left-0 h-[2px] bg-white/10 w-full overflow-hidden",
                     PlaybackBufferIndicator {
                         ranges: buffered_ranges,
@@ -66,7 +82,7 @@ pub fn BottombarNormal(
                     span { class: "text-[13px] font-bold text-white truncate leading-tight", "{current_song_title}" }
                     span { class: "text-[11px] font-medium text-white/60 truncate leading-tight", "{current_song_artist}" }
                 }
-                div { class: "flex items-center gap-1 pr-1",
+                div { class: "flex items-center gap-1 pr-1", dir: "ltr",
                     button {
                         class: "w-12 h-12 flex items-center justify-center text-white text-xl active:scale-90 transition-transform",
                         onclick: move |evt| { evt.stop_propagation(); ctrl.toggle(); },

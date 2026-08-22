@@ -28,9 +28,9 @@ mod artwork_protocol;
 #[cfg(not(target_os = "android"))]
 mod chrome_trace;
 mod desktop_shell;
+#[cfg(not(target_os = "android"))]
 mod legacy;
 mod logging;
-#[cfg(not(target_os = "android"))]
 mod queue_state;
 #[cfg(not(target_os = "android"))]
 mod ui_profile;
@@ -184,7 +184,39 @@ fn StaticHeadAssets() -> Element {
 
 static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
 
+/// Hand the Android trust store to rustls before anything opens a TLS
+/// connection. `rustls-platform-verifier` panics on first verification if it was
+/// never given a JVM and Context, which takes down the first sync or cover fetch.
+///
+/// Failing here is not recoverable — every HTTPS request would abort the process
+/// later, somewhere far less legible — so the caller stops startup instead.
+#[cfg(target_os = "android")]
+fn init_android_tls() -> Result<(), String> {
+    let ctx = ndk_context::android_context();
+    if ctx.vm().is_null() || ctx.context().is_null() {
+        return Err("no android JVM or Context on the ndk context".to_string());
+    }
+    // `::jni` — `dioxus::prelude::*` re-exports its own, older `jni`, and a glob
+    // import shadows the extern prelude.
+    //
+    // SAFETY: wry's activity populates ndk_context before `main` runs, and both
+    // handles stay valid for the lifetime of the process.
+    let vm = unsafe { ::jni::JavaVM::from_raw(ctx.vm().cast()) };
+    let raw_context = ctx.context().cast();
+    vm.attach_current_thread(|env| {
+        // SAFETY: `raw_context` is the Activity's global Context reference.
+        let context = unsafe { ::jni::objects::JObject::from_raw(env, raw_context) };
+        rustls_platform_verifier::android::init_with_env(env, context)
+    })
+    .map_err(|e: ::jni::errors::Error| e.to_string())
+}
+
 fn main() {
+    #[cfg(target_os = "android")]
+    if let Err(e) = init_android_tls() {
+        panic!("android certificate verifier failed to initialize: {e}");
+    }
+
     #[cfg(not(target_os = "android"))]
     {
         let log_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
@@ -317,7 +349,51 @@ fn main() {
 
         let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
 
+        /// Dioxus gates all task polling on the webview acknowledging the previous
+        /// edit batch, and the stock interpreter only sends that ack from a
+        /// `requestAnimationFrame` callback — which Chromium suspends while the
+        /// activity is backgrounded. One render after backgrounding, the ack never
+        /// arrives, `poll_edits_flushed` stays pending forever, and every future in
+        /// the app stalls (no queue advance, notification taps pile up undelivered).
+        /// This script rebinds the edit path to apply batches and ack immediately —
+        /// the interpreter's own headless behavior. The counter stops a stale rAF
+        /// callback from acking twice, which would release the next batch before the
+        /// DOM had it.
+        const APPLY_EDITS_WITHOUT_RAF: &str = r#"<script>
+(function () {
+    var attempts = 0;
+    function patch() {
+        var i = window.interpreter;
+        if (!i || !i.rafEdits || !i.markEditsFinished) {
+            attempts += 1;
+            if (attempts > 600) {
+                console.error("kopuz: interpreter never appeared; edit-ack patch not applied");
+                return;
+            }
+            setTimeout(patch, 50);
+            return;
+        }
+        var pending = 0;
+        var mark = i.markEditsFinished.bind(i);
+        i.markEditsFinished = function () {
+            if (pending > 0) {
+                pending -= 1;
+                mark();
+            }
+        };
+        i.rafEdits = function (bytes) {
+            pending += 1;
+            i.enqueueBytes(bytes);
+            i.flushQueuedBytes();
+            i.markEditsFinished();
+        };
+    }
+    patch();
+})();
+</script>"#;
+
         let config = dioxus::mobile::Config::new()
+            .with_custom_head(APPLY_EDITS_WITHOUT_RAF.to_string())
             .with_background_color((0, 0, 0, 255))
             // artwork://local?p=<percent-encoded-absolute-path> — the Android WebView mostly
             // receives base64 data URLs from utils, but keep a synchronous handler for any
@@ -410,6 +486,9 @@ fn App() -> Element {
     // first would leave the final queue/config persists (and any failure
     // warnings) out of latest.log and the trace.
 
+    #[cfg(target_os = "android")]
+    app_lifecycle::use_webview_decipher_engine();
+
     // The whole-Library signal is GONE — pages/components read the DB through
     // query hooks, and every track self-resolves its cover via the cover seam
     // (a local row's cover_path is projected from its album in the DB read layer).
@@ -452,6 +531,17 @@ fn App() -> Element {
     // these after the spawning page — and in principle this component — is
     // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
     let mut config = use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
+    // Snapshot of the file/env config layers (issue #530): which settings file
+    // is in play, whether it is Nix-managed, and which keys are pinned by an
+    // unwritable layer — the settings UI grays those out.
+    use_context_provider(|| {
+        let db_path = db::default_db_path();
+        let db_dir = match db_path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            _ => std::path::PathBuf::from("."),
+        };
+        config::store::FileLayers::read(&config::store::settings_path_for(&db_dir))
+    });
     let db = app_db::DB_HANDLE
         .get()
         .cloned()
@@ -483,9 +573,13 @@ fn App() -> Element {
         // Only the resolution-relevant slice of config; a volume/theme change
         // must not rebuild the client. `Memo`'s `PartialEq` dedup gates the effect.
         let identity = use_memo(move || {
+            let cfg = config.read();
             (
-                config.read().active_source.clone(),
-                config.read().server.clone(),
+                cfg.active_source.clone(),
+                cfg.server.clone(),
+                // Library roots define what a folder-tree backend scans, so
+                // editing them has to rebuild the source like a cred change.
+                cfg.active_server_folders(),
             )
         });
         let db_eff = db.clone();
@@ -514,7 +608,9 @@ fn App() -> Element {
     pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
     // Applies detached yt-dlp completions (history + rescan) in this scope —
-    // the job drivers outlive the downloads page and can't write these.
+    // the job drivers outlive the downloads page and can't write these. There is
+    // no yt-dlp on Android, so the whole module is gated out there.
+    #[cfg(not(target_os = "android"))]
     pages::ytdlp_jobs::use_ytdlp_completion_sink(config, trigger_rescan);
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
@@ -1624,6 +1720,19 @@ fn App() -> Element {
     let mut is_sidebar_collapsed = use_signal(|| cfg!(target_os = "android"));
     use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
 
+    // Mirror of the drawer's swipe-left-to-close: a swipe right anywhere on the
+    // page opens it. Horizontal carousels swallow their own touches so scrolling
+    // one back to the start does not pull the drawer out with it.
+    let mut open_swipe = components::gestures::use_swipe();
+    let on_open_swipe = move |evt: TouchEvent| {
+        if open_swipe.finish(&evt) == Some(components::gestures::SwipeDirection::Right)
+            && cfg!(target_os = "android")
+            && *is_sidebar_collapsed.peek()
+        {
+            is_sidebar_collapsed.set(false);
+        }
+    };
+
     use_context_provider(|| components::CompactMode(compact_mode));
     #[cfg(not(target_os = "android"))]
     {
@@ -1817,6 +1926,41 @@ fn App() -> Element {
         }
     });
 
+    use_effect(move || {
+        let mut ctrl = ctrl;
+        spawn(async move {
+            let mut eval = dioxus::document::eval(
+                r#"(function(){
+                    if (window.__kopuzSpaceHandler) {
+                        document.removeEventListener('keydown', window.__kopuzSpaceHandler, true);
+                    }
+                    const isTextEntry = (el) => {
+                        if (!el) return false;
+                        if (el.isContentEditable) return true;
+                        const tag = el.tagName;
+                        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+                    };
+                    const handler = (e) => {
+                        if (e.key !== ' ' && e.code !== 'Space') return;
+                        if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+                        if (isTextEntry(e.target) || isTextEntry(document.activeElement)) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (e.repeat) return;
+                        dioxus.send('toggle-play');
+                    };
+                    window.__kopuzSpaceHandler = handler;
+                    document.addEventListener('keydown', handler, true);
+                })()"#,
+            );
+            while let Ok(v) = eval.recv::<serde_json::Value>().await {
+                if v.as_str() == Some("toggle-play") {
+                    ctrl.toggle();
+                }
+            }
+        });
+    });
+
     rsx! {
         // we use this component here to prevent re-diffing to prevent warns in console
         StaticHeadAssets {}
@@ -1825,7 +1969,13 @@ fn App() -> Element {
         div {
             id: "app-root",
             class: "relative z-0 flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
-            style: "{background_style}",
+            // The activity draws edge to edge, so inset the whole column once here
+            // instead of per element. `fixed` overlays escape it and carry their own.
+            style: if cfg!(target_os = "android") {
+                format!("{} padding-top: env(safe-area-inset-top);", background_style)
+            } else {
+                background_style.to_string()
+            },
             dir: "{dir}",
             "data-platform": if cfg!(target_os = "android") { "android" } else { "desktop" },
             "data-reduce-animations": "{reduce_animations}",
@@ -1851,9 +2001,6 @@ fn App() -> Element {
                 {
                     let c = *show_quick_search.read();
                     show_quick_search.set(!c);
-                    evt.prevent_default();
-                } else if key == Key::Character(" ".into()) {
-                    ctrl.toggle();
                     evt.prevent_default();
                 }
             },
@@ -2025,6 +2172,10 @@ fn App() -> Element {
             }
             div {
                 class: "{content_row_class}",
+                ontouchstart: move |evt| open_swipe.start(&evt),
+                ontouchmove: move |evt| open_swipe.update(&evt),
+                ontouchend: on_open_swipe,
+                ontouchcancel: move |_| open_swipe.reset(),
                 Sidebar {
                     current_route,
                     on_navigate: move |route| {
@@ -2082,8 +2233,10 @@ fn App() -> Element {
                                 Route::Settings => i18n::t("settings"),
                                 _ => i18n::t("home"),
                             };
+                            let has_image_background = config.read().cover_art_background
+                                || !config.read().custom_background_path.is_empty();
                             rsx! {
-                                div { class: "shrink-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 pt-[env(safe-area-inset-top)] flex items-center h-[calc(env(safe-area-inset-top)_+_2.75rem)] px-3 shadow-xl",
+                                div { class: if has_image_background { "shrink-0 z-[60] bg-black/30 backdrop-blur-xl border-b border-white/5 flex items-center h-11 px-3" } else { "shrink-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 flex items-center h-11 px-3 shadow-xl" },
                                     if is_details {
                                         button {
                                             class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",

@@ -13,7 +13,7 @@ pub mod track;
 pub use common::controls::{
     dots_menu, reorder_buttons, selection_bar, sort_control, view_mode_toggle,
 };
-pub use common::{constants, shared, virtual_scroll};
+pub use common::{constants, gestures, shared, virtual_scroll};
 pub use layout::{
     bottombar, download_overlay, fullscreen, header, normal, rightbar, showcase, sidebar,
     stat_card, titlebar, vaxry,
@@ -35,5 +35,7 @@ pub use search::{
     bar as search_bar, genre_detail as search_genre_detail, genres as search_genres,
     quick as quick_search, results as search_results,
 };
-pub use settings::{items as settings_items, popups as settings_popups};
+pub use settings::{
+    items as settings_items, popups as settings_popups, remote_folders as settings_remote_folders,
+};
 pub use track::{list_view as track_list_view, metadata_modal, row as track_row};

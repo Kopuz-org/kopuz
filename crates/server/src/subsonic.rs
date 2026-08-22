@@ -5,6 +5,24 @@ use serde::de::DeserializeOwned;
 const SUBSONIC_API_VERSION: &str = "1.16.1";
 const CLIENT_NAME: &str = "kopuz";
 
+/// Budget for an ordinary library call, which the server answers out of its own
+/// database.
+const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Budget for the similar-songs call. Navidrome answers it from its metadata
+/// agents, and when no agent has track-level similarity it falls back to one
+/// `getSimilarArtists` lookup plus a sequential top-songs lookup per similar
+/// artist, each a live Last.fm round trip on its own 10s budget. Measured
+/// against a real library that ranges from 0.15s (warm) to over 50s (cold), so
+/// the ordinary budget turned most radio starts into a silent timeout.
+const SIMILAR_SONGS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// The OpenSubsonic extension that exposes analysis-backed similarity. A server
+/// advertises it only when something implements it (on Navidrome, the
+/// AudioMuse-AI plugin); the endpoints return a bare 404 otherwise, so it has to
+/// be asked for rather than attempted.
+const SONIC_SIMILARITY_EXTENSION: &str = "sonicSimilarity";
+
 #[derive(Debug, Deserialize)]
 struct SubsonicEnvelope<T> {
     #[serde(rename = "subsonic-response")]
@@ -31,6 +49,10 @@ pub(crate) struct SubsonicClient {
     base_url: String,
     username: String,
     password: String,
+    /// Memoized [`SONIC_SIMILARITY_EXTENSION`] probe. The answer only changes
+    /// when the server's plugins do, and radio would otherwise pay for an extra
+    /// round trip on every start.
+    sonic_similarity: tokio::sync::OnceCell<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -189,9 +211,46 @@ struct SimilarSongsContainer {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GetSimilarSongs2Data {
-    #[serde(default, rename = "similarSongs2")]
-    similar_songs2: Option<SimilarSongsContainer>,
+struct GetSimilarSongsData {
+    #[serde(default)]
+    similar_songs: Option<SimilarSongsContainer>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetSongData {
+    #[serde(default)]
+    song: Option<SubsonicSong>,
+}
+
+/// One `getSonicSimilarTracks` hit. The response also carries a `similarity`
+/// score, dropped here because the server already returns the list ordered by
+/// it and a threshold would second-guess the analysis that produced it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SonicMatch {
+    entry: SubsonicSong,
+}
+
+/// `sonicMatch` sits directly on the response body, not inside a container.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetSonicSimilarTracksData {
+    #[serde(default)]
+    sonic_match: Vec<SonicMatch>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenSubsonicExtension {
+    name: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetOpenSubsonicExtensionsData {
+    #[serde(default)]
+    open_subsonic_extensions: Vec<OpenSubsonicExtension>,
 }
 
 /// Build a Subsonic `getCoverArt` URL without the caller holding a client — the
@@ -222,7 +281,7 @@ pub fn stream_url_with_bitrate(
 impl SubsonicClient {
     pub fn new(base_url: &str, username: &str, password: &str) -> Self {
         let builder = reqwest::Client::builder();
-        let builder = builder.timeout(std::time::Duration::from_secs(10));
+        let builder = builder.timeout(DEFAULT_TIMEOUT);
         let http_client = builder.build().unwrap_or_else(|_| reqwest::Client::new());
 
         Self {
@@ -231,6 +290,7 @@ impl SubsonicClient {
             username: username.to_string(),
             password: crate::provider::resolve_subsonic_secret(password)
                 .unwrap_or_else(|| "__missing_subsonic_secret__".to_string()),
+            sonic_similarity: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -268,23 +328,103 @@ impl SubsonicClient {
         Ok(data.album.map(|a| a.song).unwrap_or_default())
     }
 
-    /// OpenSubsonic `getSimilarSongs2`, needs a server-side plugin such as
-    /// Navidrome's AudioMuse to actually return results.
+    /// Songs to build a radio queue from, seeded by one song.
+    ///
+    /// Server-side audio analysis wins when the server has it: the
+    /// `sonicSimilarity` extension answers from the server's own analysis of the
+    /// library, which is both better matched and far quicker than the
+    /// metadata-agent route. Everything else falls back to plain
+    /// `getSimilarSongs`, which every Subsonic server since API 1.11.0 exposes.
     pub async fn get_similar_songs(
         &self,
         song_id: &str,
         count: usize,
     ) -> Result<Vec<SubsonicSong>, String> {
+        if self.has_sonic_similarity().await {
+            match self.get_sonic_similar_tracks(song_id, count).await {
+                Ok(songs) if !songs.is_empty() => return Ok(songs),
+                Ok(_) => tracing::debug!(song = %song_id, "sonic similarity returned nothing"),
+                Err(e) => tracing::warn!(song = %song_id, error = %e, "sonic similarity failed"),
+            }
+        }
+        self.get_similar_songs_by_metadata(song_id, count).await
+    }
+
+    /// Whether the server advertises [`SONIC_SIMILARITY_EXTENSION`]. Probed once
+    /// per client; a failed probe is taken as "no" so radio still falls back
+    /// rather than erroring on an unrelated call.
+    async fn has_sonic_similarity(&self) -> bool {
+        *self
+            .sonic_similarity
+            .get_or_init(|| async {
+                match self
+                    .call::<GetOpenSubsonicExtensionsData>("getOpenSubsonicExtensions.view", vec![])
+                    .await
+                {
+                    Ok(data) => data
+                        .open_subsonic_extensions
+                        .iter()
+                        .any(|ext| ext.name == SONIC_SIMILARITY_EXTENSION),
+                    Err(e) => {
+                        tracing::debug!(error = %e, "OpenSubsonic extension probe failed");
+                        false
+                    }
+                }
+            })
+            .await
+    }
+
+    /// OpenSubsonic `getSonicSimilarTracks`. Results come back ordered by
+    /// similarity, so the queue order is the server's ranking.
+    async fn get_sonic_similar_tracks(
+        &self,
+        song_id: &str,
+        count: usize,
+    ) -> Result<Vec<SubsonicSong>, String> {
         let data = self
-            .call::<GetSimilarSongs2Data>(
-                "getSimilarSongs2.view",
+            .call_within::<GetSonicSimilarTracksData>(
+                "getSonicSimilarTracks.view",
                 vec![
                     ("id".to_string(), song_id.to_string()),
                     ("count".to_string(), count.to_string()),
                 ],
+                SIMILAR_SONGS_TIMEOUT,
             )
             .await?;
-        Ok(data.similar_songs2.map(|s| s.song).unwrap_or_default())
+        Ok(data.sonic_match.into_iter().map(|m| m.entry).collect())
+    }
+
+    /// Subsonic `getSimilarSongs` (API 1.11.0). This is the variant whose `id`
+    /// accepts a song; `getSimilarSongs2` is specified as artist-seeded, and
+    /// only happens to accept a song id on servers that alias the two.
+    async fn get_similar_songs_by_metadata(
+        &self,
+        song_id: &str,
+        count: usize,
+    ) -> Result<Vec<SubsonicSong>, String> {
+        let data = self
+            .call_within::<GetSimilarSongsData>(
+                "getSimilarSongs.view",
+                vec![
+                    ("id".to_string(), song_id.to_string()),
+                    ("count".to_string(), count.to_string()),
+                ],
+                SIMILAR_SONGS_TIMEOUT,
+            )
+            .await?;
+        Ok(data.similar_songs.map(|s| s.song).unwrap_or_default())
+    }
+
+    /// One song by id. Radio uses it to put the seed at the head of the queue:
+    /// `getSimilarSongs2` never includes the seed itself.
+    pub async fn get_song(&self, song_id: &str) -> Result<Option<SubsonicSong>, String> {
+        let data = self
+            .call::<GetSongData>(
+                "getSong.view",
+                vec![("id".to_string(), song_id.to_string())],
+            )
+            .await?;
+        Ok(data.song)
     }
 
     pub async fn get_playlists(&self) -> Result<Vec<SubsonicPlaylist>, String> {
@@ -499,11 +639,21 @@ impl SubsonicClient {
             .collect()
     }
 
-    #[tracing::instrument(name = "subsonic.call", skip_all, fields(endpoint = %endpoint))]
     async fn call<T: DeserializeOwned + Default>(
         &self,
         endpoint: &str,
+        extra_params: Vec<(String, String)>,
+    ) -> Result<T, String> {
+        self.call_within(endpoint, extra_params, DEFAULT_TIMEOUT)
+            .await
+    }
+
+    #[tracing::instrument(name = "subsonic.call", skip_all, fields(endpoint = %endpoint))]
+    async fn call_within<T: DeserializeOwned + Default>(
+        &self,
+        endpoint: &str,
         mut extra_params: Vec<(String, String)>,
+        timeout: std::time::Duration,
     ) -> Result<T, String> {
         let url = format!("{}/rest/{}", self.base_url, endpoint);
 
@@ -514,6 +664,7 @@ impl SubsonicClient {
             .http_client
             .get(&url)
             .query(&params)
+            .timeout(timeout)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -536,5 +687,113 @@ impl SubsonicClient {
         }
 
         Err("Subsonic request failed with unknown error".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse<T: DeserializeOwned + Default>(body: serde_json::Value) -> T {
+        let envelope: SubsonicEnvelope<T> =
+            serde_json::from_value(body).expect("valid Subsonic envelope");
+        envelope.response.data
+    }
+
+    /// The radio path reads these shapes and nothing else. A rename or a wrong
+    /// nesting level deserializes to an empty list rather than an error, which
+    /// reaches the user as a radio button that does nothing.
+    #[test]
+    fn similar_songs_response_parses() {
+        let data: GetSimilarSongsData = parse(serde_json::json!({
+            "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "similarSongs": {
+                    "song": [{
+                        "id": "song-1",
+                        "title": "Feels Like We Only Go Backwards",
+                        "artist": "Tame Impala",
+                        "albumId": "album-1",
+                        "duration": 193,
+                        "coverArt": "cover-1"
+                    }]
+                }
+            }
+        }));
+
+        let songs = data.similar_songs.expect("similarSongs container").song;
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].id, "song-1");
+    }
+
+    /// `sonicMatch` sits on the response body itself and wraps each song in an
+    /// `entry`, unlike every other list this client reads.
+    #[test]
+    fn sonic_similar_tracks_response_parses() {
+        let data: GetSonicSimilarTracksData = parse(serde_json::json!({
+            "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "openSubsonic": true,
+                "sonicMatch": [{
+                    "entry": {
+                        "id": "song-2",
+                        "title": "The Less I Know the Better",
+                        "artist": "Tame Impala"
+                    },
+                    "similarity": 0.95
+                }]
+            }
+        }));
+
+        assert_eq!(data.sonic_match.len(), 1);
+        assert_eq!(data.sonic_match[0].entry.id, "song-2");
+    }
+
+    #[test]
+    fn extension_probe_reads_the_advertised_names() {
+        let data: GetOpenSubsonicExtensionsData = parse(serde_json::json!({
+            "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "openSubsonic": true,
+                "openSubsonicExtensions": [
+                    { "name": "songLyrics", "versions": [1, 2] },
+                    { "name": "sonicSimilarity", "versions": [1] }
+                ]
+            }
+        }));
+
+        assert!(
+            data.open_subsonic_extensions
+                .iter()
+                .any(|ext| ext.name == SONIC_SIMILARITY_EXTENSION)
+        );
+    }
+
+    /// The shape a server with no similarity plugin returns (captured from
+    /// Navidrome 0.63.2): radio has to fall back rather than treat it as an error.
+    #[test]
+    fn extension_probe_without_sonic_similarity() {
+        let data: GetOpenSubsonicExtensionsData = parse(serde_json::json!({
+            "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "openSubsonic": true,
+                "openSubsonicExtensions": [
+                    { "name": "transcodeOffset", "versions": [1] },
+                    { "name": "formPost", "versions": [1] },
+                    { "name": "songLyrics", "versions": [1, 2] }
+                ]
+            }
+        }));
+
+        assert!(
+            !data
+                .open_subsonic_extensions
+                .iter()
+                .any(|ext| ext.name == SONIC_SIMILARITY_EXTENSION)
+        );
     }
 }

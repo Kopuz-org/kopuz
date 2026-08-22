@@ -1,0 +1,66 @@
+Categories:
+  - Multimedia
+License: MIT
+AuthorName: temidaradev
+SourceCode: https://github.com/Kopuz-org/kopuz
+IssueTracker: https://github.com/Kopuz-org/kopuz/issues
+
+AutoName: Kopuz
+Summary: Music player for local libraries and self-hosted servers
+Description: |-
+  Kopuz plays music from a local library or from a self-hosted server —
+  Jellyfin, Subsonic and Navidrome — with playlists, favourites, offline
+  downloads, an equaliser, lyrics and scrobbling to ListenBrainz.
+
+  The library, playlists and favourites live in a single SQLite database on
+  the device; album art and downloaded tracks are cached on disk.
+
+RepoType: git
+Repo: https://github.com/Kopuz-org/kopuz.git
+
+Builds:
+  - versionName: 0.14.0
+    versionCode: 1400
+    commit: 354ac3d04ee65aeec2a7bb38a2fe2a5406848143
+    sudo:
+      - apt-get update
+      - apt-get install -y build-essential cmake pkg-config curl
+      - curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+    init:
+      - $$rustup$$/rustup toolchain install stable --profile minimal
+      - $$rustup$$/rustup target add aarch64-linux-android
+      - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
+      - npm ci
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css
+    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+    build:
+      - export SQLX_OFFLINE=true
+      - dx build --package kopuz --platform android --release --locked
+      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+
+  - versionName: 0.15.1
+    versionCode: 1501
+    commit: v0.15.1
+    ndk: 26.3.11579264
+    sudo:
+      - apt-get update
+      - apt-get install -y build-essential cmake pkg-config curl
+      - curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+    init:
+      - $$rustup$$/rustup toolchain install stable --profile minimal
+      - $$rustup$$/rustup target add aarch64-linux-android
+      - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
+      - npm ci
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css
+    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+    build:
+      - export SQLX_OFFLINE=true
+      - export ANDROID_NDK_HOME=$$NDK$$
+      - dx build --package kopuz --platform android --release --locked --target
+        aarch64-linux-android
+      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags ^v[0-9.]+$
+CurrentVersion: 0.15.1
+CurrentVersionCode: 1501

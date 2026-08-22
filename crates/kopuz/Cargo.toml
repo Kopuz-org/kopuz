@@ -31,6 +31,13 @@ webbrowser = { workspace = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 dioxus = { workspace = true, features = ["mobile"] }
+# reqwest's rustls stack verifies certificates through the Android trust store,
+# which panics on first use unless it is handed a JVM + Context at startup.
+# Pinned to the jni that rustls-platform-verifier itself builds against, which is
+# not the workspace one (see the note there).
+rustls-platform-verifier = "0.7"
+jni = "0.22"
+ndk-context = { workspace = true }
 
 [dependencies]
 base64 = { workspace = true }

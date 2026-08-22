@@ -41,11 +41,11 @@ pub(crate) fn TrackActions(track: Track) -> Element {
         "fa-solid fa-share-nodes",
     ));
 
-    let radio_idx = if capabilities.radio {
+    let radio_idx = if capabilities.radio.track {
         let idx = actions.len();
         actions.push(MenuAction::new(
-            "Start radio",
-            "fa-solid fa-tower-broadcast",
+            crate::radio_actions::radio_label(),
+            crate::radio_actions::RADIO_ICON,
         ));
         Some(idx)
     } else {

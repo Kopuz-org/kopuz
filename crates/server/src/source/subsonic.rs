@@ -6,7 +6,7 @@ use crate::{server_ops::ServerConn, subsonic::SubsonicClient};
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, LibrarySnapshot, MediaSource,
-    PlaylistMeta, PlaylistOps, SourceError, StreamInfo, mirror_added, mirror_created,
+    PlaylistMeta, PlaylistOps, RadioSeeds, SourceError, StreamInfo, mirror_added, mirror_created,
 };
 
 pub(super) struct SubsonicSource {
@@ -227,7 +227,7 @@ impl MediaSource for SubsonicSource {
             sync: true,
             downloads: true,
             discover: false,
-            radio: true,
+            radio: RadioSeeds::TRACK,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
@@ -355,14 +355,34 @@ impl MediaSource for SubsonicSource {
             .collect())
     }
 
+    /// Song-seeded radio. Which endpoint answers is the client's call (see
+    /// [`SubsonicClient::get_similar_songs`](crate::subsonic::SubsonicClient));
+    /// either way it returns neighbours only, so the seed goes at the head of the
+    /// queue rather than jumping the user off the track they started from. A seed
+    /// the server cannot look up is not fatal: the neighbours still make a queue.
     async fn start_radio(&self, seed_ref: &str) -> Result<Vec<reader::Track>, SourceError> {
         const SIMILAR_SONGS_COUNT: usize = 50;
-        let songs = self
+        let similar: Vec<_> = self
             .client
             .get_similar_songs(seed_ref, SIMILAR_SONGS_COUNT)
-            .await?;
-        Ok(songs
+            .await?
             .into_iter()
+            .filter(|song| song.id != seed_ref)
+            .collect();
+        // Nothing similar means no radio. Returning the seed on its own would
+        // read as success and replace the queue with the one song already
+        // playing, so hand back empty and let the caller say so.
+        if similar.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let seed = self.client.get_song(seed_ref).await.unwrap_or_else(|e| {
+            tracing::debug!(seed = %seed_ref, error = %e, "radio seed lookup failed");
+            None
+        });
+        Ok(seed
+            .into_iter()
+            .chain(similar)
             .map(|song| song_to_track(&self.client, self.service, song))
             .collect())
     }
@@ -436,9 +456,11 @@ mod tests {
         assert!(meta.image_tag.is_none());
     }
 
-    /// The UI's "Start Radio" action reads this flag alone (see
-    /// `radio_actions::radio_supported`) — a regression here silently hides
-    /// the menu item for every Subsonic/Navidrome user.
+    /// The UI's "Start Radio" actions read these two flags alone (see
+    /// `radio_actions`). Track radio must stay on or the menu item silently
+    /// disappears for every Subsonic/Navidrome user; playlist radio must stay
+    /// off, because the Subsonic API has no playlist-seeded mix and the action
+    /// would only ever reach the trait's unsupported default.
     #[tokio::test]
     async fn subsonic_capabilities_enable_radio() {
         let dir = std::env::temp_dir().join(format!("kopuz-subsonic-caps-{}", std::process::id()));
@@ -450,9 +472,13 @@ mod tests {
             token: "password".to_string(),
             user_id: "user".to_string(),
             device_id: "test".to_string(),
+            apple_music_storefront: String::new(),
+            apple_music_language: String::new(),
+            folders: Vec::new(),
         };
         let src = SubsonicSource::new(db, Source::Server("test".to_string()), &conn);
 
-        assert!(src.capabilities().radio);
+        assert!(src.capabilities().radio.track);
+        assert!(!src.capabilities().radio.playlist);
     }
 }

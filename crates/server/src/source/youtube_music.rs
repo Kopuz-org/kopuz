@@ -6,8 +6,8 @@ use crate::{server_ops::ServerConn, ytmusic::YouTubeMusicClient};
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync, MediaSource,
-    PlaylistMeta, PlaylistOps, PlaylistPage, RemoteAlbum, SourceError, StreamInfo, mirror_added,
-    mirror_created,
+    PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds, RemoteAlbum, SourceError, StreamInfo,
+    mirror_added, mirror_created,
 };
 
 /// YT Music's "Liked Music" auto-playlist. It is not browsed like the user's
@@ -65,7 +65,7 @@ impl MediaSource for YtSource {
             sync: true,
             downloads: true,
             discover: true,
-            radio: true,
+            radio: RadioSeeds::ALL,
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Remote,
             albums: AlbumType::YtMusic,

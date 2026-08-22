@@ -110,7 +110,9 @@ impl TrackId {
             ("subsonic", config::MusicService::Subsonic),
             ("custom", config::MusicService::Custom),
             ("soundcloud", config::MusicService::SoundCloud),
+            ("applemusic", config::MusicService::AppleMusic),
             ("spotify", config::MusicService::Spotify),
+            ("nextcloud", config::MusicService::Nextcloud),
         ] {
             if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
                 let item_id = rest.split(':').next().unwrap_or("").to_string();
@@ -131,7 +133,9 @@ fn service_prefix(s: config::MusicService) -> &'static str {
         config::MusicService::Subsonic => "subsonic",
         config::MusicService::Custom => "custom",
         config::MusicService::SoundCloud => "soundcloud",
+        config::MusicService::AppleMusic => "applemusic",
         config::MusicService::Spotify => "spotify",
+        config::MusicService::Nextcloud => "nextcloud",
     }
 }
 
@@ -195,9 +199,14 @@ impl CoverRef {
             "custom" if !item_id.is_empty() => {
                 Self::remote_item(MusicService::Custom, item_id, value)
             }
-            // YT Music and legacy SoundCloud refs only carry self-contained
-            // artwork. Their item identity is irrelevant to cover resolution.
-            "ytmusic" | "soundcloud" => value.map_or(Self::None, Self::parse),
+            // YT Music, SoundCloud and Apple Music refs only carry
+            // self-contained artwork — a URL, or an Apple artwork template.
+            // Their item identity is irrelevant to cover resolution.
+            // Nextcloud too: an img tag won't send the Basic auth its previews
+            // need, so the sync caches art to disk and the ref carries a path.
+            "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" => {
+                value.map_or(Self::None, Self::parse)
+            }
             _ => Self::None,
         }
     }
@@ -229,9 +238,11 @@ impl CoverRef {
                 item_id: item_id.to_string(),
                 signed: false,
             },
-            MusicService::YtMusic | MusicService::SoundCloud | MusicService::Spotify => {
-                cover.map_or(Self::None, Self::parse)
-            }
+            MusicService::YtMusic
+            | MusicService::SoundCloud
+            | MusicService::AppleMusic
+            | MusicService::Spotify
+            | MusicService::Nextcloud => cover.map_or(Self::None, Self::parse),
         }
     }
 
@@ -239,6 +250,10 @@ impl CoverRef {
     /// form [`parse`](Self::parse) reads back — the one place a service prefix
     /// is written. Hand-rolled `format!`s are how a Subsonic row ended up
     /// carrying a `jellyfin:` ref.
+    ///
+    /// `parse` splits on the first two colons, so pass `None` for `cover` when
+    /// the item id can hold one itself (a remote path): the third segment would
+    /// otherwise start mid-id and resolve to nothing.
     pub fn stored_item_ref(service: MusicService, item_id: &str, cover: Option<&str>) -> String {
         let prefix = service_prefix(service);
         match cover {
@@ -277,9 +292,10 @@ impl CoverRef {
             MusicService::Subsonic | MusicService::Custom => {
                 Self::remote_item(service, &item_id, track.cover.as_deref())
             }
-            MusicService::SoundCloud | MusicService::Spotify => {
-                track.cover.as_deref().map_or(Self::None, Self::parse)
-            }
+            MusicService::SoundCloud
+            | MusicService::AppleMusic
+            | MusicService::Spotify
+            | MusicService::Nextcloud => track.cover.as_deref().map_or(Self::None, Self::parse),
         }
     }
 
@@ -656,6 +672,29 @@ mod tests {
         let stored =
             CoverRef::stored_item_ref(MusicService::YtMusic, "_", Some(&CoverRef::encode_url(url)));
         assert_eq!(CoverRef::parse(&stored), CoverRef::EmbeddedUrl(url.into()));
+    }
+
+    /// Apple Music writes its album covers as `applemusic:<id>:<url>`, where the
+    /// URL is an artwork template still holding its `{w}`/`{h}` placeholders and
+    /// — being a URL — its own colons. Without a parser arm the whole ref read
+    /// back as `None` and no Apple Music album had a cover.
+    #[test]
+    fn apple_music_album_covers_round_trip() {
+        let url = "https://is1-ssl.mzstatic.com/image/thumb/a/b/600x600bb.jpg";
+        for stored in [
+            format!("applemusic:1234567890:{url}"),
+            CoverRef::stored_item_ref(MusicService::AppleMusic, "1234567890", Some(url)),
+        ] {
+            assert_eq!(
+                CoverRef::parse(&stored),
+                CoverRef::EmbeddedUrl(url.to_string()),
+                "{stored}"
+            );
+        }
+
+        // An id with no artwork has nothing to resolve to, but must not be
+        // mistaken for a cover value.
+        assert_eq!(CoverRef::parse("applemusic:1234567890"), CoverRef::None);
     }
 }
 

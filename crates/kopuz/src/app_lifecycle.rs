@@ -2,6 +2,47 @@ use config::AppConfig;
 use dioxus::prelude::*;
 use tracing::Instrument;
 
+/// Android's YouTube JS engine: the resident WebView. Desktop deciphers on an
+/// in-process `deno_core` V8, but that doesn't build for Android, whose only
+/// capable JS runtime is the WebView already rendering the UI. Registers a
+/// [`server::ytmusic::decipher::ChannelEngine`] and drains its solve requests
+/// through `document::eval`. Without this every YT Music stream resolution
+/// falls through to clients YouTube now gates ("LOGIN_REQUIRED") and playback
+/// fails even for signed-in accounts.
+#[cfg(target_os = "android")]
+pub fn use_webview_decipher_engine() {
+    use_hook(|| {
+        let (engine, mut rx) = server::ytmusic::decipher::webview_channel();
+        if server::ytmusic::decipher::set_engine(engine).is_err() {
+            tracing::warn!("yt-decipher engine already registered — webview solver not active");
+        }
+        spawn(async move {
+            while let Some(req) = rx.recv().await {
+                let wrapped = format!(
+                    "globalThis.print=function(s){{dioxus.send(s);}};\
+                     try{{{}}}catch(e){{dioxus.send('\\u0000ERR'+(e&&e.stack?e.stack:e));}}",
+                    req.program
+                );
+                let mut eval = dioxus::document::eval(&wrapped);
+                let result = match tokio::time::timeout(
+                    std::time::Duration::from_secs(20),
+                    eval.recv::<String>(),
+                )
+                .await
+                {
+                    Ok(Ok(s)) => match s.strip_prefix('\u{0}') {
+                        Some(err) => Err(format!("webview JS: {}", err.trim_start_matches("ERR"))),
+                        None => Ok(s),
+                    },
+                    Ok(Err(error)) => Err(format!("webview eval recv: {error}")),
+                    Err(_) => Err("webview decipher timed out".to_string()),
+                };
+                let _ = req.reply.send(result);
+            }
+        });
+    });
+}
+
 pub fn use_connectivity_probe(
     config: Signal<AppConfig>,
     mut network_banner: Signal<Option<bool>>,

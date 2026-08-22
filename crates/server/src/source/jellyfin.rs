@@ -6,7 +6,7 @@ use crate::{jellyfin::JellyfinClient, server_ops::ServerConn};
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, LibrarySnapshot, MediaSource,
-    PlaylistMeta, PlaylistOps, SourceError, StreamInfo, mirror_added, mirror_created,
+    PlaylistMeta, PlaylistOps, RadioSeeds, SourceError, StreamInfo, mirror_added, mirror_created,
 };
 
 pub(super) struct JellyfinSource {
@@ -240,7 +240,7 @@ impl MediaSource for JellyfinSource {
             sync: true,
             downloads: true,
             discover: false,
-            radio: false,
+            radio: RadioSeeds::NONE,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
