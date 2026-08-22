@@ -573,6 +573,7 @@ impl PlayerController {
         progress_secs: u64,
         shuffle_order: Vec<usize>,
         shuffle_enabled: bool,
+        loop_mode: u8,
     ) {
         self.cancel_load_task();
         self.clear_pending_crossfade_ui();
@@ -583,6 +584,7 @@ impl PlayerController {
         self.queue.set(queue);
         self.shuffle.set(shuffle_enabled);
         self.shuffle_order.set(shuffle_order);
+        self.loop_mode.set(LoopMode::from_u8(loop_mode));
 
         let queue_len = self.queue.peek().len();
         if queue_len == 0 {

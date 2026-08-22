@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM tracks WHERE source = ?1 AND track_key IN (SELECT value FROM json_each(?2))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "506404f16911e4cd87cea63174e2205bd1edb5b27799ecf04e474d09c4a4aeb5"
+}

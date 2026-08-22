@@ -1,3 +1,4 @@
+use hooks::use_player_controller::LoopMode;
 use reader::Track;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,8 @@ pub struct PersistedQueueState {
     pub shuffle_order: Vec<usize>,
     #[serde(default)]
     pub shuffle_enabled: bool,
+    #[serde(default)]
+    pub loop_mode: u8,
 }
 
 impl Default for PersistedQueueState {
@@ -33,6 +36,7 @@ impl Default for PersistedQueueState {
             progress_secs: 0,
             shuffle_order: Vec::new(),
             shuffle_enabled: false,
+            loop_mode: 0,
         }
     }
 }
@@ -52,6 +56,7 @@ pub fn snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
         progress_secs: q.progress_secs,
         shuffle_order: q.shuffle_order,
         shuffle_enabled: q.shuffle_enabled,
+        loop_mode: q.loop_mode,
     }
 }
 
@@ -171,6 +176,7 @@ pub fn sanitize(state: PersistedQueueState) -> Option<PersistedQueueState> {
         progress_secs,
         shuffle_order,
         shuffle_enabled: state.shuffle_enabled,
+        loop_mode: state.loop_mode,
     })
 }
 
@@ -181,6 +187,7 @@ pub fn build_snapshot(
     is_playing: bool,
     shuffle_order: &[usize],
     shuffle_enabled: bool,
+    loop_mode: LoopMode,
 ) -> Option<PersistedQueueState> {
     if queue.is_empty() {
         return None;
@@ -204,6 +211,7 @@ pub fn build_snapshot(
         progress_secs,
         shuffle_order: shuffle_order.to_vec(),
         shuffle_enabled,
+        loop_mode: loop_mode.to_u8(),
     })
 }
 

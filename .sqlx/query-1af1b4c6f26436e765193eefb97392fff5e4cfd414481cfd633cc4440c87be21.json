@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM scrobble_queue WHERE listened_at = ?1 AND artist = ?2 AND title = ?3 AND service = ?4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "1af1b4c6f26436e765193eefb97392fff5e4cfd414481cfd633cc4440c87be21"
+}

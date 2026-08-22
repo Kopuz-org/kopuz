@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT pt.playlist_pk, pt.track_ref FROM playlist_tracks pt JOIN playlists p ON p.rowid_pk = pt.playlist_pk WHERE p.source = ?1 ORDER BY pt.playlist_pk, pt.position",
+  "describe": {
+    "columns": [
+      {
+        "name": "playlist_pk",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "track_ref",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "180fc2bc1eff658077ab322c0de46d13fee1db67723b5c0c38d8e9f859a17f13"
+}

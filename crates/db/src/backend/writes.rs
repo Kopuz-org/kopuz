@@ -842,18 +842,21 @@ pub async fn save_queue(pool: &SqlitePool, snap: &QueueSnapshot) -> Result<(), D
     let cqi = snap.current_queue_index as i64;
     let prog = snap.progress_secs as i64;
     let shuffle_on = snap.shuffle_enabled as i64;
+    let loop_mode = snap.loop_mode as i64;
     sqlx::query!(
         "INSERT INTO queue_state \
-           (id, version, queue_json, current_queue_index, progress_secs, shuffle_order_json, shuffle_enabled) \
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6) \
+           (id, version, queue_json, current_queue_index, progress_secs, \
+            shuffle_order_json, shuffle_enabled, loop_mode) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7) \
          ON CONFLICT(id) DO UPDATE SET version=?1, queue_json=?2, current_queue_index=?3, \
-           progress_secs=?4, shuffle_order_json=?5, shuffle_enabled=?6",
+           progress_secs=?4, shuffle_order_json=?5, shuffle_enabled=?6, loop_mode=?7",
         version,
         queue_json,
         cqi,
         prog,
         shuffle_json,
-        shuffle_on
+        shuffle_on,
+        loop_mode
     )
     .execute(pool)
     .await?;
