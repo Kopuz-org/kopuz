@@ -37,7 +37,7 @@ pub fn has_media_permission() -> bool {
     let ctx = ndk_context::android_context();
     let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
     let granted: Result<bool, jni::errors::Error> = (|env: &mut JNIEnv| {
-        let class = find_app_class(env, "com/temidaradev/kopuz/MediaSessionHelper")?;
+        let class = find_app_class(env, "moe/kopuz/kopuz/MediaSessionHelper")?;
         env.call_static_method(
             &class,
             "hasMediaPermission",
@@ -279,7 +279,7 @@ fn init_media_session() {
     let ctx = ndk_context::android_context();
     let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
     let result: Result<(), jni::errors::Error> = (|| {
-        let class = find_app_class(&mut env, "com/temidaradev/kopuz/MediaSessionHelper")?;
+        let class = find_app_class(&mut env, "moe/kopuz/kopuz/MediaSessionHelper")?;
         env.call_static_method(
             &class,
             "init",
@@ -322,7 +322,7 @@ pub fn get_files_dir() -> Option<String> {
     dir_via_jni("getFilesDir").or_else(|| {
         std::env::var("FILES_DIR").ok().or_else(|| {
             let home = std::env::var("HOME").ok()?;
-            if home.contains("com.temidaradev.kopuz") {
+            if home.contains("moe.kopuz.kopuz") {
                 Some(format!("{}/files", home))
             } else {
                 None
@@ -527,7 +527,7 @@ pub fn update_now_playing(
     let position_ms = (position * 1000.0) as i64;
     let resolved_art = artwork_path.and_then(resolve_artwork);
     let result: Result<(), jni::errors::Error> = (|| {
-        let class = find_app_class(&mut env, "com/temidaradev/kopuz/MediaSessionHelper")?;
+        let class = find_app_class(&mut env, "moe/kopuz/kopuz/MediaSessionHelper")?;
         let j_title = env.new_string(title)?;
         let j_artist = env.new_string(artist)?;
         let j_album = env.new_string(album)?;
@@ -576,7 +576,7 @@ pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
     let ctx = ndk_context::android_context();
     let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
     let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
-        let class = find_app_class(env, "com/temidaradev/kopuz/MediaSessionHelper")?;
+        let class = find_app_class(env, "moe/kopuz/kopuz/MediaSessionHelper")?;
         env.call_static_method(
             &class,
             "updateModes",
@@ -709,7 +709,7 @@ pub fn stop_session() {
     let ctx = ndk_context::android_context();
     let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
     let result: Result<(), jni::errors::Error> = (|| {
-        let class = find_app_class(&mut env, "com/temidaradev/kopuz/MediaSessionHelper")?;
+        let class = find_app_class(&mut env, "moe/kopuz/kopuz/MediaSessionHelper")?;
         env.call_static_method(
             &class,
             "stopSession",
@@ -739,7 +739,7 @@ pub fn request_permissions() {
     let ctx = ndk_context::android_context();
     let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
     let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
-        let class = find_app_class(env, "com/temidaradev/kopuz/MediaSessionHelper")?;
+        let class = find_app_class(env, "moe/kopuz/kopuz/MediaSessionHelper")?;
         env.call_static_method(
             &class,
             "requestPermissions",
@@ -764,7 +764,7 @@ fn clear_jni_exception(env: &mut JNIEnv) {
 
 // Called from Kotlin: MediaReceiver.nativeOnAction(String) — routes notification button taps to Rust
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_temidaradev_kopuz_MediaReceiver_nativeOnAction(
+pub extern "system" fn Java_moe_kopuz_kopuz_MediaReceiver_nativeOnAction(
     mut env: JNIEnv,
     _class: JClass,
     action: JString,
@@ -812,7 +812,7 @@ pub fn login_open(url: &str) {
     let ctx = ndk_context::android_context();
     let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
     let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
-        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        let class = find_app_class(env, "moe/kopuz/kopuz/LoginActivity")?;
         let j_url = env.new_string(url)?;
         env.call_static_method(
             &class,
@@ -834,7 +834,7 @@ pub fn login_cookies(url: &str) -> Option<String> {
     let vm = JVM.get()?;
     let mut env = vm.attach_current_thread().ok()?;
     let result: Result<Option<String>, jni::errors::Error> = (|env: &mut JNIEnv| {
-        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        let class = find_app_class(env, "moe/kopuz/kopuz/LoginActivity")?;
         let j_url = env.new_string(url)?;
         let obj = env
             .call_static_method(
@@ -870,7 +870,7 @@ pub fn login_is_open() -> bool {
         return false;
     };
     let result: Result<bool, jni::errors::Error> = (|env: &mut JNIEnv| {
-        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        let class = find_app_class(env, "moe/kopuz/kopuz/LoginActivity")?;
         env.call_static_method(&class, "isOpen", "()Z", &[])?.z()
     })(&mut env);
     match result {
@@ -892,7 +892,7 @@ pub fn login_close() {
         return;
     };
     let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
-        let class = find_app_class(env, "com/temidaradev/kopuz/LoginActivity")?;
+        let class = find_app_class(env, "moe/kopuz/kopuz/LoginActivity")?;
         env.call_static_method(&class, "close", "()V", &[])?.v()?;
         Ok(())
     })(&mut env);

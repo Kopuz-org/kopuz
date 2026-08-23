@@ -6,7 +6,7 @@ default_platform = "desktop"
 base_path = "crates/kopuz/assets"
 
 [bundle]
-identifier = "com.temidaradev.kopuz"
+identifier = "moe.kopuz.kopuz"
 publisher = "temidaradev"
 icon = ["assets/app.ico", "assets/logo.png"]
 category = "public.app-category.music"

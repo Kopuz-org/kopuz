@@ -342,10 +342,10 @@ konumunu `KOPUZ_DB_PATH` env değişkeniyle değiştirebilirsiniz.)
 
 **macOS** üzerinde:
 
-- `~/Library/Application Support/com.temidaradev.kopuz/kopuz.db` - ayarlar,
+- `~/Library/Application Support/moe.kopuz.kopuz/kopuz.db` - ayarlar,
   kütüphane, playlist'ler, favoriler
-- `~/Library/Caches/com.temidaradev.kopuz/covers/` - cached albüm kapakları
-- `~/Library/Caches/com.temidaradev.kopuz/offline_tracks/` - indirilen parçalar
+- `~/Library/Caches/moe.kopuz.kopuz/covers/` - cached albüm kapakları
+- `~/Library/Caches/moe.kopuz.kopuz/offline_tracks/` - indirilen parçalar
 
 **Linux** üzerinde (XDG spec):
 
@@ -355,10 +355,10 @@ konumunu `KOPUZ_DB_PATH` env değişkeniyle değiştirebilirsiniz.)
 
 **Windows** üzerinde (AppData):
 
-- `%APPDATA%\temidaradev\kopuz\config\kopuz.db` - ayarlar, kütüphane,
+- `%APPDATA%\kopuz\kopuz\config\kopuz.db` - ayarlar, kütüphane,
   playlist'ler, favoriler
-- `%LOCALAPPDATA%\temidaradev\kopuz\cache\covers\` - cached albüm kapakları
-- `%LOCALAPPDATA%\temidaradev\kopuz\cache\offline_tracks\` - indirilen parçalar
+- `%LOCALAPPDATA%\kopuz\kopuz\cache\covers\` - cached albüm kapakları
+- `%LOCALAPPDATA%\kopuz\kopuz\cache\offline_tracks\` - indirilen parçalar
 
 > [!NOTE]
 > Eski bir sürümden mi yükseltiyorsunuz? İlk açılışta Kopuz mevcut
@@ -429,8 +429,8 @@ Tüm dosyalar log dizininde yer alır (**Open logs folder** düğmesi doğrudan
 buraya gider):
 
 - Linux: `~/.cache/kopuz/logs/`
-- macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/`
-- Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\`
+- macOS: `~/Library/Caches/moe.kopuz.kopuz/logs/`
+- Windows: `%LOCALAPPDATA%\kopuz\kopuz\cache\logs\`
 
 | File                    | What it is                                                                                                       |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |

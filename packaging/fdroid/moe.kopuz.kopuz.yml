@@ -38,9 +38,9 @@ Builds:
       - dx build --package kopuz --platform android --release --locked
       - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
 
-  - versionName: 0.15.1
-    versionCode: 1501
-    commit: v0.15.1
+  - versionName: 0.16.0
+    versionCode: 1600
+    commit: v0.16.0
     ndk: 26.3.11579264
     sudo:
       - apt-get update
@@ -62,5 +62,5 @@ Builds:
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.15.1
-CurrentVersionCode: 1501
+CurrentVersion: 0.16.0
+CurrentVersionCode: 1600

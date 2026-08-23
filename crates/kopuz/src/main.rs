@@ -9,6 +9,8 @@ use dioxus::desktop::tao::dpi::LogicalSize;
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
 #[cfg(target_os = "windows")]
 use dioxus::desktop::tao::platform::windows::WindowExtWindows;
+#[cfg(target_os = "linux")]
+use dioxus::desktop::wry::WebViewExtUnix;
 use dioxus::prelude::*;
 use discord_presence::Presence;
 use kopuz_route::Route;
@@ -18,6 +20,8 @@ use queue_state::PersistedQueueState;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::Instrument;
+#[cfg(target_os = "linux")]
+use webkit2gtk::{SettingsExt, WebViewExt};
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 
@@ -219,7 +223,9 @@ fn main() {
 
     #[cfg(not(target_os = "android"))]
     {
-        let log_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+        let identity_migration = legacy::migrate_identity();
+
+        let log_dir = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
             .map(|dirs| dirs.cache_dir().join("logs"))
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
@@ -234,6 +240,10 @@ fn main() {
         // Guards live in a global inside `logging`; flushed by
         // logging::shutdown() after launch returns or on Ctrl+C.
         logging::init(&log_dir, config_tracing_enabled);
+
+        for line in identity_migration {
+            tracing::info!("{line}");
+        }
 
         legacy::migrate_locations();
 
@@ -277,7 +287,7 @@ fn main() {
             window = window.with_decorations(initial_titlebar_mode == config::TitlebarMode::System);
         }
 
-        let webview_data_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+        let webview_data_dir = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
             .map(|dirs| dirs.cache_dir().join("webview"))
             .unwrap_or_else(|| std::path::PathBuf::from("./cache/webview"));
         let _ = std::fs::create_dir_all(&webview_data_dir);
@@ -489,6 +499,15 @@ fn App() -> Element {
     #[cfg(target_os = "android")]
     app_lifecycle::use_webview_decipher_engine();
 
+    #[cfg(target_os = "linux")]
+    use_hook(|| {
+        let webview = dioxus::desktop::window().webview.webview();
+        if let Some(settings) = webview.settings() {
+            // Kopuz never navigates away from its single Dioxus document.
+            settings.set_enable_page_cache(false);
+        }
+    });
+
     // The whole-Library signal is GONE — pages/components read the DB through
     // query hooks, and every track self-resolves its cover via the cover seam
     // (a local row's cover_path is projected from its album in the DB read layer).
@@ -520,7 +539,7 @@ fn App() -> Element {
         }
         #[cfg(not(target_os = "android"))]
         {
-            let path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+            let path = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
                 .map(|dirs| dirs.cache_dir().to_path_buf())
                 .unwrap_or_else(|| std::path::Path::new("./cache").to_path_buf());
             let _ = std::fs::create_dir_all(&path);

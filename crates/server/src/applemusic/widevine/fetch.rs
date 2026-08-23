@@ -166,7 +166,7 @@ pub async fn resolve() -> Result<CdmRelease, String> {
 /// sign-in profile goes — this is something kopuz installs and keeps, not a
 /// derived artefact it can regenerate at will.
 pub fn install_root() -> Option<std::path::PathBuf> {
-    directories::ProjectDirs::from("com", "temidaradev", "kopuz").map(|d| {
+    directories::ProjectDirs::from("moe", "kopuz", "kopuz").map(|d| {
         #[cfg(target_os = "windows")]
         let base = d.data_local_dir();
         #[cfg(not(target_os = "windows"))]

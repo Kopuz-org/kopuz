@@ -27,7 +27,7 @@ struct Warm {
 
 /// Cache the negotiated V8 snapshot so cold start / re-init is fast.
 fn snapshot_path() -> Option<PathBuf> {
-    let dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")?
+    let dir = directories::ProjectDirs::from("moe", "kopuz", "kopuz")?
         .cache_dir()
         .to_path_buf();
     let _ = std::fs::create_dir_all(&dir);

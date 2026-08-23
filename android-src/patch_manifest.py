@@ -16,15 +16,15 @@ PERMISSIONS = [
 
 INSIDE_APPLICATION = """\
         <service
-            android:name="com.temidaradev.kopuz.MusicService"
+            android:name="moe.kopuz.kopuz.MusicService"
             android:foregroundServiceType="mediaPlayback"
             android:stopWithTask="false"
             android:exported="false" />
         <receiver
-            android:name="com.temidaradev.kopuz.MediaReceiver"
+            android:name="moe.kopuz.kopuz.MediaReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.temidaradev.kopuz.ACTION_MEDIA" />
+                <action android:name="moe.kopuz.kopuz.ACTION_MEDIA" />
             </intent-filter>
         </receiver>"""
 

@@ -632,7 +632,7 @@ pub fn config_dir() -> std::path::PathBuf {
     if let Some(dir) = android_files_dir() {
         return dir;
     }
-    directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+    directories::ProjectDirs::from("moe", "kopuz", "kopuz")
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("./config"))
 }

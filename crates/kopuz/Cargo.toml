@@ -13,7 +13,7 @@ keywords.workspace = true
 workspace = true
 
 [package.metadata.bundle]
-identifier = "com.temidaradev.kopuz"
+identifier = "moe.kopuz.kopuz"
 icon = ["assets/app.ico", "assets/logo.png"]
 category = "public.app-category.music"
 

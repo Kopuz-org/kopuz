@@ -281,9 +281,9 @@ xattr -d com.apple.quarantine /Applications/Kopuz.app
 
 **macOS-ൽ:**
 
-- `~/Library/Application Support/com.temidaradev.kopuz/kopuz.db` — ക്രമീകരണങ്ങൾ, ലൈബ്രറി, പ്ലേലിസ്റ്റുകൾ, പ്രിയപ്പെട്ടവ
-- `~/Library/Caches/com.temidaradev.kopuz/covers/` — കാഷെ ചെയ്ത ആൽബം കവർ ചിത്രങ്ങൾ
-- `~/Library/Caches/com.temidaradev.kopuz/offline_tracks/` — ഡൗൺലോഡ് ചെയ്ത ട്രാക്കുകൾ
+- `~/Library/Application Support/moe.kopuz.kopuz/kopuz.db` — ക്രമീകരണങ്ങൾ, ലൈബ്രറി, പ്ലേലിസ്റ്റുകൾ, പ്രിയപ്പെട്ടവ
+- `~/Library/Caches/moe.kopuz.kopuz/covers/` — കാഷെ ചെയ്ത ആൽബം കവർ ചിത്രങ്ങൾ
+- `~/Library/Caches/moe.kopuz.kopuz/offline_tracks/` — ഡൗൺലോഡ് ചെയ്ത ട്രാക്കുകൾ
 
 **Linux-ൽ** (XDG സ്പെസിഫിക്കേഷൻ):
 
@@ -293,9 +293,9 @@ xattr -d com.apple.quarantine /Applications/Kopuz.app
 
 **Windows-ൽ** (AppData):
 
-- `%APPDATA%\temidaradev\kopuz\config\kopuz.db` — ക്രമീകരണങ്ങൾ, ലൈബ്രറി, പ്ലേലിസ്റ്റുകൾ, പ്രിയപ്പെട്ടവ
-- `%LOCALAPPDATA%\temidaradev\kopuz\cache\covers\` — കാഷെ ചെയ്ത ആൽബം കവർ ചിത്രങ്ങൾ
-- `%LOCALAPPDATA%\temidaradev\kopuz\cache\offline_tracks\` — ഡൗൺലോഡ് ചെയ്ത ട്രാക്കുകൾ
+- `%APPDATA%\kopuz\kopuz\config\kopuz.db` — ക്രമീകരണങ്ങൾ, ലൈബ്രറി, പ്ലേലിസ്റ്റുകൾ, പ്രിയപ്പെട്ടവ
+- `%LOCALAPPDATA%\kopuz\kopuz\cache\covers\` — കാഷെ ചെയ്ത ആൽബം കവർ ചിത്രങ്ങൾ
+- `%LOCALAPPDATA%\kopuz\kopuz\cache\offline_tracks\` — ഡൗൺലോഡ് ചെയ്ത ട്രാക്കുകൾ
 
 > [!NOTE]
 > പഴയ പതിപ്പിൽ നിന്ന് അപ്‌ഗ്രേഡ് ചെയ്യുകയാണോ? ആദ്യമായി പ്രവർത്തിപ്പിക്കുമ്പോൾ Kopuz നിങ്ങളുടെ നിലവിലുള്ള `library.json` ഉം `playlists.json` ഉം `kopuz.db`-ലേക്ക് ഇമ്പോർട്ട് ചെയ്യും. അതേസമയം `*.json.bak` ബാക്കപ്പ് ഫയലുകളും സൃഷ്ടിക്കും. അതിനുശേഷം പഴയ JSON ഫയലുകൾ ഇനി ഉപയോഗിക്കുകയില്ല.
@@ -335,8 +335,8 @@ Kopuz [`tracing`](https://docs.rs/tracing) ഉപയോഗിച്ചാണ് 
 എല്ലാ ലോഗ് ഫയലുകളും ലോഗ് ഡയറക്ടറിയിലാണ് സൂക്ഷിക്കുന്നത് (**Open logs folder** ബട്ടൺ നിങ്ങളെ നേരിട്ട് അവിടേക്ക് കൊണ്ടുപോകും):
 
 - Linux: `~/.cache/kopuz/logs/`
-- macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/`
-- Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\`
+- macOS: `~/Library/Caches/moe.kopuz.kopuz/logs/`
+- Windows: `%LOCALAPPDATA%\kopuz\kopuz\cache\logs\`
 
 | ഫയൽ                     | വിവരണം                                                                                                                                                                                                           |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

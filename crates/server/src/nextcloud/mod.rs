@@ -441,7 +441,7 @@ impl NextcloudClient {
 
 fn cover_cache_dir() -> Option<PathBuf> {
     Some(
-        directories::ProjectDirs::from("com", "temidaradev", "kopuz")?
+        directories::ProjectDirs::from("moe", "kopuz", "kopuz")?
             .cache_dir()
             .join("nextcloud-covers"),
     )

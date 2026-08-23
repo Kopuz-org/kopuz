@@ -1,4 +1,4 @@
-package com.temidaradev.kopuz
+package moe.kopuz.kopuz
 
 import android.app.Service
 import android.content.Context

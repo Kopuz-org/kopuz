@@ -14,7 +14,7 @@ pub fn profile_dir(prefix: &str, server_id: &str) -> PathBuf {
     } else {
         format!("{prefix}-{safe}")
     };
-    directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+    directories::ProjectDirs::from("moe", "kopuz", "kopuz")
         .map(|d| {
             // Windows: profiles must live in Local AppData, not Roaming
             // (`config_dir()`) — a OneDrive-synced Roaming profile locks the

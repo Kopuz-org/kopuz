@@ -258,7 +258,8 @@ pub fn LibraryPage(
                                 active_menu_track.set(None);
                                 if caps().delete_from_disk
                                     && let Some(p) = track_delete.id.local_path()
-                                    && std::fs::remove_file(p).is_ok()
+                                    && crate::local_files::remove(&config.read(), &source(), p)
+                                        .is_ok_and(|removed| removed)
                                 {
                                     let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                     let key = track_delete.id.key().into_owned();
@@ -432,7 +433,9 @@ pub fn LibraryPage(
                                 let Some(path) = id.local_path() else {
                                     continue;
                                 };
-                                if std::fs::remove_file(path).is_ok() {
+                                if crate::local_files::remove(&config.read(), &source(), path)
+                                    .is_ok_and(|removed| removed)
+                                {
                                     keys.push(id.key().into_owned());
                                 }
                             }

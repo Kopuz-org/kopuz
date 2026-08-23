@@ -388,7 +388,7 @@ The Android `versionCode` is derived from the crate version as
 all an update needs. Minor and patch have to stay below 100 — past that the
 fields would collide, and the build stops rather than emit a duplicate code.
 
-`packaging/fdroid/com.temidaradev.kopuz.yml` is the build recipe to submit to
+`packaging/fdroid/moe.kopuz.kopuz.yml` is the build recipe to submit to
 [fdroiddata](https://gitlab.com/fdroid/fdroiddata); F-Droid builds from source
 and signs with its own key, so its APKs and the GitHub ones are not
 interchangeable.
@@ -568,11 +568,11 @@ var and the settings file with `KOPUZ_CONFIG_PATH`.)
 
 On **macOS**:
 
-- `~/Library/Application Support/com.temidaradev.kopuz/settings.toml` - settings
-- `~/Library/Application Support/com.temidaradev.kopuz/kopuz.db` - library,
-  playlists, favorites, runtime state
-- `~/Library/Caches/com.temidaradev.kopuz/covers/` - cached album art
-- `~/Library/Caches/com.temidaradev.kopuz/offline_tracks/` - downloaded tracks
+- `~/Library/Application Support/moe.kopuz.kopuz/settings.toml` - settings
+- `~/Library/Application Support/moe.kopuz.kopuz/kopuz.db` - library, playlists,
+  favorites, runtime state
+- `~/Library/Caches/moe.kopuz.kopuz/covers/` - cached album art
+- `~/Library/Caches/moe.kopuz.kopuz/offline_tracks/` - downloaded tracks
 
 On **Linux** (XDG spec):
 
@@ -583,11 +583,11 @@ On **Linux** (XDG spec):
 
 On **Windows** (AppData):
 
-- `%APPDATA%\temidaradev\kopuz\config\settings.toml` - settings
-- `%APPDATA%\temidaradev\kopuz\config\kopuz.db` - library, playlists, favorites,
+- `%APPDATA%\kopuz\kopuz\config\settings.toml` - settings
+- `%APPDATA%\kopuz\kopuz\config\kopuz.db` - library, playlists, favorites,
   runtime state
-- `%LOCALAPPDATA%\temidaradev\kopuz\cache\covers\` - cached album art
-- `%LOCALAPPDATA%\temidaradev\kopuz\cache\offline_tracks\` - downloaded tracks
+- `%LOCALAPPDATA%\kopuz\kopuz\cache\covers\` - cached album art
+- `%LOCALAPPDATA%\kopuz\kopuz\cache\offline_tracks\` - downloaded tracks
 
 > [!NOTE]
 > Upgrading from an older version? On first launch Kopuz imports your existing
@@ -809,8 +809,8 @@ All files sit in the logs directory (the **Open logs folder** button jumps
 straight here):
 
 - Linux: `~/.cache/kopuz/logs/`
-- macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/`
-- Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\`
+- macOS: `~/Library/Caches/moe.kopuz.kopuz/logs/`
+- Windows: `%LOCALAPPDATA%\kopuz\kopuz\cache\logs\`
 
 | File                    | What it is                                                                                       |
 | ----------------------- | ------------------------------------------------------------------------------------------------ |

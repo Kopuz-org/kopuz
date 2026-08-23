@@ -12,10 +12,10 @@ import android.graphics.Color
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import com.temidaradev.kopuz.MediaReceiver
-import com.temidaradev.kopuz.MediaSessionHelper
+import moe.kopuz.kopuz.MediaReceiver
+import moe.kopuz.kopuz.MediaSessionHelper
 
-typealias BuildConfig = com.temidaradev.kopuz.BuildConfig
+typealias BuildConfig = moe.kopuz.kopuz.BuildConfig
 
 class MainActivity : WryActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

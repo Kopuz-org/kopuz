@@ -17,7 +17,7 @@ pub fn profile_dir(server_id: &str) -> PathBuf {
     } else {
         format!("am-profile-{safe}")
     };
-    directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+    directories::ProjectDirs::from("moe", "kopuz", "kopuz")
         .map(|d| {
             #[cfg(target_os = "windows")]
             let base = d.data_local_dir();

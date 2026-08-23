@@ -1,4 +1,4 @@
-package com.temidaradev.kopuz
+package moe.kopuz.kopuz
 
 import android.content.BroadcastReceiver
 import android.content.Context

@@ -6,7 +6,7 @@ pub enum DownloadStatus {
     Failed,
 }
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -35,9 +35,22 @@ pub struct DownloadQueue {
     pub cancel_flag: Arc<AtomicBool>,
     pub bytes_done_session: u64,
     pub session_elapsed_secs: f64,
+    cancelled_items: HashSet<String>,
 }
 
 impl DownloadQueue {
+    pub fn cancel_item(&mut self, id: &str) {
+        self.cancelled_items.insert(id.to_owned());
+    }
+
+    pub fn clear_item_cancellation(&mut self, id: &str) {
+        self.cancelled_items.remove(id);
+    }
+
+    pub fn is_item_cancelled(&self, id: &str) -> bool {
+        self.cancelled_items.contains(id)
+    }
+
     pub fn is_active(&self) -> bool {
         self.items.iter().any(|i| {
             matches!(
@@ -137,5 +150,20 @@ impl DownloadQueue {
                 item.status = DownloadStatus::Failed;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn item_cancellation_survives_removal_until_explicitly_requeued() {
+        let mut queue = DownloadQueue::default();
+        queue.cancel_item("track");
+        assert!(queue.is_item_cancelled("track"));
+
+        queue.clear_item_cancellation("track");
+        assert!(!queue.is_item_cancelled("track"));
     }
 }
