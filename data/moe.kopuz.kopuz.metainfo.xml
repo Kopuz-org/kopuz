@@ -27,6 +27,13 @@
   </screenshots>
 
   <releases>
+    <release version="0.16.0" date="2026-08-23">
+      <description>
+        <p>
+          Android builds and ships again, with an arm64 APK, a signed release job, an F-Droid recipe, and a phone-sized interface with swipe gestures, notification shuffle and repeat, and an AMOLED theme. Two new sources arrive: Apple Music, with catalog and library browsing, downloads, word-timed lyrics and Widevine playback through a CDM borrowed from an installed browser, and Nextcloud over WebDAV, which reads the library from the folder tree, probes durations from file headers, and takes per-server library folders. Lyrics gain depth-of-field blur, instrumental breaks, a permanently centered active line, and a manual or automatic offset. Remote tracks start faster on pooled connections with window prefetching, radio uses server-side sonic similarity where an OpenSubsonic server offers it, macOS gains a Homebrew cask, and the app identity finished its move to moe.kopuz.kopuz, migrating existing data on first launch. Offline downloads and deletions no longer trust remote or persisted paths.
+        </p>
+      </description>
+    </release>
     <release version="0.15.0" date="2026-08-18">
       <description>
         <p>
