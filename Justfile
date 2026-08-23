@@ -20,34 +20,35 @@ clean:
     rm -rf target/dx dist build-dir .flatpak-builder
 
 flatpak:
-    @chmod +x packaging/flatpak/build-flatpak.sh
-    ./packaging/flatpak/build-flatpak.sh
+    @chmod +x packaging/build-flatpak.sh
+    ./packaging/build-flatpak.sh
 
 flatpak-install: flatpak
 
 flatpak-run:
-    flatpak run com.temidaradev.kopuz
+    flatpak run moe.kopuz.kopuz
 
 # --- Mobile -----------------------------------------------------------------
 
-android_src := "android-src"
-android_release_base := "target/dx/kopuz/release/android/app/app/src/main"
+android_project := "target/dx/kopuz/release/android/app"
 ios_app_path := "target/dx/kopuz/release/ios/kopuz.app"
 ios_ipa_dir := "target/ipa"
 
-# Build the Android app (debug runtime), patch in our Kotlin sources + manifest, assemble APK.
+# Debug-signed APK for sideloading onto a dev device. The Kotlin sources,
+# manifest patches, launcher icons and R8 keep rules are all injected by
+# crates/kopuz/build.rs during `dx build` — nothing to copy in afterwards.
 android-patch:
-    @echo "Building Android project (dx)..."
     dx build --package kopuz --platform android --release
-    @echo "Patching Kotlin sources..."
-    mkdir -p {{android_release_base}}/java/com/temidaradev/kopuz {{android_release_base}}/kotlin/dev/dioxus/main
-    cp -rv {{android_src}}/java/com/temidaradev/kopuz/. {{android_release_base}}/java/com/temidaradev/kopuz/
-    cp -rv {{android_src}}/kotlin/dev/dioxus/main/. {{android_release_base}}/kotlin/dev/dioxus/main/
-    @echo "Patching manifest and icons..."
-    python3 {{android_src}}/patch_manifest.py {{android_release_base}}/AndroidManifest.xml
-    @echo "Building APK..."
-    cd target/dx/kopuz/release/android/app && ./gradlew assembleDebug
-    @echo "Done. APK under target/dx/kopuz/release/android/app/app/build/outputs/apk/debug/"
+    cd {{android_project}} && ./gradlew assembleDebug
+    @echo "APK: {{android_project}}/app/build/outputs/apk/debug/app-debug.apk"
+
+# Release APK, signed when the KOPUZ_ANDROID_KEYSTORE env vars are set.
+android-release:
+    ./packaging/android/build-apk.sh
+
+# Install the most recently built APK on the connected device.
+android-install:
+    adb install -r "$(ls -t target/android/*.apk {{android_project}}/app/build/outputs/apk/debug/*.apk 2>/dev/null | head -1)"
 
 ios-build-sim:
     dx build --ios --package kopuz --release

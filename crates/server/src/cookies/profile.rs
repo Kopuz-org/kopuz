@@ -1,4 +1,4 @@
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "android")))]
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -14,7 +14,7 @@ pub fn profile_dir(prefix: &str, server_id: &str) -> PathBuf {
     } else {
         format!("{prefix}-{safe}")
     };
-    directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+    directories::ProjectDirs::from("moe", "kopuz", "kopuz")
         .map(|d| {
             // Windows: profiles must live in Local AppData, not Roaming
             // (`config_dir()`) — a OneDrive-synced Roaming profile locks the
@@ -36,7 +36,7 @@ pub fn delete_profile(prefix: &str, server_id: &str) -> std::io::Result<()> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "android")))]
 pub(crate) fn pick_cookies_path(profile_root: &Path) -> Option<PathBuf> {
     [
         profile_root.join("Default").join("Network").join("Cookies"),

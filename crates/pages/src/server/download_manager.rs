@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tracing::Instrument;
 
+use ::server::source::SourceError;
 pub use ::server::{DownloadItem, DownloadProgress, DownloadQueue, DownloadStatus};
 
 thread_local! {
@@ -67,6 +68,7 @@ pub fn queue_downloads(
             if queued_ids.contains(id) {
                 continue;
             }
+            q.clear_item_cancellation(id);
             q.items.push(DownloadItem {
                 id: id.clone(),
                 title: title.clone(),
@@ -143,7 +145,7 @@ pub fn queue_downloads(
 
 async fn download_worker(
     mut queue: Signal<DownloadQueue>,
-    mut config: Signal<AppConfig>,
+    config: Signal<AppConfig>,
     active_source: Signal<::server::source::ActiveSource>,
     session_start: Instant,
     cancel_flag: Arc<AtomicBool>,
@@ -180,15 +182,31 @@ async fn download_worker(
             continue;
         }
 
-        let service = config.read().server.as_ref().map(|x| x.service);
+        // Pinned for the whole download, so the file is registered against the
+        // source that produced it even if the active one changes meanwhile.
+        let source = active_source.peek().clone();
+        let config_snapshot = config.read().clone();
+        let service = config_snapshot.server.as_ref().map(|server| server.service);
+
+        // A source that can't express its audio as a URL hands back the bytes
+        // instead. Asking the source rather than testing the service keeps this
+        // out of the UI: everything else declines and falls through to the URL
+        // path below.
+        match download_from_source(&id, &source, &mut queue, &session_start, &cancel_flag).await {
+            Err(SourceError::Unsupported(_)) => {}
+            outcome => {
+                let outcome = outcome.map_err(|e| e.to_string());
+                finish_item(outcome, &id, &mut queue, &source, config).await;
+                continue;
+            }
+        }
 
         let resolved: Option<(String, &'static str, Option<String>, Option<u64>)> =
             if matches!(service, Some(MusicService::YtMusic)) {
-                let source = active_source.peek().clone();
                 match source.resolve_stream(&id).await {
                     Ok(info) => Some((
                         info.url,
-                        info.format.map(|(f, _)| f.extension()).unwrap_or_default(),
+                        info.format.map_or("bin", |(format, _)| format.extension()),
                         info.user_agent,
                         info.content_length,
                     )),
@@ -198,8 +216,8 @@ async fn download_worker(
                     }
                 }
             } else {
-                let conf = config.read();
-                super::build_download_url(&id, &conf).map(|(u, ext)| (u, ext, None, None))
+                super::build_download_url(&id, &config_snapshot)
+                    .map(|(url, extension)| (url, extension, None, None))
             };
 
         let (url, ext_hint, user_agent, content_length) = match resolved {
@@ -212,7 +230,7 @@ async fn download_worker(
             }
         };
 
-        match download_with_progress(
+        let outcome = download_with_progress(
             &id,
             &url,
             ext_hint,
@@ -222,30 +240,173 @@ async fn download_worker(
             &session_start,
             &cancel_flag,
         )
-        .await
-        {
-            Ok(path) => {
-                let path_str = path.to_string_lossy().into_owned();
-                // Durable FIRST as a single json_set (the whole-config save per
-                // completed song was the audio-stutter bug), then the in-memory
-                // mirror for live reads.
-                let source = active_source.peek().clone();
-                let _ = source.set_offline_track(&id, Some(&path_str)).await;
-                config.write().offline_tracks.insert(id.clone(), path_str);
-                if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
-                    item.status = DownloadStatus::Done;
-                }
-                clear_progress(&id);
+        .await;
+        finish_item(outcome, &id, &mut queue, &source, config).await;
+    }
+}
+
+/// Record a finished download: registry, queue status and progress.
+///
+/// `source` is the one the download actually ran against, passed in rather than
+/// re-read here: a source switch while a track was downloading would otherwise
+/// register the file against whichever backend happens to be active by the time
+/// it lands.
+async fn finish_item(
+    outcome: Result<std::path::PathBuf, String>,
+    id: &str,
+    queue: &mut Signal<DownloadQueue>,
+    source: &::server::source::ActiveSource,
+    mut config: Signal<AppConfig>,
+) {
+    let outcome = match outcome {
+        Ok(path) => {
+            if queue.read().is_item_cancelled(id) {
+                let _ = tokio::fs::remove_file(&path).await;
+                let _ = source.set_offline_track(id, None).await;
+                clear_progress(id);
+                return;
             }
-            Err(e) => {
-                tracing::error!(%id, error = %e, "download failed");
-                if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
-                    item.status = DownloadStatus::Failed;
+            let path_str = path.to_string_lossy().into_owned();
+            // Durable FIRST as a single json_set (the whole-config save per
+            // completed song was the audio-stutter bug), then the in-memory
+            // mirror for live reads. A file the registry doesn't know about is
+            // one nothing will ever play or clean up, so a failure here means
+            // the download failed — and the bytes go with it.
+            match source.set_offline_track(id, Some(&path_str)).await {
+                Ok(()) => {
+                    if queue.read().is_item_cancelled(id) {
+                        let _ = source.set_offline_track(id, None).await;
+                        let _ = tokio::fs::remove_file(&path).await;
+                        Err("cancelled".to_string())
+                    } else {
+                        config
+                            .write()
+                            .offline_tracks
+                            .insert(id.to_string(), path_str);
+                        Ok(())
+                    }
                 }
-                clear_progress(&id);
+                Err(e) => {
+                    let _ = tokio::fs::remove_file(&path).await;
+                    Err(format!("register the downloaded file: {e}"))
+                }
+            }
+        }
+        Err(e) => Err(e),
+    };
+
+    match outcome {
+        Ok(()) => {
+            if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
+                item.status = DownloadStatus::Done;
+            }
+        }
+        Err(e) => {
+            tracing::error!(%id, error = %e, "download failed");
+            if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
+                item.status = DownloadStatus::Failed;
             }
         }
     }
+    clear_progress(id);
+}
+
+/// Download a track whose bytes only the source can produce.
+///
+/// Returns [`SourceError::Unsupported`] for every source that can express its
+/// audio as a URL, which is the signal to use the URL path instead.
+///
+/// Nothing is chunked here and there is no partial file to clean up: the source
+/// hands back a finished file and it is written once, at the end.
+async fn download_from_source(
+    id: &str,
+    source: &::server::source::ActiveSource,
+    queue: &mut Signal<DownloadQueue>,
+    session_start: &Instant,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<std::path::PathBuf, SourceError> {
+    // The source reports from whatever thread does its work — for Apple Music a
+    // dedicated decrypt thread — and both the progress signal and the queue are
+    // owned by the UI thread. So the callback only stores numbers, and the loop
+    // below publishes them from here, where those signals actually exist.
+    let done = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let total = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let progress = {
+        let (done, total) = (done.clone(), total.clone());
+        Arc::new(move |_from: u64, at: u64, of: Option<u64>| {
+            done.store(at, Ordering::Relaxed);
+            if let Some(of) = of {
+                total.store(of, Ordering::Relaxed);
+            }
+        }) as ::utils::stream_buffer::BufferProgressCallback
+    };
+
+    let mut published = 0u64;
+    let mut publish = |queue: &mut Signal<DownloadQueue>| {
+        let (at, of) = (done.load(Ordering::Relaxed), total.load(Ordering::Relaxed));
+        if of > 0 {
+            let mut q = queue.write();
+            if let Some(item) = q.items.iter_mut().find(|i| i.id == id) {
+                item.bytes_total = of;
+                item.bytes_done = at;
+            }
+        }
+        if at > published {
+            publish_progress(
+                id,
+                at,
+                at - published,
+                session_start.elapsed().as_secs_f64(),
+            );
+            published = at;
+        }
+    };
+
+    let bytes = {
+        let fetch = source.download_track(id, Some(progress));
+        tokio::pin!(fetch);
+        loop {
+            tokio::select! {
+                finished = &mut fetch => break finished?,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                    publish(queue);
+                    // Checked here rather than only after the download resolves:
+                    // a source-provided download is one long await, so waiting
+                    // for it to return means cancel does nothing until the track
+                    // has finished anyway. Dropping `fetch` on the way out is
+                    // what stops the transfer.
+                    if cancel_flag.load(Ordering::Relaxed)
+                        || queue.read().is_item_cancelled(id)
+                    {
+                        return Err(SourceError::Backend("cancelled".to_string()));
+                    }
+                }
+            }
+        }
+    };
+
+    if cancel_flag.load(Ordering::Relaxed) || queue.read().is_item_cancelled(id) {
+        return Err(SourceError::Backend("cancelled".to_string()));
+    }
+
+    {
+        let mut q = queue.write();
+        if let Some(item) = q.items.iter_mut().find(|i| i.id == id) {
+            item.bytes_total = bytes.len() as u64;
+            item.bytes_done = bytes.len() as u64;
+        }
+    }
+
+    let dir = super::cache::offline_cache_dir();
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| SourceError::Backend(format!("create download dir: {e}")))?;
+    // Decrypted Apple Music assets are MP4; nothing else reaches this path yet.
+    let path = super::cache::cache_file_path(id, "m4a").map_err(SourceError::Backend)?;
+    tokio::fs::write(&path, &bytes)
+        .await
+        .map_err(|e| SourceError::Backend(format!("write download: {e}")))?;
+    Ok(path)
 }
 
 pub fn delete_downloads(
@@ -258,11 +419,19 @@ pub fn delete_downloads(
     let mut q = queue.write();
 
     for id in ids {
+        let was_active = q.items.iter().any(|item| {
+            item.id == id
+                && matches!(
+                    item.status,
+                    DownloadStatus::Queued | DownloadStatus::Downloading
+                )
+        });
+        if was_active {
+            q.cancel_item(&id);
+        }
         if let Some(path_str) = conf.offline_tracks.remove(&id) {
             let path = std::path::Path::new(&path_str);
-            if path.exists() {
-                let _ = std::fs::remove_file(path);
-            }
+            let _ = super::cache::remove_cache_file(path);
         }
         let source = active_source.peek().clone();
         let spawn_id = id.clone();
@@ -298,14 +467,12 @@ async fn download_with_progress(
         .build()
         .map_err(|e| format!("Client build error: {e}"))?;
 
-    let dir = super::offline_cache_dir();
-    let file_path_tentative = dir.join(format!("{item_id}.{ext_hint}"));
+    let file_path_tentative = super::cache::cache_file_path(item_id, ext_hint)?;
 
     // YT googlevideo URLs throttle single sequential GETs to ~1 MB/s; Range-chunking
     // sidesteps the throttle and saturates the link.
     if let (Some(ua), Some(total)) = (user_agent, content_length) {
-        let ext = ext_hint;
-        let file_path = dir.join(format!("{item_id}.{ext}"));
+        let file_path = super::cache::cache_file_path(item_id, ext_hint)?;
         let file = tokio::fs::File::create(&file_path)
             .await
             .map_err(|e| format!("Create file: {e}"))?;
@@ -329,7 +496,7 @@ async fn download_with_progress(
         let mut first_update_done = false;
 
         while start < total {
-            if cancel_flag.load(Ordering::Relaxed) {
+            if cancel_flag.load(Ordering::Relaxed) || queue.read().is_item_cancelled(item_id) {
                 drop(writer);
                 let _ = tokio::fs::remove_file(&file_path).await;
                 return Err("cancelled".to_string());
@@ -346,7 +513,9 @@ async fn download_with_progress(
             )
             .await
             .map_err(|_| format!("range request timed out after {RANGE_TIMEOUT_SECS}s"))?
-            .map_err(|e| format!("Range request failed: {e}"))?;
+            // `without_url`: a download URL can carry credentials in its
+            // userinfo, and this message is shown in the download list.
+            .map_err(|e| format!("Range request failed: {}", e.without_url()))?;
 
             let status = resp.status();
             if !status.is_success() {
@@ -366,7 +535,7 @@ async fn download_with_progress(
             let bytes = resp
                 .bytes()
                 .await
-                .map_err(|e| format!("Range read error: {e}"))?;
+                .map_err(|e| format!("Range read error: {}", e.without_url()))?;
             let expected_len = end - start + 1;
             // Defensive: a short read (network hiccup mid-Range)
             // would otherwise advance `start = end + 1` past where
@@ -420,7 +589,7 @@ async fn download_with_progress(
     let mut response = req
         .send()
         .await
-        .map_err(|e| format!("Request failed: {e}"))?;
+        .map_err(|e| format!("Request failed: {}", e.without_url()))?;
 
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()));
@@ -437,7 +606,7 @@ async fn download_with_progress(
     let file_path = if ext == ext_hint {
         file_path_tentative
     } else {
-        dir.join(format!("{item_id}.{ext}"))
+        super::cache::cache_file_path(item_id, ext)?
     };
 
     {
@@ -460,7 +629,7 @@ async fn download_with_progress(
     const CHUNK_TIMEOUT_SECS: u64 = 120;
 
     loop {
-        if cancel_flag.load(Ordering::Relaxed) {
+        if cancel_flag.load(Ordering::Relaxed) || queue.read().is_item_cancelled(item_id) {
             drop(writer);
             let _ = tokio::fs::remove_file(&file_path).await;
             return Err("cancelled".to_string());
@@ -472,7 +641,7 @@ async fn download_with_progress(
         )
         .await
         .map_err(|_| format!("chunk timed out after {CHUNK_TIMEOUT_SECS}s"))?
-        .map_err(|e| format!("Read error: {e}"))?;
+        .map_err(|e| format!("Read error: {}", e.without_url()))?;
 
         let chunk = match chunk_result {
             Some(c) => c,

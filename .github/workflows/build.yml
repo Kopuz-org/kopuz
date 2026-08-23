@@ -1,7 +1,6 @@
 name: build
 
 on:
-  workflow_dispatch:
   push:
     branches: [main, master]
   pull_request:
@@ -9,12 +8,12 @@ on:
 
 jobs:
   locale-parity:
-    runs-on: [self-hosted, linux, x64, morph, small]
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/nix-installer-action@main
 
       - name: Check locale parity against en.ftl
         run: nix shell nixpkgs#nushell --command nu scripts/check_locales.nu
@@ -27,37 +26,37 @@ jobs:
     strategy:
       matrix:
         include:
-          - runner: [self-hosted, linux, x64, morph, large]
+          - os: ubuntu-latest
             system: x86_64-linux
-          - runner: macos-latest
+          - os: macos-latest
             system: aarch64-darwin
 
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/nix-installer-action@main
 
       - name: Run Nix checks
         run: nix build .#checks.${{ matrix.system }}.default
 
   push-build:
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'push'
     strategy:
       matrix:
         include:
-          - runner: [self-hosted, linux, x64, morph, large]
+          - os: ubuntu-latest
             system: x86_64-linux
-          - runner: macos-latest
+          - os: macos-latest
             system: aarch64-darwin
 
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
+      - uses: DeterminateSystems/nix-installer-action@main
 
       - uses: cachix/cachix-action@v14
         with:
@@ -82,7 +81,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@30b5ca8b54e1dcffd9548bc87ede1531310fdc67 # v1.20.0
+        uses: cargo-bins/cargo-binstall@e00d2c94cc0067b77737821097a62d91c0301baa # v1.21.1
 
       - name: Install dioxus-cli
         # Token lets binstall query the GitHub API for the prebuilt release
@@ -124,7 +123,7 @@ jobs:
 
       - name: Upload Windows installer
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@v4
         with:
           name: kopuz-windows-installer
           path: |

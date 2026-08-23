@@ -1,5 +1,5 @@
 //! Config persistence as a DB-backed cache of the in-memory `AppConfig` (#347,
-//! step 4).
+//! step 4), layered with the standalone settings file (#530).
 //!
 //! The single-row `app_config` blob holds everything EXCEPT creds and play
 //! counts: `server`/`servers` live in the `servers` table (creds with the
@@ -7,8 +7,18 @@
 //! back onto the `AppConfig` the UI reads; [`save_config`] strips them out of
 //! the blob and syncs the tables. Net effect: same `AppConfig` shape in memory,
 //! creds never in the blob.
+//!
+//! On top of the blob sits the settings file (`settings.toml` + drop-ins +
+//! env, see `config::store`): its keys override the blob on load, and every
+//! save mirrors the settings back into it — unless it is Nix-managed
+//! (immutable), in which case the blob alone keeps persisting runtime state
+//! and the file's keys simply keep winning. Keys a layer the app cannot write
+//! pins (managed file, drop-in, env) are excluded from both persisted forms:
+//! their value belongs to the layer, so saving it as base config would keep it
+//! applying once the layer is removed.
 
 use std::collections::HashSet;
+use std::path::Path;
 
 use config::{AppConfig, Browser, MusicServer, MusicService, SavedServer, Source};
 use sqlx::SqlitePool;
@@ -18,25 +28,36 @@ use crate::DbError;
 /// How many recent entries to keep per source.
 const RECENT_LIMIT: i64 = 50;
 
-pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError> {
-    let Some(json): Option<String> =
-        sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-            .fetch_optional(pool)
-            .await?
-    else {
-        return Ok(None);
-    };
+pub async fn load_config(
+    pool: &SqlitePool,
+    settings_path: &Path,
+) -> Result<Option<AppConfig>, DbError> {
+    let json: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
+        .fetch_optional(pool)
+        .await?;
 
-    let mut cfg: AppConfig = serde_json::from_str(&json)?;
+    let layers = config::store::FileLayers::read(settings_path);
+    // First launch with no settings file either: report "never configured".
+    if json.is_none() && !layers.has_overrides() {
+        return Ok(None);
+    }
+
+    let value: serde_json::Value = match &json {
+        Some(json) => serde_json::from_str(json)?,
+        None => serde_json::json!({}),
+    };
+    let mut cfg: AppConfig = layers.merge_and_parse(value)?;
     // The in-memory shape migrations the legacy file load used to run.
     cfg.migrate_home_sections();
     cfg.migrate_sidebar_order();
     cfg.migrate_registry_paths();
 
     // Hydrate servers from their table (creds included for the active one).
-    let rows = sqlx::query!(
-        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous \
-         FROM servers"
+    use sqlx::Row;
+    let rows: Vec<sqlx::sqlite::SqliteRow> = sqlx::query(
+        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, \
+         apple_music_storefront, apple_music_language \
+         FROM servers",
     )
     .fetch_all(pool)
     .await?;
@@ -44,26 +65,38 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
     cfg.servers = rows
         .iter()
         .map(|r| SavedServer {
-            id: r.id.clone(),
-            name: r.name.clone(),
-            url: r.url.clone(),
-            service: parse_service(&r.service),
-            yt_browser: parse_browser(r.yt_browser.as_deref()),
-            yt_anonymous: r.yt_anonymous != 0,
+            id: r.get("id"),
+            name: r.get("name"),
+            url: r.get("url"),
+            service: parse_service(r.get::<String, _>("service").as_str()),
+            yt_browser: r
+                .get::<Option<String>, _>("yt_browser")
+                .as_deref()
+                .and_then(|s| parse_browser(Some(s))),
+            yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
+            apple_music_storefront: r.get("apple_music_storefront"),
+            apple_music_language: r.get("apple_music_language"),
         })
         .collect();
 
     cfg.server = cfg.active_source.server_id().and_then(|active| {
-        rows.iter().find(|r| r.id == active).map(|r| MusicServer {
-            name: r.name.clone(),
-            url: r.url.clone(),
-            service: parse_service(&r.service),
-            access_token: r.access_token.clone(),
-            user_id: r.user_id.clone(),
-            id: Some(r.id.clone()),
-            yt_browser: parse_browser(r.yt_browser.as_deref()),
-            yt_anonymous: r.yt_anonymous != 0,
-        })
+        rows.iter()
+            .find(|r| r.get::<String, _>("id") == *active)
+            .map(|r| MusicServer {
+                name: r.get("name"),
+                url: r.get("url"),
+                service: parse_service(r.get::<String, _>("service").as_str()),
+                access_token: r.get("access_token"),
+                user_id: r.get("user_id"),
+                id: Some(r.get("id")),
+                yt_browser: r
+                    .get::<Option<String>, _>("yt_browser")
+                    .as_deref()
+                    .and_then(|s| parse_browser(Some(s))),
+                yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
+                apple_music_storefront: r.get("apple_music_storefront"),
+                apple_music_language: r.get("apple_music_language"),
+            })
     });
 
     // Hydrate play counts.
@@ -79,7 +112,11 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
 }
 
 #[tracing::instrument(name = "config.save", skip_all)]
-pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbError> {
+pub async fn save_config(
+    pool: &SqlitePool,
+    cfg: &AppConfig,
+    settings_path: &Path,
+) -> Result<(), DbError> {
     let now = now_secs();
     let mut tx = pool.begin().await?;
 
@@ -89,19 +126,21 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
         let service = service_str(s.service);
         let browser = s.yt_browser.map(browser_str);
         let anon = s.yt_anonymous as i64;
-        sqlx::query!(
-            "INSERT INTO servers (id, name, url, service, yt_browser, yt_anonymous, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+        sqlx::query(
+            "INSERT INTO servers (id, name, url, service, yt_browser, yt_anonymous, apple_music_storefront, apple_music_language, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
              ON CONFLICT(id) DO UPDATE SET name=?2, url=?3, service=?4, yt_browser=?5, \
-               yt_anonymous=?6, updated_at=?7",
-            s.id,
-            s.name,
-            s.url,
-            service,
-            browser,
-            anon,
-            now
+               yt_anonymous=?6, apple_music_storefront=?7, apple_music_language=?8, updated_at=?9",
         )
+        .bind(&s.id)
+        .bind(&s.name)
+        .bind(&s.url)
+        .bind(service)
+        .bind(browser)
+        .bind(anon)
+        .bind(&s.apple_music_storefront)
+        .bind(&s.apple_music_language)
+        .bind(now)
         .execute(&mut *tx)
         .await?;
     }
@@ -122,23 +161,25 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
         } else {
             "unauthenticated"
         };
-        sqlx::query!(
+        sqlx::query(
             "INSERT INTO servers \
-               (id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, auth_state, cred_updated_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10) \
+               (id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, apple_music_storefront, apple_music_language, auth_state, cred_updated_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12) \
              ON CONFLICT(id) DO UPDATE SET name=?2, url=?3, service=?4, access_token=?5, \
-               user_id=?6, yt_browser=?7, yt_anonymous=?8, auth_state=?9, cred_updated_at=?10, updated_at=?10",
-            id,
-            srv.name,
-            srv.url,
-            service,
-            srv.access_token,
-            srv.user_id,
-            browser,
-            anon,
-            auth,
-            now
+               user_id=?6, yt_browser=?7, yt_anonymous=?8, apple_music_storefront=?9, apple_music_language=?10, auth_state=?11, cred_updated_at=?12, updated_at=?12",
         )
+        .bind(&id)
+        .bind(&srv.name)
+        .bind(&srv.url)
+        .bind(service)
+        .bind(&srv.access_token)
+        .bind(&srv.user_id)
+        .bind(browser)
+        .bind(anon)
+        .bind(&srv.apple_music_storefront)
+        .bind(&srv.apple_music_language)
+        .bind(auth)
+        .bind(now)
         .execute(&mut *tx)
         .await?;
         active_id = Some(id);
@@ -167,6 +208,7 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
     // cost hundreds of statements — the downloads-stutter bug.
 
     // Store the blob, stripped of creds/servers/counts, stamped with the active id.
+    let layers = config::store::FileLayers::read(settings_path);
     let mut blob = serde_json::to_value(cfg)?;
     if let Some(obj) = blob.as_object_mut() {
         obj.remove("server");
@@ -182,6 +224,27 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
             },
         );
     }
+    // A key pinned by an unwritable layer holds that layer's value, merged in
+    // by `load_config` — persisting it would make the override the base config
+    // and keep it applying after the layer is gone. Keep what the blob had.
+    if !layers.locked_keys.is_empty() {
+        let prior: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
+            .fetch_optional(&mut *tx)
+            .await?;
+        let prior: serde_json::Value = prior
+            .as_deref()
+            .and_then(|json| serde_json::from_str(json).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let Some(obj) = blob.as_object_mut() {
+            for key in &layers.locked_keys {
+                match prior.get(key.as_str()) {
+                    Some(value) => obj.insert(key.clone(), value.clone()),
+                    None => obj.remove(key.as_str()),
+                };
+            }
+        }
+    }
+
     let blob_str = serde_json::to_string(&blob)?;
     sqlx::query!(
         "INSERT INTO app_config (id, json) VALUES (1, ?1) \
@@ -192,28 +255,43 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
     .await?;
 
     tx.commit().await?;
+
+    // Mirror the settings into the standalone file too (skipped when it is
+    // Nix-managed). Best-effort: the DB save above already succeeded, and a
+    // missing file write only means the blob's values apply on next load.
+    if let Err(e) = config::store::save_settings_file(settings_path, &blob, &layers.locked_keys) {
+        tracing::warn!(path = %settings_path.display(), "failed to write settings file: {e}");
+    }
+
     Ok(())
 }
 
 /// Hydrate one server row (creds included) — the server-switch path, so stored
 /// creds are reused instead of re-prompting sign-in.
 pub async fn load_server(pool: &SqlitePool, id: &str) -> Result<Option<MusicServer>, DbError> {
-    let row = sqlx::query!(
-        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous \
+    use sqlx::Row;
+    let row = sqlx::query(
+        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, \
+         apple_music_storefront, apple_music_language \
          FROM servers WHERE id = ?1",
-        id
     )
+    .bind(id)
     .fetch_optional(pool)
     .await?;
     Ok(row.map(|r| MusicServer {
-        name: r.name,
-        url: r.url,
-        service: parse_service(&r.service),
-        access_token: r.access_token,
-        user_id: r.user_id,
-        id: Some(r.id),
-        yt_browser: parse_browser(r.yt_browser.as_deref()),
-        yt_anonymous: r.yt_anonymous != 0,
+        name: r.get("name"),
+        url: r.get("url"),
+        service: parse_service(r.get::<String, _>("service").as_str()),
+        access_token: r.get("access_token"),
+        user_id: r.get("user_id"),
+        id: Some(r.get("id")),
+        yt_browser: r
+            .get::<Option<String>, _>("yt_browser")
+            .as_deref()
+            .and_then(|s| parse_browser(Some(s))),
+        yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
+        apple_music_storefront: r.get("apple_music_storefront"),
+        apple_music_language: r.get("apple_music_language"),
     }))
 }
 
@@ -292,7 +370,9 @@ fn parse_service(s: &str) -> MusicService {
         "Custom" => MusicService::Custom,
         "YtMusic" => MusicService::YtMusic,
         "SoundCloud" => MusicService::SoundCloud,
+        "AppleMusic" => MusicService::AppleMusic,
         "Spotify" => MusicService::Spotify,
+        "Nextcloud" => MusicService::Nextcloud,
         _ => MusicService::Jellyfin,
     }
 }
@@ -304,7 +384,9 @@ fn service_str(s: MusicService) -> &'static str {
         MusicService::Custom => "Custom",
         MusicService::YtMusic => "YtMusic",
         MusicService::SoundCloud => "SoundCloud",
+        MusicService::AppleMusic => "AppleMusic",
         MusicService::Spotify => "Spotify",
+        MusicService::Nextcloud => "Nextcloud",
     }
 }
 

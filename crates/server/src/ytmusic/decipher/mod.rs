@@ -32,6 +32,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use tokio::sync::{mpsc, oneshot};
 
 // Headless deno_core engine (post-WebView). Android keeps the WebView.
 #[cfg(not(target_os = "android"))]
@@ -52,6 +53,13 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// `responses` array.
 pub trait JsEngine: Send + Sync {
     fn run<'a>(&'a self, program: String) -> BoxFuture<'a, Result<String, String>>;
+
+    /// True when globals survive between [`JsEngine::run`] calls — a long-lived
+    /// isolate rather than a fresh subprocess. Lets [`solve`] install the
+    /// extracted player functions once and keep per-track programs tiny.
+    fn is_persistent(&self) -> bool {
+        false
+    }
 }
 
 static ENGINE: OnceLock<Box<dyn JsEngine>> = OnceLock::new();
@@ -112,24 +120,88 @@ pub async fn deciphered_url(base_js: &str, format: &Value) -> Result<String, Str
     Ok(url)
 }
 
-/// Run the solver over `requests` against `base_js`, returning the parsed
-/// `responses` array.
-async fn solve(base_js: &str, requests: &[Value]) -> Result<Value, String> {
+/// yt_dlp_ejs sets `globalThis.location = new URL(".../watch?v=yt-dlp-wins")`
+/// as environment setup. Harmless in node/deno, but in a real WebView
+/// globalThis === window, so it NAVIGATES (out to the browser). Rename the
+/// write to a dummy property — the extraction passes the URL explicitly and
+/// doesn't read window.location (verified: decipher works without it).
+fn patched_core() -> String {
+    CORE.replace("globalThis.location =", "globalThis.__kopuz_loc =")
+}
+
+/// The vendored solver itself (`lib` + `jsc`), with no player attached. A
+/// persistent engine runs this once at isolate boot; a subprocess engine gets
+/// it prepended to every program.
+pub(super) fn solver_bootstrap() -> String {
+    format!("{LIB}\nObject.assign(globalThis, lib);\n{}", patched_core())
+}
+
+/// Emitted by the fast path when the isolate has no player installed, or a
+/// different one. Not valid JSON, so it can't be confused with a result.
+const CACHE_MISS: &str = "__KOPUZ_PLAYER_MISS__";
+
+/// Identity of a `base.js` revision, used to tell whether the copy installed in
+/// the isolate is still the one we're solving against.
+fn player_id(base_js: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    base_js.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// Extract `base.js`'s `n`/`sig` transforms once and park them on the isolate's
+/// global. Preprocessing parses ~2.5 MB of obfuscated JS into an AST and
+/// regenerates it, so this must not run per track.
+fn install_program(base_js: &str, id: &str) -> Result<String, String> {
+    let player_json =
+        serde_json::to_string(base_js).map_err(|e| format!("encode player js: {e}"))?;
+    let id_json = serde_json::to_string(id).map_err(|e| format!("encode player id: {e}"))?;
+    Ok(format!(
+        "(function(){{\
+         var o=jsc({{type:'player',player:{player_json},requests:[],output_preprocessed:true}});\
+         var r={{n:null,sig:null}};\
+         Function('_result',o.preprocessed_player)(r);\
+         globalThis.__kopuz_fns=r;globalThis.__kopuz_pid={id_json};\
+         }})();"
+    ))
+}
+
+/// Solve `requests` with the already-installed transforms. Prints the same
+/// `responses` shape `jsc` returns, so [`lookup`] reads either identically.
+fn fast_program(id: &str, requests: &[Value]) -> Result<String, String> {
+    let requests_json =
+        serde_json::to_string(requests).map_err(|e| format!("encode solver requests: {e}"))?;
+    let id_json = serde_json::to_string(id).map_err(|e| format!("encode player id: {e}"))?;
+    Ok(format!(
+        "(function(){{\
+         var __p=(typeof print==='function')?print:function(s){{console.log(s);}};\
+         if(globalThis.__kopuz_pid!=={id_json}||!globalThis.__kopuz_fns){{__p('{CACHE_MISS}');return;}}\
+         var reqs={requests_json},out=[];\
+         for(var i=0;i<reqs.length;i++){{\
+         var f=globalThis.__kopuz_fns[reqs[i].type];\
+         if(!f){{__p('{CACHE_MISS}');return;}}\
+         var d={{}},cs=reqs[i].challenges;\
+         for(var j=0;j<cs.length;j++){{d[cs[j]]=f(cs[j]);}}\
+         out.push({{type:'result',data:d}});}}\
+         __p(JSON.stringify(out));}})();"
+    ))
+}
+
+/// The original one-shot program: solver, player and requests all inline. Used
+/// by engines that keep no state between runs, and as the fallback whenever the
+/// cached fast path doesn't work out.
+fn standalone_program(base_js: &str, requests: &[Value]) -> Result<String, String> {
     let data = json!({ "type": "player", "player": base_js, "requests": requests });
     let data_json = serde_json::to_string(&data).map_err(|e| format!("encode solver data: {e}"))?;
-    // yt_dlp_ejs sets `globalThis.location = new URL(".../watch?v=yt-dlp-wins")`
-    // as environment setup. Harmless in node/deno, but in a real WebView
-    // globalThis === window, so it NAVIGATES (out to the browser). Rename the
-    // write to a dummy property — the extraction passes the URL explicitly and
-    // doesn't read window.location (verified: decipher works without it).
-    let core = CORE.replace("globalThis.location =", "globalThis.__kopuz_loc =");
     // `print` (JSC/qjs) or `console.log` (node/deno/bun) — whichever exists.
-    let program = format!(
-        "{LIB}\nObject.assign(globalThis, lib);\n{core}\n\
-         (function(){{var __p=(typeof print==='function')?print:function(s){{console.log(s);}};\
-         var o=jsc({data_json});__p(JSON.stringify(o.responses));}})();"
-    );
-    let stdout = engine().run(program).await?;
+    Ok(format!(
+        "{}\n(function(){{var __p=(typeof print==='function')?print:function(s){{console.log(s);}};\
+         var o=jsc({data_json});__p(JSON.stringify(o.responses));}})();",
+        solver_bootstrap()
+    ))
+}
+
+fn parse_responses(stdout: &str) -> Result<Value, String> {
     let line = stdout
         .lines()
         .rev()
@@ -139,6 +211,43 @@ async fn solve(base_js: &str, requests: &[Value]) -> Result<Value, String> {
         let head: String = stdout.chars().take(160).collect();
         format!("solver output parse ({e}); got: {head}")
     })
+}
+
+/// Run the solver over `requests` against `base_js`, returning the parsed
+/// `responses` array.
+///
+/// On a persistent engine the player is installed once per `base.js` revision
+/// and each track only ships its challenges — sending the full 2.5 MB player
+/// every time made the isolate's heap grow for the whole listening session.
+async fn solve(base_js: &str, requests: &[Value]) -> Result<Value, String> {
+    if engine().is_persistent() {
+        let id = player_id(base_js);
+        match solve_cached(base_js, &id, requests).await {
+            Ok(responses) => return Ok(responses),
+            Err(e) => tracing::warn!(
+                error = %e,
+                "decipher: cached player path failed, falling back to standalone solve"
+            ),
+        }
+    }
+    let stdout = engine().run(standalone_program(base_js, requests)?).await?;
+    parse_responses(&stdout)
+}
+
+/// Fast path: try the installed player, install it on a miss, then retry once.
+async fn solve_cached(base_js: &str, id: &str, requests: &[Value]) -> Result<Value, String> {
+    let stdout = engine().run(fast_program(id, requests)?).await?;
+    if !stdout.contains(CACHE_MISS) {
+        return parse_responses(&stdout);
+    }
+
+    engine().run(install_program(base_js, id)?).await?;
+
+    let stdout = engine().run(fast_program(id, requests)?).await?;
+    if stdout.contains(CACHE_MISS) {
+        return Err("player install did not take effect".to_string());
+    }
+    parse_responses(&stdout)
 }
 
 /// Pull a solved value out of the `responses` array by its input key. Each
@@ -425,6 +534,52 @@ impl JsEngine for SubprocessEngine {
             Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
         })
     }
+}
+
+/// A unit of work for the UI-layer solver loop: a JS `program` to run in the
+/// resident WebView, plus a one-shot `reply` for whatever it prints.
+pub struct SolveRequest {
+    pub program: String,
+    pub reply: oneshot::Sender<Result<String, String>>,
+}
+
+/// [`JsEngine`] that forwards each program to a solver loop running in the UI
+/// layer, which executes it via `dioxus::document::eval` inside the resident
+/// WebView. Desktop runs the in-process `DenoCoreEngine` instead; Android has
+/// no V8, so this is its only working engine (the subprocess fallback needs a
+/// system JS runtime no phone ships). Built by [`webview_channel`]; the UI
+/// registers it via [`set_engine`] and drains the returned receiver.
+pub struct ChannelEngine {
+    tx: mpsc::UnboundedSender<SolveRequest>,
+}
+
+impl JsEngine for ChannelEngine {
+    fn run<'a>(&'a self, program: String) -> BoxFuture<'a, Result<String, String>> {
+        Box::pin(async move {
+            let (reply, rx) = oneshot::channel();
+            self.tx
+                .send(SolveRequest { program, reply })
+                .map_err(|_| "webview solver loop is gone".to_string())?;
+            rx.await
+                .map_err(|_| "webview solver dropped the reply".to_string())?
+        })
+    }
+
+    /// The WebView page's `globalThis` survives between evals, so the solver
+    /// can install the player functions once and reuse them per track; a page
+    /// reload is caught by the `CACHE_MISS` handshake and reinstalls.
+    fn is_persistent(&self) -> bool {
+        true
+    }
+}
+
+/// Create a WebView-backed engine plus the receiver its solver loop drains.
+/// The UI calls this once at startup, `set_engine`s the returned engine, and
+/// spawns a Dioxus task that runs each `SolveRequest.program` via
+/// `document::eval` and answers on `reply`.
+pub fn webview_channel() -> (Box<dyn JsEngine>, mpsc::UnboundedReceiver<SolveRequest>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    (Box::new(ChannelEngine { tx }), rx)
 }
 
 #[cfg(test)]

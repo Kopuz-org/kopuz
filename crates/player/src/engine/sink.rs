@@ -30,6 +30,11 @@ pub trait AudioSink: Send {
     ) -> Result<SinkConfig, String>;
     /// Config of the currently open stream, if any.
     fn config(&self) -> Option<SinkConfig>;
+    /// Microseconds the callback's samples sit ahead of the speakers. Zero from
+    /// a backend that reports no playback timestamp.
+    fn output_latency_micros(&self) -> std::sync::Arc<std::sync::atomic::AtomicU64> {
+        std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0))
+    }
     fn play(&mut self) -> Result<(), String>;
     fn pause(&mut self);
     fn close(&mut self);
@@ -60,6 +65,7 @@ pub struct CpalSink {
     config: Option<SinkConfig>,
     on_event: std::sync::Arc<dyn Fn(SinkEvent) + Send + Sync + 'static>,
     watcher_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    latency_micros: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl CpalSink {
@@ -81,6 +87,7 @@ impl CpalSink {
             config: None,
             on_event,
             watcher_stop,
+            latency_micros: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
     }
 
@@ -159,6 +166,10 @@ impl CpalSink {
 }
 
 impl AudioSink for CpalSink {
+    fn output_latency_micros(&self) -> std::sync::Arc<std::sync::atomic::AtomicU64> {
+        self.latency_micros.clone()
+    }
+
     fn probe_config(&mut self, desired_sample_rate: Option<u32>) -> Result<SinkConfig, String> {
         let supported = self.output_config_for_sample_rate(desired_sample_rate)?;
         let stream_config = Self::preferred_stream_config(&supported);
@@ -188,11 +199,29 @@ impl AudioSink for CpalSink {
 
         let mut data_cb = make_cb(config);
         let on_event = self.on_event.clone();
+        let latency_micros = self.latency_micros.clone();
+        // A stale device's latency must not carry into a new stream.
+        self.latency_micros
+            .store(0, std::sync::atomic::Ordering::Relaxed);
         let stream = self
             .device
             .build_output_stream(
                 stream_config,
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| data_cb(data),
+                move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
+                    let stamps = info.timestamp();
+                    if let Some(ahead) = stamps.playback.checked_duration_since(stamps.callback) {
+                        // Smoothed: the per-callback reading jitters by a few ms.
+                        let sample = ahead.as_micros() as u64;
+                        let prior = latency_micros.load(std::sync::atomic::Ordering::Relaxed);
+                        let next = if prior == 0 {
+                            sample
+                        } else {
+                            (prior * 7 + sample) / 8
+                        };
+                        latency_micros.store(next, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    data_cb(data)
+                },
                 move |err: cpal::Error| {
                     let event = match err.kind() {
                         // Recovery will land on whatever device is default now;

@@ -1590,3 +1590,165 @@ fn stream_stall_rebuild_keeps_playing_under_pause_behavior() {
 
     engine.shutdown();
 }
+
+/// A `Read + Seek` source that only yields bytes as a background producer
+/// releases them: everything below the frontier reads instantly, everything past
+/// it blocks. The frontier starts at the prebuffer and advances at a fixed rate.
+struct DecryptPacedReader {
+    inner: std::io::Cursor<Vec<u8>>,
+    frontier: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl std::io::Read for DecryptPacedReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let pos = self.inner.position() as usize;
+        let total = self.inner.get_ref().len();
+        if pos >= total || buf.is_empty() {
+            return Ok(0);
+        }
+        // Serve what the frontier has reached and block only while it has
+        // reached nothing — a short read is the honest answer while the
+        // decryptor works on the rest, and waiting for the *whole* buffer would
+        // hang at EOF, where the frontier can never pass the file's length.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let ready = self
+                .frontier
+                .load(std::sync::atomic::Ordering::Relaxed)
+                .min(total);
+            if ready > pos {
+                let n = buf.len().min(ready - pos);
+                return self.inner.read(&mut buf[..n]);
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "decrypt frontier stalled",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
+impl std::io::Seek for DecryptPacedReader {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+/// Bytes of audio per second at the test config — the rate the sink drains.
+const TEST_AUDIO_BYTES_PER_SEC: usize = 44_100 * 2 * 2;
+
+/// Rounds of realtime draining the starvation tests do, and how many of those
+/// pulls may come back silent before the ring counts as starved.
+const DRAIN_ROUNDS: usize = 30;
+
+/// Load a source whose bytes are released at `fill_rate` bytes/sec after an
+/// initial `prebuffer`, and hand back the running engine — or the load error.
+fn load_paced_source(
+    prebuffer: usize,
+    fill_rate: usize,
+) -> Result<(FakeSinkHandle, EngineHandle), String> {
+    let seconds = 8.0;
+    let frames = (seconds * TEST_CONFIG.sample_rate as f64) as usize;
+    let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
+    let total = bytes.len();
+
+    let frontier = Arc::new(std::sync::atomic::AtomicUsize::new(prebuffer.min(total)));
+    let filler = frontier.clone();
+    std::thread::spawn(move || {
+        let step = fill_rate / 100; // advance every 10ms
+        loop {
+            let now = filler.load(std::sync::atomic::Ordering::Relaxed);
+            if now >= total {
+                return;
+            }
+            filler.store(
+                (now + step).min(total),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+
+    let factory: SourceFactory = Box::new(move || {
+        Ok(crate::decoder::from_stream(DecryptPacedReader {
+            inner: std::io::Cursor::new(bytes),
+            frontier,
+        }))
+    });
+
+    let (sink, engine) = spawn_engine();
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    engine.send(Command::Load(LoadRequest {
+        token: 1,
+        factory,
+        duration: Duration::from_secs_f64(seconds),
+        transition: Transition::Immediate,
+        start_at: None,
+        reply: Some(reply_tx),
+    }));
+    reply_rx.blocking_recv().expect("load reply")?;
+    Ok((sink, engine))
+}
+
+/// Play such a source, draining at realtime. Returns how many of `DRAIN_ROUNDS`
+/// pulls came back silent.
+fn silent_pulls_against_paced_source(prebuffer: usize, fill_rate: usize) -> usize {
+    let (sink, engine) = load_paced_source(prebuffer, fill_rate).expect("load ok");
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    // Drain at realtime: 4410 interleaved samples is exactly 50ms at 44.1kHz
+    // stereo. Pulling faster than realtime would empty the ring by itself and
+    // report a starvation that playback never sees.
+    let mut silent = 0;
+    for _ in 0..DRAIN_ROUNDS {
+        std::thread::sleep(Duration::from_millis(50));
+        if sink.pull(4410).iter().all(|s| *s == 0.0) {
+            silent += 1;
+        }
+    }
+    engine.shutdown();
+    silent
+}
+
+/// The ring is 2s on desktop and *empty* when `sink.play()` is called, so a
+/// source that can't beat realtime on its own has to arrive with a cushion
+/// already built. Every streaming source in the tree does this — it's what
+/// `StreamBuffer::MIN_PREBUFFER_BYTES` and Apple Music's `PREBUFFER_BYTES` are
+/// for. Here the cushion covers the whole drain, so playback is continuous even
+/// though the producer never catches up.
+#[test]
+fn a_prebuffered_slow_source_does_not_starve_the_ring() {
+    // 3s of cushion, against a producer running at 0.8x realtime.
+    let silent = silent_pulls_against_paced_source(
+        3 * TEST_AUDIO_BYTES_PER_SEC,
+        TEST_AUDIO_BYTES_PER_SEC * 8 / 10,
+    );
+    assert!(
+        silent <= DRAIN_ROUNDS / 10,
+        "ring starved on {silent}/{DRAIN_ROUNDS} pulls — the prebuffer no longer covers the ring"
+    );
+}
+
+/// The other half of the pair, and the reason the cushion has to be built
+/// before the source is handed over rather than while it plays: with nothing
+/// buffered, the same producer can't even get through the probe. Symphonia
+/// treats a source with a known length as seekable and reads near the end of it
+/// while probing, so the very first read waits on bytes the producer won't
+/// release for another ten seconds and the load fails outright.
+///
+/// Without this case the test above passes for any producer fast enough to keep
+/// up unaided, and stops saying anything about the prebuffer at all.
+#[test]
+fn an_unbuffered_slow_source_cannot_even_probe() {
+    let err = match load_paced_source(0, TEST_AUDIO_BYTES_PER_SEC * 8 / 10) {
+        Ok(_) => panic!("a source with nothing buffered must not load"),
+        Err(e) => e,
+    };
+    assert!(
+        err.contains("stalled"),
+        "expected the probe to stall on unavailable bytes, got: {err}"
+    );
+}

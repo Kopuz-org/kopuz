@@ -4,7 +4,7 @@ use db::Db;
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, MediaSource, PlaylistOps,
-    SourceError, StreamInfo,
+    RadioSeeds, SourceError, StreamInfo,
 };
 
 pub(super) struct OfflineServerSource {
@@ -30,7 +30,7 @@ impl MediaSource for OfflineServerSource {
             sync: false,
             downloads: false,
             discover: false,
-            radio: false,
+            radio: RadioSeeds::NONE,
             playlists: PlaylistOps::None,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,

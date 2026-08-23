@@ -4,7 +4,7 @@ use db::Db;
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, MediaSource, PlaylistOps,
-    SourceError, StreamInfo, mirror_created,
+    RadioSeeds, SourceError, StreamInfo, mirror_created,
 };
 
 pub(super) struct LocalSource {
@@ -30,7 +30,7 @@ impl MediaSource for LocalSource {
             sync: false,
             downloads: false,
             discover: false,
-            radio: false,
+            radio: RadioSeeds::NONE,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,

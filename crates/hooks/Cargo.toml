@@ -29,5 +29,6 @@ serde_json = { workspace = true }
 server = { workspace = true }
 scrobble = { workspace = true }
 radio = { workspace = true }
+base64 = { workspace = true }
 discord-presence = { workspace = true }
 tokio = { workspace = true, features = ["fs", "sync", "macros"] }

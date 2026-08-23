@@ -37,6 +37,8 @@ async fn config_round_trips_with_creds_in_servers_table() {
                 service: MusicService::Jellyfin,
                 yt_browser: None,
                 yt_anonymous: false,
+                apple_music_storefront: "us".into(),
+                apple_music_language: "en".into(),
             },
             SavedServer {
                 id: "srv-b".into(),
@@ -45,6 +47,8 @@ async fn config_round_trips_with_creds_in_servers_table() {
                 service: MusicService::YtMusic,
                 yt_browser: Some(config::Browser::Brave),
                 yt_anonymous: false,
+                apple_music_storefront: "us".into(),
+                apple_music_language: "en".into(),
             },
         ],
         server: Some(MusicServer {
@@ -56,6 +60,8 @@ async fn config_round_trips_with_creds_in_servers_table() {
             id: Some("srv-b".into()),
             yt_browser: Some(config::Browser::Brave),
             yt_anonymous: false,
+            apple_music_storefront: "us".into(),
+            apple_music_language: "en".into(),
         }),
         active_source: config::Source::Server("srv-b".into()),
         theme: "midnight".into(),
@@ -153,6 +159,182 @@ async fn named_local_source_round_trips_as_active() {
             .get("local:test-library|/music/work/a.flac"),
         Some(&1),
     );
+}
+
+#[tokio::test]
+async fn settings_file_mirrors_saves_and_overrides_the_blob_on_load() {
+    let db_path = unique_db();
+    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let db = db::init(&db_path).await.unwrap();
+
+    let cfg = AppConfig {
+        theme: "midnight".into(),
+        ..Default::default()
+    };
+    db.save_config(&cfg).await.unwrap();
+
+    // The save mirrored the settings into the standalone file.
+    let text = std::fs::read_to_string(&settings_path).expect("settings file written");
+    let mut written: toml::Table = text.parse().unwrap();
+    assert_eq!(written["theme"].as_str(), Some("midnight"));
+
+    // A hand-edit (or hjem-managed value) in the file wins over the blob.
+    written.insert("theme".into(), "nord".into());
+    std::fs::write(&settings_path, written.to_string()).unwrap();
+    let loaded = db.load_config().await.unwrap().expect("config present");
+    assert_eq!(loaded.theme, "nord");
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+// The allow is for cleanup only: re-enabling write on our own temp file so the
+// temp dir can be removed.
+#[allow(clippy::permissions_set_readonly_false)]
+#[tokio::test]
+async fn managed_settings_file_is_never_written_but_still_applies() {
+    let db_path = unique_db();
+    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    std::fs::write(&settings_path, "theme = \"nord\"\nvolume = 0.25\n").unwrap();
+    let mut perms = std::fs::metadata(&settings_path).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&settings_path, perms).unwrap();
+
+    let db = db::init(&db_path).await.unwrap();
+
+    // No blob yet: the file layers alone configure the app.
+    let loaded = db
+        .load_config()
+        .await
+        .unwrap()
+        .expect("file layers present");
+    assert_eq!(loaded.theme, "nord");
+    assert_eq!(loaded.volume, 0.25);
+
+    // Saving persists to the blob and leaves the immutable file untouched;
+    // its keys keep overriding what the UI changed.
+    let mut cfg = loaded;
+    cfg.theme = "dracula".into();
+    cfg.crossfade_seconds = 4;
+    db.save_config(&cfg).await.unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&settings_path).unwrap(),
+        "theme = \"nord\"\nvolume = 0.25\n"
+    );
+    let reloaded = db.load_config().await.unwrap().expect("config present");
+    assert_eq!(reloaded.theme, "nord", "managed key wins over the blob");
+    assert_eq!(reloaded.crossfade_seconds, 4, "unmanaged key persists");
+
+    let mut perms = std::fs::metadata(&settings_path).unwrap().permissions();
+    perms.set_readonly(false);
+    let _ = std::fs::set_permissions(&settings_path, perms);
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// A value a higher layer pins is not the user's choice, so a save must not
+/// bake it into the blob or the settings file: removing the layer has to
+/// restore what was configured before. Uses a drop-in rather than
+/// `KOPUZ_CONFIG_THEME` — same locked-key path, without mutating the process
+/// environment out from under the other tests in this binary.
+#[tokio::test]
+async fn layered_overrides_are_not_persisted_as_base_config() {
+    let db_path = unique_db();
+    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let db = db::init(&db_path).await.unwrap();
+
+    let cfg = AppConfig {
+        theme: "midnight".into(),
+        ..Default::default()
+    };
+    db.save_config(&cfg).await.unwrap();
+
+    let dropin_dir = config::store::dropin_dir_for(&settings_path);
+    std::fs::create_dir_all(&dropin_dir).unwrap();
+    std::fs::write(dropin_dir.join("10-theme.toml"), "theme = \"nord\"\n").unwrap();
+
+    let loaded = db.load_config().await.unwrap().expect("config present");
+    assert_eq!(loaded.theme, "nord", "the drop-in applies");
+
+    // Change something unrelated while the override is in force.
+    let mut cfg = loaded;
+    cfg.volume = 0.42;
+    db.save_config(&cfg).await.unwrap();
+
+    let written: toml::Table = std::fs::read_to_string(&settings_path)
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        written["theme"].as_str(),
+        Some("midnight"),
+        "the drop-in's theme leaked into the settings file"
+    );
+
+    std::fs::remove_dir_all(&dropin_dir).unwrap();
+    let reloaded = db.load_config().await.unwrap().expect("config present");
+    assert_eq!(
+        reloaded.theme, "midnight",
+        "removing the drop-in must restore the configured theme"
+    );
+    assert_eq!(reloaded.volume, 0.42, "unpinned key persists");
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// The hand-written path end to end: a partial `settings.toml` plus a drop-in
+/// over an existing blob, with one unusable value in each. Everything the app
+/// can use applies, in precedence order, and the bad keys cost only themselves.
+#[tokio::test]
+async fn hand_written_layers_apply_over_the_blob_and_survive_bad_keys() {
+    let db_path = unique_db();
+    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let db = db::init(&db_path).await.unwrap();
+
+    let cfg = AppConfig {
+        theme: "midnight".into(),
+        language: "en".into(),
+        crossfade_seconds: 3,
+        volume: 0.8,
+        ..Default::default()
+    };
+    db.save_config(&cfg).await.unwrap();
+
+    std::fs::write(
+        &settings_path,
+        "theme = \"nord\"\nlanguage = \"tr\"\ncrossfade_seconds = \"loud\"\n",
+    )
+    .unwrap();
+    let dropin_dir = config::store::dropin_dir_for(&settings_path);
+    std::fs::create_dir_all(&dropin_dir).unwrap();
+    std::fs::write(
+        dropin_dir.join("20-theme.toml"),
+        "theme = \"dracula\"\nui_style = \"Fancy\"\n",
+    )
+    .unwrap();
+
+    let loaded = db.load_config().await.unwrap().expect("config present");
+    assert_eq!(loaded.theme, "dracula", "the drop-in out-ranks the file");
+    assert_eq!(loaded.language, "tr", "the file out-ranks the blob");
+    assert_eq!(loaded.volume, 0.8, "untouched keys come from the blob");
+    assert_eq!(
+        loaded.crossfade_seconds, 3,
+        "a bad value falls back to the stored one, not to the default"
+    );
+    assert_eq!(loaded.ui_style, config::UiStyle::default());
+
+    // Saving on top of that doesn't corrupt the hand-written file: the pinned
+    // drop-in key keeps the file's own value and the rest mirrors normally.
+    let mut cfg = loaded;
+    cfg.volume = 0.25;
+    db.save_config(&cfg).await.unwrap();
+    let written: toml::Table = std::fs::read_to_string(&settings_path)
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(written["theme"].as_str(), Some("nord"));
+    assert_eq!(written["language"].as_str(), Some("tr"));
+    assert_eq!(written["volume"].as_float(), Some(0.25));
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
 async fn open(db_path: &std::path::Path) -> SqliteConnection {

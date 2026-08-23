@@ -176,3 +176,58 @@ async fn meta_keys_since_windows_by_kind_and_age() {
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
+
+/// Tracks reach the store from several places, and only some of them know which
+/// album a track belongs to — a server's album relationship has to be requested
+/// explicitly, so a response without it means "not asked for", not "no album".
+///
+/// Before this guard, opening a playlist re-wrote its tracks with a blank album
+/// id and unlinked them from the album the library sync had just matched, which
+/// showed up as albums that render with no songs in them.
+#[tokio::test]
+async fn a_blank_album_id_does_not_erase_a_known_one() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+
+    let linked = local("/music/a.flac", "A");
+    assert_eq!(linked.album_id, "alb");
+    db.upsert_tracks(&Source::Local, std::slice::from_ref(&linked))
+        .await
+        .unwrap();
+
+    // The same track written again by a path that didn't resolve the album.
+    let mut album_less = linked.clone();
+    album_less.album_id = String::new();
+    album_less.title = "A (from a playlist)".into();
+    db.upsert_tracks(&Source::Local, &[album_less])
+        .await
+        .unwrap();
+
+    let tracks = db.album_tracks(&Source::Local, "alb").await.unwrap();
+    assert_eq!(
+        tracks.len(),
+        1,
+        "the track must still belong to its album after an album-less write"
+    );
+    assert_eq!(
+        tracks[0].title, "A (from a playlist)",
+        "everything the later write did know still lands"
+    );
+
+    // A non-empty id is still authoritative — this must not become write-once.
+    let mut moved = linked.clone();
+    moved.album_id = "alb2".into();
+    db.upsert_tracks(&Source::Local, &[moved]).await.unwrap();
+    assert!(
+        db.album_tracks(&Source::Local, "alb")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        db.album_tracks(&Source::Local, "alb2").await.unwrap().len(),
+        1
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}

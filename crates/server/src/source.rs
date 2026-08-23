@@ -31,17 +31,22 @@ use db::Db;
 
 use crate::server_ops::ServerConn;
 
+mod apple_music;
 pub mod capabilities;
 mod jellyfin;
 mod local;
+mod nextcloud;
 mod offline;
+mod search;
 mod soundcloud;
 mod spotify;
 mod subsonic;
 mod types;
 mod youtube_music;
+use apple_music::AppleMusicSource;
 use jellyfin::JellyfinSource;
 use local::LocalSource;
+use nextcloud::NextcloudSource;
 use offline::OfflineServerSource;
 use soundcloud::SoundcloudSource;
 use spotify::SpotifySource;
@@ -100,6 +105,21 @@ pub trait MediaSource: Send + Sync {
     /// Resolve a playable stream for one item id (local = a file path, server =
     /// the remote's URL / deciphered stream).
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError>;
+
+    /// The bytes of one track, for sources that can't express it as a URL.
+    ///
+    /// Almost nothing needs this: a download is normally a GET of whatever
+    /// [`resolve_stream`](Self::resolve_stream) hands out, and that is what the
+    /// unsupported default here leaves the caller to do. Apple Music overrides
+    /// it because its assets are encrypted — the URL yields ciphertext, so a
+    /// playable file only exists after a licence and a decrypt pass.
+    async fn download_track(
+        &self,
+        _item_id: &str,
+        _progress: Option<utils::stream_buffer::BufferProgressCallback>,
+    ) -> Result<Vec<u8>, SourceError> {
+        Err(SourceError::unsupported("track download"))
+    }
 
     /// Check stored creds against the source (local is always [`Valid`](AuthOutcome::Valid)).
     async fn validate(&self) -> AuthOutcome;
@@ -168,7 +188,7 @@ pub trait MediaSource: Send + Sync {
         }
         let tracks = self.db().search_corpus(self.source()).await?;
         let albums = self.db().albums(self.source()).await?;
-        Ok(search_filter(&q, tracks, albums))
+        Ok(search::filter(&q, tracks, albums))
     }
 
     /// The discover/home feed. Default unsupported — gated by
@@ -716,49 +736,6 @@ pub(super) async fn mirror_added(
     Ok(())
 }
 
-/// Filter a library corpus by a lowercased `query` — the shared search behavior
-/// for corpus-backed sources (local, Jellyfin, Subsonic). Matches tracks on
-/// title/artist/album/genre (≤100) and albums on title/artist/genre, deduped by
-/// title (≤30). Covers are resolved by the caller via the cover seam.
-fn search_filter(
-    query: &str,
-    tracks: Vec<reader::Track>,
-    albums: Vec<reader::Album>,
-) -> (Vec<reader::Track>, Vec<reader::Album>) {
-    let album_genre: std::collections::HashMap<&String, &str> =
-        albums.iter().map(|a| (&a.id, a.genre.as_str())).collect();
-
-    let result_tracks: Vec<reader::Track> = tracks
-        .iter()
-        .filter(|t| {
-            t.title.to_lowercase().contains(query)
-                || t.artist.to_lowercase().contains(query)
-                || t.album.to_lowercase().contains(query)
-                || album_genre
-                    .get(&t.album_id)
-                    .map(|g| g.to_lowercase().contains(query))
-                    .unwrap_or(false)
-        })
-        .take(100)
-        .cloned()
-        .collect();
-
-    let mut seen = std::collections::HashSet::new();
-    let result_albums: Vec<reader::Album> = albums
-        .iter()
-        .filter(|a| {
-            (a.title.to_lowercase().contains(query)
-                || a.artist.to_lowercase().contains(query)
-                || a.genre.to_lowercase().contains(query))
-                && seen.insert(a.title.trim().to_lowercase())
-        })
-        .take(30)
-        .cloned()
-        .collect();
-
-    (result_tracks, result_albums)
-}
-
 /// Mirror a remote playlist-create into the DB cache.
 pub(super) async fn mirror_created(
     db: &Db,
@@ -795,7 +772,22 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         }
         MusicService::YtMusic => Box::new(YtSource::new(db, source, conn)),
         MusicService::SoundCloud => Box::new(SoundcloudSource::new(db, source, conn)),
+        MusicService::AppleMusic => {
+            // Apple Music is configured, so the Widevine CDM will be wanted.
+            // Start fetching now rather than when a track is already waiting.
+            crate::applemusic::widevine::fetch::prefetch();
+            Box::new(AppleMusicSource::new(
+                db,
+                source,
+                crate::applemusic::AppleMusicApi::new(
+                    Some(conn.token.clone()),
+                    &conn.apple_music_storefront,
+                    &conn.apple_music_language,
+                ),
+            ))
+        }
         MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
+        MusicService::Nextcloud => Box::new(NextcloudSource::new(db, source, conn)),
     }
 }
 

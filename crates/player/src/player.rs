@@ -241,6 +241,11 @@ impl Player {
         self.status().position()
     }
 
+    /// How far the position clock runs ahead of the speakers.
+    pub fn output_latency(&self) -> Duration {
+        self.status().output_latency()
+    }
+
     /// The outgoing (fading) session's live position during a crossfade, if one
     /// is in progress. Lets the UI show the track it is still displaying.
     pub fn fading_position(&self) -> Option<Duration> {

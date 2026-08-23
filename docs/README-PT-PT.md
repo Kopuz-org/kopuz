@@ -206,8 +206,9 @@ manifesto fonte:
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
-flatpak-builder --user --install --force-clean build-dir packaging/flatpak/com.temidaradev.kopuz.json
-flatpak run com.temidaradev.kopuz
+git submodule update --init --recursive --remote
+flatpak-builder --user --install --force-clean build-dir packaging/flatpak/moe.kopuz.kopuz.json
+flatpak run moe.kopuz.kopuz
 ```
 
 Também pode clicar no ficheiro e abri-lo com um fornecedor de aplicações, por
@@ -338,10 +339,10 @@ variável de ambiente `KOPUZ_DB_PATH`.)
 
 No **macOS**:
 
-- `~/Library/Application Support/com.temidaradev.kopuz/kopuz.db` - definições,
+- `~/Library/Application Support/moe.kopuz.kopuz/kopuz.db` - definições,
   biblioteca, playlists, favoritos
-- `~/Library/Caches/com.temidaradev.kopuz/covers/` - capas de álbuns em cache
-- `~/Library/Caches/com.temidaradev.kopuz/offline_tracks/` - faixas transferidas
+- `~/Library/Caches/moe.kopuz.kopuz/covers/` - capas de álbuns em cache
+- `~/Library/Caches/moe.kopuz.kopuz/offline_tracks/` - faixas transferidas
 
 No **Linux** (especificação XDG):
 
@@ -351,10 +352,10 @@ No **Linux** (especificação XDG):
 
 No **Windows** (AppData):
 
-- `%APPDATA%\temidaradev\kopuz\config\kopuz.db` - definições, biblioteca,
+- `%APPDATA%\kopuz\kopuz\config\kopuz.db` - definições, biblioteca,
   playlists, favoritos
-- `%LOCALAPPDATA%\temidaradev\kopuz\cache\covers\` - capas de álbuns em cache
-- `%LOCALAPPDATA%\temidaradev\kopuz\cache\offline_tracks\` - faixas transferidas
+- `%LOCALAPPDATA%\kopuz\kopuz\cache\covers\` - capas de álbuns em cache
+- `%LOCALAPPDATA%\kopuz\kopuz\cache\offline_tracks\` - faixas transferidas
 
 > [!NOTE]
 > A atualizar a partir de uma versão mais antiga? No primeiro arranque o Kopuz importa o seu já existente
@@ -422,8 +423,8 @@ Todos os ficheiros estão no diretório de registos (o botão **Abrir pasta de
 registos** salta diretamente para aqui):
 
 - Linux: `~/.cache/kopuz/logs/`
-- macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/`
-- Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\`
+- macOS: `~/Library/Caches/moe.kopuz.kopuz/logs/`
+- Windows: `%LOCALAPPDATA%\kopuz\kopuz\cache\logs\`
 
 | Ficheiro                | O que é                                                                                                         |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -561,4 +562,4 @@ guardar imagens descodificadas na memória mais tempo do que o necessário.
 
 ## Histórico de Estrelas
 
-[![Star History Chart](https://api.star-history.com/chart?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://www.star-history.com/?repos=Kopuz-org%2Fkopuz&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://star-history.dera.page/#Kopuz-org/kopuz&type=date&legend=top-left)

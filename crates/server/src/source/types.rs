@@ -71,6 +71,38 @@ pub enum AlbumType {
     YtMusic,
 }
 
+/// Which seeds a source can generate a radio/mix from. The two are separate
+/// because backends implement them separately: the Subsonic API has a
+/// song-seeded similar-songs call but nothing playlist-seeded, so a single flag
+/// made the playlist cards offer an action that could only ever fail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RadioSeeds {
+    /// Backs [`MediaSource::start_radio`](super::MediaSource::start_radio).
+    pub track: bool,
+    /// Backs [`MediaSource::start_playlist_radio`](super::MediaSource::start_playlist_radio).
+    pub playlist: bool,
+}
+
+impl RadioSeeds {
+    /// No radio at all, the default for a source that overrides neither op.
+    pub const NONE: Self = Self {
+        track: false,
+        playlist: false,
+    };
+
+    /// A song seed only, the Subsonic/OpenSubsonic shape.
+    pub const TRACK: Self = Self {
+        track: true,
+        playlist: false,
+    };
+
+    /// Both seeds, the catalog-remote shape.
+    pub const ALL: Self = Self {
+        track: true,
+        playlist: true,
+    };
+}
+
 pub struct FavoritesPage {
     pub tracks: Vec<reader::Track>,
     pub next: Option<String>,
@@ -97,7 +129,7 @@ pub struct Capabilities {
     pub sync: bool,
     pub downloads: bool,
     pub discover: bool,
-    pub radio: bool,
+    pub radio: RadioSeeds,
     pub playlists: PlaylistOps,
     pub artist_view: ArtistView,
     pub albums: AlbumType,

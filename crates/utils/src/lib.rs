@@ -13,6 +13,7 @@ pub mod lyrics;
 pub mod musicbrainz;
 pub mod playlist;
 pub mod range_source;
+pub mod redact;
 pub mod stream_buffer;
 pub mod themes;
 use std::path::Path;
@@ -97,29 +98,30 @@ pub fn format_artwork_url<P: AsRef<Path> + ?Sized>(path: Option<&P>) -> Option<C
         abs_str
     };
 
-    // Android WebView is unreliable with custom URL schemes (artwork://) and the
-    // http localhost shim, so inline the cover as a base64 data URL instead.
-    #[cfg(target_os = "android")]
-    {
-        use base64::{Engine as _, engine::general_purpose};
-        return match std::fs::read(&*abs_str) {
-            Ok(bytes) => {
-                let mime = if abs_str.ends_with(".png") {
-                    "image/png"
-                } else if abs_str.ends_with(".gif") {
-                    "image/gif"
-                } else if abs_str.ends_with(".webp") {
-                    "image/webp"
-                } else {
-                    "image/jpeg"
-                };
-                let b64 = general_purpose::STANDARD.encode(&bytes);
-                Some(cover_url_from_string(format!("data:{mime};base64,{b64}")))
-            }
-            Err(_) => None,
-        };
-    }
+    artwork_url_for(&abs_str)
+}
 
+/// Android WebView is unreliable with custom URL schemes (`artwork://`) and the
+/// http localhost shim, so the cover is inlined as a base64 data URL instead.
+#[cfg(target_os = "android")]
+fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
+    use base64::{Engine as _, engine::general_purpose};
+    let bytes = std::fs::read(abs_str).ok()?;
+    let mime = if abs_str.ends_with(".png") {
+        "image/png"
+    } else if abs_str.ends_with(".gif") {
+        "image/gif"
+    } else if abs_str.ends_with(".webp") {
+        "image/webp"
+    } else {
+        "image/jpeg"
+    };
+    let b64 = general_purpose::STANDARD.encode(&bytes);
+    Some(cover_url_from_string(format!("data:{mime};base64,{b64}")))
+}
+
+#[cfg(not(target_os = "android"))]
+fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
     const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
         .add(b' ')
         .add(b'"')
@@ -141,13 +143,13 @@ pub fn format_artwork_url<P: AsRef<Path> + ?Sized>(path: Option<&P>) -> Option<C
     if cfg!(target_os = "windows") {
         let url = format!(
             "http://artwork.dioxus.localhost/local?p={}&v=thumb400-hq1920",
-            percent_encoding::utf8_percent_encode(&abs_str, QUERY_VAL)
+            percent_encoding::utf8_percent_encode(abs_str, QUERY_VAL)
         );
         Some(cover_url_from_string(url))
     } else {
         let url = format!(
             "artwork://local?p={}&v=thumb400-hq1920",
-            percent_encoding::utf8_percent_encode(&abs_str, QUERY_VAL)
+            percent_encoding::utf8_percent_encode(abs_str, QUERY_VAL)
         );
         Some(cover_url_from_string(url))
     }

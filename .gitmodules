@@ -1,0 +1,3 @@
+[submodule "packaging/flatpak"]
+	path = packaging/flatpak
+	url = https://github.com/Kopuz-org/kopuz-flatpak.git

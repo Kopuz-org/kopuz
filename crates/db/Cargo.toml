@@ -33,6 +33,13 @@ arc-swap = { workspace = true }
 directories = { workspace = true }
 sha2 = { workspace = true }
 
+# Android has no XDG layout — the writable per-app directory has to come from
+# the Activity, so `config_dir` asks it over JNI.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { workspace = true }
+ndk-context = { workspace = true }
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
+toml = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }

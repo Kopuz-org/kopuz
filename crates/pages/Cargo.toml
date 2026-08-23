@@ -40,3 +40,7 @@ rand = { workspace = true }
 i18n = { workspace = true }
 lofty.workspace = true
 tracing = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

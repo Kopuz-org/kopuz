@@ -139,7 +139,7 @@ pub(crate) async fn check_browser_command(arg: String) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) async fn find_browser_bin(browser: Browser) -> Option<BrowserBin> {
+pub(crate) async fn find_browser_bin(browser: Browser, profile: String) -> Option<BrowserBin> {
     let env_key = format!(
         "KOPUZ_{}_BIN",
         browser.id().to_uppercase().replace('-', "_")
@@ -174,13 +174,17 @@ pub(crate) async fn find_browser_bin(browser: Browser) -> Option<BrowserBin> {
     {
         let id = v.to_string().to_owned();
         if check_browser_command(format!("flatpak info {id}")).await {
-            return Some(BrowserBin::CommandLine(format!("flatpak run {id}")));
+            return Some(BrowserBin::CommandLine(format!(
+                "flatpak run --filesystem={profile} {id}"
+            )));
         }
     }
 
     for cand in browser_flatpak_ids(browser) {
         if check_browser_command(format!("flatpak info {cand}")).await {
-            return Some(BrowserBin::CommandLine(format!("flatpak run {cand}")));
+            return Some(BrowserBin::CommandLine(format!(
+                "flatpak run --filesystem={profile} {cand}"
+            )));
         }
     }
 
@@ -223,6 +227,18 @@ pub(crate) fn browser_command(bin: &BrowserBin) -> Command {
         c.args(&tokens[1..]);
         c
     }
+}
+
+pub async fn has_host_spawn() -> bool {
+    if !in_flatpak() {
+        return true;
+    }
+
+    Command::new("flatpak-spawn")
+        .args(["--host", "true"])
+        .status()
+        .await
+        .is_ok_and(|status| status.success())
 }
 
 #[cfg(test)]

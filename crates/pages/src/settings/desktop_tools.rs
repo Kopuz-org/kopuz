@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "android"))]
 use components::settings_items::{SettingItem, SettingsSection, ToggleSetting};
 use config::AppConfig;
 use dioxus::prelude::*;
@@ -33,6 +34,7 @@ pub(super) fn logs_section(mut config: Signal<AppConfig>) -> Element {
             div {
                 SettingItem {
                     title: i18n::t("enable_tracing").to_string(),
+                    config_key: "tracing_enabled",
                     control: rsx! {
                         ToggleSetting {
                             enabled: config.read().tracing_enabled,

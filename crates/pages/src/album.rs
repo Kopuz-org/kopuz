@@ -94,7 +94,7 @@ pub fn Album(
 
     rsx! {
         div {
-            class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+            class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
 
             if album_id.read().is_empty() {
                 div { class: "flex-1 min-h-0 flex flex-col",
@@ -371,11 +371,13 @@ fn AlbumGrid(
                                                             if cap.delete_from_disk {
                                                                 let album_src = active_source.peek().clone();
                                                                 let album_id = id.clone();
+                                                                let delete_config = config.read().clone();
+                                                                let delete_source = source();
                                                                 spawn(async move {
                                                                     let to_delete = album_src.album_tracks(&album_id).await.unwrap_or_default();
                                                                     for track in &to_delete {
                                                                         if let Some(path) = track.id.local_path() {
-                                                                            let _ = std::fs::remove_file(path);
+                                                                            let _ = crate::local_files::remove(&delete_config, &delete_source, path);
                                                                         }
                                                                     }
                                                                     if album_src.delete_album(&album_id).await.is_ok() {
@@ -617,7 +619,7 @@ fn AlbumDetail(
     let cap = caps();
     let aid = album.id.clone();
 
-    let cover_cache = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+    let cover_cache = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
         .map(|d| d.cache_dir().join("covers"))
         .unwrap_or_else(|| PathBuf::from("./cache/covers"));
 
@@ -733,7 +735,7 @@ fn AlbumDetail(
                         if let Some(file) = file {
                             let path = file.path().to_path_buf();
                             let Ok(data) = tokio::fs::read(&path).await else { return };
-                            let cover_cache = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+                            let cover_cache = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
                                 .map(|d| d.cache_dir().join("covers"))
                                 .unwrap_or_else(|| PathBuf::from("./cache/covers"));
                             if let Ok(saved) = reader::utils::save_cover(&aid, &data, path.extension().and_then(|e| e.to_str()), &cover_cache) {
@@ -749,7 +751,8 @@ fn AlbumDetail(
                 on_delete_track: cap.delete_from_disk.then(|| EventHandler::new(move |idx: usize| {
                     if let Some(t) = tracks_delete.get(idx)
                         && let Some(track_path) = t.id.local_path()
-                        && std::fs::remove_file(track_path).is_ok()
+                        && crate::local_files::remove(&config.read(), &source(), track_path)
+                            .is_ok_and(|removed| removed)
                     {
                         let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                         let key = t.id.key().into_owned();
@@ -763,7 +766,9 @@ fn AlbumDetail(
                 on_selection_delete: cap.delete_from_disk.then(|| EventHandler::new(move |paths: Vec<PathBuf>| {
                     let mut keys = Vec::new();
                     for path in &paths {
-                        if std::fs::remove_file(path).is_ok() {
+                        if crate::local_files::remove(&config.read(), &source(), path)
+                            .is_ok_and(|removed| removed)
+                        {
                             keys.push(path.to_string_lossy().into_owned());
                         }
                     }

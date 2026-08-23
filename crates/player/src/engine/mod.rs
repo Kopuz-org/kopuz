@@ -152,6 +152,7 @@ pub struct EngineStatus {
     pub(crate) played_samples: Arc<AtomicU64>,
     pub(crate) channels: u32,
     pub(crate) sample_rate: u32,
+    pub(crate) output_latency_micros: Arc<AtomicU64>,
 }
 
 /// Position from a base offset plus the samples the RT callback has played,
@@ -190,7 +191,13 @@ impl EngineStatus {
             played_samples: Arc::new(AtomicU64::new(0)),
             channels: 0,
             sample_rate: 0,
+            output_latency_micros: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Output buffer plus device latency, zero when the backend won't say.
+    pub fn output_latency(&self) -> Duration {
+        Duration::from_micros(self.output_latency_micros.load(Ordering::Relaxed))
     }
 
     /// True while a load is resolving or a crossfade is mixing out — the single

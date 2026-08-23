@@ -1,4 +1,3 @@
-use jellyfin_sdk_rust::JellyfinSDK;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -46,7 +45,6 @@ pub struct PlaylistCreationResult {
 }
 
 pub(crate) struct JellyfinClient {
-    client: JellyfinSDK,
     http_client: reqwest::Client,
     base_url: String,
     device_id: String,
@@ -167,16 +165,13 @@ impl JellyfinClient {
         device_id: &str,
         user_id: Option<&str>,
     ) -> Self {
-        let mut client = JellyfinSDK::new();
         let clean_base_url = base_url.trim_end_matches('/');
-        client.create_api(clean_base_url, api_key);
 
         let builder = reqwest::Client::builder();
         let builder = builder.timeout(std::time::Duration::from_secs(10));
         let http_client = builder.build().unwrap_or_else(|_| reqwest::Client::new());
 
         Self {
-            client,
             http_client,
             base_url: clean_base_url.to_string(),
             device_id: device_id.to_string(),
@@ -322,9 +317,6 @@ impl JellyfinClient {
 
         self.access_token = Some(login_resp.access_token.clone());
         self.user_id = Some(login_resp.user.id.clone());
-
-        self.client
-            .create_api(&self.base_url, Some(&login_resp.access_token));
 
         Ok((login_resp.access_token, login_resp.user.id))
     }

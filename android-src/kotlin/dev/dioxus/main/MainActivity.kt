@@ -12,10 +12,10 @@ import android.graphics.Color
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
-import com.temidaradev.kopuz.MediaReceiver
-import com.temidaradev.kopuz.MediaSessionHelper
+import moe.kopuz.kopuz.MediaReceiver
+import moe.kopuz.kopuz.MediaSessionHelper
 
-typealias BuildConfig = com.temidaradev.kopuz.BuildConfig
+typealias BuildConfig = moe.kopuz.kopuz.BuildConfig
 
 class MainActivity : WryActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -23,7 +23,9 @@ class MainActivity : WryActivity() {
         instance = this
         enableEdgeToEdge()
         MediaSessionHelper.init(this)
-        requestNotificationPermission()
+        if (!requestNotificationPermission()) {
+            requestMediaPermission()
+        }
         requestBatteryOptimizationExemption()
     }
 
@@ -56,6 +58,47 @@ class MainActivity : WryActivity() {
         MediaReceiver.nativeOnAction("back")
     }
 
+    private var webView: android.webkit.WebView? = null
+
+    /**
+     * Dioxus only polls its futures after the WebView acknowledges the previous
+     * render, and that JS runs in the WebView's sandboxed renderer *process* — a
+     * separate process our foreground service does not protect. By default the
+     * WebView waives the renderer's priority whenever it is not visible, so about
+     * a minute after backgrounding the cached-app freezer freezes the renderer:
+     * no more edit acks, every Rust task stalls, notification taps queue up and
+     * the track never auto-advances until the app is reopened. Keeping the
+     * priority at IMPORTANT with waiving disabled binds the renderer to this
+     * process's (service-protected) importance so it stays runnable.
+     */
+    override fun onWebViewCreate(webView: android.webkit.WebView) {
+        this.webView = webView
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.setRendererPriorityPolicy(
+                android.webkit.WebView.RENDERER_PRIORITY_IMPORTANT,
+                false
+            )
+        }
+    }
+
+    // WryActivity.onPause() suspends the WebView, which stops its JavaScript. Dioxus
+    // only polls its futures once the WebView has acknowledged the previous render
+    // (see poll_edits_flushed in dioxus-desktop), so a suspended WebView freezes
+    // every task in the app: notification buttons queue up undelivered and a track
+    // ending never advances the queue, all while audio keeps playing on the engine's
+    // own threads. Resuming it right back keeps that loop turning in the background.
+    override fun onPause() {
+        super.onPause()
+        webView?.onResume()
+        webView?.resumeTimers()
+        MediaReceiver.nativeOnAction("bg-enter")
+    }
+
+    override fun onResume() {
+        super.onResume()
+        MediaReceiver.nativeOnAction("bg-exit")
+    }
+
     override fun onDestroy() {
         if (instance === this) instance = null
         super.onDestroy()
@@ -75,7 +118,14 @@ class MainActivity : WryActivity() {
         }
     }
 
-    private fun requestNotificationPermission() {
+    /**
+     * Returns whether a permission dialog was actually launched. One dialog at
+     * a time: firing the notification and media requests back to back lets the
+     * second cancel the first on some Android builds, so onCreate requests
+     * media immediately only when this launched nothing, and
+     * onRequestPermissionsResult chains it after the 1001 result otherwise.
+     */
+    private fun requestNotificationPermission(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED
@@ -85,8 +135,42 @@ class MainActivity : WryActivity() {
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                     1001
                 )
+                return true
             }
         }
+        return false
+    }
+
+    // Without this the library scan finds nothing: the manifest entry alone does not
+    // grant read access to shared storage, and the scanner has no way to ask for it
+    // from the Rust side. Tiramisu split the media permissions out of READ_EXTERNAL_STORAGE.
+    private fun requestMediaPermission() {
+        val needed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (needed.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, needed.toTypedArray(), 1002)
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001) {
+            requestMediaPermission()
+            return
+        }
+        if (requestCode != 1 && requestCode != 1002) return
+        val granted = grantResults.isNotEmpty() &&
+            grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+        MediaReceiver.nativeOnAction(if (granted) "media-granted" else "media-denied")
     }
 
     private fun requestBatteryOptimizationExemption() {

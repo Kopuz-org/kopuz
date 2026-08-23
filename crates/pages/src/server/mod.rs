@@ -2,18 +2,12 @@ pub mod discover;
 pub mod download_manager;
 pub mod subsonic_sync;
 
+mod cache;
+
+pub use cache::download_track_to_cache;
+
 use config::{AppConfig, MusicService};
 use dioxus::prelude::{ReadableExt, WritableExt};
-use std::path::PathBuf;
-
-pub(super) fn offline_cache_dir() -> PathBuf {
-    let base = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-        .map(|dirs| dirs.cache_dir().to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("./cache"));
-    let dir = base.join("offline_tracks");
-    let _ = std::fs::create_dir_all(&dir);
-    dir
-}
 
 pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, &'static str)> {
     let server = config.server.as_ref()?;
@@ -48,7 +42,22 @@ pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, 
             )
             .ok()?
         }
-        MusicService::YtMusic | MusicService::SoundCloud | MusicService::Spotify => return None,
+        MusicService::Nextcloud => {
+            // No transcode to ask for: quality only picks the fallback
+            // extension, corrected later from the response content type.
+            let username = server.user_id.as_deref()?;
+            let password = server.access_token.as_deref()?;
+            // The URL itself carries the app password, so only the error is logged.
+            ::server::nextcloud::stream_url(&server.url, username, password, item_id)
+                .inspect_err(
+                    |e| tracing::warn!(%item_id, error = %e, "nextcloud download URL build failed"),
+                )
+                .ok()?
+        }
+        MusicService::YtMusic
+        | MusicService::SoundCloud
+        | MusicService::AppleMusic
+        | MusicService::Spotify => return None,
     };
     Some((url, ext))
 }
@@ -69,37 +78,6 @@ pub(super) fn content_type_to_ext(content_type: &str) -> Option<&'static str> {
         "audio/aiff" | "audio/x-aiff" => Some("aiff"),
         _ => None,
     }
-}
-
-#[tracing::instrument(name = "download.to_cache", skip(url), fields(item_id = %item_id))]
-pub async fn download_track_to_cache(
-    item_id: &str,
-    url: &str,
-    ext_hint: &str,
-) -> Result<PathBuf, String> {
-    let response = reqwest::get(url)
-        .await
-        .map_err(|e| format!("Download failed: {e}"))?;
-
-    let ext = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(content_type_to_ext)
-        .unwrap_or(ext_hint);
-
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("Failed to read response: {e}"))?;
-
-    let dir = offline_cache_dir();
-    let file_path = dir.join(format!("{item_id}.{ext}"));
-    tokio::fs::write(&file_path, &bytes)
-        .await
-        .map_err(|e| format!("Failed to save file: {e}"))?;
-
-    Ok(file_path)
 }
 
 pub async fn download_tracks_batch(

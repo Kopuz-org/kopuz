@@ -202,6 +202,75 @@ in {
 }
 ```
 
+#### Declarative configuration (hjem)
+
+Kopuz reads its settings from `~/.config/kopuz/settings.toml`, so you can manage
+them declaratively by linking that file with
+[hjem](https://github.com/feel-co/hjem):
+
+```nix
+{
+  hjem.users.alice.files.".config/kopuz/settings.toml".source =
+    (pkgs.formats.toml {}).generate "kopuz-settings.toml" {
+      theme = "gruvbox";
+      language = "en";
+      crossfade_seconds = 3;
+      equalizer.enabled = true;
+    };
+}
+```
+
+Or inline, without the `pkgs.formats` helper:
+
+```nix
+{
+  hjem.users.alice.files.".config/kopuz/settings.toml".text = ''
+    theme = "gruvbox"
+    language = "en"
+    crossfade_seconds = 3
+
+    [equalizer]
+    enabled = true
+  '';
+}
+```
+
+hjem links the file out of the Nix store, and Kopuz detects that it is immutable
+(a store symlink or read-only) and never writes to it. If Kopuz has already run
+once, remove the `settings.toml` it wrote (or turn on hjem's clobber option) so
+activation can replace it with the link. Keys you set there always win and show
+up grayed out in the settings UI; everything you leave out remains freely
+changeable in-app (runtime state keeps persisting in `kopuz.db`).
+
+To try config changes without a rebuild, use either of the ad-hoc override
+layers, both of which out-rank `settings.toml`:
+
+- **Drop-ins:** any `*.toml` in `~/.config/kopuz/settings.d/`, applied in
+  lexicographic order.
+- **Environment variables:** `KOPUZ_CONFIG_<FIELD>=value`, e.g.
+  `KOPUZ_CONFIG_THEME=nord kopuz`. Field names match `settings.toml` keys
+  uppercased; nest tables with `__` (`KOPUZ_CONFIG_EQUALIZER__ENABLED=true`).
+  Values are parsed as TOML (`3`, `true`, `["/a", "/b"]`), falling back to plain
+  strings.
+
+`KOPUZ_CONFIG_PATH` relocates the settings file itself.
+
+### Homebrew (macOS)
+
+Apple Silicon only. The cask lives in our tap:
+
+```bash
+brew install --cask kopuz-org/tap/kopuz
+```
+
+The build is signed ad-hoc rather than notarized, so Gatekeeper blocks the first
+launch. Install with `--no-quarantine`, or clear the flag afterwards as
+described in the [macOS](#macos) section:
+
+```bash
+brew install --cask --no-quarantine kopuz-org/tap/kopuz
+```
+
 ### AUR (Arch Linux)
 
 Install from the AUR using your preferred helper:
@@ -221,7 +290,7 @@ pre-built Flatpak repository, or build it yourself from source.
 
 ```bash
 flatpak install --user --or-update \
-    https://kopuz-org.github.io/kopuz-flatpak/com.temidaradev.kopuz.flatpakref
+    https://kopuz-org.github.io/kopuz-flatpak/moe.kopuz.kopuz.flatpakref
 ```
 
 #### Option 2: Build from source manifest
@@ -241,10 +310,10 @@ Then build and install Kopuz:
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
-dx build --release --package kopuz
+git submodule update --init --recursive --remote
 flatpak-builder --user --install --force-clean \
-  build-dir packaging/flatpak/com.temidaradev.kopuz.json
-flatpak run com.temidaradev.kopuz
+  build-dir packaging/flatpak/moe.kopuz.kopuz.json
+flatpak run moe.kopuz.kopuz
 ```
 
 You can also click on the file and open it with an app provider, for example KDE
@@ -276,6 +345,53 @@ sudo ln -s /usr/lib/webkit2gtk-4.1/WebKitNetworkProcess /usr/libexec/webkit2gtk-
 sudo ln -s /usr/lib/webkit2gtk-4.1/WebKitWebProcess /usr/libexec/webkit2gtk-4.1/
 sudo ln -s /usr/lib/webkit2gtk-4.1/WebKitGPUProcess /usr/libexec/webkit2gtk-4.1/
 ```
+
+### Android
+
+Grab `kopuz-<version>-arm64-v8a.apk` from the
+[releases page](https://github.com/Kopuz-org/kopuz/releases) and install it.
+Only 64-bit ARM devices are supported (Android 7.0 / API 24 and newer). The APK
+is signed with the project release key, so an install from a different source
+has to be uninstalled first.
+
+To build one yourself you need the Android SDK (build-tools + platform 34) and
+NDK, with `ANDROID_HOME` and `ANDROID_NDK_HOME` exported:
+
+```bash
+# Debug-signed, for a quick sideload
+just android-patch
+
+# Release build; unsigned unless the keystore variables below are set
+just android-release
+just android-install
+```
+
+`just android-release` signs the APK when these are exported:
+
+| Variable                          | Meaning                                       |
+| --------------------------------- | --------------------------------------------- |
+| `KOPUZ_ANDROID_KEYSTORE`          | path to the JKS/PKCS12 keystore               |
+| `KOPUZ_ANDROID_KEYSTORE_PASSWORD` | store password                                |
+| `KOPUZ_ANDROID_KEY_ALIAS`         | key alias inside the store                    |
+| `KOPUZ_ANDROID_KEY_PASSWORD`      | key password (defaults to the store password) |
+
+CI reads the same values from the repository secrets: `ANDROID_KEYSTORE_BASE64`
+(the keystore, base64-encoded), `ANDROID_KEYSTORE_PASSWORD` and
+`ANDROID_KEY_ALIAS` are required, while `ANDROID_KEY_PASSWORD` is optional and,
+when set, overrides the default derived from `ANDROID_KEYSTORE_PASSWORD`. A
+tagged build fails outright if a required one is missing, so a release can never
+ship unsigned; validation runs on branches and forks build an unsigned APK
+instead.
+
+The Android `versionCode` is derived from the crate version as
+`major * 10000 + minor * 100 + patch`, so bumping `version` in `Cargo.toml` is
+all an update needs. Minor and patch have to stay below 100 — past that the
+fields would collide, and the build stops rather than emit a duplicate code.
+
+`packaging/fdroid/moe.kopuz.kopuz.yml` is the build recipe to submit to
+[fdroiddata](https://gitlab.com/fdroid/fdroiddata); F-Droid builds from source
+and signs with its own key, so its APKs and the GitHub ones are not
+interchangeable.
 
 ### Build from Source
 
@@ -441,31 +557,37 @@ xattr -d com.apple.quarantine /Applications/Kopuz.app
 
 ### Where does Kopuz keep its files?
 
-Your settings, scanned library, playlists, and favorites all live in a single
-**SQLite** database, `kopuz.db`, in the config directory. Album art and
+Your scanned library, playlists, favorites, and runtime state live in a single
+**SQLite** database, `kopuz.db`, in the config directory. Settings are mirrored
+to a human-editable `settings.toml` next to it — hand-edits (and hjem-managed
+values, see the hjem section above) apply on the next launch. Album art and
 downloaded tracks stay on disk in the cache directory. (Debug builds use a
-separate `kopuz-debug.db` so `dx serve` never touches your real data. You can
-override the DB location with the `KOPUZ_DB_PATH` env var.)
+separate `kopuz-debug.db` and `settings-debug.toml` so `dx serve` never touches
+your real data. You can override the DB location with the `KOPUZ_DB_PATH` env
+var and the settings file with `KOPUZ_CONFIG_PATH`.)
 
 On **macOS**:
 
-- `~/Library/Application Support/com.temidaradev.kopuz/kopuz.db` - settings,
-  library, playlists, favorites
-- `~/Library/Caches/com.temidaradev.kopuz/covers/` - cached album art
-- `~/Library/Caches/com.temidaradev.kopuz/offline_tracks/` - downloaded tracks
+- `~/Library/Application Support/moe.kopuz.kopuz/settings.toml` - settings
+- `~/Library/Application Support/moe.kopuz.kopuz/kopuz.db` - library, playlists,
+  favorites, runtime state
+- `~/Library/Caches/moe.kopuz.kopuz/covers/` - cached album art
+- `~/Library/Caches/moe.kopuz.kopuz/offline_tracks/` - downloaded tracks
 
 On **Linux** (XDG spec):
 
-- `~/.config/kopuz/kopuz.db` - settings, library, playlists, favorites
+- `~/.config/kopuz/settings.toml` - settings
+- `~/.config/kopuz/kopuz.db` - library, playlists, favorites, runtime state
 - `~/.cache/kopuz/covers/` - cached album art
 - `~/.cache/kopuz/offline_tracks/` - downloaded tracks
 
 On **Windows** (AppData):
 
-- `%APPDATA%\temidaradev\kopuz\config\kopuz.db` - settings, library, playlists,
-  favorites
-- `%LOCALAPPDATA%\temidaradev\kopuz\cache\covers\` - cached album art
-- `%LOCALAPPDATA%\temidaradev\kopuz\cache\offline_tracks\` - downloaded tracks
+- `%APPDATA%\kopuz\kopuz\config\settings.toml` - settings
+- `%APPDATA%\kopuz\kopuz\config\kopuz.db` - library, playlists, favorites,
+  runtime state
+- `%LOCALAPPDATA%\kopuz\kopuz\cache\covers\` - cached album art
+- `%LOCALAPPDATA%\kopuz\kopuz\cache\offline_tracks\` - downloaded tracks
 
 > [!NOTE]
 > Upgrading from an older version? On first launch Kopuz imports your existing
@@ -685,8 +807,8 @@ All files sit in the logs directory (the **Open logs folder** button jumps
 straight here):
 
 - Linux: `~/.cache/kopuz/logs/`
-- macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/`
-- Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\`
+- macOS: `~/Library/Caches/moe.kopuz.kopuz/logs/`
+- Windows: `%LOCALAPPDATA%\kopuz\kopuz\cache\logs\`
 
 | File                    | What it is                                                                                       |
 | ----------------------- | ------------------------------------------------------------------------------------------------ |
@@ -813,4 +935,4 @@ longer than needed.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/chart?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://www.star-history.com/?repos=Kopuz-org%2Fkopuz&type=date&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=Kopuz-org/kopuz&type=date&legend=top-left)](https://star-history.dera.page/#Kopuz-org/kopuz&type=date&legend=top-left)

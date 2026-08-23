@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 mod source;
+pub mod store;
 mod views;
 pub use source::{
     Browser, JellyfinServer, MusicServer, MusicService, SavedLocalSource, SavedServer, Source,
@@ -64,6 +65,10 @@ impl Default for YoutubeDownloadOptions {
             overwrite_existing: false,
         }
     }
+}
+
+fn default_depth_blur_strength() -> u8 {
+    100
 }
 
 fn default_true() -> bool {
@@ -572,6 +577,12 @@ pub struct AppConfig {
     pub active_source: Source,
     #[serde(default)]
     pub source_explicitly_set: bool,
+    /// Library roots per server id, for backends whose library is a folder tree
+    /// rather than a catalogue (Nextcloud/WebDAV). Lives here rather than on
+    /// `SavedServer` because the servers table holds creds and is stripped from
+    /// the config blob. No entry means "auto-detect".
+    #[serde(default)]
+    pub server_folders: HashMap<String, Vec<String>>,
     /// Browser id used to host Spotify playback (`chrome`/`edge`/`brave`/
     /// `chromium`/`vivaldi`/`safari`); `None` picks the first available.
     #[serde(default)]
@@ -735,6 +746,19 @@ pub struct AppConfig {
     pub prefer_local_lyrics: bool,
     #[serde(default)]
     pub enable_musixmatch_lyrics: bool,
+    /// Milliseconds to hold the lyrics behind the playback clock.
+    #[serde(default, deserialize_with = "deserialize_lyrics_offset_ms")]
+    pub lyrics_offset_ms: i32,
+    /// Take the offset from the backend's playback timestamp instead.
+    #[serde(default = "default_true")]
+    pub lyrics_offset_auto: bool,
+    /// Apple Music style depth-of-field: blur lines by distance from the
+    /// active one instead of just dimming them.
+    #[serde(default = "default_true")]
+    pub lyrics_depth_blur: bool,
+    /// Scales the depth-of-field ramp, in percent (100 = the built-in ramp).
+    #[serde(default = "default_depth_blur_strength")]
+    pub lyrics_depth_blur_strength: u8,
 }
 
 fn default_theme() -> String {
@@ -845,17 +869,39 @@ where
     }
 }
 
+/// Slider bound for `lyrics_offset_ms`; also enforced here since config files
+/// and env vars can set it without going through the UI.
+pub const LYRICS_OFFSET_LIMIT_MS: i32 = 1000;
+
+fn deserialize_lyrics_offset_ms<'de, D>(deserializer: D) -> Result<i32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(i32::deserialize(deserializer)?.clamp(-LYRICS_OFFSET_LIMIT_MS, LYRICS_OFFSET_LIMIT_MS))
+}
+
+/// The folder a fresh install scans. `directories` resolves the XDG layout
+/// against `$HOME`, which on Android is a private app path with no music in it,
+/// so point at the shared media directory the platform actually uses.
+fn default_music_directory() -> PathBuf {
+    if cfg!(target_os = "android") {
+        return PathBuf::from("/storage/emulated/0/Music");
+    }
+    directories::UserDirs::new()
+        .and_then(|u| u.audio_dir().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("./assets"))
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
-        let music_directory = directories::UserDirs::new()
-            .and_then(|u| u.audio_dir().map(|p| p.to_path_buf()))
-            .unwrap_or_else(|| PathBuf::from("./assets"));
+        let music_directory = default_music_directory();
         Self {
             server: None,
             servers: Vec::new(),
             local_sources: Vec::new(),
             active_source: Source::Local,
             source_explicitly_set: false,
+            server_folders: HashMap::new(),
             spotify_browser: None,
             spotify_prefer_active_device: true,
             music_directory: vec![music_directory],
@@ -924,6 +970,10 @@ impl Default for AppConfig {
             pinned_stations: Vec::new(),
             prefer_local_lyrics: false,
             enable_musixmatch_lyrics: false,
+            lyrics_offset_ms: 0,
+            lyrics_offset_auto: true,
+            lyrics_depth_blur: true,
+            lyrics_depth_blur_strength: default_depth_blur_strength(),
         }
     }
 }
@@ -968,6 +1018,8 @@ impl AppConfig {
                     service: server.service,
                     yt_browser: server.yt_browser,
                     yt_anonymous: server.yt_anonymous,
+                    apple_music_storefront: server.apple_music_storefront.clone(),
+                    apple_music_language: server.apple_music_language.clone(),
                 });
             }
         }
@@ -1036,6 +1088,43 @@ impl AppConfig {
 }
 
 impl AppConfig {
+    /// Library roots configured for a server, empty when it auto-detects.
+    pub fn folders_for(&self, server_id: &str) -> Vec<String> {
+        self.server_folders
+            .get(server_id)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Library roots of the active source, empty for a local one.
+    pub fn active_server_folders(&self) -> Vec<String> {
+        self.active_source
+            .server_id()
+            .map(|id| self.folders_for(id))
+            .unwrap_or_default()
+    }
+
+    /// Replace the active server's library roots. Does nothing when the active
+    /// source is local, since roots are keyed by server id.
+    pub fn edit_active_server_folders(&mut self, edit: impl FnOnce(&mut Vec<String>)) {
+        let Some(id) = self.active_source.server_id().map(String::from) else {
+            return;
+        };
+        let mut folders = self.folders_for(&id);
+        edit(&mut folders);
+        self.set_folders_for(&id, folders);
+    }
+
+    /// Replace a server's library roots, dropping the entry when the list empties
+    /// so the backend goes back to auto-detecting.
+    pub fn set_folders_for(&mut self, server_id: &str, folders: Vec<String>) {
+        if folders.is_empty() {
+            self.server_folders.remove(server_id);
+        } else {
+            self.server_folders.insert(server_id.to_string(), folders);
+        }
+    }
+
     pub fn clear_active_server(&mut self) {
         self.active_source = Source::Local;
         self.server = None;
@@ -1234,5 +1323,19 @@ mod tests {
                 anonymous: true,
             }
         );
+    }
+
+    #[test]
+    fn server_folders_round_trip_and_clear_when_emptied() {
+        let mut config = AppConfig::default();
+        assert!(config.folders_for("srv").is_empty());
+
+        config.set_folders_for("srv", vec!["/Music".to_string()]);
+        assert_eq!(config.folders_for("srv"), vec!["/Music".to_string()]);
+
+        // Emptying drops the entry, so the backend auto-detects again.
+        config.set_folders_for("srv", Vec::new());
+        assert!(config.folders_for("srv").is_empty());
+        assert!(!config.server_folders.contains_key("srv"));
     }
 }

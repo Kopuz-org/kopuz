@@ -54,8 +54,8 @@ Palette* overrides it if you keep yours somewhere else.
 | Platform | Config directory |
 | --- | --- |
 | Linux | `~/.config/kopuz` |
-| macOS | `~/Library/Application Support/com.temidaradev.kopuz` |
-| Windows | `%APPDATA%\temidaradev\kopuz\config` |
+| macOS | `~/Library/Application Support/moe.kopuz.kopuz` |
+| Windows | `%APPDATA%\kopuz\kopuz\config` |
 
 ## Notes
 

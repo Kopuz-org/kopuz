@@ -1,0 +1,55 @@
+name: Update Flatpak repo
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Flatpak repo
+        uses: actions/checkout@v4
+        with:
+          repository: Kopuz-org/kopuz-flatpak
+          token: ${{ secrets.PAT }}
+
+      - name: Install tools
+        run: |
+          sudo apt update
+          sudo apt install -y flatpak
+
+      - name: Install flatpak external data checker
+        run: |
+          flatpak --user remote-add --if-not-exists flathub \
+            https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --assumeyes org.flathub.flatpak-external-data-checker
+
+      - name: Run external data checker
+        run: |
+          flatpak run \
+          --filesystem=$PWD \
+          org.flathub.flatpak-external-data-checker \
+          --update \
+          --edit-only \
+          moe.kopuz.kopuz.json
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          git add .
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Update to ${{ github.ref_name }}"
+            git push
+          fi

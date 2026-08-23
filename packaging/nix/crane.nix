@@ -28,7 +28,7 @@
 }:
 let
   pname = "kopuz";
-  version = "0.14.0";
+  version = "0.16.0";
 
   # `deno_core` pulls in the `v8` crate, whose build script fetches a prebuilt
   # librusty_v8 archive — impossible in the network-less Nix sandbox. Fetch it as
@@ -150,16 +150,16 @@ craneLib.mkCargoDerivation (
           ''
             cp -r target/dx/kopuz/release/linux/app/* $out/bin/
 
-            install -Dm644 data/com.temidaradev.kopuz.desktop \
-              $out/share/applications/com.temidaradev.kopuz.desktop
-            substituteInPlace $out/share/applications/com.temidaradev.kopuz.desktop \
+            install -Dm644 data/moe.kopuz.kopuz.desktop \
+              $out/share/applications/moe.kopuz.kopuz.desktop
+            substituteInPlace $out/share/applications/moe.kopuz.kopuz.desktop \
               --replace-fail "Exec=kopuz" "Exec=$out/bin/kopuz"
 
-            install -Dm644 data/com.temidaradev.kopuz.metainfo.xml \
-              $out/share/metainfo/com.temidaradev.kopuz.metainfo.xml
+            install -Dm644 data/moe.kopuz.kopuz.metainfo.xml \
+              $out/share/metainfo/moe.kopuz.kopuz.metainfo.xml
 
             install -Dm644 crates/kopuz/assets/logo.png \
-              $out/share/icons/hicolor/256x256/apps/com.temidaradev.kopuz.png
+              $out/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
           ''
         else
           ''

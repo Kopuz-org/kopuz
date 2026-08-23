@@ -21,13 +21,12 @@ impl<'a> PlaybackItemRef<'a> {
                 station_id: parts.next().unwrap_or_default(),
                 stream_id: parts.next().unwrap_or_default(),
             },
-            "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "spotify" => {
-                Self::Server {
-                    service: scheme,
-                    item_id: parts.next().unwrap_or_default(),
-                    extra: parts.next(),
-                }
-            }
+            "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "applemusic"
+            | "spotify" => Self::Server {
+                service: scheme,
+                item_id: parts.next().unwrap_or_default(),
+                extra: parts.next(),
+            },
             _ => Self::Local(value),
         }
     }
@@ -61,6 +60,11 @@ impl<'a> PlaybackItemRef<'a> {
 pub enum ResolvedStreamRef<'a> {
     Pending(&'a str),
     SoundCloudHls(&'a str),
+    /// Apple Music encrypted fMP4. Payload is
+    /// `adam_id:storefront:language:base64_media_user_token` — the ref carries
+    /// everything the decode factory needs, so it never re-reads the config.
+    /// Written by `AppleMusicSource::resolve_stream`.
+    AppleMusicFmp4(&'a str),
     Direct(&'a str),
 }
 
@@ -74,9 +78,19 @@ impl<'a> ResolvedStreamRef<'a> {
             Self::Pending(item_id)
         } else if let Some(url) = value.strip_prefix("__SC_HLS:") {
             Self::SoundCloudHls(url)
+        } else if let Some(payload) = value.strip_prefix("__AM_FMP4:") {
+            Self::AppleMusicFmp4(payload)
         } else {
             Self::Direct(value)
         }
+    }
+
+    /// Split an [`Self::AppleMusicFmp4`] payload into
+    /// `(adam_id, storefront, language, base64_token)`. The token comes last so
+    /// its base64 padding can't be mistaken for a field separator.
+    pub fn apple_music_parts(payload: &'a str) -> Option<(&'a str, &'a str, &'a str, &'a str)> {
+        let mut parts = payload.splitn(4, ':');
+        Some((parts.next()?, parts.next()?, parts.next()?, parts.next()?))
     }
 }
 

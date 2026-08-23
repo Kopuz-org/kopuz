@@ -17,10 +17,17 @@ pub fn YoutubeDownloadsPage(config: Signal<AppConfig>) -> Element {
     let mut format = use_signal(|| AudioFormat::Original);
     let mut out_dir = use_signal(|| initial_output_directory(&config.peek()));
     let mut show_options = use_signal(|| false);
+    let mut resolving_link = use_signal(|| false);
 
     use_hook(move || {
         seed_from_history(&config.peek().youtube_download_history);
     });
+
+    // Searching by name is the main path; a link in the box is the exception,
+    // so the same field detects one instead of asking the user which mode they
+    // are in. Nothing but a real YouTube track link parses, so a search phrase
+    // can never be mistaken for one.
+    let pasted_link = use_memo(move || server::youtube_download::parse_video_id(&query()));
 
     let mut search = move || {
         let search_query = query().trim().to_string();
@@ -41,6 +48,30 @@ pub fn YoutubeDownloadsPage(config: Signal<AppConfig>) -> Element {
                 ))),
             }
             searching.set(false);
+        });
+    };
+
+    let mut download_link = move || {
+        if pasted_link().is_none() || *resolving_link.peek() {
+            return;
+        }
+        let link = query().trim().to_string();
+        resolving_link.set(true);
+        page_error.set(None);
+        let client = YoutubeDownloadClient::from_config(&config.peek());
+        spawn(async move {
+            match client.track_from_link(&link).await {
+                Ok(track) => {
+                    if queue_download(track, config, out_dir, format, page_error) {
+                        query.set(String::new());
+                    }
+                }
+                Err(error) => page_error.set(Some(i18n::t_with(
+                    "youtube_download_error_link",
+                    &[("error", error)],
+                ))),
+            }
+            resolving_link.set(false);
         });
     };
 
@@ -84,21 +115,44 @@ pub fn YoutubeDownloadsPage(config: Signal<AppConfig>) -> Element {
                     onkeydown: move |event| {
                         event.stop_propagation();
                         if event.key() == Key::Enter {
-                            search();
+                            if pasted_link().is_some() {
+                                download_link();
+                            } else {
+                                search();
+                            }
                         }
                     }
                 }
                 button {
                     class: "bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-wait text-white px-5 py-3 rounded-xl transition-colors font-medium text-sm shrink-0",
-                    disabled: *searching.read(),
-                    onclick: move |_| search(),
-                    if *searching.read() {
+                    disabled: *searching.read() || *resolving_link.read(),
+                    onclick: move |_| {
+                        if pasted_link().is_some() {
+                            download_link();
+                        } else {
+                            search();
+                        }
+                    },
+                    if *resolving_link.read() {
+                        i { class: "fa-solid fa-spinner fa-spin mr-2" }
+                        "{i18n::t(\"youtube_download_resolving_link\")}"
+                    } else if *searching.read() {
                         i { class: "fa-solid fa-spinner fa-spin mr-2" }
                         "{i18n::t(\"youtube_download_searching\")}"
+                    } else if pasted_link().is_some() {
+                        i { class: "fa-solid fa-download mr-2" }
+                        "{i18n::t(\"youtube_download_download_link\")}"
                     } else {
                         i { class: "fa-solid fa-magnifying-glass mr-2" }
                         "{i18n::t(\"youtube_download_search\")}"
                     }
+                }
+            }
+
+            if pasted_link().is_some() {
+                p { class: "text-xs text-slate-500 mb-3 flex items-center gap-1.5",
+                    i { class: "fa-solid fa-link text-[10px]" }
+                    "{i18n::t(\"youtube_download_link_detected\")}"
                 }
             }
 
@@ -176,19 +230,7 @@ pub fn YoutubeDownloadsPage(config: Signal<AppConfig>) -> Element {
                             SearchResultRow {
                                 track,
                                 on_download: move |track: Track| {
-                                    let options = config.peek().youtube_download_options.clone();
-                                    let video_id = track.id.key().into_owned();
-                                    if let Err(error) = run_preflight_checks(
-                                        &video_id,
-                                        &out_dir(),
-                                        format(),
-                                        &options,
-                                    ) {
-                                        page_error.set(Some(error));
-                                        return;
-                                    }
-                                    let client = YoutubeDownloadClient::from_config(&config.peek());
-                                    start_download(track, client, out_dir(), format(), options);
+                                    queue_download(track, config, out_dir, format, page_error);
                                 }
                             }
                         }
@@ -228,6 +270,27 @@ pub fn YoutubeDownloadsPage(config: Signal<AppConfig>) -> Element {
             }
         }
     }
+}
+
+/// Preflight and hand a track to the job driver. Shared by the search results
+/// and the pasted-link path so both enforce the same checks. Returns whether the
+/// download was actually queued.
+fn queue_download(
+    track: Track,
+    config: Signal<AppConfig>,
+    out_dir: Signal<String>,
+    format: Signal<AudioFormat>,
+    mut page_error: Signal<Option<String>>,
+) -> bool {
+    let options = config.peek().youtube_download_options.clone();
+    let video_id = track.id.key().into_owned();
+    if let Err(error) = run_preflight_checks(&video_id, &out_dir(), format(), &options) {
+        page_error.set(Some(error));
+        return false;
+    }
+    let client = YoutubeDownloadClient::from_config(&config.peek());
+    start_download(track, client, out_dir(), format(), options);
+    true
 }
 
 fn initial_output_directory(config: &AppConfig) -> String {
