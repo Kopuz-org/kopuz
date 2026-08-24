@@ -4401,6 +4401,7 @@ dependencies = [
  "kopuz-config",
  "kopuz-daemon",
  "kopuz-db",
+ "kopuz-discord-presence",
  "kopuz-player",
  "kopuz-radio",
  "kopuz-reader",

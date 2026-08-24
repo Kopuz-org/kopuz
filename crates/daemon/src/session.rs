@@ -37,6 +37,15 @@ pub trait QueueMaterializer: Send + Sync {
     async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError>;
 }
 
+/// Durable playback bookkeeping: recents on commit, listen counts when a
+/// track completes or crossfades out. Implemented over the active source;
+/// tests inject a stub.
+#[async_trait::async_trait]
+pub trait PlaybackRecorder: Send + Sync {
+    async fn record_recent(&self, track: &Track);
+    async fn bump_listen_count(&self, track: &Track);
+}
+
 /// Playback dependencies that will eventually be owned by daemon services.
 /// Keeping them together lets the actor land before ConfigService and source
 /// lifecycle extraction do.
@@ -45,6 +54,7 @@ pub struct PlaybackServices {
     pub active_source: Option<server::source::ActiveSource>,
     pub station_registry: Arc<radio::registry::StationRegistry>,
     pub queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
+    pub recorder: Option<Arc<dyn PlaybackRecorder>>,
 }
 
 impl Default for PlaybackServices {
@@ -54,6 +64,7 @@ impl Default for PlaybackServices {
             active_source: None,
             station_registry: Arc::new(radio::registry::StationRegistry::default()),
             queue_store: None,
+            recorder: None,
         }
     }
 }
@@ -91,6 +102,7 @@ enum SessionCmd {
 pub struct SessionHandle {
     cmd_tx: mpsc::UnboundedSender<SessionCmd>,
     state_rx: watch::Receiver<PlayerState>,
+    config_rx: watch::Receiver<config::AppConfig>,
     events: broadcast::Sender<(u64, ApiEvent)>,
     seq: Arc<AtomicU64>,
     history: Arc<Mutex<VecDeque<(u64, ApiEvent)>>>,
@@ -123,6 +135,7 @@ impl SessionHandle {
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let seq = Arc::new(AtomicU64::new(0));
         let history = Arc::new(Mutex::new(VecDeque::new()));
+        let (config_tx, config_rx) = watch::channel(services.config.clone());
         let engine_events = player.subscribe();
         player.set_volume(services.config.volume);
         player.set_channel_mode(services.config.channel_mode);
@@ -156,6 +169,9 @@ impl SessionHandle {
             materializer,
             queue_store: services.queue_store,
             queue_dirty: false,
+            recorder: services.recorder,
+            last_recent_key: None,
+            config_tx,
             config: services.config,
             active_source: services.active_source,
             station_registry: services.station_registry,
@@ -167,6 +183,7 @@ impl SessionHandle {
         Self {
             cmd_tx,
             state_rx,
+            config_rx,
             events,
             seq,
             history,
@@ -191,6 +208,12 @@ impl SessionHandle {
 
     pub fn subscribe(&self) -> broadcast::Receiver<(u64, ApiEvent)> {
         self.events.subscribe()
+    }
+
+    /// The session's live config copy: seeded at spawn, updated by
+    /// `set_config`. Integration tasks watch this instead of polling.
+    pub fn config_watch(&self) -> watch::Receiver<config::AppConfig> {
+        self.config_rx.clone()
     }
 
     /// Events after `last` from the replay ring. `true` means the ring no
@@ -358,6 +381,9 @@ struct Session {
     materializer: Arc<dyn QueueMaterializer>,
     queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
     queue_dirty: bool,
+    recorder: Option<Arc<dyn PlaybackRecorder>>,
+    last_recent_key: Option<String>,
+    config_tx: watch::Sender<config::AppConfig>,
     config: config::AppConfig,
     active_source: Option<server::source::ActiveSource>,
     station_registry: Arc<radio::registry::StationRegistry>,
@@ -709,6 +735,7 @@ impl Session {
         }
         self.player.play_resume();
         self.phase = ApiPhase::Playing;
+        self.maybe_record_recent();
         self.publish_position_anchor(state_tx, Some(engine_token), None, true);
     }
 
@@ -1032,6 +1059,7 @@ impl Session {
                 if finished.clear_pending_resume {
                     self.pending_resume = None;
                 }
+                self.maybe_record_recent();
                 let matching_transition = self
                     .pending_transition
                     .as_ref()
@@ -1096,8 +1124,52 @@ impl Session {
             }
         }
         self.config = config;
+        let _ = self.config_tx.send(self.config.clone());
         self.emit(ApiEvent::ConfigChanged { keys: changed });
         self.publish(state_tx, false);
+    }
+
+    /// Record the committed track as recently played, once per session track.
+    /// The invalidation event lets clients refresh recents immediately even
+    /// though the durable write is fire-and-forget.
+    fn maybe_record_recent(&mut self) {
+        let Some(recorder) = self.recorder.clone() else {
+            return;
+        };
+        let Some(track) = self.model.current_track() else {
+            return;
+        };
+        let uid = track.id.uid();
+        if self.last_recent_key.as_deref() == Some(uid.as_str()) {
+            return;
+        }
+        self.last_recent_key = Some(uid);
+        let track = track.clone();
+        tokio::spawn(async move {
+            recorder.record_recent(&track).await;
+        });
+        self.emit(ApiEvent::LibraryInvalidated {
+            table: api::Table::Recents,
+            generation: self.rev,
+        });
+    }
+
+    /// Count a completed listen (auto-advance or crossfade arm), mirroring
+    /// the pump: bumped for the outgoing track, never for radio.
+    pub(super) fn record_listen_of_current(&mut self) {
+        let Some(recorder) = self.recorder.clone() else {
+            return;
+        };
+        let Some(track) = self.model.current_track() else {
+            return;
+        };
+        if track.duration == u64::MAX {
+            return;
+        }
+        let track = track.clone();
+        tokio::spawn(async move {
+            recorder.bump_listen_count(&track).await;
+        });
     }
 
     /// Port of the app's `restore_queue_state`: stop, restore the model,
@@ -1116,6 +1188,7 @@ impl Session {
         self.set_intent(PlaybackIntent::Stopped);
         self.pending_resume = None;
         self.buffered.clear();
+        self.last_recent_key = None;
 
         let restored = self.model.restore(
             snapshot.queue,
@@ -2585,6 +2658,83 @@ mod tests {
         async fn save(&self, snapshot: db::QueueSnapshot) {
             self.saved.lock().expect("store lock").push(snapshot);
         }
+    }
+
+    struct MemoryRecorder {
+        recents: Mutex<Vec<String>>,
+        listens: Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl PlaybackRecorder for MemoryRecorder {
+        async fn record_recent(&self, track: &Track) {
+            self.recents
+                .lock()
+                .expect("recorder lock")
+                .push(track.title.clone());
+        }
+
+        async fn bump_listen_count(&self, track: &Track) {
+            self.listens
+                .lock()
+                .expect("recorder lock")
+                .push(track.title.clone());
+        }
+    }
+
+    #[tokio::test]
+    async fn recents_record_once_and_completion_bumps_listens() {
+        let recorder = Arc::new(MemoryRecorder {
+            recents: Mutex::new(Vec::new()),
+            listens: Mutex::new(Vec::new()),
+        });
+        let sink = FakeSinkHandle::default();
+        let player = Player::try_with_sink(Box::new(FakeSink(sink.clone())))
+            .expect("headless player starts");
+        let services = PlaybackServices {
+            recorder: Some(recorder.clone()),
+            ..Default::default()
+        };
+        let session = SessionHandle::spawn_with_factory(
+            Arc::new(StubLibrary),
+            player,
+            services,
+            Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+        );
+        let api = LocalApi::new(session);
+        let harness = Harness { api, sink };
+
+        harness
+            .api
+            .set_queue(replace(&["short-a", "short-b"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+
+        drive_until(&harness, "auto-advance to second track", |state| {
+            state.queue.index == Some(1) && matches!(state.intent, Intent::Committed { .. })
+        })
+        .await;
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let recents = recorder.recents.lock().expect("lock").clone();
+        assert_eq!(recents, vec!["short-a".to_string(), "short-b".to_string()]);
+        let listens = recorder.listens.lock().expect("lock").clone();
+        assert_eq!(listens, vec!["short-a".to_string()]);
+
+        harness
+            .api
+            .player_command(PlayerCommand::Pause)
+            .await
+            .expect("pause");
+        harness
+            .api
+            .player_command(PlayerCommand::Play)
+            .await
+            .expect("resume");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let recents = recorder.recents.lock().expect("lock").clone();
+        assert_eq!(recents.len(), 2, "resume must not re-record the same track");
     }
 
     #[tokio::test]

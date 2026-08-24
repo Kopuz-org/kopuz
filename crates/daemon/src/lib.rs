@@ -5,6 +5,7 @@
 pub mod config_service;
 #[cfg(feature = "http")]
 pub mod http;
+pub mod integrations;
 pub mod library;
 pub mod persistence;
 mod playback;
@@ -12,6 +13,7 @@ pub mod queue_model;
 pub mod session;
 
 pub use config_service::ConfigService;
+pub use integrations::SourceRecorder;
 pub use library::LibraryService;
 pub use persistence::{DbQueueStore, QueueStore};
 pub use queue_model::{NextOutcome, QueueModel};

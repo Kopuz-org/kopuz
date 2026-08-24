@@ -28,7 +28,7 @@ use std::time::Instant;
 
 use daemon::{
     ConfigService, DbQueueStore, LibraryService, LocalApi, PlaybackServices, QueueStore,
-    SessionHandle,
+    SessionHandle, SourceRecorder,
 };
 
 struct Args {
@@ -170,17 +170,22 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         config.active_source.clone(),
         station_registry.clone(),
     ));
-    let active_source = Some(Arc::from(server::source::active(database.clone(), &config)));
+    utils::db_cache::init(database.clone());
+    let active_source: server::source::ActiveSource =
+        Arc::from(server::source::active(database.clone(), &config));
     let queue_store: Arc<dyn QueueStore> = Arc::new(DbQueueStore::new(database.clone()));
     let services = PlaybackServices {
         config,
-        active_source,
+        active_source: Some(active_source.clone()),
         station_registry,
         queue_store: Some(queue_store.clone()),
+        recorder: Some(Arc::new(SourceRecorder::new(active_source.clone()))),
     };
 
     let session = SessionHandle::try_spawn(library.clone(), services)
         .map_err(|error| format!("audio engine init failed: {error:?}"))?;
+    daemon::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
+    daemon::integrations::spawn_discord_presence(&session, session.config_watch());
     if let Some(snapshot) = queue_store.load().await
         && !snapshot.queue.is_empty()
     {

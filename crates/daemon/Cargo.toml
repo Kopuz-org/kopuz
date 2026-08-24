@@ -23,6 +23,7 @@ workspace = true
 [dependencies]
 api = { workspace = true }
 db = { workspace = true }
+discord-presence = { workspace = true }
 base64 = { workspace = true }
 config = { workspace = true }
 player = { workspace = true }

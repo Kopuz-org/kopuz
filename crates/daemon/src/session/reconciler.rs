@@ -58,6 +58,7 @@ impl Session {
                 if token == self.intent.token() =>
             {
                 self.phase = ApiPhase::Ended;
+                self.record_listen_of_current();
                 self.play_next(false, state_tx);
                 self.publish(state_tx, false);
             }
@@ -70,6 +71,7 @@ impl Session {
                 let committed = self.commit_transition(token);
                 debug_assert!(committed);
                 self.phase = ApiPhase::Playing;
+                self.maybe_record_recent();
                 self.publish(state_tx, false);
                 self.publish_position_anchor(state_tx, Some(token), None, true);
             }
@@ -129,6 +131,7 @@ impl Session {
             return;
         };
         self.armed_transition = Some(self.current_token);
+        self.record_listen_of_current();
         self.start_load(idx, true, Some(candidate));
     }
 }
