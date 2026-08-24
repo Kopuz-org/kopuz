@@ -41,9 +41,12 @@ impl Session {
                 }
             }
             EngineEvent::PhaseChanged {
+                token,
                 phase: EnginePhase::Idle,
-                ..
-            } => {
+            } if token == self.intent.token() => {
+                // Idle from a superseded session must not flicker the state
+                // while the intended session keeps playing; the stale-session
+                // arms above already handle tearing those down.
                 self.phase = ApiPhase::Idle;
                 self.publish(state_tx, false);
             }

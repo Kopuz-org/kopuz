@@ -85,11 +85,22 @@ pub(crate) fn network_factory(
                             "malformed Apple Music stream ref",
                         )
                     })?;
-                let token = String::from_utf8(
+                let token =
                     base64::Engine::decode(&base64::engine::general_purpose::STANDARD, token_b64)
-                        .unwrap_or_default(),
-                )
-                .unwrap_or_default();
+                        .map_err(|error| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!("malformed Apple Music token: {error}"),
+                            )
+                        })
+                        .and_then(|bytes| {
+                            String::from_utf8(bytes).map_err(|error| {
+                                std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    format!("malformed Apple Music token: {error}"),
+                                )
+                            })
+                        })?;
                 let (adam_id, storefront, language) = (
                     adam_id.to_string(),
                     storefront.to_string(),

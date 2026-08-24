@@ -324,15 +324,15 @@ impl QueueModel {
 
     pub fn repaired_order(order: &[usize], queue_len: usize) -> Vec<usize> {
         use rand::seq::SliceRandom;
+        let mut seen = vec![false; queue_len];
         let mut repaired: Vec<usize> = Vec::with_capacity(queue_len);
         for &idx in order {
-            if idx < queue_len && !repaired.contains(&idx) {
+            if idx < queue_len && !seen[idx] {
+                seen[idx] = true;
                 repaired.push(idx);
             }
         }
-        let mut missing: Vec<usize> = (0..queue_len)
-            .filter(|idx| !repaired.contains(idx))
-            .collect();
+        let mut missing: Vec<usize> = (0..queue_len).filter(|&idx| !seen[idx]).collect();
         missing.shuffle(&mut rand::rng());
         repaired.extend(missing);
         repaired

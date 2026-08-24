@@ -103,6 +103,7 @@ fn discovery_path() -> Option<PathBuf> {
 }
 
 fn write_discovery(path: &Path, port: u16, token: &str) -> std::io::Result<()> {
+    use std::io::Write;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -111,7 +112,18 @@ fn write_discovery(path: &Path, port: u16, token: &str) -> std::io::Result<()> {
         "token": token,
         "pid": std::process::id(),
     });
-    std::fs::write(path, body.to_string())?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    // Created 0600 so the token is never world-readable, not even between
+    // create and chmod; the explicit set below repairs a pre-existing file
+    // left behind with wider permissions.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    file.write_all(body.to_string().as_bytes())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

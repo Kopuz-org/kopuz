@@ -16,7 +16,7 @@ workspace = true
 api = { workspace = true }
 daemon = { workspace = true, features = ["http"] }
 reader = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal", "net"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rand = { workspace = true }

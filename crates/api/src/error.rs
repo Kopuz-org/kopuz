@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Stable, machine-readable error codes. Frontends localize by code; the
 /// daemon never sends localized strings. New codes may be added within an API
-/// version, so clients must treat unknown codes as [`ErrorCode::Internal`].
+/// version; unknown codes deserialize as [`ErrorCode::Internal`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -13,6 +13,7 @@ pub enum ErrorCode {
     SourceAuthExpired,
     SourceUnreachable,
     Unsupported,
+    #[serde(other)]
     Internal,
 }
 

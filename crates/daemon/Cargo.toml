@@ -38,4 +38,4 @@ daemon = { workspace = true, features = ["http"] }
 client = { workspace = true }
 
 [features]
-http = ["dep:axum", "dep:serde", "dep:serde_json"]
+http = ["dep:axum", "dep:serde", "dep:serde_json", "tokio/net"]

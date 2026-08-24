@@ -6,6 +6,9 @@ use crate::player::{BufferedRange, PlayerState};
 /// The invalidation tables, mirroring `hooks::db_reactivity::Table`. A
 /// `library.invalidated` event tells clients to re-run reads that depend on
 /// the table.
+/// Fallback variants absorb values added in later daemon versions, so a known
+/// event with an unknown enum value degrades instead of being dropped. The
+/// daemon never serializes `Unknown`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Table {
@@ -16,6 +19,8 @@ pub enum Table {
     Folders,
     Servers,
     Recents,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,6 +31,8 @@ pub enum JobKind {
     FavoritesSync,
     PlaylistSync,
     Download,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -46,6 +53,7 @@ pub struct JobProgress {
 pub enum NoticeLevel {
     Info,
     Warning,
+    #[serde(other)]
     Error,
 }
 
@@ -53,8 +61,9 @@ pub enum NoticeLevel {
 #[serde(rename_all = "snake_case")]
 pub enum SourceState {
     Online,
-    Offline,
     AuthExpired,
+    #[serde(other)]
+    Offline,
 }
 
 /// One event on the `/v1/events` SSE stream. The serde tag matches the SSE

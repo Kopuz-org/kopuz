@@ -140,7 +140,7 @@ pub struct PlayerState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<ExternalPlayback>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+    pub error: Option<crate::error::ErrorBody>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

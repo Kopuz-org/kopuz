@@ -27,6 +27,7 @@ mod reconciler;
 
 pub const EVENT_BUFFER: usize = 512;
 const POSITION_CORRECTION_INTERVAL: Duration = Duration::from_secs(10);
+const MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Resolves a wire queue context into concrete tracks daemon-side.
 #[async_trait::async_trait]
@@ -306,7 +307,7 @@ struct Session {
     position: Option<PositionAnchor>,
     position_token: Option<u64>,
     buffered: Vec<BufferedRange>,
-    error: Option<String>,
+    error: Option<api::ErrorBody>,
     rev: u64,
     queue_rev: u64,
     volume: f32,
@@ -499,7 +500,26 @@ impl Session {
         request: SetQueueRequest,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
-        let tracks = self.materializer.materialize(&request.context).await?;
+        if request.mode != QueueMode::Replace
+            && (request.start_index.is_some() || request.shuffle.is_some())
+        {
+            return Err(ApiError::invalid_input(
+                "start_index and shuffle apply to mode \"replace\" only",
+            ));
+        }
+        // Bounded so a hanging materializer (a slow source resolve) cannot
+        // wedge the whole session command loop.
+        let tracks = tokio::time::timeout(
+            MATERIALIZE_TIMEOUT,
+            self.materializer.materialize(&request.context),
+        )
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                api::ErrorCode::SourceUnreachable,
+                "queue materialization timed out",
+            )
+        })??;
         match request.mode {
             QueueMode::Replace => {
                 self.model.replace(tracks);
@@ -1046,7 +1066,11 @@ impl Session {
         if intent.token() != token {
             return false;
         }
-        self.error = Some(format!("Couldn't load this track:\n{error}"));
+        self.error = Some(api::ErrorBody {
+            code: api::ErrorCode::Internal,
+            message: format!("couldn't load this track: {error}"),
+            details: None,
+        });
         self.buffered.clear();
         match intent {
             PlaybackIntent::Loading {

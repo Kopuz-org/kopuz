@@ -82,6 +82,36 @@ mod tests {
     }
 
     #[test]
+    fn resync_serializes_without_a_data_key() {
+        let json = serde_json::to_value(&ApiEvent::Resync).expect("serialize");
+        assert_eq!(json["event"], "resync");
+        assert!(json.get("data").is_none());
+        let back: ApiEvent = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(back, ApiEvent::Resync);
+    }
+
+    #[test]
+    fn set_mode_round_trips_with_the_loop_field() {
+        let command = PlayerCommand::SetMode {
+            shuffle: Some(true),
+            loop_mode: Some(LoopMode::Track),
+        };
+        let json = serde_json::to_value(command).expect("serialize");
+        assert_eq!(json["type"], "set_mode");
+        assert_eq!(json["loop"], "track");
+        let back: PlayerCommand = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(back, command);
+    }
+
+    #[test]
+    fn unknown_enum_values_fall_back_instead_of_failing() {
+        let code: ErrorCode = serde_json::from_value("brand_new_code".into()).expect("code");
+        assert_eq!(code, ErrorCode::Internal);
+        let table: Table = serde_json::from_value("brand_new_table".into()).expect("table");
+        assert_eq!(table, Table::Unknown);
+    }
+
+    #[test]
     fn player_state_round_trips() {
         let state = PlayerState {
             rev: 7,
