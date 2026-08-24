@@ -26,7 +26,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
-use daemon::{LibraryService, LocalApi, PlaybackServices, SessionHandle};
+use daemon::{DbQueueStore, LibraryService, LocalApi, PlaybackServices, QueueStore, SessionHandle};
 
 struct Args {
     bind: String,
@@ -161,14 +161,26 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         station_registry.clone(),
     ));
     let active_source = Some(Arc::from(server::source::active(database.clone(), &config)));
+    let queue_store: Arc<dyn QueueStore> = Arc::new(DbQueueStore::new(database.clone()));
     let services = PlaybackServices {
         config,
         active_source,
         station_registry,
+        queue_store: Some(queue_store.clone()),
     };
 
     let session = SessionHandle::try_spawn(library.clone(), services)
         .map_err(|error| format!("audio engine init failed: {error:?}"))?;
+    if let Some(snapshot) = queue_store.load().await
+        && !snapshot.queue.is_empty()
+    {
+        let restored = snapshot.queue.len();
+        match session.restore_queue(snapshot).await {
+            Ok(_) => tracing::info!(tracks = restored, "queue restored from the last session"),
+            Err(error) => tracing::warn!(%error, "queue restore failed"),
+        }
+    }
+    let flush_session = session.clone();
     let state = Arc::new(daemon::http::HttpState {
         api: Arc::new(LocalApi::with_library(session.clone(), library)),
         session,
@@ -197,6 +209,8 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
     };
+
+    flush_session.persist_now().await;
 
     if let Some(path) = discovery {
         let _ = std::fs::remove_file(path);

@@ -28,6 +28,8 @@ mod reconciler;
 pub const EVENT_BUFFER: usize = 512;
 const POSITION_CORRECTION_INTERVAL: Duration = Duration::from_secs(10);
 const MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
+const PERSIST_INTERVAL: Duration = Duration::from_secs(5);
+const PROGRESS_STEP_SECS: u64 = 5;
 
 /// Resolves a wire queue context into concrete tracks daemon-side.
 #[async_trait::async_trait]
@@ -42,6 +44,7 @@ pub struct PlaybackServices {
     pub config: config::AppConfig,
     pub active_source: Option<server::source::ActiveSource>,
     pub station_registry: Arc<radio::registry::StationRegistry>,
+    pub queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
 }
 
 impl Default for PlaybackServices {
@@ -50,6 +53,7 @@ impl Default for PlaybackServices {
             config: config::AppConfig::default(),
             active_source: None,
             station_registry: Arc::new(radio::registry::StationRegistry::default()),
+            queue_store: None,
         }
     }
 }
@@ -69,6 +73,11 @@ enum SessionCmd {
         oneshot::Sender<Result<CommandAck, ApiError>>,
     ),
     Window(Page, oneshot::Sender<Result<QueueWindow, ApiError>>),
+    RestoreQueue(
+        Box<db::QueueSnapshot>,
+        oneshot::Sender<Result<CommandAck, ApiError>>,
+    ),
+    Persist(oneshot::Sender<()>),
     LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
     LoadFinished(LoadFinished),
     BufferProgress(BufferProgressEvent),
@@ -141,6 +150,8 @@ impl SessionHandle {
             seq: seq.clone(),
             history: history.clone(),
             materializer,
+            queue_store: services.queue_store,
+            queue_dirty: false,
             config: services.config,
             active_source: services.active_source,
             station_registry: services.station_registry,
@@ -229,6 +240,22 @@ impl SessionHandle {
     pub async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError> {
         self.request(|tx| SessionCmd::Edit(edit, tx)).await
     }
+
+    /// Restore a persisted queue: paused, with a resume point at the saved
+    /// progress, exactly like the app's startup restore.
+    pub async fn restore_queue(&self, snapshot: db::QueueSnapshot) -> Result<CommandAck, ApiError> {
+        self.request(|tx| SessionCmd::RestoreQueue(Box::new(snapshot), tx))
+            .await
+    }
+
+    /// Flush the current queue snapshot to the store and wait for the write;
+    /// the shutdown path calls this so a quit never loses the debounce window.
+    pub async fn persist_now(&self) {
+        let (tx, rx) = oneshot::channel();
+        if self.cmd_tx.send(SessionCmd::Persist(tx)).is_ok() {
+            let _ = rx.await;
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -316,6 +343,8 @@ struct Session {
     seq: Arc<AtomicU64>,
     history: Arc<Mutex<VecDeque<(u64, ApiEvent)>>>,
     materializer: Arc<dyn QueueMaterializer>,
+    queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
+    queue_dirty: bool,
     config: config::AppConfig,
     active_source: Option<server::source::ActiveSource>,
     station_registry: Arc<radio::registry::StationRegistry>,
@@ -334,6 +363,11 @@ impl Session {
         let mut correction =
             tokio::time::interval_at(correction_start, POSITION_CORRECTION_INTERVAL);
         correction.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut persist = tokio::time::interval_at(
+            tokio::time::Instant::now() + PERSIST_INTERVAL,
+            PERSIST_INTERVAL,
+        );
+        persist.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
             // The correction branch is disabled while nothing plays, so an
@@ -350,6 +384,9 @@ impl Session {
                 }
                 _ = correction.tick(), if self.phase == ApiPhase::Playing => {
                     self.publish_position_anchor(&state_tx, None, None, true);
+                }
+                _ = persist.tick(), if self.queue_dirty && self.queue_store.is_some() => {
+                    self.persist_async();
                 }
             }
         }
@@ -377,6 +414,18 @@ impl Session {
                 title,
                 artist,
             } => self.apply_radio_metadata(token, title, artist, state_tx),
+            SessionCmd::RestoreQueue(snapshot, reply) => {
+                let result = self.handle_restore(*snapshot, state_tx);
+                let _ = reply.send(result);
+            }
+            SessionCmd::Persist(reply) => {
+                if let Some(store) = self.queue_store.clone() {
+                    let snapshot = self.snapshot();
+                    self.queue_dirty = false;
+                    store.save(snapshot).await;
+                }
+                let _ = reply.send(());
+            }
             SessionCmd::LoadPrepared(result) => self.handle_prepared_load(*result, state_tx),
             SessionCmd::LoadFinished(result) => self.handle_load_finished(result, state_tx),
             SessionCmd::BufferProgress(event) => self.handle_buffer_progress(event, state_tx),
@@ -1008,6 +1057,83 @@ impl Session {
         }
     }
 
+    /// Port of the app's `restore_queue_state`: stop, restore the model,
+    /// seed a paused resume point at the saved progress.
+    fn handle_restore(
+        &mut self,
+        snapshot: db::QueueSnapshot,
+        state_tx: &watch::Sender<PlayerState>,
+    ) -> Result<CommandAck, ApiError> {
+        self.cancel_load_task();
+        self.cancel_radio_task();
+        self.pending_transition = None;
+        self.armed_transition = None;
+        self.player.stop();
+        self.phase = ApiPhase::Idle;
+        self.set_intent(PlaybackIntent::Stopped);
+        self.pending_resume = None;
+        self.buffered.clear();
+
+        let restored = self.model.restore(
+            snapshot.queue,
+            snapshot.current_queue_index,
+            snapshot.shuffle_order,
+            snapshot.shuffle_enabled,
+        );
+        if let Some(position) = restored
+            && let Some(track) = self.model.track_at(position).cloned()
+        {
+            let progress_secs = snapshot.progress_secs.min(track.duration);
+            if track.duration != u64::MAX {
+                self.pending_resume = Some(PendingResumeState {
+                    track_key: track.id.uid(),
+                    position_ms: progress_secs.saturating_mul(1000),
+                });
+            }
+            self.publish_position_anchor(
+                state_tx,
+                None,
+                Some(Duration::from_secs(progress_secs)),
+                false,
+            );
+        }
+        let ack = self.publish(state_tx, true);
+        self.queue_dirty = false;
+        Ok(ack)
+    }
+
+    fn snapshot(&self) -> db::QueueSnapshot {
+        let progress_secs = if self.phase == ApiPhase::Playing {
+            let secs = self.displayed_position().as_secs();
+            (secs / PROGRESS_STEP_SECS) * PROGRESS_STEP_SECS
+        } else {
+            self.position
+                .map(|anchor| anchor.ms / 1000)
+                .unwrap_or_default()
+        };
+        db::QueueSnapshot {
+            version: 1,
+            queue: self.model.items().to_vec(),
+            current_queue_index: self.model.current_position(),
+            progress_secs,
+            shuffle_order: self.model.shuffle_order().to_vec(),
+            shuffle_enabled: self.model.shuffle(),
+        }
+    }
+
+    /// Fire-and-forget save off the actor thread; overlapping writes are
+    /// last-write-wins on one SQLite row.
+    fn persist_async(&mut self) {
+        let Some(store) = self.queue_store.clone() else {
+            return;
+        };
+        let snapshot = self.snapshot();
+        self.queue_dirty = false;
+        tokio::spawn(async move {
+            store.save(snapshot).await;
+        });
+    }
+
     fn commit_transition_model(&mut self, token: u64) -> bool {
         let Some(pending) = self.pending_transition.take() else {
             return false;
@@ -1100,12 +1226,15 @@ impl Session {
 
     fn store_pending_resume(&mut self) {
         if let Some(track) = self.model.current_track() {
-            let position_ms = if self.intent.is_loading() {
+            // The displayed progress, like the hooks progress signal: the live
+            // engine position only while audibly playing; otherwise the last
+            // published anchor, which is what a restore or a pause seeded.
+            let position_ms = if self.phase == ApiPhase::Playing && !self.intent.is_loading() {
+                self.displayed_position().as_millis() as u64
+            } else {
                 self.position
                     .map(|position| position.ms)
                     .unwrap_or_default()
-            } else {
-                self.displayed_position().as_millis() as u64
             };
             self.pending_resume = Some(PendingResumeState {
                 track_key: track.id.uid(),
@@ -1190,6 +1319,7 @@ impl Session {
         if queue_changed {
             self.queue_rev = self.rev;
         }
+        self.queue_dirty = true;
         let state = self.build_state();
         if queue_changed {
             self.emit(ApiEvent::QueueChanged {
@@ -1232,6 +1362,7 @@ impl Session {
             playing,
         };
         self.position = Some(anchor);
+        self.queue_dirty = true;
         self.position_token = Some(token);
         let _ = state_tx.send(self.build_state());
         self.emit(ApiEvent::PlayerPosition {
@@ -2374,6 +2505,97 @@ mod tests {
         assert_eq!(now.kind, TrackKind::Radio);
         assert_eq!(now.duration_ms, None);
         assert!(!now.seekable);
+    }
+
+    struct MemoryStore {
+        saved: Mutex<Vec<db::QueueSnapshot>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::persistence::QueueStore for MemoryStore {
+        async fn load(&self) -> Option<db::QueueSnapshot> {
+            None
+        }
+
+        async fn save(&self, snapshot: db::QueueSnapshot) {
+            self.saved.lock().expect("store lock").push(snapshot);
+        }
+    }
+
+    #[tokio::test]
+    async fn restore_seeds_a_paused_resume_point_and_play_continues_there() {
+        let harness = harness(|_| {});
+        let snapshot = db::QueueSnapshot {
+            version: 1,
+            queue: ["track-0", "track-1", "track-2"]
+                .iter()
+                .map(|key| test_track(&(*key).to_string()))
+                .collect(),
+            current_queue_index: 1,
+            progress_secs: 2,
+            shuffle_order: Vec::new(),
+            shuffle_enabled: false,
+        };
+        harness
+            .api
+            .session
+            .restore_queue(snapshot)
+            .await
+            .expect("restore");
+
+        let state = harness.api.player_state().await.expect("state");
+        assert_eq!(state.phase, ApiPhase::Idle);
+        assert_eq!(state.queue.index, Some(1));
+        assert_eq!(
+            state.track.as_ref().map(|t| t.title.as_str()),
+            Some("track-1")
+        );
+        let anchor = state.position.expect("restored anchor");
+        assert_eq!(anchor.ms, 2000);
+        assert!(!anchor.playing);
+
+        harness
+            .api
+            .player_command(PlayerCommand::Play)
+            .await
+            .expect("play");
+        let state = wait_committed(&harness.api).await;
+        let anchor = state.position.expect("anchor");
+        assert!(anchor.ms >= 2000, "resumed at {}ms", anchor.ms);
+    }
+
+    #[tokio::test]
+    async fn persist_now_writes_the_current_snapshot() {
+        let store = Arc::new(MemoryStore {
+            saved: Mutex::new(Vec::new()),
+        });
+        let sink = FakeSinkHandle::default();
+        let player = Player::try_with_sink(Box::new(FakeSink(sink.clone())))
+            .expect("headless player starts");
+        let services = PlaybackServices {
+            queue_store: Some(store.clone()),
+            ..Default::default()
+        };
+        let session = SessionHandle::spawn_with_factory(
+            Arc::new(StubLibrary),
+            player,
+            services,
+            Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+        );
+        let api = LocalApi::new(session.clone());
+
+        api.set_queue(replace(&["track-0", "track-1"]))
+            .await
+            .expect("set queue");
+        wait_committed(&api).await;
+        session.persist_now().await;
+
+        let saved = store.saved.lock().expect("store lock");
+        let last = saved.last().expect("at least one snapshot");
+        assert_eq!(last.version, 1);
+        assert_eq!(last.queue.len(), 2);
+        assert_eq!(last.current_queue_index, 0);
+        assert!(!last.shuffle_enabled);
     }
 
     #[tokio::test]
