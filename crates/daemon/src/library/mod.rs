@@ -51,6 +51,38 @@ fn map_sort(sort: Option<&str>) -> db::TrackSort {
     }
 }
 
+fn lyrics_view(lyrics: utils::lyrics::Lyrics) -> api::LyricsView {
+    let to_ms = |seconds: f64| (seconds.max(0.0) * 1000.0) as u64;
+    match lyrics {
+        utils::lyrics::Lyrics::Plain(text) => api::LyricsView {
+            plain: Some(text),
+            synced: Vec::new(),
+        },
+        utils::lyrics::Lyrics::Synced(lines) => api::LyricsView {
+            plain: None,
+            synced: lines
+                .into_iter()
+                .map(|line| api::LyricLineView {
+                    start_ms: to_ms(line.start_time),
+                    end_ms: line.end_time.map(to_ms),
+                    text: line.text,
+                    chunks: line
+                        .chunks
+                        .into_iter()
+                        .map(|chunk| api::LyricChunkView {
+                            start_ms: to_ms(chunk.start_time),
+                            text: chunk.text,
+                        })
+                        .collect(),
+                    parent_line_index: line.parent_line_index.map(|index| index as u32),
+                    background: line.background,
+                    opposite_turn: line.opposite_turn,
+                })
+                .collect(),
+        },
+    }
+}
+
 fn matches_search(track: &Track, needle: &str) -> bool {
     let needle = needle.to_lowercase();
     [&track.title, &track.artist, &track.album]
@@ -199,6 +231,80 @@ impl LibraryService {
             .map_err(db_error)?;
         let total = self.db.tracks_count(&db_filter).await.map_err(db_error)?;
         Ok((total, items))
+    }
+
+    pub async fn folder_tracks(
+        &self,
+        prefix: &str,
+        page: Page,
+    ) -> Result<api::TrackPage, ApiError> {
+        let config = self.current_config();
+        let rows = self
+            .db
+            .folder_tracks(&self.query_source(), prefix)
+            .await
+            .map_err(db_error)?;
+        let total = rows.len() as u32;
+        let items = rows
+            .iter()
+            .skip(page.offset as usize)
+            .take(page.limit as usize)
+            .map(|track| crate::wire::track_info(track, &config))
+            .collect();
+        Ok(api::TrackPage {
+            total,
+            offset: page.offset,
+            items,
+        })
+    }
+
+    pub fn stats(&self) -> api::StatsView {
+        api::StatsView {
+            listen_counts: self.current_config().listen_counts.clone(),
+        }
+    }
+
+    /// Lyrics for one library track, through the app's full provider chain
+    /// (local .lrc, server lyrics API, synced fallbacks, lrclib) with its
+    /// process cache. Radio has no lyrics by construction.
+    pub async fn lyrics(&self, key: &str) -> Result<api::LyricsView, ApiError> {
+        let config = self.current_config();
+        let track = self
+            .db
+            .tracks_by_keys(&config.active_source, &[key.to_string()])
+            .await
+            .map_err(db_error)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| ApiError::not_found("unknown track key"))?;
+        if track.duration == u64::MAX {
+            return Err(ApiError::invalid_input("radio streams have no lyrics"));
+        }
+
+        let mut request = utils::lyrics::LyricsRequest::new(
+            &track.artist,
+            &track.title,
+            &track.album,
+            track.duration,
+            track.id.uid(),
+        )
+        .prefer_local(config.prefer_local_lyrics)
+        .enable_musixmatch(config.enable_musixmatch_lyrics);
+        if let Some(server) = &config.server {
+            request = request.with_server(
+                Some(&server.url),
+                server.access_token.as_deref(),
+                server.user_id.as_deref(),
+            );
+        }
+
+        let lyrics = match utils::lyrics::cached_lyrics_for_request(&request) {
+            Some(cached) => cached,
+            None => utils::lyrics::fetch_lyrics_for_request(&request).await,
+        };
+        lyrics
+            .map(lyrics_view)
+            .ok_or_else(|| ApiError::not_found("no lyrics found"))
     }
 
     /// Synthetic radio track, seeded from the manifest so no client ever sees

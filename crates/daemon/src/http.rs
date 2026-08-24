@@ -62,6 +62,9 @@ pub fn router(state: Arc<HttpState>) -> Router {
         .route("/v1/jobs", get(list_jobs))
         .route("/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/v1/library/tracks", get(library_tracks))
+        .route("/v1/library/folders", get(library_folders))
+        .route("/v1/library/stats", get(library_stats))
+        .route("/v1/lyrics", get(lyrics))
         .route("/v1/queue", get(queue_window).post(set_queue))
         .route("/v1/queue/jump", post(queue_jump))
         .route("/v1/queue/move", post(queue_move))
@@ -240,6 +243,40 @@ async fn queue_window(
         limit: page.limit.unwrap_or(api::DEFAULT_PAGE_LIMIT),
     };
     Ok(Json(state.api.queue_window(page).await?).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct FolderQuery {
+    prefix: String,
+    offset: Option<u32>,
+    limit: Option<u32>,
+}
+
+async fn library_folders(
+    State(state): State<Arc<HttpState>>,
+    Query(query): Query<FolderQuery>,
+) -> Result<Response, ApiFailure> {
+    let page = Page {
+        offset: query.offset.unwrap_or(0),
+        limit: query.limit.unwrap_or(api::DEFAULT_PAGE_LIMIT),
+    };
+    Ok(Json(state.api.folder_tracks(query.prefix, page).await?).into_response())
+}
+
+async fn library_stats(State(state): State<Arc<HttpState>>) -> Result<Response, ApiFailure> {
+    Ok(Json(state.api.stats().await?).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct LyricsQuery {
+    track: String,
+}
+
+async fn lyrics(
+    State(state): State<Arc<HttpState>>,
+    Query(query): Query<LyricsQuery>,
+) -> Result<Response, ApiFailure> {
+    Ok(Json(state.api.lyrics(query.track).await?).into_response())
 }
 
 #[derive(serde::Deserialize)]

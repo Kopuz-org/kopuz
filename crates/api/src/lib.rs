@@ -16,7 +16,10 @@ mod queue;
 
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
-pub use library::{DEFAULT_PAGE_LIMIT, Page, TrackFilter, TrackInfo, TrackPage};
+pub use library::{
+    DEFAULT_PAGE_LIMIT, LyricChunkView, LyricLineView, LyricsView, Page, StatsView, TrackFilter,
+    TrackInfo, TrackPage,
+};
 pub use player::{
     BufferedRange, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying, Phase,
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
@@ -124,6 +127,13 @@ pub trait KopuzApi: Send + Sync {
     async fn cancel_job(&self, id: String) -> Result<(), ApiError>;
 
     async fn tracks(&self, filter: TrackFilter, page: Page) -> Result<TrackPage, ApiError>;
+
+    /// Local tracks under a directory prefix, path-ordered.
+    async fn folder_tracks(&self, prefix: String, page: Page) -> Result<TrackPage, ApiError>;
+
+    async fn lyrics(&self, key: String) -> Result<LyricsView, ApiError>;
+
+    async fn stats(&self) -> Result<StatsView, ApiError>;
 
     /// Subscribe to the state stream. Every subscriber gets every event from
     /// the moment of subscription; a snapshot fetch plus this stream is the

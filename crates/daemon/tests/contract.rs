@@ -426,6 +426,35 @@ async fn scan_job_indexes_local_files_over_the_wire() {
 }
 
 #[tokio::test]
+async fn folders_and_stats_agree_across_transports() {
+    let pair = spawn_pair().await;
+    let local_page = pair
+        .local
+        .folder_tracks("/lib/".into(), Page::default())
+        .await
+        .expect("folders locally");
+    let http_page = pair
+        .http
+        .folder_tracks("/lib/".into(), Page::default())
+        .await
+        .expect("folders over http");
+    assert_eq!(local_page, http_page);
+    assert_eq!(http_page.total, 2);
+    let row = &http_page.items[0];
+    assert_eq!(row.key, "/lib/seed-0.flac");
+    assert!(
+        row.artwork
+            .as_deref()
+            .is_some_and(|a| a.starts_with("/v1/artwork?track="))
+    );
+    assert!(!row.offline);
+
+    let local_stats = pair.local.stats().await.expect("stats locally");
+    let http_stats = pair.http.stats().await.expect("stats over http");
+    assert_eq!(local_stats, http_stats);
+}
+
+#[tokio::test]
 async fn wrong_token_is_rejected() {
     let pair = spawn_pair().await;
     let base = {

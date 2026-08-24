@@ -230,6 +230,25 @@ impl KopuzApi for HttpApi {
         self.post(path, None).await
     }
 
+    async fn folder_tracks(&self, prefix: String, page: Page) -> Result<api::TrackPage, ApiError> {
+        self.get(&format!(
+            "/v1/library/folders?prefix={}&offset={}&limit={}",
+            urlencode(&prefix),
+            page.offset,
+            page.limit
+        ))
+        .await
+    }
+
+    async fn lyrics(&self, key: String) -> Result<api::LyricsView, ApiError> {
+        self.get(&format!("/v1/lyrics?track={}", urlencode(&key)))
+            .await
+    }
+
+    async fn stats(&self) -> Result<api::StatsView, ApiError> {
+        self.get("/v1/library/stats").await
+    }
+
     async fn download(&self, keys: Vec<String>) -> Result<JobRef, ApiError> {
         self.post("/v1/downloads", Some(serde_json::json!({ "keys": keys })))
             .await

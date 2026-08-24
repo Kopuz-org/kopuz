@@ -62,6 +62,44 @@ pub struct TrackFilter {
     pub sort: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LyricChunkView {
+    pub start_ms: u64,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LyricLineView {
+    pub start_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_ms: Option<u64>,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chunks: Vec<LyricChunkView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_line_index: Option<u32>,
+    #[serde(default)]
+    pub background: bool,
+    #[serde(default)]
+    pub opposite_turn: bool,
+}
+
+/// Lyrics for one track: `synced` when timing exists (chunks carry word or
+/// syllable timing where the provider has it), `plain` otherwise.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct LyricsView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plain: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub synced: Vec<LyricLineView>,
+}
+
+/// Listening stats: play counts keyed by track uid.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StatsView {
+    pub listen_counts: std::collections::HashMap<String, u64>,
+}
+
 /// A window into a filtered track listing. `total` always reflects the whole
 /// filtered set so clients can paginate without a second count request.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

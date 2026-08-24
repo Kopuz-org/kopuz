@@ -148,6 +148,27 @@ impl api::KopuzApi for LocalApi {
         }
     }
 
+    async fn folder_tracks(&self, prefix: String, page: Page) -> Result<api::TrackPage, ApiError> {
+        match &self.library {
+            Some(library) => library.folder_tracks(&prefix, page).await,
+            None => Err(ApiError::unsupported("no library service")),
+        }
+    }
+
+    async fn lyrics(&self, key: String) -> Result<api::LyricsView, ApiError> {
+        match &self.library {
+            Some(library) => library.lyrics(&key).await,
+            None => Err(ApiError::unsupported("no library service")),
+        }
+    }
+
+    async fn stats(&self) -> Result<api::StatsView, ApiError> {
+        match &self.library {
+            Some(library) => Ok(library.stats()),
+            None => Err(ApiError::unsupported("no library service")),
+        }
+    }
+
     async fn download(&self, keys: Vec<String>) -> Result<api::JobRef, ApiError> {
         let (Some(service), Some(runner)) = (&self.downloads, &self.jobs) else {
             return Err(ApiError::unsupported(
