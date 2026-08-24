@@ -117,6 +117,7 @@ pages = { package = "kopuz-pages", version = "0.16.0", path = "./crates/pages" }
 utils = { package = "kopuz-utils", version = "0.16.0", path = "./crates/utils" }
 config = { package = "kopuz-config", version = "0.16.0", path = "./crates/config" }
 db = { package = "kopuz-db", version = "0.16.0", path = "./crates/db" }
+api = { package = "kopuz-api", version = "0.16.0", path = "./crates/api" }
 kopuz = { version = "0.16.0", path = "./crates/kopuz" }
 server = { package = "kopuz-server", version = "0.16.0", path = "./crates/server" }
 kopuz_route = { package = "kopuz-route", version = "0.16.0", path = "./crates/kopuz_route" }

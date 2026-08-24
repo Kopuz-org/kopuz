@@ -3,8 +3,8 @@ use dioxus::logger::tracing;
 use dioxus::prelude::*;
 use reader::Track;
 
-use crate::playback_ref::PlaybackItemRef;
 use crate::use_player_controller::{LoopMode, PlaybackIntent, PlayerController};
+use utils::playback_ref::PlaybackItemRef;
 
 impl PlayerController {
     pub fn play_next(&mut self) {

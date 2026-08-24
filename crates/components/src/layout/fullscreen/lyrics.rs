@@ -62,7 +62,7 @@ pub(crate) fn use_fullscreen_lyrics(
 
         // Radio has no lyrics; querying providers with station names only
         // produces junk matches.
-        if title.is_empty() || hooks::playback_ref::PlaybackItemRef::parse(&track_path).is_radio() {
+        if title.is_empty() || utils::playback_ref::PlaybackItemRef::parse(&track_path).is_radio() {
             lyrics.set(Some(None));
             return;
         }

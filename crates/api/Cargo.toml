@@ -1,5 +1,5 @@
 [package]
-name = "kopuz-scrobble"
+name = "kopuz-api"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,17 +10,15 @@ homepage.workspace = true
 keywords.workspace = true
 
 [lib]
-name = "scrobble"
+name = "api"
 
 [lints]
 workspace = true
 
 [dependencies]
-md5 = { workspace = true }
-tracing = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
-config.workspace = true
-db.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-tokio.workspace = true
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+reader = { workspace = true }

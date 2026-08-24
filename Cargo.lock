@@ -4271,6 +4271,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "kopuz-api"
+version = "0.16.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "kopuz-reader",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "kopuz-components"
 version = "0.16.0"
 dependencies = [
@@ -4466,7 +4478,6 @@ version = "0.16.0"
 name = "kopuz-scrobble"
 version = "0.16.0"
 dependencies = [
- "dioxus",
  "kopuz-config",
  "kopuz-db",
  "md5",

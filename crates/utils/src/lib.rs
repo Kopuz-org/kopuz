@@ -11,6 +11,7 @@ pub mod live_theme;
 pub mod logs;
 pub mod lyrics;
 pub mod musicbrainz;
+pub mod playback_ref;
 pub mod playlist;
 pub mod range_source;
 pub mod redact;
