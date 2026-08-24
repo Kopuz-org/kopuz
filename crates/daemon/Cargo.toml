@@ -37,8 +37,8 @@ async-trait = { workspace = true }
 futures-util = { workspace = true }
 utils = { workspace = true }
 axum = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 directories = { workspace = true, optional = true }
 
@@ -48,7 +48,7 @@ client = { workspace = true }
 tempfile = { workspace = true }
 
 [features]
-http = ["dep:axum", "dep:serde", "dep:serde_json", "tokio/net"]
+http = ["dep:axum", "tokio/net"]
 kopuzd = [
   "http",
   "dep:tracing-subscriber",

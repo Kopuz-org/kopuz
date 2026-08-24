@@ -7,7 +7,8 @@ use api::{Phase as ApiPhase, PlayerState};
 use player::engine::{Event as EngineEvent, Phase as EnginePhase};
 use tokio::sync::watch;
 
-use super::{Session, engine_phase};
+use super::Session;
+use super::state::engine_phase;
 use crate::queue_model::NextOutcome;
 
 impl Session {
