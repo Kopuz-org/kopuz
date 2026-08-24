@@ -46,6 +46,7 @@ pub fn router(state: Arc<HttpState>) -> Router {
         .route("/v1/player/seek", post(seek))
         .route("/v1/player/volume", post(volume))
         .route("/v1/player/mode", post(mode))
+        .route("/v1/config", get(get_config).patch(patch_config))
         .route("/v1/library/tracks", get(library_tracks))
         .route("/v1/queue", get(queue_window).post(set_queue))
         .route("/v1/queue/jump", post(queue_jump))
@@ -236,6 +237,17 @@ struct TracksQuery {
     sort: Option<String>,
     offset: Option<u32>,
     limit: Option<u32>,
+}
+
+async fn get_config(State(state): State<Arc<HttpState>>) -> Result<Response, ApiFailure> {
+    Ok(Json(state.api.config().await?).into_response())
+}
+
+async fn patch_config(
+    State(state): State<Arc<HttpState>>,
+    Json(patch): Json<serde_json::Value>,
+) -> Result<Response, ApiFailure> {
+    Ok(Json(state.api.patch_config(patch).await?).into_response())
 }
 
 async fn library_tracks(

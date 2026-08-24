@@ -8,8 +8,8 @@
 mod sse;
 
 use api::{
-    ApiError, CommandAck, ErrorBody, KopuzApi, Page, PlayerCommand, PlayerState, QueueEdit,
-    QueueWindow, SetQueueRequest, TrackFilter, TrackPage,
+    ApiError, CommandAck, ConfigView, ErrorBody, KopuzApi, Page, PlayerCommand, PlayerState,
+    QueueEdit, QueueWindow, SetQueueRequest, TrackFilter, TrackPage,
 };
 use serde::de::DeserializeOwned;
 
@@ -189,6 +189,18 @@ impl KopuzApi for HttpApi {
             .collect();
         self.get(&format!("/v1/library/tracks?{}", pairs.join("&")))
             .await
+    }
+
+    async fn config(&self) -> Result<ConfigView, ApiError> {
+        self.get("/v1/config").await
+    }
+
+    async fn patch_config(&self, patch: serde_json::Value) -> Result<ConfigView, ApiError> {
+        self.send(
+            self.request(reqwest::Method::PATCH, "/v1/config")
+                .json(&patch),
+        )
+        .await
     }
 
     /// Connects to `/v1/events`, reconnecting with `Last-Event-ID` after

@@ -26,7 +26,10 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
-use daemon::{DbQueueStore, LibraryService, LocalApi, PlaybackServices, QueueStore, SessionHandle};
+use daemon::{
+    ConfigService, DbQueueStore, LibraryService, LocalApi, PlaybackServices, QueueStore,
+    SessionHandle,
+};
 
 struct Args {
     bind: String,
@@ -154,6 +157,13 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let database = db::init(&db_path).await?;
     let config = database.load_config().await?.unwrap_or_default();
 
+    let settings_path =
+        config::store::settings_path_for(db_path.parent().unwrap_or_else(|| Path::new(".")));
+    let config_service = Arc::new(ConfigService::new(
+        database.clone(),
+        settings_path,
+        config.clone(),
+    ));
     let station_registry = Arc::new(radio::registry::StationRegistry::default());
     let library = Arc::new(LibraryService::new(
         database.reads(),
@@ -182,7 +192,11 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     }
     let flush_session = session.clone();
     let state = Arc::new(daemon::http::HttpState {
-        api: Arc::new(LocalApi::with_library(session.clone(), library)),
+        api: Arc::new(
+            LocalApi::new(session.clone())
+                .with_library(library)
+                .with_config(config_service),
+        ),
         session,
         token: args.token.unwrap_or_else(random_token),
         started: Instant::now(),

@@ -11,7 +11,7 @@ use api::{
     PlayerState, QueueContext, QueueEdit, QueueMode, SetQueueRequest, TrackFilter,
 };
 use daemon::session::FactoryOverride;
-use daemon::{LocalApi, PlaybackServices, QueueMaterializer, SessionHandle};
+use daemon::{ConfigService, LocalApi, PlaybackServices, QueueMaterializer, SessionHandle};
 use player::engine::{NullSink, SourceFactory};
 use player::player::Player;
 use reader::Track;
@@ -79,9 +79,19 @@ fn wav_factory(seconds: u64) -> SourceFactory {
 struct Pair {
     local: LocalApi,
     http: client::HttpApi,
+    _dir: tempfile::TempDir,
 }
 
 async fn spawn_pair() -> Pair {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("contract.db"))
+        .await
+        .expect("db init");
+    let config_service = Arc::new(ConfigService::new(
+        database,
+        dir.path().join("settings.toml"),
+        config::AppConfig::default(),
+    ));
     let player = Player::try_with_sink(Box::new(NullSink::new())).expect("headless player starts");
     let provider: FactoryOverride = Arc::new(|_| Some(wav_factory(6)));
     let session = SessionHandle::spawn_with_factory(
@@ -92,7 +102,7 @@ async fn spawn_pair() -> Pair {
     );
     let token = "contract-token".to_string();
     let state = Arc::new(daemon::http::HttpState {
-        api: Arc::new(LocalApi::new(session.clone())),
+        api: Arc::new(LocalApi::new(session.clone()).with_config(config_service.clone())),
         session: session.clone(),
         token: token.clone(),
         started: Instant::now(),
@@ -103,8 +113,9 @@ async fn spawn_pair() -> Pair {
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(daemon::http::serve(listener, state));
     Pair {
-        local: LocalApi::new(session),
+        local: LocalApi::new(session).with_config(config_service),
         http: client::HttpApi::new(format!("http://{addr}"), token),
+        _dir: dir,
     }
 }
 
@@ -264,6 +275,40 @@ async fn http_events_stream_delivers_typed_events() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn config_view_and_patch_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    let local_view = pair.local.config().await.expect("local view");
+    let http_view = pair.http.config().await.expect("http view");
+    assert_eq!(local_view, http_view);
+    assert!(local_view.config.get("lastfm_session_key").is_none());
+    assert!(local_view.config.get("server").is_none());
+
+    let patched = pair
+        .http
+        .patch_config(serde_json::json!({"crossfade_seconds": 7}))
+        .await
+        .expect("patch over http");
+    assert_eq!(patched.config["crossfade_seconds"], 7);
+    let local_view = pair.local.config().await.expect("local view after patch");
+    assert_eq!(local_view.config["crossfade_seconds"], 7);
+
+    let local_err = pair
+        .local
+        .patch_config(serde_json::json!({"servers": []}))
+        .await
+        .expect_err("credential key locally");
+    let http_err = pair
+        .http
+        .patch_config(serde_json::json!({"servers": []}))
+        .await
+        .expect_err("credential key over http");
+    assert_eq!(local_err.code, ErrorCode::InvalidInput);
+    assert_eq!(http_err.code, local_err.code);
+    assert_eq!(http_err.message, local_err.message);
 }
 
 #[tokio::test]

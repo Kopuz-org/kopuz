@@ -77,6 +77,10 @@ enum SessionCmd {
         Box<db::QueueSnapshot>,
         oneshot::Sender<Result<CommandAck, ApiError>>,
     ),
+    SetConfig {
+        config: Box<config::AppConfig>,
+        changed: Vec<String>,
+    },
     Persist(oneshot::Sender<()>),
     LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
     LoadFinished(LoadFinished),
@@ -248,6 +252,15 @@ impl SessionHandle {
             .await
     }
 
+    /// Adopt a new config (a ConfigService patch): applies live audio
+    /// settings and emits `config.changed`.
+    pub fn set_config(&self, config: config::AppConfig, changed: Vec<String>) {
+        let _ = self.cmd_tx.send(SessionCmd::SetConfig {
+            config: Box::new(config),
+            changed,
+        });
+    }
+
     /// Flush the current queue snapshot to the store and wait for the write;
     /// the shutdown path calls this so a quit never loses the debounce window.
     pub async fn persist_now(&self) {
@@ -417,6 +430,9 @@ impl Session {
             SessionCmd::RestoreQueue(snapshot, reply) => {
                 let result = self.handle_restore(*snapshot, state_tx);
                 let _ = reply.send(result);
+            }
+            SessionCmd::SetConfig { config, changed } => {
+                self.apply_config(*config, changed, state_tx);
             }
             SessionCmd::Persist(reply) => {
                 if let Some(store) = self.queue_store.clone() {
@@ -1055,6 +1071,33 @@ impl Session {
                 // cancelled it; token guards reject any late completion.
             }
         }
+    }
+
+    fn apply_config(
+        &mut self,
+        config: config::AppConfig,
+        changed: Vec<String>,
+        state_tx: &watch::Sender<PlayerState>,
+    ) {
+        for key in &changed {
+            match key.as_str() {
+                "volume" => {
+                    self.volume = config.volume.clamp(0.0, 1.0);
+                    self.player.set_volume(self.volume);
+                }
+                "equalizer" => self.player.set_equalizer(config.equalizer.clone()),
+                "channel_mode" => self.player.set_channel_mode(config.channel_mode),
+                "sample_rate_mode" => self.player.set_sample_rate_mode(config.sample_rate_mode),
+                "device_change_behavior" => {
+                    self.player
+                        .set_device_change_behavior(config.device_change_behavior);
+                }
+                _ => {}
+            }
+        }
+        self.config = config;
+        self.emit(ApiEvent::ConfigChanged { keys: changed });
+        self.publish(state_tx, false);
     }
 
     /// Port of the app's `restore_queue_state`: stop, restore the model,
@@ -1730,6 +1773,7 @@ fn now_playing_from(track: &Track) -> NowPlaying {
 pub struct LocalApi {
     session: SessionHandle,
     library: Option<Arc<crate::library::LibraryService>>,
+    config: Option<Arc<crate::config_service::ConfigService>>,
 }
 
 impl LocalApi {
@@ -1737,17 +1781,18 @@ impl LocalApi {
         Self {
             session,
             library: None,
+            config: None,
         }
     }
 
-    pub fn with_library(
-        session: SessionHandle,
-        library: Arc<crate::library::LibraryService>,
-    ) -> Self {
-        Self {
-            session,
-            library: Some(library),
-        }
+    pub fn with_library(mut self, library: Arc<crate::library::LibraryService>) -> Self {
+        self.library = Some(library);
+        self
+    }
+
+    pub fn with_config(mut self, config: Arc<crate::config_service::ConfigService>) -> Self {
+        self.config = Some(config);
+        self
     }
 }
 
@@ -1784,6 +1829,26 @@ impl api::KopuzApi for LocalApi {
                 "this daemon runs without a library service",
             )),
         }
+    }
+
+    async fn config(&self) -> Result<api::ConfigView, ApiError> {
+        match &self.config {
+            Some(service) => service.view().await,
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a config service",
+            )),
+        }
+    }
+
+    async fn patch_config(&self, patch: serde_json::Value) -> Result<api::ConfigView, ApiError> {
+        let Some(service) = &self.config else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without a config service",
+            ));
+        };
+        let (view, updated, changed) = service.patch(patch).await?;
+        self.session.set_config(updated, changed);
+        Ok(view)
     }
 
     fn events(&self) -> api::EventStream {

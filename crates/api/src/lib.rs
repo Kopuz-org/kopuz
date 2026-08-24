@@ -25,6 +25,16 @@ pub use queue::{QueueContext, QueueEdit, QueueItem, QueueMode, QueueWindow, SetQ
 
 pub const API_VERSION: u32 = 1;
 
+/// The `GET /v1/config` payload: the layered config with credential keys
+/// stripped, plus the keys a managed settings file pins (rendered locked in
+/// settings UIs).
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ConfigView {
+    pub config: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locked_keys: Vec<String>,
+}
+
 /// Returned by every command; `rev` names the state revision that includes
 /// the command's effect, so a client can wait for the event stream to catch
 /// up before trusting its local mirror.
@@ -46,6 +56,12 @@ pub trait KopuzApi: Send + Sync {
     async fn set_queue(&self, req: SetQueueRequest) -> Result<CommandAck, ApiError>;
 
     async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError>;
+
+    async fn config(&self) -> Result<ConfigView, ApiError>;
+
+    /// RFC 7396 merge patch against the config surface. Credential and
+    /// locked keys are refused with `invalid_input`.
+    async fn patch_config(&self, patch: serde_json::Value) -> Result<ConfigView, ApiError>;
 
     async fn tracks(&self, filter: TrackFilter, page: Page) -> Result<TrackPage, ApiError>;
 
