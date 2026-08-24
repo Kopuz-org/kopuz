@@ -5,7 +5,6 @@
 //! implements it over HTTP/JSON + SSE. The JSON shapes of these types are the
 //! protocol; a breaking change to a shipped shape requires a new API version.
 //!
-//! See `docs/daemon-split-plan.md` for the full endpoint and event catalog.
 //! The trait starts with the playback core and grows one resource group at a
 //! time as the daemon services land.
 

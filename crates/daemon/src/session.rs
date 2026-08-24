@@ -1,31 +1,57 @@
-//! The PlayerSession actor: single owner of queue/transport state, driven by
-//! commands and publishing [`PlayerState`] snapshots plus [`ApiEvent`]s.
-//!
-//! This is the daemon-side replacement for the Signal-shaped
-//! `PlayerController`. The queue semantics are live; transport commands that
-//! need the audio engine return `Unsupported` until the engine port lands, so
-//! nothing pretends to play audio it cannot.
+//! The PlayerSession actor: sole owner of queue, transport, intent, and audio
+//! engine state. Commands and engine events are serialized through one tokio
+//! task, then projected into watch snapshots and broadcast API events.
 
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use api::{
-    ApiError, ApiEvent, CommandAck, NowPlaying, Page, PlayerCommand, PlayerState, QueueContext,
-    QueueItem, QueueMode, QueueSummary, QueueWindow, SetQueueRequest, TrackKind,
+    ApiError, ApiEvent, BufferedRange, CommandAck, FadingState, Intent, NowPlaying, Page,
+    Phase as ApiPhase, PlayerCommand, PlayerState, PositionAnchor, QueueContext, QueueItem,
+    QueueMode, QueueSummary, QueueWindow, SetQueueRequest, TrackKind,
 };
+use player::engine::{Event as EngineEvent, Phase as EnginePhase, SourceFactory, Transition};
+use player::player::{LoadArgs, NowPlayingMeta, Player, PlayerInitError};
 use reader::Track;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
+use tokio::task::JoinHandle;
+use utils::playback_ref::{PlaybackItemRef, ResolvedStreamRef};
 
-use crate::queue_model::QueueModel;
+use crate::playback::network_factory;
+use crate::queue_model::{NextOutcome, QueueModel};
+
+mod reconciler;
 
 pub const EVENT_BUFFER: usize = 512;
+const POSITION_CORRECTION_INTERVAL: Duration = Duration::from_secs(10);
 
-/// Resolves a [`QueueContext`] into concrete tracks, daemon-side. The library
-/// service implements this over the database; tests inject a stub.
+/// Resolves a wire queue context into concrete tracks daemon-side.
 #[async_trait::async_trait]
 pub trait QueueMaterializer: Send + Sync {
     async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError>;
 }
+
+/// Playback dependencies that will eventually be owned by daemon services.
+/// Keeping them together lets the actor land before ConfigService and source
+/// lifecycle extraction do.
+pub struct PlaybackServices {
+    pub config: config::AppConfig,
+    pub active_source: Option<server::source::ActiveSource>,
+    pub station_registry: Arc<radio::registry::StationRegistry>,
+}
+
+impl Default for PlaybackServices {
+    fn default() -> Self {
+        Self {
+            config: config::AppConfig::default(),
+            active_source: None,
+            station_registry: Arc::new(radio::registry::StationRegistry::default()),
+        }
+    }
+}
+
+type FactoryOverride = Arc<dyn Fn(&Track) -> Option<SourceFactory> + Send + Sync>;
 
 enum SessionCmd {
     Player(PlayerCommand, oneshot::Sender<Result<CommandAck, ApiError>>),
@@ -34,6 +60,9 @@ enum SessionCmd {
         oneshot::Sender<Result<CommandAck, ApiError>>,
     ),
     Window(Page, oneshot::Sender<Result<QueueWindow, ApiError>>),
+    LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
+    LoadFinished(LoadFinished),
+    BufferProgress(BufferProgressEvent),
 }
 
 #[derive(Clone)]
@@ -44,25 +73,81 @@ pub struct SessionHandle {
 }
 
 impl SessionHandle {
-    pub fn spawn(materializer: Arc<dyn QueueMaterializer>) -> Self {
+    pub fn try_spawn(
+        materializer: Arc<dyn QueueMaterializer>,
+        services: PlaybackServices,
+    ) -> Result<Self, PlayerInitError> {
+        let player = Player::try_new()?;
+        Ok(Self::spawn_with_player(materializer, player, services))
+    }
+
+    pub fn spawn_with_player(
+        materializer: Arc<dyn QueueMaterializer>,
+        player: Player,
+        services: PlaybackServices,
+    ) -> Self {
+        Self::spawn_inner(materializer, player, services, None)
+    }
+
+    fn spawn_inner(
+        materializer: Arc<dyn QueueMaterializer>,
+        player: Player,
+        services: PlaybackServices,
+        factory_override: Option<FactoryOverride>,
+    ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (events, _) = broadcast::channel(EVENT_BUFFER);
+        let engine_events = player.subscribe();
+        player.set_volume(services.config.volume);
+        player.set_channel_mode(services.config.channel_mode);
+        player.set_equalizer(services.config.equalizer.clone());
+        player.set_device_change_behavior(services.config.device_change_behavior);
+        player.set_sample_rate_mode(services.config.sample_rate_mode);
+
         let session = Session {
             model: QueueModel::default(),
+            player,
+            intent: PlaybackIntent::Stopped,
+            next_token: 0,
+            current_token: 0,
+            pending_resume: None,
+            pending_transition: None,
+            armed_transition: None,
+            load_task: None,
+            phase: ApiPhase::Idle,
+            position: None,
+            position_token: None,
+            buffered: Vec::new(),
+            error: None,
             rev: 0,
             queue_rev: 0,
-            volume: 1.0,
+            volume: services.config.volume,
             epoch: Instant::now(),
             events: events.clone(),
             materializer,
+            config: services.config,
+            active_source: services.active_source,
+            station_registry: services.station_registry,
+            cmd_tx: cmd_tx.clone(),
+            factory_override,
         };
         let (state_tx, state_rx) = watch::channel(session.build_state());
-        tokio::spawn(session.run(cmd_rx, state_tx));
+        tokio::spawn(session.run(cmd_rx, engine_events, state_tx));
         Self {
             cmd_tx,
             state_rx,
             events,
         }
+    }
+
+    #[cfg(test)]
+    fn spawn_with_factory(
+        materializer: Arc<dyn QueueMaterializer>,
+        player: Player,
+        services: PlaybackServices,
+        factory_override: FactoryOverride,
+    ) -> Self {
+        Self::spawn_inner(materializer, player, services, Some(factory_override))
     }
 
     pub fn state(&self) -> PlayerState {
@@ -85,12 +170,12 @@ impl SessionHandle {
             .map_err(|_| ApiError::internal("daemon session terminated"))?
     }
 
-    pub async fn player_command(&self, cmd: PlayerCommand) -> Result<CommandAck, ApiError> {
-        self.request(|tx| SessionCmd::Player(cmd, tx)).await
+    pub async fn player_command(&self, command: PlayerCommand) -> Result<CommandAck, ApiError> {
+        self.request(|tx| SessionCmd::Player(command, tx)).await
     }
 
-    pub async fn set_queue(&self, req: SetQueueRequest) -> Result<CommandAck, ApiError> {
-        self.request(|tx| SessionCmd::SetQueue(req, tx)).await
+    pub async fn set_queue(&self, request: SetQueueRequest) -> Result<CommandAck, ApiError> {
+        self.request(|tx| SessionCmd::SetQueue(request, tx)).await
     }
 
     pub async fn queue_window(&self, page: Page) -> Result<QueueWindow, ApiError> {
@@ -98,91 +183,197 @@ impl SessionHandle {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlaybackIntent {
+    Stopped,
+    Loading {
+        token: u64,
+        idx: usize,
+        crossfade: bool,
+        from_token: u64,
+    },
+    Committed {
+        token: u64,
+    },
+}
+
+impl PlaybackIntent {
+    fn token(self) -> u64 {
+        match self {
+            Self::Stopped => 0,
+            Self::Loading { token, .. } | Self::Committed { token } => token,
+        }
+    }
+
+    fn is_loading(self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+}
+
+impl From<PlaybackIntent> for Intent {
+    fn from(value: PlaybackIntent) -> Self {
+        match value {
+            PlaybackIntent::Stopped => Self::Stopped,
+            PlaybackIntent::Loading {
+                token, from_token, ..
+            } => Self::Loading {
+                token,
+                from_token: (from_token != 0).then_some(from_token),
+            },
+            PlaybackIntent::Committed { token } => Self::Committed { token },
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingResumeState {
+    track_key: String,
+    position_ms: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TransitionStage {
+    Loading,
+    Fading,
+}
+
+struct PendingTransition {
+    model: QueueModel,
+    to_token: u64,
+    from_token: u64,
+    stage: TransitionStage,
+}
+
 struct Session {
     model: QueueModel,
+    player: Player,
+    intent: PlaybackIntent,
+    next_token: u64,
+    current_token: u64,
+    pending_resume: Option<PendingResumeState>,
+    pending_transition: Option<PendingTransition>,
+    armed_transition: Option<u64>,
+    load_task: Option<(u64, JoinHandle<()>)>,
+    phase: ApiPhase,
+    position: Option<PositionAnchor>,
+    position_token: Option<u64>,
+    buffered: Vec<BufferedRange>,
+    error: Option<String>,
     rev: u64,
     queue_rev: u64,
     volume: f32,
     epoch: Instant,
     events: broadcast::Sender<ApiEvent>,
     materializer: Arc<dyn QueueMaterializer>,
+    config: config::AppConfig,
+    active_source: Option<server::source::ActiveSource>,
+    station_registry: Arc<radio::registry::StationRegistry>,
+    cmd_tx: mpsc::UnboundedSender<SessionCmd>,
+    factory_override: Option<FactoryOverride>,
 }
 
 impl Session {
     async fn run(
         mut self,
         mut cmd_rx: mpsc::UnboundedReceiver<SessionCmd>,
+        mut engine_events: mpsc::UnboundedReceiver<EngineEvent>,
         state_tx: watch::Sender<PlayerState>,
     ) {
-        while let Some(cmd) = cmd_rx.recv().await {
-            match cmd {
-                SessionCmd::Player(cmd, reply) => {
-                    let result = self.handle_player_command(cmd, &state_tx);
-                    let _ = reply.send(result);
+        let correction_start = tokio::time::Instant::now() + POSITION_CORRECTION_INTERVAL;
+        let mut correction =
+            tokio::time::interval_at(correction_start, POSITION_CORRECTION_INTERVAL);
+        correction.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            tokio::select! {
+                command = cmd_rx.recv() => {
+                    let Some(command) = command else { break };
+                    self.handle_command(command, &state_tx).await;
                 }
-                SessionCmd::SetQueue(req, reply) => {
-                    let result = self.handle_set_queue(req, &state_tx).await;
-                    let _ = reply.send(result);
+                event = engine_events.recv() => {
+                    let Some(event) = event else { break };
+                    self.handle_engine_event(event, &state_tx);
                 }
-                SessionCmd::Window(page, reply) => {
-                    let _ = reply.send(Ok(self.window(page)));
+                _ = correction.tick() => {
+                    if self.phase == ApiPhase::Playing {
+                        self.publish_position_anchor(&state_tx, None, None, true);
+                    }
                 }
             }
         }
     }
 
+    async fn handle_command(&mut self, command: SessionCmd, state_tx: &watch::Sender<PlayerState>) {
+        match command {
+            SessionCmd::Player(command, reply) => {
+                let result = self.handle_player_command(command, state_tx);
+                let _ = reply.send(result);
+            }
+            SessionCmd::SetQueue(request, reply) => {
+                let result = self.handle_set_queue(request, state_tx).await;
+                let _ = reply.send(result);
+            }
+            SessionCmd::Window(page, reply) => {
+                let _ = reply.send(Ok(self.window(page)));
+            }
+            SessionCmd::LoadPrepared(result) => self.handle_prepared_load(*result, state_tx),
+            SessionCmd::LoadFinished(result) => self.handle_load_finished(result, state_tx),
+            SessionCmd::BufferProgress(event) => self.handle_buffer_progress(event, state_tx),
+        }
+    }
+
     fn handle_player_command(
         &mut self,
-        cmd: PlayerCommand,
+        command: PlayerCommand,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
-        match cmd {
-            PlayerCommand::Next => {
-                self.model.advance_next();
-                Ok(self.publish(state_tx, false))
+        let mut queue_changed = false;
+        match command {
+            PlayerCommand::Play => self.resume(state_tx),
+            PlayerCommand::Pause => self.pause(state_tx),
+            PlayerCommand::Toggle => {
+                if self.phase == ApiPhase::Playing {
+                    self.pause(state_tx);
+                } else {
+                    self.resume(state_tx);
+                }
             }
-            PlayerCommand::Previous => {
-                self.model.previous_position();
-                Ok(self.publish(state_tx, false))
-            }
+            PlayerCommand::Next => self.play_next(false, state_tx),
+            PlayerCommand::Previous => self.play_previous(state_tx),
+            PlayerCommand::Stop => self.stop(state_tx),
+            PlayerCommand::Seek { position_ms } => self.seek(position_ms, state_tx)?,
             PlayerCommand::SetVolume { volume } => {
                 self.volume = volume.clamp(0.0, 1.0);
-                Ok(self.publish(state_tx, false))
+                self.player.set_volume(self.volume);
             }
             PlayerCommand::SetMode { shuffle, loop_mode } => {
+                queue_changed = shuffle.is_some();
                 if let Some(on) = shuffle {
                     self.model.set_shuffle(on);
                 }
                 if let Some(mode) = loop_mode {
                     self.model.set_loop_mode(mode);
                 }
-                Ok(self.publish(state_tx, shuffle.is_some()))
             }
-            PlayerCommand::Play
-            | PlayerCommand::Pause
-            | PlayerCommand::Toggle
-            | PlayerCommand::Stop
-            | PlayerCommand::Seek { .. } => Err(ApiError::unsupported(
-                "transport commands land with the engine port",
-            )),
         }
+        Ok(self.publish(state_tx, queue_changed))
     }
 
     async fn handle_set_queue(
         &mut self,
-        req: SetQueueRequest,
+        request: SetQueueRequest,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
-        let tracks = self.materializer.materialize(&req.context).await?;
-        match req.mode {
+        let tracks = self.materializer.materialize(&request.context).await?;
+        match request.mode {
             QueueMode::Replace => {
                 self.model.replace(tracks);
-                if let Some(on) = req.shuffle {
+                if let Some(on) = request.shuffle {
                     self.model.set_shuffle(on);
                 }
                 let len = self.model.len();
                 if len > 0 {
-                    let start = req.start_index.map(|i| i as usize).unwrap_or_else(|| {
+                    let start = request.start_index.map(|i| i as usize).unwrap_or_else(|| {
                         if self.model.shuffle() {
                             use rand::RngExt;
                             rand::rng().random_range(0..len)
@@ -190,7 +381,8 @@ impl Session {
                             0
                         }
                     });
-                    self.model.jump_to(start.min(len - 1));
+                    let idx = self.model.jump_to(start.min(len - 1));
+                    self.start_load(idx, false, None);
                 }
             }
             QueueMode::Append => self.model.add(tracks),
@@ -199,13 +391,601 @@ impl Session {
         Ok(self.publish(state_tx, true))
     }
 
+    fn play_next(&mut self, allow_crossfade: bool, state_tx: &watch::Sender<PlayerState>) {
+        if allow_crossfade {
+            let mut candidate = self.model.clone();
+            if let NextOutcome::Play(idx) = candidate.advance_next() {
+                self.start_load(idx, true, Some(candidate));
+            }
+            return;
+        }
+
+        if self.pending_transition.is_some() {
+            let _ = self.revert_transition();
+        }
+        match self.model.advance_next() {
+            NextOutcome::Play(idx) => self.start_load(idx, false, None),
+            NextOutcome::EndOfQueue => {
+                // End of queue: kill an in-flight load so it cannot restart
+                // playback later; the stale-Loaded rule catches a promoted one.
+                self.cancel_load_task();
+                self.pending_transition = None;
+                self.set_intent(PlaybackIntent::Stopped);
+                self.player.pause();
+                if self.phase != ApiPhase::Ended {
+                    self.phase = ApiPhase::Paused;
+                }
+                self.publish_position_anchor(state_tx, None, None, false);
+            }
+            NextOutcome::Empty => {}
+        }
+    }
+
+    fn play_previous(&mut self, state_tx: &watch::Sender<PlayerState>) {
+        let idx = self.model.current_position();
+        if self.revert_transition().is_some() {
+            self.start_load(idx, false, None);
+            return;
+        }
+
+        if self.config.back_behavior == config::BackBehavior::RewindThenPrev
+            && self.displayed_position().as_secs() > 3
+        {
+            let _ = self.seek(0, state_tx);
+            return;
+        }
+
+        if let Some(idx) = self.model.previous_position() {
+            self.start_load(idx, false, None);
+        }
+    }
+
+    fn pause(&mut self, state_tx: &watch::Sender<PlayerState>) {
+        let is_radio = self.current_track_is_radio();
+
+        // Pausing mid-load cancels it, else a cancelled reply leaves intent
+        // stuck Loading. Resolving crossfades revert whole; immediate loads
+        // record a resume point. A running fade is merely frozen.
+        if self.intent.is_loading() && self.revert_transition().is_none() {
+            self.cancel_load_task();
+            if !is_radio {
+                self.store_pending_resume();
+            }
+            self.set_intent(PlaybackIntent::Stopped);
+        }
+
+        if is_radio {
+            self.player.stop_for_transition();
+            self.phase = ApiPhase::Idle;
+        } else {
+            self.player.pause();
+            if self.phase != ApiPhase::Ended {
+                self.phase = ApiPhase::Paused;
+            }
+        }
+        self.publish_position_anchor(state_tx, None, None, false);
+    }
+
+    fn resume(&mut self, state_tx: &watch::Sender<PlayerState>) {
+        let idx = self.model.current_position();
+        let is_radio = self.current_track_is_radio();
+        if is_radio || !self.player.can_resume() {
+            if self.model.track_at(idx).is_some() {
+                if !is_radio {
+                    self.store_pending_resume();
+                }
+                self.start_load(idx, false, None);
+            }
+            return;
+        }
+
+        // Re-adopt a live engine session after a flow that quiesced playback
+        // but kept it resumable, or the stale-session rule would stop it.
+        let engine_token = self.player.session_token();
+        if engine_token != 0 {
+            self.set_intent(PlaybackIntent::Committed {
+                token: engine_token,
+            });
+        }
+        self.player.play_resume();
+        self.phase = ApiPhase::Playing;
+        self.publish_position_anchor(state_tx, Some(engine_token), None, true);
+    }
+
+    fn stop(&mut self, state_tx: &watch::Sender<PlayerState>) {
+        self.cancel_load_task();
+        self.pending_transition = None;
+        self.armed_transition = None;
+        self.pending_resume = None;
+        self.set_intent(PlaybackIntent::Stopped);
+        self.player.stop();
+        self.phase = ApiPhase::Idle;
+        self.buffered.clear();
+        self.publish_position_anchor(state_tx, Some(0), Some(Duration::ZERO), false);
+    }
+
+    fn seek(
+        &mut self,
+        position_ms: u64,
+        state_tx: &watch::Sender<PlayerState>,
+    ) -> Result<(), ApiError> {
+        if self.current_track_is_radio() {
+            return Err(ApiError::invalid_input("radio tracks are not seekable"));
+        }
+
+        let position = Duration::from_millis(position_ms);
+        let token = if let Some(from_token) = self.revert_transition() {
+            self.player.seek_for_session(position, from_token);
+            from_token
+        } else {
+            self.player.seek(position);
+            self.current_token
+        };
+        self.armed_transition = None;
+        self.publish_position_anchor(
+            state_tx,
+            Some(token),
+            Some(position),
+            self.phase == ApiPhase::Playing,
+        );
+        Ok(())
+    }
+
+    /// Two-phase load pipeline. Classification is mutation-free except stale
+    /// offline-cache eviction; only after every early bail do we cancel the
+    /// old load, allocate a token, and publish Loading intent.
+    fn start_load(
+        &mut self,
+        idx: usize,
+        allow_crossfade: bool,
+        transition_model: Option<QueueModel>,
+    ) {
+        let source_model = transition_model.as_ref().unwrap_or(&self.model);
+        let Some(track) = source_model.track_at(idx).cloned() else {
+            return;
+        };
+        let track_key = track.id.uid();
+        let (restore_seek, clear_pending_resume) = self.pending_resume_seek(&track);
+        let use_crossfade = allow_crossfade
+            && self.should_crossfade()
+            && restore_seek.is_none_or(|position| position.is_zero());
+        let crossfade_duration = Duration::from_secs(self.config.crossfade_seconds as u64);
+        let item_ref = PlaybackItemRef::parse(&track_key);
+        let is_radio = item_ref.is_radio();
+        let is_server = item_ref.is_server();
+        let item_id = item_ref.primary_id().unwrap_or_default().to_string();
+        let stream_id = item_ref.stream_id().unwrap_or_default().to_string();
+
+        let factory_override = self
+            .factory_override
+            .as_ref()
+            .and_then(|provider| provider(&track));
+
+        let offline_path = if factory_override.is_none() && is_server {
+            let raw = self
+                .config
+                .offline_tracks
+                .get(&item_id)
+                .map(PathBuf::from)
+                .filter(|path| path.exists());
+            if let Some(path) = raw.as_ref() {
+                let bad_ext = matches!(
+                    path.extension().and_then(|extension| extension.to_str()),
+                    Some("audio") | Some("bin")
+                );
+                if bad_ext {
+                    // Imported config paths are untrusted. Remove only the
+                    // stale mapping; deleting the path could remove user data.
+                    self.config.offline_tracks.remove(&item_id);
+                    None
+                } else {
+                    raw
+                }
+            } else {
+                raw
+            }
+        } else {
+            None
+        };
+
+        let mut use_icy = false;
+        let remote_ref = if factory_override.is_some() || offline_path.is_some() {
+            None
+        } else if is_radio {
+            let station = self.station_registry.get(&item_id);
+            use_icy = station.is_some_and(|station| !station.has_live_metadata());
+            let cover = station
+                .and_then(|station| match &station.metadata {
+                    Some(radio::manifest::MetadataSourceDef::Static(static_meta)) => {
+                        static_meta.resolve(&stream_id).2.map(str::to_string)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
+            station
+                .and_then(|station| station.streams.iter().find(|stream| stream.id == stream_id))
+                .map(|stream| (stream.url.clone(), cover))
+        } else if is_server && self.config.server.is_some() && self.active_source.is_some() {
+            let cover = server::cover::track(&self.config, &track, 800)
+                .map(|cover| cover.as_ref().to_string())
+                .unwrap_or_default();
+            Some((ResolvedStreamRef::pending_marker(&item_id), cover))
+        } else {
+            None
+        };
+
+        let local_path = if factory_override.is_none() && !is_server && !is_radio {
+            track.id.local_path().map(PathBuf::from)
+        } else {
+            None
+        };
+
+        if factory_override.is_none()
+            && offline_path.is_none()
+            && local_path.is_none()
+            && remote_ref.is_none()
+        {
+            return;
+        }
+
+        self.error = None;
+        self.cancel_load_task();
+        if !use_crossfade {
+            self.pending_transition = None;
+        }
+        let from_token = self.intent.token();
+        let token = self.allocate_token();
+        self.set_intent(PlaybackIntent::Loading {
+            token,
+            idx,
+            crossfade: use_crossfade,
+            from_token,
+        });
+        self.buffered.clear();
+
+        if use_crossfade {
+            let Some(model) = transition_model else {
+                self.fail_load(token, "crossfade transition has no queue candidate");
+                return;
+            };
+            self.pending_transition = Some(PendingTransition {
+                model,
+                to_token: token,
+                from_token,
+                stage: TransitionStage::Loading,
+            });
+        }
+
+        let cover_url = if offline_path.is_some() {
+            server::cover::track(&self.config, &track, 800)
+                .map(|cover| cover.as_ref().to_string())
+                .unwrap_or_default()
+        } else {
+            remote_ref
+                .as_ref()
+                .map(|(_, cover)| cover.clone())
+                .unwrap_or_default()
+        };
+        let artwork = if is_server || is_radio {
+            Some(cover_url)
+        } else {
+            track.cover.clone()
+        };
+
+        if !use_crossfade {
+            if is_server || is_radio {
+                // Remote resolution deliberately silences the old session;
+                // local files switch seamlessly inside the engine.
+                self.player.stop_for_transition();
+                self.phase = ApiPhase::Idle;
+            }
+            self.position = Some(PositionAnchor {
+                ms: restore_seek.unwrap_or_default().as_millis() as u64,
+                at_ms: self.now_ms(),
+                playing: false,
+            });
+        }
+
+        let classified = ClassifiedLoad {
+            token,
+            idx,
+            track,
+            is_radio,
+            item_id,
+            use_icy,
+            factory_override,
+            offline_path,
+            local_path,
+            remote_ref,
+            active_source: self.active_source.clone(),
+            artwork,
+            transition: if use_crossfade {
+                Transition::Crossfade(crossfade_duration)
+            } else {
+                Transition::Immediate
+            },
+            start_at: restore_seek.filter(|position| !position.is_zero()),
+            clear_pending_resume,
+            cmd_tx: self.cmd_tx.clone(),
+        };
+        let tx = self.cmd_tx.clone();
+        let task = tokio::spawn(async move {
+            let result = classified.prepare().await;
+            let _ = tx.send(SessionCmd::LoadPrepared(Box::new(result)));
+        });
+        self.load_task = Some((token, task));
+    }
+
+    fn handle_prepared_load(
+        &mut self,
+        result: Result<PreparedLoad, LoadFailure>,
+        state_tx: &watch::Sender<PlayerState>,
+    ) {
+        let prepared = match result {
+            Ok(prepared) => prepared,
+            Err(failure) => {
+                if self.fail_load(failure.token, failure.message) {
+                    self.publish(state_tx, false);
+                }
+                return;
+            }
+        };
+        if self.intent.token() != prepared.token {
+            return;
+        }
+        self.load_task = None;
+        self.stamp_probed_stream_info(
+            prepared.token,
+            prepared.idx,
+            prepared.duration_secs,
+            prepared.bitrate,
+        );
+
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.player.load(LoadArgs {
+            token: prepared.token,
+            factory: prepared.factory,
+            meta: NowPlayingMeta {
+                title: prepared.track.title,
+                artist: prepared.track.artist,
+                album: prepared.track.album,
+                duration: Duration::from_secs(prepared.track.duration),
+                artwork: prepared.artwork,
+            },
+            transition: prepared.transition,
+            start_at: prepared.start_at,
+            reply: Some(reply_tx),
+        });
+        let token = prepared.token;
+        let tx = self.cmd_tx.clone();
+        let task = tokio::spawn(async move {
+            let result = reply_rx.await.ok();
+            let _ = tx.send(SessionCmd::LoadFinished(LoadFinished {
+                token,
+                result,
+                clear_pending_resume: prepared.clear_pending_resume,
+            }));
+        });
+        self.load_task = Some((token, task));
+        self.publish(state_tx, false);
+    }
+
+    fn handle_load_finished(
+        &mut self,
+        finished: LoadFinished,
+        state_tx: &watch::Sender<PlayerState>,
+    ) {
+        if self.intent.token() != finished.token {
+            return;
+        }
+        self.load_task = None;
+        match finished.result {
+            Some(Ok(outcome)) => {
+                self.set_intent(PlaybackIntent::Committed {
+                    token: finished.token,
+                });
+                if finished.clear_pending_resume {
+                    self.pending_resume = None;
+                }
+                let matching_transition = self
+                    .pending_transition
+                    .as_ref()
+                    .is_some_and(|pending| pending.to_token == finished.token);
+                if matching_transition {
+                    if outcome.crossfaded {
+                        if let Some(pending) = self.pending_transition.as_mut() {
+                            // Keep the visible queue/track outgoing until the
+                            // authoritative TrackSwitched event.
+                            pending.stage = TransitionStage::Fading;
+                        }
+                    } else {
+                        self.commit_transition_model(finished.token);
+                    }
+                }
+                self.publish(state_tx, false);
+                if self.pending_transition.is_none()
+                    && self.phase != ApiPhase::Idle
+                    && self.position_token != Some(finished.token)
+                {
+                    self.publish_position_anchor(
+                        state_tx,
+                        Some(finished.token),
+                        None,
+                        self.phase == ApiPhase::Playing,
+                    );
+                }
+            }
+            Some(Err(error)) => {
+                tracing::error!(error = %error, "playback failed");
+                if self.fail_load(finished.token, error) {
+                    self.publish(state_tx, false);
+                }
+            }
+            None => {
+                // Engine-side cancellation is owned by the command that
+                // cancelled it; token guards reject any late completion.
+            }
+        }
+    }
+
+    fn commit_transition_model(&mut self, token: u64) -> bool {
+        let Some(pending) = self.pending_transition.take() else {
+            return false;
+        };
+        if pending.to_token != token {
+            self.pending_transition = Some(pending);
+            return false;
+        }
+        self.model = pending.model;
+        true
+    }
+
+    fn commit_transition(&mut self, token: u64) -> bool {
+        if !self.commit_transition_model(token) {
+            return false;
+        }
+        self.player.commit_now_playing();
+        true
+    }
+
+    /// Undo either a resolving crossfade or a running fade. The queue model is
+    /// still outgoing until commit, so discarding the candidate also undoes
+    /// its history/index mutation.
+    fn revert_transition(&mut self) -> Option<u64> {
+        let pending = self.pending_transition.take()?;
+        if pending.stage == TransitionStage::Loading {
+            self.cancel_load_task();
+        }
+        self.armed_transition = None;
+        self.set_intent(PlaybackIntent::Committed {
+            token: pending.from_token,
+        });
+        Some(pending.from_token)
+    }
+
+    fn cancel_load_task(&mut self) {
+        if let Some((_, task)) = self.load_task.take() {
+            task.abort();
+        }
+        self.player.cancel_pending_load();
+    }
+
+    fn allocate_token(&mut self) -> u64 {
+        self.next_token = self.next_token.wrapping_add(1);
+        self.next_token
+    }
+
+    /// Sole writer for playback intent and its plain token mirror.
+    fn set_intent(&mut self, next: PlaybackIntent) {
+        self.current_token = next.token();
+        self.intent = next;
+    }
+
+    fn fail_load(&mut self, token: u64, error: impl std::fmt::Display) -> bool {
+        let intent = self.intent;
+        if intent.token() != token {
+            return false;
+        }
+        self.error = Some(format!("Couldn't load this track:\n{error}"));
+        self.buffered.clear();
+        match intent {
+            PlaybackIntent::Loading {
+                crossfade: true,
+                from_token,
+                ..
+            } => {
+                self.pending_transition = None;
+                self.set_intent(PlaybackIntent::Committed { token: from_token });
+            }
+            _ => {
+                self.set_intent(PlaybackIntent::Stopped);
+            }
+        }
+        true
+    }
+
+    fn pending_resume_seek(&self, track: &Track) -> (Option<Duration>, bool) {
+        let pending = self.pending_resume.as_ref();
+        let position = pending.and_then(|pending| {
+            (pending.track_key == track.id.uid()).then(|| {
+                Duration::from_millis(pending.position_ms.min(track.duration.saturating_mul(1000)))
+            })
+        });
+        (position, pending.is_some())
+    }
+
+    fn store_pending_resume(&mut self) {
+        if let Some(track) = self.model.current_track() {
+            let position_ms = if self.intent.is_loading() {
+                self.position
+                    .map(|position| position.ms)
+                    .unwrap_or_default()
+            } else {
+                self.displayed_position().as_millis() as u64
+            };
+            self.pending_resume = Some(PendingResumeState {
+                track_key: track.id.uid(),
+                position_ms: position_ms.min(track.duration.saturating_mul(1000)),
+            });
+        }
+    }
+
+    fn stamp_probed_stream_info(
+        &mut self,
+        token: u64,
+        idx: usize,
+        duration_secs: Option<u64>,
+        bitrate: Option<u32>,
+    ) {
+        let model = self
+            .pending_transition
+            .as_mut()
+            .filter(|pending| pending.to_token == token)
+            .map(|pending| &mut pending.model)
+            .unwrap_or(&mut self.model);
+        if let Some(track) = model.track_at_mut(idx) {
+            if let Some(duration) = duration_secs.filter(|duration| *duration > 0) {
+                track.duration = duration;
+            }
+            if let Some(bitrate) = bitrate {
+                track.bitrate = (bitrate / 1000) as u16;
+            }
+        }
+    }
+
+    fn handle_buffer_progress(
+        &mut self,
+        event: BufferProgressEvent,
+        state_tx: &watch::Sender<PlayerState>,
+    ) {
+        if event.token != self.current_token {
+            return;
+        }
+        let Some(total) = event.total.filter(|total| *total > 0) else {
+            return;
+        };
+        merge_buffered_range(
+            &mut self.buffered,
+            BufferedRange {
+                start: event.start,
+                end: event.end,
+                total: Some(total),
+            },
+        );
+        let _ = self.events.send(ApiEvent::PlayerBuffered {
+            token: event.token,
+            ranges: self.buffered.clone(),
+        });
+        let _ = state_tx.send(self.build_state());
+    }
+
     fn window(&mut self, page: Page) -> QueueWindow {
         let items = self
             .model
             .window(page.offset as usize, page.limit as usize)
             .into_iter()
-            .map(|(pos, track)| QueueItem {
-                index: pos as u32,
+            .map(|(position, track)| QueueItem {
+                index: position as u32,
                 track,
             })
             .collect();
@@ -239,16 +1019,83 @@ impl Session {
         CommandAck { rev: self.rev }
     }
 
+    fn publish_position_anchor(
+        &mut self,
+        state_tx: &watch::Sender<PlayerState>,
+        token: Option<u64>,
+        position: Option<Duration>,
+        playing: bool,
+    ) {
+        let token = token.unwrap_or_else(|| self.visible_token());
+        let position = position.unwrap_or_else(|| self.displayed_position());
+        let anchor = PositionAnchor {
+            ms: position.as_millis() as u64,
+            at_ms: self.now_ms(),
+            playing,
+        };
+        self.position = Some(anchor);
+        self.position_token = Some(token);
+        let _ = state_tx.send(self.build_state());
+        let _ = self.events.send(ApiEvent::PlayerPosition {
+            token,
+            position_ms: anchor.ms,
+            at_ms: anchor.at_ms,
+            playing,
+        });
+    }
+
+    fn visible_token(&self) -> u64 {
+        self.pending_transition
+            .as_ref()
+            .map(|pending| pending.from_token)
+            .unwrap_or(self.current_token)
+    }
+
+    fn displayed_position(&self) -> Duration {
+        if self.pending_transition.is_some()
+            && let Some(position) = self.player.fading_position()
+        {
+            return position;
+        }
+        self.player.get_position()
+    }
+
+    fn current_track_is_radio(&self) -> bool {
+        self.model
+            .current_track()
+            .is_some_and(|track| track.duration == u64::MAX)
+    }
+
+    fn should_crossfade(&self) -> bool {
+        self.config.crossfade_seconds > 0
+            && self.phase == ApiPhase::Playing
+            && self.player.can_resume()
+    }
+
     fn now_ms(&self) -> u64 {
         self.epoch.elapsed().as_millis() as u64
     }
 
     fn build_state(&self) -> PlayerState {
         let track = self.model.current_track().map(now_playing_from);
+        let fading = self.pending_transition.as_ref().and_then(|pending| {
+            (pending.stage == TransitionStage::Fading).then(|| FadingState {
+                from_token: pending.from_token,
+                track: track.clone().unwrap_or_default(),
+                position_ms: self
+                    .player
+                    .fading_position()
+                    .unwrap_or_default()
+                    .as_millis() as u64,
+            })
+        });
         PlayerState {
             rev: self.rev,
             now_ms: self.now_ms(),
+            phase: self.phase,
+            intent: self.intent.into(),
             track,
+            position: self.position,
             queue: QueueSummary {
                 rev: self.queue_rev,
                 length: self.model.len() as u32,
@@ -257,18 +1104,267 @@ impl Session {
                 loop_mode: self.model.loop_mode(),
             },
             volume: self.volume,
+            buffered: self.buffered.clone(),
+            fading,
+            error: self.error.clone(),
             ..Default::default()
         }
     }
 }
 
-/// Boundary translation from the internal track model to the wire summary:
-/// the `u64::MAX` radio sentinel becomes an explicit kind + non-seekable flag
-/// here and never reaches a client.
+enum ClassifiedSource {
+    Factory(SourceFactory),
+    Local(PathBuf),
+    Cached {
+        path: PathBuf,
+        source: Option<server::source::ActiveSource>,
+        item_id: String,
+    },
+    Remote {
+        stream_ref: String,
+        source: Option<server::source::ActiveSource>,
+    },
+}
+
+struct ClassifiedLoad {
+    token: u64,
+    idx: usize,
+    track: Track,
+    is_radio: bool,
+    item_id: String,
+    use_icy: bool,
+    factory_override: Option<SourceFactory>,
+    offline_path: Option<PathBuf>,
+    local_path: Option<PathBuf>,
+    remote_ref: Option<(String, String)>,
+    active_source: Option<server::source::ActiveSource>,
+    artwork: Option<String>,
+    transition: Transition,
+    start_at: Option<Duration>,
+    clear_pending_resume: bool,
+    cmd_tx: mpsc::UnboundedSender<SessionCmd>,
+}
+
+impl ClassifiedLoad {
+    async fn prepare(mut self) -> Result<PreparedLoad, LoadFailure> {
+        let source = if let Some(factory) = self.factory_override.take() {
+            ClassifiedSource::Factory(factory)
+        } else if let Some(path) = self.local_path.take() {
+            ClassifiedSource::Local(path)
+        } else if let Some(path) = self.offline_path.take() {
+            ClassifiedSource::Cached {
+                path,
+                source: self.active_source.clone(),
+                item_id: self.item_id.clone(),
+            }
+        } else {
+            let (stream_ref, _) = self.remote_ref.take().ok_or_else(|| LoadFailure {
+                token: self.token,
+                message: "classified load has no source".to_string(),
+            })?;
+            ClassifiedSource::Remote {
+                stream_ref,
+                source: self.active_source.clone(),
+            }
+        };
+
+        let buffer_progress = (!self.is_radio).then(|| {
+            let tx = self.cmd_tx.clone();
+            let token = self.token;
+            Arc::new(move |start, end, total| {
+                let _ = tx.send(SessionCmd::BufferProgress(BufferProgressEvent {
+                    token,
+                    start,
+                    end,
+                    total,
+                }));
+            }) as utils::stream_buffer::BufferProgressCallback
+        });
+
+        let icy_tx = if self.is_radio && self.use_icy {
+            let (tx, _rx) = watch::channel(utils::icy::IcyMeta::default());
+            Some(tx)
+        } else {
+            None
+        };
+
+        let mut duration_secs = None;
+        let mut bitrate = None;
+        let factory: SourceFactory = match source {
+            ClassifiedSource::Factory(factory) => factory,
+            ClassifiedSource::Local(path) => Box::new(move || {
+                player::decoder::open_file(&path).map_err(|error| error.to_string())
+            }),
+            ClassifiedSource::Cached {
+                path,
+                source,
+                item_id,
+            } => {
+                // The fallback resolve blocks on the runtime captured here;
+                // this closure executes on the runtime-less decode worker.
+                let rt_handle = tokio::runtime::Handle::current();
+                Box::new(move || match player::decoder::open_file(&path) {
+                    Ok(parts) => Ok(parts),
+                    Err(error) => {
+                        tracing::warn!(error = %error, "cached file failed to open; falling back to the server stream");
+                        let source = source
+                            .as_ref()
+                            .ok_or_else(|| "no active source for cache fallback".to_string())?;
+                        let info = rt_handle
+                            .block_on(source.resolve_stream(&item_id))
+                            .map_err(|error| error.to_string())?;
+                        network_factory(
+                            info.url,
+                            info.format,
+                            info.user_agent,
+                            false,
+                            None,
+                            rt_handle.clone(),
+                            buffer_progress.clone(),
+                        )()
+                    }
+                })
+            }
+            ClassifiedSource::Remote { stream_ref, source } => {
+                let (stream_url, format, user_agent) = match ResolvedStreamRef::parse(&stream_ref) {
+                    ResolvedStreamRef::Pending(item_id) => {
+                        let source = source.ok_or_else(|| LoadFailure {
+                            token: self.token,
+                            message: "no active source for remote track".to_string(),
+                        })?;
+                        let info = source.resolve_stream(item_id).await.map_err(|error| {
+                            tracing::error!(error = %error, "stream URL resolve failed");
+                            LoadFailure {
+                                token: self.token,
+                                message: error.to_string(),
+                            }
+                        })?;
+                        duration_secs = info.duration_secs;
+                        bitrate = info.bitrate;
+                        (info.url, info.format, info.user_agent)
+                    }
+                    ResolvedStreamRef::SoundCloudHls(_)
+                    | ResolvedStreamRef::AppleMusicFmp4(_)
+                    | ResolvedStreamRef::Direct(_) => (stream_ref, None, None),
+                };
+
+                // The factory runs on the decode worker (no runtime), so hand
+                // every blocking stream/decrypt path this task's handle.
+                let rt_handle = tokio::runtime::Handle::current();
+                network_factory(
+                    stream_url,
+                    format,
+                    user_agent,
+                    self.is_radio,
+                    icy_tx,
+                    rt_handle,
+                    buffer_progress,
+                )
+            }
+        };
+
+        if let Some(duration) = duration_secs.filter(|duration| *duration > 0) {
+            self.track.duration = duration;
+        }
+        if let Some(bits_per_second) = bitrate {
+            self.track.bitrate = (bits_per_second / 1000) as u16;
+        }
+
+        Ok(PreparedLoad {
+            token: self.token,
+            idx: self.idx,
+            track: self.track,
+            factory,
+            artwork: self.artwork,
+            transition: self.transition,
+            start_at: self.start_at,
+            clear_pending_resume: self.clear_pending_resume,
+            duration_secs,
+            bitrate,
+        })
+    }
+}
+
+struct PreparedLoad {
+    token: u64,
+    idx: usize,
+    track: Track,
+    factory: SourceFactory,
+    artwork: Option<String>,
+    transition: Transition,
+    start_at: Option<Duration>,
+    clear_pending_resume: bool,
+    duration_secs: Option<u64>,
+    bitrate: Option<u32>,
+}
+
+struct LoadFailure {
+    token: u64,
+    message: String,
+}
+
+struct LoadFinished {
+    token: u64,
+    result: Option<Result<player::engine::LoadOutcome, String>>,
+    clear_pending_resume: bool,
+}
+
+#[derive(Clone, Copy)]
+struct BufferProgressEvent {
+    token: u64,
+    start: u64,
+    end: u64,
+    total: Option<u64>,
+}
+
+fn merge_buffered_range(ranges: &mut Vec<BufferedRange>, incoming: BufferedRange) {
+    let Some(total) = incoming.total.filter(|total| *total > 0) else {
+        return;
+    };
+    if incoming.start >= incoming.end {
+        return;
+    }
+    if ranges
+        .first()
+        .and_then(|range| range.total)
+        .is_some_and(|old_total| old_total != total)
+    {
+        ranges.clear();
+    }
+    ranges.push(BufferedRange {
+        end: incoming.end.min(total),
+        ..incoming
+    });
+    ranges.sort_unstable_by_key(|range| range.start);
+
+    let mut merged: Vec<BufferedRange> = Vec::with_capacity(ranges.len());
+    for range in ranges.drain(..) {
+        if let Some(previous) = merged.last_mut()
+            && range.start <= previous.end
+        {
+            previous.end = previous.end.max(range.end);
+            continue;
+        }
+        merged.push(range);
+    }
+    *ranges = merged;
+}
+
+fn engine_phase(phase: EnginePhase) -> ApiPhase {
+    match phase {
+        EnginePhase::Idle => ApiPhase::Idle,
+        EnginePhase::Playing => ApiPhase::Playing,
+        EnginePhase::Paused => ApiPhase::Paused,
+        EnginePhase::Ended => ApiPhase::Ended,
+    }
+}
+
+/// Translate the internal track model to the wire summary. The radio duration
+/// sentinel is contained at this boundary.
 fn now_playing_from(track: &Track) -> NowPlaying {
     let radio = track.duration == u64::MAX;
     NowPlaying {
-        key: track.id.uid().to_string(),
+        key: track.id.uid(),
         title: track.title.clone(),
         artist: track.artist.clone(),
         album: track.album.clone(),
@@ -286,8 +1382,6 @@ fn now_playing_from(track: &Track) -> NowPlaying {
 }
 
 /// In-process implementation of [`api::KopuzApi`] over a running session.
-/// Android and all-in-one desktop link this directly; `HttpApi` in the client
-/// crate is its wire twin, and the contract tests must hold for both.
 pub struct LocalApi {
     session: SessionHandle,
 }
@@ -304,16 +1398,16 @@ impl api::KopuzApi for LocalApi {
         Ok(self.session.state())
     }
 
-    async fn player_command(&self, cmd: PlayerCommand) -> Result<CommandAck, ApiError> {
-        self.session.player_command(cmd).await
+    async fn player_command(&self, command: PlayerCommand) -> Result<CommandAck, ApiError> {
+        self.session.player_command(command).await
     }
 
     async fn queue_window(&self, page: Page) -> Result<QueueWindow, ApiError> {
         self.session.queue_window(page).await
     }
 
-    async fn set_queue(&self, req: SetQueueRequest) -> Result<CommandAck, ApiError> {
-        self.session.set_queue(req).await
+    async fn set_queue(&self, request: SetQueueRequest) -> Result<CommandAck, ApiError> {
+        self.session.set_queue(request).await
     }
 
     async fn tracks(
@@ -342,9 +1436,95 @@ impl api::KopuzApi for LocalApi {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::HashMap;
+    use std::io::Cursor;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Condvar, Mutex};
+
     use api::{ErrorCode, KopuzApi, LoopMode};
     use futures_util::StreamExt;
+    use player::engine::{AudioSink, DataCallback, DataCallbackFactory, SinkConfig};
+
+    use super::*;
+
+    const TEST_CONFIG: SinkConfig = SinkConfig {
+        channels: 2,
+        sample_rate: 44_100,
+    };
+
+    #[derive(Default)]
+    struct FakeSinkState {
+        callback: Option<DataCallback>,
+        config: Option<SinkConfig>,
+        playing: bool,
+        pause_calls: usize,
+    }
+
+    #[derive(Clone, Default)]
+    struct FakeSinkHandle(Arc<Mutex<FakeSinkState>>);
+
+    impl FakeSinkHandle {
+        fn pull(&self, samples: usize) -> Vec<f32> {
+            let mut output = vec![0.0; samples];
+            let mut state = self.0.lock().expect("sink lock");
+            if state.playing
+                && let Some(callback) = state.callback.as_mut()
+            {
+                callback(&mut output);
+            }
+            output
+        }
+
+        fn pause_calls(&self) -> usize {
+            self.0.lock().expect("sink lock").pause_calls
+        }
+    }
+
+    struct FakeSink(FakeSinkHandle);
+
+    impl AudioSink for FakeSink {
+        fn probe_config(&mut self, desired_sample_rate: Option<u32>) -> Result<SinkConfig, String> {
+            Ok(SinkConfig {
+                channels: TEST_CONFIG.channels,
+                sample_rate: desired_sample_rate.unwrap_or(TEST_CONFIG.sample_rate),
+            })
+        }
+
+        fn open(
+            &mut self,
+            _desired_sample_rate: Option<u32>,
+            make_callback: DataCallbackFactory,
+        ) -> Result<SinkConfig, String> {
+            let callback = make_callback(TEST_CONFIG);
+            let mut state = self.0.0.lock().expect("sink lock");
+            state.callback = Some(callback);
+            state.config = Some(TEST_CONFIG);
+            state.playing = true;
+            Ok(TEST_CONFIG)
+        }
+
+        fn config(&self) -> Option<SinkConfig> {
+            self.0.0.lock().expect("sink lock").config
+        }
+
+        fn play(&mut self) -> Result<(), String> {
+            self.0.0.lock().expect("sink lock").playing = true;
+            Ok(())
+        }
+
+        fn pause(&mut self) {
+            let mut state = self.0.0.lock().expect("sink lock");
+            state.playing = false;
+            state.pause_calls += 1;
+        }
+
+        fn close(&mut self) {
+            let mut state = self.0.0.lock().expect("sink lock");
+            state.callback = None;
+            state.config = None;
+            state.playing = false;
+        }
+    }
 
     struct StubLibrary;
 
@@ -352,135 +1532,30 @@ mod tests {
     impl QueueMaterializer for StubLibrary {
         async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
             match context {
-                QueueContext::Tracks { keys } => Ok(keys
-                    .iter()
-                    .map(|key| Track {
-                        id: reader::models::TrackId::Local(std::path::PathBuf::from(key)),
-                        cover: None,
-                        album_id: String::new(),
-                        title: key.clone(),
-                        artist: String::new(),
-                        album: String::new(),
-                        duration: 100,
-                        khz: 44,
-                        bitrate: 320,
-                        track_number: None,
-                        disc_number: None,
-                        musicbrainz_release_id: None,
-                        musicbrainz_recording_id: None,
-                        musicbrainz_track_id: None,
-                        playlist_item_id: None,
-                        artists: vec![],
-                    })
-                    .collect()),
+                QueueContext::Tracks { keys } => Ok(keys.iter().map(test_track).collect()),
                 _ => Err(ApiError::unsupported("stub resolves raw tracks only")),
             }
         }
     }
 
-    fn keys(n: usize) -> Vec<String> {
-        (0..n).map(|i| format!("/t/{i}.mp3")).collect()
-    }
-
-    fn local() -> LocalApi {
-        LocalApi::new(SessionHandle::spawn(Arc::new(StubLibrary)))
-    }
-
-    fn replace(n: usize) -> SetQueueRequest {
-        SetQueueRequest {
-            mode: QueueMode::Replace,
-            context: QueueContext::Tracks { keys: keys(n) },
-            start_index: Some(0),
-            shuffle: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn set_queue_then_window_round_trips() {
-        let local = local();
-        let ack = local.set_queue(replace(3)).await.expect("set_queue");
-        assert!(ack.rev > 0);
-
-        let window = local.queue_window(Page::default()).await.expect("window");
-        assert_eq!(window.total, 3);
-        assert_eq!(window.items.len(), 3);
-        assert_eq!(window.items[0].track.title, "/t/0.mp3");
-        assert_eq!(window.rev, ack.rev);
-
-        let state = local.player_state().await.expect("state");
-        assert_eq!(state.queue.length, 3);
-        assert_eq!(state.queue.index, Some(0));
-        assert_eq!(
-            state.track.as_ref().map(|t| t.title.as_str()),
-            Some("/t/0.mp3")
-        );
-    }
-
-    #[tokio::test]
-    async fn next_and_previous_move_the_queue_position() {
-        let local = local();
-        local.set_queue(replace(3)).await.expect("set_queue");
-
-        local
-            .player_command(PlayerCommand::Next)
-            .await
-            .expect("next");
-        let state = local.player_state().await.expect("state");
-        assert_eq!(state.queue.index, Some(1));
-
-        local
-            .player_command(PlayerCommand::Previous)
-            .await
-            .expect("previous");
-        let state = local.player_state().await.expect("state");
-        assert_eq!(state.queue.index, Some(0));
-    }
-
-    #[tokio::test]
-    async fn set_mode_and_events_flow_through() {
-        let local = local();
-        let mut events = local.events();
-
-        local.set_queue(replace(4)).await.expect("set_queue");
-        let first = events.next().await.expect("event");
-        assert!(matches!(first, ApiEvent::QueueChanged { length: 4, .. }));
-        let second = events.next().await.expect("event");
-        assert!(matches!(second, ApiEvent::PlayerState(_)));
-
-        local
-            .player_command(PlayerCommand::SetMode {
-                shuffle: Some(true),
-                loop_mode: Some(LoopMode::Queue),
-            })
-            .await
-            .expect("set_mode");
-        let state = local.player_state().await.expect("state");
-        assert!(state.queue.shuffle);
-        assert_eq!(state.queue.loop_mode, LoopMode::Queue);
-    }
-
-    #[tokio::test]
-    async fn transport_commands_report_unsupported_until_engine_lands() {
-        let local = local();
-        let err = local
-            .player_command(PlayerCommand::Toggle)
-            .await
-            .expect_err("unsupported");
-        assert_eq!(err.code, ErrorCode::Unsupported);
-    }
-
-    #[tokio::test]
-    async fn radio_sentinel_becomes_wire_kind() {
-        let track = Track {
-            id: reader::models::TrackId::Local(std::path::PathBuf::from("radio:x:y")),
+    fn test_track(key: &String) -> Track {
+        let duration = if key.starts_with("radio:") {
+            u64::MAX
+        } else if key.contains("short") {
+            1
+        } else {
+            6
+        };
+        Track {
+            id: reader::models::TrackId::Local(PathBuf::from(key)),
             cover: None,
             album_id: String::new(),
-            title: "Station".into(),
+            title: key.clone(),
             artist: String::new(),
             album: String::new(),
-            duration: u64::MAX,
-            khz: 0,
-            bitrate: 0,
+            duration,
+            khz: 44,
+            bitrate: 320,
             track_number: None,
             disc_number: None,
             musicbrainz_release_id: None,
@@ -488,7 +1563,578 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec![],
-        };
+        }
+    }
+
+    fn wav_bytes(seconds: u64) -> Vec<u8> {
+        let frames = seconds as usize * TEST_CONFIG.sample_rate as usize;
+        let data_len = frames * TEST_CONFIG.channels * 2;
+        let mut bytes = Vec::with_capacity(44 + data_len);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&((36 + data_len) as u32).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&(TEST_CONFIG.channels as u16).to_le_bytes());
+        bytes.extend_from_slice(&TEST_CONFIG.sample_rate.to_le_bytes());
+        bytes.extend_from_slice(
+            &(TEST_CONFIG.sample_rate * TEST_CONFIG.channels as u32 * 2).to_le_bytes(),
+        );
+        bytes.extend_from_slice(&((TEST_CONFIG.channels * 2) as u16).to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&(data_len as u32).to_le_bytes());
+        for frame in 0..frames {
+            let sample = (((frame % 100) as i16) + 1) * 100;
+            for _ in 0..TEST_CONFIG.channels {
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+        }
+        bytes
+    }
+
+    fn wav_factory(seconds: u64) -> SourceFactory {
+        let bytes = wav_bytes(seconds);
+        Box::new(move || Ok(player::decoder::from_stream(Cursor::new(bytes))))
+    }
+
+    fn gated_factory(seconds: u64, gate: Arc<(Mutex<bool>, Condvar)>) -> SourceFactory {
+        let bytes = wav_bytes(seconds);
+        Box::new(move || {
+            let (lock, ready) = &*gate;
+            let mut blocked = lock.lock().expect("gate lock");
+            while *blocked {
+                blocked = ready.wait(blocked).expect("gate wait");
+            }
+            drop(blocked);
+            Ok(player::decoder::from_stream(Cursor::new(bytes)))
+        })
+    }
+
+    struct Harness {
+        api: LocalApi,
+        sink: FakeSinkHandle,
+    }
+
+    fn harness(configure: impl FnOnce(&mut config::AppConfig)) -> Harness {
+        harness_with_provider(
+            configure,
+            Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+        )
+    }
+
+    fn harness_with_provider(
+        configure: impl FnOnce(&mut config::AppConfig),
+        provider: FactoryOverride,
+    ) -> Harness {
+        let sink = FakeSinkHandle::default();
+        let player = Player::try_with_sink(Box::new(FakeSink(sink.clone())))
+            .expect("headless player starts");
+        let mut services = PlaybackServices::default();
+        services.config.crossfade_seconds = 0;
+        configure(&mut services.config);
+        let session =
+            SessionHandle::spawn_with_factory(Arc::new(StubLibrary), player, services, provider);
+        Harness {
+            api: LocalApi::new(session),
+            sink,
+        }
+    }
+
+    fn replace(keys: &[&str]) -> SetQueueRequest {
+        SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: QueueContext::Tracks {
+                keys: keys.iter().map(|key| (*key).to_string()).collect(),
+            },
+            start_index: Some(0),
+            shuffle: None,
+        }
+    }
+
+    async fn wait_state(
+        api: &LocalApi,
+        description: &str,
+        predicate: impl Fn(&PlayerState) -> bool,
+    ) -> PlayerState {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let state = api.player_state().await.expect("player state");
+            if predicate(&state) {
+                return state;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for {description}: {state:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    async fn drive_until(
+        harness: &Harness,
+        description: &str,
+        predicate: impl Fn(&PlayerState) -> bool,
+    ) -> PlayerState {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            // Keep the fake callback close enough to wall-clock pacing that
+            // the actor can observe crossfade arming before the synthetic
+            // decoder reaches EOF under parallel test load.
+            harness.sink.pull(2048);
+            let state = harness.api.player_state().await.expect("player state");
+            if predicate(&state) {
+                return state;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out driving audio until {description}: {state:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    async fn wait_committed(api: &LocalApi) -> PlayerState {
+        wait_state(api, "committed playback", |state| {
+            state.phase == ApiPhase::Playing && matches!(state.intent, Intent::Committed { .. })
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn set_queue_then_window_round_trips() {
+        let harness = harness(|_| {});
+        let ack = harness
+            .api
+            .set_queue(replace(&["track-0", "track-1", "track-2"]))
+            .await
+            .expect("set queue");
+        assert!(ack.rev > 0);
+
+        let window = harness
+            .api
+            .queue_window(Page::default())
+            .await
+            .expect("window");
+        assert_eq!(window.total, 3);
+        assert_eq!(window.items[0].track.title, "track-0");
+        assert_eq!(window.rev, ack.rev);
+    }
+
+    #[tokio::test]
+    async fn next_and_previous_load_the_selected_track() {
+        let harness = harness(|_| {});
+        harness
+            .api
+            .set_queue(replace(&["track-0", "track-1", "track-2"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+
+        harness
+            .api
+            .player_command(PlayerCommand::Next)
+            .await
+            .expect("next");
+        let state = wait_state(&harness.api, "second track", |state| {
+            state.queue.index == Some(1) && matches!(state.intent, Intent::Committed { .. })
+        })
+        .await;
+        assert_eq!(
+            state.track.as_ref().map(|track| track.title.as_str()),
+            Some("track-1")
+        );
+
+        harness
+            .api
+            .player_command(PlayerCommand::Previous)
+            .await
+            .expect("previous");
+        let state = wait_state(&harness.api, "first track", |state| {
+            state.queue.index == Some(0) && matches!(state.intent, Intent::Committed { .. })
+        })
+        .await;
+        assert_eq!(
+            state.track.as_ref().map(|track| track.title.as_str()),
+            Some("track-0")
+        );
+    }
+
+    #[tokio::test]
+    async fn set_mode_and_events_flow_through() {
+        let harness = harness(|_| {});
+        let mut events = harness.api.events();
+        harness
+            .api
+            .set_queue(replace(&["track-0", "track-1"]))
+            .await
+            .expect("set queue");
+        assert!(matches!(
+            events.next().await,
+            Some(ApiEvent::QueueChanged { length: 2, .. })
+        ));
+
+        harness
+            .api
+            .player_command(PlayerCommand::SetMode {
+                shuffle: Some(true),
+                loop_mode: Some(LoopMode::Queue),
+            })
+            .await
+            .expect("set mode");
+        let state = harness.api.player_state().await.expect("state");
+        assert!(state.queue.shuffle);
+        assert_eq!(state.queue.loop_mode, LoopMode::Queue);
+    }
+
+    #[tokio::test]
+    async fn transport_commands_drive_the_engine_and_position_anchors() {
+        let harness = harness(|_| {});
+        harness
+            .api
+            .set_queue(replace(&["track-0"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+
+        harness
+            .api
+            .player_command(PlayerCommand::Pause)
+            .await
+            .expect("pause");
+        let paused = wait_state(&harness.api, "paused engine", |state| {
+            state.phase == ApiPhase::Paused
+        })
+        .await;
+        assert_eq!(paused.position.map(|anchor| anchor.playing), Some(false));
+
+        harness
+            .api
+            .player_command(PlayerCommand::Play)
+            .await
+            .expect("play");
+        let playing = wait_state(&harness.api, "resumed engine", |state| {
+            state.phase == ApiPhase::Playing
+        })
+        .await;
+        assert_eq!(playing.position.map(|anchor| anchor.playing), Some(true));
+
+        harness
+            .api
+            .player_command(PlayerCommand::Toggle)
+            .await
+            .expect("toggle");
+        wait_state(&harness.api, "toggle paused", |state| {
+            state.phase == ApiPhase::Paused
+        })
+        .await;
+
+        harness
+            .api
+            .player_command(PlayerCommand::Stop)
+            .await
+            .expect("stop");
+        let stopped = harness.api.player_state().await.expect("state");
+        assert_eq!(stopped.intent, Intent::Stopped);
+        assert_eq!(stopped.phase, ApiPhase::Idle);
+        assert_eq!(stopped.position.map(|anchor| anchor.ms), Some(0));
+    }
+
+    #[tokio::test]
+    async fn engine_position_ticks_do_not_become_one_hz_api_events() {
+        let harness = harness(|_| {});
+        let mut events = harness.api.session.subscribe();
+        harness
+            .api
+            .set_queue(replace(&["track-0"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+
+        for _ in 0..25 {
+            harness.sink.pull(8192);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let mut anchors = 0;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ApiEvent::PlayerPosition { .. }) {
+                anchors += 1;
+            }
+        }
+        assert_eq!(anchors, 1, "only the initial play anchor is emitted");
+    }
+
+    #[tokio::test]
+    async fn pause_mid_load_cannot_restart_a_cancelled_session() {
+        let gate = Arc::new((Mutex::new(true), Condvar::new()));
+        let provider_gate = gate.clone();
+        let provider: FactoryOverride = Arc::new(move |track| {
+            Some(if track.title == "slow" {
+                gated_factory(6, provider_gate.clone())
+            } else {
+                wav_factory(6)
+            })
+        });
+        let harness = harness_with_provider(|_| {}, provider);
+        harness
+            .api
+            .set_queue(replace(&["slow"]))
+            .await
+            .expect("set queue");
+        wait_state(&harness.api, "loading intent", |state| {
+            matches!(state.intent, Intent::Loading { .. })
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        harness
+            .api
+            .player_command(PlayerCommand::Pause)
+            .await
+            .expect("pause");
+        {
+            *gate.0.lock().expect("gate lock") = false;
+            gate.1.notify_all();
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let state = harness.api.player_state().await.expect("state");
+        assert_eq!(state.intent, Intent::Stopped);
+        assert_ne!(state.phase, ApiPhase::Playing);
+    }
+
+    #[tokio::test]
+    async fn resume_re_adopts_the_live_engine_token_after_mid_load_pause() {
+        let gate = Arc::new((Mutex::new(true), Condvar::new()));
+        let provider_gate = gate.clone();
+        let provider: FactoryOverride = Arc::new(move |track| {
+            Some(if track.title == "slow" {
+                gated_factory(6, provider_gate.clone())
+            } else {
+                wav_factory(6)
+            })
+        });
+        let harness = harness_with_provider(|_| {}, provider);
+        harness
+            .api
+            .set_queue(replace(&["fast", "slow"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+        harness
+            .api
+            .player_command(PlayerCommand::Next)
+            .await
+            .expect("next");
+        wait_state(&harness.api, "second load resolving", |state| {
+            matches!(state.intent, Intent::Loading { token: 2, .. })
+        })
+        .await;
+
+        harness
+            .api
+            .player_command(PlayerCommand::Pause)
+            .await
+            .expect("pause");
+        harness
+            .api
+            .player_command(PlayerCommand::Play)
+            .await
+            .expect("resume");
+        let state = wait_state(&harness.api, "live token re-adopted", |state| {
+            state.phase == ApiPhase::Playing
+                && matches!(state.intent, Intent::Committed { token: 1 })
+        })
+        .await;
+        assert_eq!(state.queue.index, Some(1));
+
+        {
+            *gate.0.lock().expect("gate lock") = false;
+            gate.1.notify_all();
+        }
+    }
+
+    #[tokio::test]
+    async fn newer_load_wins_when_a_cancelled_decode_finishes_late() {
+        let gate = Arc::new((Mutex::new(true), Condvar::new()));
+        let provider_gate = gate.clone();
+        let provider: FactoryOverride = Arc::new(move |track| {
+            Some(if track.title == "slow" {
+                gated_factory(6, provider_gate.clone())
+            } else {
+                wav_factory(6)
+            })
+        });
+        let harness = harness_with_provider(|_| {}, provider);
+        harness
+            .api
+            .set_queue(replace(&["slow", "fast"]))
+            .await
+            .expect("set queue");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        harness
+            .api
+            .player_command(PlayerCommand::Next)
+            .await
+            .expect("next");
+        let state = wait_state(&harness.api, "newer load committed", |state| {
+            state.queue.index == Some(1) && matches!(state.intent, Intent::Committed { token: 2 })
+        })
+        .await;
+        assert_eq!(
+            state.track.as_ref().map(|track| track.title.as_str()),
+            Some("fast")
+        );
+
+        {
+            *gate.0.lock().expect("gate lock") = false;
+            gate.1.notify_all();
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let state = harness.api.player_state().await.expect("state");
+        assert!(matches!(state.intent, Intent::Committed { token: 2 }));
+        assert_eq!(state.queue.index, Some(1));
+    }
+
+    #[tokio::test]
+    async fn crossfade_load_can_be_superseded_without_a_stale_switch() {
+        let gate = Arc::new((Mutex::new(true), Condvar::new()));
+        let calls = Arc::new(Mutex::new(HashMap::<String, Arc<AtomicUsize>>::new()));
+        let provider_gate = gate.clone();
+        let provider_calls = calls.clone();
+        let provider: FactoryOverride = Arc::new(move |track| {
+            let counter = provider_calls
+                .lock()
+                .expect("calls lock")
+                .entry(track.title.clone())
+                .or_default()
+                .clone();
+            let call = counter.fetch_add(1, Ordering::Relaxed);
+            Some(if track.title == "track-1" && call == 0 {
+                gated_factory(6, provider_gate.clone())
+            } else {
+                wav_factory(6)
+            })
+        });
+        let harness = harness_with_provider(|config| config.crossfade_seconds = 1, provider);
+        harness
+            .api
+            .set_queue(replace(&["track-0", "track-1"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+
+        drive_until(&harness, "crossfade resolving", |state| {
+            matches!(
+                state.intent,
+                Intent::Loading {
+                    token: 2,
+                    from_token: Some(1)
+                }
+            )
+        })
+        .await;
+        harness
+            .api
+            .player_command(PlayerCommand::Next)
+            .await
+            .expect("manual next supersedes fade");
+        let state = wait_state(&harness.api, "replacement load committed", |state| {
+            state.queue.index == Some(1) && matches!(state.intent, Intent::Committed { token: 3 })
+        })
+        .await;
+        assert!(state.fading.is_none());
+
+        {
+            *gate.0.lock().expect("gate lock") = false;
+            gate.1.notify_all();
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let state = harness.api.player_state().await.expect("state");
+        assert!(matches!(state.intent, Intent::Committed { token: 3 }));
+        assert_eq!(state.queue.index, Some(1));
+    }
+
+    #[tokio::test]
+    async fn end_of_queue_pauses_the_live_engine_session() {
+        let harness = harness(|_| {});
+        harness
+            .api
+            .set_queue(replace(&["short-track"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+        let pauses_before = harness.sink.pause_calls();
+        let state = drive_until(&harness, "end-of-queue stop", |state| {
+            state.intent == Intent::Stopped && state.phase == ApiPhase::Ended
+        })
+        .await;
+        assert_eq!(state.queue.index, Some(0));
+        assert!(harness.sink.pause_calls() > pauses_before);
+    }
+
+    #[tokio::test]
+    async fn seek_during_crossfade_is_guarded_to_the_visible_token() {
+        let harness = harness(|config| config.crossfade_seconds = 1);
+        harness
+            .api
+            .set_queue(replace(&["track-0", "track-1"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+        drive_until(&harness, "running crossfade", |state| {
+            state.fading.is_some() && matches!(state.intent, Intent::Committed { token: 2 })
+        })
+        .await;
+
+        harness
+            .api
+            .player_command(PlayerCommand::Seek { position_ms: 1_500 })
+            .await
+            .expect("seek visible track");
+        let state = wait_state(&harness.api, "outgoing session restored", |state| {
+            state.fading.is_none()
+                && state.queue.index == Some(0)
+                && matches!(state.intent, Intent::Committed { token: 1 })
+        })
+        .await;
+        assert_eq!(state.position.map(|position| position.ms), Some(1_500));
+    }
+
+    #[tokio::test]
+    async fn radio_tracks_reject_seek_commands() {
+        let harness = harness(|_| {});
+        harness
+            .api
+            .set_queue(replace(&["radio:station:main"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+        let error = harness
+            .api
+            .player_command(PlayerCommand::Seek { position_ms: 1_000 })
+            .await
+            .expect_err("radio seek rejected");
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+
+        let pauses_before = harness.sink.pause_calls();
+        harness
+            .api
+            .player_command(PlayerCommand::Pause)
+            .await
+            .expect("pause radio");
+        let state = wait_state(&harness.api, "radio stopped", |state| {
+            state.phase == ApiPhase::Idle
+        })
+        .await;
+        assert_eq!(state.intent, Intent::Committed { token: 1 });
+        assert_eq!(harness.sink.pause_calls(), pauses_before);
+    }
+
+    #[test]
+    fn radio_sentinel_becomes_wire_kind() {
+        let track = test_track(&"radio:station:main".to_string());
         let now = now_playing_from(&track);
         assert_eq!(now.kind, TrackKind::Radio);
         assert_eq!(now.duration_ms, None);

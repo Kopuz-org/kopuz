@@ -17,9 +17,15 @@ workspace = true
 
 [dependencies]
 api = { workspace = true }
+base64 = { workspace = true }
+config = { workspace = true }
+player = { workspace = true }
+radio = { workspace = true }
 reader = { workspace = true }
+server = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
+utils = { workspace = true }

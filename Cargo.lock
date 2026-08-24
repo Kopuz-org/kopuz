@@ -4325,9 +4325,15 @@ name = "kopuz-daemon"
 version = "0.16.0"
 dependencies = [
  "async-trait",
+ "base64",
  "futures-util",
  "kopuz-api",
+ "kopuz-config",
+ "kopuz-player",
+ "kopuz-radio",
  "kopuz-reader",
+ "kopuz-server",
+ "kopuz-utils",
  "rand 0.10.2",
  "tokio",
  "tracing",

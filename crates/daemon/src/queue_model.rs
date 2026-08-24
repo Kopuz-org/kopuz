@@ -86,6 +86,11 @@ impl QueueModel {
         self.items.get(idx)
     }
 
+    pub(crate) fn track_at_mut(&mut self, position: usize) -> Option<&mut Track> {
+        let idx = self.physical_index_of(position)?;
+        self.items.get_mut(idx)
+    }
+
     pub fn current_track(&self) -> Option<&Track> {
         self.track_at(self.current)
     }
