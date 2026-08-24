@@ -414,6 +414,50 @@ impl QueueModel {
         }
     }
 
+    /// Remove the entry at a logical position. Physical indices above the
+    /// removed track shift down, so the permutation and history are remapped;
+    /// history entries pointing at the removed position are dropped. `current`
+    /// keeps its logical position (now the following track), clamped to the
+    /// new tail.
+    pub fn remove(&mut self, position: usize) -> Option<Track> {
+        let physical = self.physical_index_of(position)?;
+        if physical >= self.items.len() {
+            return None;
+        }
+        let removed = self.items.remove(physical);
+
+        if self.shuffle {
+            if position < self.shuffle_order.len() {
+                self.shuffle_order.remove(position);
+            }
+        } else {
+            self.shuffle_order.retain(|&idx| idx != physical);
+        }
+        for idx in self.shuffle_order.iter_mut() {
+            if *idx > physical {
+                *idx -= 1;
+            }
+        }
+
+        self.history.retain(|&idx| idx != position);
+        for idx in self.history.iter_mut() {
+            if *idx > position {
+                *idx -= 1;
+            }
+        }
+
+        if position < self.current {
+            self.current -= 1;
+        }
+        let len = self.items.len();
+        if len == 0 {
+            self.current = 0;
+        } else if self.current >= len {
+            self.current = len - 1;
+        }
+        Some(removed)
+    }
+
     /// Hard reset for a backend switch: queue, history, permutation, position.
     pub fn clear(&mut self) {
         self.items.clear();
@@ -656,6 +700,63 @@ mod tests {
             Some("t2".into())
         );
         assert_eq!(m.history(), &[2]);
+    }
+
+    #[test]
+    fn remove_remaps_current_history_and_permutation() {
+        let mut m = model(5);
+        m.jump_to(1);
+        m.jump_to(3);
+        assert_eq!(m.history(), &[0, 1]);
+
+        let removed = m.remove(1).expect("removed");
+        assert_eq!(removed.title, "t1");
+        assert_eq!(m.len(), 4);
+        assert_eq!(m.current_position(), 2);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t3".into())
+        );
+        assert_eq!(m.history(), &[0]);
+
+        let removed = m.remove(3);
+        assert!(removed.is_none() || m.len() == 3);
+    }
+
+    #[test]
+    fn remove_last_position_clamps_current() {
+        let mut m = model(2);
+        m.jump_to(1);
+        m.remove(1).expect("removed");
+        assert_eq!(m.current_position(), 0);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t0".into())
+        );
+
+        m.remove(0).expect("removed");
+        assert!(m.is_empty());
+        assert_eq!(m.current_position(), 0);
+        assert!(m.current_track().is_none());
+    }
+
+    #[test]
+    fn remove_while_shuffling_keeps_a_valid_permutation() {
+        let mut m = model(5);
+        m.toggle_shuffle();
+        let victim_position = 2;
+        let victim_title = m.track_at(victim_position).map(|t| t.title.clone());
+        m.remove(victim_position).expect("removed");
+        assert_eq!(m.len(), 4);
+        assert_eq!(m.shuffle_order().len(), 4);
+        let mut covered = m.shuffle_order().to_vec();
+        covered.sort_unstable();
+        assert_eq!(covered, vec![0, 1, 2, 3]);
+        for pos in 0..4 {
+            let title = m.track_at(pos).map(|t| t.title.clone());
+            assert!(title.is_some());
+            assert_ne!(title, victim_title);
+        }
     }
 
     #[test]

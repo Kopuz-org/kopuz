@@ -21,7 +21,7 @@ pub use player::{
     BufferedRange, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying, Phase,
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
 };
-pub use queue::{QueueContext, QueueItem, QueueMode, QueueWindow, SetQueueRequest};
+pub use queue::{QueueContext, QueueEdit, QueueItem, QueueMode, QueueWindow, SetQueueRequest};
 
 pub const API_VERSION: u32 = 1;
 
@@ -44,6 +44,8 @@ pub trait KopuzApi: Send + Sync {
     async fn queue_window(&self, page: Page) -> Result<QueueWindow, ApiError>;
 
     async fn set_queue(&self, req: SetQueueRequest) -> Result<CommandAck, ApiError>;
+
+    async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError>;
 
     async fn tracks(&self, filter: TrackFilter, page: Page) -> Result<TrackPage, ApiError>;
 

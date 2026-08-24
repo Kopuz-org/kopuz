@@ -2,14 +2,16 @@
 //! engine state. Commands and engine events are serialized through one tokio
 //! task, then projected into watch snapshots and broadcast API events.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use api::{
     ApiError, ApiEvent, BufferedRange, CommandAck, FadingState, Intent, NowPlaying, Page,
-    Phase as ApiPhase, PlayerCommand, PlayerState, PositionAnchor, QueueContext, QueueItem,
-    QueueMode, QueueSummary, QueueWindow, SetQueueRequest, TrackKind,
+    Phase as ApiPhase, PlayerCommand, PlayerState, PositionAnchor, QueueContext, QueueEdit,
+    QueueItem, QueueMode, QueueSummary, QueueWindow, SetQueueRequest, TrackKind,
 };
 use player::engine::{Event as EngineEvent, Phase as EnginePhase, SourceFactory, Transition};
 use player::player::{LoadArgs, NowPlayingMeta, Player, PlayerInitError};
@@ -55,6 +57,12 @@ type FactoryOverride = Arc<dyn Fn(&Track) -> Option<SourceFactory> + Send + Sync
 
 enum SessionCmd {
     Player(PlayerCommand, oneshot::Sender<Result<CommandAck, ApiError>>),
+    Edit(QueueEdit, oneshot::Sender<Result<CommandAck, ApiError>>),
+    RadioMetadata {
+        token: u64,
+        title: String,
+        artist: Option<String>,
+    },
     SetQueue(
         SetQueueRequest,
         oneshot::Sender<Result<CommandAck, ApiError>>,
@@ -69,7 +77,9 @@ enum SessionCmd {
 pub struct SessionHandle {
     cmd_tx: mpsc::UnboundedSender<SessionCmd>,
     state_rx: watch::Receiver<PlayerState>,
-    events: broadcast::Sender<ApiEvent>,
+    events: broadcast::Sender<(u64, ApiEvent)>,
+    seq: Arc<AtomicU64>,
+    history: Arc<Mutex<VecDeque<(u64, ApiEvent)>>>,
 }
 
 impl SessionHandle {
@@ -97,6 +107,8 @@ impl SessionHandle {
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (events, _) = broadcast::channel(EVENT_BUFFER);
+        let seq = Arc::new(AtomicU64::new(0));
+        let history = Arc::new(Mutex::new(VecDeque::new()));
         let engine_events = player.subscribe();
         player.set_volume(services.config.volume);
         player.set_channel_mode(services.config.channel_mode);
@@ -114,6 +126,7 @@ impl SessionHandle {
             pending_transition: None,
             armed_transition: None,
             load_task: None,
+            radio_task: None,
             phase: ApiPhase::Idle,
             position: None,
             position_token: None,
@@ -124,6 +137,8 @@ impl SessionHandle {
             volume: services.config.volume,
             epoch: Instant::now(),
             events: events.clone(),
+            seq: seq.clone(),
+            history: history.clone(),
             materializer,
             config: services.config,
             active_source: services.active_source,
@@ -137,6 +152,8 @@ impl SessionHandle {
             cmd_tx,
             state_rx,
             events,
+            seq,
+            history,
         }
     }
 
@@ -154,8 +171,32 @@ impl SessionHandle {
         self.state_rx.borrow().clone()
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<ApiEvent> {
+    pub fn subscribe(&self) -> broadcast::Receiver<(u64, ApiEvent)> {
         self.events.subscribe()
+    }
+
+    /// Events after `last` from the replay ring. `true` means the ring no
+    /// longer reaches back that far: the client must refetch its snapshots
+    /// (the `resync` contract) and then continue from the live stream.
+    pub fn replay_since(&self, last: u64) -> (bool, Vec<(u64, ApiEvent)>) {
+        let newest = self.seq.load(Ordering::Acquire);
+        if newest <= last {
+            return (false, Vec::new());
+        }
+        let Ok(history) = self.history.lock() else {
+            return (true, Vec::new());
+        };
+        match history.front() {
+            Some((first, _)) if *first <= last + 1 => (
+                false,
+                history
+                    .iter()
+                    .filter(|(sequence, _)| *sequence > last)
+                    .cloned()
+                    .collect(),
+            ),
+            _ => (true, Vec::new()),
+        }
     }
 
     async fn request<T>(
@@ -180,6 +221,10 @@ impl SessionHandle {
 
     pub async fn queue_window(&self, page: Page) -> Result<QueueWindow, ApiError> {
         self.request(|tx| SessionCmd::Window(page, tx)).await
+    }
+
+    pub async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError> {
+        self.request(|tx| SessionCmd::Edit(edit, tx)).await
     }
 }
 
@@ -254,6 +299,7 @@ struct Session {
     pending_transition: Option<PendingTransition>,
     armed_transition: Option<u64>,
     load_task: Option<(u64, JoinHandle<()>)>,
+    radio_task: Option<JoinHandle<()>>,
     phase: ApiPhase,
     position: Option<PositionAnchor>,
     position_token: Option<u64>,
@@ -263,7 +309,9 @@ struct Session {
     queue_rev: u64,
     volume: f32,
     epoch: Instant,
-    events: broadcast::Sender<ApiEvent>,
+    events: broadcast::Sender<(u64, ApiEvent)>,
+    seq: Arc<AtomicU64>,
+    history: Arc<Mutex<VecDeque<(u64, ApiEvent)>>>,
     materializer: Arc<dyn QueueMaterializer>,
     config: config::AppConfig,
     active_source: Option<server::source::ActiveSource>,
@@ -285,6 +333,9 @@ impl Session {
         correction.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
+            // The correction branch is disabled while nothing plays, so an
+            // idle daemon takes zero timer wakeups and this task parks until
+            // a command or engine event arrives.
             tokio::select! {
                 command = cmd_rx.recv() => {
                     let Some(command) = command else { break };
@@ -294,10 +345,8 @@ impl Session {
                     let Some(event) = event else { break };
                     self.handle_engine_event(event, &state_tx);
                 }
-                _ = correction.tick() => {
-                    if self.phase == ApiPhase::Playing {
-                        self.publish_position_anchor(&state_tx, None, None, true);
-                    }
+                _ = correction.tick(), if self.phase == ApiPhase::Playing => {
+                    self.publish_position_anchor(&state_tx, None, None, true);
                 }
             }
         }
@@ -316,6 +365,15 @@ impl Session {
             SessionCmd::Window(page, reply) => {
                 let _ = reply.send(Ok(self.window(page)));
             }
+            SessionCmd::Edit(edit, reply) => {
+                let result = self.handle_queue_edit(edit, state_tx);
+                let _ = reply.send(result);
+            }
+            SessionCmd::RadioMetadata {
+                token,
+                title,
+                artist,
+            } => self.apply_radio_metadata(token, title, artist, state_tx),
             SessionCmd::LoadPrepared(result) => self.handle_prepared_load(*result, state_tx),
             SessionCmd::LoadFinished(result) => self.handle_load_finished(result, state_tx),
             SessionCmd::BufferProgress(event) => self.handle_buffer_progress(event, state_tx),
@@ -357,6 +415,81 @@ impl Session {
             }
         }
         Ok(self.publish(state_tx, queue_changed))
+    }
+
+    fn handle_queue_edit(
+        &mut self,
+        edit: QueueEdit,
+        state_tx: &watch::Sender<PlayerState>,
+    ) -> Result<CommandAck, ApiError> {
+        let len = self.model.len();
+        match edit {
+            QueueEdit::Jump { index } => {
+                let index = index as usize;
+                let position_exists = self.model.track_at(index).is_some();
+                if !position_exists {
+                    return Err(ApiError::invalid_input("no track at that queue position"));
+                }
+                let physical = self
+                    .model
+                    .physical_index_of(index)
+                    .ok_or_else(|| ApiError::invalid_input("no track at that queue position"))?;
+                let position = self.model.jump_to(physical);
+                self.start_load(position, false, None);
+                Ok(self.publish(state_tx, true))
+            }
+            QueueEdit::Move { from, to } => {
+                let (from, to) = (from as usize, to as usize);
+                if from >= len || to >= len {
+                    return Err(ApiError::invalid_input("queue position out of range"));
+                }
+                self.model.move_item(from, to);
+                Ok(self.publish(state_tx, true))
+            }
+            QueueEdit::Remove { index } => {
+                let index = index as usize;
+                if index >= len {
+                    return Err(ApiError::invalid_input("queue position out of range"));
+                }
+                if index == self.model.current_position() {
+                    return Err(ApiError::invalid_input(
+                        "cannot remove the playing position; skip or stop first",
+                    ));
+                }
+                self.model.remove(index);
+                Ok(self.publish(state_tx, true))
+            }
+        }
+    }
+
+    fn apply_radio_metadata(
+        &mut self,
+        token: u64,
+        title: String,
+        artist: Option<String>,
+        state_tx: &watch::Sender<PlayerState>,
+    ) {
+        if token != self.current_token || title.trim().is_empty() {
+            return;
+        }
+        let position = self.model.current_position();
+        let Some(track) = self.model.track_at_mut(position) else {
+            return;
+        };
+        if track.duration != u64::MAX {
+            return;
+        }
+        track.title = title;
+        if let Some(artist) = artist.filter(|artist| !artist.trim().is_empty()) {
+            track.artist = artist;
+        }
+        self.publish(state_tx, false);
+    }
+
+    fn cancel_radio_task(&mut self) {
+        if let Some(task) = self.radio_task.take() {
+            task.abort();
+        }
     }
 
     async fn handle_set_queue(
@@ -494,6 +627,7 @@ impl Session {
 
     fn stop(&mut self, state_tx: &watch::Sender<PlayerState>) {
         self.cancel_load_task();
+        self.cancel_radio_task();
         self.pending_transition = None;
         self.armed_transition = None;
         self.pending_resume = None;
@@ -630,6 +764,7 @@ impl Session {
 
         self.error = None;
         self.cancel_load_task();
+        self.cancel_radio_task();
         if !use_crossfade {
             self.pending_transition = None;
         }
@@ -642,6 +777,29 @@ impl Session {
             from_token,
         });
         self.buffered.clear();
+
+        if is_radio
+            && let Some(station) = self
+                .station_registry
+                .get(&item_id)
+                .filter(|station| station.has_live_metadata())
+                .cloned()
+        {
+            use radio::provider::RadioMetadataProvider;
+            let provider = radio::provider::DynamicProvider::new(station);
+            let mut metadata_rx = provider.start(&stream_id);
+            let cmd_tx = self.cmd_tx.clone();
+            let handle = tokio::spawn(async move {
+                while let Some(meta) = metadata_rx.recv().await {
+                    let _ = cmd_tx.send(SessionCmd::RadioMetadata {
+                        token,
+                        title: meta.title,
+                        artist: Some(meta.artist).filter(|artist| !artist.is_empty()),
+                    });
+                }
+            });
+            self.radio_task = Some(handle);
+        }
 
         if use_crossfade {
             let Some(model) = transition_model else {
@@ -972,7 +1130,7 @@ impl Session {
                 total: Some(total),
             },
         );
-        let _ = self.events.send(ApiEvent::PlayerBuffered {
+        self.emit(ApiEvent::PlayerBuffered {
             token: event.token,
             ranges: self.buffered.clone(),
         });
@@ -1008,15 +1166,29 @@ impl Session {
         }
         let state = self.build_state();
         if queue_changed {
-            let _ = self.events.send(ApiEvent::QueueChanged {
+            self.emit(ApiEvent::QueueChanged {
                 rev: self.queue_rev,
                 length: state.queue.length,
                 index: state.queue.index,
             });
         }
         let _ = state_tx.send(state.clone());
-        let _ = self.events.send(ApiEvent::PlayerState(Box::new(state)));
+        self.emit(ApiEvent::PlayerState(Box::new(state)));
         CommandAck { rev: self.rev }
+    }
+
+    /// Sole event egress: stamps the monotonic sequence, records the event in
+    /// the replay ring, then broadcasts. SSE ids and `Last-Event-ID` resume
+    /// both key off these sequences.
+    fn emit(&self, event: ApiEvent) {
+        let sequence = self.seq.fetch_add(1, Ordering::AcqRel) + 1;
+        if let Ok(mut history) = self.history.lock() {
+            if history.len() >= EVENT_BUFFER {
+                history.pop_front();
+            }
+            history.push_back((sequence, event.clone()));
+        }
+        let _ = self.events.send((sequence, event));
     }
 
     fn publish_position_anchor(
@@ -1036,7 +1208,7 @@ impl Session {
         self.position = Some(anchor);
         self.position_token = Some(token);
         let _ = state_tx.send(self.build_state());
-        let _ = self.events.send(ApiEvent::PlayerPosition {
+        self.emit(ApiEvent::PlayerPosition {
             token,
             position_ms: anchor.ms,
             at_ms: anchor.at_ms,
@@ -1182,7 +1354,23 @@ impl ClassifiedLoad {
         });
 
         let icy_tx = if self.is_radio && self.use_icy {
-            let (tx, _rx) = watch::channel(utils::icy::IcyMeta::default());
+            let (tx, mut rx) = watch::channel(utils::icy::IcyMeta::default());
+            let cmd_tx = self.cmd_tx.clone();
+            let token = self.token;
+            tokio::spawn(async move {
+                while rx.changed().await.is_ok() {
+                    let meta = rx.borrow_and_update().clone();
+                    if meta.title.trim().is_empty() {
+                        continue;
+                    }
+                    let (artist, title) = utils::icy::split_artist_title(&meta.title);
+                    let _ = cmd_tx.send(SessionCmd::RadioMetadata {
+                        token,
+                        title,
+                        artist,
+                    });
+                }
+            });
             Some(tx)
         } else {
             None
@@ -1410,6 +1598,10 @@ impl api::KopuzApi for LocalApi {
         self.session.set_queue(request).await
     }
 
+    async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError> {
+        self.session.queue_edit(edit).await
+    }
+
     async fn tracks(
         &self,
         _filter: api::TrackFilter,
@@ -1425,7 +1617,7 @@ impl api::KopuzApi for LocalApi {
         let rx = self.session.subscribe();
         futures_util::stream::unfold(rx, |mut rx| async move {
             match rx.recv().await {
-                Ok(event) => Some((event, rx)),
+                Ok((_, event)) => Some((event, rx)),
                 Err(broadcast::error::RecvError::Lagged(_)) => Some((ApiEvent::Resync, rx)),
                 Err(broadcast::error::RecvError::Closed) => None,
             }
@@ -1858,7 +2050,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(150)).await;
 
         let mut anchors = 0;
-        while let Ok(event) = events.try_recv() {
+        while let Ok((_, event)) = events.try_recv() {
             if matches!(event, ApiEvent::PlayerPosition { .. }) {
                 anchors += 1;
             }
@@ -2139,5 +2331,159 @@ mod tests {
         assert_eq!(now.kind, TrackKind::Radio);
         assert_eq!(now.duration_ms, None);
         assert!(!now.seekable);
+    }
+
+    #[tokio::test]
+    async fn queue_edit_moves_removes_and_guards_the_playing_row() {
+        let harness = harness(|_| {});
+        harness
+            .api
+            .set_queue(replace(&["/a.wav", "/b.wav", "/c.wav"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+
+        let err = harness
+            .api
+            .queue_edit(QueueEdit::Remove { index: 0 })
+            .await
+            .expect_err("removing the playing row is refused");
+        assert_eq!(err.code, ErrorCode::InvalidInput);
+
+        harness
+            .api
+            .queue_edit(QueueEdit::Move { from: 1, to: 2 })
+            .await
+            .expect("move");
+        let window = harness
+            .api
+            .queue_window(Page::default())
+            .await
+            .expect("window");
+        assert_eq!(window.items[1].track.title, "/c.wav");
+        assert_eq!(window.items[2].track.title, "/b.wav");
+
+        harness
+            .api
+            .queue_edit(QueueEdit::Remove { index: 2 })
+            .await
+            .expect("remove tail");
+        let window = harness
+            .api
+            .queue_window(Page::default())
+            .await
+            .expect("window");
+        assert_eq!(window.total, 2);
+
+        let err = harness
+            .api
+            .queue_edit(QueueEdit::Jump { index: 9 })
+            .await
+            .expect_err("out of range jump");
+        assert_eq!(err.code, ErrorCode::InvalidInput);
+
+        harness
+            .api
+            .queue_edit(QueueEdit::Jump { index: 1 })
+            .await
+            .expect("jump");
+        let state = wait_state(&harness.api, "jump target playing", |state| {
+            state.queue.index == Some(1) && matches!(state.intent, Intent::Committed { .. })
+        })
+        .await;
+        assert_eq!(
+            state.track.as_ref().map(|t| t.title.as_str()),
+            Some("/c.wav")
+        );
+    }
+
+    #[tokio::test]
+    async fn replay_ring_serves_gaps_and_flags_overflow() {
+        let harness = harness(|_| {});
+        harness
+            .api
+            .player_command(PlayerCommand::SetVolume { volume: 0.5 })
+            .await
+            .expect("volume");
+
+        let (resync, replayed) = harness.api.session.replay_since(0);
+        assert!(!resync);
+        assert!(!replayed.is_empty());
+        let ids: Vec<u64> = replayed.iter().map(|(sequence, _)| *sequence).collect();
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
+
+        let newest = *ids.last().expect("ids");
+        let (resync, tail) = harness.api.session.replay_since(newest);
+        assert!(!resync);
+        assert!(tail.is_empty());
+
+        for step in 0..(EVENT_BUFFER as u64 + 40) {
+            harness
+                .api
+                .player_command(PlayerCommand::SetVolume {
+                    volume: (step % 100) as f32 / 100.0,
+                })
+                .await
+                .expect("volume");
+        }
+        let (resync, dropped) = harness.api.session.replay_since(1);
+        assert!(resync);
+        assert!(dropped.is_empty());
+    }
+
+    #[tokio::test]
+    async fn radio_metadata_updates_the_displayed_track() {
+        let harness = harness(|_| {});
+        harness
+            .api
+            .set_queue(replace(&["radio:station:stream"]))
+            .await
+            .expect("set queue");
+        let state = wait_state(&harness.api, "radio committed", |state| {
+            matches!(state.intent, Intent::Committed { .. })
+        })
+        .await;
+        let token = match state.intent {
+            Intent::Committed { token } => token,
+            _ => unreachable!(),
+        };
+
+        harness
+            .api
+            .session
+            .cmd_tx
+            .send(SessionCmd::RadioMetadata {
+                token,
+                title: "Song Title".into(),
+                artist: Some("Some Artist".into()),
+            })
+            .expect("send metadata");
+        let state = wait_state(&harness.api, "metadata applied", |state| {
+            state
+                .track
+                .as_ref()
+                .is_some_and(|t| t.title == "Song Title")
+        })
+        .await;
+        let track = state.track.expect("track");
+        assert_eq!(track.artist, "Some Artist");
+        assert_eq!(track.kind, TrackKind::Radio);
+
+        harness
+            .api
+            .session
+            .cmd_tx
+            .send(SessionCmd::RadioMetadata {
+                token: token + 999,
+                title: "Stale".into(),
+                artist: None,
+            })
+            .expect("send stale");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let state = harness.api.player_state().await.expect("state");
+        assert_eq!(
+            state.track.as_ref().map(|t| t.title.as_str()),
+            Some("Song Title")
+        );
     }
 }

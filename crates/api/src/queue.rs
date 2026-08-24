@@ -52,6 +52,16 @@ pub struct SetQueueRequest {
     pub shuffle: Option<bool>,
 }
 
+/// In-place queue edits. Positions are play-order (logical) indices, the same
+/// space `QueueSummary::index` and `QueueItem::index` use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum QueueEdit {
+    Jump { index: u32 },
+    Move { from: u32, to: u32 },
+    Remove { index: u32 },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueueItem {
     pub index: u32,
