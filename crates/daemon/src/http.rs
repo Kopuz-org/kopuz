@@ -47,6 +47,12 @@ pub fn router(state: Arc<HttpState>) -> Router {
         .route("/v1/player/volume", post(volume))
         .route("/v1/player/mode", post(mode))
         .route("/v1/config", get(get_config).patch(patch_config))
+        .route("/v1/favorites", get(get_favorites).put(put_favorite))
+        .route("/v1/favorites/sync", post(favorites_sync))
+        .route("/v1/library/scan", post(library_scan))
+        .route("/v1/library/sync", post(library_sync))
+        .route("/v1/jobs", get(list_jobs))
+        .route("/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/v1/library/tracks", get(library_tracks))
         .route("/v1/queue", get(queue_window).post(set_queue))
         .route("/v1/queue/jump", post(queue_jump))
@@ -248,6 +254,52 @@ async fn patch_config(
     Json(patch): Json<serde_json::Value>,
 ) -> Result<Response, ApiFailure> {
     Ok(Json(state.api.patch_config(patch).await?).into_response())
+}
+
+async fn get_favorites(State(state): State<Arc<HttpState>>) -> Result<Response, ApiFailure> {
+    Ok(Json(state.api.favorites().await?).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct FavoriteBody {
+    key: String,
+    favorite: bool,
+}
+
+async fn put_favorite(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<FavoriteBody>,
+) -> Result<Response, ApiFailure> {
+    state.api.set_favorite(body.key, body.favorite).await?;
+    Ok(Json(serde_json::json!({})).into_response())
+}
+
+async fn start_job(state: Arc<HttpState>, kind: api::JobKind) -> Result<Response, ApiFailure> {
+    Ok(Json(state.api.start_job(kind).await?).into_response())
+}
+
+async fn favorites_sync(State(state): State<Arc<HttpState>>) -> Result<Response, ApiFailure> {
+    start_job(state, api::JobKind::FavoritesSync).await
+}
+
+async fn library_scan(State(state): State<Arc<HttpState>>) -> Result<Response, ApiFailure> {
+    start_job(state, api::JobKind::Scan).await
+}
+
+async fn library_sync(State(state): State<Arc<HttpState>>) -> Result<Response, ApiFailure> {
+    start_job(state, api::JobKind::LibrarySync).await
+}
+
+async fn list_jobs(State(state): State<Arc<HttpState>>) -> Result<Response, ApiFailure> {
+    Ok(Json(state.api.jobs().await?).into_response())
+}
+
+async fn cancel_job(
+    State(state): State<Arc<HttpState>>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiFailure> {
+    state.api.cancel_job(id).await?;
+    Ok(Json(serde_json::json!({})).into_response())
 }
 
 async fn library_tracks(

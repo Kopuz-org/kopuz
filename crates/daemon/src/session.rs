@@ -92,6 +92,7 @@ enum SessionCmd {
         config: Box<config::AppConfig>,
         changed: Vec<String>,
     },
+    Emit(Box<ApiEvent>),
     Persist(oneshot::Sender<()>),
     LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
     LoadFinished(LoadFinished),
@@ -273,6 +274,12 @@ impl SessionHandle {
     pub async fn restore_queue(&self, snapshot: db::QueueSnapshot) -> Result<CommandAck, ApiError> {
         self.request(|tx| SessionCmd::RestoreQueue(Box::new(snapshot), tx))
             .await
+    }
+
+    /// Emit an event through the session's sequenced stream (services use
+    /// this for invalidations, job progress, and notices).
+    pub fn emit_event(&self, event: ApiEvent) {
+        let _ = self.cmd_tx.send(SessionCmd::Emit(Box::new(event)));
     }
 
     /// Adopt a new config (a ConfigService patch): applies live audio
@@ -460,6 +467,7 @@ impl Session {
             SessionCmd::SetConfig { config, changed } => {
                 self.apply_config(*config, changed, state_tx);
             }
+            SessionCmd::Emit(event) => self.emit(*event),
             SessionCmd::Persist(reply) => {
                 if let Some(store) = self.queue_store.clone() {
                     let snapshot = self.snapshot();
@@ -1847,6 +1855,8 @@ pub struct LocalApi {
     session: SessionHandle,
     library: Option<Arc<crate::library::LibraryService>>,
     config: Option<Arc<crate::config_service::ConfigService>>,
+    jobs: Option<Arc<crate::jobs::JobRunner>>,
+    favorites: Option<Arc<crate::favorites::FavoritesService>>,
 }
 
 impl LocalApi {
@@ -1855,6 +1865,8 @@ impl LocalApi {
             session,
             library: None,
             config: None,
+            jobs: None,
+            favorites: None,
         }
     }
 
@@ -1865,6 +1877,16 @@ impl LocalApi {
 
     pub fn with_config(mut self, config: Arc<crate::config_service::ConfigService>) -> Self {
         self.config = Some(config);
+        self
+    }
+
+    pub fn with_jobs(mut self, jobs: Arc<crate::jobs::JobRunner>) -> Self {
+        self.jobs = Some(jobs);
+        self
+    }
+
+    pub fn with_favorites(mut self, favorites: Arc<crate::favorites::FavoritesService>) -> Self {
+        self.favorites = Some(favorites);
         self
     }
 }
@@ -1922,6 +1944,67 @@ impl api::KopuzApi for LocalApi {
         let (view, updated, changed) = service.patch(patch).await?;
         self.session.set_config(updated, changed);
         Ok(view)
+    }
+
+    async fn favorites(&self) -> Result<api::FavoritesView, ApiError> {
+        match &self.favorites {
+            Some(service) => service.list().await,
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a favorites service",
+            )),
+        }
+    }
+
+    async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError> {
+        match &self.favorites {
+            Some(service) => service.set(&key, favorite).await,
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a favorites service",
+            )),
+        }
+    }
+
+    async fn start_job(&self, kind: api::JobKind) -> Result<api::JobRef, ApiError> {
+        let Some(runner) = &self.jobs else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without a job runner",
+            ));
+        };
+        match kind {
+            api::JobKind::Scan => match &self.library {
+                Some(library) => library.spawn_scan(runner),
+                None => Err(ApiError::unsupported("no library service")),
+            },
+            api::JobKind::LibrarySync => match &self.library {
+                Some(library) => library.spawn_remote_sync(runner),
+                None => Err(ApiError::unsupported("no library service")),
+            },
+            api::JobKind::FavoritesSync => match &self.favorites {
+                Some(favorites) => favorites.spawn_sync(runner),
+                None => Err(ApiError::unsupported("no favorites service")),
+            },
+            api::JobKind::PlaylistSync | api::JobKind::Download | api::JobKind::Unknown => Err(
+                ApiError::unsupported("this job kind has no direct starter yet"),
+            ),
+        }
+    }
+
+    async fn jobs(&self) -> Result<Vec<api::JobStatus>, ApiError> {
+        match &self.jobs {
+            Some(runner) => Ok(runner.list()),
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a job runner",
+            )),
+        }
+    }
+
+    async fn cancel_job(&self, id: String) -> Result<(), ApiError> {
+        match &self.jobs {
+            Some(runner) => runner.cancel(&id),
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a job runner",
+            )),
+        }
     }
 
     fn events(&self) -> api::EventStream {

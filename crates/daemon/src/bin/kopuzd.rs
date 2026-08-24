@@ -27,8 +27,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use daemon::{
-    ConfigService, DbQueueStore, LibraryService, LocalApi, PlaybackServices, QueueStore,
-    SessionHandle, SourceRecorder,
+    ConfigService, DbQueueStore, FavoritesService, JobRunner, LibraryService, LocalApi,
+    PlaybackServices, QueueStore, SessionHandle, SourceRecorder,
 };
 
 struct Args {
@@ -165,10 +165,15 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         config.clone(),
     ));
     let station_registry = Arc::new(radio::registry::StationRegistry::default());
+    let cover_cache = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+        .map(|dirs| dirs.cache_dir().join("covers"))
+        .unwrap_or_else(|| std::env::temp_dir().join("kopuz-covers"));
+    let _ = std::fs::create_dir_all(&cover_cache);
     let library = Arc::new(LibraryService::new(
-        database.reads(),
+        database.clone(),
         config.active_source.clone(),
         station_registry.clone(),
+        cover_cache,
     ));
     utils::db_cache::init(database.clone());
     let active_source: server::source::ActiveSource =
@@ -184,6 +189,10 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 
     let session = SessionHandle::try_spawn(library.clone(), services)
         .map_err(|error| format!("audio engine init failed: {error:?}"))?;
+    library.attach_session(session.clone());
+    let jobs = Arc::new(JobRunner::new(session.clone()));
+    let favorites = FavoritesService::new(database.clone(), session.clone());
+    favorites.spawn_reconciler();
     daemon::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
     daemon::integrations::spawn_discord_presence(&session, session.config_watch());
     if let Some(snapshot) = queue_store.load().await
@@ -200,7 +209,9 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         api: Arc::new(
             LocalApi::new(session.clone())
                 .with_library(library)
-                .with_config(config_service),
+                .with_config(config_service)
+                .with_jobs(jobs)
+                .with_favorites(favorites),
         ),
         session,
         token: args.token.unwrap_or_else(random_token),

@@ -8,8 +8,9 @@
 mod sse;
 
 use api::{
-    ApiError, CommandAck, ConfigView, ErrorBody, KopuzApi, Page, PlayerCommand, PlayerState,
-    QueueEdit, QueueWindow, SetQueueRequest, TrackFilter, TrackPage,
+    ApiError, CommandAck, ConfigView, ErrorBody, FavoritesView, JobKind, JobRef, JobStatus,
+    KopuzApi, Page, PlayerCommand, PlayerState, QueueEdit, QueueWindow, SetQueueRequest,
+    TrackFilter, TrackPage,
 };
 use serde::de::DeserializeOwned;
 
@@ -201,6 +202,41 @@ impl KopuzApi for HttpApi {
                 .json(&patch),
         )
         .await
+    }
+
+    async fn favorites(&self) -> Result<FavoritesView, ApiError> {
+        self.get("/v1/favorites").await
+    }
+
+    async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError> {
+        let _: serde_json::Value = self
+            .send(
+                self.request(reqwest::Method::PUT, "/v1/favorites")
+                    .json(&serde_json::json!({ "key": key, "favorite": favorite })),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn start_job(&self, kind: JobKind) -> Result<JobRef, ApiError> {
+        let path = match kind {
+            JobKind::Scan => "/v1/library/scan",
+            JobKind::LibrarySync => "/v1/library/sync",
+            JobKind::FavoritesSync => "/v1/favorites/sync",
+            JobKind::PlaylistSync | JobKind::Download | JobKind::Unknown => {
+                return Err(ApiError::unsupported("no endpoint for this job kind"));
+            }
+        };
+        self.post(path, None).await
+    }
+
+    async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError> {
+        self.get("/v1/jobs").await
+    }
+
+    async fn cancel_job(&self, id: String) -> Result<(), ApiError> {
+        let _: serde_json::Value = self.post(&format!("/v1/jobs/{id}/cancel"), None).await?;
+        Ok(())
     }
 
     /// Connects to `/v1/events`, reconnecting with `Last-Event-ID` after

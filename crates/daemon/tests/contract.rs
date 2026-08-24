@@ -11,7 +11,10 @@ use api::{
     PlayerState, QueueContext, QueueEdit, QueueMode, SetQueueRequest, TrackFilter,
 };
 use daemon::session::FactoryOverride;
-use daemon::{ConfigService, LocalApi, PlaybackServices, QueueMaterializer, SessionHandle};
+use daemon::{
+    ConfigService, FavoritesService, JobRunner, LibraryService, LocalApi, PlaybackServices,
+    QueueMaterializer, SessionHandle,
+};
 use player::engine::{NullSink, SourceFactory};
 use player::player::Player;
 use reader::Track;
@@ -87,10 +90,24 @@ async fn spawn_pair() -> Pair {
     let database = db::init(&dir.path().join("contract.db"))
         .await
         .expect("db init");
+    let seeded: Vec<Track> = ["/lib/seed-0.flac", "/lib/seed-1.flac"]
+        .iter()
+        .map(|key| track(key))
+        .collect();
+    database
+        .upsert_tracks(&config::Source::Local, &seeded)
+        .await
+        .expect("seed tracks");
     let config_service = Arc::new(ConfigService::new(
-        database,
+        database.clone(),
         dir.path().join("settings.toml"),
         config::AppConfig::default(),
+    ));
+    let library = Arc::new(LibraryService::new(
+        database.clone(),
+        config::Source::Local,
+        Arc::new(radio::registry::StationRegistry::default()),
+        dir.path().join("covers"),
     ));
     let player = Player::try_with_sink(Box::new(NullSink::new())).expect("headless player starts");
     let provider: FactoryOverride = Arc::new(|_| Some(wav_factory(6)));
@@ -100,9 +117,19 @@ async fn spawn_pair() -> Pair {
         PlaybackServices::default(),
         provider,
     );
+    library.attach_session(session.clone());
+    let jobs = Arc::new(JobRunner::new(session.clone()));
+    let favorites = FavoritesService::new(database, session.clone());
+    let build_api = |session: SessionHandle| {
+        LocalApi::new(session)
+            .with_config(config_service.clone())
+            .with_library(library.clone())
+            .with_jobs(jobs.clone())
+            .with_favorites(favorites.clone())
+    };
     let token = "contract-token".to_string();
     let state = Arc::new(daemon::http::HttpState {
-        api: Arc::new(LocalApi::new(session.clone()).with_config(config_service.clone())),
+        api: Arc::new(build_api(session.clone())),
         session: session.clone(),
         token: token.clone(),
         started: Instant::now(),
@@ -113,7 +140,7 @@ async fn spawn_pair() -> Pair {
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(daemon::http::serve(listener, state));
     Pair {
-        local: LocalApi::new(session).with_config(config_service),
+        local: build_api(session),
         http: client::HttpApi::new(format!("http://{addr}"), token),
         _dir: dir,
     }
@@ -225,18 +252,18 @@ async fn commands_and_errors_map_identically() {
     assert_eq!(http_err.code, local_err.code);
     assert_eq!(http_err.message, local_err.message);
 
-    let local_err = pair
+    let local_page = pair
         .local
         .tracks(TrackFilter::default(), Page::default())
         .await
-        .expect_err("unsupported locally");
-    let http_err = pair
+        .expect("tracks locally");
+    let http_page = pair
         .http
         .tracks(TrackFilter::default(), Page::default())
         .await
-        .expect_err("unsupported over http");
-    assert_eq!(local_err.code, ErrorCode::Unsupported);
-    assert_eq!(http_err.code, local_err.code);
+        .expect("tracks over http");
+    assert_eq!(local_page, http_page);
+    assert_eq!(http_page.total, 2);
 }
 
 #[tokio::test]
@@ -309,6 +336,92 @@ async fn config_view_and_patch_agree_across_transports() {
     assert_eq!(local_err.code, ErrorCode::InvalidInput);
     assert_eq!(http_err.code, local_err.code);
     assert_eq!(http_err.message, local_err.message);
+}
+
+#[tokio::test]
+async fn favorites_round_trip_across_transports() {
+    let pair = spawn_pair().await;
+    pair.http
+        .set_favorite("/lib/seed-0.flac".into(), true)
+        .await
+        .expect("set over http");
+    let local_view = pair.local.favorites().await.expect("local list");
+    let http_view = pair.http.favorites().await.expect("http list");
+    assert_eq!(local_view.refs, http_view.refs);
+    assert!(local_view.refs.contains(&"/lib/seed-0.flac".to_string()));
+
+    pair.local
+        .set_favorite("/lib/seed-0.flac".into(), false)
+        .await
+        .expect("unset locally");
+    let http_view = pair.http.favorites().await.expect("http list");
+    assert!(http_view.refs.is_empty());
+
+    let err = pair
+        .http
+        .set_favorite("/nope.flac".into(), true)
+        .await
+        .expect_err("unknown key");
+    assert_eq!(err.code, ErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn scan_job_indexes_local_files_over_the_wire() {
+    let pair = spawn_pair().await;
+    let music = pair._dir.path().join("music");
+    std::fs::create_dir_all(&music).expect("music dir");
+    std::fs::write(music.join("one.wav"), wav_bytes(1)).expect("write wav");
+    std::fs::write(music.join("two.wav"), wav_bytes(1)).expect("write wav");
+
+    pair.http
+        .patch_config(serde_json::json!({
+            "music_directory": [music.to_string_lossy()],
+        }))
+        .await
+        .expect("point the library at the temp dir");
+
+    let job = pair
+        .http
+        .start_job(api::JobKind::Scan)
+        .await
+        .expect("start scan");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let jobs = pair.local.jobs().await.expect("jobs");
+        let status = jobs
+            .iter()
+            .find(|status| status.id == job.job_id)
+            .expect("job listed");
+        match status.state {
+            api::JobState::Running => {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "scan timed out: {status:?}"
+                );
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            api::JobState::Finished => break,
+            other => panic!("scan ended as {other:?}: {status:?}"),
+        }
+    }
+
+    let page = pair
+        .http
+        .tracks(TrackFilter::default(), Page::default())
+        .await
+        .expect("tracks over http");
+    assert!(
+        page.items
+            .iter()
+            .filter(|track| track.title.contains("one") || track.title.contains("two"))
+            .count()
+            >= 2,
+        "scanned tracks visible: {:?}",
+        page.items
+            .iter()
+            .map(|t| t.title.clone())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]

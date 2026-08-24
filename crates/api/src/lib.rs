@@ -45,6 +45,42 @@ pub struct CommandAck {
 
 pub type EventStream = futures_util::stream::BoxStream<'static, ApiEvent>;
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct JobRef {
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobState {
+    Running,
+    Finished,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct JobStatus {
+    pub id: String,
+    pub kind: JobKind,
+    pub state: JobState,
+    pub phase: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<ErrorBody>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FavoritesView {
+    pub refs: Vec<String>,
+    pub generation: u64,
+}
+
 #[async_trait::async_trait]
 pub trait KopuzApi: Send + Sync {
     async fn player_state(&self) -> Result<PlayerState, ApiError>;
@@ -62,6 +98,22 @@ pub trait KopuzApi: Send + Sync {
     /// RFC 7396 merge patch against the config surface. Credential and
     /// locked keys are refused with `invalid_input`.
     async fn patch_config(&self, patch: serde_json::Value) -> Result<ConfigView, ApiError>;
+
+    async fn favorites(&self) -> Result<FavoritesView, ApiError>;
+
+    /// Optimistic set: recorded locally and reflected immediately, pushed to
+    /// the remote in the background of the call; a rejected push reverts the
+    /// local state and surfaces the error.
+    async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError>;
+
+    /// Start a long-running job (`scan`, `library_sync`, `favorites_sync`).
+    /// Progress arrives as `job.progress` / `job.finished` events; a second
+    /// start of an already-running kind returns `conflict`.
+    async fn start_job(&self, kind: JobKind) -> Result<JobRef, ApiError>;
+
+    async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError>;
+
+    async fn cancel_job(&self, id: String) -> Result<(), ApiError>;
 
     async fn tracks(&self, filter: TrackFilter, page: Page) -> Result<TrackPage, ApiError>;
 
