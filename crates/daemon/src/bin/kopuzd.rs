@@ -139,6 +139,28 @@ fn main() -> ExitCode {
         }
     };
 
+    // macOS: Now Playing and the media-key command center need the process
+    // main thread to run a CFRunLoop, so async work moves to a worker thread
+    // and the main thread parks in the loop. Elsewhere the runtime keeps the
+    // main thread.
+    #[cfg(target_os = "macos")]
+    {
+        player::systemint::init();
+        std::thread::spawn(move || {
+            let code = match runtime.block_on(run(args)) {
+                Ok(()) => 0,
+                Err(error) => {
+                    tracing::error!(%error, "kopuzd exited with an error");
+                    1
+                }
+            };
+            std::process::exit(code);
+        });
+        player::systemint::park_main_loop();
+        ExitCode::SUCCESS
+    }
+
+    #[cfg(not(target_os = "macos"))]
     match runtime.block_on(run(args)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -193,6 +215,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let jobs = Arc::new(JobRunner::new(session.clone()));
     let favorites = FavoritesService::new(database.clone(), session.clone());
     favorites.spawn_reconciler();
+    daemon::os_media::spawn(&session);
     daemon::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
     daemon::integrations::spawn_discord_presence(&session, session.config_watch());
     if let Some(snapshot) = queue_store.load().await

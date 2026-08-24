@@ -9,6 +9,7 @@ pub mod http;
 pub mod integrations;
 pub mod jobs;
 pub mod library;
+pub mod os_media;
 pub mod persistence;
 mod playback;
 pub mod queue_model;
