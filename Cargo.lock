@@ -4321,6 +4321,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kopuz-daemon"
+version = "0.16.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "kopuz-api",
+ "kopuz-reader",
+ "rand 0.10.2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "kopuz-db"
 version = "0.16.0"
 dependencies = [

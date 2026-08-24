@@ -1,0 +1,25 @@
+[package]
+name = "kopuz-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "daemon"
+
+[lints]
+workspace = true
+
+[dependencies]
+api = { workspace = true }
+reader = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
