@@ -26,6 +26,8 @@ use crate::session::SessionHandle;
 
 pub struct HttpState {
     pub api: Arc<dyn KopuzApi>,
+    /// Entity-addressed artwork; `None` disables the endpoint.
+    pub artwork: Option<Arc<crate::artwork::ArtworkService>>,
     /// Event source with sequence numbers and the replay ring; the trait's
     /// `events()` strips ids, and SSE resume needs them.
     pub session: SessionHandle,
@@ -64,6 +66,7 @@ pub fn router(state: Arc<HttpState>) -> Router {
         .route("/v1/queue/jump", post(queue_jump))
         .route("/v1/queue/move", post(queue_move))
         .route("/v1/queue/items/{index}", delete(queue_remove))
+        .route("/v1/artwork", get(artwork))
         .route("/v1/events", get(events))
         .layer(middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state)
@@ -425,6 +428,60 @@ fn sse_event(sequence: u64, event: &ApiEvent) -> SseEvent {
         .id(sequence.to_string())
         .event(name)
         .data(data.to_string())
+}
+
+#[derive(serde::Deserialize)]
+struct ArtworkQuery {
+    track: Option<String>,
+    album: Option<String>,
+    artist: Option<String>,
+    #[serde(default)]
+    hq: bool,
+}
+
+async fn artwork(
+    State(state): State<Arc<HttpState>>,
+    headers: HeaderMap,
+    Query(query): Query<ArtworkQuery>,
+) -> Result<Response, ApiFailure> {
+    use crate::artwork::ArtworkEntity;
+    let Some(service) = &state.artwork else {
+        return Err(ApiFailure(ApiError::unsupported(
+            "this daemon runs without artwork",
+        )));
+    };
+    let entity = if let Some(track) = query.track.as_deref() {
+        ArtworkEntity::Track(track)
+    } else if let Some(album) = query.album.as_deref() {
+        ArtworkEntity::Album(album)
+    } else if let Some(artist) = query.artist.as_deref() {
+        ArtworkEntity::Artist(artist)
+    } else {
+        return Err(ApiFailure(ApiError::invalid_input(
+            "pass one of track, album, or artist",
+        )));
+    };
+    let payload = service.fetch(entity, query.hq).await?;
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        == Some(payload.etag.as_str())
+    {
+        return Ok(StatusCode::NOT_MODIFIED.into_response());
+    }
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, payload.content_type.to_string()),
+            (header::ETAG, payload.etag),
+            (
+                header::CACHE_CONTROL,
+                "private, max-age=31536000".to_string(),
+            ),
+        ],
+        payload.bytes,
+    )
+        .into_response())
 }
 
 fn resync_event() -> SseEvent {

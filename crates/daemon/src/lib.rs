@@ -2,6 +2,7 @@
 //! library, config, and job services. Pure tokio, no Dioxus, no HTTP; the
 //! `http` feature will add the axum shell.
 
+pub mod artwork;
 pub mod config_service;
 pub mod downloads;
 pub mod favorites;
@@ -16,6 +17,7 @@ mod playback;
 pub mod queue_model;
 pub mod session;
 
+pub use artwork::ArtworkService;
 pub use config_service::ConfigService;
 pub use downloads::DownloadsService;
 pub use favorites::FavoritesService;

@@ -236,6 +236,13 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let flush_session = session.clone();
+    let artwork = daemon::ArtworkService::new(
+        database.clone(),
+        session.clone(),
+        directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+            .map(|dirs| dirs.cache_dir().join("artwork"))
+            .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork")),
+    );
     let state = Arc::new(daemon::http::HttpState {
         api: Arc::new(
             LocalApi::new(session.clone())
@@ -245,6 +252,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 .with_favorites(favorites)
                 .with_downloads(downloads),
         ),
+        artwork: Some(artwork),
         session,
         token: args.token.unwrap_or_else(random_token),
         started: Instant::now(),

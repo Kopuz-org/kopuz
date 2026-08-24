@@ -130,6 +130,7 @@ async fn spawn_pair() -> Pair {
     let token = "contract-token".to_string();
     let state = Arc::new(daemon::http::HttpState {
         api: Arc::new(build_api(session.clone())),
+        artwork: None,
         session: session.clone(),
         token: token.clone(),
         started: Instant::now(),
