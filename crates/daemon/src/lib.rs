@@ -2,6 +2,8 @@
 //! library, config, and job services. Pure tokio, no Dioxus, no HTTP; the
 //! `http` feature will add the axum shell.
 
+#[cfg(feature = "http")]
+pub mod http;
 mod playback;
 pub mod queue_model;
 pub mod session;

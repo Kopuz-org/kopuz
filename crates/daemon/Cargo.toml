@@ -29,3 +29,9 @@ rand = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 utils = { workspace = true }
+axum = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[features]
+http = ["dep:axum", "dep:serde", "dep:serde_json"]
