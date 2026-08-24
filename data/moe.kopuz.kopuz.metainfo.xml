@@ -5,7 +5,10 @@
   <project_license>MIT</project_license>
   <name>Kopuz</name>
   <icon type="stock">moe.kopuz.kopuz</icon>
-  <summary>Fast, modern music player with local library and Jellyfin support</summary>
+  <branding>
+        <color type="primary">#891111</color>
+  </branding>
+  <summary>Hi-Res multi-backend music player</summary>
   <description>
     <p>
       Kopuz is a fast, modern music player built with Rust and the Dioxus framework.
@@ -18,11 +21,28 @@
       Designed for performance and simplicity.
     </p>
   </description>
+  <categories>
+        <category>AudioVideo</category>
+  </categories>
+  <keywords>
+        <keyword>jellyfin</keyword>
+        <keyword>subsonic</keyword>
+        <keyword>navidrome</keyword>
+        <keyword>nextcloud</keyword>
+        <keyword>music</keyword>
+        <keyword>youtube</keyword>
+        <keyword>apple</keyword>
+        <keyword>soundcloud</keyword>
+        <keyword>spotify</keyword>
+        <keyword>audio</keyword>
+        <keyword>yt-dlp</keyword>
+        <keyword>hi-res</keyword>
+  </keywords>
 
   <screenshots>
     <screenshot type="default">
       <caption>The main interface</caption>
-      <image>https://github.com/user-attachments/assets/8366b1ea-021f-4631-a97b-5ed6e5bf1562</image>
+      <image>https://github.com/user-attachments/assets/ca88f0c0-15d7-4a4d-8e81-78a61a70084f</image>
     </screenshot>
   </screenshots>
 
