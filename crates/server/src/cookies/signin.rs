@@ -71,6 +71,7 @@ where
     let mut cmd = browser_command(&bin);
     cmd.arg("--no-first-run")
         .arg("--no-default-browser-check")
+        .arg("--password-store=basic")
         .arg(format!("--user-data-dir={}", profile.display()));
     // Windows: kopuz's WebView2 UI runs us inside a job object whose sandbox
     // quota (1 active process) stops a spawned Chrome from creating the nested
@@ -82,7 +83,7 @@ where
         cmd.creation_flags(0x0100_0000);
     }
     let mut child = cmd
-        .arg(signin_url)
+        .arg(format!("--app={signin_url}"))
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
