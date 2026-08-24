@@ -46,6 +46,7 @@ pub fn router(state: Arc<HttpState>) -> Router {
         .route("/v1/player/seek", post(seek))
         .route("/v1/player/volume", post(volume))
         .route("/v1/player/mode", post(mode))
+        .route("/v1/library/tracks", get(library_tracks))
         .route("/v1/queue", get(queue_window).post(set_queue))
         .route("/v1/queue/jump", post(queue_jump))
         .route("/v1/queue/move", post(queue_move))
@@ -223,6 +224,37 @@ async fn queue_window(
         limit: page.limit.unwrap_or(api::DEFAULT_PAGE_LIMIT),
     };
     Ok(Json(state.api.queue_window(page).await?).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct TracksQuery {
+    search: Option<String>,
+    artist: Option<String>,
+    album: Option<String>,
+    genre: Option<String>,
+    favorite: Option<bool>,
+    sort: Option<String>,
+    offset: Option<u32>,
+    limit: Option<u32>,
+}
+
+async fn library_tracks(
+    State(state): State<Arc<HttpState>>,
+    Query(query): Query<TracksQuery>,
+) -> Result<Response, ApiFailure> {
+    let filter = api::TrackFilter {
+        search: query.search,
+        artist: query.artist,
+        album: query.album,
+        genre: query.genre,
+        favorite: query.favorite,
+        sort: query.sort,
+    };
+    let page = Page {
+        offset: query.offset.unwrap_or(0),
+        limit: query.limit.unwrap_or(api::DEFAULT_PAGE_LIMIT),
+    };
+    Ok(Json(state.api.tracks(filter, page).await?).into_response())
 }
 
 async fn set_queue(

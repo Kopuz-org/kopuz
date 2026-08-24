@@ -4336,6 +4336,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kopuz-client"
+version = "0.16.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "kopuz-api",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "kopuz-components"
 version = "0.16.0"
 dependencies = [
@@ -4382,7 +4396,9 @@ dependencies = [
  "base64",
  "futures-util",
  "kopuz-api",
+ "kopuz-client",
  "kopuz-config",
+ "kopuz-daemon",
  "kopuz-player",
  "kopuz-radio",
  "kopuz-reader",

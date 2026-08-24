@@ -53,7 +53,7 @@ impl Default for PlaybackServices {
     }
 }
 
-type FactoryOverride = Arc<dyn Fn(&Track) -> Option<SourceFactory> + Send + Sync>;
+pub type FactoryOverride = Arc<dyn Fn(&Track) -> Option<SourceFactory> + Send + Sync>;
 
 enum SessionCmd {
     Player(PlayerCommand, oneshot::Sender<Result<CommandAck, ApiError>>),
@@ -157,8 +157,10 @@ impl SessionHandle {
         }
     }
 
-    #[cfg(test)]
-    fn spawn_with_factory(
+    /// Test and diagnostic seam: every load resolves through the given
+    /// factory instead of classifying real sources. Contract tests use it to
+    /// run deterministic decodes against a [`player::engine::NullSink`].
+    pub fn spawn_with_factory(
         materializer: Arc<dyn QueueMaterializer>,
         player: Player,
         services: PlaybackServices,

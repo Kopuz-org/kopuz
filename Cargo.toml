@@ -120,6 +120,7 @@ config = { package = "kopuz-config", version = "0.16.0", path = "./crates/config
 db = { package = "kopuz-db", version = "0.16.0", path = "./crates/db" }
 api = { package = "kopuz-api", version = "0.16.0", path = "./crates/api" }
 daemon = { package = "kopuz-daemon", version = "0.16.0", path = "./crates/daemon" }
+client = { package = "kopuz-client", version = "0.16.0", path = "./crates/client" }
 kopuz = { version = "0.16.0", path = "./crates/kopuz" }
 server = { package = "kopuz-server", version = "0.16.0", path = "./crates/server" }
 kopuz_route = { package = "kopuz-route", version = "0.16.0", path = "./crates/kopuz_route" }
