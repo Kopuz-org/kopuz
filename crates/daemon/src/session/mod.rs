@@ -1104,7 +1104,7 @@ impl Session {
             .into_iter()
             .map(|(position, track)| QueueItem {
                 index: position as u32,
-                track,
+                track: crate::wire::track_info(&track, &self.config),
             })
             .collect();
         QueueWindow {

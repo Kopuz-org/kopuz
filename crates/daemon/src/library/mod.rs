@@ -120,6 +120,23 @@ impl LibraryService {
     }
 
     pub async fn tracks(&self, filter: TrackFilter, page: Page) -> Result<TrackPage, ApiError> {
+        let config = self.current_config();
+        let (total, rows) = self.tracks_raw(filter, page).await?;
+        Ok(TrackPage {
+            total,
+            offset: page.offset,
+            items: rows
+                .iter()
+                .map(|track| crate::wire::track_info(track, &config))
+                .collect(),
+        })
+    }
+
+    pub(crate) async fn tracks_raw(
+        &self,
+        filter: TrackFilter,
+        page: Page,
+    ) -> Result<(u32, Vec<Track>), ApiError> {
         if filter.favorite.is_some() {
             return Err(ApiError::unsupported(
                 "favorite filtering lands with the favorites service",
@@ -161,11 +178,7 @@ impl LibraryService {
                 .skip(page.offset as usize)
                 .take(page.limit as usize)
                 .collect();
-            return Ok(TrackPage {
-                total,
-                offset: page.offset,
-                items,
-            });
+            return Ok((total, items));
         }
 
         let db_filter = db::TrackFilter {
@@ -185,11 +198,7 @@ impl LibraryService {
             .await
             .map_err(db_error)?;
         let total = self.db.tracks_count(&db_filter).await.map_err(db_error)?;
-        Ok(TrackPage {
-            total,
-            offset: page.offset,
-            items,
-        })
+        Ok((total, items))
     }
 
     /// Synthetic radio track, seeded from the manifest so no client ever sees
@@ -322,7 +331,7 @@ impl QueueMaterializer for LibraryService {
                     .map_err(db_error)
             }
             QueueContext::Filter { filter } => Ok(self
-                .tracks(
+                .tracks_raw(
                     filter.clone(),
                     Page {
                         offset: 0,
@@ -330,7 +339,7 @@ impl QueueMaterializer for LibraryService {
                     },
                 )
                 .await?
-                .items),
+                .1),
             QueueContext::Radio {
                 station_id,
                 stream_id,

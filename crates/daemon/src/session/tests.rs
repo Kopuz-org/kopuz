@@ -700,7 +700,7 @@ async fn radio_tracks_reject_seek_commands() {
 #[test]
 fn radio_sentinel_becomes_wire_kind() {
     let track = test_track(&"radio:station:main".to_string());
-    let now = now_playing_from(&track);
+    let now = now_playing_from(&track, &config::AppConfig::default());
     assert_eq!(now.kind, TrackKind::Radio);
     assert_eq!(now.duration_ms, None);
     assert!(!now.seekable);

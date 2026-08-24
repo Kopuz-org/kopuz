@@ -65,7 +65,7 @@ pub enum QueueEdit {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QueueItem {
     pub index: u32,
-    pub track: reader::Track,
+    pub track: crate::library::TrackInfo,
 }
 
 /// A window into the queue in play order. `rev` matches

@@ -16,6 +16,7 @@ pub mod persistence;
 mod playback;
 pub mod queue_model;
 pub mod session;
+mod wire;
 
 pub use artwork::ArtworkService;
 pub use config_service::ConfigService;

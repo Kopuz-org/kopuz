@@ -16,7 +16,7 @@ mod queue;
 
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
-pub use library::{DEFAULT_PAGE_LIMIT, Page, TrackFilter, TrackPage};
+pub use library::{DEFAULT_PAGE_LIMIT, Page, TrackFilter, TrackInfo, TrackPage};
 pub use player::{
     BufferedRange, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying, Phase,
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,

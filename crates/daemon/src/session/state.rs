@@ -100,7 +100,10 @@ impl Session {
     }
 
     pub(super) fn build_state(&self) -> PlayerState {
-        let track = self.model.current_track().map(now_playing_from);
+        let track = self
+            .model
+            .current_track()
+            .map(|track| now_playing_from(track, &self.config));
         let fading = self.pending_transition.as_ref().and_then(|pending| {
             (pending.stage == TransitionStage::Fading).then(|| FadingState {
                 from_token: pending.from_token,
@@ -146,9 +149,11 @@ pub(super) fn engine_phase(phase: EnginePhase) -> ApiPhase {
 
 /// Translate the internal track model to the wire summary. The radio duration
 /// sentinel is contained at this boundary.
-pub(super) fn now_playing_from(track: &Track) -> NowPlaying {
+pub(super) fn now_playing_from(track: &Track, config: &config::AppConfig) -> NowPlaying {
+    let _ = config;
     let radio = track.duration == u64::MAX;
     NowPlaying {
+        artwork: (!radio).then(|| crate::wire::artwork_url(&track.id.key())),
         key: track.id.uid(),
         title: track.title.clone(),
         artist: track.artist.clone(),
@@ -156,7 +161,6 @@ pub(super) fn now_playing_from(track: &Track) -> NowPlaying {
         duration_ms: (!radio).then(|| track.duration.saturating_mul(1000)),
         khz: track.khz,
         bitrate: track.bitrate,
-        artwork: None,
         kind: if radio {
             TrackKind::Radio
         } else {
