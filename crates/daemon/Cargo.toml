@@ -51,6 +51,7 @@ directories = { workspace = true, optional = true }
 daemon = { workspace = true, features = ["http", "kopuzd"] }
 client = { workspace = true }
 tempfile = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
 
 [features]
 http = ["dep:axum", "tokio/net"]

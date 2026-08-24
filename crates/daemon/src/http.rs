@@ -32,6 +32,10 @@ pub struct HttpState {
     /// `events()` strips ids, and SSE resume needs them.
     pub session: SessionHandle,
     pub token: String,
+    /// Browser origins allowed to call the API. Non-browser clients send no
+    /// Origin header and are unaffected; any unlisted Origin is refused even
+    /// with a valid token, so a malicious web page cannot ride a leaked one.
+    pub allowed_origins: Vec<String>,
     pub started: Instant,
 }
 
@@ -114,6 +118,18 @@ fn query_param<'a>(query: Option<&'a str>, name: &str) -> Option<&'a str> {
 /// Bearer auth on every route. `EventSource` cannot set headers, so the token
 /// is also accepted as a `?token=` query parameter.
 async fn auth(State(state): State<Arc<HttpState>>, request: Request, next: Next) -> Response {
+    if let Some(origin) = request
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        && !state
+            .allowed_origins
+            .iter()
+            .any(|allowed| allowed == origin)
+    {
+        return ApiFailure(ApiError::new(ErrorCode::Unauthorized, "origin not allowed"))
+            .into_response();
+    }
     let header_token = request
         .headers()
         .get(header::AUTHORIZATION)

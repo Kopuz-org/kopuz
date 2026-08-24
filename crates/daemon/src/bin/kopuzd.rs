@@ -35,6 +35,7 @@ struct Args {
     bind: String,
     token: Option<String>,
     db_path: Option<String>,
+    allowed_origins: Vec<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -42,6 +43,7 @@ fn parse_args() -> Result<Args, String> {
         bind: "127.0.0.1:0".to_string(),
         token: None,
         db_path: None,
+        allowed_origins: Vec::new(),
     };
     let mut iter = std::env::args().skip(1);
     while let Some(arg) = iter.next() {
@@ -55,9 +57,13 @@ fn parse_args() -> Result<Args, String> {
             "--db-path" => {
                 args.db_path = Some(iter.next().ok_or("--db-path requires a path")?);
             }
+            "--allow-origin" => {
+                args.allowed_origins
+                    .push(iter.next().ok_or("--allow-origin requires an origin")?);
+            }
             "--help" | "-h" => {
                 return Err(
-                    "usage: kopuzd [--bind 127.0.0.1:0] [--token <hex>] [--db-path <file>]"
+                    "usage: kopuzd [--bind 127.0.0.1:0] [--token <hex>] [--db-path <file>] [--allow-origin <origin>]..."
                         .to_string(),
                 );
             }
@@ -255,6 +261,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         artwork: Some(artwork),
         session,
         token: args.token.unwrap_or_else(random_token),
+        allowed_origins: args.allowed_origins,
         started: Instant::now(),
     });
 

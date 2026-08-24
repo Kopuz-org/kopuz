@@ -133,6 +133,7 @@ async fn spawn_pair() -> Pair {
         artwork: None,
         session: session.clone(),
         token: token.clone(),
+        allowed_origins: Vec::new(),
         started: Instant::now(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -452,6 +453,28 @@ async fn folders_and_stats_agree_across_transports() {
     let local_stats = pair.local.stats().await.expect("stats locally");
     let http_stats = pair.http.stats().await.expect("stats over http");
     assert_eq!(local_stats, http_stats);
+}
+
+#[tokio::test]
+async fn browser_origins_are_refused_unless_allowlisted() {
+    let pair = spawn_pair().await;
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/v1/status", pair.http.base_url()))
+        .header("Authorization", "Bearer contract-token")
+        .header("Origin", "https://evil.example")
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(response.status(), 401);
+
+    let response = client
+        .get(format!("{}/v1/status", pair.http.base_url()))
+        .header("Authorization", "Bearer contract-token")
+        .send()
+        .await
+        .expect("request without origin");
+    assert_eq!(response.status(), 200);
 }
 
 #[tokio::test]
