@@ -4,9 +4,11 @@
 
 #[cfg(feature = "http")]
 pub mod http;
+pub mod library;
 mod playback;
 pub mod queue_model;
 pub mod session;
 
+pub use library::LibraryService;
 pub use queue_model::{NextOutcome, QueueModel};
 pub use session::{LocalApi, PlaybackServices, QueueMaterializer, SessionHandle};

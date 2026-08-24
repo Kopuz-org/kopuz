@@ -12,11 +12,17 @@ keywords.workspace = true
 [lib]
 name = "daemon"
 
+[[bin]]
+name = "kopuzd"
+path = "src/bin/kopuzd.rs"
+required-features = ["kopuzd"]
+
 [lints]
 workspace = true
 
 [dependencies]
 api = { workspace = true }
+db = { workspace = true }
 base64 = { workspace = true }
 config = { workspace = true }
 player = { workspace = true }
@@ -32,10 +38,20 @@ utils = { workspace = true }
 axum = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+directories = { workspace = true, optional = true }
 
 [dev-dependencies]
-daemon = { workspace = true, features = ["http"] }
+daemon = { workspace = true, features = ["http", "kopuzd"] }
 client = { workspace = true }
+tempfile = { workspace = true }
 
 [features]
 http = ["dep:axum", "dep:serde", "dep:serde_json", "tokio/net"]
+kopuzd = [
+  "http",
+  "dep:tracing-subscriber",
+  "dep:directories",
+  "tokio/rt-multi-thread",
+  "tokio/signal",
+]

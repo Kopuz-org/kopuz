@@ -4394,11 +4394,13 @@ dependencies = [
  "async-trait",
  "axum",
  "base64",
+ "directories",
  "futures-util",
  "kopuz-api",
  "kopuz-client",
  "kopuz-config",
  "kopuz-daemon",
+ "kopuz-db",
  "kopuz-player",
  "kopuz-radio",
  "kopuz-reader",
@@ -4407,8 +4409,10 @@ dependencies = [
  "rand 0.10.2",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4643,22 +4647,6 @@ dependencies = [
  "tokio",
  "tracing",
  "urlencoding",
-]
-
-[[package]]
-name = "kopuzd"
-version = "0.16.0"
-dependencies = [
- "async-trait",
- "directories",
- "kopuz-api",
- "kopuz-daemon",
- "kopuz-reader",
- "rand 0.10.2",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

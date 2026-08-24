@@ -1598,11 +1598,25 @@ fn now_playing_from(track: &Track) -> NowPlaying {
 /// In-process implementation of [`api::KopuzApi`] over a running session.
 pub struct LocalApi {
     session: SessionHandle,
+    library: Option<Arc<crate::library::LibraryService>>,
 }
 
 impl LocalApi {
     pub fn new(session: SessionHandle) -> Self {
-        Self { session }
+        Self {
+            session,
+            library: None,
+        }
+    }
+
+    pub fn with_library(
+        session: SessionHandle,
+        library: Arc<crate::library::LibraryService>,
+    ) -> Self {
+        Self {
+            session,
+            library: Some(library),
+        }
     }
 }
 
@@ -1630,12 +1644,15 @@ impl api::KopuzApi for LocalApi {
 
     async fn tracks(
         &self,
-        _filter: api::TrackFilter,
-        _page: Page,
+        filter: api::TrackFilter,
+        page: Page,
     ) -> Result<api::TrackPage, ApiError> {
-        Err(ApiError::unsupported(
-            "library reads land with the library service",
-        ))
+        match &self.library {
+            Some(library) => library.tracks(filter, page).await,
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a library service",
+            )),
+        }
     }
 
     fn events(&self) -> api::EventStream {

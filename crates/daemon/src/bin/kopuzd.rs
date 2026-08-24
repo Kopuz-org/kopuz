@@ -1,73 +1,44 @@
 //! Headless Kopuz daemon (Phase 3 preview).
 //!
-//! Owns the real audio engine and serves the HTTP/JSON + SSE API from
-//! `daemon::http`. Library, config, and source services have not moved in yet,
-//! so queue contexts resolve local file paths only:
+//! Owns the real audio engine, the Kopuz database, and the configured source,
+//! and serves the HTTP/JSON + SSE API from `daemon::http`. Queue contexts
+//! resolve from the library (albums, artists, genres, playlists, filters,
+//! radio) with a fallback probe for ad-hoc local file paths:
 //!
 //! ```sh
 //! kopuzd
 //! TOKEN=$(python3 -c "import json;print(json.load(open('<discovery>'))['token'])")
 //! curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:<port>/v1/player
 //! curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-//!   -d '{"context":{"kind":"tracks","keys":["/path/to/song.flac"]}}' \
+//!   -d '{"context":{"kind":"album","id":"<album id>"}}' \
 //!   http://127.0.0.1:<port>/v1/queue
 //! ```
 //!
 //! The discovery file (path is logged at startup) carries `{port, token, pid}`
 //! with 0600 permissions, so local frontends can attach without configuration.
+//!
+//! Interim caveat: the daemon expects exclusive database access. Running it
+//! alongside the GUI app against the same `KOPUZ_DB_PATH` means two writers
+//! on one SQLite file; safe for reads, but not the supported end state.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
-use api::{ApiError, QueueContext};
-use daemon::{PlaybackServices, QueueMaterializer, SessionHandle};
-use reader::Track;
-
-struct LocalFiles;
-
-#[async_trait::async_trait]
-impl QueueMaterializer for LocalFiles {
-    async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
-        let QueueContext::Tracks { keys } = context else {
-            return Err(ApiError::unsupported(
-                "this preview daemon resolves only local file paths (context kind \"tracks\")",
-            ));
-        };
-        let keys = keys.clone();
-        let tracks = tokio::task::spawn_blocking(move || {
-            let cover_cache = std::env::temp_dir();
-            let mut library = reader::Library::default();
-            keys.iter()
-                .filter_map(|key| {
-                    let path = Path::new(key);
-                    path.is_file()
-                        .then(|| reader::read(path, &cover_cache, &mut library))
-                        .flatten()
-                })
-                .collect::<Vec<_>>()
-        })
-        .await
-        .map_err(|_| ApiError::internal("track probe task failed"))?;
-        if tracks.is_empty() {
-            return Err(ApiError::invalid_input(
-                "no readable local audio files in request",
-            ));
-        }
-        Ok(tracks)
-    }
-}
+use daemon::{LibraryService, LocalApi, PlaybackServices, SessionHandle};
 
 struct Args {
     bind: String,
     token: Option<String>,
+    db_path: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args {
         bind: "127.0.0.1:0".to_string(),
         token: None,
+        db_path: None,
     };
     let mut iter = std::env::args().skip(1);
     while let Some(arg) = iter.next() {
@@ -78,8 +49,14 @@ fn parse_args() -> Result<Args, String> {
             "--token" => {
                 args.token = Some(iter.next().ok_or("--token requires a value")?);
             }
+            "--db-path" => {
+                args.db_path = Some(iter.next().ok_or("--db-path requires a path")?);
+            }
             "--help" | "-h" => {
-                return Err("usage: kopuzd [--bind 127.0.0.1:0] [--token <hex>]".to_string());
+                return Err(
+                    "usage: kopuzd [--bind 127.0.0.1:0] [--token <hex>] [--db-path <file>]"
+                        .to_string(),
+                );
             }
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -169,10 +146,31 @@ fn main() -> ExitCode {
 }
 
 async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
-    let session = SessionHandle::try_spawn(Arc::new(LocalFiles), PlaybackServices::default())
+    let db_path = args
+        .db_path
+        .map(PathBuf::from)
+        .unwrap_or_else(db::default_db_path);
+    tracing::info!(path = %db_path.display(), "opening library database (expects exclusive access)");
+    let database = db::init(&db_path).await?;
+    let config = database.load_config().await?.unwrap_or_default();
+
+    let station_registry = Arc::new(radio::registry::StationRegistry::default());
+    let library = Arc::new(LibraryService::new(
+        database.reads(),
+        config.active_source.clone(),
+        station_registry.clone(),
+    ));
+    let active_source = Some(Arc::from(server::source::active(database.clone(), &config)));
+    let services = PlaybackServices {
+        config,
+        active_source,
+        station_registry,
+    };
+
+    let session = SessionHandle::try_spawn(library.clone(), services)
         .map_err(|error| format!("audio engine init failed: {error:?}"))?;
     let state = Arc::new(daemon::http::HttpState {
-        api: Arc::new(daemon::LocalApi::new(session.clone())),
+        api: Arc::new(LocalApi::with_library(session.clone(), library)),
         session,
         token: args.token.unwrap_or_else(random_token),
         started: Instant::now(),
