@@ -6,7 +6,8 @@
   <name>Kopuz</name>
   <icon type="stock">moe.kopuz.kopuz</icon>
   <branding>
-        <color type="primary">#891111</color>
+  <color type="primary" scheme_preference="light">#fcf0f0</color>
+  <color type="primary" scheme_preference="dark">#0f0303</color>
   </branding>
   <summary>Hi-Res multi-backend music player</summary>
   <description>
