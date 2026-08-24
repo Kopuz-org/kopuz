@@ -213,6 +213,14 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|error| format!("audio engine init failed: {error:?}"))?;
     library.attach_session(session.clone());
     let jobs = Arc::new(JobRunner::new(session.clone()));
+    let downloads = daemon::DownloadsService::new(
+        database.clone(),
+        session.clone(),
+        config_service.clone(),
+        directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+            .map(|dirs| dirs.cache_dir().join("offline_tracks"))
+            .unwrap_or_else(|| std::env::temp_dir().join("kopuz-offline")),
+    );
     let favorites = FavoritesService::new(database.clone(), session.clone());
     favorites.spawn_reconciler();
     daemon::os_media::spawn(&session);
@@ -234,7 +242,8 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 .with_library(library)
                 .with_config(config_service)
                 .with_jobs(jobs)
-                .with_favorites(favorites),
+                .with_favorites(favorites)
+                .with_downloads(downloads),
         ),
         session,
         token: args.token.unwrap_or_else(random_token),

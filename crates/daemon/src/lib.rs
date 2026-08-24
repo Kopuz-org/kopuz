@@ -3,6 +3,7 @@
 //! `http` feature will add the axum shell.
 
 pub mod config_service;
+pub mod downloads;
 pub mod favorites;
 #[cfg(feature = "http")]
 pub mod http;
@@ -16,6 +17,7 @@ pub mod queue_model;
 pub mod session;
 
 pub use config_service::ConfigService;
+pub use downloads::DownloadsService;
 pub use favorites::FavoritesService;
 pub use integrations::SourceRecorder;
 pub use jobs::JobRunner;

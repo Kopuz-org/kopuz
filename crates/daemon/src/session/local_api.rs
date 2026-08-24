@@ -8,6 +8,7 @@ pub struct LocalApi {
     pub(super) library: Option<Arc<crate::library::LibraryService>>,
     pub(super) config: Option<Arc<crate::config_service::ConfigService>>,
     pub(super) jobs: Option<Arc<crate::jobs::JobRunner>>,
+    pub(super) downloads: Option<Arc<crate::downloads::DownloadsService>>,
     pub(super) favorites: Option<Arc<crate::favorites::FavoritesService>>,
 }
 
@@ -18,6 +19,7 @@ impl LocalApi {
             library: None,
             config: None,
             jobs: None,
+            downloads: None,
             favorites: None,
         }
     }
@@ -39,6 +41,11 @@ impl LocalApi {
 
     pub fn with_favorites(mut self, favorites: Arc<crate::favorites::FavoritesService>) -> Self {
         self.favorites = Some(favorites);
+        self
+    }
+
+    pub fn with_downloads(mut self, downloads: Arc<crate::downloads::DownloadsService>) -> Self {
+        self.downloads = Some(downloads);
         self
     }
 }
@@ -138,6 +145,33 @@ impl api::KopuzApi for LocalApi {
             api::JobKind::PlaylistSync | api::JobKind::Download | api::JobKind::Unknown => Err(
                 ApiError::unsupported("this job kind has no direct starter yet"),
             ),
+        }
+    }
+
+    async fn download(&self, keys: Vec<String>) -> Result<api::JobRef, ApiError> {
+        let (Some(service), Some(runner)) = (&self.downloads, &self.jobs) else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without a downloads service",
+            ));
+        };
+        service.spawn_download(runner, keys)
+    }
+
+    async fn downloads(&self) -> Result<Vec<String>, ApiError> {
+        match &self.downloads {
+            Some(service) => Ok(service.list().await),
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a downloads service",
+            )),
+        }
+    }
+
+    async fn remove_download(&self, key: String) -> Result<(), ApiError> {
+        match &self.downloads {
+            Some(service) => service.remove(&key).await,
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a downloads service",
+            )),
         }
     }
 

@@ -86,6 +86,22 @@ impl ConfigService {
             .collect()
     }
 
+    /// Internal state mutation (offline registrations, play state): bypasses
+    /// the wire-facing sensitive/locked checks, persists immediately, and
+    /// returns the updated config for the caller to push into the session.
+    pub async fn mutate_state(
+        &self,
+        mutate: impl FnOnce(&mut config::AppConfig),
+    ) -> Result<config::AppConfig, ApiError> {
+        let mut current = self.current.write().await;
+        mutate(&mut current);
+        self.db
+            .save_config(&current)
+            .await
+            .map_err(|error| ApiError::internal(format!("config save failed: {error}")))?;
+        Ok(current.clone())
+    }
+
     pub async fn snapshot(&self) -> config::AppConfig {
         self.current.read().await.clone()
     }

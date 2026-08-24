@@ -230,6 +230,25 @@ impl KopuzApi for HttpApi {
         self.post(path, None).await
     }
 
+    async fn download(&self, keys: Vec<String>) -> Result<JobRef, ApiError> {
+        self.post("/v1/downloads", Some(serde_json::json!({ "keys": keys })))
+            .await
+    }
+
+    async fn downloads(&self) -> Result<Vec<String>, ApiError> {
+        self.get("/v1/downloads").await
+    }
+
+    async fn remove_download(&self, key: String) -> Result<(), ApiError> {
+        let _: serde_json::Value = self
+            .send(
+                self.request(reqwest::Method::DELETE, "/v1/downloads")
+                    .json(&serde_json::json!({ "key": key })),
+            )
+            .await?;
+        Ok(())
+    }
+
     async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError> {
         self.get("/v1/jobs").await
     }

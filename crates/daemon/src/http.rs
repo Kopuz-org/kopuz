@@ -51,6 +51,12 @@ pub fn router(state: Arc<HttpState>) -> Router {
         .route("/v1/favorites/sync", post(favorites_sync))
         .route("/v1/library/scan", post(library_scan))
         .route("/v1/library/sync", post(library_sync))
+        .route(
+            "/v1/downloads",
+            get(list_downloads)
+                .post(start_downloads)
+                .delete(remove_download),
+        )
         .route("/v1/jobs", get(list_jobs))
         .route("/v1/jobs/{id}/cancel", post(cancel_job))
         .route("/v1/library/tracks", get(library_tracks))
@@ -288,6 +294,35 @@ async fn library_scan(State(state): State<Arc<HttpState>>) -> Result<Response, A
 
 async fn library_sync(State(state): State<Arc<HttpState>>) -> Result<Response, ApiFailure> {
     start_job(state, api::JobKind::LibrarySync).await
+}
+
+#[derive(serde::Deserialize)]
+struct DownloadBody {
+    keys: Vec<String>,
+}
+
+async fn start_downloads(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<DownloadBody>,
+) -> Result<Response, ApiFailure> {
+    Ok(Json(state.api.download(body.keys).await?).into_response())
+}
+
+async fn list_downloads(State(state): State<Arc<HttpState>>) -> Result<Response, ApiFailure> {
+    Ok(Json(state.api.downloads().await?).into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct RemoveDownloadBody {
+    key: String,
+}
+
+async fn remove_download(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<RemoveDownloadBody>,
+) -> Result<Response, ApiFailure> {
+    state.api.remove_download(body.key).await?;
+    Ok(Json(serde_json::json!({})).into_response())
 }
 
 async fn list_jobs(State(state): State<Arc<HttpState>>) -> Result<Response, ApiFailure> {

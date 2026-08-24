@@ -4408,12 +4408,15 @@ dependencies = [
  "kopuz-server",
  "kopuz-utils",
  "rand 0.10.2",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "uuid 1.23.5",
 ]
 
 [[package]]

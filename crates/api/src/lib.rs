@@ -111,6 +111,14 @@ pub trait KopuzApi: Send + Sync {
     /// start of an already-running kind returns `conflict`.
     async fn start_job(&self, kind: JobKind) -> Result<JobRef, ApiError>;
 
+    /// Cache server tracks for offline playback; returns the download job.
+    async fn download(&self, keys: Vec<String>) -> Result<JobRef, ApiError>;
+
+    /// Item ids with a registered offline copy.
+    async fn downloads(&self) -> Result<Vec<String>, ApiError>;
+
+    async fn remove_download(&self, key: String) -> Result<(), ApiError>;
+
     async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError>;
 
     async fn cancel_job(&self, id: String) -> Result<(), ApiError>;
