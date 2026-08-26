@@ -2,6 +2,12 @@
 /// the app via context.
 pub static DB_HANDLE: std::sync::OnceLock<db::Db> = std::sync::OnceLock::new();
 
+/// The persisted config, loaded alongside the DB before the UI mounts. The
+/// embedded daemon session seeds from this so nothing that reads its config
+/// watch early (the scan job's roots above all) can observe defaults; the
+/// async startup loader still owns applying it to the UI signals.
+pub static BOOT_CONFIG: std::sync::OnceLock<config::AppConfig> = std::sync::OnceLock::new();
+
 pub fn init_blocking() -> db::Db {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -37,6 +43,15 @@ pub fn init_blocking() -> db::Db {
             }
         };
         db::legacy::migrate_json_store(&handle, &db::config_dir()).await;
+        match handle.load_config().await {
+            Ok(loaded) => {
+                let _ = BOOT_CONFIG.set(loaded.unwrap_or_default());
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "kopuz: boot config load failed - seeding defaults");
+                let _ = BOOT_CONFIG.set(config::AppConfig::default());
+            }
+        }
         server::ytmusic::player::init_tier_store(handle.clone());
         utils::db_cache::init(handle.clone());
         handle

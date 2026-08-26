@@ -141,6 +141,9 @@ pub struct PlayerState {
     pub external: Option<ExternalPlayback>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<crate::error::ErrorBody>,
+    /// Output pipeline latency, for lyric/visual sync offsets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_latency_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

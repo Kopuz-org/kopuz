@@ -379,6 +379,7 @@ pub mod convert {
                 device: external.device.clone(),
             }),
             error: value.error.as_ref().map(error_body_to_proto),
+            output_latency_ms: value.output_latency_ms,
         }
     }
 
@@ -410,6 +411,7 @@ pub mod convert {
                     device: external.device.clone(),
                 }),
             error: value.error.as_ref().map(error_body_from_proto),
+            output_latency_ms: value.output_latency_ms,
         }
     }
 
@@ -1119,6 +1121,7 @@ mod tests {
                 message: "m".into(),
                 details: Some(serde_json::json!({"k": 1})),
             }),
+            output_latency_ms: Some(120),
         }
     }
 

@@ -202,6 +202,7 @@ message PlayerState {
   optional FadingState fading = 10;
   optional ExternalPlayback external = 11;
   optional ErrorBody error = 12;
+  optional uint64 output_latency_ms = 13;
 }
 
 // phase is engine truth; intent is what the daemon is trying to do.

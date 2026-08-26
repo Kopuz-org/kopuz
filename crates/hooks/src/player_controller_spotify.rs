@@ -222,6 +222,7 @@ impl PlayerController {
         if let Some(task) = self.spotify_start_task.take() {
             task.cancel();
         }
+        self.spotify_scrobble_token.with_mut(|token| *token += 1);
         self.spotify_transport_pause();
         self.external_active.set(false);
     }

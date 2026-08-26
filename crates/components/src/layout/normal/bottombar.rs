@@ -5,14 +5,12 @@ use crate::player_controls::{
 use config::PlayerBarPosition;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
-use player::player::Player;
 
 use hooks::favorites::toggle_favorite;
 
 #[component]
 pub fn BottombarNormal(
     mut config: Signal<config::AppConfig>,
-    mut player: Signal<Player>,
     mut is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
     mut current_song_duration: Signal<u64>,
@@ -188,7 +186,7 @@ pub fn BottombarNormal(
 
             div {
                 class: "flex items-center justify-end gap-4 w-1/4",
-                VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Bar }
+                VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Bar }
                 button {
                     class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
