@@ -1,44 +1,69 @@
+//! Frontend-side async playback orchestration. Engine playback and OS media
+//! integration live in the daemon now; what remains here is the Spotify
+//! external-playback machinery, which is tied to the browser host and the
+//! controller's signal mirror.
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use crate::use_player_controller::LoopMode;
 use crate::use_player_controller::PlayerController;
 use config::AppConfig;
 use config::MusicService;
-use dioxus::logger::tracing::Instrument;
 use dioxus::prelude::*;
-use std::sync::Arc;
 
-use discord_presence::Presence;
-use discord_presence::cover_art;
+#[cfg(target_os = "android")]
+mod android_media {
+    #[derive(Debug, Clone, Copy)]
+    pub(super) enum BgCmd {
+        Play,
+        Pause,
+        Toggle,
+        Next,
+        Prev,
+        ToggleShuffle,
+        CycleRepeat,
+    }
 
-#[path = "player_task_event_pump.rs"]
-mod event_pump;
+    pub(super) static BG_CMD_TX: std::sync::OnceLock<
+        std::sync::Mutex<std::sync::mpsc::Sender<BgCmd>>,
+    > = std::sync::OnceLock::new();
+    pub(super) static BG_CMD_RX: std::sync::OnceLock<
+        std::sync::Mutex<std::sync::mpsc::Receiver<BgCmd>>,
+    > = std::sync::OnceLock::new();
+    pub(super) static BG_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> =
+        std::sync::OnceLock::new();
 
-#[cfg(target_os = "macos")]
-use player::systemint::set_background_handler;
+    pub(super) fn init_bg_channel() {
+        BG_CMD_TX.get_or_init(|| {
+            let (tx, rx) = std::sync::mpsc::channel::<BgCmd>();
+            let _ = BG_CMD_RX.set(std::sync::Mutex::new(rx));
+            std::sync::Mutex::new(tx)
+        });
+        BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
+    }
 
-#[cfg(target_os = "macos")]
-use player::systemint::set_tokio_waker;
+    pub(super) fn send_bg_cmd(cmd: BgCmd) {
+        if let Some(lock) = BG_CMD_TX.get()
+            && let Ok(tx) = lock.lock()
+        {
+            let _ = tx.send(cmd);
+        }
+        if let Some(notify) = BG_NOTIFY.get() {
+            notify.notify_one();
+        }
+    }
 
-#[derive(Debug, Clone, Copy)]
-#[allow(dead_code)]
-enum BgCmd {
-    Play,
-    Pause,
-    Toggle,
-    Next,
-    Prev,
-    Seek(f64),
-    #[cfg(target_os = "android")]
-    ToggleShuffle,
-    #[cfg(target_os = "android")]
-    CycleRepeat,
+    pub(super) fn drain_bg_cmds() -> Vec<BgCmd> {
+        let mut cmds = Vec::new();
+        if let Some(lock) = BG_CMD_RX.get()
+            && let Ok(rx) = lock.try_lock()
+        {
+            while let Ok(cmd) = rx.try_recv() {
+                cmds.push(cmd);
+            }
+        }
+        cmds
+    }
 }
-
-static BG_CMD_TX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<BgCmd>>> =
-    std::sync::OnceLock::new();
-static BG_CMD_RX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Receiver<BgCmd>>> =
-    std::sync::OnceLock::new();
-static BG_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
 
 /// Persist a play-count increment as a single-row upsert. The in-memory
 /// `config.listen_counts` is bumped by the caller for live views; this is the
@@ -49,30 +74,6 @@ fn bump_listen_count_db(track_uid: String, source: ::server::source::ActiveSourc
             tracing::warn!(error = %e, "listen count persist failed");
         }
     });
-}
-
-#[cfg(any(target_os = "macos", target_os = "android"))]
-fn init_bg_channel() {
-    BG_CMD_TX.get_or_init(|| {
-        let (tx, rx) = std::sync::mpsc::channel::<BgCmd>();
-        let _ = BG_CMD_RX.set(std::sync::Mutex::new(rx));
-        std::sync::Mutex::new(tx)
-    });
-    BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
-}
-
-#[allow(dead_code)]
-fn send_bg_cmd(cmd: BgCmd) {
-    if let Some(lock) = BG_CMD_TX.get()
-        && let Ok(tx) = lock.lock()
-    {
-        let _ = tx.send(cmd);
-    }
-    // Instantly wake the tokio task so it processes the command
-    // without waiting for the next 250ms poll tick.
-    if let Some(notify) = BG_NOTIFY.get() {
-        notify.notify_one();
-    }
 }
 
 /// Record one completed listen for the current track — the same accounting the
@@ -100,9 +101,9 @@ struct OsTrack<'a> {
     artwork: Option<&'a str>,
 }
 
-/// Platforms whose OS media widget Kopuz drives directly. Matches the set the
-/// local `Player` pushes to; for remote Spotify playback the engine is stopped,
-/// so the poll loop feeds these the now-playing metadata itself.
+/// Platforms whose OS media widget Kopuz drives directly. Engine playback
+/// feeds these from the daemon's os_media task; for remote Spotify playback
+/// the engine is stopped, so the poll loop here feeds them itself.
 #[cfg(any(
     target_os = "macos",
     target_os = "linux",
@@ -160,52 +161,8 @@ mod os_now_playing {
     pub(super) fn push(_track: OsTrack<'_>) {}
 }
 
-fn drain_bg_cmds() -> Vec<BgCmd> {
-    let mut cmds = Vec::new();
-    if let Some(lock) = BG_CMD_RX.get()
-        && let Ok(rx) = lock.try_lock()
-    {
-        while let Ok(cmd) = rx.try_recv() {
-            cmds.push(cmd);
-        }
-    }
-    cmds
-}
-
-#[inline]
-fn nudge_event_loop() {
-    #[cfg(target_os = "macos")]
-    player::systemint::wake_run_loop();
-}
-
 pub fn use_player_task(ctrl: PlayerController) {
     let config: Signal<AppConfig> = use_context();
-    #[cfg(target_os = "macos")]
-    use_hook(move || {
-        init_bg_channel();
-
-        // let the CFRunLoopTimer heartbeat poke our tokio task so it
-        // doesn't stall when macOS coalesces tokio::time::sleep
-        set_tokio_waker(|| {
-            if let Some(notify) = BG_NOTIFY.get() {
-                notify.notify_one();
-            }
-        });
-
-        set_background_handler(move |event| {
-            use player::systemint::SystemEvent;
-            let cmd = match event {
-                SystemEvent::Play => BgCmd::Play,
-                SystemEvent::Pause => BgCmd::Pause,
-                SystemEvent::Toggle => BgCmd::Toggle,
-                SystemEvent::Next => BgCmd::Next,
-                SystemEvent::Prev => BgCmd::Prev,
-                SystemEvent::Seek(secs) => BgCmd::Seek(secs),
-            };
-            send_bg_cmd(cmd);
-            nudge_event_loop();
-        });
-    });
 
     // Keep MPRIS / the Android notification in sync with the UI's own toggles.
     #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -219,95 +176,69 @@ pub fn use_player_task(ctrl: PlayerController) {
         player::systemint::update_modes(shuffle, repeat);
     });
 
-    #[cfg(target_os = "linux")]
-    use_future(move || {
-        let mut ctrl = ctrl;
-        async move {
-            use player::systemint::{RepeatMode, SystemEvent, poll_event};
-            loop {
-                let mut processed = false;
-                while let Some(event) = poll_event() {
-                    processed = true;
-                    match event {
-                        SystemEvent::Play => ctrl.resume(),
-                        SystemEvent::Pause => ctrl.pause(),
-                        SystemEvent::Toggle => ctrl.toggle(),
-                        SystemEvent::Next => ctrl.play_next(),
-                        SystemEvent::Prev => ctrl.play_prev(),
-                        SystemEvent::Seek(secs) => {
-                            ctrl.seek(std::time::Duration::from_secs_f64(secs));
-                        }
-                        SystemEvent::SetShuffle(on) => ctrl.set_shuffle(on),
-                        SystemEvent::SetRepeat(mode) => ctrl.set_loop_mode(match mode {
-                            RepeatMode::Off => LoopMode::None,
-                            RepeatMode::Playlist => LoopMode::Queue,
-                            RepeatMode::Track => LoopMode::Track,
-                        }),
-                    }
-                }
-                if !processed {
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                }
-            }
-        }
-    });
-
-    #[cfg(target_os = "windows")]
-    use_future(move || {
-        let mut ctrl = ctrl;
-        async move {
-            use player::systemint::{SystemEvent, wait_event};
-            player::systemint::init();
-            tracing::debug!("starting Windows SMTC event loop");
-            loop {
-                match wait_event().await {
-                    Some(SystemEvent::Play) => ctrl.resume(),
-                    Some(SystemEvent::Pause) => ctrl.pause(),
-                    Some(SystemEvent::Toggle) => ctrl.toggle(),
-                    Some(SystemEvent::Next) => ctrl.play_next(),
-                    Some(SystemEvent::Prev) => ctrl.play_prev(),
-                    Some(SystemEvent::Seek(secs)) => {
-                        ctrl.seek(std::time::Duration::from_secs_f64(secs));
-                    }
-                    None => {
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    }
-                }
-            }
-        }
-    });
-
-    // Android routes media-notification button taps through a JNI callback (no event
-    // queue), so we register a background handler like macOS and let the shared loop
-    // drain the resulting BgCmds.
+    // Android routes media-notification button taps through a JNI callback (no
+    // event queue) and the daemon's os_media task has no Android backend, so
+    // the taps are drained here and dispatched through the controller.
     #[cfg(target_os = "android")]
-    use_hook(move || {
-        init_bg_channel();
-        // Runs on the event loop thread, which is the only place its looper can be
-        // picked up — see `capture_event_loop`.
-        player::systemint::capture_event_loop();
-        // Same trick as macOS: the keepalive ticker pokes this while the activity is
-        // hidden, so the loop below keeps draining commands and advancing the queue.
-        player::systemint::set_tokio_waker(|| {
-            if let Some(notify) = BG_NOTIFY.get() {
-                notify.notify_one();
+    {
+        use android_media::BgCmd;
+        use_hook(move || {
+            android_media::init_bg_channel();
+            // Runs on the event loop thread, which is the only place its looper
+            // can be picked up — see `capture_event_loop`.
+            player::systemint::capture_event_loop();
+            // The keepalive ticker pokes this while the activity is hidden, so
+            // the loop below keeps draining commands and advancing the queue.
+            player::systemint::set_tokio_waker(|| {
+                if let Some(notify) = android_media::BG_NOTIFY.get() {
+                    notify.notify_one();
+                }
+            });
+            player::systemint::set_background_handler(move |event| {
+                use player::systemint::SystemEvent;
+                let cmd = match event {
+                    SystemEvent::Play => BgCmd::Play,
+                    SystemEvent::Pause => BgCmd::Pause,
+                    SystemEvent::Toggle => BgCmd::Toggle,
+                    SystemEvent::Next => BgCmd::Next,
+                    SystemEvent::Prev => BgCmd::Prev,
+                    SystemEvent::Stop => BgCmd::Pause,
+                    SystemEvent::ToggleShuffle => BgCmd::ToggleShuffle,
+                    SystemEvent::CycleRepeat => BgCmd::CycleRepeat,
+                };
+                android_media::send_bg_cmd(cmd);
+            });
+        });
+        use_future(move || {
+            let mut ctrl = ctrl;
+            async move {
+                loop {
+                    for cmd in android_media::drain_bg_cmds() {
+                        match cmd {
+                            BgCmd::Play => ctrl.resume(),
+                            BgCmd::Pause => ctrl.pause(),
+                            BgCmd::Toggle => ctrl.toggle(),
+                            BgCmd::Next => ctrl.play_next(),
+                            BgCmd::Prev => ctrl.play_prev(),
+                            BgCmd::ToggleShuffle => ctrl.toggle_shuffle(),
+                            BgCmd::CycleRepeat => ctrl.toggle_loop(),
+                        }
+                    }
+                    let notified = async {
+                        if let Some(notify) = android_media::BG_NOTIFY.get() {
+                            notify.notified().await;
+                        } else {
+                            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                        }
+                    };
+                    tokio::select! {
+                        _ = notified => {}
+                        _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {}
+                    }
+                }
             }
         });
-        player::systemint::set_background_handler(move |event| {
-            use player::systemint::SystemEvent;
-            let cmd = match event {
-                SystemEvent::Play => BgCmd::Play,
-                SystemEvent::Pause => BgCmd::Pause,
-                SystemEvent::Toggle => BgCmd::Toggle,
-                SystemEvent::Next => BgCmd::Next,
-                SystemEvent::Prev => BgCmd::Prev,
-                SystemEvent::Stop => BgCmd::Pause,
-                SystemEvent::ToggleShuffle => BgCmd::ToggleShuffle,
-                SystemEvent::CycleRepeat => BgCmd::CycleRepeat,
-            };
-            send_bg_cmd(cmd);
-        });
-    });
+    }
 
     use_effect(move || {
         let host = ctrl.spotify_host.read().clone();
@@ -716,6 +647,4 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
         spotify_pump.set(Some(task));
     });
-
-    event_pump::use_player_event_pump(ctrl, config);
 }

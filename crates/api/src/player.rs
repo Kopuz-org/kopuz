@@ -123,6 +123,8 @@ pub struct PlayerState {
     pub fading: Option<FadingState>,
     pub external: Option<ExternalPlayback>,
     pub error: Option<crate::error::ErrorBody>,
+    /// Output pipeline latency, for lyric/visual sync offsets.
+    pub output_latency_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -290,6 +290,17 @@ impl Session {
                     self.pending_resume = None;
                 }
                 self.maybe_record_recent();
+                if let Some(scrobbler) = self.scrobbler.clone() {
+                    let committed_track = self
+                        .pending_transition
+                        .as_ref()
+                        .filter(|pending| pending.to_token == finished.token)
+                        .and_then(|pending| pending.model.current_track().cloned())
+                        .or_else(|| self.model.current_track().cloned());
+                    if let Some(track) = committed_track {
+                        scrobbler.track_committed(track, finished.token);
+                    }
+                }
                 let matching_transition = self
                     .pending_transition
                     .as_ref()

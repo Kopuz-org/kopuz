@@ -251,6 +251,50 @@ impl QueueModel {
         }
     }
 
+    /// Insert tracks at a play-order position (the queue view's drag-drop),
+    /// keeping the current pointer and history aimed at the same tracks.
+    pub fn insert_at(&mut self, position: usize, tracks: Vec<Track>) {
+        let count = tracks.len();
+        if count == 0 {
+            return;
+        }
+        let was_empty = self.items.is_empty();
+        if self.shuffle {
+            self.repair_shuffle_order();
+            let visual_insert = position.min(self.shuffle_order.len());
+            let physical_insert = self
+                .shuffle_order
+                .get(visual_insert)
+                .copied()
+                .unwrap_or(self.items.len());
+            for (offset, track) in tracks.into_iter().enumerate() {
+                self.items.insert(physical_insert + offset, track);
+            }
+            for idx in &mut self.shuffle_order {
+                if *idx >= physical_insert {
+                    *idx += count;
+                }
+            }
+            for offset in 0..count {
+                self.shuffle_order
+                    .insert(visual_insert + offset, physical_insert + offset);
+            }
+            if visual_insert <= self.current && !was_empty {
+                self.current += count;
+            }
+            Self::shift_indices_at_or_after(&mut self.history, visual_insert, count);
+        } else {
+            let insert_at = position.min(self.items.len());
+            for (offset, track) in tracks.into_iter().enumerate() {
+                self.items.insert(insert_at + offset, track);
+            }
+            if insert_at <= self.current && !was_empty {
+                self.current += count;
+            }
+            Self::shift_indices_at_or_after(&mut self.history, insert_at, count);
+        }
+    }
+
     pub fn set_shuffle(&mut self, on: bool) {
         if self.shuffle != on {
             self.toggle_shuffle();
@@ -576,6 +620,44 @@ mod tests {
         let repaired = QueueModel::repaired_order(&[2, 9, 2, 0], 3);
         assert_eq!(&repaired[..2], &[2, 0]);
         assert_eq!(repaired.len(), 3);
+    }
+
+    #[test]
+    fn insert_at_keeps_the_pointer_on_the_playing_track() {
+        let mut m = model(3);
+        m.jump_to(1);
+        m.insert_at(0, vec![track(10), track(11)]);
+        assert_eq!(m.len(), 5);
+        assert_eq!(m.current_position(), 3);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t1".into())
+        );
+        assert_eq!(m.items()[0].title, "t10");
+        assert_eq!(m.items()[1].title, "t11");
+
+        let mut m = model(2);
+        m.insert_at(99, vec![track(20)]);
+        assert_eq!(m.items()[2].title, "t20");
+        assert_eq!(m.current_position(), 0);
+    }
+
+    #[test]
+    fn insert_at_while_shuffling_splices_the_permutation() {
+        let mut m = model(4);
+        m.toggle_shuffle();
+        m.insert_at(2, vec![track(30), track(31)]);
+        assert_eq!(m.len(), 6);
+        assert_eq!(m.shuffle_order().len(), 6);
+        assert_eq!(m.track_at(2).map(|t| t.title.clone()), Some("t30".into()));
+        assert_eq!(m.track_at(3).map(|t| t.title.clone()), Some("t31".into()));
+        let mut covered: Vec<usize> = m.shuffle_order().to_vec();
+        covered.sort_unstable();
+        assert_eq!(covered, vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t0".into())
+        );
     }
 
     #[test]

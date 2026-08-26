@@ -4,11 +4,9 @@ use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, Volu
 use crate::titlebar::Titlebar;
 use config::AppConfig;
 use dioxus::prelude::*;
-use player::player::Player;
 
 #[component]
 pub(crate) fn FullscreenDesktop(
-    player: Signal<Player>,
     is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
     mut config: Signal<AppConfig>,
@@ -82,7 +80,7 @@ pub(crate) fn FullscreenDesktop(
 
                         TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
 
-                        VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
+                        VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
                     }
                 }
 

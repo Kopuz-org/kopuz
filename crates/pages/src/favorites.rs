@@ -7,7 +7,6 @@ use crate::favorites_body::FavoritesBody;
 #[component]
 pub fn FavoritesPage(
     config: Signal<AppConfig>,
-    player: Signal<player::player::Player>,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
     mut current_song_cover_url: Signal<String>,

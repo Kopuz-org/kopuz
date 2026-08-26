@@ -330,7 +330,6 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                         current: config.read().channel_mode,
                         on_change: move |mode| {
                             config.write().channel_mode = mode;
-                            ctrl.player.peek().set_channel_mode(mode);
                         }
                     }
                 }
@@ -343,7 +342,6 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                         current: config.read().device_change_behavior,
                         on_change: move |behavior| {
                             config.write().device_change_behavior = behavior;
-                            ctrl.player.peek().set_device_change_behavior(behavior);
                         }
                     }
                 }
@@ -356,7 +354,6 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                         current: config.read().sample_rate_mode,
                         on_change: move |mode| {
                             config.write().sample_rate_mode = mode;
-                            ctrl.player.peek().set_sample_rate_mode(mode);
                         }
                     }
                 }
@@ -369,11 +366,10 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                     EqualizerPanel {
                         current: config.read().equalizer.clone(),
                         on_preview: move |equalizer: config::EqualizerSettings| {
-                            ctrl.player.peek().set_equalizer(equalizer);
+                            ctrl.preview_equalizer(equalizer);
                         },
                         on_commit: move |equalizer: config::EqualizerSettings| {
-                            config.write().equalizer = equalizer.clone();
-                            ctrl.player.peek().set_equalizer(equalizer);
+                            config.write().equalizer = equalizer;
                         }
                     }
                 }

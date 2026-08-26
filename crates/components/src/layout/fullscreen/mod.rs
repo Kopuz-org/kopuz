@@ -13,7 +13,6 @@ use desktop::FullscreenDesktop;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use lyrics::use_fullscreen_lyrics;
-use player::player::Player;
 
 fn display_order_items(
     ctrl: &PlayerController,
@@ -33,7 +32,6 @@ fn display_order_items(
 
 #[component]
 pub fn Fullscreen(
-    player: Signal<Player>,
     is_playing: Signal<bool>,
     is_fullscreen: Signal<bool>,
     current_song_duration: Signal<u64>,
@@ -69,7 +67,6 @@ pub fn Fullscreen(
     if cfg!(target_os = "android") {
         rsx! {
             FullscreenAndroid {
-                player,
                 is_playing,
                 is_fullscreen,
                 config,
@@ -92,7 +89,6 @@ pub fn Fullscreen(
     } else {
         rsx! {
             FullscreenDesktop {
-                player,
                 is_playing,
                 is_fullscreen,
                 config,
