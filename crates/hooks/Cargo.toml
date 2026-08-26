@@ -18,6 +18,8 @@ workspace = true
 [dependencies]
 tracing = { workspace = true }
 dioxus = { workspace = true }
+api = { workspace = true }
+daemon = { workspace = true }
 reader = { workspace = true }
 db = { workspace = true }
 utils = { workspace = true }
@@ -30,5 +32,4 @@ server = { workspace = true }
 scrobble = { workspace = true }
 radio = { workspace = true }
 base64 = { workspace = true }
-discord-presence = { workspace = true }
 tokio = { workspace = true, features = ["fs", "sync", "macros"] }

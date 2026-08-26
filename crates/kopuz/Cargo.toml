@@ -40,9 +40,10 @@ jni = "0.22"
 ndk-context = { workspace = true }
 
 [dependencies]
+api = { workspace = true }
+daemon = { workspace = true }
 base64 = { workspace = true }
 directories = { workspace = true }
-discord-presence = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
 player = { workspace = true }

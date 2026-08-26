@@ -8,7 +8,6 @@ use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_active_source, use_genre_tracks};
 use hooks::use_search_data::use_search_data;
-use player::player;
 
 /// Source-agnostic search. The data path (`use_search_data`, `use_genre_tracks`)
 /// is already source-scoped; the only per-source bits are the genre-detail cover
@@ -18,7 +17,6 @@ use player::player;
 pub fn Search(
     config: Signal<AppConfig>,
     search_query: Signal<String>,
-    player: Signal<player::Player>,
     is_playing: Signal<bool>,
     current_playing: Signal<u64>,
     current_song_cover_url: Signal<String>,
@@ -111,7 +109,6 @@ pub fn Search(
                     genre_tracks: genre_tracks.read().clone(),
                     genres: (data.genres)().clone(),
                     on_back: move |_| selected_genre.set(None),
-                    player,
                     is_playing,
                     current_song_cover_url,
                     current_song_title,
@@ -132,8 +129,7 @@ pub fn Search(
                         search_query: data.search_query.read().clone(),
                         tracks: tracks.clone(),
                         albums: albums.clone(),
-                        player,
-                        is_playing,
+                            is_playing,
                         current_song_cover_url,
                         current_song_title,
                         current_song_artist,

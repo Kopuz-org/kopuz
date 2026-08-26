@@ -31,7 +31,6 @@ const ITEM_HEIGHT: f64 = 60.0; // 60px: p-2 padding (16px*2=32) + content height
 pub fn LibraryPage(
     mut config: Signal<AppConfig>,
     on_rescan: EventHandler,
-    player: Signal<player::player::Player>,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
     mut current_song_cover_url: Signal<String>,

@@ -18,6 +18,7 @@ pub mod os_media;
 pub mod persistence;
 mod playback;
 pub mod queue_model;
+pub mod scrobbler;
 pub mod session;
 mod wire;
 
@@ -30,4 +31,7 @@ pub use jobs::JobRunner;
 pub use library::LibraryService;
 pub use persistence::{DbQueueStore, QueueStore};
 pub use queue_model::{NextOutcome, QueueModel};
-pub use session::{LocalApi, PlaybackServices, QueueMaterializer, SessionHandle};
+pub use scrobbler::Scrobbler;
+pub use session::{
+    LocalApi, PlaybackServices, QueueMaterializer, QueueMirrorSnapshot, SessionHandle,
+};

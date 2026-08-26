@@ -52,5 +52,6 @@ pub(super) fn sample_state() -> api::PlayerState {
             code: api::ErrorCode::SourceUnreachable,
             message: "m".into(),
         }),
+        output_latency_ms: Some(120),
     }
 }

@@ -39,7 +39,6 @@ enum AlbumAction {
 pub fn Artist(
     config: Signal<AppConfig>,
     artist_name: Signal<String>,
-    player: Signal<player::player::Player>,
     on_navigate: EventHandler<String>,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,

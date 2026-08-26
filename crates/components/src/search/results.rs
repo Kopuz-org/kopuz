@@ -5,7 +5,6 @@ use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
-use player::player;
 use reader::models::{Album, Track};
 
 #[component]
@@ -13,7 +12,6 @@ pub fn SearchResults(
     search_query: String,
     tracks: Vec<(Track, Option<utils::CoverUrl>)>,
     albums: Vec<(Album, Option<utils::CoverUrl>)>,
-    player: Signal<player::Player>,
     mut is_playing: Signal<bool>,
     mut current_song_cover_url: Signal<String>,
     mut current_song_title: Signal<String>,
