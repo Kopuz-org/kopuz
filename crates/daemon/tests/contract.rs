@@ -344,6 +344,10 @@ async fn reads_agree_between_local_and_wire() {
         .expect("wire window");
     assert_eq!(local_window, wire_window);
     assert_eq!(wire_window.total, 3);
+    assert_eq!(
+        pair.local.live_queue().await.expect("local live queue"),
+        pair.wire.live_queue().await.expect("wire live queue")
+    );
 }
 
 #[tokio::test]
@@ -385,6 +389,39 @@ async fn queue_persistence_agrees_between_local_and_wire() {
         .save_queue_snapshot(invalid)
         .await
         .expect_err("invalid wire snapshot");
+    assert_eq!(local_error.code, wire_error.code);
+    assert_eq!(local_error.message, wire_error.message);
+}
+
+#[tokio::test]
+async fn equalizer_preview_agrees_between_local_and_wire() {
+    let pair = spawn_pair().await;
+    let equalizer = serde_json::json!({
+        "enabled": true,
+        "preset": "Custom",
+        "bands": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 3.0, 2.0, 1.0],
+        "preamp_db": -2.0,
+    });
+    pair.local
+        .preview_equalizer(equalizer.clone())
+        .await
+        .expect("local equalizer preview");
+    pair.wire
+        .preview_equalizer(equalizer)
+        .await
+        .expect("wire equalizer preview");
+
+    let invalid = serde_json::json!({ "bands": "not a band array" });
+    let local_error = pair
+        .local
+        .preview_equalizer(invalid.clone())
+        .await
+        .expect_err("invalid local equalizer");
+    let wire_error = pair
+        .wire
+        .preview_equalizer(invalid)
+        .await
+        .expect_err("invalid wire equalizer");
     assert_eq!(local_error.code, wire_error.code);
     assert_eq!(local_error.message, wire_error.message);
 }

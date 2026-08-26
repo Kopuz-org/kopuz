@@ -151,6 +151,10 @@ pub trait KopuzApi: Send + Sync {
 
     async fn queue_snapshot(&self) -> Result<QueuePersistenceSnapshot, ApiError>;
 
+    /// The session actor's current queue and shuffle permutation. Unlike
+    /// `queue_snapshot`, this is not a read of the durable restore row.
+    async fn live_queue(&self) -> Result<QueuePersistenceSnapshot, ApiError>;
+
     async fn save_queue_snapshot(&self, snapshot: QueuePersistenceSnapshot)
     -> Result<(), ApiError>;
 
@@ -159,6 +163,9 @@ pub trait KopuzApi: Send + Sync {
     /// RFC 7396 merge patch against the config surface. Credential and
     /// locked keys are refused with `invalid_input`.
     async fn patch_config(&self, patch: serde_json::Value) -> Result<ConfigView, ApiError>;
+
+    /// Apply an equalizer value to the live engine without persisting it.
+    async fn preview_equalizer(&self, equalizer: serde_json::Value) -> Result<(), ApiError>;
 
     async fn favorites(&self) -> Result<FavoritesView, ApiError>;
 

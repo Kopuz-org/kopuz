@@ -14,6 +14,7 @@ impl Session {
             self.queue_rev = self.rev;
         }
         self.queue_dirty = true;
+        self.cache_queue_snapshot();
         let state = self.build_state();
         if queue_changed {
             self.emit(ApiEvent::QueueChanged {
@@ -57,6 +58,7 @@ impl Session {
         };
         self.position = Some(anchor);
         self.queue_dirty = true;
+        self.cache_queue_snapshot();
         self.position_token = Some(token);
         let _ = state_tx.send(self.build_state());
         self.emit(ApiEvent::PlayerPosition {

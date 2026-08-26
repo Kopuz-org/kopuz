@@ -28,8 +28,8 @@ Current API version: `1` (reported by `Kopuz/GetStatus`).
 7. Treat `UNIMPLEMENTED` as "this daemon runs without that feature" and
    hide it; ignore `Event`s whose oneof you do not recognize (they decode
    as unset) and map unknown enum values to their defaults.
-8. Reference clients: kopuz-tui (Go), the built-in GUI itself (the same
-   core in-process), and the `kopuz`/`kopuzd` control CLI.
+8. Reference clients: kopuz-tui (Go), the built-in GUI itself, and the
+   `kopuz`/`kopuzd` control CLI.
 
 ## Running the daemon
 
@@ -41,10 +41,10 @@ Two deployment shapes serve the same API:
   `cargo build --release -p kopuz-daemon --features kopuzd --bin kopuzd`.
   A systemd user unit ships in `packaging/systemd/kopuzd.service`.
 - **Embedded**: the desktop app serves the identical API from its own
-  process, on by default. This exists because SQLite is single-writer:
-  `kopuzd` and the GUI must never run against the same library at once, so
-  a frontend that wants to attach while the GUI is open attaches to the GUI
-  itself.
+  process, on by default. If `kopuzd` already owns the session, the desktop
+  app attaches to it instead of starting another daemon stack. Process and
+  database ownership locks prevent two audio engines or SQLite writers from
+  starting during a discovery race.
 
 Both binaries double as control clients: `kopuz pause`, `kopuz next`,
 `kopuz seek 1:30`, `kopuz volume 80`, `kopuz status [--json]`, and the same
@@ -154,6 +154,7 @@ Two rules make a frontend feel native:
 | `GetPlayerState` | | `PlayerState` snapshot |
 | `GetQueue` | `Page {offset, limit}` | play-order window `{rev, total, items: [{index, track}]}` |
 | `GetQueueSnapshot` | | durable physical-order queue, progress, and shuffle permutation |
+| `GetLiveQueue` | | current actor-owned physical queue, progress, and shuffle permutation |
 | `GetTracks` | `TracksRequest {filter, page}` | `{total, offset, items: [TrackInfo]}` |
 | `GetFolderTracks` | `{prefix, page}` | same shape |
 | `GetStats` | | `{listen_counts: {uid: count}}` |
@@ -188,6 +189,7 @@ Two rules make a frontend feel native:
 | `RemoveDownload` | `{key}` | |
 | `CancelDownloadItem` | `{key}` | cancel one item without stopping its batch |
 | `PatchConfig` | RFC 7396 merge patch as JSON in `merge_patch_json` | updated view; credential keys refused, `locked_keys` are pinned by a managed settings layer |
+| `PreviewEqualizer` | equalizer JSON in `merge_patch_json` | applies to the live engine without persisting |
 | `CreatePlaylist`, `RenamePlaylist`, `DeletePlaylist` | playlist mutation | entity/empty |
 | `AddPlaylistTracks`, `RemovePlaylistTracks`, `ReorderPlaylistTracks` | playlist + keys | empty |
 | `CreatePlaylistFolder`, `RenamePlaylistFolder`, `DeletePlaylistFolder`, `MovePlaylist` | folder mutation | entity/empty |

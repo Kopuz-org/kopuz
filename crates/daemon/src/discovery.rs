@@ -3,10 +3,13 @@
 //! Written by whichever process serves the API (kopuzd, or the GUI app with
 //! its remote control API enabled).
 
+use std::fs::{File, OpenOptions};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use api::KopuzApi;
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,6 +22,38 @@ pub struct DiscoveryRecord {
 pub struct DiscoveryLease {
     path: PathBuf,
     token: String,
+}
+
+pub struct DiscoveryGuard {
+    _file: File,
+}
+
+impl DiscoveryGuard {
+    pub fn try_claim(discovery_path: &Path) -> io::Result<Option<Self>> {
+        let path = guard_path(discovery_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(path)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => Ok(Some(Self { _file: file })),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+fn guard_path(discovery_path: &Path) -> PathBuf {
+    let mut path = discovery_path.as_os_str().to_os_string();
+    path.push(".owner.lock");
+    PathBuf::from(path)
 }
 
 impl DiscoveryLease {
@@ -142,4 +177,29 @@ fn constant_time_eq(left: &str, right: &str) -> bool {
         );
     }
     difference == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guard_is_exclusive_and_released_on_drop() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("daemon.json");
+        let first = DiscoveryGuard::try_claim(&path)
+            .expect("first claim")
+            .expect("first owner");
+        assert!(
+            DiscoveryGuard::try_claim(&path)
+                .expect("contending claim")
+                .is_none()
+        );
+        drop(first);
+        assert!(
+            DiscoveryGuard::try_claim(&path)
+                .expect("claim after drop")
+                .is_some()
+        );
+    }
 }

@@ -68,8 +68,10 @@ server discovered for the current user owns the playback session and the
 single-writer database. Attach to it.
 
 Several frontends may race to start a daemon. `kopuzd` protects the discovery
-file, so only one process will claim it. Treat an early sidecar exit as a cue
-to retry discovery before reporting failure.
+file and the database with operating system locks, so only one process will
+initialize services. The official GUI uses the same locks and attaches to an
+already-running `kopuzd`. Treat an early sidecar exit as a cue to retry
+discovery before reporting failure.
 
 Decide whether the daemon is application-scoped or user-scoped:
 
@@ -359,6 +361,10 @@ owns playback, such as a Spotify frontend, and must preserve its physical queue,
 progress, and shuffle permutation across shutdown. Ordinary daemon-owned
 playback persists itself, so most frontends only need `GetQueue`, `SetQueue`,
 and `EditQueue`.
+
+Use `GetLiveQueue` when mirroring the active session. It returns the actor's
+current physical queue and shuffle permutation immediately, while
+`GetQueueSnapshot` reads the durable restore row and can lag active playback.
 
 Fetch artwork incrementally with `GetArtwork`. The first chunk contains the
 content type and later chunks contain bytes only. Stream chunks into a bounded

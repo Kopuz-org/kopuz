@@ -1,30 +1,19 @@
-//! Last-known persistable state for exit paths that cannot read UI signals.
-//!
-//! The wry close handler peeks signals directly, but the SIGINT handler runs
-//! on the ctrlc thread where no signal access exists. The `App` effects stash
-//! eligible snapshots here as they change; the SIGINT path persists whatever
-//! was last stashed, so a Ctrl+C no longer loses up to a debounce window of
-//! queue and config state.
+//! Exit flushing sourced from the daemon rather than the UI mirror.
 
 use std::sync::{Arc, Mutex};
 
 struct Stashed {
-    queue: Option<api::QueuePersistenceSnapshot>,
+    flush_queue: bool,
     config: Option<config::AppConfig>,
 }
 
 static STASHED: Mutex<Stashed> = Mutex::new(Stashed {
-    queue: None,
+    flush_queue: false,
     config: None,
 });
-static CONFIG_SERVICE: Mutex<Option<Arc<daemon::ConfigService>>> = Mutex::new(None);
 static FRONTEND_API: Mutex<Option<Arc<dyn api::KopuzApi>>> = Mutex::new(None);
-
-pub fn install_config_service(service: Arc<daemon::ConfigService>) {
-    if let Ok(mut installed) = CONFIG_SERVICE.lock() {
-        *installed = Some(service);
-    }
-}
+static QUEUE_PERSISTENCE: Mutex<Option<(daemon::SessionHandle, Arc<dyn daemon::QueueStore>)>> =
+    Mutex::new(None);
 
 pub fn install_frontend_api(api: Arc<dyn api::KopuzApi>) {
     if let Ok(mut installed) = FRONTEND_API.lock() {
@@ -32,13 +21,18 @@ pub fn install_frontend_api(api: Arc<dyn api::KopuzApi>) {
     }
 }
 
-/// Stash an eligibility-checked queue snapshot. Callers must apply the same
-/// guards as the debounced saver (`initial_load_done && queue_loaded_ok`);
-/// an empty-but-eligible queue is stashed as the default snapshot so a
-/// cleared queue persists as empty instead of resurrecting.
-pub fn stash_queue(snapshot: api::QueuePersistenceSnapshot) {
+pub fn install_queue_persistence(
+    session: daemon::SessionHandle,
+    store: Arc<dyn daemon::QueueStore>,
+) {
+    if let Ok(mut installed) = QUEUE_PERSISTENCE.lock() {
+        *installed = Some((session, store));
+    }
+}
+
+pub fn enable_queue_flush() {
     if let Ok(mut stashed) = STASHED.lock() {
-        stashed.queue = Some(snapshot);
+        stashed.flush_queue = true;
     }
 }
 
@@ -54,21 +48,18 @@ pub fn stash_config(config: config::AppConfig) {
 /// join it. A fresh thread is required from both exit paths: the main thread
 /// sits inside dioxus's tokio context where `block_on` panics, and the ctrlc
 /// thread should not host a runtime of unknown stack depth.
-pub fn persist_on_fresh_thread(
-    queue: Option<api::QueuePersistenceSnapshot>,
-    config: Option<config::AppConfig>,
-) {
-    if queue.is_none() && config.is_none() {
+pub fn persist_on_fresh_thread(flush_queue: bool, config: Option<config::AppConfig>) {
+    if !flush_queue && config.is_none() {
         tracing::info!("daemon shutdown has no pending state to flush");
         return;
     }
-    let queue_pending = queue.is_some();
+    let queue_pending = flush_queue;
     let config_pending = config.is_some();
-    let config_service = CONFIG_SERVICE
+    let frontend_api = FRONTEND_API.lock().ok().and_then(|api| api.clone());
+    let queue_persistence = QUEUE_PERSISTENCE
         .lock()
         .ok()
-        .and_then(|service| service.clone());
-    let frontend_api = FRONTEND_API.lock().ok().and_then(|api| api.clone());
+        .and_then(|persistence| persistence.clone());
     tracing::info!(
         queue_pending,
         config_pending,
@@ -86,25 +77,28 @@ pub fn persist_on_fresh_thread(
             }
         };
         rt.block_on(async move {
-            if let Some(snapshot) = queue {
-                match frontend_api {
-                    Some(api) => {
-                        if let Err(error) = api.save_queue_snapshot(snapshot).await {
-                            tracing::warn!(%error, "queue flush on exit failed");
-                        }
-                    }
-                    None => tracing::warn!("queue flush on exit has no daemon API"),
+            if flush_queue {
+                match queue_persistence {
+                    Some((session, store)) => store.save(session.queue_snapshot()).await,
+                    None => tracing::warn!("queue flush on exit has no owned daemon session"),
                 }
             }
-            if let Some(cfg) = config {
-                match config_service {
-                    Some(service) => {
-                        if let Err(e) = service.persist_frontend_snapshot(cfg).await {
-                            tracing::warn!(error = %e, "config flush on exit failed");
+            if let Some(api) = frontend_api {
+                if let Some(cfg) = config {
+                    match api.config().await {
+                        Ok(current) => {
+                            let patch = super::frontend_config_patch(&cfg, &current.config);
+                            if patch.as_object().is_some_and(|patch| !patch.is_empty())
+                                && let Err(error) = api.patch_config(patch).await
+                            {
+                                tracing::warn!(%error, "config flush on exit failed");
+                            }
                         }
+                        Err(error) => tracing::warn!(%error, "config read on exit failed"),
                     }
-                    None => tracing::warn!("config flush on exit has no daemon config service"),
                 }
+            } else {
+                tracing::warn!("shutdown flush has no daemon API");
             }
         });
     });
@@ -121,9 +115,9 @@ pub fn persist_on_fresh_thread(
 /// SIGINT path: persist whatever the app last stashed. A no-op before the
 /// startup loads complete, so an early Ctrl+C cannot wipe saved state.
 pub fn flush_stashed_blocking() {
-    let (queue, config) = match STASHED.lock() {
-        Ok(stashed) => (stashed.queue.clone(), stashed.config.clone()),
+    let (flush_queue, config) = match STASHED.lock() {
+        Ok(stashed) => (stashed.flush_queue, stashed.config.clone()),
         Err(_) => return,
     };
-    persist_on_fresh_thread(queue, config);
+    persist_on_fresh_thread(flush_queue, config);
 }

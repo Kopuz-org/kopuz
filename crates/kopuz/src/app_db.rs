@@ -1,14 +1,115 @@
-/// Process-wide database handle. Opened before the UI mounts, then provided to
-/// the app via context.
-pub static DB_HANDLE: std::sync::OnceLock<db::Db> = std::sync::OnceLock::new();
+use std::sync::Arc;
 
-/// The persisted config, loaded alongside the DB before the UI mounts. The
-/// embedded daemon session seeds from this so nothing that reads its config
-/// watch early (the scan job's roots above all) can observe defaults; the
-/// async startup loader still owns applying it to the UI signals.
+pub static DB_HANDLE: std::sync::OnceLock<db::Db> = std::sync::OnceLock::new();
 pub static BOOT_CONFIG: std::sync::OnceLock<config::AppConfig> = std::sync::OnceLock::new();
+static REMOTE_API: std::sync::OnceLock<Arc<dyn api::KopuzApi>> = std::sync::OnceLock::new();
+static DATABASE_LEASE: std::sync::OnceLock<daemon::DatabaseLease> = std::sync::OnceLock::new();
+#[cfg(not(target_os = "android"))]
+static DISCOVERY_GUARD: std::sync::OnceLock<daemon::discovery::DiscoveryGuard> =
+    std::sync::OnceLock::new();
+
+#[cfg(not(target_os = "android"))]
+pub fn is_embedded() -> bool {
+    REMOTE_API.get().is_none()
+}
+
+pub fn remote_api() -> Option<Arc<dyn api::KopuzApi>> {
+    REMOTE_API.get().cloned()
+}
+
+#[cfg(not(target_os = "android"))]
+pub fn select_desktop_backend() -> Result<bool, String> {
+    let database_path = db::default_db_path();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("could not start the daemon discovery runtime: {error}"))?;
+    let discovered_tracing = rt.block_on(async {
+        let discovery_path = daemon::discovery::path();
+        if let Some((api, config)) = discovered_api(discovery_path.as_deref()).await? {
+            let tracing_enabled = config.tracing_enabled;
+            let _ = BOOT_CONFIG.set(config);
+            let _ = REMOTE_API.set(api);
+            return Ok(Some(tracing_enabled));
+        }
+
+        if let Some(path) = discovery_path.as_deref() {
+            let guard = match daemon::discovery::DiscoveryGuard::try_claim(path)
+                .map_err(|error| format!("could not lock daemon discovery: {error}"))?
+            {
+                Some(guard) => guard,
+                None => {
+                    for _ in 0..50 {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        if let Some((api, config)) = discovered_api(Some(path)).await? {
+                            let tracing_enabled = config.tracing_enabled;
+                            let _ = BOOT_CONFIG.set(config);
+                            let _ = REMOTE_API.set(api);
+                            return Ok(Some(tracing_enabled));
+                        }
+                    }
+                    return Err(
+                        "another Kopuz daemon is starting but did not become reachable".to_string(),
+                    );
+                }
+            };
+            match daemon::discovery::read(path) {
+                Some(record) => {
+                    let _ = daemon::discovery::remove_record(path, &record);
+                }
+                None if path.exists() => {
+                    let _ = daemon::discovery::remove_invalid(path);
+                }
+                None => {}
+            }
+            let _ = DISCOVERY_GUARD.set(guard);
+        }
+
+        let lease = daemon::DatabaseLease::try_claim(&database_path)
+            .map_err(|error| format!("could not lock the Kopuz database: {error}"))?
+            .ok_or_else(|| {
+                "another process owns the Kopuz database but exposes no reachable API".to_string()
+            })?;
+        let _ = DATABASE_LEASE.set(lease);
+        Ok::<_, String>(None)
+    })?;
+    Ok(discovered_tracing.unwrap_or_else(|| {
+        db::peek_config(&database_path)
+            .map(|config| config.tracing_enabled)
+            .unwrap_or(false)
+    }))
+}
+
+#[cfg(not(target_os = "android"))]
+async fn discovered_api(
+    path: Option<&std::path::Path>,
+) -> Result<Option<(Arc<dyn api::KopuzApi>, config::AppConfig)>, String> {
+    let Some(record) = path.and_then(daemon::discovery::read) else {
+        return Ok(None);
+    };
+    if !daemon::discovery::is_serving(&record).await {
+        return Ok(None);
+    }
+    let api: Arc<dyn api::KopuzApi> = Arc::new(
+        client::GrpcApi::new(format!("127.0.0.1:{}", record.port), record.token)
+            .map_err(|error| format!("could not connect to the Kopuz daemon: {error}"))?,
+    );
+    let view = api
+        .config()
+        .await
+        .map_err(|error| format!("could not load daemon configuration: {error}"))?;
+    let config = serde_json::from_value(view.config)
+        .map_err(|error| format!("could not decode daemon configuration: {error}"))?;
+    Ok(Some((api, config)))
+}
 
 pub fn init_blocking() -> db::Db {
+    if DATABASE_LEASE.get().is_none() {
+        let lease = daemon::DatabaseLease::try_claim(&db::default_db_path())
+            .expect("claim database ownership")
+            .expect("another process already owns the Kopuz database");
+        let _ = DATABASE_LEASE.set(lease);
+    }
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

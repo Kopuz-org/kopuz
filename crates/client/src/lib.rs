@@ -160,6 +160,13 @@ impl KopuzApi for GrpcApi {
         ))
     }
 
+    async fn live_queue(&self) -> Result<api::QueuePersistenceSnapshot, ApiError> {
+        let snapshot = rpc!(self, get_live_queue, proto::Empty {});
+        Ok(convert::queue_persistence_snapshot_from_proto(
+            snapshot.get_ref(),
+        ))
+    }
+
     async fn save_queue_snapshot(
         &self,
         snapshot: api::QueuePersistenceSnapshot,
@@ -198,6 +205,17 @@ impl KopuzApi for GrpcApi {
             }
         );
         Ok(convert::config_view_from_proto(view.get_ref()))
+    }
+
+    async fn preview_equalizer(&self, equalizer: serde_json::Value) -> Result<(), ApiError> {
+        rpc!(
+            self,
+            preview_equalizer,
+            proto::ConfigPatch {
+                merge_patch_json: equalizer.to_string(),
+            }
+        );
+        Ok(())
     }
 
     async fn favorites(&self) -> Result<FavoritesView, ApiError> {

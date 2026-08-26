@@ -25,6 +25,7 @@ service Kopuz {
   rpc GetPlayerState(Empty) returns (PlayerState);
   rpc GetQueue(Page) returns (QueueWindow);
   rpc GetQueueSnapshot(Empty) returns (QueuePersistenceSnapshot);
+  rpc GetLiveQueue(Empty) returns (QueuePersistenceSnapshot);
   rpc GetTracks(TracksRequest) returns (TrackPage);
   rpc GetFolderTracks(FolderRequest) returns (TrackPage);
   rpc GetStats(Empty) returns (Stats);
@@ -76,6 +77,7 @@ service Kopuz {
   rpc RemoveDownload(TrackRef) returns (Empty);
   rpc CancelDownloadItem(TrackRef) returns (Empty);
   rpc PatchConfig(ConfigPatch) returns (ConfigView);
+  rpc PreviewEqualizer(ConfigPatch) returns (Empty);
   rpc CreatePlaylist(CreatePlaylistRequest) returns (EntityRef);
   rpc RenamePlaylist(NamedEntity) returns (Empty);
   rpc DeletePlaylist(EntityRef) returns (Empty);

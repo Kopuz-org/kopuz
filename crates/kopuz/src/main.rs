@@ -13,9 +13,9 @@ use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 #[cfg(target_os = "linux")]
 use dioxus::desktop::wry::WebViewExtUnix;
 use dioxus::prelude::*;
+use futures_util::StreamExt;
 use hooks::downloads::DownloadQueue;
 use kopuz_route::Route;
-use queue_state::PersistedQueueState;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,7 +36,6 @@ mod exit_flush;
 #[cfg(not(target_os = "android"))]
 mod legacy;
 mod logging;
-mod queue_state;
 #[cfg(not(target_os = "android"))]
 mod ui_profile;
 mod updates;
@@ -67,6 +66,31 @@ const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
 const LIVE_THEME_POLL_MS: u64 = 400;
 const LIVE_THEME_IDLE_POLL_MS: u64 = 2000;
 
+struct EmbeddedDaemon {
+    #[cfg(debug_assertions)]
+    db: db::Db,
+    session: daemon::SessionHandle,
+    queue_store: Arc<dyn daemon::QueueStore>,
+    favorites: Arc<daemon::FavoritesService>,
+    scrobbler: Arc<daemon::Scrobbler>,
+    frontend: Arc<daemon::FrontendService>,
+    api: Arc<dyn api::KopuzApi>,
+}
+
+fn frontend_config(mut config: config::AppConfig) -> config::AppConfig {
+    config.server = None;
+    config.servers.clear();
+    config.musicbrainz_token.clear();
+    config.lastfm_api_key.clear();
+    config.lastfm_api_secret.clear();
+    config.lastfm_session_key.clear();
+    config.librefm_api_key.clear();
+    config.librefm_api_secret.clear();
+    config.librefm_session_key.clear();
+    config.offline_tracks.clear();
+    config
+}
+
 fn frontend_config_patch(
     config: &config::AppConfig,
     current: &serde_json::Value,
@@ -92,18 +116,40 @@ fn frontend_config_patch(
     value
 }
 
-fn frontend_config(mut config: config::AppConfig) -> config::AppConfig {
-    config.server = None;
-    config.servers.clear();
-    config.musicbrainz_token.clear();
-    config.lastfm_api_key.clear();
-    config.lastfm_api_secret.clear();
-    config.lastfm_session_key.clear();
-    config.librefm_api_key.clear();
-    config.librefm_api_secret.clear();
-    config.librefm_session_key.clear();
-    config.offline_tracks.clear();
-    config
+async fn refresh_frontend_config(api: &dyn api::KopuzApi, mut signal: Signal<config::AppConfig>) {
+    match api.config().await {
+        Ok(view) => match serde_json::from_value::<config::AppConfig>(view.config) {
+            Ok(updated) => {
+                let updated = frontend_config(updated);
+                if serde_json::to_value(&updated).ok() != serde_json::to_value(&*signal.peek()).ok()
+                {
+                    signal.set(updated);
+                }
+            }
+            Err(error) => tracing::warn!(%error, "could not decode refreshed daemon config"),
+        },
+        Err(error) => tracing::warn!(%error, "could not refresh daemon config"),
+    }
+}
+
+async fn refresh_frontend_sources(
+    api: &dyn api::KopuzApi,
+    mut signal: Signal<Vec<api::SourceInfo>>,
+) {
+    match api.sources().await {
+        Ok(sources) => signal.set(sources),
+        Err(error) => tracing::warn!(%error, "could not refresh daemon sources"),
+    }
+}
+
+async fn refresh_frontend_downloads(
+    api: &dyn api::KopuzApi,
+    mut downloads: hooks::downloads::DownloadedTracks,
+) {
+    match api.downloads().await {
+        Ok(keys) => downloads.0.set(keys.into_iter().collect()),
+        Err(error) => tracing::warn!(%error, "could not refresh daemon downloads"),
+    }
 }
 
 fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, Vec<PathBuf>)> {
@@ -239,12 +285,6 @@ fn main() {
         unsafe { std::env::set_var("WEBKIT_FORCE_VBLANK_TIMER", "1") };
     }
 
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_FORCE_VBLANK_TIMER").is_none() {
-        // SAFETY: first statement of main, before any thread is spawned.
-        unsafe { std::env::set_var("WEBKIT_FORCE_VBLANK_TIMER", "1") };
-    }
-
     #[cfg(not(target_os = "android"))]
     {
         let identity_migration = legacy::migrate_identity();
@@ -254,12 +294,8 @@ fn main() {
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
-        // Read the persisted tracing toggle from the DB before the app (and its
-        // config Signal) exists — the subscriber is built once here, so the
-        // setting is applied at startup. Missing DB/blob defaults to off.
-        let config_tracing_enabled = db::peek_config(&db::default_db_path())
-            .map(|c| c.tracing_enabled)
-            .unwrap_or(false);
+        let config_tracing_enabled = app_db::select_desktop_backend()
+            .unwrap_or_else(|error| panic!("Kopuz daemon ownership failed: {error}"));
 
         // Guards live in a global inside `logging`; flushed by
         // logging::shutdown() after launch returns or on Ctrl+C.
@@ -269,12 +305,15 @@ fn main() {
             tracing::info!("{line}");
         }
 
-        legacy::migrate_locations();
-
-        let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
+        if app_db::is_embedded() {
+            legacy::migrate_locations();
+            let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
+        } else {
+            tracing::info!(mode = "attached", "using the discovered Kopuz daemon");
+        }
 
         #[cfg(target_os = "macos")]
-        {
+        if app_db::is_embedded() {
             player::systemint::init();
         }
 
@@ -297,7 +336,10 @@ fn main() {
 
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
-            let initial_titlebar_mode = desktop_shell::read_titlebar_mode_from_disk();
+            let initial_titlebar_mode = app_db::BOOT_CONFIG
+                .get()
+                .map(|config| config.titlebar_mode)
+                .unwrap_or_default();
             window = window.with_decorations(initial_titlebar_mode == config::TitlebarMode::System);
         }
 
@@ -587,12 +629,6 @@ fn App() -> Element {
         };
         config::store::FileLayers::read(&config::store::settings_path_for(&db_dir))
     });
-    let db = app_db::DB_HANDLE
-        .get()
-        .cloned()
-        .expect("db initialized in main before launch");
-    #[cfg(debug_assertions)]
-    use_context_provider(|| db.clone());
     hooks::db_reactivity::use_generations_provider();
 
     // The PoToken minter isn't armed here: it's a headless deno_core runtime that
@@ -602,18 +638,11 @@ fn App() -> Element {
     let cover_cache = use_memo(move || cache_dir().join("covers"));
     let _ = std::fs::create_dir_all(cover_cache());
 
-    // The embedded daemon: the same session actor and services kopuzd runs,
-    // in-process. The UI's PlayerController is a signal mirror over the
-    // session; the scan job, scrobbler, favorites reconciler, OS media
-    // integration, and Jellyfin/Discord reporting all live behind it.
-    let embedded_services = {
-        let db_boot = db.clone();
-        use_hook(move || {
-            // Seeded with the persisted config loaded before launch, so the
-            // scan job, scrobbler, and reconciler can never observe default
-            // library roots or credentials. The async startup loader still
-            // applies the same config to the UI signals and re-pushes it
-            // through `set_config` (idempotent).
+    let embedded_result = use_hook(|| {
+        app_db::DB_HANDLE
+            .get()
+            .cloned()
+            .map(|database| -> Result<Arc<EmbeddedDaemon>, String> {
             let seeded = app_db::BOOT_CONFIG.get().cloned().unwrap_or_default();
             let database_path = db::default_db_path();
             let configured_roots = configured_local_sources(&seeded)
@@ -635,30 +664,28 @@ fn App() -> Element {
                     .unwrap_or_else(|| std::path::Path::new(".")),
             );
             let config_service = Arc::new(daemon::ConfigService::new(
-                db_boot.clone(),
+                database.clone(),
                 settings_path,
                 seeded.clone(),
             ));
             let registry = Arc::new(radio::registry::StationRegistry::default());
             let library = Arc::new(daemon::LibraryService::new(
-                db_boot.clone(),
+                database.clone(),
                 seeded.active_source.clone(),
                 registry.clone(),
                 cover_cache(),
             ));
             let initial_source: ::server::source::ActiveSource =
-                Arc::from(::server::source::active(db_boot.clone(), &seeded));
-            let scrobbler = daemon::Scrobbler::new(db_boot.clone());
-            let recorder = Arc::new(daemon::SourceRecorder::new(db_boot.clone()));
+                Arc::from(::server::source::active(database.clone(), &seeded));
+            let queue_store: Arc<dyn daemon::QueueStore> =
+                Arc::new(daemon::DbQueueStore::new(database.clone()));
+            let scrobbler = daemon::Scrobbler::new(database.clone());
+            let recorder = Arc::new(daemon::SourceRecorder::new(database.clone()));
             let services = daemon::PlaybackServices {
                 config: seeded,
-                active_source: Some(initial_source.clone()),
+                active_source: Some(initial_source),
                 station_registry: registry,
-                // Queue persistence stays with the app's exit-flush machinery
-                // below, which can snapshot the mirror signals synchronously
-                // on the close path — the session's own store is left off so
-                // the two never race on the same row.
-                queue_store: None,
+                queue_store: Some(queue_store.clone()),
                 recorder: Some(recorder.clone()),
                 scrobbler: Some(scrobbler.clone()),
             };
@@ -674,17 +701,17 @@ fn App() -> Element {
             scrobbler.attach_session(session.clone());
             let jobs = Arc::new(daemon::JobRunner::new(session.clone()));
             let downloads = daemon::DownloadsService::new(
-                db_boot.clone(),
+                database.clone(),
                 session.clone(),
                 config_service.clone(),
                 cache_dir().join("offline_tracks"),
             );
-            let favorites = daemon::FavoritesService::new(db_boot.clone(), session.clone());
+            let favorites = daemon::FavoritesService::new(database.clone(), session.clone());
             favorites.spawn_reconciler();
             daemon::os_media::spawn(&session);
             daemon::integrations::spawn_jellyfin_reporter(
                 &session,
-                db_boot.clone(),
+                database.clone(),
                 session.config_watch(),
             );
             daemon::integrations::spawn_discord_presence(&session, session.config_watch());
@@ -692,85 +719,85 @@ fn App() -> Element {
                 config_service.clone(),
                 session.clone(),
             );
-            let artwork =
-                daemon::ArtworkService::new(db_boot, session.clone(), cache_dir().join("artwork"));
+            let artwork = daemon::ArtworkService::new(
+                database.clone(),
+                session.clone(),
+                cache_dir().join("artwork"),
+            );
+            let frontend = daemon::FrontendService::new(
+                database.clone(),
+                config_service.clone(),
+                library.clone(),
+                session.clone(),
+                cache_dir().join("uploaded_artwork"),
+            );
+            let api: Arc<dyn api::KopuzApi> = Arc::new(
+                daemon::LocalApi::new(session.clone())
+                    .with_library(library)
+                    .with_config(config_service.clone())
+                    .with_jobs(jobs)
+                    .with_favorites(favorites.clone())
+                    .with_downloads(downloads)
+                    .with_frontend(frontend.clone())
+                    .with_artwork(artwork),
+            );
             tracing::info!(
                 mode = "embedded",
                 "daemon services ready: playback, library, config, jobs, downloads, favorites, artwork, scrobbling, integrations, OS media"
             );
-            Ok((
+            Ok(Arc::new(EmbeddedDaemon {
+                #[cfg(debug_assertions)]
+                db: database,
                 session,
-                library,
-                config_service,
-                jobs,
-                downloads,
+                queue_store,
                 favorites,
                 scrobbler,
-                artwork,
-            ))
+                frontend,
+                api,
+            }))
         })
+        .transpose()
+    });
+    let embedded = match embedded_result {
+        Ok(embedded) => embedded,
+        Err(error) => {
+            return rsx! {
+                main {
+                    role: "alert",
+                    style: "height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center;",
+                    "{error}"
+                }
+            };
+        }
     };
-    let (
-        session,
-        library_service,
-        config_service,
-        job_runner,
-        downloads_service,
-        favorites_service,
-        scrobbler,
-        artwork_service,
-    ) = match embedded_services {
-            Ok(services) => services,
-            Err(error) => {
-                return rsx! {
-                    main {
-                        role: "alert",
-                        style: "height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center;",
-                        "{error}"
-                    }
-                };
-            }
-        };
-
-    let frontend_service = {
-        let db = db.clone();
-        let config_service = config_service.clone();
-        let library_service = library_service.clone();
-        let session = session.clone();
-        use_hook(move || {
-            daemon::FrontendService::new(
-                db,
-                config_service,
-                library_service,
-                session,
-                cache_dir().join("uploaded_artwork"),
-            )
-        })
+    #[cfg(debug_assertions)]
+    use_context_provider({
+        let embedded = embedded.clone();
+        move || embedded.as_ref().map(|daemon| daemon.db.clone())
+    });
+    let frontend_api = match app_db::remote_api()
+        .or_else(|| embedded.as_ref().map(|daemon| daemon.api.clone()))
+    {
+        Some(api) => api,
+        None => {
+            tracing::error!("frontend API initialization failed");
+            return rsx! {
+                main {
+                    role: "alert",
+                    style: "height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center;",
+                    "Frontend API initialization failed"
+                }
+            };
+        }
     };
-    let local_api = {
-        let session = session.clone();
-        let library_service = library_service.clone();
-        let config_service = config_service.clone();
-        let job_runner = job_runner.clone();
-        let favorites_service = favorites_service.clone();
-        let downloads_service = downloads_service.clone();
-        let frontend_service = frontend_service.clone();
-        let artwork_service = artwork_service.clone();
-        use_hook(move || {
-            Arc::new(
-                daemon::LocalApi::new(session)
-                    .with_library(library_service)
-                    .with_config(config_service)
-                    .with_jobs(job_runner)
-                    .with_favorites(favorites_service)
-                    .with_downloads(downloads_service)
-                    .with_frontend(frontend_service)
-                    .with_artwork(artwork_service),
-            )
-        })
-    };
-    let frontend_api: Arc<dyn api::KopuzApi> = local_api.clone();
-    exit_flush::install_config_service(config_service.clone());
+    #[cfg(not(target_os = "android"))]
+    if let Some(embedded) = embedded.as_ref() {
+        exit_flush::install_queue_persistence(
+            embedded.session.clone(),
+            embedded.queue_store.clone(),
+        );
+    }
+    #[cfg(not(target_os = "android"))]
     exit_flush::install_frontend_api(frontend_api.clone());
     artwork_protocol::install_api(frontend_api.clone());
     provide_context(frontend_api.clone());
@@ -807,22 +834,6 @@ fn App() -> Element {
         });
     });
 
-    {
-        let updates = config_service.subscribe();
-        use_future(move || {
-            let mut updates = updates.clone();
-            async move {
-                while updates.changed().await.is_ok() {
-                    let updated = frontend_config(updates.borrow().clone());
-                    let current = config.peek().clone();
-                    if serde_json::to_value(&updated).ok() != serde_json::to_value(&current).ok() {
-                        config.set(updated);
-                    }
-                }
-            }
-        });
-    }
-
     // The remote control API: serve the same gRPC surface kopuzd exposes
     // from this process, so custom frontends and the control CLI can attach
     // to the running app (loopback only, bearer token in the discovery
@@ -831,14 +842,16 @@ fn App() -> Element {
     let mut remote_api_port = use_signal(|| None::<u16>);
     let mut remote_api_token = use_signal(|| None::<String>);
     {
-        let session = session.clone();
-        let api = frontend_api.clone();
+        let embedded = embedded.clone();
         let mut server_task = use_signal(|| None::<dioxus_core::Task>);
         let remote_api_cfg = use_memo(move || {
             let cfg = config.read();
             (cfg.remote_api_enabled, cfg.remote_api_port)
         });
         use_effect(move || {
+            let Some(embedded) = embedded.as_ref() else {
+                return;
+            };
             let (enabled, port) = *remote_api_cfg.read();
             if !*initial_load_done.read() {
                 return;
@@ -860,8 +873,8 @@ fn App() -> Element {
                 tracing::info!("embedded daemon API disabled");
                 return;
             }
-            let session = session.clone();
-            let api = api.clone();
+            let session = embedded.session.clone();
+            let api = embedded.api.clone();
             let task = spawn(async move {
                 tracing::info!(requested_port = port, "embedded daemon API starting");
                 let discovery_path = daemon::discovery::path();
@@ -966,10 +979,8 @@ fn App() -> Element {
     // empty DB still counts). Library/playlists/favorites have no such flag
     // anymore — they're targeted per-row writes, never full-replace.
     let mut config_loaded_ok = use_signal(|| false);
-    let mut queue_loaded_ok = use_signal(|| false);
-
-    let mut pending_queue_state_snapshot = use_signal(|| None::<PersistedQueueState>);
-    let mut pending_queue_state_revision = use_signal(|| 0u64);
+    #[cfg(not(target_os = "android"))]
+    let owns_daemon = embedded.is_some();
 
     // tao calls process::exit() after CloseRequested, killing the debounced
     // save loops — without this, the last debounce window of queue/store
@@ -990,25 +1001,12 @@ fn App() -> Element {
                     ..
                 }
         ) {
-            // None = the queue is empty (a cleared queue must persist as
-            // empty, not resurrect) — but only once the saved queue has
-            // actually been restored, else a quit during startup (or a
-            // failed load) would wipe it.
-            let queue_snap = (*initial_load_done.peek() && *queue_loaded_ok.peek()).then(|| {
-                pending_queue_state_snapshot
-                    .peek()
-                    .clone()
-                    .map(queue_state::api_snapshot)
-                    .unwrap_or_default()
-            });
-            // Library/playlists/favorites need no flush — every mutation
-            // already committed as a targeted write when it happened.
             let cfg = (*config_loaded_ok.peek()).then(|| {
                 let mut cfg = config.peek().clone();
                 cfg.volume = *volume.peek();
                 cfg
             });
-            exit_flush::persist_on_fresh_thread(queue_snap, cfg);
+            exit_flush::persist_on_fresh_thread(owns_daemon && *initial_load_done.peek(), cfg);
             // A quitting app must not leave a discovery file pointing at a
             // dead port; frontends would keep trying to attach to it.
             if let Some(token) = remote_api_token.peek().clone()
@@ -1098,18 +1096,20 @@ fn App() -> Element {
     });
 
     let mut radio_loaded = use_signal(|| false);
-    let frontend_service_for_registry = frontend_service.clone();
+    let embedded_for_registry = embedded.clone();
     use_effect(move || {
         if !*initial_load_done.read() || *radio_loaded.peek() {
             return;
         }
         radio_loaded.set(true);
-        let frontend_service = frontend_service_for_registry.clone();
-        spawn(async move {
-            if let Err(error) = frontend_service.reload_radio().await {
-                tracing::warn!(%error, "could not load radio registries");
-            }
-        });
+        if let Some(embedded) = embedded_for_registry.as_ref() {
+            let frontend = embedded.frontend.clone();
+            spawn(async move {
+                if let Err(error) = frontend.reload_radio().await {
+                    tracing::warn!(%error, "could not load radio registries");
+                }
+            });
+        }
     });
 
     let mut selected_album_id = use_signal(String::new);
@@ -1134,7 +1134,7 @@ fn App() -> Element {
     let mut update_banner: Signal<Option<updates::AvailableUpdate>> = use_signal(|| None);
     let mut did_check_updates = use_signal(|| false);
     let mut ctrl = hooks::use_player_controller(
-        session.clone(),
+        frontend_api.clone(),
         is_playing,
         queue,
         current_queue_index,
@@ -1411,187 +1411,100 @@ fn App() -> Element {
         });
     }
 
-    use_effect(move || {
-        if !*initial_load_done.read() || !*queue_loaded_ok.read() {
-            return;
-        }
-
-        let queue_snapshot = queue.read().clone();
-        let shuffle_order_snapshot = ctrl.shuffle_order.read().clone();
-        let shuffle_enabled_snapshot = *ctrl.shuffle.read();
-
-        let queue_state = queue_state::build_snapshot(
-            &queue_snapshot,
-            *current_queue_index.read(),
-            *current_song_progress.read(),
-            *is_playing.read(),
-            &shuffle_order_snapshot,
-            shuffle_enabled_snapshot,
-        );
-
-        if *pending_queue_state_snapshot.peek() != queue_state {
-            #[cfg(not(target_os = "android"))]
-            exit_flush::stash_queue(
-                queue_state
-                    .clone()
-                    .map(queue_state::api_snapshot)
-                    .unwrap_or_default(),
-            );
-            pending_queue_state_snapshot.set(queue_state);
-            pending_queue_state_revision.with_mut(|revision| *revision += 1);
-        }
-    });
-
-    let api_for_queue_save = frontend_api.clone();
-    use_future(move || {
-        let api = api_for_queue_save.clone();
-        async move {
-            let mut flushed_revision = 0u64;
-
-            loop {
-                let pending_revision = *pending_queue_state_revision.read();
-                if pending_revision == flushed_revision {
-                    utils::sleep(std::time::Duration::from_millis(250)).await;
-                    continue;
-                }
-
-                utils::sleep(std::time::Duration::from_millis(
-                    queue_state::SAVE_DEBOUNCE_MS,
-                ))
-                .await;
-
-                let latest_revision = *pending_queue_state_revision.read();
-                if latest_revision != pending_revision {
-                    continue;
-                }
-
-                let snapshot = pending_queue_state_snapshot.read().clone();
-                queue_state::persist_snapshot(api.clone(), snapshot)
-                    .instrument(tracing::info_span!("queue.persist"))
-                    .await;
-                flushed_revision = latest_revision;
-            }
-        }
-    });
-
     let mut offline_mode = app_lifecycle::use_connectivity_probe(frontend_sources, network_banner);
 
     let api_for_load = frontend_api.clone();
-    let favorites_for_load = favorites_service.clone();
-    let scrobbler_for_load = scrobbler.clone();
+    let embedded_for_load = embedded.clone();
     use_hook(move || {
-        {
-            let api = api_for_load;
-            let mut ctrl = ctrl;
+        let api = api_for_load;
+        let embedded = embedded_for_load;
 
-            spawn(async move {
-                // Startup asks the daemon for config and queue only. Everything
-                // else is queried on demand through the API. Saving stays
-                // disarmed after a failed read so defaults cannot replace real
-                // persisted state.
-                let cfg_loaded = match api
-                    .config()
-                    .instrument(tracing::info_span!("startup.load_config"))
+        spawn(async move {
+            let restored_queue_tracks = if let Some(daemon) = embedded.as_ref() {
+                match daemon.queue_store.load().await {
+                    Some(snapshot) => {
+                        let count = snapshot.queue.len();
+                        if let Err(error) = daemon.session.restore_queue(snapshot).await {
+                            tracing::warn!(%error, "queue restore failed");
+                        }
+                        count
+                    }
+                    None => 0,
+                }
+            } else {
+                api.live_queue()
                     .await
-                {
-                    Ok(view) => match serde_json::from_value::<config::AppConfig>(view.config) {
-                        Ok(config) => {
-                            config_loaded_ok.set(true);
-                            Some(config)
-                        }
-                        Err(error) => {
-                            tracing::error!(%error, "failed to decode daemon config — config saves disabled this session");
-                            None
-                        }
+                    .map(|snapshot| snapshot.tracks.len())
+                    .unwrap_or_default()
+            };
+
+            let cfg_loaded = match api
+                .config()
+                .instrument(tracing::info_span!("startup.load_config"))
+                .await
+            {
+                Ok(view) => match serde_json::from_value::<config::AppConfig>(view.config) {
+                    Ok(config) => {
+                        config_loaded_ok.set(true);
+                        Some(config)
                     }
                     Err(error) => {
-                        tracing::error!(%error, "failed to load daemon config — config saves disabled this session");
+                        tracing::error!(%error, "failed to decode daemon config — config saves disabled this session");
                         None
                     }
-                };
-                let queue_loaded = match api
-                    .queue_snapshot()
-                    .instrument(tracing::info_span!("startup.load_queue"))
-                    .await
-                {
-                    Ok(snapshot) => {
-                        queue_loaded_ok.set(true);
-                        Some(snapshot)
-                    }
-                    Err(error) => {
-                        tracing::error!(%error, "failed to load daemon queue — queue saves disabled this session");
-                        None
-                    }
-                };
+                }
+                Err(error) => {
+                    tracing::error!(%error, "failed to load daemon config — config saves disabled this session");
+                    None
+                }
+            };
 
-                let cfg_loaded = cfg_loaded.unwrap_or_else(|| {
-                    app_db::BOOT_CONFIG.get().cloned().unwrap_or_default()
+            let cfg_loaded = cfg_loaded
+                .unwrap_or_else(|| app_db::BOOT_CONFIG.get().cloned().unwrap_or_default());
+            let startup_source = daemon::active_source_label(&cfg_loaded);
+            let startup_source_id = cfg_loaded.active_source.as_str().to_string();
+            let startup_roots = configured_local_sources(&cfg_loaded)
+                .iter()
+                .map(|(_, roots)| roots.len())
+                .sum::<usize>();
+            {
+                let _apply = tracing::info_span!("startup.apply_config").entered();
+                let loaded = cfg_loaded;
+                config.set(frontend_config(loaded.clone()));
+                configured_local_libraries.set(configured_local_sources(&loaded));
+                volume.set(loaded.volume);
+                persisted_volume.set(loaded.volume);
+                i18n::set_locale(&loaded.language);
+            }
+
+            initial_load_done.set(true);
+            #[cfg(not(target_os = "android"))]
+            if embedded.is_some() {
+                exit_flush::enable_queue_flush();
+            }
+            let mode = if embedded.is_some() {
+                "embedded"
+            } else {
+                "attached"
+            };
+            tracing::info!(
+                mode,
+                source = %startup_source,
+                source_id = %startup_source_id,
+                configured_roots = startup_roots,
+                restored_queue_tracks,
+                "daemon startup state restored"
+            );
+            if let Some(daemon) = embedded {
+                daemon.favorites.nudge_activate();
+                let scrobbler = daemon.scrobbler.clone();
+                let drain_config = config.peek().clone();
+                spawn(async move {
+                    scrobbler.drain_queue(&drain_config).await;
                 });
-                let startup_source = daemon::active_source_label(&cfg_loaded);
-                let startup_source_id = cfg_loaded.active_source.as_str().to_string();
-                let startup_roots = configured_local_sources(&cfg_loaded)
-                    .iter()
-                    .map(|(_, roots)| roots.len())
-                    .sum::<usize>();
-                {
-                    let _apply = tracing::info_span!("startup.apply_config").entered();
-                    let loaded = cfg_loaded;
-                    config.set(frontend_config(loaded.clone()));
-                    configured_local_libraries.set(configured_local_sources(&loaded));
-                    volume.set(loaded.volume);
-                    persisted_volume.set(loaded.volume);
-                    i18n::set_locale(&loaded.language);
-                }
-
-                // Local is the source of truth: no auto-switch to a server on
-                // startup. An unselected source stays Local (the config default);
-                // the user picks a server explicitly via the sidebar.
-
-                let queue_state = utils::offload(async move {
-                    queue_loaded
-                        .map(queue_state::from_api_snapshot)
-                        .and_then(queue_state::sanitize)
-                })
-                .instrument(tracing::info_span!("startup.sanitize_queue"))
-                .await;
-                let restored_queue_tracks = queue_state
-                    .as_ref()
-                    .map_or(0, |queue_state| queue_state.queue.len());
-                {
-                    let _restore = tracing::info_span!("startup.restore_queue").entered();
-                    if let Some(queue_state) = queue_state {
-                        ctrl.restore_queue_state(
-                            queue_state.queue,
-                            queue_state.current_queue_index,
-                            queue_state.progress_secs,
-                            queue_state.shuffle_order,
-                            queue_state.shuffle_enabled,
-                        );
-                    }
-                }
-
-                initial_load_done.set(true);
-                tracing::info!(
-                    mode = "embedded",
-                    source = %startup_source,
-                    source_id = %startup_source_id,
-                    configured_roots = startup_roots,
-                    restored_queue_tracks,
-                    "daemon startup state restored"
-                );
-                // Kick one reconcile shortly after startup so pending offline
-                // likes from the previous session push now, not on the first
-                // multi-minute interval; drain queued scrobbles the same way.
-                favorites_for_load.nudge_activate();
-                {
-                    let scrobbler = scrobbler_for_load.clone();
-                    let drain_config = config.peek().clone();
-                    spawn(async move {
-                        scrobbler.drain_queue(&drain_config).await;
-                    });
-                }
-            }.instrument(tracing::info_span!("startup.load")));
-        }
+            }
+            }
+            .instrument(tracing::info_span!("startup.load")));
     });
 
     let api_for_play_album = frontend_api.clone();
@@ -1634,61 +1547,84 @@ fn App() -> Element {
     // Feed daemon events back into the UI: library invalidations re-run the
     // query hooks, and scan job progress drives the scan indicator.
     {
-        let session = session.clone();
         let gens = gens_for_albums;
         let api = frontend_api.clone();
-        let mut downloads = downloaded_tracks;
+        let downloads = downloaded_tracks;
+        let sources = frontend_sources;
         use_future(move || {
-            let session = session.clone();
             let api = api.clone();
             async move {
-                use tokio::sync::broadcast::error::RecvError;
-                let mut rx = session.subscribe();
-                loop {
-                    match rx.recv().await {
-                        Ok((_, event)) => match event {
-                            api::ApiEvent::LibraryInvalidated { table, .. } => {
-                                use hooks::db_reactivity::Table;
-                                let mapped = match table {
-                                    api::Table::Tracks => Some(Table::Tracks),
-                                    api::Table::Albums => Some(Table::Albums),
-                                    api::Table::Playlists => Some(Table::Playlists),
-                                    api::Table::Favorites => Some(Table::Favorites),
-                                    api::Table::Folders => Some(Table::Folders),
-                                    api::Table::Servers => Some(Table::Servers),
-                                    api::Table::Recents => Some(Table::Recents),
-                                    _ => None,
-                                };
-                                if let Some(table) = mapped {
-                                    gens.bump_coalesced(table);
+                let mut events = api.events();
+                while let Some(event) = events.next().await {
+                    match event {
+                        api::ApiEvent::LibraryInvalidated { table, .. } => {
+                            use hooks::db_reactivity::Table;
+                            let mapped = match table {
+                                api::Table::Tracks => Some(Table::Tracks),
+                                api::Table::Albums => Some(Table::Albums),
+                                api::Table::Playlists => Some(Table::Playlists),
+                                api::Table::Favorites => Some(Table::Favorites),
+                                api::Table::Folders => Some(Table::Folders),
+                                api::Table::Servers => Some(Table::Servers),
+                                api::Table::Recents => Some(Table::Recents),
+                                _ => None,
+                            };
+                            if let Some(table) = mapped {
+                                gens.bump_coalesced(table);
+                            }
+                            if table == api::Table::Servers {
+                                refresh_frontend_sources(api.as_ref(), sources).await;
+                            }
+                        }
+                        api::ApiEvent::JobProgress(progress)
+                            if progress.kind == api::JobKind::Scan =>
+                        {
+                            scan_current_file.set(Some(progress.message.unwrap_or(progress.phase)));
+                        }
+                        api::ApiEvent::JobFinished {
+                            kind: api::JobKind::Scan,
+                            ..
+                        } => {
+                            scan_current_file.set(None);
+                        }
+                        api::ApiEvent::ConfigChanged { keys } => {
+                            refresh_frontend_config(api.as_ref(), config).await;
+                            refresh_frontend_sources(api.as_ref(), sources).await;
+                            if keys.iter().any(|key| key == "offline_tracks") {
+                                refresh_frontend_downloads(api.as_ref(), downloads).await;
+                            }
+                        }
+                        api::ApiEvent::Resync => {
+                            use hooks::db_reactivity::Table;
+                            for table in [
+                                Table::Tracks,
+                                Table::Albums,
+                                Table::Playlists,
+                                Table::Favorites,
+                                Table::Folders,
+                                Table::Servers,
+                                Table::Recents,
+                            ] {
+                                gens.bump(table);
+                            }
+                            refresh_frontend_config(api.as_ref(), config).await;
+                            refresh_frontend_sources(api.as_ref(), sources).await;
+                            refresh_frontend_downloads(api.as_ref(), downloads).await;
+                            match api.jobs().await {
+                                Ok(jobs) => {
+                                    let scan = jobs.into_iter().find(|job| {
+                                        job.kind == api::JobKind::Scan
+                                            && job.state == api::JobState::Running
+                                    });
+                                    scan_current_file
+                                        .set(scan.map(|job| job.message.unwrap_or(job.phase)));
+                                }
+                                Err(error) => {
+                                    tracing::warn!(%error, "could not refresh daemon jobs")
                                 }
                             }
-                            api::ApiEvent::JobProgress(progress)
-                                if progress.kind == api::JobKind::Scan =>
-                            {
-                                scan_current_file
-                                    .set(Some(progress.message.unwrap_or(progress.phase)));
-                            }
-                            api::ApiEvent::JobFinished {
-                                kind: api::JobKind::Scan,
-                                ..
-                            } => {
-                                scan_current_file.set(None);
-                            }
-                            api::ApiEvent::ConfigChanged { keys }
-                                if keys.iter().any(|key| key == "offline_tracks") =>
-                            {
-                                match api.downloads().await {
-                                    Ok(keys) => downloads.0.set(keys.into_iter().collect()),
-                                    Err(error) => {
-                                        tracing::warn!(%error, "could not refresh daemon downloads")
-                                    }
-                                }
-                            }
-                            _ => {}
-                        },
-                        Err(RecvError::Lagged(_)) => continue,
-                        Err(RecvError::Closed) => break,
+                        }
+                        _ => {}
                     }
                 }
             }

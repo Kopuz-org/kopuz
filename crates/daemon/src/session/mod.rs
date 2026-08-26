@@ -34,13 +34,22 @@ const MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 const PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 const PROGRESS_STEP_SECS: u64 = 5;
 
-/// The embedded frontend's raw view of the queue model.
-#[derive(Debug, Clone, Default)]
-pub struct QueueMirrorSnapshot {
-    pub tracks: Vec<Track>,
-    pub shuffle_order: Vec<usize>,
-    pub position: usize,
-    pub shuffle: bool,
+struct CachedQueueSnapshot {
+    snapshot: db::QueueSnapshot,
+    position_secs: u64,
+    at: Instant,
+    playing: bool,
+}
+
+impl Default for CachedQueueSnapshot {
+    fn default() -> Self {
+        Self {
+            snapshot: db::QueueSnapshot::default(),
+            position_secs: 0,
+            at: Instant::now(),
+            playing: false,
+        }
+    }
 }
 
 /// Resolves a wire queue context into concrete tracks daemon-side.
@@ -108,6 +117,7 @@ enum SessionCmd {
         config: Box<config::AppConfig>,
         changed: Vec<String>,
     },
+    PreviewEqualizer(Box<config::EqualizerSettings>),
     Emit(Box<ApiEvent>),
     SetStationRegistry(Arc<radio::registry::StationRegistry>),
     SetActiveSource(Option<server::source::ActiveSource>),
@@ -121,20 +131,6 @@ enum SessionCmd {
         reply: oneshot::Sender<Result<(), ApiError>>,
     },
     ResetPlayback(oneshot::Sender<Result<CommandAck, ApiError>>),
-    SetQueueRaw {
-        tracks: Vec<Track>,
-        mode: QueueMode,
-        start_index: Option<usize>,
-        shuffle: Option<bool>,
-        reply: oneshot::Sender<Result<CommandAck, ApiError>>,
-    },
-    JumpPhysical(usize, oneshot::Sender<Result<CommandAck, ApiError>>),
-    InsertTracksAt {
-        position: usize,
-        tracks: Vec<Track>,
-        reply: oneshot::Sender<Result<CommandAck, ApiError>>,
-    },
-    QueueMirror(oneshot::Sender<QueueMirrorSnapshot>),
     Persist(oneshot::Sender<()>),
     LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
     LoadFinished(LoadFinished),
@@ -151,6 +147,7 @@ pub struct SessionHandle {
     history: Arc<Mutex<VecDeque<(u64, ApiEvent)>>>,
     materializer: Arc<dyn QueueMaterializer>,
     queue_request_seq: Arc<AtomicU64>,
+    queue_snapshot: Arc<Mutex<CachedQueueSnapshot>>,
 }
 
 impl SessionHandle {
@@ -181,6 +178,7 @@ impl SessionHandle {
         let seq = Arc::new(AtomicU64::new(0));
         let history = Arc::new(Mutex::new(VecDeque::new()));
         let queue_request_seq = Arc::new(AtomicU64::new(0));
+        let queue_snapshot = Arc::new(Mutex::new(CachedQueueSnapshot::default()));
         let (config_tx, config_rx) = watch::channel(services.config.clone());
         let engine_events = player.subscribe();
         player.set_volume(services.config.volume);
@@ -227,6 +225,7 @@ impl SessionHandle {
             history: history.clone(),
             queue_writer,
             queue_request_seq: queue_request_seq.clone(),
+            queue_snapshot: queue_snapshot.clone(),
             queue_dirty: false,
             recorder: services.recorder,
             scrobbler: services.scrobbler,
@@ -252,6 +251,7 @@ impl SessionHandle {
             history,
             materializer,
             queue_request_seq,
+            queue_snapshot,
         }
     }
 
@@ -441,83 +441,26 @@ impl SessionHandle {
         .await
     }
 
-    pub fn report_external_detached(
-        &self,
-        track: Option<Track>,
-        position_ms: u64,
-        playing: bool,
-        completed: bool,
-        device: Option<String>,
-    ) {
-        let (reply, _ignored) = oneshot::channel();
-        let _ = self.cmd_tx.send(SessionCmd::ReportExternal {
-            track,
-            position_ms,
-            playing,
-            completed,
-            device,
-            reply,
-        });
-    }
-
     /// Serialize source teardown so external ownership cannot race engine reset.
     pub async fn reset_playback(&self) -> Result<CommandAck, ApiError> {
         self.queue_request_seq.fetch_add(1, Ordering::AcqRel);
         self.request(SessionCmd::ResetPlayback).await
     }
 
-    /// In-process queue replacement with literal tracks (catalog rows that
-    /// may not exist in the database yet). Wire clients use `set_queue` with
-    /// a context instead; this is the embedded frontend's path.
-    pub async fn set_queue_tracks(
-        &self,
-        tracks: Vec<Track>,
-        mode: QueueMode,
-        start_index: Option<usize>,
-        shuffle: Option<bool>,
-    ) -> Result<CommandAck, ApiError> {
-        self.queue_request_seq.fetch_add(1, Ordering::AcqRel);
-        self.request(|reply| SessionCmd::SetQueueRaw {
-            tracks,
-            mode,
-            start_index,
-            shuffle,
-            reply,
-        })
-        .await
-    }
-
-    /// Explicit jump to a physical queue index (a row click), with the
-    /// history push and shuffle re-pin semantics of the app's `play_track`.
-    pub async fn jump_physical(&self, index: usize) -> Result<CommandAck, ApiError> {
-        self.request(|reply| SessionCmd::JumpPhysical(index, reply))
-            .await
-    }
-
-    /// Insert literal tracks at a play-order position (the queue view's
-    /// drag-drop). Wire clients use `queue_edit` moves instead.
-    pub async fn insert_tracks_at(
-        &self,
-        position: usize,
-        tracks: Vec<Track>,
-    ) -> Result<CommandAck, ApiError> {
-        self.queue_request_seq.fetch_add(1, Ordering::AcqRel);
-        self.request(|reply| SessionCmd::InsertTracksAt {
-            position,
-            tracks,
-            reply,
-        })
-        .await
-    }
-
-    /// The raw queue plus its permutation, for the embedded frontend's
-    /// signal mirror. Wire clients use `queue_window`.
-    pub async fn queue_mirror(&self) -> QueueMirrorSnapshot {
-        let (tx, rx) = oneshot::channel();
-        if self.cmd_tx.send(SessionCmd::QueueMirror(tx)).is_err() {
-            return QueueMirrorSnapshot::default();
-        }
-        rx.await.unwrap_or_default()
+    pub fn queue_snapshot(&self) -> db::QueueSnapshot {
+        self.queue_snapshot
+            .lock()
+            .map(|cached| {
+                let mut snapshot = cached.snapshot.clone();
+                if cached.playing {
+                    let position = cached
+                        .position_secs
+                        .saturating_add(cached.at.elapsed().as_secs());
+                    snapshot.progress_secs = (position / PROGRESS_STEP_SECS) * PROGRESS_STEP_SECS;
+                }
+                snapshot
+            })
+            .unwrap_or_default()
     }
 
     /// Adopt a new config (a ConfigService patch): applies live audio
@@ -527,6 +470,12 @@ impl SessionHandle {
             config: Box::new(config),
             changed,
         });
+    }
+
+    pub fn preview_equalizer(&self, equalizer: config::EqualizerSettings) -> Result<(), ApiError> {
+        self.cmd_tx
+            .send(SessionCmd::PreviewEqualizer(Box::new(equalizer)))
+            .map_err(|_| ApiError::internal("player session is unavailable"))
     }
 
     /// Flush the current queue snapshot to the store and wait for the write;
@@ -625,6 +574,7 @@ struct Session {
     history: Arc<Mutex<VecDeque<(u64, ApiEvent)>>>,
     queue_writer: Option<mpsc::UnboundedSender<(db::QueueSnapshot, Option<oneshot::Sender<()>>)>>,
     queue_request_seq: Arc<AtomicU64>,
+    queue_snapshot: Arc<Mutex<CachedQueueSnapshot>>,
     queue_dirty: bool,
     recorder: Option<Arc<dyn PlaybackRecorder>>,
     scrobbler: Option<Arc<crate::scrobbler::Scrobbler>>,
@@ -733,6 +683,9 @@ impl Session {
             SessionCmd::SetConfig { config, changed } => {
                 self.apply_config(*config, changed, state_tx);
             }
+            SessionCmd::PreviewEqualizer(equalizer) => {
+                self.player.set_equalizer(*equalizer);
+            }
             SessionCmd::Emit(event) => self.emit(*event),
             SessionCmd::SetStationRegistry(registry) => self.station_registry = registry,
             SessionCmd::SetActiveSource(source) => self.active_source = source,
@@ -780,42 +733,6 @@ impl Session {
                 let result =
                     self.apply_queue_tracks(Vec::new(), QueueMode::Replace, None, None, state_tx);
                 let _ = reply.send(result);
-            }
-            SessionCmd::SetQueueRaw {
-                tracks,
-                mode,
-                start_index,
-                shuffle,
-                reply,
-            } => {
-                let result = self.apply_queue_tracks(tracks, mode, start_index, shuffle, state_tx);
-                let _ = reply.send(result);
-            }
-            SessionCmd::JumpPhysical(index, reply) => {
-                let result = if self.model.items().get(index).is_some() {
-                    let position = self.model.jump_to(index);
-                    self.start_load(position, false, None);
-                    Ok(self.publish(state_tx, true))
-                } else {
-                    Err(ApiError::invalid_input("no track at that queue position"))
-                };
-                let _ = reply.send(result);
-            }
-            SessionCmd::InsertTracksAt {
-                position,
-                tracks,
-                reply,
-            } => {
-                self.model.insert_at(position, tracks);
-                let _ = reply.send(Ok(self.publish(state_tx, true)));
-            }
-            SessionCmd::QueueMirror(reply) => {
-                let _ = reply.send(QueueMirrorSnapshot {
-                    tracks: self.model.items().to_vec(),
-                    shuffle_order: self.model.shuffle_order().to_vec(),
-                    position: self.model.current_position(),
-                    shuffle: self.model.shuffle(),
-                });
             }
             SessionCmd::Persist(reply) => {
                 if let Some(writer) = self.queue_writer.clone() {
@@ -1392,6 +1309,24 @@ impl Session {
             progress_secs,
             shuffle_order: self.model.shuffle_order().to_vec(),
             shuffle_enabled: self.model.shuffle(),
+        }
+    }
+
+    fn cache_queue_snapshot(&self) {
+        if let Ok(mut cached) = self.queue_snapshot.lock() {
+            let snapshot = self.snapshot();
+            let playing = self.phase == ApiPhase::Playing;
+            let position_secs = if playing && self.external.is_none() {
+                self.displayed_position().as_secs()
+            } else {
+                snapshot.progress_secs
+            };
+            *cached = CachedQueueSnapshot {
+                snapshot,
+                position_secs,
+                at: Instant::now(),
+                playing,
+            };
         }
     }
 

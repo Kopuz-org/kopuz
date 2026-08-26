@@ -96,6 +96,32 @@ impl api::KopuzApi for LocalApi {
         self.frontend()?.queue_snapshot().await
     }
 
+    async fn live_queue(&self) -> Result<api::QueuePersistenceSnapshot, ApiError> {
+        let snapshot = self.session.queue_snapshot();
+        Ok(api::QueuePersistenceSnapshot {
+            tracks: snapshot
+                .queue
+                .iter()
+                .map(crate::wire::track_info_for_persistence)
+                .collect(),
+            current_index: snapshot
+                .current_queue_index
+                .try_into()
+                .map_err(|_| ApiError::internal("live queue index is too large"))?,
+            progress_ms: snapshot.progress_secs.saturating_mul(1000),
+            shuffle_order: snapshot
+                .shuffle_order
+                .into_iter()
+                .map(|index| {
+                    index
+                        .try_into()
+                        .map_err(|_| ApiError::internal("live shuffle index is too large"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            shuffle_enabled: snapshot.shuffle_enabled,
+        })
+    }
+
     async fn save_queue_snapshot(
         &self,
         snapshot: api::QueuePersistenceSnapshot,
@@ -147,6 +173,12 @@ impl api::KopuzApi for LocalApi {
             }
         }
         Ok(view)
+    }
+
+    async fn preview_equalizer(&self, equalizer: serde_json::Value) -> Result<(), ApiError> {
+        let equalizer = serde_json::from_value(equalizer)
+            .map_err(|error| ApiError::invalid_input(format!("invalid equalizer: {error}")))?;
+        self.session.preview_equalizer(equalizer)
     }
 
     async fn favorites(&self) -> Result<api::FavoritesView, ApiError> {

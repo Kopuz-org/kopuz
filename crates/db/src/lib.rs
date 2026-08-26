@@ -596,25 +596,17 @@ pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
     let layers = config::store::FileLayers::read(&config::store::settings_path_for(db_dir));
 
     let blob: Option<serde_json::Value> = if db_path.exists() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .ok()?;
-        rt.block_on(async {
-            let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(db_path)
-                .create_if_missing(false)
-                .read_only(true);
-            use sqlx::ConnectOptions;
-            let mut conn = opts.connect().await.ok()?;
-            let json: Option<String> =
-                sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-                    .fetch_optional(&mut conn)
-                    .await
+        if tokio::runtime::Handle::try_current().is_ok() {
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(|| read_config_blob_blocking(db_path))
+                    .join()
                     .ok()
-                    .flatten();
-            json.and_then(|j| serde_json::from_str(&j).ok())
-        })
+                    .flatten()
+            })
+        } else {
+            read_config_blob_blocking(db_path)
+        }
     } else {
         None
     };
@@ -626,6 +618,27 @@ pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
     }
     let value = blob.unwrap_or_else(|| serde_json::json!({}));
     layers.merge_and_parse(value).ok()
+}
+
+fn read_config_blob_blocking(db_path: &std::path::Path) -> Option<serde_json::Value> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    rt.block_on(async {
+        let opts = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(db_path)
+            .create_if_missing(false)
+            .read_only(true);
+        use sqlx::ConnectOptions;
+        let mut conn = opts.connect().await.ok()?;
+        let json: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
+            .fetch_optional(&mut conn)
+            .await
+            .ok()
+            .flatten();
+        json.and_then(|json| serde_json::from_str(&json).ok())
+    })
 }
 
 /// The RELEASE database path (`kopuz.db`), independent of build profile — the

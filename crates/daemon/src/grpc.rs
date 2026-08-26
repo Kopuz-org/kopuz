@@ -265,6 +265,16 @@ impl Kopuz for KopuzGrpc {
         )))
     }
 
+    async fn get_live_queue(
+        &self,
+        _request: Request<proto::Empty>,
+    ) -> Result<Response<proto::QueuePersistenceSnapshot>, Status> {
+        let snapshot = api_call!(self, live_queue);
+        Ok(Response::new(convert::queue_persistence_snapshot_to_proto(
+            &snapshot,
+        )))
+    }
+
     async fn get_tracks(
         &self,
         request: Request<proto::TracksRequest>,
@@ -819,6 +829,16 @@ impl Kopuz for KopuzGrpc {
             .map_err(|error| Status::invalid_argument(format!("invalid merge patch: {error}")))?;
         let view = api_call!(self, patch_config, patch);
         Ok(Response::new(convert::config_view_to_proto(&view)))
+    }
+
+    async fn preview_equalizer(
+        &self,
+        request: Request<proto::ConfigPatch>,
+    ) -> Result<Response<proto::Empty>, Status> {
+        let equalizer = serde_json::from_str(&request.get_ref().merge_patch_json)
+            .map_err(|error| Status::invalid_argument(format!("invalid equalizer: {error}")))?;
+        api_call!(self, preview_equalizer, equalizer);
+        Ok(Response::new(proto::Empty {}))
     }
 
     async fn create_playlist(

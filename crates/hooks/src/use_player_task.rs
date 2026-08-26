@@ -65,12 +65,7 @@ mod android_media {
 }
 
 fn report_completed(ctrl: &PlayerController) {
-    let track = ctrl.current_track();
-    let position_ms = ctrl.current_song_progress.peek().saturating_mul(1000);
-    let device = ctrl.spotify_device_override.peek().clone();
-    ctrl.session
-        .peek()
-        .report_external_detached(track, position_ms, false, true, device);
+    ctrl.report_external_state(true);
 }
 
 /// The now-playing fields the OS media widget needs, cloned out of the Dioxus

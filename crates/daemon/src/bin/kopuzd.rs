@@ -160,6 +160,17 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let using_default_database =
         args.db_path.is_none() && std::env::var_os("KOPUZ_DB_PATH").is_none();
     let discovery_path = daemon::discovery::path();
+    let _discovery_guard = match discovery_path.as_deref() {
+        Some(path) => match daemon::discovery::DiscoveryGuard::try_claim(path)? {
+            Some(guard) => Some(guard),
+            None => {
+                return Err(
+                    "another Kopuz daemon owns the discovery service or is starting".into(),
+                );
+            }
+        },
+        None => None,
+    };
     if let Some(path) = discovery_path.as_deref() {
         match daemon::discovery::read(path) {
             Some(existing) if daemon::discovery::is_serving(&existing).await => {
@@ -188,6 +199,8 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .db_path
         .map(PathBuf::from)
         .unwrap_or_else(db::default_db_path);
+    let _database_lease = daemon::DatabaseLease::try_claim(&db_path)?
+        .ok_or("another Kopuz daemon already owns this database")?;
     tracing::info!(path = %db_path.display(), "opening library database (expects exclusive access)");
     let database = db::init(&db_path).await?;
     if using_default_database {
@@ -355,7 +368,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    flush_session.persist_now().await;
+    queue_store.save(flush_session.queue_snapshot()).await;
     tracing::info!("daemon shutdown flush finished");
 
     result

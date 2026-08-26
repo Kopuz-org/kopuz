@@ -41,6 +41,7 @@ tracing = { workspace = true }
 rand = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
+fs2 = { workspace = true }
 webbrowser = { workspace = true }
 utils = { workspace = true }
 tonic = { workspace = true, optional = true }
