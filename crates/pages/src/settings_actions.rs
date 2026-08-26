@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
-use ::server::provider::ProviderClient;
 use api::KopuzApi;
-use config::{AppConfig, Browser, MusicService};
+use config::{Browser, MusicService};
 use dioxus::prelude::*;
-use tracing::Instrument;
 
 pub(crate) async fn ensure_host_access(mut host_access: Signal<bool>) -> Option<()> {
     let host = ::server::cookies::has_host_spawn().await;
@@ -12,30 +10,6 @@ pub(crate) async fn ensure_host_access(mut host_access: Signal<bool>) -> Option<
     None
 }
 
-async fn validate_ytmusic(cookies: &str) -> bool {
-    ::server::provider::validate_ytmusic_cookies(cookies).await
-}
-
-async fn try_resume_ytmusic(seed: Option<String>) -> Option<String> {
-    if let Some(cookies) = &seed
-        && validate_ytmusic(cookies).await
-    {
-        return seed;
-    }
-    if let Some(cookies) = &seed
-        && let Ok(Some(rotated)) = ::server::ytmusic::verify_session_keepalive::tick(cookies).await
-        && validate_ytmusic(&rotated).await
-    {
-        return Some(rotated);
-    }
-    None
-}
-
-/// Poll-driven Android sign-in: opens the in-app login WebView at `signin_url`
-/// and waits until `extract` finds what it needs in the cookies the WebView
-/// accumulates for `cookie_url`. Mirrors the desktop flow in
-/// `server::cookies::signin`, with Android's app-global CookieManager standing
-/// in for the spawned browser profile.
 #[cfg(target_os = "android")]
 async fn webview_signin(
     signin_url: &str,
@@ -43,6 +17,7 @@ async fn webview_signin(
     extract: impl Fn(&str) -> Option<String>,
 ) -> Result<String, String> {
     use std::time::{Duration, Instant};
+
     player::systemint::login_open(signin_url);
     let deadline = Instant::now() + Duration::from_secs(300);
     let mut seen_open = false;
@@ -74,357 +49,215 @@ fn cookie_value(header: &str, name: &str) -> Option<String> {
     })
 }
 
-#[cfg(target_os = "android")]
-async fn ensure_ytmusic_signed_in(
-    config_cookies: Option<String>,
-    _browser: Browser,
-    _server_id: &str,
-) -> Result<String, String> {
-    if let Some(cookies) = try_resume_ytmusic(config_cookies).await {
-        return Ok(cookies);
+fn api_service(service: MusicService) -> api::MusicService {
+    match service {
+        MusicService::Jellyfin => api::MusicService::Jellyfin,
+        MusicService::Subsonic => api::MusicService::Subsonic,
+        MusicService::Custom => api::MusicService::Custom,
+        MusicService::YtMusic => api::MusicService::YtMusic,
+        MusicService::AppleMusic => api::MusicService::AppleMusic,
+        MusicService::SoundCloud => api::MusicService::SoundCloud,
+        MusicService::Spotify => api::MusicService::Spotify,
+        MusicService::Nextcloud => api::MusicService::Nextcloud,
     }
-    let cookies = webview_signin(
-        ::server::ytmusic::isolated_profile::SIGNIN_URL,
-        "https://music.youtube.com",
-        |header| {
-            (cookie_value(header, "SAPISID").is_some() && cookie_value(header, "SID").is_some())
-                .then(|| header.to_string())
-        },
-    )
-    .await?;
-    if !validate_ytmusic(&cookies).await {
-        return Err("Sign-in completed but YT validation still failed".to_string());
-    }
-    Ok(cookies)
+}
+
+fn config_service(service: api::MusicService) -> Option<MusicService> {
+    Some(match service {
+        api::MusicService::Jellyfin => MusicService::Jellyfin,
+        api::MusicService::Subsonic => MusicService::Subsonic,
+        api::MusicService::Custom => MusicService::Custom,
+        api::MusicService::YtMusic => MusicService::YtMusic,
+        api::MusicService::AppleMusic => MusicService::AppleMusic,
+        api::MusicService::SoundCloud => MusicService::SoundCloud,
+        api::MusicService::Spotify => MusicService::Spotify,
+        api::MusicService::Nextcloud => MusicService::Nextcloud,
+        api::MusicService::Unknown => return None,
+    })
 }
 
 #[cfg(not(target_os = "android"))]
-async fn ensure_ytmusic_signed_in(
-    config_cookies: Option<String>,
-    browser: Browser,
-    server_id: &str,
-) -> Result<String, String> {
-    if let Some(cookies) = try_resume_ytmusic(config_cookies).await {
-        return Ok(cookies);
-    }
+async fn authenticate_source(
+    api: Arc<dyn KopuzApi>,
+    server_id: String,
+    _service: MusicService,
+    _browser: Browser,
+    _client_id: String,
+) -> Result<(), api::ApiError> {
+    api.authenticate_source(server_id).await.map(|_| ())
+}
 
-    let profile = ::server::ytmusic::isolated_profile::profile_dir(server_id);
-    if profile.is_dir() {
-        let from_profile = ::server::ytmusic::cookies::extract_from(browser, &profile)
+#[cfg(target_os = "android")]
+async fn authenticate_source(
+    api: Arc<dyn KopuzApi>,
+    server_id: String,
+    service: MusicService,
+    browser: Browser,
+    client_id: String,
+) -> Result<(), api::ApiError> {
+    let (secret, user_id) = match service {
+        MusicService::YtMusic => {
+            let cookies = webview_signin(
+                ::server::ytmusic::isolated_profile::SIGNIN_URL,
+                "https://music.youtube.com",
+                |header| {
+                    (cookie_value(header, "SAPISID").is_some()
+                        && cookie_value(header, "SID").is_some())
+                    .then(|| header.to_string())
+                },
+            )
             .await
-            .ok();
-        if let Some(cookies) = try_resume_ytmusic(from_profile).await {
-            return Ok(cookies);
+            .map_err(api::ApiError::internal)?;
+            let user_id =
+                ::server::ytmusic::derive_user_id(&cookies).unwrap_or_else(|| "me".to_string());
+            (cookies, user_id)
         }
-    }
-
-    let cookies = ::server::ytmusic::isolated_profile::launch_signin_and_extract(
-        browser,
-        server_id,
-        std::time::Duration::from_secs(300),
-    )
-    .await?;
-    if !validate_ytmusic(&cookies).await {
-        return Err("Sign-in completed but YT validation still failed".to_string());
-    }
-    Ok(cookies)
-}
-
-pub fn add_registry(
-    mut config: Signal<AppConfig>,
-    mut registry_url: Signal<String>,
-    mut registry_error: Signal<Option<String>>,
-    mut registry_loading: Signal<bool>,
-    mut show_add_registry: Signal<bool>,
-) {
-    let url = registry_url().trim().to_string();
-    if url.is_empty() {
-        registry_error.set(Some(i18n::t("radio_registry_empty_path").to_string()));
-        return;
-    }
-
-    if config.read().radio_registries.iter().any(|r| r.url == url) {
-        registry_error.set(Some(i18n::t("radio_registry_exists").to_string()));
-        return;
-    }
-
-    registry_loading.set(true);
-    registry_error.set(None);
-
-    spawn(
-        async move {
-            let mut temp_registry = radio::registry::StationRegistry::new();
-            match temp_registry.import_registry(&url).await {
-                Ok(_) => {
-                    let mut current_config = config.write();
-                    if !current_config.radio_registries.iter().any(|r| r.url == url) {
-                        current_config.radio_registries.push(config::RegistryEntry {
-                            url,
-                            enabled: true,
-                            is_default: false,
-                        });
-                    }
-                    registry_url.set(String::new());
-                    registry_error.set(None);
-                    show_add_registry.set(false);
-                }
-                Err(error) => {
-                    registry_error.set(Some(i18n::t_with(
-                        "radio_registry_import_failed",
-                        &[("error", error.to_string())],
-                    )));
-                }
-            }
-            registry_loading.set(false);
-        }
-        .instrument(tracing::info_span!("radio.import_registry")),
-    );
-}
-
-/// Persist freshly-obtained browser-sign-in credentials onto the active server
-/// and mirror the browser choice into its saved entry. Shared by the YT Music
-/// and SoundCloud auto-login flows (the only per-service differences are how the
-/// token is obtained and how the user id is derived).
-fn apply_browser_login(
-    mut config: Signal<AppConfig>,
-    browser: Browser,
-    token: String,
-    user_id: String,
-) {
-    let mut cfg = config.write();
-    let saved_id = cfg.server.as_ref().and_then(|server| server.id.clone());
-    if let Some(server) = cfg.server.as_mut() {
-        server.access_token = Some(token);
-        server.user_id = Some(user_id);
-        server.yt_browser = Some(browser);
-    }
-    if let Some(id) = saved_id
-        && let Some(saved) = cfg.servers.iter_mut().find(|server| server.id == id)
-    {
-        saved.yt_browser = Some(browser);
-    }
-}
-
-/// What actually rendered the sign-in page, for error messages: the chosen
-/// desktop browser, or the in-app WebView on Android (where the browser
-/// setting is not consulted at all).
-fn signin_surface(browser: Browser) -> String {
-    if cfg!(target_os = "android") {
-        "WebView".to_string()
-    } else {
-        browser.to_string()
-    }
-}
-
-/// Surface a browser sign-in failure to both the settings error line and the
-/// player error banner.
-fn report_signin_failure(
-    mut error: Signal<Option<String>>,
-    mut playback_error: Signal<Option<String>>,
-    msg: String,
-) {
-    error.set(Some(msg.clone()));
-    playback_error.set(Some(msg));
-}
-
-pub fn ytmusic_auto_login(
-    config: Signal<AppConfig>,
-    yt_browser: Signal<Browser>,
-    mut error: Signal<Option<String>>,
-    playback_error: Signal<Option<String>>,
-) {
-    let (browser, existing, server_id) = {
-        let cfg = config.peek();
-        let srv = cfg.server.as_ref();
-        (
-            srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
-            srv.and_then(|s| s.access_token.clone())
-                .filter(|token| !token.is_empty()),
-            srv.and_then(|s| s.id.clone()).unwrap_or_default(),
-        )
-    };
-    spawn(async move {
-        let cookies = match ensure_ytmusic_signed_in(existing, browser, &server_id).await {
-            Ok(cookies) => cookies,
-            Err(err) => {
-                report_signin_failure(
-                    error,
-                    playback_error,
-                    format!(
-                        "YT Music sign-in failed ({}): {err}",
-                        signin_surface(browser)
-                    ),
-                );
-                return;
-            }
-        };
-        let yt_user_id =
-            ::server::ytmusic::derive_user_id(&cookies).unwrap_or_else(|| "me".to_string());
-        apply_browser_login(config, browser, cookies, yt_user_id);
-        error.set(None);
-    });
-}
-
-pub fn soundcloud_auto_login(
-    config: Signal<AppConfig>,
-    yt_browser: Signal<Browser>,
-    mut error: Signal<Option<String>>,
-    playback_error: Signal<Option<String>>,
-) {
-    let (browser, server_id) = {
-        let cfg = config.peek();
-        let srv = cfg.server.as_ref();
-        (
-            srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
-            srv.and_then(|s| s.id.clone()).unwrap_or_default(),
-        )
-    };
-    spawn(async move {
-        #[cfg(not(target_os = "android"))]
-        let signin = ::server::soundcloud::signin::launch_signin_and_extract(
-            browser,
-            &server_id,
-            std::time::Duration::from_secs(300),
-        )
-        .await;
-        #[cfg(target_os = "android")]
-        let signin = {
-            let _ = &server_id;
-            webview_signin(
+        MusicService::SoundCloud => {
+            let token = webview_signin(
                 "https://soundcloud.com/signin",
                 "https://soundcloud.com",
                 |header| cookie_value(header, "oauth_token"),
             )
             .await
-        };
-        let token = match signin {
-            Ok(token) => token,
-            Err(err) => {
-                report_signin_failure(
-                    error,
-                    playback_error,
-                    format!(
-                        "SoundCloud sign-in failed ({}): {err}",
-                        signin_surface(browser)
-                    ),
-                );
-                return;
-            }
-        };
-        let user_id = ::server::soundcloud::derive_user_id(&token)
-            .await
-            .unwrap_or_else(|| "me".to_string());
-        apply_browser_login(config, browser, token, user_id);
-        error.set(None);
-    });
-}
-
-/// Spotify OAuth (Authorization-Code + PKCE) sign-in: opens the default browser
-/// at the consent screen, captures the redirect on a loopback listener, and
-/// stores the packed `<access>\n<refresh>` token + user id on the active server.
-/// Unlike YT/SoundCloud this is a real redirect flow, not cookie-scraping, so it
-/// takes no browser choice.
-pub fn spotify_auto_login(
-    mut config: Signal<AppConfig>,
-    mut error: Signal<Option<String>>,
-    playback_error: Signal<Option<String>>,
-) {
-    let client_id = config
-        .peek()
-        .server
-        .as_ref()
-        .map(|s| s.url.clone())
-        .unwrap_or_default();
-    spawn(async move {
-        let auth = match ::server::spotify::auth::launch_signin_and_extract(client_id).await {
-            Ok(auth) => auth,
-            Err(err) => {
-                report_signin_failure(
-                    error,
-                    playback_error,
-                    format!("Spotify sign-in failed: {err}"),
-                );
-                return;
-            }
-        };
-        let packed = ::server::spotify::auth::pack_token(&auth.access_token, &auth.refresh_token);
-        {
-            let mut cfg = config.write();
-            if let Some(server) = cfg.server.as_mut() {
-                server.access_token = Some(packed);
-                server.user_id = Some(auth.user_id);
-            }
+            .map_err(api::ApiError::internal)?;
+            let user_id = ::server::soundcloud::derive_user_id(&token)
+                .await
+                .unwrap_or_else(|| "me".to_string());
+            (token, user_id)
         }
-        error.set(None);
-    });
-}
-pub fn applemusic_auto_login(
-    mut config: Signal<AppConfig>,
-    yt_browser: Signal<Browser>,
-    mut error: Signal<Option<String>>,
-    mut playback_error: Signal<Option<String>>,
-) {
-    let (browser, server_id) = {
-        let cfg = config.peek();
-        let srv = cfg.server.as_ref();
-        (
-            srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
-            srv.and_then(|s| s.id.clone()).unwrap_or_default(),
-        )
-    };
-    let mut report = move |msg: String| {
-        error.set(Some(msg.clone()));
-        playback_error.set(Some(msg));
-    };
-    spawn(async move {
-        #[cfg(not(target_os = "android"))]
-        let signin = ::server::applemusic::signin::launch_signin_and_extract(
-            browser,
-            &server_id,
-            std::time::Duration::from_secs(300),
-        )
-        .await;
-        #[cfg(target_os = "android")]
-        let signin = {
-            let _ = &server_id;
-            webview_signin(
+        MusicService::AppleMusic => {
+            let token = webview_signin(
                 ::server::applemusic::signin::SIGNIN_URL,
                 "https://music.apple.com",
                 |header| cookie_value(header, ::server::applemusic::signin::TOKEN_COOKIE),
             )
             .await
-        };
-        let token = match signin {
-            Ok(token) => token,
-            Err(err) => {
-                report(format!(
-                    "Apple Music sign-in failed ({}): {err}",
-                    signin_surface(browser)
-                ));
-                return;
-            }
-        };
-        {
-            let mut cfg = config.write();
-            let saved_id = cfg.server.as_ref().and_then(|server| server.id.clone());
-            if let Some(server) = cfg.server.as_mut() {
-                server.access_token = Some(token);
-                server.user_id = Some("me".to_string());
-                server.yt_browser = Some(browser);
-            }
-            if let Some(id) = saved_id
-                && let Some(saved) = cfg.servers.iter_mut().find(|server| server.id == id)
-            {
-                saved.yt_browser = Some(browser);
-            }
+            .map_err(api::ApiError::internal)?;
+            (token, "me".to_string())
         }
-        error.set(None);
+        MusicService::Spotify => {
+            let auth = ::server::spotify::auth::launch_signin_and_extract(client_id)
+                .await
+                .map_err(api::ApiError::internal)?;
+            (
+                ::server::spotify::auth::pack_token(&auth.access_token, &auth.refresh_token),
+                auth.user_id,
+            )
+        }
+        _ => {
+            return Err(api::ApiError::unsupported(
+                "this source uses username and password authentication",
+            ));
+        }
+    };
+    api.provision_credentials(api::CredentialProvision {
+        server_id,
+        secret,
+        user_id: Some(user_id),
+        browser: Some(browser.id().to_string()),
+    })
+    .await
+    .map(|_| ())
+}
+
+fn report_signin_failure(
+    mut error: Signal<Option<String>>,
+    mut playback_error: Signal<Option<String>>,
+    message: String,
+) {
+    error.set(Some(message.clone()));
+    playback_error.set(Some(message));
+}
+
+pub fn add_registry(
+    mut registry_url: Signal<String>,
+    mut registry_error: Signal<Option<String>>,
+    mut registry_loading: Signal<bool>,
+    mut show_add_registry: Signal<bool>,
+) {
+    let api = consume_context::<Arc<dyn KopuzApi>>();
+    let url = registry_url().trim().to_string();
+    if url.is_empty() {
+        registry_error.set(Some(i18n::t("radio_registry_empty_path").to_string()));
+        return;
+    }
+    registry_loading.set(true);
+    registry_error.set(None);
+    spawn(async move {
+        match api.add_radio_registry(url).await {
+            Ok(()) => {
+                registry_url.set(String::new());
+                registry_error.set(None);
+                show_add_registry.set(false);
+            }
+            Err(error) => registry_error.set(Some(i18n::t_with(
+                "radio_registry_import_failed",
+                &[("error", error.to_string())],
+            ))),
+        }
+        registry_loading.set(false);
     });
+}
+
+fn browser_login(
+    yt_browser: Signal<Browser>,
+    mut error: Signal<Option<String>>,
+    playback_error: Signal<Option<String>>,
+    expected: MusicService,
+) {
+    let api = consume_context::<Arc<dyn KopuzApi>>();
+    let sources = consume_context::<Signal<Vec<api::SourceInfo>>>();
+    let Some(server) = sources
+        .peek()
+        .iter()
+        .find(|source| source.active && source.service == Some(api_service(expected)))
+        .cloned()
+    else {
+        return;
+    };
+    let browser = server
+        .browser
+        .as_deref()
+        .and_then(Browser::from_id)
+        .unwrap_or(*yt_browser.peek());
+    spawn(async move {
+        match authenticate_source(
+            api,
+            server.id,
+            expected,
+            browser,
+            server.url.unwrap_or_default(),
+        )
+        .await
+        {
+            Ok(()) => error.set(None),
+            Err(auth_error) => report_signin_failure(
+                error,
+                playback_error,
+                format!("{} sign-in failed: {auth_error}", expected.display_name()),
+            ),
+        }
+    });
+}
+
+pub fn ytmusic_auto_login(
+    yt_browser: Signal<Browser>,
+    error: Signal<Option<String>>,
+    playback_error: Signal<Option<String>>,
+) {
+    browser_login(yt_browser, error, playback_error, MusicService::YtMusic);
+}
+
+pub fn applemusic_auto_login(
+    yt_browser: Signal<Browser>,
+    error: Signal<Option<String>>,
+    playback_error: Signal<Option<String>>,
+) {
+    browser_login(yt_browser, error, playback_error, MusicService::AppleMusic);
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn add_server(
-    mut config: Signal<AppConfig>,
     mut server_name: Signal<String>,
     mut server_url: Signal<String>,
     mut server_service: Signal<MusicService>,
@@ -439,184 +272,150 @@ pub fn add_server(
     mut apple_music_manual_token: Signal<String>,
     apple_music_use_manual: Signal<bool>,
 ) {
-    let selected_service = server_service();
-    let is_ytmusic = selected_service == MusicService::YtMusic;
-    let is_soundcloud = selected_service == MusicService::SoundCloud;
-    let is_spotify = selected_service == MusicService::Spotify;
-    let is_browser_signin = selected_service.uses_browser_signin();
-    let apple_music_storefront_value = apple_music_storefront().trim().to_string();
-
+    let api = consume_context::<Arc<dyn KopuzApi>>();
+    let service = server_service();
+    let browser_signin = service.uses_browser_signin();
+    let storefront = apple_music_storefront().trim().to_string();
     if server_name().trim().is_empty() {
         error.set(Some(i18n::t("server_name_required").to_string()));
         return;
     }
-
-    if !is_browser_signin && !server_url().starts_with("http") {
+    if !browser_signin && !server_url().starts_with("http") {
         error.set(Some(i18n::t("invalid_server_url").to_string()));
         return;
     }
-
-    if is_spotify && server_url().trim().is_empty() {
+    if service == MusicService::Spotify && server_url().trim().is_empty() {
         error.set(Some(
             "Enter your Spotify app Client ID (create one at developer.spotify.com)".to_string(),
         ));
         return;
     }
-
-    // Manual mode is the one path that never opens a browser, so an empty field
-    // here isn't "sign in later" — it saves a server with no credential and no
-    // way to acquire one.
-    if selected_service == MusicService::AppleMusic
-        && *apple_music_use_manual.peek()
-        && apple_music_manual_token().trim().is_empty()
-    {
+    let manual_apple = service == MusicService::AppleMusic && *apple_music_use_manual.peek();
+    if manual_apple && apple_music_manual_token().trim().is_empty() {
         error.set(Some(
             "Enter your Apple Music media-user-token, or switch to browser sign-in".to_string(),
         ));
         return;
     }
 
-    if selected_service == MusicService::AppleMusic && apple_music_storefront_value.is_empty() {
+    if service == MusicService::AppleMusic && storefront.is_empty() {
         error.set(Some("Enter an Apple Music storefront ID".to_string()));
         return;
     }
 
-    let name_input = server_name();
-    let url_input = server_url();
-
-    spawn(
-        async move {
-            let display_name = name_input.trim().to_string();
-
-            let effective_url = if is_ytmusic {
-                "https://music.youtube.com".to_string()
-            } else if is_soundcloud {
-                "https://soundcloud.com".to_string()
-            } else if selected_service == MusicService::AppleMusic {
-                "https://music.apple.com".to_string()
-            } else if is_spotify {
-                url_input.trim().to_string()
-            } else {
-                url_input
-            };
-
-            let mut new_server = config::MusicServer::new_with_service(
-                display_name,
-                effective_url,
-                selected_service,
-            );
-            let is_anon = is_ytmusic && *yt_anonymous.peek();
-            new_server.yt_anonymous = is_anon;
-            if is_anon {
-                new_server.access_token = Some(String::new());
-            }
-            new_server.yt_browser = (is_browser_signin && !is_anon).then(|| *yt_browser.peek());
-            // Apple Music: set storefront, language, and optionally manual token.
-            // The token only applies in manual mode — the signal keeps its value
-            // between saves, so reading it unconditionally would attach the
-            // previous server's token to one that is about to sign in through
-            // the browser, and leave it there if that sign-in fails.
-            if selected_service == MusicService::AppleMusic {
-                new_server.apple_music_storefront = apple_music_storefront_value;
-                new_server.apple_music_language = apple_music_language();
-                if *apple_music_use_manual.peek() {
-                    let manual = apple_music_manual_token();
-                    if !manual.is_empty() {
-                        new_server.access_token = Some(manual);
-                        new_server.user_id = Some("me".to_string());
-                    }
-                }
-            }
-            let saved = config::SavedServer::from_music_server(&new_server);
-            {
-                let mut cfg = config.write();
-                cfg.add_saved_server(saved);
-                cfg.set_active_server_snapshot(new_server);
-            }
-
-            server_name.set(String::new());
-            server_url.set(String::new());
-            server_service.set(MusicService::Jellyfin);
-            // Cleared with the rest of the form: it has been persisted, and a
-            // credential left in a live signal is one the next server can pick up.
-            apple_music_manual_token.set(String::new());
-            error.set(None);
-            show_add_server.set(false);
-
-            if is_ytmusic && !is_anon {
-                ytmusic_auto_login(config, yt_browser, error, playback_error);
-            } else if is_soundcloud {
-                soundcloud_auto_login(config, yt_browser, error, playback_error);
-            } else if selected_service == MusicService::AppleMusic
-                && !*apple_music_use_manual.peek()
-            {
-                applemusic_auto_login(config, yt_browser, error, playback_error);
-            } else if is_spotify {
-                spotify_auto_login(config, error, playback_error);
-            } else if !is_browser_signin {
-                show_login.set(true);
-            }
-        }
-        .instrument(tracing::info_span!("source.add_server")),
-    );
-}
-
-pub fn switch_server(
-    config: Signal<AppConfig>,
-    api: Arc<dyn KopuzApi>,
-    id: String,
-    yt_browser: Signal<Browser>,
-    error: Signal<Option<String>>,
-    mut show_login: Signal<bool>,
-    playback_error: Signal<Option<String>>,
-) {
+    let name = server_name().trim().to_string();
+    let url = match service {
+        MusicService::YtMusic => "https://music.youtube.com".to_string(),
+        MusicService::SoundCloud => "https://soundcloud.com".to_string(),
+        MusicService::AppleMusic => "https://music.apple.com".to_string(),
+        _ => server_url().trim_end_matches('/').to_string(),
+    };
+    let browser = *yt_browser.peek();
+    let anonymous = service == MusicService::YtMusic && *yt_anonymous.peek();
+    let language = apple_music_language();
+    let manual_token = apple_music_manual_token();
     spawn(async move {
-        let Some(service) = config.peek().find_saved_server(&id).map(|s| s.service) else {
-            return;
+        let source = match api
+            .upsert_server(api::ServerDraft {
+                id: None,
+                name,
+                url: url.clone(),
+                service: api_service(service),
+                browser: (browser_signin && !anonymous).then(|| browser.id().to_string()),
+                anonymous,
+                storefront: (service == MusicService::AppleMusic).then_some(storefront),
+                language: (service == MusicService::AppleMusic).then_some(language),
+            })
+            .await
+        {
+            Ok(source) => source,
+            Err(api_error) => {
+                error.set(Some(api_error.to_string()));
+                return;
+            }
         };
-
-        let usable =
-            hooks::source_switch::apply_source_switch(api, config::Source::Server(id)).await;
-        if usable {
+        if let Err(api_error) = api.switch_source(source.id.clone()).await {
+            error.set(Some(api_error.to_string()));
+            return;
+        }
+        let auth_result = if manual_apple {
+            api.provision_credentials(api::CredentialProvision {
+                server_id: source.id.clone(),
+                secret: manual_token,
+                user_id: Some("me".to_string()),
+                browser: Some(browser.id().to_string()),
+            })
+            .await
+            .map(|_| ())
+        } else if browser_signin && !anonymous {
+            authenticate_source(api.clone(), source.id, service, browser, url).await
+        } else {
+            Ok(())
+        };
+        if let Err(auth_error) = auth_result {
+            report_signin_failure(error, playback_error, auth_error.to_string());
             return;
         }
 
-        match service {
-            MusicService::YtMusic => ytmusic_auto_login(config, yt_browser, error, playback_error),
-            MusicService::SoundCloud => {
-                soundcloud_auto_login(config, yt_browser, error, playback_error)
-            }
-            MusicService::AppleMusic => {
-                applemusic_auto_login(config, yt_browser, error, playback_error)
-            }
-            MusicService::Spotify => spotify_auto_login(config, error, playback_error),
-            _ => show_login.set(true),
+        server_name.set(String::new());
+        server_url.set(String::new());
+        server_service.set(MusicService::Jellyfin);
+        apple_music_manual_token.set(String::new());
+        error.set(None);
+        show_add_server.set(false);
+        if !browser_signin {
+            show_login.set(true);
         }
     });
 }
 
-pub fn delete_saved(mut config: Signal<AppConfig>, id: String) {
-    let service = config
-        .peek()
-        .find_saved_server(&id)
-        .map(|server| server.service);
-    config.write().remove_saved_server(&id);
-    match service {
-        Some(MusicService::YtMusic) => {
-            let _ = ::server::ytmusic::isolated_profile::delete_profile(&id);
+pub fn switch_server(
+    api: Arc<dyn KopuzApi>,
+    source: api::SourceInfo,
+    yt_browser: Signal<Browser>,
+    mut error: Signal<Option<String>>,
+    mut show_login: Signal<bool>,
+    playback_error: Signal<Option<String>>,
+) {
+    let Some(service) = source.service.and_then(config_service) else {
+        return;
+    };
+    let id = source.id;
+    let browser = source
+        .browser
+        .as_deref()
+        .and_then(Browser::from_id)
+        .unwrap_or(*yt_browser.peek());
+    let url = source.url.unwrap_or_default();
+    spawn(async move {
+        match api.switch_source(id.clone()).await {
+            Ok(source) if source.authenticated => return,
+            Ok(_) => {}
+            Err(switch_error) => {
+                error.set(Some(switch_error.to_string()));
+                return;
+            }
         }
-        Some(MusicService::SoundCloud) => {
-            let _ = ::server::soundcloud::signin::delete_profile(&id);
+        if service.uses_browser_signin() {
+            if let Err(auth_error) = authenticate_source(api, id, service, browser, url).await {
+                report_signin_failure(error, playback_error, auth_error.to_string());
+            }
+        } else {
+            show_login.set(true);
         }
-        Some(MusicService::AppleMusic) => {
-            let _ = ::server::applemusic::signin::delete_profile(&id);
+    });
+}
+
+pub fn delete_saved(id: String) {
+    let api = consume_context::<Arc<dyn KopuzApi>>();
+    spawn(async move {
+        if let Err(error) = api.delete_server(id).await {
+            tracing::warn!(%error, "could not delete media server");
         }
-        _ => {}
-    }
+    });
 }
 
 pub fn login_with_password(
-    mut config: Signal<AppConfig>,
     mut username: Signal<String>,
     mut password: Signal<String>,
     mut login_error: Signal<Option<String>>,
@@ -627,41 +426,40 @@ pub fn login_with_password(
         login_error.set(Some(i18n::t("username_and_password_required").to_string()));
         return;
     }
-
-    if let Some(server) = &config.read().server {
-        let service = server.service;
-        let server_url = server.url.clone();
-        let device_id = config.read().device_id.clone();
-        let user = username();
-        let pass = password();
-
-        is_loading.set(true);
-        login_error.set(None);
-
-        spawn(async move {
-            let remote = ProviderClient::new(service, server_url, device_id);
-            let result = remote.login(&user, &pass).await;
-
-            is_loading.set(false);
-
-            match result {
-                Ok(session) => {
-                    if let Some(server) = config.write().server.as_mut() {
-                        server.access_token = Some(session.access_token);
-                        server.user_id = Some(session.user_id);
-                    }
-                    username.set(String::new());
-                    password.set(String::new());
-                    login_error.set(None);
-                    show_login.set(false);
-                }
-                Err(error) => {
-                    login_error.set(Some(i18n::t_with(
-                        "login_failed",
-                        &[("error", error.to_string())],
-                    )));
-                }
+    let sources = consume_context::<Signal<Vec<api::SourceInfo>>>();
+    let Some(server_id) = sources
+        .peek()
+        .iter()
+        .find(|source| source.active && source.kind == api::SourceKind::Server)
+        .map(|source| source.id.clone())
+    else {
+        return;
+    };
+    let api = consume_context::<Arc<dyn KopuzApi>>();
+    let user = username();
+    let pass = password();
+    is_loading.set(true);
+    login_error.set(None);
+    spawn(async move {
+        let result = api
+            .login_source(api::SourceLoginRequest {
+                server_id,
+                username: user,
+                password: pass,
+            })
+            .await;
+        is_loading.set(false);
+        match result {
+            Ok(_) => {
+                username.set(String::new());
+                password.set(String::new());
+                login_error.set(None);
+                show_login.set(false);
             }
-        });
-    }
+            Err(error) => login_error.set(Some(i18n::t_with(
+                "login_failed",
+                &[("error", error.to_string())],
+            ))),
+        }
+    });
 }

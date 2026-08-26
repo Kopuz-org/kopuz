@@ -347,6 +347,49 @@ async fn reads_agree_between_local_and_wire() {
 }
 
 #[tokio::test]
+async fn queue_persistence_agrees_between_local_and_wire() {
+    let pair = spawn_pair().await;
+    let tracks = pair
+        .wire
+        .tracks_by_keys(vec!["/lib/seed-0.flac".into(), "/lib/seed-1.flac".into()])
+        .await
+        .expect("seed tracks over the wire");
+    let snapshot = api::QueuePersistenceSnapshot {
+        tracks,
+        current_index: 1,
+        progress_ms: 4_000,
+        shuffle_order: vec![1, 0],
+        shuffle_enabled: true,
+    };
+    pair.wire
+        .save_queue_snapshot(snapshot.clone())
+        .await
+        .expect("save snapshot over the wire");
+    assert_eq!(
+        snapshot,
+        pair.local.queue_snapshot().await.expect("read locally")
+    );
+
+    let invalid = api::QueuePersistenceSnapshot {
+        tracks: snapshot.tracks,
+        shuffle_order: vec![0, 0],
+        ..Default::default()
+    };
+    let local_error = pair
+        .local
+        .save_queue_snapshot(invalid.clone())
+        .await
+        .expect_err("invalid local snapshot");
+    let wire_error = pair
+        .wire
+        .save_queue_snapshot(invalid)
+        .await
+        .expect_err("invalid wire snapshot");
+    assert_eq!(local_error.code, wire_error.code);
+    assert_eq!(local_error.message, wire_error.message);
+}
+
+#[tokio::test]
 async fn commands_and_errors_map_identically() {
     let pair = spawn_pair().await;
     pair.wire
@@ -888,6 +931,71 @@ async fn server_credentials_are_secure_and_do_not_switch_sources() {
 }
 
 #[tokio::test]
+async fn source_management_agrees_between_local_and_wire() {
+    let pair = spawn_pair().await;
+    let local = pair
+        .wire
+        .set_source_directories("local".into(), vec!["/music".into()])
+        .await
+        .expect("set default local directories");
+    assert_eq!(local.directories, vec!["/music"]);
+
+    let created = pair
+        .local
+        .upsert_local_source(api::LocalSourceDraft {
+            id: None,
+            name: "Archive".into(),
+            directories: vec!["/archive".into()],
+        })
+        .await
+        .expect("create local source");
+    assert_eq!(created.kind, api::SourceKind::LocalLibrary);
+    assert_eq!(created.directories, vec!["/archive"]);
+    assert_eq!(
+        pair.local.sources().await.expect("local sources"),
+        pair.wire.sources().await.expect("wire sources")
+    );
+
+    let updated = pair
+        .wire
+        .set_source_directories(created.id.clone(), vec!["/archive".into(), "/vault".into()])
+        .await
+        .expect("update local source directories");
+    assert_eq!(updated.directories, vec!["/archive", "/vault"]);
+    assert!(
+        pair.local
+            .switch_source(created.id.clone())
+            .await
+            .expect("switch local source")
+            .active
+    );
+    pair.wire
+        .delete_local_source(created.id)
+        .await
+        .expect("delete local source");
+    assert!(
+        pair.local
+            .sources()
+            .await
+            .expect("sources after delete")
+            .iter()
+            .any(|source| source.id == "local" && source.active)
+    );
+
+    let local_error = pair
+        .local
+        .delete_local_source("local".into())
+        .await
+        .expect_err("local default delete must fail");
+    let wire_error = pair
+        .wire
+        .delete_local_source("local".into())
+        .await
+        .expect_err("wire default delete must fail");
+    assert_eq!(local_error, wire_error);
+}
+
+#[tokio::test]
 async fn switching_sources_stops_playback_and_clears_the_queue() {
     let pair = spawn_pair().await;
     let server_id = activate_spotify(&pair).await;
@@ -988,11 +1096,14 @@ async fn radio_and_external_playback_agree_across_transports() {
         id: "contract-radio".into(),
         name: "Contract Radio".into(),
         description: "Contract fixture".into(),
+        icon: "fa-solid fa-radio".into(),
+        artwork: None,
         tags: vec!["test".into()],
         streams: vec![api::RadioStreamInfo {
             id: "main".into(),
             name: "Main".into(),
             url: "https://radio.example/stream".into(),
+            icon: None,
         }],
         pinned: false,
     };

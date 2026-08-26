@@ -32,8 +32,6 @@ config = { workspace = true }
 utils = { workspace = true }
 kopuz_route = { workspace = true }
 server = { workspace = true }
-radio = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
@@ -41,7 +39,6 @@ rand = { workspace = true }
 i18n = { workspace = true }
 lofty.workspace = true
 tracing = { workspace = true }
-sha2 = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -1,7 +1,5 @@
-//! Queue persistence: the daemon-side home of the snapshot the app crate
-//! saves via `queue_state.rs`. Same `db::QueueSnapshot` row, same version and
-//! progress rounding, so the GUI and the daemon can restore each other's
-//! sessions during the transition.
+//! Queue persistence shared by headless sessions and the frontend API. Both
+//! paths write the same snapshot row and use the same progress rounding.
 
 use async_trait::async_trait;
 

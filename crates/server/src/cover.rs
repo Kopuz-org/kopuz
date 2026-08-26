@@ -17,8 +17,6 @@ use config::{AppConfig, MusicService};
 use reader::{ArtistImageRef, CoverRef, Track};
 use utils::CoverUrl;
 
-use crate::source::ArtistView;
-
 pub(crate) fn jellyfin_item_url(
     server_url: &str,
     item_id: &str,
@@ -275,13 +273,10 @@ pub struct ArtistArt<'a> {
     pub photo: Option<&'a ArtistImageRef>,
     /// This session's fetch pipeline state for the artist.
     pub fetched: ArtistFetchState<'a>,
-    /// The caller's best album-art candidate for the artist (their first album,
-    /// else their track's album). Only [`ArtistView::Library`] tiles ever render
-    /// it — see [`artist`].
+    /// The caller's best album-art candidate for the artist.
     pub album_cover: Option<&'a Path>,
-    /// How the source presents artists — decides whether the album-art last
-    /// resort applies.
-    pub view: ArtistView,
+    /// Whether a library-style source may use album art as a last resort.
+    pub allow_album_fallback: bool,
 }
 
 impl<'a> ArtistArt<'a> {
@@ -294,7 +289,7 @@ impl<'a> ArtistArt<'a> {
         norm: &str,
         display: &str,
         album_cover: Option<&'a Path>,
-        view: ArtistView,
+        allow_album_fallback: bool,
     ) -> Self {
         let (overrides, photos) = images;
         Self {
@@ -302,7 +297,7 @@ impl<'a> ArtistArt<'a> {
             photo: photos.get(norm),
             fetched: fetched.state(display),
             album_cover,
-            view,
+            allow_album_fallback,
         }
     }
 }
@@ -313,12 +308,12 @@ impl<'a> ArtistArt<'a> {
 /// 2. the source's own photo — DB server photo, then a session-fetched hit,
 ///    then a local folder image;
 /// 3. fetch still pending → placeholder (don't guess and visibly swap);
-/// 4. [`Library`](ArtistView::Library) sources: the album-art candidate;
+/// 4. library-style sources: the album-art candidate;
 /// 5. placeholder.
 ///
 /// The album-art last resort is what keeps a library grid (whose artists mostly
 /// have no photo anywhere) from being a wall of placeholders. A
-/// [`Remote`](ArtistView::Remote) catalog never renders it: every artist there
+/// A remote catalog never renders it: every artist there
 /// resolves to a real photo or a placeholder — its liked-track album covers
 /// aren't the artist, and a shared track's cover on every credited artist's
 /// tile was the duped-grid bug. Call sites pass candidates and the source's
@@ -339,11 +334,10 @@ pub fn artist(config: &AppConfig, art: ArtistArt<'_>, max_width: u32) -> Option<
     {
         return Some(cover);
     }
-    match art.view {
-        ArtistView::Library if art.fetched != ArtistFetchState::Pending => {
-            from_path(config, art.album_cover, max_width)
-        }
-        _ => None,
+    if art.allow_album_fallback && art.fetched != ArtistFetchState::Pending {
+        from_path(config, art.album_cover, max_width)
+    } else {
+        None
     }
 }
 
@@ -574,24 +568,30 @@ mod tests {
         let over = Path::new("/pics/custom.png");
         let remote = ArtistImageRef::Remote("https://yt/photo.jpg".into());
         let local = ArtistImageRef::Local(PathBuf::from("/music/band/artist.jpg"));
-        let art = |override_path, photo, fetched, album_cover, view| ArtistArt {
+        let art = |override_path, photo, fetched, album_cover, allow_album_fallback| ArtistArt {
             override_path,
             photo,
             fetched,
             album_cover,
-            view,
+            allow_album_fallback,
         };
         let hit = ArtistFetchState::Resolved(Some("https://fetched/p.jpg"));
         let miss = ArtistFetchState::Resolved(None);
         let none = ArtistFetchState::NotFetching;
-        let lib = ArtistView::Library;
-        let rem = ArtistView::Remote;
+        let lib = true;
+        let rem = false;
 
-        // Override beats everything, in every state, on every view.
-        for view in [lib, rem] {
+        // Override beats everything regardless of fallback behavior.
+        for allow_album_fallback in [lib, rem] {
             let got = artist(
                 &cfg,
-                art(Some(over), Some(&remote), hit, Some(album), view),
+                art(
+                    Some(over),
+                    Some(&remote),
+                    hit,
+                    Some(album),
+                    allow_album_fallback,
+                ),
                 320,
             )
             .unwrap();
@@ -663,7 +663,7 @@ mod tests {
                 photo: None,
                 fetched: ArtistFetchState::Resolved(None),
                 album_cover: Some(Path::new(&reff)),
-                view: ArtistView::Library,
+                allow_album_fallback: true,
             },
             320,
         )
@@ -686,14 +686,8 @@ mod tests {
         let mut fetched = FetchedArtistImages::default();
         fetched.insert_hit("COOL&CREATE".into(), "https://f/cc.jpg".into());
 
-        let art = ArtistArt::from_caches(
-            &images,
-            &fetched,
-            "cool&create",
-            "COOL&CREATE",
-            None,
-            ArtistView::Library,
-        );
+        let art =
+            ArtistArt::from_caches(&images, &fetched, "cool&create", "COOL&CREATE", None, true);
         assert!(art.override_path.is_some());
         assert!(matches!(art.photo, Some(ArtistImageRef::Remote(_))));
         assert_eq!(
@@ -704,7 +698,7 @@ mod tests {
         // Empty caches → nothing fetches, no candidates.
         let empty: db::ArtistImages = Default::default();
         let no_fetch = FetchedArtistImages::default();
-        let art = ArtistArt::from_caches(&empty, &no_fetch, "x", "X", None, ArtistView::Library);
+        let art = ArtistArt::from_caches(&empty, &no_fetch, "x", "X", None, true);
         assert!(art.override_path.is_none() && art.photo.is_none());
         assert_eq!(art.fetched, ArtistFetchState::NotFetching);
     }

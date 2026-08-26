@@ -8,14 +8,12 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::folder_picker::FolderPickerModal;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
-use config::{AppConfig, MusicService, UiStyle};
+use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_active_source, use_playlists, use_tracks_by_keys};
 
-use crate::server::download_manager::{
-    DownloadQueue, DownloadStatus, delete_downloads, queue_downloads,
-};
+use hooks::downloads::{DownloadQueue, DownloadStatus, delete_downloads, queue_downloads};
 
 #[component]
 #[tracing::instrument(name = "render.playlists_page", skip_all)]
@@ -25,9 +23,8 @@ pub fn PlaylistsPage(
 ) -> Element {
     let source = use_active_source();
     let nav_ctrl = use_context::<components::NavigationController>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let api = use_context::<std::sync::Arc<dyn api::KopuzApi>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = use_context::<Signal<api::SourceCapabilities>>();
 
     let mut show_add_playlist = use_signal(|| false);
     let mut playlist_name = use_signal(String::new);
@@ -48,6 +45,7 @@ pub fn PlaylistsPage(
     });
     let sel_server_tracks_res = use_tracks_by_keys(source, sel_server_refs);
 
+    let add_playlist_api = api.clone();
     let handle_add_playlist = move |_| {
         if saving() {
             return;
@@ -55,11 +53,11 @@ pub fn PlaylistsPage(
         let name = playlist_name();
         // A source that can't mutate playlists (a creds-less/offline server, or a
         // read-only source) gets the friendly message instead of a raw error.
-        if caps().playlists == ::server::source::PlaylistOps::None {
+        if caps().playlists == api::PlaylistCapability::None {
             error.set(Some(i18n::t("error_server_not_configured").to_string()));
             return;
         }
-        let api = api.clone();
+        let api = add_playlist_api.clone();
         error.set(None);
         saving.set(true);
         spawn(async move {
@@ -154,7 +152,7 @@ pub fn PlaylistsPage(
                                 if requests.is_empty() {
                                     return;
                                 }
-                                queue_downloads(requests, config, download_queue);
+                                queue_downloads(requests, download_queue);
                             },
                             on_delete_all: move |_| {
                                 let ids: Vec<String> = {
@@ -167,7 +165,7 @@ pub fn PlaylistsPage(
                                         .unwrap_or_default()
                                 };
                                 if !ids.is_empty() {
-                                    delete_downloads(ids, config, download_queue);
+                                    delete_downloads(ids, download_queue);
                                 }
                             },
                             on_download_track: move |idx: usize| {
@@ -188,18 +186,12 @@ pub fn PlaylistsPage(
                                     }
                                 }
                                 if !track_id.is_empty() {
-                                    let is_downloaded = config
-                                        .read()
-                                        .offline_tracks
-                                        .get(&track_id)
-                                        .map(|p| std::path::Path::new(p).exists())
-                                        .unwrap_or(false);
+                                    let is_downloaded = hooks::downloads::is_downloaded(&track_id);
                                     if is_downloaded {
-                                        delete_downloads(vec![track_id], config, download_queue);
+                                        delete_downloads(vec![track_id], download_queue);
                                     } else {
                                         queue_downloads(
                                             vec![(track_id, track_title, track_artist)],
-                                            config,
                                             download_queue,
                                         );
                                     }
@@ -228,15 +220,10 @@ pub fn PlaylistsPage(
                                 class: "w-10 h-10 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
                                 title: i18n::t("new_folder").to_string(),
                                 onclick: move |_| {
-                                    let new_id = uuid::Uuid::new_v4().to_string();
                                     let name = i18n::t("new_folder").to_string();
-                                    let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                    let api = api.clone();
                                     spawn(async move {
-                                        if local
-                                            .create_folder(&new_id, &name)
-                                            .await
-                                            .is_ok()
-                                        {
+                                        if api.create_playlist_folder(name).await.is_ok() {
                                             gens.bump(Table::Folders);
                                         }
                                     });
@@ -336,10 +323,10 @@ fn PlaylistsGrid(
 ) -> Element {
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = use_context::<Signal<api::SourceCapabilities>>();
     let is_offline = use_context::<Signal<bool>>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
+    let downloaded_tracks = use_context::<hooks::downloads::DownloadedTracks>();
 
     let playlists_res = use_playlists();
     // First track of each playlist — the cover-of-last-resort for a playlist with
@@ -475,41 +462,35 @@ fn PlaylistsGrid(
     // ---- Server (flat remote list) layout ----------------------------------
     let offline = caps().downloads && *is_offline.read();
     let conf = config.read();
+    let downloaded = downloaded_tracks.0.read();
     let playlists: Vec<reader::models::Playlist> = if offline {
         store
             .playlists
             .iter()
-            .filter(|p| {
-                !p.tracks.is_empty()
-                    && p.tracks.iter().all(|tid| {
-                        conf.offline_tracks
-                            .get(tid)
-                            .map(|path| std::path::Path::new(path).exists())
-                            .unwrap_or(false)
-                    })
-            })
+            .filter(|p| !p.tracks.is_empty() && p.tracks.iter().all(|tid| downloaded.contains(tid)))
             .cloned()
             .collect()
     } else {
         store.playlists.clone()
     };
     drop(conf);
-    let is_yt = caps().albums == ::server::source::AlbumType::YtMusic;
+    let is_yt = caps().albums == api::AlbumPresentation::Remote;
     // The flat remote card has no overflow menu of its own, so radio is its one
     // entry — no kind-tagged action list needed here (unlike the folder card).
-    let can_radio = caps().radio.playlist;
+    let can_radio = caps().playlist_radio;
     let radio_text = components::radio_actions::radio_label();
     let radio_actions = vec![MenuAction::new(
         radio_text.as_str(),
         components::radio_actions::RADIO_ICON,
     )];
     let mut active_menu = active_menu;
-    let yt_anon = config
+    let yt_anon = consume_context::<Signal<Vec<api::SourceInfo>>>()
         .read()
-        .server
-        .as_ref()
-        .map(|s| s.service == MusicService::YtMusic && s.yt_anonymous)
-        .unwrap_or(false);
+        .iter()
+        .find(|source| source.active)
+        .is_some_and(|source| {
+            source.service == Some(api::MusicService::YtMusic) && source.anonymous
+        });
 
     rsx! {
         div {
@@ -564,9 +545,8 @@ fn PlaylistsGrid(
                             let q = download_queue.read();
                             playlist.tracks.iter().any(|tid| q.items.iter().any(|i| &i.id == tid && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading)))
                         };
-                        let all_downloaded = !playlist.tracks.is_empty() && playlist.tracks.iter().all(|tid| {
-                            config.read().offline_tracks.get(tid).map(|p| std::path::Path::new(p).exists()).unwrap_or(false)
-                        });
+                        let all_downloaded = !playlist.tracks.is_empty()
+                            && playlist.tracks.iter().all(|tid| downloaded.contains(tid));
                         rsx! {
                             div {
                                 key: "{playlist.id}",
@@ -622,7 +602,7 @@ fn PlaylistsGrid(
                                         onclick: move |evt| {
                                             evt.stop_propagation();
                                             if all_downloaded {
-                                                delete_downloads(playlist.tracks.clone(), config, download_queue);
+                                                delete_downloads(playlist.tracks.clone(), download_queue);
                                             } else {
                                                 let ids = playlist.tracks.clone();
                                                 let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
@@ -632,7 +612,7 @@ fn PlaylistsGrid(
                                                         let m = meta.iter().find(|t| t.key == *tid);
                                                         (tid.clone(), m.map(|t| t.title.clone()).unwrap_or_default(), m.map(|t| t.artist.clone()).unwrap_or_default())
                                                     }).collect();
-                                                    queue_downloads(requests, config, download_queue);
+                                                    queue_downloads(requests, download_queue);
                                                 });
                                             }
                                         },
@@ -688,7 +668,6 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
     let all_playlists = store.playlists.clone();
     // A dedicated clone the rename modal's `on_save` closure can own (it preserves
     // the playlist's existing cover when renaming).
-    let rename_lookup = all_playlists.clone();
     let root_playlists: Vec<_> = all_playlists
         .iter()
         .filter(|p| !folders.iter().any(|f| f.playlist_ids.contains(&p.id)))
@@ -716,11 +695,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
     let delete_folder_text = i18n::t("delete_folder").to_string();
 
     let radio_text = components::radio_actions::radio_label();
-    let can_radio = consume_context::<Signal<::server::source::ActiveSource>>()
+    let can_radio = consume_context::<Signal<api::SourceCapabilities>>()
         .read()
-        .capabilities()
-        .radio
-        .playlist;
+        .playlist_radio;
 
     let build_playlist_actions = |in_folder: bool| -> (Vec<MenuAction>, Vec<PlaylistCardAction>) {
         let mut entries = vec![(
@@ -882,23 +859,13 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                         if name.is_empty() {
                             return;
                         }
-                        if let Some(playlist) = rename_lookup.iter().find(|playlist| playlist.id == rename_id) {
-                            let id = rename_id.clone();
-                            let cover = playlist
-                                .cover_path
-                                .as_ref()
-                                .map(|p| p.to_string_lossy().into_owned());
-                            let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            spawn(async move {
-                                if local
-                                    .upsert_playlist_meta(&id, &name, cover.as_deref(), None)
-                                    .await
-                                    .is_ok()
-                                {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
-                        }
+                        let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
+                        let id = rename_id.clone();
+                        spawn(async move {
+                            if api.rename_playlist(id, name).await.is_ok() {
+                                gens.bump(Table::Playlists);
+                            }
+                        });
                         rename_playlist_id.set(None);
                         rename_playlist_name.set(String::new());
                     },
@@ -918,13 +885,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                             return;
                         }
                         let rename_id = rename_id.clone();
-                        let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                        let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                         spawn(async move {
-                            if local
-                                .rename_folder(&rename_id, &name)
-                                .await
-                                .is_ok()
-                            {
+                            if api.rename_playlist_folder(rename_id, name).await.is_ok() {
                                 gens.bump(Table::Folders);
                             }
                         });
@@ -1022,13 +985,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                                                 rename_folder_name.set(fname_rename.clone());
                                                             } else {
                                                                 let fid = fid_del.clone();
-                                                                let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                                                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                                                 spawn(async move {
-                                                                    if local
-                                                                        .delete_folder(&fid)
-                                                                        .await
-                                                                        .is_ok()
-                                                                    {
+                                                                    if api.delete_playlist_folder(fid).await.is_ok() {
                                                                         gens.bump(Table::Folders);
                                                                     }
                                                                 });

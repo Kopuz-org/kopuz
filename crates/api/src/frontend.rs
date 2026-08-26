@@ -18,6 +18,22 @@ pub enum MusicService {
     Unknown,
 }
 
+impl MusicService {
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Jellyfin => "Jellyfin",
+            Self::Subsonic => "Subsonic",
+            Self::Custom => "Custom",
+            Self::YtMusic => "YouTube Music",
+            Self::AppleMusic => "Apple Music",
+            Self::SoundCloud => "SoundCloud",
+            Self::Spotify => "Spotify",
+            Self::Nextcloud => "Nextcloud",
+            Self::Unknown => "Unknown",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceKind {
@@ -60,6 +76,16 @@ pub enum AlbumPresentation {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FavoritesSyncMode {
+    #[default]
+    Instant,
+    Paginated,
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceCapabilities {
     pub edit_tags: bool,
@@ -74,6 +100,7 @@ pub struct SourceCapabilities {
     pub playlists: PlaylistCapability,
     pub artists: ArtistPresentation,
     pub albums: AlbumPresentation,
+    pub favorites_sync: FavoritesSyncMode,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -86,6 +113,24 @@ pub struct SourceInfo {
     pub active: bool,
     pub authenticated: bool,
     pub capabilities: SourceCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser: Option<String>,
+    pub anonymous: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storefront: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    pub directories: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalSourceDraft {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub name: String,
+    pub directories: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +157,13 @@ pub struct CredentialProvision {
     pub user_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub browser: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceLoginRequest {
+    pub server_id: String,
+    pub username: String,
+    pub password: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -339,6 +391,8 @@ pub struct RadioStreamInfo {
     pub id: String,
     pub name: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -346,6 +400,9 @@ pub struct RadioStationInfo {
     pub id: String,
     pub name: String,
     pub description: String,
+    pub icon: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artwork: Option<String>,
     pub tags: Vec<String>,
     pub streams: Vec<RadioStreamInfo>,
     pub pinned: bool,

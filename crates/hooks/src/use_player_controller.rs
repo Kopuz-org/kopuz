@@ -44,14 +44,13 @@ pub struct PlayerController {
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
     pub config: Signal<AppConfig>,
-    pub db: Signal<db::Db>,
-    pub active_source: Signal<::server::source::ActiveSource>,
     pub playback_error: Signal<Option<String>>,
     pub browse_loading: Signal<bool>,
     pub(crate) engine_anchor: Signal<Option<(u64, std::time::Instant, bool)>>,
     pub(crate) fading_progress: Signal<Option<f64>>,
     pub(crate) output_latency_ms: Signal<u64>,
     pub(crate) spotify_scrobble_token: Signal<u64>,
+    pub(crate) spotify_token: Signal<Option<String>>,
 
     pub(crate) spotify_host: Signal<Option<::server::spotify::host::SpotifyHost>>,
     pub spotify_device: Signal<Option<String>>,
@@ -913,7 +912,6 @@ pub fn use_player_controller(
     volume: Signal<f32>,
     config: Signal<AppConfig>,
     _config_loaded_ok: Signal<bool>,
-    db_handle: db::Db,
 ) -> PlayerController {
     let session = use_signal(move || session_handle);
     let loading = use_signal(|| false);
@@ -929,8 +927,7 @@ pub fn use_player_controller(
     let fading_progress = use_signal(|| None::<f64>);
     let output_latency_ms = use_signal(|| 0u64);
     let spotify_scrobble_token = use_signal(|| 0u64);
-    let db = use_signal(move || db_handle);
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let spotify_token = use_signal(|| None::<String>);
 
     let spotify_host = use_signal(|| None::<::server::spotify::host::SpotifyHost>);
     let spotify_device = use_signal(|| None::<String>);
@@ -967,14 +964,13 @@ pub fn use_player_controller(
         current_track_snapshot,
         volume,
         config,
-        db,
-        active_source,
         playback_error,
         browse_loading,
         engine_anchor,
         fading_progress,
         output_latency_ms,
         spotify_scrobble_token,
+        spotify_token,
         spotify_host,
         spotify_device,
         spotify_pending_uri,

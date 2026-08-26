@@ -13,9 +13,10 @@ use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 #[cfg(target_os = "linux")]
 use dioxus::desktop::wry::WebViewExtUnix;
 use dioxus::prelude::*;
+use hooks::downloads::DownloadQueue;
 use kopuz_route::Route;
-use pages::server::download_manager::DownloadQueue;
 use queue_state::PersistedQueueState;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::Instrument;
@@ -65,6 +66,45 @@ const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
 /// notice the theme being switched on.
 const LIVE_THEME_POLL_MS: u64 = 400;
 const LIVE_THEME_IDLE_POLL_MS: u64 = 2000;
+
+fn frontend_config_patch(
+    config: &config::AppConfig,
+    current: &serde_json::Value,
+) -> serde_json::Value {
+    let mut value = serde_json::to_value(config).unwrap_or_default();
+    if let Some(object) = value.as_object_mut() {
+        for key in [
+            "server",
+            "servers",
+            "musicbrainz_token",
+            "lastfm_api_key",
+            "lastfm_api_secret",
+            "lastfm_session_key",
+            "librefm_api_key",
+            "librefm_api_secret",
+            "librefm_session_key",
+            "offline_tracks",
+        ] {
+            object.remove(key);
+        }
+        object.retain(|key, value| current.get(key) != Some(value));
+    }
+    value
+}
+
+fn frontend_config(mut config: config::AppConfig) -> config::AppConfig {
+    config.server = None;
+    config.servers.clear();
+    config.musicbrainz_token.clear();
+    config.lastfm_api_key.clear();
+    config.lastfm_api_secret.clear();
+    config.lastfm_session_key.clear();
+    config.librefm_api_key.clear();
+    config.librefm_api_secret.clear();
+    config.librefm_session_key.clear();
+    config.offline_tracks.clear();
+    config
+}
 
 fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, Vec<PathBuf>)> {
     std::iter::once((config::Source::Local, config.music_directory.clone()))
@@ -532,7 +572,7 @@ fn App() -> Element {
     // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
     let mut config = use_hook(|| {
         Signal::new_in_scope(
-            app_db::BOOT_CONFIG.get().cloned().unwrap_or_default(),
+            frontend_config(app_db::BOOT_CONFIG.get().cloned().unwrap_or_default()),
             ScopeId::ROOT,
         )
     });
@@ -551,55 +591,10 @@ fn App() -> Element {
         .get()
         .cloned()
         .expect("db initialized in main before launch");
-    // The UI reads through a read-only handle and operates through the cached
-    // source handles below — it never gets a full `Db`, so it cannot reach a
-    // write method (those live on `Storage`, not `ReadStore`). The full `Db` is
-    // provided to the UI tree ONLY in debug builds, where the debug DB panel
-    // needs it.
-    use_context_provider(|| db.reads());
     #[cfg(debug_assertions)]
     use_context_provider(|| db.clone());
     hooks::db_reactivity::use_generations_provider();
 
-    // The active source — the single source the UI operates through — resolved
-    // ONCE and held, so call sites read this shared handle instead of rebuilding
-    // the source (and, for a server, a fresh HTTP client) per operation. Rotation
-    // isn't mutation: an identity change (source switch or cred change) rebuilds
-    // and swaps the `Arc`. Capability gating guarantees an op is only reachable
-    // when the active source can do it (no local-only op offered under a server).
-    let active_source = {
-        let db_init = db.clone();
-        let mut active_source = use_signal(move || {
-            ::server::source::ActiveSource::from(::server::source::active(
-                db_init.clone(),
-                &config.peek(),
-            ))
-        });
-        // Only the resolution-relevant slice of config; a volume/theme change
-        // must not rebuild the client. `Memo`'s `PartialEq` dedup gates the effect.
-        let identity = use_memo(move || {
-            let cfg = config.read();
-            (
-                cfg.active_source.clone(),
-                cfg.server.clone(),
-                // Library roots define what a folder-tree backend scans, so
-                // editing them has to rebuild the source like a cred change.
-                cfg.active_server_folders(),
-            )
-        });
-        let db_eff = db.clone();
-        use_effect(move || {
-            let _ = identity.read();
-            active_source.set(::server::source::ActiveSource::from(
-                ::server::source::active(db_eff.clone(), &config.peek()),
-            ));
-        });
-        use_context_provider(|| active_source)
-    };
-
-    // Capabilities of the active source — drives source-agnostic routing (e.g.
-    // which artist view to render) without hardcoding services in the router.
-    let active_caps = use_memo(move || active_source.read().capabilities());
     // The PoToken minter isn't armed here: it's a headless deno_core runtime that
     // self-starts on the first `mint_content_pot` (only when YT demands a pot).
     let mut initial_load_done = use_signal(|| false);
@@ -693,6 +688,10 @@ fn App() -> Element {
                 session.config_watch(),
             );
             daemon::integrations::spawn_discord_presence(&session, session.config_watch());
+            daemon::integrations::spawn_credential_maintenance(
+                config_service.clone(),
+                session.clone(),
+            );
             let artwork =
                 daemon::ArtworkService::new(db_boot, session.clone(), cache_dir().join("artwork"));
             tracing::info!(
@@ -771,59 +770,42 @@ fn App() -> Element {
         })
     };
     let frontend_api: Arc<dyn api::KopuzApi> = local_api.clone();
+    exit_flush::install_config_service(config_service.clone());
+    exit_flush::install_frontend_api(frontend_api.clone());
     artwork_protocol::install_api(frontend_api.clone());
     provide_context(frontend_api.clone());
-
-    // A server switch or credential rotation rebuilds the shared source
-    // handle; the session's loader has to follow it.
-    {
-        let session = session.clone();
-        use_effect(move || {
-            let source = active_source.read().clone();
-            session.set_active_source(Some(source));
-        });
-    }
-
-    // Bridge config changes into the session: every change updates its
-    // config watch (crossfade, scrobble creds, Jellyfin reporting), and
-    // audio-pipeline keys apply to the engine when their slice changes.
-    {
-        let session = session.clone();
-        let config_service = config_service.clone();
-        let mut last_audio_slice = use_signal(String::new);
-        use_effect(move || {
-            let snapshot = config.read().clone();
-            if !*initial_load_done.peek() {
-                return;
+    let mut downloaded_tracks = hooks::downloads::DownloadedTracks(use_signal(HashSet::new));
+    provide_context(downloaded_tracks);
+    let api_for_downloads = frontend_api.clone();
+    use_future(move || {
+        let api = api_for_downloads.clone();
+        async move {
+            match api.downloads().await {
+                Ok(keys) => downloaded_tracks.0.set(keys.into_iter().collect()),
+                Err(error) => tracing::warn!(%error, "could not load daemon downloads"),
             }
-            let audio_slice = format!(
-                "{:?}|{:?}|{:?}|{:?}",
-                snapshot.equalizer,
-                snapshot.channel_mode,
-                snapshot.sample_rate_mode,
-                snapshot.device_change_behavior,
-            );
-            let changed = if *last_audio_slice.peek() != audio_slice {
-                last_audio_slice.set(audio_slice);
-                [
-                    "equalizer",
-                    "channel_mode",
-                    "sample_rate_mode",
-                    "device_change_behavior",
-                ]
-                .iter()
-                .map(|key| key.to_string())
-                .collect()
-            } else {
-                Vec::new()
-            };
-            session.set_config(snapshot.clone(), changed);
-            let config_service = config_service.clone();
-            spawn(async move {
-                config_service.adopt(snapshot).await;
-            });
+        }
+    });
+    let mut active_caps = use_signal(api::SourceCapabilities::default);
+    let mut frontend_sources = use_signal(Vec::<api::SourceInfo>::new);
+    provide_context(active_caps);
+    provide_context(frontend_sources);
+    let api_for_caps = frontend_api.clone();
+    use_effect(move || {
+        let source_id = config.read().active_source.as_str().to_string();
+        let api = api_for_caps.clone();
+        spawn(async move {
+            match api.sources().await {
+                Ok(sources) => {
+                    if let Some(source) = sources.iter().find(|source| source.id == source_id) {
+                        active_caps.set(source.capabilities.clone());
+                    }
+                    frontend_sources.set(sources);
+                }
+                Err(error) => tracing::warn!(%error, "could not load source capabilities"),
+            }
         });
-    }
+    });
 
     {
         let updates = config_service.subscribe();
@@ -831,7 +813,7 @@ fn App() -> Element {
             let mut updates = updates.clone();
             async move {
                 while updates.changed().await.is_ok() {
-                    let updated = updates.borrow().clone();
+                    let updated = frontend_config(updates.borrow().clone());
                     let current = config.peek().clone();
                     if serde_json::to_value(&updated).ok() != serde_json::to_value(&current).ok() {
                         config.set(updated);
@@ -954,15 +936,7 @@ fn App() -> Element {
         });
     }
     let download_queue = use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
-    let download_progress =
-        use_hook(|| Signal::new_in_scope(::server::DownloadProgress::default(), ScopeId::ROOT));
-    pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
-    // Applies detached yt-dlp completions (history + rescan) in this scope —
-    // the job drivers outlive the downloads page and can't write these. There is
-    // no yt-dlp on Android, so the whole module is gated out there.
-    #[cfg(not(target_os = "android"))]
-    pages::ytdlp_jobs::use_ytdlp_completion_sink(config, trigger_rescan);
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
@@ -996,8 +970,6 @@ fn App() -> Element {
 
     let mut pending_queue_state_snapshot = use_signal(|| None::<PersistedQueueState>);
     let mut pending_queue_state_revision = use_signal(|| 0u64);
-    #[cfg(not(target_os = "android"))]
-    let close_hides_window = use_signal(|| false);
 
     // tao calls process::exit() after CloseRequested, killing the debounced
     // save loops — without this, the last debounce window of queue/store
@@ -1010,38 +982,33 @@ fn App() -> Element {
     #[cfg(not(target_os = "android"))]
     dioxus::desktop::use_wry_event_handler(move |event, _| {
         use dioxus::desktop::tao::event::{Event, WindowEvent};
-        let shutting_down = matches!(event, Event::LoopDestroyed)
-            || matches!(
-                event,
-                Event::WindowEvent {
+        if matches!(
+            event,
+            Event::LoopDestroyed
+                | Event::WindowEvent {
                     event: WindowEvent::CloseRequested,
                     ..
                 }
-            ) && !*close_hides_window.peek();
-        if shutting_down {
-            if let Some(db) = app_db::DB_HANDLE.get() {
-                let db = db.clone();
-                // None = the queue is empty (a cleared queue must persist as
-                // empty, not resurrect) — but only once the saved queue has
-                // actually been restored, else a quit during startup (or a
-                // failed load) would wipe it.
-                let queue_snap =
-                    (*initial_load_done.peek() && *queue_loaded_ok.peek()).then(|| {
-                        pending_queue_state_snapshot
-                            .peek()
-                            .clone()
-                            .map(queue_state::snapshot)
-                            .unwrap_or_default()
-                    });
-                // Library/playlists/favorites need no flush — every mutation
-                // already committed as a targeted write when it happened.
-                let cfg = (*config_loaded_ok.peek()).then(|| {
-                    let mut cfg = config.peek().clone();
-                    cfg.volume = *volume.peek();
-                    cfg
-                });
-                exit_flush::persist_on_fresh_thread(db, queue_snap, cfg);
-            }
+        ) {
+            // None = the queue is empty (a cleared queue must persist as
+            // empty, not resurrect) — but only once the saved queue has
+            // actually been restored, else a quit during startup (or a
+            // failed load) would wipe it.
+            let queue_snap = (*initial_load_done.peek() && *queue_loaded_ok.peek()).then(|| {
+                pending_queue_state_snapshot
+                    .peek()
+                    .clone()
+                    .map(queue_state::api_snapshot)
+                    .unwrap_or_default()
+            });
+            // Library/playlists/favorites need no flush — every mutation
+            // already committed as a targeted write when it happened.
+            let cfg = (*config_loaded_ok.peek()).then(|| {
+                let mut cfg = config.peek().clone();
+                cfg.volume = *volume.peek();
+                cfg
+            });
+            exit_flush::persist_on_fresh_thread(queue_snap, cfg);
             // A quitting app must not leave a discovery file pointing at a
             // dead port; frontends would keep trying to attach to it.
             if let Some(token) = remote_api_token.peek().clone()
@@ -1130,69 +1097,17 @@ fn App() -> Element {
         }
     });
 
-    let mut station_registry = use_signal(radio::registry::StationRegistry::new);
-    provide_context(station_registry);
-
-    let mut last_radio_registry_key = use_signal(|| None::<String>);
-
+    let mut radio_loaded = use_signal(|| false);
     let frontend_service_for_registry = frontend_service.clone();
     use_effect(move || {
-        if !*initial_load_done.read() {
+        if !*initial_load_done.read() || *radio_loaded.peek() {
             return;
         }
-
-        let registry_paths: Vec<String> = config
-            .read()
-            .radio_registries
-            .iter()
-            .filter(|r| r.enabled)
-            .map(|r| r.url.clone())
-            .collect();
-        let pinned_stations: Vec<String> = config.read().pinned_stations.clone();
-
-        // Key on paths only: pin toggles update the live registry directly,
-        // a rebuild would re-fetch every registry.
-        let key = registry_paths.join(",");
-        if *last_radio_registry_key.peek() == Some(key.clone()) {
-            return;
-        }
-        last_radio_registry_key.set(Some(key));
-
+        radio_loaded.set(true);
         let frontend_service = frontend_service_for_registry.clone();
         spawn(async move {
-            let (new_registry, import_count) = utils::offload(
-                async move {
-                    let mut new_registry = radio::registry::StationRegistry::new();
-                    let mut import_count = 0;
-
-                    for path in registry_paths {
-                        match new_registry.import_registry(&path).await {
-                            Ok(_) => import_count += 1,
-                            Err(e) => {
-                                tracing::warn!("Failed to import registry from {}: {}", path, e)
-                            }
-                        }
-                    }
-
-                    for json in pinned_stations {
-                        match serde_json::from_str(&json) {
-                            Ok(manifest) => new_registry.pin_manifest(manifest),
-                            Err(e) => tracing::warn!("Failed to parse pinned station: {}", e),
-                        }
-                    }
-                    (new_registry, import_count)
-                }
-                .instrument(tracing::info_span!("radio.registry_load")),
-            )
-            .await;
-
-            frontend_service
-                .adopt_radio_registry(new_registry.clone())
-                .await;
-            station_registry.set(new_registry);
-
-            if import_count > 0 {
-                tracing::info!("Imported {} external radio registries", import_count);
+            if let Err(error) = frontend_service.reload_radio().await {
+                tracing::warn!(%error, "could not load radio registries");
             }
         });
     });
@@ -1235,7 +1150,6 @@ fn App() -> Element {
         volume,
         config,
         config_loaded_ok,
-        db.clone(),
     );
 
     // Generations handle the rescan task bumps after writing scanned tracks/albums,
@@ -1249,22 +1163,20 @@ fn App() -> Element {
 
         // Tokens rotate without changing the source identity, but changing the
         // selected source, server URL, or account must clear source-owned state.
-        let current_backend_key = {
-            let conf = config.read();
-            let server = conf
-                .server
-                .as_ref()
-                .map(|server| {
-                    format!(
-                        "{:?}|{}|{}",
-                        server.service,
-                        server.url,
-                        server.user_id.as_deref().unwrap_or_default(),
-                    )
-                })
-                .unwrap_or_default();
-            format!("{}|{server}", conf.active_source.as_str())
-        };
+        let current_backend_key = frontend_sources
+            .read()
+            .iter()
+            .find(|source| source.active)
+            .map(|source| {
+                format!(
+                    "{}|{:?}|{}|{}",
+                    source.id,
+                    source.service,
+                    source.url.as_deref().unwrap_or_default(),
+                    source.authenticated,
+                )
+            })
+            .unwrap_or_else(|| "local".to_string());
 
         if !*backend_key_initialized.read() {
             last_backend_key.set(Some(current_backend_key));
@@ -1346,9 +1258,9 @@ fn App() -> Element {
         snapshot.volume = *volume.peek();
         exit_flush::stash_config(snapshot);
     });
-    let db_for_cfg_save = db.clone();
+    let api_for_cfg_save = frontend_api.clone();
     use_future(move || {
-        let db = db_for_cfg_save.clone();
+        let api = api_for_cfg_save.clone();
         async move {
             let mut flushed = 0u64;
             loop {
@@ -1360,92 +1272,23 @@ fn App() -> Element {
                 flushed = *config_dirty.peek();
                 let mut snapshot = config.peek().clone();
                 snapshot.volume = *volume.peek();
-                if let Err(e) = db
-                    .save_config(&snapshot)
-                    .instrument(tracing::info_span!("config.persist"))
-                    .await
-                {
-                    tracing::error!("Failed to save config: {}", e);
+                match api.config().await {
+                    Ok(current) => {
+                        let patch = frontend_config_patch(&snapshot, &current.config);
+                        if patch.as_object().is_some_and(|patch| !patch.is_empty())
+                            && let Err(e) = api
+                                .patch_config(patch)
+                                .instrument(tracing::info_span!("config.persist"))
+                                .await
+                        {
+                            tracing::error!("Failed to save config: {}", e);
+                        }
+                    }
+                    Err(e) => tracing::error!("Failed to read daemon config: {}", e),
                 }
                 utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
             }
         }
-    });
-
-    // Keepalive is rearm-on-account-change, not rearm-on-every-config-
-    // write. Re-running the effect on every config save would spawn
-    // a fresh loop that immediately fires run_rotation, spamming
-    // /verify_session a dozen times a minute on any settings churn.
-    //
-    // The signal stores the YT identity (a stable hash of the SAPISID
-    // cookie) we currently have a loop running against. The effect
-    // re-runs cheap, but only spawns a new loop when the identity
-    // changes (sign-in, account switch). Sign-out clears the
-    // identity and the running loop exits on its next tick.
-    let mut yt_keepalive_identity = use_signal(|| None::<String>);
-    use_effect(move || {
-        if !*initial_load_done.read() {
-            return;
-        }
-        let yt_cookies: Option<String> = config.read().server.as_ref().and_then(|s| {
-            (s.service == config::MusicService::YtMusic)
-                .then(|| s.access_token.clone())
-                .flatten()
-                .filter(|t| !t.is_empty())
-        });
-        let live_identity = yt_cookies
-            .as_deref()
-            .and_then(server::ytmusic::derive_user_id);
-        if live_identity == *yt_keepalive_identity.peek() {
-            return;
-        }
-        // Identity changed (fresh sign-in, account switch, or
-        // sign-out): the previously-running loop (if any) will read
-        // the new identity on its next tick and exit. Update the
-        // tracked identity; spawn a fresh loop only if we still have
-        // valid auth.
-        yt_keepalive_identity.set(live_identity.clone());
-        let Some(my_identity) = live_identity else {
-            return;
-        };
-        spawn(async move {
-            updates::run_rotation(config).await;
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-                if yt_keepalive_identity.peek().as_deref() != Some(my_identity.as_str()) {
-                    return;
-                }
-                updates::run_rotation(config).await;
-            }
-        });
-    });
-
-    let mut spotify_refresh_identity = use_signal(|| None::<String>);
-    use_effect(move || {
-        if !*initial_load_done.read() {
-            return;
-        }
-        let identity: Option<String> = config.read().server.as_ref().and_then(|s| {
-            (s.service == config::MusicService::Spotify && s.access_token.is_some())
-                .then(|| s.id.clone().unwrap_or_else(|| s.url.clone()))
-        });
-        if identity == *spotify_refresh_identity.peek() {
-            return;
-        }
-        spotify_refresh_identity.set(identity.clone());
-        let Some(my_identity) = identity else {
-            return;
-        };
-        spawn(async move {
-            updates::run_spotify_refresh(config).await;
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
-                if spotify_refresh_identity.peek().as_deref() != Some(my_identity.as_str()) {
-                    return;
-                }
-                updates::run_spotify_refresh(config).await;
-            }
-        });
     });
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -1483,7 +1326,6 @@ fn App() -> Element {
         let win_ctx = window();
         let handle_menu = {
             let win_ctx = win_ctx.clone();
-            let mut close_hides_window = close_hides_window;
             move |id: &dioxus::desktop::trayicon::menu::MenuId| {
                 tracing::debug!("tray menu event id={:?}", id);
                 if *id == TRAY_SHOW_ID {
@@ -1494,25 +1336,23 @@ fn App() -> Element {
                         win_ctx.set_focus();
                     }
                 } else if *id == TRAY_QUIT_ID {
-                    close_hides_window.set(false);
                     win_ctx.set_close_behavior(WindowCloseBehaviour::WindowCloses);
                     win_ctx.close();
                 }
             }
         };
         dioxus::desktop::use_tray_menu_event_handler({
-            let mut handle_menu = handle_menu.clone();
+            let handle_menu = handle_menu.clone();
             move |event| handle_menu(&event.id)
         });
         dioxus::desktop::use_muda_event_handler({
-            let mut handle_menu = handle_menu.clone();
+            let handle_menu = handle_menu.clone();
             move |event| handle_menu(&event.id)
         });
 
         use_effect({
             let tray_slot = tray_slot.clone();
             let tray_warned = tray_warned.clone();
-            let mut close_hides_window = close_hides_window;
             move || {
                 use dioxus::desktop::trayicon::TrayIconBuilder;
                 let want_tray = config.read().minimize_to_tray;
@@ -1534,7 +1374,6 @@ fn App() -> Element {
                     *warned = false;
                 }
                 drop(warned);
-                close_hides_window.set(enabled);
                 window().set_close_behavior(if enabled {
                     WindowCloseBehaviour::WindowHides
                 } else {
@@ -1595,7 +1434,7 @@ fn App() -> Element {
             exit_flush::stash_queue(
                 queue_state
                     .clone()
-                    .map(queue_state::snapshot)
+                    .map(queue_state::api_snapshot)
                     .unwrap_or_default(),
             );
             pending_queue_state_snapshot.set(queue_state);
@@ -1603,9 +1442,9 @@ fn App() -> Element {
         }
     });
 
-    let db_for_queue_save = db.clone();
+    let api_for_queue_save = frontend_api.clone();
     use_future(move || {
-        let db = db_for_queue_save.clone();
+        let api = api_for_queue_save.clone();
         async move {
             let mut flushed_revision = 0u64;
 
@@ -1627,7 +1466,7 @@ fn App() -> Element {
                 }
 
                 let snapshot = pending_queue_state_snapshot.read().clone();
-                queue_state::persist_snapshot(db.clone(), snapshot)
+                queue_state::persist_snapshot(api.clone(), snapshot)
                     .instrument(tracing::info_span!("queue.persist"))
                     .await;
                 flushed_revision = latest_revision;
@@ -1635,51 +1474,52 @@ fn App() -> Element {
         }
     });
 
-    let _is_offline = app_lifecycle::use_connectivity_probe(config, network_banner);
+    let mut offline_mode = app_lifecycle::use_connectivity_probe(frontend_sources, network_banner);
 
-    let db_for_load = db.clone();
-    let session_for_load = session.clone();
+    let api_for_load = frontend_api.clone();
     let favorites_for_load = favorites_service.clone();
     let scrobbler_for_load = scrobbler.clone();
     use_hook(move || {
         {
-            let db = db_for_load;
+            let api = api_for_load;
             let mut ctrl = ctrl;
 
             spawn(async move {
-                // Everything loads from the DB — the converted source of truth.
-                // The legacy JSON files are never read or written; a fresh DB
-                // with no blob yet just yields the default config.
-                // Startup loads ONLY config + queue — everything else is queried
-                // on demand by the page hooks. Config marks itself loaded ONLY
-                // on success: its save is the one remaining whole-value write,
-                // and persisting a default born of a read failure would wipe
-                // real settings/servers.
-                let cfg_loaded = match db
-                    .load_config()
+                // Startup asks the daemon for config and queue only. Everything
+                // else is queried on demand through the API. Saving stays
+                // disarmed after a failed read so defaults cannot replace real
+                // persisted state.
+                let cfg_loaded = match api
+                    .config()
                     .instrument(tracing::info_span!("startup.load_config"))
                     .await
                 {
-                    Ok(c) => {
-                        config_loaded_ok.set(true);
-                        c
+                    Ok(view) => match serde_json::from_value::<config::AppConfig>(view.config) {
+                        Ok(config) => {
+                            config_loaded_ok.set(true);
+                            Some(config)
+                        }
+                        Err(error) => {
+                            tracing::error!(%error, "failed to decode daemon config — config saves disabled this session");
+                            None
+                        }
                     }
-                    Err(e) => {
-                        tracing::error!(error = %e, "failed to load config from db — config saves disabled this session");
+                    Err(error) => {
+                        tracing::error!(%error, "failed to load daemon config — config saves disabled this session");
                         None
                     }
                 };
-                let queue_loaded = match db
-                    .load_queue()
+                let queue_loaded = match api
+                    .queue_snapshot()
                     .instrument(tracing::info_span!("startup.load_queue"))
                     .await
                 {
-                    Ok(snap) => {
+                    Ok(snapshot) => {
                         queue_loaded_ok.set(true);
-                        Some(snap)
+                        Some(snapshot)
                     }
-                    Err(e) => {
-                        tracing::error!(error = %e, "failed to load queue from db — queue saves disabled this session");
+                    Err(error) => {
+                        tracing::error!(%error, "failed to load daemon queue — queue saves disabled this session");
                         None
                     }
                 };
@@ -1696,23 +1536,10 @@ fn App() -> Element {
                 {
                     let _apply = tracing::info_span!("startup.apply_config").entered();
                     let loaded = cfg_loaded;
-                    config.set(loaded.clone());
+                    config.set(frontend_config(loaded.clone()));
                     configured_local_libraries.set(configured_local_sources(&loaded));
                     volume.set(loaded.volume);
                     persisted_volume.set(loaded.volume);
-                    session_for_load.set_config(
-                        loaded.clone(),
-                        [
-                            "volume",
-                            "equalizer",
-                            "channel_mode",
-                            "sample_rate_mode",
-                            "device_change_behavior",
-                        ]
-                        .iter()
-                        .map(|key| key.to_string())
-                        .collect(),
-                    );
                     i18n::set_locale(&loaded.language);
                 }
 
@@ -1721,16 +1548,9 @@ fn App() -> Element {
                 // the user picks a server explicitly via the sidebar.
 
                 let queue_state = utils::offload(async move {
-                    queue_loaded.and_then(|snap| {
-                        queue_state::sanitize(PersistedQueueState {
-                            version: snap.version,
-                            queue: snap.queue,
-                            current_queue_index: snap.current_queue_index,
-                            progress_secs: snap.progress_secs,
-                            shuffle_order: snap.shuffle_order,
-                            shuffle_enabled: snap.shuffle_enabled,
-                        })
-                    })
+                    queue_loaded
+                        .map(queue_state::from_api_snapshot)
+                        .and_then(queue_state::sanitize)
                 })
                 .instrument(tracing::info_span!("startup.sanitize_queue"))
                 .await;
@@ -1774,9 +1594,8 @@ fn App() -> Element {
         }
     });
 
-    let db_for_play_album = db.clone();
-    let library_for_scan = library_service.clone();
-    let jobs_for_scan = job_runner.clone();
+    let api_for_play_album = frontend_api.clone();
+    let api_for_scan = frontend_api.clone();
     use_effect(move || {
         // config_loaded_ok matters here: a defaulted config (load failure) has
         // an empty music_directory, and the daemon's no-dirs branch prunes the
@@ -1804,16 +1623,12 @@ fn App() -> Element {
         }
         last_scan_key.set(Some(scan_key));
 
-        // The scan itself lives in the daemon's LibraryService now; the job
-        // runner's single-flight replaces the old epoch supersession, and the
-        // event bridge below feeds progress and invalidations back to the UI.
-        // The roots travel with the call: the config signal is the authority
-        // here, and the session's own copy may not have caught up yet.
-        if let Err(error) =
-            library_for_scan.spawn_scan_with_config(&jobs_for_scan, config.peek().clone())
-        {
-            tracing::warn!(%error, "library scan could not start");
-        }
+        let api = api_for_scan.clone();
+        spawn(async move {
+            if let Err(error) = api.start_job(api::JobKind::Scan).await {
+                tracing::warn!(%error, "library scan could not start");
+            }
+        });
     });
 
     // Feed daemon events back into the UI: library invalidations re-run the
@@ -1821,8 +1636,11 @@ fn App() -> Element {
     {
         let session = session.clone();
         let gens = gens_for_albums;
+        let api = frontend_api.clone();
+        let mut downloads = downloaded_tracks;
         use_future(move || {
             let session = session.clone();
+            let api = api.clone();
             async move {
                 use tokio::sync::broadcast::error::RecvError;
                 let mut rx = session.subscribe();
@@ -1856,6 +1674,16 @@ fn App() -> Element {
                                 ..
                             } => {
                                 scan_current_file.set(None);
+                            }
+                            api::ApiEvent::ConfigChanged { keys }
+                                if keys.iter().any(|key| key == "offline_tracks") =>
+                            {
+                                match api.downloads().await {
+                                    Ok(keys) => downloads.0.set(keys.into_iter().collect()),
+                                    Err(error) => {
+                                        tracing::warn!(%error, "could not refresh daemon downloads")
+                                    }
+                                }
                             }
                             _ => {}
                         },
@@ -1921,7 +1749,6 @@ fn App() -> Element {
         discover_prefetch_cache,
     ));
     provide_context(download_queue);
-    provide_context(download_progress);
     provide_context(scroll_positions);
     provide_context(components::source_switcher::SettingsAnchor(settings_anchor));
     provide_context(fetched_artist_images);
@@ -2168,7 +1995,6 @@ fn App() -> Element {
 
     let reduce_animations = use_memo(move || config.read().reduce_animations);
     let active_source = use_memo(move || config.read().active_source.clone());
-    let switch_source = hooks::source_switch::use_switch_source();
     let mut show_quick_search = use_signal(|| false);
     let quick_search_source = hooks::use_db_queries::use_active_source();
     use_effect(move || {
@@ -2297,17 +2123,13 @@ fn App() -> Element {
             // their own errors via the settings popup, and a lingering YT
             // error from a previous session shouldn't haunt a switched-to
             // server.
-            if config
-                .read()
-                .server
-                .as_ref()
-                .map(|s| {
-                    matches!(
-                        s.service,
-                        config::MusicService::YtMusic | config::MusicService::Spotify
+            if frontend_sources.read().iter().any(|source| {
+                source.active
+                    && matches!(
+                        source.service,
+                        Some(api::MusicService::YtMusic | api::MusicService::Spotify)
                     )
-                })
-                .unwrap_or(false)
+            })
             {
                 if let Some(msg) = ctrl.playback_error.read().clone() {
                     div {
@@ -2352,10 +2174,7 @@ fn App() -> Element {
                                 button {
                                     class: "ml-2 text-xs underline opacity-70 hover:opacity-100 transition-opacity",
                                     onclick: move |_| {
-                                        let target = config.peek().server_toggle_target();
-                                        if let Some(s) = target {
-                                            switch_source(s);
-                                        }
+                                        offline_mode.set(false);
                                         network_banner.set(None);
                                     },
                                     "Keep server mode"
@@ -2534,11 +2353,24 @@ fn App() -> Element {
                                     // Subsonic/Custom album ids carry their own
                                     // prefixes and Home only emits the active
                                     // source's ids anyway.
-                                    let source = config.peek().active_source.clone();
-                                    let db = db_for_play_album.clone();
+                                    let api = api_for_play_album.clone();
                                     spawn(async move {
-                                        let mut tracks =
-                                            db.album_tracks(&source, &id).await.unwrap_or_default();
+                                        let mut tracks = api
+                                            .album_tracks(
+                                                id,
+                                                api::Page {
+                                                    offset: 0,
+                                                    limit: u32::MAX,
+                                                },
+                                            )
+                                            .await
+                                            .map(|page| {
+                                                page.items
+                                                    .into_iter()
+                                                    .map(hooks::use_db_queries::track_from_api)
+                                                    .collect::<Vec<_>>()
+                                            })
+                                            .unwrap_or_default();
                                         if !tracks.is_empty() {
                                             tracks.sort_by(|a, b| {
                                                 let disc_cmp = a.disc_number.unwrap_or(1).cmp(&b.disc_number.unwrap_or(1));
@@ -2647,7 +2479,7 @@ fn App() -> Element {
                             // Local is active, and the rich remote profile must not
                             // hijack the local artist page.
                             let remote_profile =
-                                active_caps().artist_view == ::server::source::ArtistView::Remote;
+                                active_caps().artists == api::ArtistPresentation::Remote;
                             let has_selection = !selected_artist_name.read().is_empty()
                                 || selected_artist_channel_id.read().is_some();
                             if remote_profile && has_selection {

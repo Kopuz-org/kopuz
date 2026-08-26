@@ -916,6 +916,30 @@ pub mod convert {
         }
     }
 
+    pub fn queue_persistence_snapshot_to_proto(
+        value: &api::QueuePersistenceSnapshot,
+    ) -> QueuePersistenceSnapshot {
+        QueuePersistenceSnapshot {
+            tracks: value.tracks.iter().map(track_info_to_proto).collect(),
+            current_index: value.current_index,
+            progress_ms: value.progress_ms,
+            shuffle_order: value.shuffle_order.clone(),
+            shuffle_enabled: value.shuffle_enabled,
+        }
+    }
+
+    pub fn queue_persistence_snapshot_from_proto(
+        value: &QueuePersistenceSnapshot,
+    ) -> api::QueuePersistenceSnapshot {
+        api::QueuePersistenceSnapshot {
+            tracks: value.tracks.iter().map(track_info_from_proto).collect(),
+            current_index: value.current_index,
+            progress_ms: value.progress_ms,
+            shuffle_order: value.shuffle_order.clone(),
+            shuffle_enabled: value.shuffle_enabled,
+        }
+    }
+
     pub fn lyrics_to_proto(value: &api::LyricsView) -> Lyrics {
         Lyrics {
             plain: value.plain.clone(),
@@ -1004,6 +1028,11 @@ pub mod convert {
             total: value.total,
             message: value.message.clone(),
             error: value.error.as_ref().map(error_body_to_proto),
+            request: value.request.clone(),
+            title: value.title.clone(),
+            format: value.format.clone(),
+            speed: value.speed.clone(),
+            eta: value.eta.clone(),
         }
     }
 
@@ -1017,6 +1046,11 @@ pub mod convert {
             total: value.total,
             message: value.message.clone(),
             error: value.error.as_ref().map(error_body_from_proto),
+            request: value.request.clone(),
+            title: value.title.clone(),
+            format: value.format.clone(),
+            speed: value.speed.clone(),
+            eta: value.eta.clone(),
         }
     }
 
@@ -1329,6 +1363,23 @@ pub mod convert {
         }
     }
 
+    pub fn favorites_sync_to_proto(value: api::FavoritesSyncMode) -> FavoritesSyncMode {
+        match value {
+            api::FavoritesSyncMode::Instant => FavoritesSyncMode::Instant,
+            api::FavoritesSyncMode::Paginated => FavoritesSyncMode::Paginated,
+            api::FavoritesSyncMode::Unknown => FavoritesSyncMode::Unspecified,
+        }
+    }
+
+    pub fn favorites_sync_from_proto(value: i32) -> api::FavoritesSyncMode {
+        match FavoritesSyncMode::try_from(value).unwrap_or(FavoritesSyncMode::Unspecified) {
+            FavoritesSyncMode::Paginated => api::FavoritesSyncMode::Paginated,
+            FavoritesSyncMode::Instant | FavoritesSyncMode::Unspecified => {
+                api::FavoritesSyncMode::Instant
+            }
+        }
+    }
+
     pub fn source_capabilities_to_proto(value: &api::SourceCapabilities) -> SourceCapabilities {
         SourceCapabilities {
             edit_tags: value.edit_tags,
@@ -1343,6 +1394,7 @@ pub mod convert {
             playlists: playlist_capability_to_proto(value.playlists) as i32,
             artists: artist_presentation_to_proto(value.artists) as i32,
             albums: album_presentation_to_proto(value.albums) as i32,
+            favorites_sync: favorites_sync_to_proto(value.favorites_sync) as i32,
         }
     }
 
@@ -1363,6 +1415,7 @@ pub mod convert {
             playlists: playlist_capability_from_proto(value.playlists),
             artists: artist_presentation_from_proto(value.artists),
             albums: album_presentation_from_proto(value.albums),
+            favorites_sync: favorites_sync_from_proto(value.favorites_sync),
         }
     }
 
@@ -1377,6 +1430,12 @@ pub mod convert {
             active: value.active,
             authenticated: value.authenticated,
             capabilities: Some(source_capabilities_to_proto(&value.capabilities)),
+            url: value.url.clone(),
+            browser: value.browser.clone(),
+            anonymous: value.anonymous,
+            storefront: value.storefront.clone(),
+            language: value.language.clone(),
+            directories: value.directories.clone(),
         }
     }
 
@@ -1389,6 +1448,28 @@ pub mod convert {
             active: value.active,
             authenticated: value.authenticated,
             capabilities: source_capabilities_from_proto(value.capabilities.as_ref()),
+            url: value.url.clone(),
+            browser: value.browser.clone(),
+            anonymous: value.anonymous,
+            storefront: value.storefront.clone(),
+            language: value.language.clone(),
+            directories: value.directories.clone(),
+        }
+    }
+
+    pub fn local_source_draft_to_proto(value: &api::LocalSourceDraft) -> LocalSourceDraft {
+        LocalSourceDraft {
+            id: value.id.clone(),
+            name: value.name.clone(),
+            directories: value.directories.clone(),
+        }
+    }
+
+    pub fn local_source_draft_from_proto(value: &LocalSourceDraft) -> api::LocalSourceDraft {
+        api::LocalSourceDraft {
+            id: value.id.clone(),
+            name: value.name.clone(),
+            directories: value.directories.clone(),
         }
     }
 
@@ -1433,6 +1514,22 @@ pub mod convert {
             secret: value.secret.clone(),
             user_id: value.user_id.clone(),
             browser: value.browser.clone(),
+        }
+    }
+
+    pub fn source_login_to_proto(value: &api::SourceLoginRequest) -> SourceLoginRequest {
+        SourceLoginRequest {
+            server_id: value.server_id.clone(),
+            username: value.username.clone(),
+            password: value.password.clone(),
+        }
+    }
+
+    pub fn source_login_from_proto(value: &SourceLoginRequest) -> api::SourceLoginRequest {
+        api::SourceLoginRequest {
+            server_id: value.server_id.clone(),
+            username: value.username.clone(),
+            password: value.password.clone(),
         }
     }
 
@@ -1736,9 +1833,12 @@ pub mod convert {
                     id: stream.id.clone(),
                     name: stream.name.clone(),
                     url: stream.url.clone(),
+                    icon: stream.icon.clone(),
                 })
                 .collect(),
             pinned: value.pinned,
+            icon: value.icon.clone(),
+            artwork: value.artwork.clone(),
         }
     }
 
@@ -1747,6 +1847,8 @@ pub mod convert {
             id: value.id.clone(),
             name: value.name.clone(),
             description: value.description.clone(),
+            icon: value.icon.clone(),
+            artwork: value.artwork.clone(),
             tags: value.tags.clone(),
             streams: value
                 .streams
@@ -1755,6 +1857,7 @@ pub mod convert {
                     id: stream.id.clone(),
                     name: stream.name.clone(),
                     url: stream.url.clone(),
+                    icon: stream.icon.clone(),
                 })
                 .collect(),
             pinned: value.pinned,
@@ -2332,11 +2435,26 @@ mod tests {
             rev: 9,
             total: 1,
             offset: 0,
-            items: vec![api::QueueItem { index: 4, track }],
+            items: vec![api::QueueItem {
+                index: 4,
+                track: track.clone(),
+            }],
         };
         assert_eq!(
             window,
             queue_window_from_proto(&queue_window_to_proto(&window))
+        );
+
+        let snapshot = api::QueuePersistenceSnapshot {
+            tracks: vec![track],
+            current_index: 0,
+            progress_ms: 12_345,
+            shuffle_order: vec![0],
+            shuffle_enabled: true,
+        };
+        assert_eq!(
+            snapshot,
+            queue_persistence_snapshot_from_proto(&queue_persistence_snapshot_to_proto(&snapshot))
         );
 
         let lyrics = api::LyricsView {
@@ -2383,6 +2501,11 @@ mod tests {
                 message: "failed".into(),
                 details: Some(serde_json::json!({"retry": false})),
             }),
+            request: Some("https://example.com/watch".into()),
+            title: Some("Example".into()),
+            format: Some("OPUS".into()),
+            speed: Some("2MiB/s".into()),
+            eta: Some("00:03".into()),
         };
         assert_eq!(job, job_status_from_proto(&job_status_to_proto(&job)));
 
@@ -2541,11 +2664,28 @@ mod tests {
                 playlists: api::PlaylistCapability::Reorder,
                 artists: api::ArtistPresentation::Remote,
                 albums: api::AlbumPresentation::Remote,
+                favorites_sync: api::FavoritesSyncMode::Paginated,
             },
+            url: Some("https://example.com".into()),
+            browser: Some("chrome".into()),
+            anonymous: true,
+            storefront: Some("tr".into()),
+            language: Some("tr".into()),
+            directories: vec!["/music".into()],
         };
         assert_eq!(
             source,
             source_info_from_proto(&source_info_to_proto(&source))
+        );
+
+        let local = api::LocalSourceDraft {
+            id: Some("local:test".into()),
+            name: "Test".into(),
+            directories: vec!["/music".into(), "/more".into()],
+        };
+        assert_eq!(
+            local,
+            local_source_draft_from_proto(&local_source_draft_to_proto(&local))
         );
 
         let server = api::ServerDraft {
@@ -2571,6 +2711,15 @@ mod tests {
         assert_eq!(
             credential,
             credential_from_proto(&credential_to_proto(&credential))
+        );
+        let login = api::SourceLoginRequest {
+            server_id: "server".into(),
+            username: "user".into(),
+            password: "password".into(),
+        };
+        assert_eq!(
+            login,
+            source_login_from_proto(&source_login_to_proto(&login))
         );
         let integration = api::IntegrationCredentialProvision {
             kind: api::IntegrationKind::LastFm,
@@ -2727,11 +2876,14 @@ mod tests {
             id: "station".into(),
             name: "Station".into(),
             description: "Description".into(),
+            icon: "fa-solid fa-radio".into(),
+            artwork: Some("https://example.com/cover.png".into()),
             tags: vec!["tag".into()],
             streams: vec![api::RadioStreamInfo {
                 id: "main".into(),
                 name: "Main".into(),
                 url: "https://example.com/stream".into(),
+                icon: Some("fa-solid fa-play".into()),
             }],
             pinned: true,
         };

@@ -19,7 +19,7 @@ pub fn PlaylistDetail(
     let mut tracks = use_signal(Vec::<reader::models::Track>::new);
     let mut has_loaded_remote = use_signal(|| false);
     let gens = hooks::db_reactivity::use_generations();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let caps = use_context::<Signal<api::SourceCapabilities>>();
     let playlists_res = use_playlists();
     let cover_for = hooks::use_db_queries::use_cover_resolver(512);
 
@@ -43,8 +43,8 @@ pub fn PlaylistDetail(
     // playlists cap (YT's InnerTube has no reorder mutation). Reading the caps is
     // also more correct than `is_server` — e.g. a creds-less offline server has
     // downloads=false.
-    let caps = active_source.read().capabilities();
-    let can_reorder = caps.playlists == ::server::source::PlaylistOps::Reorder;
+    let caps = caps.read().clone();
+    let can_reorder = caps.playlists == api::PlaylistCapability::Reorder;
 
     // Initial tracks with no network round-trip: resolve the playlist's refs from
     // the active source's cached/local rows. A server's live entries (below)

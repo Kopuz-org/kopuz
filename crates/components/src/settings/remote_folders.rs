@@ -3,15 +3,14 @@
 //! is an in-place browser, since the folders live on the server.
 
 use dioxus::prelude::*;
-use server::nextcloud::{folder_name, parent_dir};
+use std::sync::Arc;
 
-/// Credentials the browser needs. The picker runs from Settings, before the
-/// active source is rebuilt, so it takes them rather than a `MediaSource`.
-#[derive(Clone, PartialEq)]
-pub struct RemoteCreds {
-    pub url: String,
-    pub user_id: String,
-    pub token: String,
+fn parent_dir(path: &str) -> String {
+    let path = path.trim_end_matches('/');
+    match path.rsplit_once('/') {
+        Some(("", _)) | None => "/".to_string(),
+        Some((parent, _)) => parent.to_string(),
+    }
 }
 
 /// A server card's folder picker, absent unless the active server browses a
@@ -19,7 +18,7 @@ pub struct RemoteCreds {
 /// root for itself.
 #[derive(Clone, PartialEq)]
 pub struct RemoteFolderSettings {
-    pub creds: RemoteCreds,
+    pub server_id: String,
     pub folders: Vec<String>,
     pub on_add: EventHandler<String>,
     pub on_remove: EventHandler<usize>,
@@ -31,14 +30,16 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
     let mut path = use_signal(|| "/".to_string());
 
     let RemoteFolderSettings {
-        creds,
+        server_id,
         folders,
         on_add,
         on_remove,
     } = settings;
+    let api = use_context::<Arc<dyn api::KopuzApi>>();
 
     let listing = use_resource(move || {
-        let creds = creds.clone();
+        let api = api.clone();
+        let server_id = server_id.clone();
         let at = path();
         let open = browsing();
         // Closed means nothing to list, not an empty server.
@@ -46,7 +47,9 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
             if !open {
                 return Ok(Vec::new());
             }
-            server::nextcloud::browse_folders(&creds.url, &creds.user_id, &creds.token, &at).await
+            api.browse_source(server_id, at)
+                .await
+                .map_err(|error| error.to_string())
         }
     });
 
@@ -96,11 +99,11 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
                             Some(Ok(dirs)) => rsx! {
                                 for dir in dirs.clone() {
                                     button {
-                                        key: "{dir}",
-                                        onclick: move |_| path.set(dir.clone()),
+                                        key: "{dir.path}",
+                                        onclick: move |_| path.set(dir.path.clone()),
                                         class: "flex items-center gap-2 text-left text-xs text-white/80 hover:bg-white/10 px-2 py-1 rounded transition-colors",
                                         i { class: "fa-solid fa-folder text-white/40" }
-                                        span { class: "truncate", "{folder_name(&dir)}" }
+                                        span { class: "truncate", "{dir.name}" }
                                     }
                                 }
                             },

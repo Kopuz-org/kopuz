@@ -9,7 +9,6 @@
 //! read); the active row is highlighted. Styling matches the sidebar's flat,
 //! single-line nav items rather than a glassy stand-alone widget.
 
-use config::{AppConfig, MusicService, Source};
 use dioxus::prelude::*;
 use hooks::source_switch::ConnStatus;
 
@@ -69,46 +68,47 @@ const SWITCHER_CSS: &str = r#"
 const LOCAL_ACCENT: &str = "var(--color-indigo-500)";
 
 /// One selectable source: key, label, icon class, accent colour, mono subline.
-fn entries(config: &AppConfig) -> Vec<(Source, String, &'static str, &'static str, String)> {
-    let mut v = vec![(
-        Source::Local,
-        i18n::t("local").to_string(),
-        "fa-solid fa-hard-drive",
-        LOCAL_ACCENT,
-        i18n::t("source_on_this_device").to_string(),
-    )];
-    for local in &config.local_sources {
-        v.push((
-            Source::LocalLibrary(local.id.clone()),
-            local.name.clone(),
-            "fa-solid fa-folder-tree",
-            LOCAL_ACCENT,
-            i18n::t("source_on_this_device").to_string(),
-        ));
-    }
-    for s in &config.servers {
-        let (icon, accent) = service_style(s.service);
-        v.push((
-            Source::Server(s.id.clone()),
-            s.name.clone(),
-            icon,
-            accent,
-            s.service.display_name().to_uppercase(),
-        ));
-    }
-    v
+fn entries(
+    sources: &[api::SourceInfo],
+) -> Vec<(String, String, &'static str, &'static str, String)> {
+    sources
+        .iter()
+        .map(|source| {
+            let (icon, accent, sub) = match source.kind {
+                api::SourceKind::Local => (
+                    "fa-solid fa-hard-drive",
+                    LOCAL_ACCENT,
+                    i18n::t("source_on_this_device").to_string(),
+                ),
+                api::SourceKind::LocalLibrary => (
+                    "fa-solid fa-folder-tree",
+                    LOCAL_ACCENT,
+                    i18n::t("source_on_this_device").to_string(),
+                ),
+                api::SourceKind::Server | api::SourceKind::Unknown => {
+                    let service = source.service.unwrap_or_default();
+                    let (icon, accent) = service_style(service);
+                    (icon, accent, format!("{service:?}").to_uppercase())
+                }
+            };
+            (source.id.clone(), source.name.clone(), icon, accent, sub)
+        })
+        .collect()
 }
 
 /// Icon + accent colour per service, so each source reads at a glance.
-fn service_style(service: MusicService) -> (&'static str, &'static str) {
+fn service_style(service: api::MusicService) -> (&'static str, &'static str) {
     match service {
-        MusicService::YtMusic => ("fa-brands fa-youtube", "#ff3355"),
-        MusicService::SoundCloud => ("fa-brands fa-soundcloud", "#ff7a33"),
-        MusicService::AppleMusic => ("fa-brands fa-apple", "#ffffff"),
-        MusicService::Spotify => ("fa-brands fa-spotify", "#1DB954"),
-        MusicService::Jellyfin => ("fa-solid fa-server", "#b277ee"),
-        MusicService::Subsonic | MusicService::Custom => ("fa-solid fa-compact-disc", "#f0a84b"),
-        MusicService::Nextcloud => (NEXTCLOUD_ICON, "#0082c9"),
+        api::MusicService::YtMusic => ("fa-brands fa-youtube", "#ff3355"),
+        api::MusicService::SoundCloud => ("fa-brands fa-soundcloud", "#ff7a33"),
+        api::MusicService::AppleMusic => ("fa-brands fa-apple", "#ffffff"),
+        api::MusicService::Spotify => ("fa-brands fa-spotify", "#1DB954"),
+        api::MusicService::Jellyfin => ("fa-solid fa-server", "#b277ee"),
+        api::MusicService::Subsonic | api::MusicService::Custom => {
+            ("fa-solid fa-compact-disc", "#f0a84b")
+        }
+        api::MusicService::Nextcloud => (NEXTCLOUD_ICON, "#0082c9"),
+        api::MusicService::Unknown => ("fa-solid fa-server", LOCAL_ACCENT),
     }
 }
 
@@ -143,25 +143,29 @@ fn ServiceGlyph(icon: &'static str) -> Element {
 
 #[component]
 pub fn SourceSwitcher(
-    config: Signal<AppConfig>,
     #[props(default = false)] collapsed: bool,
     #[props(default)] on_manage: Option<EventHandler<()>>,
 ) -> Element {
     let mut open = use_signal(|| false);
-    // Full switch (loads server creds + syncs config.server), so a sidebar switch
-    // is identical to the Settings one — not just an active_source flip.
+    let source_signal = use_context::<Signal<Vec<api::SourceInfo>>>();
+    // The daemon applies the same atomic source switch used by Settings.
     let switch = hooks::source_switch::use_switch_source();
     // Live auth/connection status of the active source, for the status indicator.
     let conn = hooks::source_switch::use_connection_status();
-    let sources = entries(&config.read());
+    let source_info = source_signal.read();
+    let sources = entries(&source_info);
     let count = sources.len();
-    let active = config.read().active_source.clone();
+    let active = source_info
+        .iter()
+        .find(|source| source.active)
+        .map(|source| source.id.clone())
+        .unwrap_or_else(|| "local".to_string());
     // Follow the active theme palette in both UI styles (the chrome does too), so
     // the switcher harmonises with the theme instead of a fixed dark.
     let surface_vars = "--ss-surface:var(--color-neutral-900);--ss-fg:var(--color-white);";
     let (active_label, active_icon, active_accent) = sources
         .iter()
-        .find(|(s, ..)| *s == active)
+        .find(|(source, ..)| *source == active)
         .map(|(_, l, i, a, _)| (l.clone(), *i, *a))
         .unwrap_or_else(|| {
             (
@@ -217,7 +221,7 @@ pub fn SourceSwitcher(
                                 let switch = switch.clone();
                                 rsx! {
                                     button {
-                                        key: "{src.as_str()}",
+                                        key: "{src}",
                                         class: if is_active { "ss-row ss-act" } else { "ss-row" },
                                         style: "--accent:{accent};",
                                         onclick: move |_| {

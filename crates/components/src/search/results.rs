@@ -28,7 +28,7 @@ pub fn SearchResults(
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
     let gens = hooks::db_reactivity::use_generations();
-    let offline_tracks = config.read().offline_tracks.clone();
+    let offline_tracks = hooks::downloads::downloaded_keys();
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let sort_state = use_signal(|| None);
     let sorted_tracks = showcase::sorted_track_pairs(&tracks, *sort_state.read());
@@ -137,13 +137,7 @@ pub fn SearchResults(
                                 };
                                 let is_downloaded = item_id
                                     .as_ref()
-                                    .is_some_and(|id| {
-                                        if let Some(path_str) = offline_tracks.get(id) {
-                                            std::path::Path::new(path_str).exists()
-                                        } else {
-                                            false
-                                        }
-                                    });
+                                    .is_some_and(|id| offline_tracks.contains(id));
 
                                 rsx! {
                                     TrackRow {

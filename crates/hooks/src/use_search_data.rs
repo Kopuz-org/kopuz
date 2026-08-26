@@ -50,9 +50,8 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
         let _ = gens.generation(crate::db_reactivity::Table::Tracks);
         let _ = gens.generation(crate::db_reactivity::Table::Albums);
         let query = search_query.read().to_lowercase();
-        // The source owns search: local/Jellyfin/Subsonic filter their corpus,
-        // YT queries its catalog (see `MediaSource::search`). Covers are resolved
-        // here through the cover seam, which dispatches on the source/track.
+        // The daemon dispatches search to the active source. Covers are
+        // resolved here through the source-neutral cover seam.
         let conf = config.read().clone();
         let api = api.clone();
 

@@ -23,7 +23,7 @@ use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
 use std::collections::HashSet;
 
-use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
+use hooks::downloads::{DownloadQueue, DownloadStatus, queue_downloads};
 
 const ITEM_HEIGHT: f64 = 60.0; // 60px: p-2 padding (16px*2=32) + content height (~28px)
 
@@ -43,8 +43,7 @@ pub fn LibraryPage(
 ) -> Element {
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = use_context::<Signal<api::SourceCapabilities>>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let library_sort = use_signal(|| config.peek().library_sort.clone());
@@ -104,7 +103,7 @@ pub fn LibraryPage(
         let current_gen = *fetch_generation.peek();
         spawn(async move {
             if *fetch_generation.read() == current_gen {
-                let _ = crate::server::subsonic_sync::sync_server_library(true).await;
+                let _ = crate::server::library_sync::sync_server_library().await;
                 if *fetch_generation.read() == current_gen {
                     is_loading.set(false);
                 }
@@ -184,11 +183,7 @@ pub fn LibraryPage(
                 // Download state (servers only).
                 let item_id: String = track.id.key().to_string();
                 let is_downloaded = cap.downloads
-                    && conf
-                        .offline_tracks
-                        .get(&item_id)
-                        .map(|p| std::path::Path::new(p).exists())
-                        .unwrap_or(false);
+                    && hooks::downloads::is_downloaded(&item_id);
                 let is_downloading = cap.downloads
                     && download_queue.read().items.iter().any(|i| {
                         i.id == item_id
@@ -270,7 +265,6 @@ pub fn LibraryPage(
                                     active_menu_track.set(None);
                                     queue_downloads(
                                         vec![(item_id_dl.clone(), track_title.clone(), track_artist.clone())],
-                                        config,
                                         download_queue,
                                     );
                                 }

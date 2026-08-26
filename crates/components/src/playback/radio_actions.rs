@@ -12,7 +12,6 @@ use dioxus::prelude::*;
 use hooks::PlayerController;
 use hooks::toast::{toast, toast_error};
 use reader::models::Track;
-use server::source::ActiveSource;
 use std::future::Future;
 use tracing::Instrument;
 
@@ -55,7 +54,7 @@ where
 }
 
 /// Start radio seeded from a track and play the generated queue. The radio
-/// operation lives in the source layer ([`MediaSource::start_radio`](server::source::MediaSource::start_radio));
+/// operation lives behind [`KopuzApi::track_radio`];
 /// this just resolves the track's id and hands the result to the player.
 pub fn play_track_radio(track: Track, api: Arc<dyn KopuzApi>, ctrl: PlayerController) {
     let seed = track.id.key().into_owned();
@@ -103,9 +102,9 @@ pub fn play_playlist_radio(playlist_id: String, api: Arc<dyn KopuzApi>, ctrl: Pl
 /// changes (e.g. an empty server library filling in after a sync).
 pub fn track_radio_handler(track: Track) -> Option<EventHandler<()>> {
     let ctrl = consume_context::<PlayerController>();
-    let active_source = consume_context::<Signal<ActiveSource>>();
+    let capabilities = consume_context::<Signal<api::SourceCapabilities>>();
     let api = consume_context::<Arc<dyn KopuzApi>>();
-    let supported = active_source.read().capabilities().radio.track;
+    let supported = capabilities.read().track_radio;
     supported
         .then(|| EventHandler::new(move |_| play_track_radio(track.clone(), api.clone(), ctrl)))
 }
@@ -118,9 +117,9 @@ pub fn track_radio_handler(track: Track) -> Option<EventHandler<()>> {
 /// playlist cards that could only return `Unsupported`.
 pub fn playlist_radio_handler(playlist_id: String) -> Option<EventHandler<()>> {
     let ctrl = consume_context::<PlayerController>();
-    let active_source = consume_context::<Signal<ActiveSource>>();
+    let capabilities = consume_context::<Signal<api::SourceCapabilities>>();
     let api = consume_context::<Arc<dyn KopuzApi>>();
-    let supported = active_source.read().capabilities().radio.playlist;
+    let supported = capabilities.read().playlist_radio;
     supported.then(|| {
         EventHandler::new(move |_| play_playlist_radio(playlist_id.clone(), api.clone(), ctrl))
     })

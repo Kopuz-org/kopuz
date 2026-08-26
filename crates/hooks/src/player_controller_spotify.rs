@@ -2,23 +2,14 @@
 
 use std::time::Duration;
 
-use config::MusicService;
 use dioxus::prelude::*;
 use reader::Track;
 
 use crate::use_player_controller::PlayerController;
 
 impl PlayerController {
-    /// The current Spotify OAuth access token, if Spotify is the active server.
     pub(crate) fn spotify_access(&self) -> Option<String> {
-        let cfg = self.config.peek();
-        let server = cfg.server.as_ref()?;
-        if server.service != MusicService::Spotify {
-            return None;
-        }
-        let packed = server.access_token.clone()?;
-        let access = ::server::spotify::auth::unpack_token(&packed).0;
-        (!access.is_empty()).then_some(access)
+        self.spotify_token.peek().clone()
     }
 
     /// Start the browser playback host if it isn't running yet (first Spotify play).

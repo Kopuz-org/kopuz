@@ -354,6 +354,12 @@ Use `TrackInfo.key` as the stable reference for queueing, favorites, lyrics,
 downloads, and artwork. Do not infer file paths from keys. Server-side tracks
 intentionally do not expose filesystem paths.
 
+`GetQueueSnapshot` and `SaveQueueSnapshot` exist for a frontend that temporarily
+owns playback, such as a Spotify frontend, and must preserve its physical queue,
+progress, and shuffle permutation across shutdown. Ordinary daemon-owned
+playback persists itself, so most frontends only need `GetQueue`, `SetQueue`,
+and `EditQueue`.
+
 Fetch artwork incrementally with `GetArtwork`. The first chunk contains the
 content type and later chunks contain bytes only. Stream chunks into a bounded
 buffer or file instead of assuming the response is one message.
@@ -372,8 +378,10 @@ last value is the final choice. `GetLyrics` remains available for clients that
 only need the final result.
 
 Credentials never appear in `GetConfig`, `GetSources`, events, logs, or normal
-catalog DTOs. Create or update a credential-free server record with
-`UpsertServer`, then send secrets only through `ProvisionCredentials`. Use
+catalog DTOs. Manage local libraries with `UpsertLocalSource`,
+`DeleteLocalSource`, and `SetSourceDirectories`. Create or update a
+credential-free server record with `UpsertServer`, then send secrets only
+through `ProvisionCredentials` or `LoginSource`. Use
 `AuthenticateSource` when Kopuz should own a supported browser sign-in flow.
 Use `BrowseSource` to browse a configured Nextcloud account without receiving
 its password. `ClearCredentials` revokes the stored source credential. A

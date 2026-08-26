@@ -74,6 +74,139 @@ impl FrontendService {
         ApiError::internal(format!("database error: {error}"))
     }
 
+    fn persisted_track(value: &api::TrackInfo) -> Result<reader::Track, ApiError> {
+        if value.service.is_some() {
+            return LibraryService::track_from_info(value);
+        }
+        if value.key.trim().is_empty() {
+            return Err(ApiError::invalid_input("persisted track key is required"));
+        }
+        let id = reader::TrackId::Local(PathBuf::from(&value.key));
+        if !value.uid.is_empty() && value.uid != id.uid() {
+            return Err(ApiError::invalid_input(
+                "persisted track uid does not match its key",
+            ));
+        }
+        Ok(reader::Track {
+            id,
+            cover: None,
+            album_id: value.album_id.clone(),
+            title: value.title.clone(),
+            artist: value.artist.clone(),
+            album: value.album.clone(),
+            duration: if value.kind == api::TrackKind::Radio {
+                u64::MAX
+            } else {
+                value.duration_ms.unwrap_or_default() / 1000
+            },
+            khz: value.khz,
+            bitrate: value.bitrate,
+            track_number: value.track_number,
+            disc_number: value.disc_number,
+            musicbrainz_release_id: value.musicbrainz_release_id.clone(),
+            musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
+            musicbrainz_track_id: value.musicbrainz_track_id.clone(),
+            playlist_item_id: value.playlist_item_id.clone(),
+            artists: value.artists.clone(),
+        })
+    }
+
+    pub async fn queue_snapshot(&self) -> Result<api::QueuePersistenceSnapshot, ApiError> {
+        let snapshot = self.db.load_queue().await.map_err(Self::db_error)?;
+        let config = self.current().await;
+        Ok(api::QueuePersistenceSnapshot {
+            tracks: snapshot
+                .queue
+                .iter()
+                .map(|track| crate::wire::track_info(track, &config))
+                .collect(),
+            current_index: snapshot
+                .current_queue_index
+                .try_into()
+                .map_err(|_| ApiError::internal("persisted queue index is too large"))?,
+            progress_ms: snapshot.progress_secs.saturating_mul(1000),
+            shuffle_order: snapshot
+                .shuffle_order
+                .into_iter()
+                .map(|index| {
+                    index
+                        .try_into()
+                        .map_err(|_| ApiError::internal("persisted shuffle index is too large"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            shuffle_enabled: snapshot.shuffle_enabled,
+        })
+    }
+
+    pub async fn save_queue_snapshot(
+        &self,
+        snapshot: api::QueuePersistenceSnapshot,
+    ) -> Result<(), ApiError> {
+        if snapshot.tracks.len() > u32::MAX as usize {
+            return Err(ApiError::invalid_input("queue snapshot is too large"));
+        }
+        if snapshot.tracks.is_empty() {
+            if snapshot.current_index != 0 || !snapshot.shuffle_order.is_empty() {
+                return Err(ApiError::invalid_input(
+                    "an empty queue snapshot cannot contain positions",
+                ));
+            }
+        } else if snapshot.current_index as usize >= snapshot.tracks.len() {
+            return Err(ApiError::invalid_input(
+                "current queue index is outside the snapshot",
+            ));
+        }
+        if snapshot.shuffle_enabled
+            && !snapshot.tracks.is_empty()
+            && snapshot.shuffle_order.len() != snapshot.tracks.len()
+        {
+            return Err(ApiError::invalid_input(
+                "enabled shuffle requires a complete queue permutation",
+            ));
+        }
+        if !snapshot.shuffle_order.is_empty() {
+            let mut seen = vec![false; snapshot.tracks.len()];
+            for index in &snapshot.shuffle_order {
+                let index = *index as usize;
+                if index >= seen.len() || std::mem::replace(&mut seen[index], true) {
+                    return Err(ApiError::invalid_input(
+                        "shuffle order must be a queue permutation",
+                    ));
+                }
+            }
+            if seen.iter().any(|seen| !seen) {
+                return Err(ApiError::invalid_input(
+                    "shuffle order must include every queue position",
+                ));
+            }
+        }
+
+        let tracks = snapshot
+            .tracks
+            .iter()
+            .map(|value| {
+                let decoded = Self::persisted_track(value)?;
+                Ok(self
+                    .library
+                    .transient_track_for_info(value)
+                    .unwrap_or(decoded))
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?;
+        let persisted = db::QueueSnapshot {
+            version: 1,
+            queue: tracks,
+            current_queue_index: snapshot.current_index as usize,
+            progress_secs: snapshot.progress_ms / 1000,
+            shuffle_order: snapshot
+                .shuffle_order
+                .into_iter()
+                .map(|index| index as usize)
+                .collect(),
+            shuffle_enabled: snapshot.shuffle_enabled,
+        };
+        self.db.save_queue(&persisted).await.map_err(Self::db_error)
+    }
+
     fn source_error(error: SourceError) -> ApiError {
         match error {
             SourceError::Unsupported(message) => ApiError::unsupported(message),
@@ -152,6 +285,10 @@ impl FrontendService {
                 server::source::AlbumType::Standard => api::AlbumPresentation::Standard,
                 server::source::AlbumType::YtMusic => api::AlbumPresentation::Remote,
             },
+            favorites_sync: match value.favorites_sync {
+                server::source::FavoritesSync::Instant => api::FavoritesSyncMode::Instant,
+                server::source::FavoritesSync::Paginated => api::FavoritesSyncMode::Paginated,
+            },
         }
     }
 
@@ -189,38 +326,74 @@ impl FrontendService {
         let current = self.current().await;
         let (resolved, source) = self.source_for(id).await?;
         let source_key = resolved.active_source.clone();
-        let (name, kind, service, authenticated) = match &source_key {
-            config::Source::Local => (
-                "Local Library".to_string(),
-                api::SourceKind::Local,
-                None,
-                true,
-            ),
-            config::Source::LocalLibrary(local_id) => {
-                let saved = resolved
-                    .local_sources
-                    .iter()
-                    .find(|saved| saved.id == *local_id)
-                    .ok_or_else(|| ApiError::not_found("local source not found"))?;
-                (
-                    saved.name.clone(),
-                    api::SourceKind::LocalLibrary,
+        let (name, kind, service, authenticated, url, browser, anonymous, storefront, language) =
+            match &source_key {
+                config::Source::Local => (
+                    "Local Library".to_string(),
+                    api::SourceKind::Local,
                     None,
                     true,
-                )
-            }
-            config::Source::Server(_) => {
-                let server = resolved
-                    .server
-                    .as_ref()
-                    .ok_or_else(|| ApiError::not_found("server not found"))?;
-                (
-                    server.name.clone(),
-                    api::SourceKind::Server,
-                    Some(crate::wire::music_service(server.service)),
-                    server.access_token.is_some() || server.yt_anonymous,
-                )
-            }
+                    None,
+                    None,
+                    false,
+                    None,
+                    None,
+                ),
+                config::Source::LocalLibrary(local_id) => {
+                    let saved = resolved
+                        .local_sources
+                        .iter()
+                        .find(|saved| saved.id == *local_id)
+                        .ok_or_else(|| ApiError::not_found("local source not found"))?;
+                    (
+                        saved.name.clone(),
+                        api::SourceKind::LocalLibrary,
+                        None,
+                        true,
+                        None,
+                        None,
+                        false,
+                        None,
+                        None,
+                    )
+                }
+                config::Source::Server(_) => {
+                    let server = resolved
+                        .server
+                        .as_ref()
+                        .ok_or_else(|| ApiError::not_found("server not found"))?;
+                    (
+                        server.name.clone(),
+                        api::SourceKind::Server,
+                        Some(crate::wire::music_service(server.service)),
+                        server.access_token.is_some() || server.yt_anonymous,
+                        Some(server.url.clone()),
+                        server.yt_browser.map(|browser| browser.id().to_string()),
+                        server.yt_anonymous,
+                        Some(server.apple_music_storefront.clone()),
+                        Some(server.apple_music_language.clone()),
+                    )
+                }
+            };
+        let directories = match &source_key {
+            config::Source::Local => resolved
+                .music_directory
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect(),
+            config::Source::LocalLibrary(local_id) => resolved
+                .local_sources
+                .iter()
+                .find(|source| source.id == *local_id)
+                .map(|source| {
+                    source
+                        .directories
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            config::Source::Server(server_id) => resolved.folders_for(server_id),
         };
         Ok(api::SourceInfo {
             id: source_key.as_str().to_string(),
@@ -230,6 +403,12 @@ impl FrontendService {
             active: current.active_source.as_str() == source_key.as_str(),
             authenticated,
             capabilities: Self::capabilities(source.capabilities()),
+            url,
+            browser,
+            anonymous,
+            storefront,
+            language,
+            directories,
         })
     }
 
@@ -578,6 +757,22 @@ impl FrontendService {
             .next()
             .ok_or_else(|| ApiError::not_found("track not found"))?;
         Ok(self.source().await.web_url(&track))
+    }
+
+    pub async fn album_web_url(&self, id: &str) -> Result<Option<String>, ApiError> {
+        if id.trim().is_empty() {
+            return Err(ApiError::invalid_input("album id is required"));
+        }
+        let service = self.current().await.server.map(|server| server.service);
+        Ok(match service {
+            Some(config::MusicService::Spotify) => {
+                Some(format!("https://open.spotify.com/album/{id}"))
+            }
+            Some(config::MusicService::YtMusic) => {
+                Some(format!("https://music.youtube.com/browse/{id}"))
+            }
+            _ => None,
+        })
     }
 
     pub async fn top_genre(&self) -> Result<Option<String>, ApiError> {
@@ -966,6 +1161,144 @@ impl FrontendService {
         self.source_info_for(id).await
     }
 
+    pub async fn upsert_local_source(
+        &self,
+        draft: api::LocalSourceDraft,
+    ) -> Result<api::SourceInfo, ApiError> {
+        self.config.ensure_unlocked(&["local_sources"])?;
+        let name = draft.name.trim();
+        if name.is_empty() {
+            return Err(ApiError::invalid_input("local source name is required"));
+        }
+        if draft.directories.is_empty()
+            || draft.directories.iter().any(|path| path.trim().is_empty())
+        {
+            return Err(ApiError::invalid_input(
+                "at least one local source directory is required",
+            ));
+        }
+        let id = draft
+            .id
+            .unwrap_or_else(|| format!("local:{}", uuid::Uuid::new_v4()));
+        if !id.starts_with("local:") {
+            return Err(ApiError::invalid_input("invalid local source id"));
+        }
+        let saved = config::SavedLocalSource {
+            id: id.clone(),
+            name: name.to_string(),
+            directories: draft.directories.into_iter().map(PathBuf::from).collect(),
+        };
+        let updated = self
+            .config
+            .mutate_state({
+                let saved = saved.clone();
+                move |config| {
+                    if let Some(existing) = config
+                        .local_sources
+                        .iter_mut()
+                        .find(|source| source.id == saved.id)
+                    {
+                        *existing = saved.clone();
+                    } else {
+                        config.local_sources.push(saved.clone());
+                    }
+                }
+            })
+            .await?;
+        self.publish_config(updated, vec!["local_sources".to_string()])
+            .await;
+        self.library.invalidate(api::Table::Servers);
+        self.source_info_for(&id).await
+    }
+
+    pub async fn delete_local_source(&self, id: &str) -> Result<(), ApiError> {
+        self.config
+            .ensure_unlocked(&["active_source", "local_sources"])?;
+        if id == "local" {
+            return Err(ApiError::invalid_input(
+                "the default local source cannot be deleted",
+            ));
+        }
+        let current = self.current().await;
+        if !current.local_sources.iter().any(|source| source.id == id) {
+            return Err(ApiError::not_found("local source not found"));
+        }
+        let was_active = current.active_source.local_library_id() == Some(id);
+        let id = id.to_string();
+        let updated = self
+            .config
+            .mutate_state(move |config| config.remove_local_source(&id))
+            .await?;
+        if was_active {
+            self.finish_source_change(
+                updated,
+                vec!["local_sources".to_string(), "active_source".to_string()],
+            )
+            .await?;
+        } else {
+            self.publish_config(updated, vec!["local_sources".to_string()])
+                .await;
+            self.library.invalidate(api::Table::Servers);
+        }
+        Ok(())
+    }
+
+    pub async fn set_source_directories(
+        &self,
+        id: &str,
+        directories: Vec<String>,
+    ) -> Result<api::SourceInfo, ApiError> {
+        if directories.iter().any(|path| path.trim().is_empty()) {
+            return Err(ApiError::invalid_input("source directory is empty"));
+        }
+        let source = config::Source::from_column(id);
+        let changed = match &source {
+            config::Source::Local => "music_directory",
+            config::Source::LocalLibrary(_) => "local_sources",
+            config::Source::Server(_) => "server_folders",
+        };
+        self.config.ensure_unlocked(&[changed])?;
+        let current = self.current().await;
+        if let config::Source::LocalLibrary(local_id) = &source
+            && !current
+                .local_sources
+                .iter()
+                .any(|saved| saved.id == *local_id)
+        {
+            return Err(ApiError::not_found("local source not found"));
+        }
+        if let config::Source::Server(server_id) = &source
+            && !current.servers.iter().any(|saved| saved.id == *server_id)
+        {
+            return Err(ApiError::not_found("server not found"));
+        }
+        let id_owned = id.to_string();
+        let updated = self
+            .config
+            .mutate_state(move |config| match source {
+                config::Source::Local => {
+                    config.music_directory = directories.into_iter().map(PathBuf::from).collect();
+                }
+                config::Source::LocalLibrary(local_id) => {
+                    if let Some(saved) = config
+                        .local_sources
+                        .iter_mut()
+                        .find(|saved| saved.id == local_id)
+                    {
+                        saved.directories = directories.into_iter().map(PathBuf::from).collect();
+                    }
+                }
+                config::Source::Server(server_id) => {
+                    config.set_folders_for(&server_id, directories);
+                }
+            })
+            .await?;
+        self.publish_config(updated, vec![changed.to_string()])
+            .await;
+        self.library.invalidate(api::Table::Servers);
+        self.source_info_for(&id_owned).await
+    }
+
     pub async fn upsert_server(
         &self,
         draft: api::ServerDraft,
@@ -1047,7 +1380,13 @@ impl FrontendService {
     pub async fn delete_server(&self, id: &str) -> Result<(), ApiError> {
         self.config
             .ensure_unlocked(&["active_source", "server", "servers"])?;
-        let was_active = self.current().await.active_source.server_id() == Some(id);
+        let current = self.current().await;
+        let service = current
+            .servers
+            .iter()
+            .find(|server| server.id == id)
+            .map(|server| server.service);
+        let was_active = current.active_source.server_id() == Some(id);
         let id_owned = id.to_string();
         let updated = self
             .config
@@ -1067,6 +1406,18 @@ impl FrontendService {
             self.reset_playback().await?;
         }
         self.library.invalidate(api::Table::Servers);
+        match service {
+            Some(config::MusicService::YtMusic) => {
+                let _ = server::ytmusic::isolated_profile::delete_profile(id);
+            }
+            Some(config::MusicService::SoundCloud) => {
+                let _ = server::soundcloud::signin::delete_profile(id);
+            }
+            Some(config::MusicService::AppleMusic) => {
+                let _ = server::applemusic::signin::delete_profile(id);
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -1137,6 +1488,37 @@ impl FrontendService {
         }
         self.library.invalidate(api::Table::Servers);
         self.source_info_for(&provision.server_id).await
+    }
+
+    pub async fn login_source(
+        &self,
+        request: api::SourceLoginRequest,
+    ) -> Result<api::SourceInfo, ApiError> {
+        self.config.ensure_unlocked(&["server", "servers"])?;
+        if request.username.trim().is_empty() || request.password.is_empty() {
+            return Err(ApiError::invalid_input(
+                "source username and password are required",
+            ));
+        }
+        let current = self.current().await;
+        let server = self
+            .db
+            .load_server(&request.server_id)
+            .await
+            .map_err(Self::db_error)?
+            .ok_or_else(|| ApiError::not_found("server not found"))?;
+        let auth =
+            server::provider::ProviderClient::new(server.service, server.url, current.device_id)
+                .login(request.username.trim(), &request.password)
+                .await
+                .map_err(|error| ApiError::new(ErrorCode::Unauthorized, error))?;
+        self.provision(api::CredentialProvision {
+            server_id: request.server_id,
+            secret: auth.access_token,
+            user_id: Some(auth.user_id),
+            browser: None,
+        })
+        .await
     }
 
     pub async fn clear_credentials(&self, id: &str) -> Result<(), ApiError> {
@@ -1994,6 +2376,13 @@ impl FrontendService {
             id: manifest.id.clone(),
             name: manifest.name.clone(),
             description: manifest.description.clone(),
+            icon: manifest.icon.clone(),
+            artwork: match manifest.metadata.as_ref() {
+                Some(radio::manifest::MetadataSourceDef::Static(metadata)) => {
+                    metadata.cover_url.clone()
+                }
+                _ => None,
+            },
             tags: manifest.tags.clone(),
             streams: manifest
                 .streams
@@ -2002,6 +2391,7 @@ impl FrontendService {
                     id: stream.id.clone(),
                     name: stream.name.clone(),
                     url: stream.url.clone(),
+                    icon: stream.icon.clone(),
                 })
                 .collect(),
             pinned,
@@ -2129,7 +2519,8 @@ impl FrontendService {
         let mut result = Vec::with_capacity(stations.len());
         for station in stations {
             let manifest = radio::browser::to_manifest(&station);
-            result.push(Self::station_info(&manifest, false));
+            let pinned = registry.is_registry_station(&manifest.id);
+            result.push(Self::station_info(&manifest, pinned));
             registry.insert_manifest(manifest);
         }
         let snapshot = Arc::new(registry.clone());
@@ -2232,7 +2623,7 @@ impl FrontendService {
                     id: station.id.clone(),
                     name: station.name.clone(),
                     description: station.description.clone(),
-                    icon: "fa-solid fa-radio".to_string(),
+                    icon: station.icon.clone(),
                     tags: station.tags.clone(),
                     streams: station
                         .streams
@@ -2243,10 +2634,17 @@ impl FrontendService {
                             url: stream.url.clone(),
                             codec: None,
                             bitrate: None,
-                            icon: None,
+                            icon: stream.icon.clone(),
                         })
                         .collect(),
-                    metadata: None,
+                    metadata: Some(radio::manifest::MetadataSourceDef::Static(
+                        radio::manifest::StaticSourceDef {
+                            title: station.name.clone(),
+                            artist: "Live Radio".to_string(),
+                            cover_url: station.artwork.clone(),
+                            stream_overrides: std::collections::HashMap::new(),
+                        },
+                    )),
                 })
         };
         manifest

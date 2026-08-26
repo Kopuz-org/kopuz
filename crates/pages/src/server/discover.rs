@@ -6,8 +6,59 @@ use components::track_row::TrackRow;
 use config::MusicService;
 use dioxus::prelude::*;
 use reader::models::Track;
-use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArtist};
 use tracing::Instrument;
+
+#[derive(Debug, Clone, PartialEq)]
+struct DiscoverHome {
+    shelves: Vec<DiscoverShelf>,
+    continuation: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct DiscoverShelf {
+    title: String,
+    strapline: Option<String>,
+    more_browse_id: Option<String>,
+    items: Vec<DiscoverItem>,
+    is_song_list: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum DiscoverItem {
+    Song(Box<Track>),
+    Playlist {
+        playlist_id: String,
+        title: String,
+        subtitle: String,
+        thumbnail: Option<String>,
+    },
+    Album {
+        browse_id: String,
+        title: String,
+        subtitle: String,
+        thumbnail: Option<String>,
+    },
+    Artist {
+        channel_id: String,
+        name: String,
+        thumbnail: Option<String>,
+    },
+    Mood {
+        browse_id: String,
+        title: String,
+        thumbnail: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct YtArtist {
+    name: String,
+    subscribers: Option<String>,
+    description: Option<String>,
+    banner_thumbnail: Option<String>,
+    shuffle_playlist_id: Option<String>,
+    sections: Vec<DiscoverShelf>,
+}
 
 /// Tracks the id (playlist_id or MPRE… album browse id) that last
 /// initiated playback through a Discover surface. Album and playlist
@@ -88,7 +139,7 @@ pub fn DiscoverPage(
     on_open_artist: EventHandler<(String, String)>,
     on_search_artist: EventHandler<String>,
 ) -> Element {
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let caps = use_context::<Signal<api::SourceCapabilities>>();
     let api = use_context::<Arc<dyn api::KopuzApi>>();
     let mut shelves = use_signal(Vec::<DiscoverShelf>::new);
     let mut continuation = use_signal(|| None::<String>);
@@ -98,7 +149,7 @@ pub fn DiscoverPage(
 
     // Discover is a capability of the active source, not a hardcoded service —
     // gate on it (and on the active source, not the configured server).
-    let discover_supported = active_source.read().capabilities().discover;
+    let discover_supported = caps.read().discover;
 
     let home_api = api.clone();
     use_effect(move || {
@@ -1239,7 +1290,6 @@ pub fn DiscoverArtistPage(
                     })
                     .await
                     .map(|detail| YtArtist {
-                        channel_id: detail.id,
                         name: detail.title,
                         subscribers: detail.subtitle,
                         description: detail.description,

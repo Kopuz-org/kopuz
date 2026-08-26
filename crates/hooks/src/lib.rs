@@ -4,8 +4,8 @@
 pub mod artist_images;
 pub mod db_reactivity;
 pub mod debug_db;
+pub mod downloads;
 pub mod favorites;
-pub mod scrobble_scheduler;
 mod session_projector;
 pub mod source_switch;
 pub mod toast;
@@ -23,4 +23,4 @@ pub use debug_db::debug_db_section;
 // The read-facing storage types the UI needs — re-exported here (the query
 // layer) so `pages`/`components` depend on `hooks`, not `db`, and so cannot name
 // the write-capable `db::Db` at all.
-pub use db::{Page, ReadDb, TrackFilter, TrackSort};
+pub use db::{Page, TrackFilter, TrackSort};

@@ -244,6 +244,16 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::queue_window_to_proto(&window)))
     }
 
+    async fn get_queue_snapshot(
+        &self,
+        _request: Request<proto::Empty>,
+    ) -> Result<Response<proto::QueuePersistenceSnapshot>, Status> {
+        let snapshot = self.0.api.queue_snapshot().await.map_err(failed)?;
+        Ok(Response::new(convert::queue_persistence_snapshot_to_proto(
+            &snapshot,
+        )))
+    }
+
     async fn get_tracks(
         &self,
         request: Request<proto::TracksRequest>,
@@ -526,6 +536,19 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::OptionalString { value }))
     }
 
+    async fn get_album_web_url(
+        &self,
+        request: Request<proto::EntityRef>,
+    ) -> Result<Response<proto::OptionalString>, Status> {
+        let value = self
+            .0
+            .api
+            .album_web_url(request.get_ref().id.clone())
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::OptionalString { value }))
+    }
+
     async fn get_top_genre(
         &self,
         _request: Request<proto::Empty>,
@@ -790,6 +813,20 @@ impl Kopuz for KopuzGrpc {
         }))
     }
 
+    async fn save_queue_snapshot(
+        &self,
+        request: Request<proto::QueuePersistenceSnapshot>,
+    ) -> Result<Response<proto::Empty>, Status> {
+        self.0
+            .api
+            .save_queue_snapshot(convert::queue_persistence_snapshot_from_proto(
+                request.get_ref(),
+            ))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Empty {}))
+    }
+
     async fn set_favorite(
         &self,
         request: Request<proto::FavoriteRequest>,
@@ -1026,6 +1063,45 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::source_info_to_proto(&source)))
     }
 
+    async fn upsert_local_source(
+        &self,
+        request: Request<proto::LocalSourceDraft>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let source = self
+            .0
+            .api
+            .upsert_local_source(convert::local_source_draft_from_proto(request.get_ref()))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&source)))
+    }
+
+    async fn delete_local_source(
+        &self,
+        request: Request<proto::EntityRef>,
+    ) -> Result<Response<proto::Empty>, Status> {
+        self.0
+            .api
+            .delete_local_source(request.get_ref().id.clone())
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Empty {}))
+    }
+
+    async fn set_source_directories(
+        &self,
+        request: Request<proto::SourceDirectories>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let request = request.get_ref();
+        let source = self
+            .0
+            .api
+            .set_source_directories(request.id.clone(), request.directories.clone())
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&source)))
+    }
+
     async fn upsert_server(
         &self,
         request: Request<proto::ServerDraft>,
@@ -1059,6 +1135,19 @@ impl Kopuz for KopuzGrpc {
             .0
             .api
             .provision_credentials(convert::credential_from_proto(request.get_ref()))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&source)))
+    }
+
+    async fn login_source(
+        &self,
+        request: Request<proto::SourceLoginRequest>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let source = self
+            .0
+            .api
+            .login_source(convert::source_login_from_proto(request.get_ref()))
             .await
             .map_err(failed)?;
         Ok(Response::new(convert::source_info_to_proto(&source)))

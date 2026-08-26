@@ -65,8 +65,7 @@ pub fn HomeBody(
     let is_offline = use_context::<Signal<bool>>();
     let mut config = use_context::<Signal<AppConfig>>();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = use_context::<Signal<api::SourceCapabilities>>();
     let mut has_fetched = use_signal(|| false);
     // Which card has its overflow menu open, keyed by track uid / playlist id.
     // Owned here because the section renderers are plain functions, so they
@@ -79,17 +78,12 @@ pub fn HomeBody(
     // home triggers no photo fetch; the Artists page's pipeline fills these).
     let artist_images_res = hooks::use_db_queries::use_artist_images();
     let fetched_artist_images = use_context::<Signal<::server::cover::FetchedArtistImages>>();
+    let downloaded_tracks = use_context::<hooks::downloads::DownloadedTracks>();
     let offline_keys = use_memo(move || -> Vec<String> {
         if !(caps().downloads && *is_offline.read()) {
             return Vec::new();
         }
-        config
-            .read()
-            .offline_tracks
-            .iter()
-            .filter(|(_, path)| std::path::Path::new(path).exists())
-            .map(|(id, _)| id.clone())
-            .collect()
+        downloaded_tracks.0.read().iter().cloned().collect()
     });
     let offline_tracks_res = use_tracks_by_keys(source, offline_keys);
     // Recently-played for the active source (each source keeps its own history).
@@ -101,7 +95,7 @@ pub fn HomeBody(
     let mut fetch_remote = move || {
         has_fetched.set(true);
         spawn(async move {
-            let _ = crate::server::subsonic_sync::sync_server_library(false).await;
+            let _ = crate::server::library_sync::sync_server_library().await;
         });
     };
 
@@ -359,7 +353,7 @@ pub fn HomeBody(
                     &norm,
                     &track.artist,
                     album_cover,
-                    caps().artist_view,
+                    caps().artists == api::ArtistPresentation::Library,
                 );
                 let cover_url = ::server::cover::artist(&conf, art, 384).map(|c| c.to_string());
                 artist_list.push((track.artist.clone(), cover_url));
@@ -385,6 +379,7 @@ pub fn HomeBody(
         let store = playlists_res.read().clone().unwrap_or_default();
         let cover_tracks = playlist_cover_tracks_res.read().clone().unwrap_or_default();
         let conf = config.read();
+        let downloaded = downloaded_tracks.0.read();
         let offline = caps().downloads && *is_offline.read();
         store
             .playlists
@@ -393,14 +388,7 @@ pub fn HomeBody(
                 if !offline {
                     return true;
                 }
-                !p.tracks.is_empty()
-                    && p.tracks.iter().all(|tid| {
-                        if let Some(path_str) = conf.offline_tracks.get(tid) {
-                            std::path::Path::new(path_str).exists()
-                        } else {
-                            false
-                        }
-                    })
+                !p.tracks.is_empty() && p.tracks.iter().all(|tid| downloaded.contains(tid))
             })
             .rev()
             .take(10)

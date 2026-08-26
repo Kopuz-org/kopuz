@@ -1,4 +1,3 @@
-use config::AppConfig;
 use dioxus::prelude::*;
 use tracing::Instrument;
 
@@ -44,7 +43,7 @@ pub fn use_webview_decipher_engine() {
 }
 
 pub fn use_connectivity_probe(
-    config: Signal<AppConfig>,
+    sources: Signal<Vec<api::SourceInfo>>,
     mut network_banner: Signal<Option<bool>>,
 ) -> Signal<bool> {
     let mut is_offline = use_signal(|| false);
@@ -59,7 +58,11 @@ pub fn use_connectivity_probe(
         };
         let mut misses: u8 = 0;
         loop {
-            if config.peek().server.is_none() {
+            if !sources
+                .peek()
+                .iter()
+                .any(|source| source.active && source.kind == api::SourceKind::Server)
+            {
                 if *is_offline.peek() {
                     is_offline.set(false);
                 }

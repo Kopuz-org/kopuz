@@ -1217,17 +1217,6 @@ impl AppConfig {
     pub fn uses_jellyfin_server(&self) -> bool {
         self.active_service() == Some(MusicService::Jellyfin)
     }
-
-    /// The server to activate when toggling into server mode: the current server
-    /// if already on one, else the first saved server. `None` ⇒ no servers, so
-    /// the toggle is a no-op.
-    pub fn server_toggle_target(&self) -> Option<Source> {
-        self.active_source
-            .server_id()
-            .map(String::from)
-            .or_else(|| self.servers.first().map(|s| s.id.clone()))
-            .map(Source::Server)
-    }
 }
 
 #[cfg(test)]

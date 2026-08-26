@@ -5,19 +5,18 @@ use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_player_controller::PlayerController;
 use reader::Track;
-use server::source::PlaylistOps;
 
 #[component]
 pub(crate) fn TrackActions(track: Track) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let capabilities = use_context::<Signal<api::SourceCapabilities>>();
     let api = use_context::<std::sync::Arc<dyn api::KopuzApi>>();
     let generations = hooks::db_reactivity::use_generations();
     let mut is_open = use_signal(|| false);
     let mut show_playlist_modal = use_signal(|| false);
     let mut show_metadata = use_signal(|| false);
 
-    let capabilities = active_source.read().capabilities();
+    let capabilities = capabilities.read();
     let mut actions = vec![
         MenuAction::new(i18n::t("play_next").to_string(), "fa-solid fa-forward-step"),
         MenuAction::new(i18n::t("add_to_queue").to_string(), "fa-solid fa-list-ul"),
@@ -25,7 +24,7 @@ pub(crate) fn TrackActions(track: Track) -> Element {
     let play_next_idx = 0;
     let add_to_queue_idx = 1;
 
-    let playlist_idx = if capabilities.playlists != PlaylistOps::None {
+    let playlist_idx = if capabilities.playlists != api::PlaylistCapability::None {
         let idx = actions.len();
         actions.push(MenuAction::new(
             i18n::t("add_to_playlist").to_string(),
@@ -42,7 +41,7 @@ pub(crate) fn TrackActions(track: Track) -> Element {
         "fa-solid fa-share-nodes",
     ));
 
-    let radio_idx = if capabilities.radio.track {
+    let radio_idx = if capabilities.track_radio {
         let idx = actions.len();
         actions.push(MenuAction::new(
             crate::radio_actions::radio_label(),
@@ -83,8 +82,7 @@ pub(crate) fn TrackActions(track: Track) -> Element {
                     } else if playlist_idx == Some(idx) {
                         show_playlist_modal.set(true);
                     } else if idx == share_idx {
-                        let source = active_source.peek().clone();
-                        crate::track_row::share_track(action_track.clone(), source);
+                        crate::track_row::share_track(action_track.clone(), api_menu.clone());
                     } else if radio_idx == Some(idx) {
                         crate::track_row::play_radio(action_track.clone(), api_menu.clone(), ctrl);
                     } else if idx == metadata_idx {

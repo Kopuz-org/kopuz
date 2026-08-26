@@ -26,7 +26,7 @@ pub fn BottombarNormal(
     is_devices_open: Signal<bool>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let api = use_context::<std::sync::Arc<dyn api::KopuzApi>>();
     let nav_ctrl = use_context::<NavigationController>();
     let fav_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_fav = hooks::use_db_queries::use_track_is_favorite(fav_track);
@@ -201,8 +201,7 @@ pub fn BottombarNormal(
                     title: i18n::t("share_musicbrainz").to_string(),
                     onclick: move |_| {
                         if let Some(t) = ctrl.current_track_snapshot.read().clone() {
-                            let src = active_source.peek().clone();
-                            crate::track_row::share_track(t, src);
+                            crate::track_row::share_track(t, api.clone());
                         }
                     },
                     i { class: "fa-solid fa-share-nodes text-xs" }

@@ -13,7 +13,7 @@ use components::settings_items::{
 use components::settings_popups::{
     AddLocalSourcePopup, AddRegistryPopup, AddServerPopup, LoginPopup,
 };
-use components::settings_remote_folders::{RemoteCreds, RemoteFolderSettings};
+use components::settings_remote_folders::RemoteFolderSettings;
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
@@ -52,6 +52,7 @@ fn BuildInfoCard() -> Element {
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
+    let source_list = use_context::<Signal<Vec<api::SourceInfo>>>();
     let spotify_browsers = use_hook(|| {
         ::server::spotify::host::available_browsers()
             .into_iter()
@@ -70,11 +71,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let server_url = use_signal(String::new);
     let server_service = use_signal(|| MusicService::Jellyfin);
     let yt_browser = use_signal(|| {
-        config
+        source_list
             .peek()
-            .server
-            .as_ref()
-            .and_then(|s| s.yt_browser)
+            .iter()
+            .find(|source| source.active)
+            .and_then(|source| source.browser.as_deref())
+            .and_then(config::Browser::from_id)
             .unwrap_or(config::Browser::Chrome)
     });
     let yt_anonymous = use_signal(|| false);
@@ -116,7 +118,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
     let handle_add_registry = move |_| {
         crate::settings_actions::add_registry(
-            config,
             registry_url,
             registry_error,
             registry_loading,
@@ -125,21 +126,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     let ytmusic_auto_login = move || {
-        crate::settings_actions::ytmusic_auto_login(config, yt_browser, error, ctrl.playback_error);
+        crate::settings_actions::ytmusic_auto_login(yt_browser, error, ctrl.playback_error);
     };
 
     let applemusic_auto_login = move || {
-        crate::settings_actions::applemusic_auto_login(
-            config,
-            yt_browser,
-            error,
-            ctrl.playback_error,
-        );
+        crate::settings_actions::applemusic_auto_login(yt_browser, error, ctrl.playback_error);
     };
 
     let handle_add_server = move |_| {
         crate::settings_actions::add_server(
-            config,
             server_name,
             server_url,
             server_service,
@@ -157,18 +152,32 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     let api_for_switch = use_context::<std::sync::Arc<dyn api::KopuzApi>>();
+    let api_for_radio_toggle = api_for_switch.clone();
+    let api_for_radio_delete = api_for_switch.clone();
     let api_for_local_switch = api_for_switch.clone();
-    let handle_switch_local = move |source: config::Source| {
+    let api_for_local_delete = api_for_switch.clone();
+    let api_for_local_add_folder = api_for_switch.clone();
+    let api_for_local_remove_folder = api_for_switch.clone();
+    let api_for_local_create = api_for_switch.clone();
+    let api_for_remote_folders = api_for_switch.clone();
+    let handle_switch_local = move |source_id: String| {
         let api = api_for_local_switch.clone();
         spawn(async move {
-            hooks::source_switch::apply_source_switch(api, source).await;
+            hooks::source_switch::apply_source_switch(api, source_id).await;
         });
     };
     let handle_switch_server = move |id: String| {
+        let Some(source) = source_list
+            .peek()
+            .iter()
+            .find(|source| source.id == id)
+            .cloned()
+        else {
+            return;
+        };
         crate::settings_actions::switch_server(
-            config,
             api_for_switch.clone(),
-            id,
+            source,
             yt_browser,
             error,
             show_login,
@@ -177,12 +186,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     let handle_delete_saved = move |id: String| {
-        crate::settings_actions::delete_saved(config, id);
+        crate::settings_actions::delete_saved(id);
     };
 
     let handle_login = move |_| {
         crate::settings_actions::login_with_password(
-            config,
             username,
             password,
             login_error,
@@ -482,47 +490,56 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             extra_config_keys: vec!["local_sources"],
                             control: rsx! {
                                 LocalSourceSettings {
-                                    active_source: config.read().active_source.clone(),
-                                    default_directories: config.read().music_directory.clone(),
-                                    sources: config.read().local_sources.clone(),
+                                    sources: source_list
+                                        .read()
+                                        .iter()
+                                        .filter(|source| source.kind != api::SourceKind::Server)
+                                        .cloned()
+                                        .collect(),
                                     on_add: move |_| show_add_local_source.set(true),
-                                    on_delete: move |id: String| config.write().remove_local_source(&id),
-                                    on_switch: handle_switch_local,
-                                    on_add_folder: move |(source, path): (config::Source, std::path::PathBuf)| {
-                                        let mut cfg = config.write();
-                                        match source {
-                                            config::Source::Local => {
-                                                if !cfg.music_directory.contains(&path) {
-                                                    cfg.music_directory.push(path);
-                                                }
+                                    on_delete: move |id: String| {
+                                        let api = api_for_local_delete.clone();
+                                        spawn(async move {
+                                            if let Err(error) = api.delete_local_source(id).await {
+                                                tracing::warn!(%error, "failed to delete local source");
+                                                hooks::toast::toast_error(&error.to_string());
                                             }
-                                            config::Source::LocalLibrary(id) => {
-                                                if let Some(local) = cfg.local_sources.iter_mut().find(|local| local.id == id)
-                                                    && !local.directories.contains(&path)
-                                                {
-                                                    local.directories.push(path);
-                                                }
-                                            }
-                                            config::Source::Server(_) => {}
-                                        }
+                                        });
                                     },
-                                    on_remove_folder: move |(source, index): (config::Source, usize)| {
-                                        let mut cfg = config.write();
-                                        match source {
-                                            config::Source::Local => {
-                                                if index < cfg.music_directory.len() {
-                                                    cfg.music_directory.remove(index);
-                                                }
-                                            }
-                                            config::Source::LocalLibrary(id) => {
-                                                if let Some(local) = cfg.local_sources.iter_mut().find(|local| local.id == id)
-                                                    && index < local.directories.len()
-                                                {
-                                                    local.directories.remove(index);
-                                                }
-                                            }
-                                            config::Source::Server(_) => {}
+                                    on_switch: handle_switch_local,
+                                    on_add_folder: move |(id, path): (String, std::path::PathBuf)| {
+                                        let mut directories = source_directories(&source_list.peek(), &id);
+                                        if !directories.contains(&path) {
+                                            directories.push(path);
                                         }
+                                        let directories = directories
+                                            .into_iter()
+                                            .map(|path| path.to_string_lossy().into_owned())
+                                            .collect();
+                                        let api = api_for_local_add_folder.clone();
+                                        spawn(async move {
+                                            if let Err(error) = api.set_source_directories(id, directories).await {
+                                                tracing::warn!(%error, "failed to add local source directory");
+                                                hooks::toast::toast_error(&error.to_string());
+                                            }
+                                        });
+                                    },
+                                    on_remove_folder: move |(id, index): (String, usize)| {
+                                        let mut directories = source_directories(&source_list.peek(), &id);
+                                        if index < directories.len() {
+                                            directories.remove(index);
+                                        }
+                                        let directories = directories
+                                            .into_iter()
+                                            .map(|path| path.to_string_lossy().into_owned())
+                                            .collect();
+                                        let api = api_for_local_remove_folder.clone();
+                                        spawn(async move {
+                                            if let Err(error) = api.set_source_directories(id, directories).await {
+                                                tracing::warn!(%error, "failed to remove local source directory");
+                                                hooks::toast::toast_error(&error.to_string());
+                                            }
+                                        });
                                     },
                                 }
                             }
@@ -541,42 +558,30 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     )
                                 };
 
-                                if is_enabling && !url.is_empty() {
+                                if !url.is_empty() {
                                     registry_toggle_error.set(None);
+                                    let api = api_for_radio_toggle.clone();
                                     spawn(async move {
-                                        let mut temp_registry = radio::registry::StationRegistry::new();
-                                        match temp_registry.import_registry(&url).await {
-                                            Ok(_) => {
-                                                let mut cfg = config.write();
-                                                if let Some(entry) = cfg
-                                                .radio_registries
-                                                .iter_mut()
-                                                .find(|entry| entry.url == url)
-                                                {
-                                                    entry.enabled = true;
-                                                }
-                                                registry_toggle_error.set(None);
-                                            }
-                                            Err(e) => {
-                                                registry_toggle_error.set(Some(i18n::t_with("radio_registry_enable_failed", &[("error", e.to_string())])));
-                                            }
+                                        match api.set_radio_registry_enabled(url, is_enabling).await {
+                                            Ok(()) => registry_toggle_error.set(None),
+                                            Err(error) => registry_toggle_error.set(Some(i18n::t_with(
+                                                "radio_registry_enable_failed",
+                                                &[("error", error.to_string())],
+                                            ))),
                                         }
                                     });
-                                } else {
-                                    let mut cfg = config.write();
-                                    if let Some(entry) = cfg.radio_registries.get_mut(index) {
-                                        entry.enabled = false;
-                                    }
-                                    registry_toggle_error.set(None);
                                 }
                             },
                             on_add: move |_| show_add_registry.set(true),
                             on_delete: move |index: usize| {
-                                let mut cfg = config.write();
-                                if index < cfg.radio_registries.len()
-                                    && !cfg.radio_registries[index].is_default
-                                {
-                                    cfg.radio_registries.remove(index);
+                                let entry = config.read().radio_registries.get(index).cloned();
+                                if let Some(entry) = entry.filter(|entry| !entry.is_default) {
+                                    let api = api_for_radio_delete.clone();
+                                    spawn(async move {
+                                        if let Err(error) = api.remove_radio_registry(entry.url).await {
+                                            tracing::warn!(%error, "could not remove radio registry");
+                                        }
+                                    });
                                 }
                             }
                         }
@@ -586,23 +591,27 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 title: i18n::t("media_servers").to_string(),
                                 control: rsx! {
                                     ServerSettings {
-                                        active_source_id: config
+                                        servers: source_list
                                             .read()
-                                            .active_source
-                                            .server_id()
-                                            .map(String::from),
-                                        servers: config.read().servers.clone(),
+                                            .iter()
+                                            .filter(|source| source.kind == api::SourceKind::Server)
+                                            .cloned()
+                                            .collect(),
                                         on_add: move |_| show_add_server.set(true),
                                         on_delete: handle_delete_saved,
                                         on_switch: handle_switch_server,
                                         on_login: move |_| {
                                             let service =
-                                                config.read().server.as_ref().map(|s| s.service);
+                                                source_list
+                                                    .read()
+                                                    .iter()
+                                                    .find(|source| source.active)
+                                                    .and_then(|source| source.service);
                                             match service {
-                                                Some(MusicService::YtMusic) => {
+                                                Some(api::MusicService::YtMusic) => {
                                                     ytmusic_auto_login();
                                                 }
-                                                Some(MusicService::AppleMusic) => {
+                                                Some(api::MusicService::AppleMusic) => {
                                                     applemusic_auto_login();
                                                 }
                                                 _ => {
@@ -619,7 +628,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         on_spotify_prefer_active_device: move |v: bool| {
                                             config.write().spotify_prefer_active_device = v;
                                         },
-                                        remote_folders: remote_folder_settings(config),
+                                        remote_folders: remote_folder_settings(source_list, api_for_remote_folders.clone()),
                                     }
                                 }
                             }
@@ -872,13 +881,31 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             local_source_error.set(Some(i18n::t("local_library_folder_required").to_string()));
                             return;
                         }
-                        let source = config::SavedLocalSource::new(name, directories);
-                        let active = config::Source::LocalLibrary(source.id.clone());
-                        {
-                            let mut cfg = config.write();
-                            cfg.add_local_source(source);
-                            cfg.set_active_local_source(active);
-                        }
+                        let api = api_for_local_create.clone();
+                        spawn(async move {
+                            match api
+                                .upsert_local_source(api::LocalSourceDraft {
+                                    id: None,
+                                    name,
+                                    directories: directories
+                                        .into_iter()
+                                        .map(|path| path.to_string_lossy().into_owned())
+                                        .collect(),
+                                })
+                                .await
+                            {
+                                Ok(source) => {
+                                    if let Err(error) = api.switch_source(source.id).await {
+                                        tracing::warn!(%error, "failed to activate local source");
+                                        hooks::toast::toast_error(&error.to_string());
+                                    }
+                                }
+                                Err(error) => {
+                                    tracing::warn!(%error, "failed to create local source");
+                                    hooks::toast::toast_error(&error.to_string());
+                                }
+                            }
+                        });
                         show_add_local_source.set(false);
                         local_source_name.set(String::new());
                         local_source_directories.set(Vec::new());
@@ -901,11 +928,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 LoginPopup {
                     username,
                     password,
-                    service_name: config
+                    service_name: source_list
                         .read()
-                        .server
-                        .as_ref()
-                        .map(|server| server.service.display_name().to_string())
+                        .iter()
+                        .find(|source| source.active)
+                        .and_then(|source| source.service)
+                        .map(|service| service.display_name().to_string())
                         .unwrap_or_else(|| i18n::t("server").to_string()),
                     error: login_error,
                     loading: is_loading,
@@ -924,38 +952,72 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
 /// The active server's folder picker, or `None` when it has no folder tree or
 /// no creds. Only the active server carries hydrated creds.
-fn remote_folder_settings(mut config: Signal<AppConfig>) -> Option<RemoteFolderSettings> {
-    let creds = {
-        let cfg = config.read();
-        let server = cfg.server.as_ref()?;
-        let active_id = cfg.active_source.server_id()?;
-        if server.id.as_deref() != Some(active_id) {
-            return None;
-        }
-        if server.service != MusicService::Nextcloud {
-            return None;
-        }
-        RemoteCreds {
-            url: server.url.clone(),
-            user_id: server.user_id.clone()?,
-            token: server.access_token.clone()?,
-        }
-    };
+fn source_directories(sources: &[api::SourceInfo], id: &str) -> Vec<std::path::PathBuf> {
+    sources
+        .iter()
+        .find(|source| source.id == id)
+        .map(|source| {
+            source
+                .directories
+                .iter()
+                .map(std::path::PathBuf::from)
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
+fn remote_folder_settings(
+    sources: Signal<Vec<api::SourceInfo>>,
+    api: std::sync::Arc<dyn api::KopuzApi>,
+) -> Option<RemoteFolderSettings> {
+    let server = sources
+        .read()
+        .iter()
+        .find(|source| source.active && source.service == Some(api::MusicService::Nextcloud))?
+        .clone();
+    let server_id = server.id;
+
+    let add_server_id = server_id.clone();
+    let remove_server_id = server_id.clone();
+    let add_api = api.clone();
     Some(RemoteFolderSettings {
-        creds,
-        folders: config.read().active_server_folders(),
+        server_id,
+        folders: server.directories,
         on_add: EventHandler::new(move |path: String| {
-            config.write().edit_active_server_folders(|folders| {
-                if !folders.contains(&path) {
-                    folders.push(path);
+            let mut folders = sources
+                .peek()
+                .iter()
+                .find(|source| source.id == add_server_id)
+                .map(|source| source.directories.clone())
+                .unwrap_or_default();
+            if !folders.contains(&path) {
+                folders.push(path);
+            }
+            let api = add_api.clone();
+            let id = add_server_id.clone();
+            spawn(async move {
+                if let Err(error) = api.set_source_directories(id, folders).await {
+                    tracing::warn!(%error, "failed to add remote source directory");
+                    hooks::toast::toast_error(&error.to_string());
                 }
             });
         }),
         on_remove: EventHandler::new(move |index: usize| {
-            config.write().edit_active_server_folders(|folders| {
-                if index < folders.len() {
-                    folders.remove(index);
+            let mut folders = sources
+                .peek()
+                .iter()
+                .find(|source| source.id == remove_server_id)
+                .map(|source| source.directories.clone())
+                .unwrap_or_default();
+            if index < folders.len() {
+                folders.remove(index);
+            }
+            let api = api.clone();
+            let id = remove_server_id.clone();
+            spawn(async move {
+                if let Err(error) = api.set_source_directories(id, folders).await {
+                    tracing::warn!(%error, "failed to remove remote source directory");
+                    hooks::toast::toast_error(&error.to_string());
                 }
             });
         }),

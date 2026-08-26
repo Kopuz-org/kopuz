@@ -153,6 +153,7 @@ Two rules make a frontend feel native:
 | `GetStatus` | | `{version, api_version, uptime_secs}` |
 | `GetPlayerState` | | `PlayerState` snapshot |
 | `GetQueue` | `Page {offset, limit}` | play-order window `{rev, total, items: [{index, track}]}` |
+| `GetQueueSnapshot` | | durable physical-order queue, progress, and shuffle permutation |
 | `GetTracks` | `TracksRequest {filter, page}` | `{total, offset, items: [TrackInfo]}` |
 | `GetFolderTracks` | `{prefix, page}` | same shape |
 | `GetStats` | | `{listen_counts: {uid: count}}` |
@@ -166,7 +167,7 @@ Two rules make a frontend feel native:
 | `GetAlbums`, `GetAlbum`, `GetArtists`, `GetGenres` | filters/pages where applicable | library summaries |
 | `GetRecentTracks`, `GetAlbumTracks`, `GetArtistTracks`, `GetGenreTracks` | entity + page | track page |
 | `GetArtistSampleTracks`, `GetTracksByKeys`, `GetTopGenre` | page/keys/empty | library data |
-| `GetTrackWebUrl` | track ref | provider share URL when supported |
+| `GetTrackWebUrl`, `GetAlbumWebUrl` | track/album ref | provider share URL when supported |
 | `Search` | query + limits | tracks, albums, artists, playlists |
 | `GetPlaylists`, `GetPlaylistTracks` | empty/entity + page | playlist tree and tracks |
 | `RefreshPlaylist` | playlist + page | refreshed playlist tracks |
@@ -179,6 +180,7 @@ Two rules make a frontend feel native:
 | `GetExternalAccess` | provider kind | short-lived frontend access, never refresh credentials |
 | `SetQueue` | mode + context (+ `start_index`/`shuffle` for replace) | ack |
 | `EditQueue` | `jump {index}` / `move {from, to}` / `remove {index}` (play-order indices) | ack |
+| `SaveQueueSnapshot` | durable physical-order queue snapshot | empty |
 | `SetFavorite` | `{key, favorite}` | optimistic; a rejected remote push reverts and emits a `notice` |
 | `StartJob` | `{kind}` (scan / library_sync / favorites_sync / playlist_sync) | `{job_id}`; single-flight per kind, ABORTED on conflict |
 | `CancelJob` | `{id}` | |
@@ -189,8 +191,9 @@ Two rules make a frontend feel native:
 | `CreatePlaylist`, `RenamePlaylist`, `DeletePlaylist` | playlist mutation | entity/empty |
 | `AddPlaylistTracks`, `RemovePlaylistTracks`, `ReorderPlaylistTracks` | playlist + keys | empty |
 | `CreatePlaylistFolder`, `RenamePlaylistFolder`, `DeletePlaylistFolder`, `MovePlaylist` | folder mutation | entity/empty |
-| `SwitchSource`, `UpsertServer`, `DeleteServer` | source/server mutation | source/empty |
-| `ProvisionCredentials`, `ClearCredentials` | dedicated secret operation | source/empty |
+| `SwitchSource`, `UpsertLocalSource`, `DeleteLocalSource`, `SetSourceDirectories` | source mutation | source/empty |
+| `UpsertServer`, `DeleteServer` | credential-free server mutation | source/empty |
+| `ProvisionCredentials`, `LoginSource`, `ClearCredentials` | dedicated secret operation | source/empty |
 | `AuthenticateSource` | source | daemon-owned browser sign-in where supported |
 | `ProvisionIntegrationCredentials`, `ClearIntegrationCredentials` | write-only scrobbling secret operation | configured flag/empty |
 | `AuthenticateIntegration` | integration + public app credentials where needed | configured flag |

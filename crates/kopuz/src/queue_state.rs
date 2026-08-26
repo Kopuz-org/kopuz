@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use api::KopuzApi;
 use reader::Track;
 use serde::{Deserialize, Serialize};
 
@@ -37,21 +40,89 @@ impl Default for PersistedQueueState {
     }
 }
 
-pub async fn persist_snapshot(db: db::Db, queue_state: Option<PersistedQueueState>) {
-    let snap = queue_state.map(snapshot).unwrap_or_default();
-    if let Err(e) = db.save_queue(&snap).await {
-        tracing::error!("Failed to save queue state: {}", e);
+pub async fn persist_snapshot(api: Arc<dyn KopuzApi>, queue_state: Option<PersistedQueueState>) {
+    let snapshot = queue_state.map(api_snapshot).unwrap_or_default();
+    if let Err(error) = api.save_queue_snapshot(snapshot).await {
+        tracing::error!(%error, "failed to save queue state");
     }
 }
 
-pub fn snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
-    db::QueueSnapshot {
-        version: q.version,
-        queue: q.queue,
-        current_queue_index: q.current_queue_index,
-        progress_secs: q.progress_secs,
-        shuffle_order: q.shuffle_order,
+fn music_service(value: config::MusicService) -> api::MusicService {
+    match value {
+        config::MusicService::Jellyfin => api::MusicService::Jellyfin,
+        config::MusicService::Subsonic => api::MusicService::Subsonic,
+        config::MusicService::Custom => api::MusicService::Custom,
+        config::MusicService::YtMusic => api::MusicService::YtMusic,
+        config::MusicService::AppleMusic => api::MusicService::AppleMusic,
+        config::MusicService::SoundCloud => api::MusicService::SoundCloud,
+        config::MusicService::Spotify => api::MusicService::Spotify,
+        config::MusicService::Nextcloud => api::MusicService::Nextcloud,
+    }
+}
+
+fn track_info(track: &Track) -> api::TrackInfo {
+    let radio = track.duration == u64::MAX;
+    let key = track.id.key().to_string();
+    api::TrackInfo {
+        uid: track.id.uid(),
+        title: track.title.clone(),
+        artist: track.artist.clone(),
+        album: track.album.clone(),
+        album_id: track.album_id.clone(),
+        duration_ms: (!radio).then(|| track.duration.saturating_mul(1000)),
+        khz: track.khz,
+        bitrate: track.bitrate,
+        track_number: track.track_number,
+        disc_number: track.disc_number,
+        kind: if radio {
+            api::TrackKind::Radio
+        } else {
+            api::TrackKind::Normal
+        },
+        seekable: !radio,
+        artwork: (!radio).then(|| key.clone()),
+        offline: false,
+        service: track.id.service().map(music_service),
+        artists: track.artists.clone(),
+        musicbrainz_release_id: track.musicbrainz_release_id.clone(),
+        musicbrainz_recording_id: track.musicbrainz_recording_id.clone(),
+        musicbrainz_track_id: track.musicbrainz_track_id.clone(),
+        playlist_item_id: track.playlist_item_id.clone(),
+        source: String::new(),
+        key,
+    }
+}
+
+pub fn api_snapshot(q: PersistedQueueState) -> api::QueuePersistenceSnapshot {
+    api::QueuePersistenceSnapshot {
+        tracks: q.queue.iter().map(track_info).collect(),
+        current_index: q.current_queue_index.min(u32::MAX as usize) as u32,
+        progress_ms: q.progress_secs.saturating_mul(1000),
+        shuffle_order: q
+            .shuffle_order
+            .into_iter()
+            .map(|index| index.min(u32::MAX as usize) as u32)
+            .collect(),
         shuffle_enabled: q.shuffle_enabled,
+    }
+}
+
+pub fn from_api_snapshot(snapshot: api::QueuePersistenceSnapshot) -> PersistedQueueState {
+    PersistedQueueState {
+        version: 1,
+        queue: snapshot
+            .tracks
+            .into_iter()
+            .map(hooks::use_db_queries::track_from_api)
+            .collect(),
+        current_queue_index: snapshot.current_index as usize,
+        progress_secs: snapshot.progress_ms / 1000,
+        shuffle_order: snapshot
+            .shuffle_order
+            .into_iter()
+            .map(|index| index as usize)
+            .collect(),
+        shuffle_enabled: snapshot.shuffle_enabled,
     }
 }
 

@@ -4,8 +4,8 @@ use std::time::Duration;
 use api::{JobKind, JobState, KopuzApi};
 use dioxus::prelude::*;
 
-#[tracing::instrument(name = "library.sync", skip_all, fields(clear_first = clear_first))]
-pub async fn sync_server_library(clear_first: bool) -> Result<(), String> {
+#[tracing::instrument(name = "library.sync", skip_all)]
+pub async fn sync_server_library() -> Result<(), String> {
     let api = consume_context::<Arc<dyn KopuzApi>>();
     let job = api
         .start_job(JobKind::LibrarySync)

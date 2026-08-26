@@ -16,7 +16,6 @@ use api::KopuzApi;
 use dioxus::prelude::*;
 use reader::ArtistImageRef;
 use server::cover::FetchedArtistImages;
-use server::source::ArtistView;
 use tracing::Instrument;
 use utils::artist::{joined_credit_primary, normalize_artist_key};
 
@@ -30,9 +29,8 @@ pub fn use_artist_photo_fetch(
     artist_images: Resource<db::ArtistImages>,
 ) {
     let source = use_active_source();
-    let active_source = use_context::<Signal<server::source::ActiveSource>>();
     let api = use_context::<Arc<dyn KopuzApi>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = use_context::<Signal<api::SourceCapabilities>>();
     let mut fetched_artist_images = use_context::<Signal<FetchedArtistImages>>();
     // In-flight guard, and WHICH source a fetch already ran for — keyed by
     // source (not a bool) so switching sources refetches instead of silently
@@ -44,7 +42,7 @@ pub fn use_artist_photo_fetch(
         if *is_fetching.read() || *fetch_done.read() == Some(source()) {
             return;
         }
-        if caps().artist_view == ArtistView::Library && !caps().sync {
+        if caps().artists == api::ArtistPresentation::Library && !caps().sync {
             return;
         }
         let db_imgs = artist_images.read();

@@ -544,25 +544,6 @@ impl std::ops::Deref for Db {
     }
 }
 
-/// Read-only view of the storage backend — the surface the UI gets, so it
-/// cannot reach a write method (those live on `Storage`, not `ReadStore`).
-#[derive(Clone)]
-pub struct ReadDb(std::sync::Arc<dyn ReadStore>);
-
-impl std::ops::Deref for ReadDb {
-    type Target = dyn ReadStore;
-    fn deref(&self) -> &Self::Target {
-        &*self.0
-    }
-}
-
-impl Db {
-    /// A read-only view of the same backend (cheap Arc upcast).
-    pub fn reads(&self) -> ReadDb {
-        ReadDb(self.0.clone())
-    }
-}
-
 /// Open the database and apply migrations. Native callers should `block_on`
 /// this in `main()` before mounting.
 pub async fn init(db_path: &std::path::Path) -> Result<Db, DbError> {

@@ -213,7 +213,7 @@ fn build_command(request: &api::YtdlpRequest) -> Result<Command, ApiError> {
     Ok(command)
 }
 
-fn progress(line: &str) -> Option<(u64, String)> {
+fn progress(line: &str) -> Option<(u64, String, String)> {
     if !line.starts_with("[download]") || !line.contains('%') {
         return None;
     }
@@ -224,7 +224,19 @@ fn progress(line: &str) -> Option<(u64, String)> {
         .last()?
         .parse::<f64>()
         .ok()?;
-    Some(((percent.clamp(0.0, 100.0) * 100.0) as u64, line.to_string()))
+    let speed = line
+        .split("at")
+        .nth(1)
+        .and_then(|value| value.split_whitespace().next())
+        .unwrap_or_default()
+        .to_string();
+    let eta = line
+        .split("ETA")
+        .nth(1)
+        .and_then(|value| value.split_whitespace().next())
+        .unwrap_or_default()
+        .to_string();
+    Some(((percent.clamp(0.0, 100.0) * 100.0) as u64, speed, eta))
 }
 
 fn run_process(mut command: Command, ctx: crate::jobs::JobCtx) -> Result<String, ApiError> {
@@ -266,14 +278,16 @@ fn run_process(mut command: Command, ctx: crate::jobs::JobCtx) -> Result<String,
         while let Ok(output) = rx.try_recv() {
             match output {
                 OutputLine::Line(line) => {
-                    if let Some((current, message)) = progress(&line) {
-                        ctx.progress("downloading", Some(current), Some(10_000), Some(message));
+                    if let Some((current, speed, eta)) = progress(&line) {
+                        ctx.details(None, None, None, Some(speed), Some(eta));
+                        ctx.progress("downloading", Some(current), Some(10_000), None);
                     } else if let Some(destination) = line.split("Destination:").nth(1) {
                         title = Path::new(destination.trim())
                             .file_name()
                             .and_then(|name| name.to_str())
                             .unwrap_or(destination.trim())
                             .to_string();
+                        ctx.details(None, Some(title.clone()), None, None, None);
                     } else if line.contains("[ExtractAudio]") || line.contains("[ffmpeg]") {
                         ctx.progress("processing", Some(10_000), Some(10_000), None);
                     }
@@ -311,9 +325,16 @@ pub fn spawn(
     }
     validate_output(&request.output_dir)?;
     let scan_runner = runner.clone();
-    runner.start(JobKind::Ytdlp, move |ctx| async move {
+    runner.start_concurrent(JobKind::Ytdlp, move |ctx| async move {
         let format = format_label(request.format).to_string();
         let url = request.url.clone();
+        ctx.details(
+            Some(url.clone()),
+            Some(url.clone()),
+            Some(format.clone()),
+            Some(String::new()),
+            Some(String::new()),
+        );
         let command = build_command(&request)?;
         let task_ctx = ctx.clone();
         let result = tokio::task::spawn_blocking(move || run_process(command, task_ctx))

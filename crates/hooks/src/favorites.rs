@@ -1,11 +1,7 @@
 //! Favorite toggling on the active source, optimistically.
 //!
-//! The heart flips immediately: the local state is written
-//! ([`record_favorite`](server::source::MediaSource::record_favorite)) and shown,
-//! then the change is pushed to the remote in the background
-//! ([`push_favorite`](server::source::MediaSource::push_favorite)); if the push
-//! is rejected the local state is reverted and a toast explains why, so a
-//! snapping-back heart doesn't read as a broken UI.
+//! The daemon records the optimistic state, reconciles it with the active
+//! source, and emits invalidation events if a rejected remote write reverts it.
 
 use std::sync::Arc;
 

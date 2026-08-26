@@ -87,3 +87,14 @@ pub struct QueueWindow {
     pub offset: u32,
     pub items: Vec<QueueItem>,
 }
+
+/// Durable queue state used by frontends that temporarily own playback.
+/// Track positions and the shuffle permutation use physical queue indices.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct QueuePersistenceSnapshot {
+    pub tracks: Vec<crate::library::TrackInfo>,
+    pub current_index: u32,
+    pub progress_ms: u64,
+    pub shuffle_order: Vec<u32>,
+    pub shuffle_enabled: bool,
+}

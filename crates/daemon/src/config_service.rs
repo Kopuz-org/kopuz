@@ -86,18 +86,6 @@ impl ConfigService {
         self.updates.subscribe()
     }
 
-    /// Adopt state persisted by the embedded GUI's existing save path.
-    pub async fn adopt(&self, config: config::AppConfig) {
-        let mut current = self.current.write().await;
-        let unchanged = serde_json::to_value(&*current).ok() == serde_json::to_value(&config).ok();
-        if unchanged {
-            return;
-        }
-        *current = config.clone();
-        drop(current);
-        let _ = self.updates.send(config);
-    }
-
     fn locked_keys(&self) -> Vec<String> {
         config::store::FileLayers::read(&self.settings_path)
             .locked_keys
@@ -171,6 +159,31 @@ impl ConfigService {
 
     pub async fn snapshot(&self) -> config::AppConfig {
         self.current.read().await.clone()
+    }
+
+    pub async fn persist_frontend_snapshot(
+        &self,
+        snapshot: config::AppConfig,
+    ) -> Result<(), ApiError> {
+        let mut current = serde_json::to_value(&*self.current.read().await)
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        let mut requested = serde_json::to_value(snapshot)
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        strip_sensitive(&mut current);
+        strip_sensitive(&mut requested);
+        let (Some(current), Some(requested)) = (current.as_object(), requested.as_object()) else {
+            return Err(ApiError::internal("config snapshot is not an object"));
+        };
+        let patch = requested
+            .iter()
+            .filter(|(key, value)| current.get(*key) != Some(*value))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<serde_json::Map<_, _>>();
+        if patch.is_empty() {
+            return Ok(());
+        }
+        self.patch(serde_json::Value::Object(patch)).await?;
+        Ok(())
     }
 
     pub async fn rotate_active_server_credential(

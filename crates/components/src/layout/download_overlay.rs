@@ -1,5 +1,5 @@
-use ::server::{DownloadItem, DownloadProgress, DownloadQueue, DownloadStatus};
 use dioxus::prelude::*;
+use hooks::downloads::{DownloadItem, DownloadQueue, DownloadStatus, cancel_all_downloads};
 
 fn compute_eta(
     in_flight: &[DownloadItem],
@@ -46,7 +46,6 @@ fn fmt_bytes(b: u64) -> String {
 
 #[component]
 pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
-    let progress = use_context::<Signal<DownloadProgress>>();
     let mut collapsed = use_signal(|| false);
 
     let q = queue.read();
@@ -59,7 +58,7 @@ pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
     let is_active = q.is_active();
     let done = q.done_count();
     let total = q.total_non_failed();
-    let in_flight_skeletons: Vec<DownloadItem> = q
+    let in_flight: Vec<DownloadItem> = q
         .items
         .iter()
         .filter(|i| matches!(i.status, DownloadStatus::Downloading))
@@ -70,21 +69,9 @@ pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
         .iter()
         .filter(|i| matches!(i.status, DownloadStatus::Failed))
         .count();
+    let bytes_done_session = q.bytes_done_session;
+    let session_elapsed_secs = q.session_elapsed_secs;
     drop(q);
-
-    let prog = progress.read();
-    let in_flight: Vec<DownloadItem> = in_flight_skeletons
-        .into_iter()
-        .map(|mut item| {
-            if let Some(&bytes) = prog.per_item.get(&item.id) {
-                item.bytes_done = bytes;
-            }
-            item
-        })
-        .collect();
-    let bytes_done_session = prog.bytes_done_session;
-    let session_elapsed_secs = prog.session_elapsed_secs;
-    drop(prog);
 
     let eta = compute_eta(&in_flight, bytes_done_session, session_elapsed_secs);
 
@@ -117,7 +104,7 @@ pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
                             class: "text-red-400/70 hover:text-red-400 transition-colors text-xs px-2 py-0.5 rounded bg-red-500/10 hover:bg-red-500/20",
                             onclick: move |evt| {
                                 evt.stop_propagation();
-                                queue.write().cancel_all();
+                                cancel_all_downloads(queue);
                             },
                             "Stop"
                         }
@@ -238,6 +225,9 @@ pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
                                                 DownloadStatus::Failed => rsx! {
                                                     i { class: "fa-solid fa-xmark text-red-400 w-3 shrink-0" }
                                                 },
+                                                DownloadStatus::Cancelled => rsx! {
+                                                    i { class: "fa-solid fa-ban text-slate-500 w-3 shrink-0" }
+                                                },
                                                 DownloadStatus::Queued => rsx! {
                                                     i { class: "fa-regular fa-clock text-slate-500 w-3 shrink-0" }
                                                 },
@@ -249,6 +239,7 @@ pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
                                                     match item.status {
                                                         DownloadStatus::Done => "text-slate-400",
                                                         DownloadStatus::Failed => "text-red-400/70",
+                                                        DownloadStatus::Cancelled => "text-slate-500",
                                                         _ => "text-slate-500",
                                                     }
                                                 ),

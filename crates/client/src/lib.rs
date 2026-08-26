@@ -160,6 +160,30 @@ impl KopuzApi for GrpcApi {
         })
     }
 
+    async fn queue_snapshot(&self) -> Result<api::QueuePersistenceSnapshot, ApiError> {
+        let snapshot = self
+            .client()
+            .get_queue_snapshot(Request::new(proto::Empty {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::queue_persistence_snapshot_from_proto(
+            snapshot.get_ref(),
+        ))
+    }
+
+    async fn save_queue_snapshot(
+        &self,
+        snapshot: api::QueuePersistenceSnapshot,
+    ) -> Result<(), ApiError> {
+        self.client()
+            .save_queue_snapshot(Request::new(convert::queue_persistence_snapshot_to_proto(
+                &snapshot,
+            )))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
     async fn tracks(&self, filter: TrackFilter, page: Page) -> Result<TrackPage, ApiError> {
         let tracks = self
             .client()
@@ -490,6 +514,15 @@ impl KopuzApi for GrpcApi {
         Ok(response.get_ref().value.clone())
     }
 
+    async fn album_web_url(&self, id: String) -> Result<Option<String>, ApiError> {
+        let response = self
+            .client()
+            .get_album_web_url(Request::new(proto::EntityRef { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(response.get_ref().value.clone())
+    }
+
     async fn top_genre(&self) -> Result<Option<String>, ApiError> {
         let response = self
             .client()
@@ -652,6 +685,39 @@ impl KopuzApi for GrpcApi {
         Ok(convert::source_info_from_proto(response.get_ref()))
     }
 
+    async fn upsert_local_source(
+        &self,
+        source: api::LocalSourceDraft,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let response = self
+            .client()
+            .upsert_local_source(Request::new(convert::local_source_draft_to_proto(&source)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(response.get_ref()))
+    }
+
+    async fn delete_local_source(&self, id: String) -> Result<(), ApiError> {
+        self.client()
+            .delete_local_source(Request::new(proto::EntityRef { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn set_source_directories(
+        &self,
+        id: String,
+        directories: Vec<String>,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let response = self
+            .client()
+            .set_source_directories(Request::new(proto::SourceDirectories { id, directories }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(response.get_ref()))
+    }
+
     async fn upsert_server(&self, server: api::ServerDraft) -> Result<api::SourceInfo, ApiError> {
         let response = self
             .client()
@@ -676,6 +742,18 @@ impl KopuzApi for GrpcApi {
         let response = self
             .client()
             .provision_credentials(Request::new(convert::credential_to_proto(&provision)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(response.get_ref()))
+    }
+
+    async fn login_source(
+        &self,
+        request: api::SourceLoginRequest,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let response = self
+            .client()
+            .login_source(Request::new(convert::source_login_to_proto(&request)))
             .await
             .map_err(wire_error)?;
         Ok(convert::source_info_from_proto(response.get_ref()))

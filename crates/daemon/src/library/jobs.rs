@@ -12,21 +12,6 @@ impl LibraryService {
         })
     }
 
-    /// Like [`Self::spawn_scan`], but with the roots pinned by the caller.
-    /// The embedded frontend uses this: its config signal is the authority,
-    /// and reading the session watch here instead would race the async
-    /// config push (a lost race scans and prunes against default roots).
-    pub fn spawn_scan_with_config(
-        self: &Arc<Self>,
-        runner: &JobRunner,
-        config: config::AppConfig,
-    ) -> Result<JobRef, ApiError> {
-        let service = self.clone();
-        runner.start(JobKind::Scan, move |ctx| async move {
-            service.run_scan(&ctx, &config).await
-        })
-    }
-
     pub fn spawn_remote_sync(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
         let service = self.clone();
         runner.start(JobKind::LibrarySync, move |ctx| async move {

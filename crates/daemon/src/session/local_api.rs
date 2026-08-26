@@ -92,6 +92,17 @@ impl api::KopuzApi for LocalApi {
         self.session.queue_edit(edit).await
     }
 
+    async fn queue_snapshot(&self) -> Result<api::QueuePersistenceSnapshot, ApiError> {
+        self.frontend()?.queue_snapshot().await
+    }
+
+    async fn save_queue_snapshot(
+        &self,
+        snapshot: api::QueuePersistenceSnapshot,
+    ) -> Result<(), ApiError> {
+        self.frontend()?.save_queue_snapshot(snapshot).await
+    }
+
     async fn tracks(
         &self,
         filter: api::TrackFilter,
@@ -269,6 +280,10 @@ impl api::KopuzApi for LocalApi {
         self.frontend()?.track_web_url(&key).await
     }
 
+    async fn album_web_url(&self, id: String) -> Result<Option<String>, ApiError> {
+        self.frontend()?.album_web_url(&id).await
+    }
+
     async fn top_genre(&self) -> Result<Option<String>, ApiError> {
         self.frontend()?.top_genre().await
     }
@@ -345,6 +360,27 @@ impl api::KopuzApi for LocalApi {
         self.frontend()?.switch_source(&id).await
     }
 
+    async fn upsert_local_source(
+        &self,
+        source: api::LocalSourceDraft,
+    ) -> Result<api::SourceInfo, ApiError> {
+        self.frontend()?.upsert_local_source(source).await
+    }
+
+    async fn delete_local_source(&self, id: String) -> Result<(), ApiError> {
+        self.frontend()?.delete_local_source(&id).await
+    }
+
+    async fn set_source_directories(
+        &self,
+        id: String,
+        directories: Vec<String>,
+    ) -> Result<api::SourceInfo, ApiError> {
+        self.frontend()?
+            .set_source_directories(&id, directories)
+            .await
+    }
+
     async fn upsert_server(&self, server: api::ServerDraft) -> Result<api::SourceInfo, ApiError> {
         self.frontend()?.upsert_server(server).await
     }
@@ -358,6 +394,13 @@ impl api::KopuzApi for LocalApi {
         provision: api::CredentialProvision,
     ) -> Result<api::SourceInfo, ApiError> {
         self.frontend()?.provision(provision).await
+    }
+
+    async fn login_source(
+        &self,
+        request: api::SourceLoginRequest,
+    ) -> Result<api::SourceInfo, ApiError> {
+        self.frontend()?.login_source(request).await
     }
 
     async fn clear_credentials(&self, id: String) -> Result<(), ApiError> {

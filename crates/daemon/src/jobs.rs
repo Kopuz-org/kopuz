@@ -90,6 +90,35 @@ impl JobCtx {
         }
     }
 
+    pub fn details(
+        &self,
+        request: Option<String>,
+        title: Option<String>,
+        format: Option<String>,
+        speed: Option<String>,
+        eta: Option<String>,
+    ) {
+        if let Ok(mut entries) = self.entries.lock()
+            && let Some(entry) = entries.iter_mut().find(|entry| entry.status.id == self.id)
+        {
+            if request.is_some() {
+                entry.status.request = request;
+            }
+            if title.is_some() {
+                entry.status.title = title;
+            }
+            if format.is_some() {
+                entry.status.format = format;
+            }
+            if speed.is_some() {
+                entry.status.speed = speed;
+            }
+            if eta.is_some() {
+                entry.status.eta = eta;
+            }
+        }
+    }
+
     fn record(
         &self,
         phase: &str,
@@ -125,15 +154,37 @@ impl JobRunner {
         F: FnOnce(JobCtx) -> Fut,
         Fut: std::future::Future<Output = Result<(), ApiError>> + Send + 'static,
     {
+        self.start_inner(kind, true, job)
+    }
+
+    pub fn start_concurrent<F, Fut>(&self, kind: JobKind, job: F) -> Result<JobRef, ApiError>
+    where
+        F: FnOnce(JobCtx) -> Fut,
+        Fut: std::future::Future<Output = Result<(), ApiError>> + Send + 'static,
+    {
+        self.start_inner(kind, false, job)
+    }
+
+    fn start_inner<F, Fut>(
+        &self,
+        kind: JobKind,
+        single_flight: bool,
+        job: F,
+    ) -> Result<JobRef, ApiError>
+    where
+        F: FnOnce(JobCtx) -> Fut,
+        Fut: std::future::Future<Output = Result<(), ApiError>> + Send + 'static,
+    {
         let id = format!("job-{}", self.next_id.fetch_add(1, Ordering::Relaxed) + 1);
         let cancelled = Arc::new(AtomicBool::new(false));
         {
             let Ok(mut entries) = self.entries.lock() else {
                 return Err(ApiError::internal("job registry poisoned"));
             };
-            if entries
-                .iter()
-                .any(|entry| entry.status.kind == kind && entry.status.state == JobState::Running)
+            if single_flight
+                && entries.iter().any(|entry| {
+                    entry.status.kind == kind && entry.status.state == JobState::Running
+                })
             {
                 return Err(ApiError::new(
                     ErrorCode::Conflict,
@@ -158,6 +209,11 @@ impl JobRunner {
                     total: None,
                     message: None,
                     error: None,
+                    request: None,
+                    title: None,
+                    format: None,
+                    speed: None,
+                    eta: None,
                 },
                 cancelled: cancelled.clone(),
             });

@@ -1,6 +1,5 @@
 //! Local-library and remote-server settings controls.
 
-use config::{MusicService, SavedLocalSource, SavedServer};
 use dioxus::prelude::*;
 #[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
@@ -49,16 +48,36 @@ pub fn MultiDirectoryPicker(
 
 #[component]
 pub fn LocalSourceSettings(
-    active_source: config::Source,
-    default_directories: Vec<std::path::PathBuf>,
-    sources: Vec<SavedLocalSource>,
+    sources: Vec<api::SourceInfo>,
     on_add: EventHandler<()>,
     on_delete: EventHandler<String>,
-    on_switch: EventHandler<config::Source>,
-    on_add_folder: EventHandler<(config::Source, std::path::PathBuf)>,
-    on_remove_folder: EventHandler<(config::Source, usize)>,
+    on_switch: EventHandler<String>,
+    on_add_folder: EventHandler<(String, std::path::PathBuf)>,
+    on_remove_folder: EventHandler<(String, usize)>,
 ) -> Element {
-    let default_active = active_source == config::Source::Local;
+    let default = sources
+        .iter()
+        .find(|source| source.kind == api::SourceKind::Local)
+        .cloned()
+        .unwrap_or_else(|| api::SourceInfo {
+            id: "local".to_string(),
+            name: i18n::t("local").to_string(),
+            kind: api::SourceKind::Local,
+            ..Default::default()
+        });
+    let default_active = default.active;
+    let default_directories = default
+        .directories
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+    let default_switch_id = default.id.clone();
+    let default_add_id = default.id.clone();
+    let default_remove_id = default.id.clone();
+    let named_sources = sources
+        .into_iter()
+        .filter(|source| source.kind == api::SourceKind::LocalLibrary)
+        .collect::<Vec<_>>();
     rsx! {
         div { class: "flex flex-col gap-3 w-full",
             div { class: "bg-white/5 p-3 rounded w-full space-y-2",
@@ -73,7 +92,7 @@ pub fn LocalSourceSettings(
                     }
                     if !default_active {
                         button {
-                            onclick: move |_| on_switch.call(config::Source::Local),
+                            onclick: move |_| on_switch.call(default_switch_id.clone()),
                             class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
                             "{i18n::t(\"switch_to_local_library\")}"
                         }
@@ -81,19 +100,23 @@ pub fn LocalSourceSettings(
                 }
                 MultiDirectoryPicker {
                     current_paths: default_directories,
-                    on_add: move |path| on_add_folder.call((config::Source::Local, path)),
-                    on_remove: move |index| on_remove_folder.call((config::Source::Local, index)),
+                    on_add: move |path| on_add_folder.call((default_add_id.clone(), path)),
+                    on_remove: move |index| on_remove_folder.call((default_remove_id.clone(), index)),
                 }
             }
-            for source in sources.iter().cloned() {
+            for source in named_sources {
                 {
                     let id = source.id.clone();
                     let id_delete = id.clone();
-                    let source_key = config::Source::LocalLibrary(id.clone());
-                    let switch_key = source_key.clone();
-                    let add_folder_key = source_key.clone();
-                    let remove_folder_key = source_key.clone();
-                    let is_active = active_source.local_library_id() == Some(source.id.as_str());
+                    let switch_key = id.clone();
+                    let add_folder_key = id.clone();
+                    let remove_folder_key = id.clone();
+                    let is_active = source.active;
+                    let directories = source
+                        .directories
+                        .iter()
+                        .map(std::path::PathBuf::from)
+                        .collect::<Vec<_>>();
                     rsx! {
                         div { key: "{source.id}", class: "bg-white/5 p-3 rounded w-full space-y-2",
                             div { class: "flex items-center justify-between gap-3",
@@ -121,7 +144,7 @@ pub fn LocalSourceSettings(
                                 }
                             }
                             MultiDirectoryPicker {
-                                current_paths: source.directories.clone(),
+                                current_paths: directories,
                                 on_add: move |path| on_add_folder.call((add_folder_key.clone(), path)),
                                 on_remove: move |index| on_remove_folder.call((remove_folder_key.clone(), index)),
                             }
@@ -194,10 +217,7 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
 
 #[component]
 pub fn ServerSettings(
-    /// The active source's server id (`None` ⇒ Local) — the authoritative "which
-    /// server is active", reactive to the sidebar source switcher too.
-    active_source_id: Option<String>,
-    servers: Vec<SavedServer>,
+    servers: Vec<api::SourceInfo>,
     on_add: EventHandler<()>,
     on_delete: EventHandler<String>,
     on_switch: EventHandler<String>,
@@ -230,10 +250,15 @@ pub fn ServerSettings(
             for srv in servers.iter().cloned() {
                 {
                     let id = srv.id.clone();
-                    let is_active = active_source_id.as_deref() == Some(srv.id.as_str());
+                    let is_active = srv.active;
                     let id_switch = id.clone();
                     let id_delete = id.clone();
-                    let is_spotify = srv.service == MusicService::Spotify;
+                    let is_spotify = srv.service == Some(api::MusicService::Spotify);
+                    let service_name = srv.service.unwrap_or_default().display_name();
+                    let service_label = i18n::t_with(
+                        "service",
+                        &[("name", service_name.to_string())],
+                    );
                     // Folders are the whole library definition here, so the
                     // picker sits on the card the way it does for a local
                     // library, not behind a separate dialog.
@@ -254,8 +279,10 @@ pub fn ServerSettings(
                                         }
                                     }
                                 }
-                                p { class: "text-xs text-white/60", "{i18n::t_with(\"service\", &[(\"name\", srv.service.display_name().to_string())])}" }
-                                p { class: "text-xs text-white/60 truncate", "{srv.url}" }
+                                p { class: "text-xs text-white/60", "{service_label}" }
+                                if let Some(url) = srv.url.as_ref() {
+                                    p { class: "text-xs text-white/60 truncate", "{url}" }
+                                }
                                 if is_active {
                                     match conn() {
                                         hooks::source_switch::ConnStatus::Online => rsx! {

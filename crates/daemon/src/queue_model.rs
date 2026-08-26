@@ -562,7 +562,7 @@ impl QueueModel {
         Some(idx)
     }
 
-    /// A play-order window for `GET /v1/queue`: `(logical position, track)`
+    /// A play-order window for the queue API: `(logical position, track)`
     /// pairs. Repairs the permutation first so every position resolves.
     pub fn window(&mut self, offset: usize, limit: usize) -> Vec<(usize, Track)> {
         if self.shuffle {
