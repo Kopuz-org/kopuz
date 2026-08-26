@@ -11,22 +11,12 @@ use api::{ApiError, ApiEvent, ErrorCode, FavoritesView, JobKind, JobRef, Table};
 use server::sync::{SyncError, SyncReason, reconcile_favorites};
 use tokio::sync::Notify;
 
+use crate::error::source as source_error;
 use crate::jobs::{JobCtx, JobRunner};
 use crate::session::SessionHandle;
 
 const NUDGE_DEBOUNCE: Duration = Duration::from_secs(2);
 const BACKOFF_CAP_SECS: u64 = 30 * 60;
-
-fn source_error(error: server::source::SourceError) -> ApiError {
-    use server::source::SourceError;
-    match &error {
-        SourceError::Unsupported(what) => ApiError::unsupported(*what),
-        SourceError::Auth => ApiError::new(ErrorCode::SourceAuthExpired, error.to_string()),
-        SourceError::Connectivity => ApiError::new(ErrorCode::SourceUnreachable, error.to_string()),
-        SourceError::InvalidInput(message) => ApiError::invalid_input(message.clone()),
-        SourceError::Backend(message) => ApiError::internal(message.clone()),
-    }
-}
 
 pub struct FavoritesService {
     db: db::Db,
@@ -59,13 +49,15 @@ impl FavoritesService {
     }
 
     pub async fn list(&self) -> Result<FavoritesView, ApiError> {
-        let generation = self.generation.load(Ordering::Relaxed);
         let refs = self
             .active_source()
             .favorites()
             .await
-            .map_err(source_error)?;
-        Ok(FavoritesView { refs, generation })
+            .map_err(crate::error::source)?;
+        Ok(FavoritesView {
+            refs,
+            generation: self.generation.load(Ordering::Relaxed),
+        })
     }
 
     /// Optimistic set, matching the hooks toggle: local write reflected
@@ -92,7 +84,7 @@ impl FavoritesService {
         source
             .record_favorite(&track, favorite)
             .await
-            .map_err(source_error)?;
+            .map_err(crate::error::source)?;
         self.bump(Table::Favorites);
         self.bump(Table::Tracks);
 

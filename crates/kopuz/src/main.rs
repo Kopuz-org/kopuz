@@ -1996,7 +1996,6 @@ fn App() -> Element {
     let reduce_animations = use_memo(move || config.read().reduce_animations);
     let active_source = use_memo(move || config.read().active_source.clone());
     let mut show_quick_search = use_signal(|| false);
-    let quick_search_source = hooks::use_db_queries::use_active_source();
     use_effect(move || {
         if !*show_quick_search.read() {
             let _ = dioxus::document::eval(
@@ -2606,15 +2605,16 @@ fn App() -> Element {
                     show: show_quick_search,
                     on_play: move |(track, fallback): (reader::Track, Vec<reader::Track>)| {
                         let api = consume_context::<Arc<dyn api::KopuzApi>>();
-                        let filter = hooks::TrackFilter {
-                            source: quick_search_source(),
-                            sort: hooks::TrackSort::Fields(config.peek().library_sort.clone()),
+                        let filter = api::TrackFilter {
+                            sort: hooks::use_db_queries::track_sort_fields(
+                                &config.peek().library_sort,
+                            ),
                             ..Default::default()
                         };
                         spawn(async move {
                             let all = api
                                 .tracks(
-                                    hooks::use_db_queries::track_filter_to_api(&filter),
+                                    filter,
                                     api::Page {
                                         offset: 0,
                                         limit: u32::MAX,

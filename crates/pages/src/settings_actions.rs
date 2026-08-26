@@ -49,33 +49,6 @@ fn cookie_value(header: &str, name: &str) -> Option<String> {
     })
 }
 
-fn api_service(service: MusicService) -> api::MusicService {
-    match service {
-        MusicService::Jellyfin => api::MusicService::Jellyfin,
-        MusicService::Subsonic => api::MusicService::Subsonic,
-        MusicService::Custom => api::MusicService::Custom,
-        MusicService::YtMusic => api::MusicService::YtMusic,
-        MusicService::AppleMusic => api::MusicService::AppleMusic,
-        MusicService::SoundCloud => api::MusicService::SoundCloud,
-        MusicService::Spotify => api::MusicService::Spotify,
-        MusicService::Nextcloud => api::MusicService::Nextcloud,
-    }
-}
-
-fn config_service(service: api::MusicService) -> Option<MusicService> {
-    Some(match service {
-        api::MusicService::Jellyfin => MusicService::Jellyfin,
-        api::MusicService::Subsonic => MusicService::Subsonic,
-        api::MusicService::Custom => MusicService::Custom,
-        api::MusicService::YtMusic => MusicService::YtMusic,
-        api::MusicService::AppleMusic => MusicService::AppleMusic,
-        api::MusicService::SoundCloud => MusicService::SoundCloud,
-        api::MusicService::Spotify => MusicService::Spotify,
-        api::MusicService::Nextcloud => MusicService::Nextcloud,
-        api::MusicService::Unknown => return None,
-    })
-}
-
 #[cfg(not(target_os = "android"))]
 async fn authenticate_source(
     api: Arc<dyn KopuzApi>,
@@ -210,7 +183,9 @@ fn browser_login(
     let Some(server) = sources
         .peek()
         .iter()
-        .find(|source| source.active && source.service == Some(api_service(expected)))
+        .find(|source| {
+            source.active && source.service == Some(hooks::music_service_to_api(expected))
+        })
         .cloned()
     else {
         return;
@@ -320,7 +295,7 @@ pub fn add_server(
                 id: None,
                 name,
                 url: url.clone(),
-                service: api_service(service),
+                service: hooks::music_service_to_api(service),
                 browser: (browser_signin && !anonymous).then(|| browser.id().to_string()),
                 anonymous,
                 storefront: (service == MusicService::AppleMusic).then_some(storefront),
@@ -377,7 +352,7 @@ pub fn switch_server(
     mut show_login: Signal<bool>,
     playback_error: Signal<Option<String>>,
 ) {
-    let Some(service) = source.service.and_then(config_service) else {
+    let Some(service) = source.service.and_then(hooks::music_service_from_api) else {
         return;
     };
     let id = source.id;

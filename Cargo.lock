@@ -4423,12 +4423,10 @@ dependencies = [
  "kopuz-route",
  "kopuz-server",
  "kopuz-utils",
- "rand 0.10.2",
  "rfd",
  "serde_json",
  "tokio",
  "tracing",
- "uuid 1.23.5",
 ]
 
 [[package]]
@@ -4522,7 +4520,6 @@ dependencies = [
 name = "kopuz-hooks"
 version = "0.16.1"
 dependencies = [
- "base64",
  "dioxus",
  "kopuz-api",
  "kopuz-config",
@@ -4563,10 +4560,8 @@ dependencies = [
  "kopuz-route",
  "kopuz-server",
  "kopuz-utils",
- "lofty",
  "rand 0.10.2",
  "rfd",
- "serde",
  "serde_json",
  "tempfile",
  "tokio",

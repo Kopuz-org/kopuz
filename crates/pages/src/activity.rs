@@ -2,7 +2,6 @@ use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_active_source, use_albums, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
-use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
 use reader::Track;
 use std::collections::HashMap;
@@ -24,10 +23,9 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
 
     let source = use_active_source();
     let albums_res = use_albums(source);
-    let filter = use_memo(move || TrackFilter {
-        source: source(),
-        sort: TrackSort::PlayCount,
-        search: String::new(),
+    let filter = use_memo(move || api::TrackFilter {
+        sort: Some("play_count".to_string()),
+        ..Default::default()
     });
 
     // album_id → genre (covers resolve via the source seam off the track itself).
@@ -61,7 +59,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             total_rows(),
             ITEM_HEIGHT,
         );
-        Page {
+        api::Page {
             offset: info.start_index as u32,
             limit: info.items_to_render as u32,
         }
@@ -177,10 +175,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                                 let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                                 spawn(async move {
                                                     let all = api
-                                                        .tracks(
-                                                            hooks::use_db_queries::track_filter_to_api(&f),
-                                                            api::Page { offset: 0, limit: u32::MAX },
-                                                        )
+                                                        .tracks(f, api::Page { offset: 0, limit: u32::MAX })
                                                         .await
                                                         .map(|page| page.items.into_iter().map(hooks::use_db_queries::track_from_api).collect())
                                                         .unwrap_or_default();

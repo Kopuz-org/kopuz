@@ -13,6 +13,7 @@ use api::{ApiError, ApiEvent, JobKind, JobRef, Page, QueueContext, Table, TrackF
 use reader::Track;
 use tokio::sync::watch;
 
+use crate::error::db as db_error;
 use crate::jobs::{JobCtx, JobRunner};
 use crate::session::{QueueMaterializer, SessionHandle};
 
@@ -43,10 +44,6 @@ fn normalize_album_id(id: &str) -> String {
     } else {
         id.to_string()
     }
-}
-
-fn db_error(error: db::DbError) -> ApiError {
-    ApiError::internal(format!("database error: {error}"))
 }
 
 fn map_sort(sort: Option<&str>) -> db::TrackSort {
@@ -166,7 +163,9 @@ impl LibraryService {
     }
 
     pub(crate) fn transient_track_for_info(&self, value: &api::TrackInfo) -> Option<Track> {
-        let service = value.service.and_then(crate::wire::config_music_service)?;
+        let service = value
+            .service
+            .and_then(crate::wire::music_service_from_api)?;
         let uid = reader::TrackId::Server {
             service,
             item_id: value.key.clone(),
@@ -181,7 +180,7 @@ impl LibraryService {
         }
         let service = value
             .service
-            .and_then(crate::wire::config_music_service)
+            .and_then(crate::wire::music_service_from_api)
             .ok_or_else(|| ApiError::invalid_input("inline tracks must name a media service"))?;
         let id = reader::TrackId::Server {
             service,
@@ -192,28 +191,7 @@ impl LibraryService {
                 "inline track uid does not match its service and key",
             ));
         }
-        Ok(Track {
-            id,
-            cover: None,
-            album_id: value.album_id.clone(),
-            title: value.title.clone(),
-            artist: value.artist.clone(),
-            album: value.album.clone(),
-            duration: if value.kind == api::TrackKind::Radio {
-                u64::MAX
-            } else {
-                value.duration_ms.unwrap_or_default() / 1000
-            },
-            khz: value.khz,
-            bitrate: value.bitrate,
-            track_number: value.track_number,
-            disc_number: value.disc_number,
-            musicbrainz_release_id: value.musicbrainz_release_id.clone(),
-            musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
-            musicbrainz_track_id: value.musicbrainz_track_id.clone(),
-            playlist_item_id: value.playlist_item_id.clone(),
-            artists: value.artists.clone(),
-        })
+        Ok(crate::wire::track_from_info_parts(value, id, None))
     }
 
     fn current_config(&self) -> config::AppConfig {
@@ -653,7 +631,7 @@ impl QueueMaterializer for LibraryService {
                     .map(|value| {
                         let service = value
                             .service
-                            .and_then(crate::wire::config_music_service)
+                            .and_then(crate::wire::music_service_from_api)
                             .ok_or_else(|| {
                                 ApiError::invalid_input("inline tracks must name a media service")
                             })?;

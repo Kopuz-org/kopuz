@@ -2,43 +2,11 @@ use std::sync::Arc;
 
 use api::KopuzApi;
 use reader::Track;
-use serde::{Deserialize, Serialize};
 
 pub const SAVE_DEBOUNCE_MS: u64 = 1200;
 pub const PROGRESS_STEP_SECS: u64 = 5;
 
-fn default_queue_state_version() -> u8 {
-    1
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PersistedQueueState {
-    #[serde(default = "default_queue_state_version")]
-    pub version: u8,
-    #[serde(default)]
-    pub queue: Vec<Track>,
-    #[serde(default)]
-    pub current_queue_index: usize,
-    #[serde(default)]
-    pub progress_secs: u64,
-    #[serde(default)]
-    pub shuffle_order: Vec<usize>,
-    #[serde(default)]
-    pub shuffle_enabled: bool,
-}
-
-impl Default for PersistedQueueState {
-    fn default() -> Self {
-        Self {
-            version: default_queue_state_version(),
-            queue: Vec::new(),
-            current_queue_index: 0,
-            progress_secs: 0,
-            shuffle_order: Vec::new(),
-            shuffle_enabled: false,
-        }
-    }
-}
+pub type PersistedQueueState = db::QueueSnapshot;
 
 pub async fn persist_snapshot(api: Arc<dyn KopuzApi>, queue_state: Option<PersistedQueueState>) {
     let snapshot = queue_state.map(api_snapshot).unwrap_or_default();
@@ -47,55 +15,13 @@ pub async fn persist_snapshot(api: Arc<dyn KopuzApi>, queue_state: Option<Persis
     }
 }
 
-fn music_service(value: config::MusicService) -> api::MusicService {
-    match value {
-        config::MusicService::Jellyfin => api::MusicService::Jellyfin,
-        config::MusicService::Subsonic => api::MusicService::Subsonic,
-        config::MusicService::Custom => api::MusicService::Custom,
-        config::MusicService::YtMusic => api::MusicService::YtMusic,
-        config::MusicService::AppleMusic => api::MusicService::AppleMusic,
-        config::MusicService::SoundCloud => api::MusicService::SoundCloud,
-        config::MusicService::Spotify => api::MusicService::Spotify,
-        config::MusicService::Nextcloud => api::MusicService::Nextcloud,
-    }
-}
-
-fn track_info(track: &Track) -> api::TrackInfo {
-    let radio = track.duration == u64::MAX;
-    let key = track.id.key().to_string();
-    api::TrackInfo {
-        uid: track.id.uid(),
-        title: track.title.clone(),
-        artist: track.artist.clone(),
-        album: track.album.clone(),
-        album_id: track.album_id.clone(),
-        duration_ms: (!radio).then(|| track.duration.saturating_mul(1000)),
-        khz: track.khz,
-        bitrate: track.bitrate,
-        track_number: track.track_number,
-        disc_number: track.disc_number,
-        kind: if radio {
-            api::TrackKind::Radio
-        } else {
-            api::TrackKind::Normal
-        },
-        seekable: !radio,
-        artwork: (!radio).then(|| key.clone()),
-        offline: false,
-        service: track.id.service().map(music_service),
-        artists: track.artists.clone(),
-        musicbrainz_release_id: track.musicbrainz_release_id.clone(),
-        musicbrainz_recording_id: track.musicbrainz_recording_id.clone(),
-        musicbrainz_track_id: track.musicbrainz_track_id.clone(),
-        playlist_item_id: track.playlist_item_id.clone(),
-        source: String::new(),
-        key,
-    }
-}
-
 pub fn api_snapshot(q: PersistedQueueState) -> api::QueuePersistenceSnapshot {
     api::QueuePersistenceSnapshot {
-        tracks: q.queue.iter().map(track_info).collect(),
+        tracks: q
+            .queue
+            .iter()
+            .map(daemon::track_info_for_persistence)
+            .collect(),
         current_index: q.current_queue_index.min(u32::MAX as usize) as u32,
         progress_ms: q.progress_secs.saturating_mul(1000),
         shuffle_order: q

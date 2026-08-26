@@ -9,6 +9,7 @@ pub mod ctl;
 #[cfg(feature = "grpc")]
 pub mod discovery;
 pub mod downloads;
+mod error;
 pub mod favorites;
 pub mod frontend;
 #[cfg(feature = "grpc")]
@@ -38,6 +39,9 @@ pub use queue_model::{NextOutcome, QueueModel};
 pub use scrobbler::Scrobbler;
 pub use session::{
     LocalApi, PlaybackServices, QueueMaterializer, QueueMirrorSnapshot, SessionHandle,
+};
+pub use wire::{
+    music_service_from_api, music_service_to_api, track_from_info_parts, track_info_for_persistence,
 };
 
 pub fn active_source_label(config: &config::AppConfig) -> String {

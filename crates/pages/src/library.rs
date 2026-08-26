@@ -16,10 +16,9 @@ use config::{AppConfig, TrackSortField, UiStyle};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
-    use_active_source, use_albums, use_artists, use_playlists, use_tracks_window,
+    track_sort_fields, use_active_source, use_albums, use_artists, use_playlists, use_tracks_window,
 };
 use hooks::use_player_controller::PlayerController;
-use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
 use std::collections::HashSet;
 
@@ -47,9 +46,8 @@ pub fn LibraryPage(
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let library_sort = use_signal(|| config.peek().library_sort.clone());
-    let filter = use_memo(move || TrackFilter {
-        source: source(),
-        sort: TrackSort::Fields(library_sort.read().clone()),
+    let filter = use_memo(move || api::TrackFilter {
+        sort: track_sort_fields(&library_sort.read()),
         ..Default::default()
     });
     use_effect(move || {
@@ -79,7 +77,7 @@ pub fn LibraryPage(
             total_rows(),
             ITEM_HEIGHT,
         );
-        Page {
+        api::Page {
             offset: info.start_index as u32,
             limit: info.items_to_render as u32,
         }
@@ -276,7 +274,7 @@ pub fn LibraryPage(
                                 spawn(async move {
                                     let all = api
                                         .tracks(
-                                            hooks::use_db_queries::track_filter_to_api(&f),
+                                            f,
                                             api::Page {
                                                 offset: 0,
                                                 limit: u32::MAX,
@@ -391,7 +389,7 @@ pub fn LibraryPage(
                         spawn(async move {
                             let tracks: Vec<_> = api
                                 .tracks(
-                                    hooks::use_db_queries::track_filter_to_api(&f),
+                                    f,
                                     api::Page {
                                         offset: 0,
                                         limit: u32::MAX,
@@ -512,7 +510,7 @@ pub fn LibraryPage(
                                 spawn(async move {
                                     let tracks = api
                                         .tracks(
-                                            hooks::use_db_queries::track_filter_to_api(&f),
+                                            f,
                                             api::Page {
                                                 offset: 0,
                                                 limit: u32::MAX,

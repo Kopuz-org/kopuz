@@ -441,14 +441,7 @@ pub enum ArtworkTarget {
     Playlist { id: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ArtworkEntity {
-    Track { key: String },
-    Album { id: String },
-    Artist { name: String },
-    Playlist { id: String },
-}
+pub type ArtworkEntity = ArtworkTarget;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtworkRequest {

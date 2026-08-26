@@ -40,9 +40,9 @@ pub struct Page {
     pub limit: u32,
 }
 
-/// The queue/progress snapshot, reconstructed from the `queue_state` row. The
-/// in-memory `PersistedQueueState` (in the app crate) maps directly from this.
-#[derive(Clone, Debug, Default)]
+/// The queue/progress snapshot reconstructed from the `queue_state` row.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct QueueSnapshot {
     pub version: u8,
     pub queue: Vec<reader::Track>,
@@ -50,6 +50,23 @@ pub struct QueueSnapshot {
     pub progress_secs: u64,
     pub shuffle_order: Vec<usize>,
     pub shuffle_enabled: bool,
+}
+
+const fn queue_snapshot_version() -> u8 {
+    1
+}
+
+impl Default for QueueSnapshot {
+    fn default() -> Self {
+        Self {
+            version: queue_snapshot_version(),
+            queue: Vec::new(),
+            current_queue_index: 0,
+            progress_secs: 0,
+            shuffle_order: Vec::new(),
+            shuffle_enabled: false,
+        }
+    }
 }
 
 /// Sort order for a track listing — maps to an indexed `ORDER BY`.

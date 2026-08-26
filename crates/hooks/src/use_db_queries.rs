@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use api::KopuzApi;
-use db::{Page, Source, TrackFilter, TrackSort};
+use config::Source;
 use dioxus::prelude::*;
 use tracing::Instrument;
 use utils::offload;
@@ -19,15 +19,8 @@ pub struct WindowRows {
 
 #[derive(Clone, Copy)]
 pub struct TracksWindow {
-    pub rows: Resource<WindowRows>,
-    pub total: Resource<u32>,
-}
-
-pub fn page_to_api(value: Page) -> api::Page {
-    api::Page {
-        offset: value.offset,
-        limit: value.limit,
-    }
+    pub rows: Memo<Option<WindowRows>>,
+    pub total: Memo<Option<u32>>,
 }
 
 fn all() -> api::Page {
@@ -37,40 +30,12 @@ fn all() -> api::Page {
     }
 }
 
-fn sort_key(sort: &TrackSort) -> Option<String> {
-    match sort {
-        TrackSort::ArtistAlbum => None,
-        TrackSort::Title => Some("title".to_string()),
-        TrackSort::Artist => Some("artist".to_string()),
-        TrackSort::Album => Some("album".to_string()),
-        TrackSort::DateAdded => Some("date_added".to_string()),
-        TrackSort::PlayCount => Some("play_count".to_string()),
-        TrackSort::Fields(fields) => serde_json::to_string(fields)
-            .ok()
-            .map(|json| format!("fields:{json}")),
-    }
-}
-
-pub fn track_filter_to_api(value: &TrackFilter) -> api::TrackFilter {
-    api::TrackFilter {
-        search: (!value.search.is_empty()).then(|| value.search.clone()),
-        sort: sort_key(&value.sort),
-        ..Default::default()
-    }
-}
-
-fn music_service(value: api::MusicService) -> Option<config::MusicService> {
-    Some(match value {
-        api::MusicService::Jellyfin => config::MusicService::Jellyfin,
-        api::MusicService::Subsonic => config::MusicService::Subsonic,
-        api::MusicService::Custom => config::MusicService::Custom,
-        api::MusicService::YtMusic => config::MusicService::YtMusic,
-        api::MusicService::AppleMusic => config::MusicService::AppleMusic,
-        api::MusicService::SoundCloud => config::MusicService::SoundCloud,
-        api::MusicService::Spotify => config::MusicService::Spotify,
-        api::MusicService::Nextcloud => config::MusicService::Nextcloud,
-        api::MusicService::Unknown => return None,
-    })
+pub fn track_sort_fields(
+    fields: &[config::SortCriterion<config::TrackSortField>],
+) -> Option<String> {
+    serde_json::to_string(fields)
+        .ok()
+        .map(|json| format!("fields:{json}"))
 }
 
 fn hex(value: &str) -> String {
@@ -102,37 +67,17 @@ fn stored_artwork_ref(kind: &str, value: &str) -> String {
 pub fn track_from_api(value: api::TrackInfo) -> reader::Track {
     let id = value
         .service
-        .and_then(music_service)
+        .and_then(daemon::music_service_from_api)
         .map(|service| reader::TrackId::Server {
             service,
             item_id: value.key.clone(),
         })
         .unwrap_or_else(|| reader::TrackId::Local(PathBuf::from(&value.key)));
-    let duration = match value.kind {
-        api::TrackKind::Radio => u64::MAX,
-        api::TrackKind::Normal => value.duration_ms.unwrap_or_default() / 1000,
-    };
-    reader::Track {
-        id,
-        cover: value
-            .artwork
-            .as_ref()
-            .map(|key| stored_artwork_ref("track", key)),
-        album_id: value.album_id,
-        title: value.title,
-        artist: value.artist,
-        album: value.album,
-        duration,
-        khz: value.khz,
-        bitrate: value.bitrate,
-        track_number: value.track_number,
-        disc_number: value.disc_number,
-        musicbrainz_release_id: value.musicbrainz_release_id,
-        musicbrainz_recording_id: value.musicbrainz_recording_id,
-        musicbrainz_track_id: value.musicbrainz_track_id,
-        playlist_item_id: value.playlist_item_id,
-        artists: value.artists,
-    }
+    let cover = value
+        .artwork
+        .as_ref()
+        .map(|key| stored_artwork_ref("track", key));
+    daemon::track_from_info_parts(&value, id, cover)
 }
 
 pub async fn save_track_edits(
@@ -194,11 +139,14 @@ fn api_or_default<T: Default>(result: Result<T, api::ApiError>, operation: &'sta
     }
 }
 
-pub fn use_tracks_window(filter: Memo<TrackFilter>, page_value: Memo<Page>) -> TracksWindow {
+pub fn use_tracks_window(
+    filter: Memo<api::TrackFilter>,
+    page_value: Memo<api::Page>,
+) -> TracksWindow {
     let api = use_context::<Arc<dyn KopuzApi>>();
     let gens = use_generations();
 
-    let rows = use_resource({
+    let window = use_resource({
         let api = api.clone();
         move || {
             let _ = gens.generation(Table::Tracks);
@@ -212,37 +160,22 @@ pub fn use_tracks_window(filter: Memo<TrackFilter>, page_value: Memo<Page>) -> T
             );
             offload(
                 async move {
-                    let result = api_or_default(
-                        api.tracks(track_filter_to_api(&filter), page_to_api(page_value))
-                            .await,
-                        "tracks",
-                    );
+                    let result = api_or_default(api.tracks(filter, page_value).await, "tracks");
                     tracing::Span::current().record("rows", result.items.len());
-                    WindowRows {
-                        offset: result.offset,
-                        rows: result.items.into_iter().map(track_from_api).collect(),
-                    }
+                    (
+                        WindowRows {
+                            offset: result.offset,
+                            rows: result.items.into_iter().map(track_from_api).collect(),
+                        },
+                        result.total,
+                    )
                 }
                 .instrument(span),
             )
         }
     });
-
-    let total = use_resource({
-        let api = api.clone();
-        move || {
-            let _ = gens.generation(Table::Tracks);
-            let (api, filter, page_value) = (api.clone(), filter(), page_value());
-            offload(async move {
-                api_or_default(
-                    api.tracks(track_filter_to_api(&filter), page_to_api(page_value))
-                        .await,
-                    "tracks.total",
-                )
-                .total
-            })
-        }
-    });
+    let rows = use_memo(move || window.read().as_ref().map(|(rows, _)| rows.clone()));
+    let total = use_memo(move || window.read().as_ref().map(|(_, total)| *total));
 
     TracksWindow { rows, total }
 }

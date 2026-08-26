@@ -71,44 +71,28 @@ impl FrontendService {
     }
 
     fn db_error(error: db::DbError) -> ApiError {
-        ApiError::internal(format!("database error: {error}"))
+        crate::error::db(error)
     }
 
     fn persisted_track(value: &api::TrackInfo) -> Result<reader::Track, ApiError> {
-        if value.service.is_some() {
-            return LibraryService::track_from_info(value);
-        }
         if value.key.trim().is_empty() {
             return Err(ApiError::invalid_input("persisted track key is required"));
         }
-        let id = reader::TrackId::Local(PathBuf::from(&value.key));
+        let id = match value.service {
+            Some(service) => reader::TrackId::Server {
+                service: crate::wire::music_service_from_api(service).ok_or_else(|| {
+                    ApiError::invalid_input("persisted track names an unknown media service")
+                })?,
+                item_id: value.key.clone(),
+            },
+            None => reader::TrackId::Local(PathBuf::from(&value.key)),
+        };
         if !value.uid.is_empty() && value.uid != id.uid() {
             return Err(ApiError::invalid_input(
                 "persisted track uid does not match its key",
             ));
         }
-        Ok(reader::Track {
-            id,
-            cover: None,
-            album_id: value.album_id.clone(),
-            title: value.title.clone(),
-            artist: value.artist.clone(),
-            album: value.album.clone(),
-            duration: if value.kind == api::TrackKind::Radio {
-                u64::MAX
-            } else {
-                value.duration_ms.unwrap_or_default() / 1000
-            },
-            khz: value.khz,
-            bitrate: value.bitrate,
-            track_number: value.track_number,
-            disc_number: value.disc_number,
-            musicbrainz_release_id: value.musicbrainz_release_id.clone(),
-            musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
-            musicbrainz_track_id: value.musicbrainz_track_id.clone(),
-            playlist_item_id: value.playlist_item_id.clone(),
-            artists: value.artists.clone(),
-        })
+        Ok(crate::wire::track_from_info_parts(value, id, None))
     }
 
     pub async fn queue_snapshot(&self) -> Result<api::QueuePersistenceSnapshot, ApiError> {
@@ -208,18 +192,7 @@ impl FrontendService {
     }
 
     fn source_error(error: SourceError) -> ApiError {
-        match error {
-            SourceError::Unsupported(message) => ApiError::unsupported(message),
-            SourceError::Connectivity => {
-                ApiError::new(ErrorCode::SourceUnreachable, "the source is unreachable")
-            }
-            SourceError::Auth => ApiError::new(
-                ErrorCode::SourceAuthExpired,
-                "the source needs authentication",
-            ),
-            SourceError::InvalidInput(message) => ApiError::invalid_input(message),
-            SourceError::Backend(message) => ApiError::internal(message),
-        }
+        crate::error::source(error)
     }
 
     fn album_info(album: &reader::Album) -> api::AlbumInfo {
@@ -259,6 +232,21 @@ impl FrontendService {
                 })
                 .collect(),
         }
+    }
+
+    async fn playlist(
+        &self,
+        config: &config::AppConfig,
+        id: &str,
+    ) -> Result<reader::models::Playlist, ApiError> {
+        self.db
+            .load_playlists(&config.active_source)
+            .await
+            .map_err(Self::db_error)?
+            .playlists
+            .into_iter()
+            .find(|playlist| playlist.id == id)
+            .ok_or_else(|| ApiError::not_found("playlist not found"))
     }
 
     fn capabilities(value: server::source::Capabilities) -> api::SourceCapabilities {
@@ -365,7 +353,7 @@ impl FrontendService {
                     (
                         server.name.clone(),
                         api::SourceKind::Server,
-                        Some(crate::wire::music_service(server.service)),
+                        Some(crate::wire::music_service_to_api(server.service)),
                         server.access_token.is_some() || server.yt_anonymous,
                         Some(server.url.clone()),
                         server.yt_browser.map(|browser| browser.id().to_string()),
@@ -813,16 +801,7 @@ impl FrontendService {
         request: api::PlaylistTracksRequest,
     ) -> Result<api::TrackPage, ApiError> {
         let config = self.current().await;
-        let store = self
-            .db
-            .load_playlists(&config.active_source)
-            .await
-            .map_err(Self::db_error)?;
-        let playlist = store
-            .playlists
-            .iter()
-            .find(|playlist| playlist.id == request.id)
-            .ok_or_else(|| ApiError::not_found("playlist not found"))?;
+        let playlist = self.playlist(&config, &request.id).await?;
         let total = playlist.tracks.len().min(u32::MAX as usize) as u32;
         let keys: Vec<String> = playlist
             .tracks
@@ -915,16 +894,7 @@ impl FrontendService {
             return Err(ApiError::invalid_input("playlist id and name are required"));
         }
         let config = self.current().await;
-        let store = self
-            .db
-            .load_playlists(&config.active_source)
-            .await
-            .map_err(Self::db_error)?;
-        let playlist = store
-            .playlists
-            .iter()
-            .find(|playlist| playlist.id == id)
-            .ok_or_else(|| ApiError::not_found("playlist not found"))?;
+        let playlist = self.playlist(&config, id).await?;
         self.db
             .upsert_playlist_meta(
                 &config.active_source,
@@ -966,16 +936,7 @@ impl FrontendService {
 
     pub async fn remove_playlist_tracks(&self, id: &str, keys: &[String]) -> Result<(), ApiError> {
         let config = self.current().await;
-        let store = self
-            .db
-            .load_playlists(&config.active_source)
-            .await
-            .map_err(Self::db_error)?;
-        let playlist = store
-            .playlists
-            .iter()
-            .find(|playlist| playlist.id == id)
-            .ok_or_else(|| ApiError::not_found("playlist not found"))?;
+        let playlist = self.playlist(&config, id).await?;
         let source = self.source().await;
         let mut remaining = playlist.tracks.clone();
         for key in keys {
@@ -1004,16 +965,7 @@ impl FrontendService {
 
     pub async fn reorder_playlist_tracks(&self, id: &str, keys: &[String]) -> Result<(), ApiError> {
         let config = self.current().await;
-        let store = self
-            .db
-            .load_playlists(&config.active_source)
-            .await
-            .map_err(Self::db_error)?;
-        let playlist = store
-            .playlists
-            .iter()
-            .find(|playlist| playlist.id == id)
-            .ok_or_else(|| ApiError::not_found("playlist not found"))?;
+        let playlist = self.playlist(&config, id).await?;
         let mut current_keys = playlist.tracks.clone();
         let mut requested_keys = keys.to_vec();
         current_keys.sort_unstable();
@@ -1304,7 +1256,7 @@ impl FrontendService {
         draft: api::ServerDraft,
     ) -> Result<api::SourceInfo, ApiError> {
         self.config.ensure_unlocked(&["server", "servers"])?;
-        let service = crate::wire::config_music_service(draft.service)
+        let service = crate::wire::music_service_from_api(draft.service)
             .ok_or_else(|| ApiError::invalid_input("unknown music service"))?;
         if draft.name.trim().is_empty() {
             return Err(ApiError::invalid_input("server name is required"));
@@ -2542,45 +2494,44 @@ impl FrontendService {
             .collect()
     }
 
+    async fn mutate_radio_config(
+        &self,
+        key: &'static str,
+        mutate: impl FnOnce(&mut config::AppConfig),
+    ) -> Result<(), ApiError> {
+        self.config.ensure_unlocked(&[key])?;
+        let updated = self.config.mutate_state(mutate).await?;
+        self.session.set_config(updated, vec![key.to_string()]);
+        self.reload_radio().await
+    }
+
     pub async fn add_radio_registry(&self, url: &str) -> Result<(), ApiError> {
-        self.config.ensure_unlocked(&["radio_registries"])?;
         let mut probe = radio::registry::StationRegistry::new();
         probe
             .import_registry(url)
             .await
             .map_err(|error| ApiError::invalid_input(error.to_string()))?;
         let url = url.to_string();
-        let updated = self
-            .config
-            .mutate_state(move |config| {
-                if !config.radio_registries.iter().any(|entry| entry.url == url) {
-                    config.radio_registries.push(config::RegistryEntry {
-                        url,
-                        enabled: true,
-                        is_default: false,
-                    });
-                }
-            })
-            .await?;
-        self.session
-            .set_config(updated, vec!["radio_registries".to_string()]);
-        self.reload_radio().await
+        self.mutate_radio_config("radio_registries", move |config| {
+            if !config.radio_registries.iter().any(|entry| entry.url == url) {
+                config.radio_registries.push(config::RegistryEntry {
+                    url,
+                    enabled: true,
+                    is_default: false,
+                });
+            }
+        })
+        .await
     }
 
     pub async fn remove_radio_registry(&self, url: &str) -> Result<(), ApiError> {
-        self.config.ensure_unlocked(&["radio_registries"])?;
         let url = url.to_string();
-        let updated = self
-            .config
-            .mutate_state(move |config| {
-                config
-                    .radio_registries
-                    .retain(|entry| entry.url != url || entry.is_default);
-            })
-            .await?;
-        self.session
-            .set_config(updated, vec!["radio_registries".to_string()]);
-        self.reload_radio().await
+        self.mutate_radio_config("radio_registries", move |config| {
+            config
+                .radio_registries
+                .retain(|entry| entry.url != url || entry.is_default);
+        })
+        .await
     }
 
     pub async fn set_radio_registry_enabled(
@@ -2588,23 +2539,17 @@ impl FrontendService {
         url: &str,
         enabled: bool,
     ) -> Result<(), ApiError> {
-        self.config.ensure_unlocked(&["radio_registries"])?;
         let url = url.to_string();
-        let updated = self
-            .config
-            .mutate_state(move |config| {
-                if let Some(entry) = config
-                    .radio_registries
-                    .iter_mut()
-                    .find(|entry| entry.url == url)
-                {
-                    entry.enabled = enabled;
-                }
-            })
-            .await?;
-        self.session
-            .set_config(updated, vec!["radio_registries".to_string()]);
-        self.reload_radio().await
+        self.mutate_radio_config("radio_registries", move |config| {
+            if let Some(entry) = config
+                .radio_registries
+                .iter_mut()
+                .find(|entry| entry.url == url)
+            {
+                entry.enabled = enabled;
+            }
+        })
+        .await
     }
 
     pub async fn pin_station(
@@ -2612,7 +2557,6 @@ impl FrontendService {
         station: api::RadioStationInfo,
         pinned: bool,
     ) -> Result<(), ApiError> {
-        self.config.ensure_unlocked(&["pinned_stations"])?;
         let manifest = {
             let registry = self.registry.read().await;
             registry
@@ -2653,22 +2597,17 @@ impl FrontendService {
         let id = manifest.id.clone();
         let json = serde_json::to_string(&manifest)
             .map_err(|error| ApiError::internal(error.to_string()))?;
-        let updated = self
-            .config
-            .mutate_state(move |config| {
-                config.pinned_stations.retain(|existing| {
-                    serde_json::from_str::<radio::manifest::StationManifest>(existing)
-                        .map(|station| station.id != id)
-                        .unwrap_or(true)
-                });
-                if pinned {
-                    config.pinned_stations.push(json);
-                }
-            })
-            .await?;
-        self.session
-            .set_config(updated, vec!["pinned_stations".to_string()]);
-        self.reload_radio().await
+        self.mutate_radio_config("pinned_stations", move |config| {
+            config.pinned_stations.retain(|existing| {
+                serde_json::from_str::<radio::manifest::StationManifest>(existing)
+                    .map(|station| station.id != id)
+                    .unwrap_or(true)
+            });
+            if pinned {
+                config.pinned_stations.push(json);
+            }
+        })
+        .await
     }
 
     pub async fn update_track_metadata(
@@ -2862,17 +2801,7 @@ impl FrontendService {
                 .0
                 .get(&utils::artist::normalize_artist_key(name))
                 .cloned(),
-            api::ArtworkTarget::Playlist { id } => {
-                self.db
-                    .load_playlists(&config.active_source)
-                    .await
-                    .map_err(Self::db_error)?
-                    .playlists
-                    .into_iter()
-                    .find(|playlist| playlist.id == *id)
-                    .ok_or_else(|| ApiError::not_found("playlist not found"))?
-                    .cover_path
-            }
+            api::ArtworkTarget::Playlist { id } => self.playlist(&config, id).await?.cover_path,
         };
         let extension = match upload.content_type.as_str() {
             "image/jpeg" => "jpg",
@@ -2922,16 +2851,7 @@ impl FrontendService {
             api::ArtworkTarget::Playlist { id } => {
                 async {
                     let config = self.current().await;
-                    let store = self
-                        .db
-                        .load_playlists(&config.active_source)
-                        .await
-                        .map_err(Self::db_error)?;
-                    let playlist = store
-                        .playlists
-                        .iter()
-                        .find(|playlist| playlist.id == id)
-                        .ok_or_else(|| ApiError::not_found("playlist not found"))?;
+                    let playlist = self.playlist(&config, &id).await?;
                     self.source()
                         .await
                         .set_playlist_cover(
@@ -3001,16 +2921,7 @@ impl FrontendService {
                 previous
             }
             api::ArtworkTarget::Playlist { id } => {
-                let store = self
-                    .db
-                    .load_playlists(&config.active_source)
-                    .await
-                    .map_err(Self::db_error)?;
-                let playlist = store
-                    .playlists
-                    .iter()
-                    .find(|playlist| playlist.id == id)
-                    .ok_or_else(|| ApiError::not_found("playlist not found"))?;
+                let playlist = self.playlist(&config, &id).await?;
                 let previous = playlist.cover_path.clone();
                 self.db
                     .upsert_playlist_meta(

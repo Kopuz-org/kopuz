@@ -47,6 +47,15 @@ fn wire_error(status: tonic::Status) -> ApiError {
     proto::status::from_status(&status)
 }
 
+macro_rules! rpc {
+    ($api:expr, $method:ident, $request:expr) => {
+        $api.client()
+            .$method(Request::new($request))
+            .await
+            .map_err(wire_error)?
+    };
+}
+
 impl GrpcApi {
     pub fn addr(&self) -> &str {
         &self.addr
@@ -81,11 +90,7 @@ impl GrpcApi {
 #[async_trait::async_trait]
 impl KopuzApi for GrpcApi {
     async fn player_state(&self) -> Result<PlayerState, ApiError> {
-        let state = self
-            .client()
-            .get_player_state(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let state = rpc!(self, get_player_state, proto::Empty {});
         Ok(convert::player_state_from_proto(state.get_ref()))
     }
 
@@ -130,42 +135,26 @@ impl KopuzApi for GrpcApi {
     }
 
     async fn queue_window(&self, page: Page) -> Result<QueueWindow, ApiError> {
-        let window = self
-            .client()
-            .get_queue(Request::new(convert::page_to_proto(page)))
-            .await
-            .map_err(wire_error)?;
+        let window = rpc!(self, get_queue, convert::page_to_proto(page));
         Ok(convert::queue_window_from_proto(window.get_ref()))
     }
 
     async fn set_queue(&self, request: SetQueueRequest) -> Result<CommandAck, ApiError> {
-        let ack = self
-            .client()
-            .set_queue(Request::new(convert::set_queue_to_proto(&request)))
-            .await
-            .map_err(wire_error)?;
+        let ack = rpc!(self, set_queue, convert::set_queue_to_proto(&request));
         Ok(CommandAck {
             rev: ack.get_ref().rev,
         })
     }
 
     async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError> {
-        let ack = self
-            .client()
-            .edit_queue(Request::new(convert::queue_edit_to_proto(&edit)))
-            .await
-            .map_err(wire_error)?;
+        let ack = rpc!(self, edit_queue, convert::queue_edit_to_proto(&edit));
         Ok(CommandAck {
             rev: ack.get_ref().rev,
         })
     }
 
     async fn queue_snapshot(&self) -> Result<api::QueuePersistenceSnapshot, ApiError> {
-        let snapshot = self
-            .client()
-            .get_queue_snapshot(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let snapshot = rpc!(self, get_queue_snapshot, proto::Empty {});
         Ok(convert::queue_persistence_snapshot_from_proto(
             snapshot.get_ref(),
         ))
@@ -175,95 +164,79 @@ impl KopuzApi for GrpcApi {
         &self,
         snapshot: api::QueuePersistenceSnapshot,
     ) -> Result<(), ApiError> {
-        self.client()
-            .save_queue_snapshot(Request::new(convert::queue_persistence_snapshot_to_proto(
-                &snapshot,
-            )))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            save_queue_snapshot,
+            convert::queue_persistence_snapshot_to_proto(&snapshot)
+        );
         Ok(())
     }
 
     async fn tracks(&self, filter: TrackFilter, page: Page) -> Result<TrackPage, ApiError> {
-        let tracks = self
-            .client()
-            .get_tracks(Request::new(proto::TracksRequest {
+        let tracks = rpc!(
+            self,
+            get_tracks,
+            proto::TracksRequest {
                 filter: Some(convert::track_filter_to_proto(&filter)),
                 page: Some(convert::page_to_proto(page)),
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(convert::track_page_from_proto(tracks.get_ref()))
     }
 
     async fn config(&self) -> Result<ConfigView, ApiError> {
-        let view = self
-            .client()
-            .get_config(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let view = rpc!(self, get_config, proto::Empty {});
         Ok(convert::config_view_from_proto(view.get_ref()))
     }
 
     async fn patch_config(&self, patch: serde_json::Value) -> Result<ConfigView, ApiError> {
-        let view = self
-            .client()
-            .patch_config(Request::new(proto::ConfigPatch {
+        let view = rpc!(
+            self,
+            patch_config,
+            proto::ConfigPatch {
                 merge_patch_json: patch.to_string(),
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(convert::config_view_from_proto(view.get_ref()))
     }
 
     async fn favorites(&self) -> Result<FavoritesView, ApiError> {
-        let favorites = self
-            .client()
-            .get_favorites(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let favorites = rpc!(self, get_favorites, proto::Empty {});
         Ok(convert::favorites_from_proto(favorites.get_ref()))
     }
 
     async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError> {
-        self.client()
-            .set_favorite(Request::new(proto::FavoriteRequest { key, favorite }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, set_favorite, proto::FavoriteRequest { key, favorite });
         Ok(())
     }
 
     async fn start_job(&self, kind: JobKind) -> Result<JobRef, ApiError> {
-        let job = self
-            .client()
-            .start_job(Request::new(proto::StartJobRequest {
+        let job = rpc!(
+            self,
+            start_job,
+            proto::StartJobRequest {
                 kind: convert::job_kind_to_proto(kind) as i32,
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(JobRef {
             job_id: job.get_ref().job_id.clone(),
         })
     }
 
     async fn folder_tracks(&self, prefix: String, page: Page) -> Result<api::TrackPage, ApiError> {
-        let tracks = self
-            .client()
-            .get_folder_tracks(Request::new(proto::FolderRequest {
+        let tracks = rpc!(
+            self,
+            get_folder_tracks,
+            proto::FolderRequest {
                 prefix,
                 page: Some(convert::page_to_proto(page)),
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(convert::track_page_from_proto(tracks.get_ref()))
     }
 
     async fn lyrics(&self, key: String) -> Result<api::LyricsView, ApiError> {
-        let lyrics = self
-            .client()
-            .get_lyrics(Request::new(proto::TrackRef { key }))
-            .await
-            .map_err(wire_error)?;
+        let lyrics = rpc!(self, get_lyrics, proto::TrackRef { key });
         Ok(convert::lyrics_from_proto(lyrics.get_ref()))
     }
 
@@ -304,40 +277,24 @@ impl KopuzApi for GrpcApi {
     }
 
     async fn stats(&self) -> Result<api::StatsView, ApiError> {
-        let stats = self
-            .client()
-            .get_stats(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let stats = rpc!(self, get_stats, proto::Empty {});
         Ok(convert::stats_from_proto(stats.get_ref()))
     }
 
     async fn download(&self, keys: Vec<String>) -> Result<JobRef, ApiError> {
-        let job = self
-            .client()
-            .start_downloads(Request::new(proto::DownloadRequest { keys }))
-            .await
-            .map_err(wire_error)?;
+        let job = rpc!(self, start_downloads, proto::DownloadRequest { keys });
         Ok(JobRef {
             job_id: job.get_ref().job_id.clone(),
         })
     }
 
     async fn downloads(&self) -> Result<Vec<String>, ApiError> {
-        let list = self
-            .client()
-            .get_downloads(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let list = rpc!(self, get_downloads, proto::Empty {});
         Ok(list.get_ref().keys.clone())
     }
 
     async fn download_statuses(&self) -> Result<Vec<api::DownloadItemStatus>, ApiError> {
-        let list = self
-            .client()
-            .get_download_statuses(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let list = rpc!(self, get_download_statuses, proto::Empty {});
         Ok(list
             .get_ref()
             .statuses
@@ -347,27 +304,17 @@ impl KopuzApi for GrpcApi {
     }
 
     async fn cancel_download_item(&self, key: String) -> Result<(), ApiError> {
-        self.client()
-            .cancel_download_item(Request::new(proto::TrackRef { key }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, cancel_download_item, proto::TrackRef { key });
         Ok(())
     }
 
     async fn remove_download(&self, key: String) -> Result<(), ApiError> {
-        self.client()
-            .remove_download(Request::new(proto::TrackRef { key }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, remove_download, proto::TrackRef { key });
         Ok(())
     }
 
     async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError> {
-        let jobs = self
-            .client()
-            .get_jobs(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let jobs = rpc!(self, get_jobs, proto::Empty {});
         Ok(jobs
             .get_ref()
             .jobs
@@ -377,10 +324,7 @@ impl KopuzApi for GrpcApi {
     }
 
     async fn cancel_job(&self, id: String) -> Result<(), ApiError> {
-        self.client()
-            .cancel_job(Request::new(proto::JobId { id }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, cancel_job, proto::JobId { id });
         Ok(())
     }
 
@@ -389,114 +333,90 @@ impl KopuzApi for GrpcApi {
         filter: api::AlbumFilter,
         page: Page,
     ) -> Result<api::AlbumPage, ApiError> {
-        let response = self
-            .client()
-            .get_albums(Request::new(proto::AlbumsRequest {
+        let response = rpc!(
+            self,
+            get_albums,
+            proto::AlbumsRequest {
                 filter: Some(convert::album_filter_to_proto(&filter)),
                 page: Some(convert::page_to_proto(page)),
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(convert::album_page_from_proto(response.get_ref()))
     }
 
     async fn album(&self, id: String) -> Result<api::AlbumInfo, ApiError> {
-        let response = self
-            .client()
-            .get_album(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_album, proto::EntityRef { id });
         Ok(convert::album_info_from_proto(response.get_ref()))
     }
 
     async fn artists(&self, page: Page) -> Result<api::ArtistPage, ApiError> {
-        let response = self
-            .client()
-            .get_artists(Request::new(convert::page_to_proto(page)))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_artists, convert::page_to_proto(page));
         Ok(convert::artist_page_from_proto(response.get_ref()))
     }
 
     async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<Vec<String>, ApiError> {
-        Ok(self
-            .client()
-            .refresh_artist_artwork(Request::new(proto::StringList { values: names }))
-            .await
-            .map_err(wire_error)?
-            .into_inner()
-            .values)
+        Ok(rpc!(
+            self,
+            refresh_artist_artwork,
+            proto::StringList { values: names }
+        )
+        .into_inner()
+        .values)
     }
 
     async fn genres(&self) -> Result<Vec<String>, ApiError> {
-        let response = self
-            .client()
-            .get_genres(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_genres, proto::Empty {});
         Ok(response.get_ref().values.clone())
     }
 
     async fn recent_tracks(&self, page: Page) -> Result<TrackPage, ApiError> {
-        let response = self
-            .client()
-            .get_recent_tracks(Request::new(convert::page_to_proto(page)))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_recent_tracks, convert::page_to_proto(page));
         Ok(convert::track_page_from_proto(response.get_ref()))
     }
 
     async fn album_tracks(&self, id: String, page: Page) -> Result<TrackPage, ApiError> {
-        let response = self
-            .client()
-            .get_album_tracks(Request::new(proto::EntityPage {
+        let response = rpc!(
+            self,
+            get_album_tracks,
+            proto::EntityPage {
                 value: id,
                 page: Some(convert::page_to_proto(page)),
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(convert::track_page_from_proto(response.get_ref()))
     }
 
     async fn artist_tracks(&self, name: String, page: Page) -> Result<TrackPage, ApiError> {
-        let response = self
-            .client()
-            .get_artist_tracks(Request::new(proto::EntityPage {
+        let response = rpc!(
+            self,
+            get_artist_tracks,
+            proto::EntityPage {
                 value: name,
                 page: Some(convert::page_to_proto(page)),
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(convert::track_page_from_proto(response.get_ref()))
     }
 
     async fn genre_tracks(&self, name: String, page: Page) -> Result<TrackPage, ApiError> {
-        let response = self
-            .client()
-            .get_genre_tracks(Request::new(proto::EntityPage {
+        let response = rpc!(
+            self,
+            get_genre_tracks,
+            proto::EntityPage {
                 value: name,
                 page: Some(convert::page_to_proto(page)),
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(convert::track_page_from_proto(response.get_ref()))
     }
 
     async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError> {
-        let response = self
-            .client()
-            .get_artist_sample_tracks(Request::new(convert::page_to_proto(page)))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_artist_sample_tracks, convert::page_to_proto(page));
         Ok(convert::track_page_from_proto(response.get_ref()))
     }
 
     async fn tracks_by_keys(&self, keys: Vec<String>) -> Result<Vec<api::TrackInfo>, ApiError> {
-        let response = self
-            .client()
-            .get_tracks_by_keys(Request::new(proto::TrackKeysRequest { keys }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_tracks_by_keys, proto::TrackKeysRequest { keys });
         Ok(response
             .get_ref()
             .tracks
@@ -506,47 +426,27 @@ impl KopuzApi for GrpcApi {
     }
 
     async fn track_web_url(&self, key: String) -> Result<Option<String>, ApiError> {
-        let response = self
-            .client()
-            .get_track_web_url(Request::new(proto::TrackRef { key }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_track_web_url, proto::TrackRef { key });
         Ok(response.get_ref().value.clone())
     }
 
     async fn album_web_url(&self, id: String) -> Result<Option<String>, ApiError> {
-        let response = self
-            .client()
-            .get_album_web_url(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_album_web_url, proto::EntityRef { id });
         Ok(response.get_ref().value.clone())
     }
 
     async fn top_genre(&self) -> Result<Option<String>, ApiError> {
-        let response = self
-            .client()
-            .get_top_genre(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_top_genre, proto::Empty {});
         Ok(response.get_ref().value.clone())
     }
 
     async fn search(&self, query: String) -> Result<api::SearchResults, ApiError> {
-        let response = self
-            .client()
-            .search(Request::new(proto::SearchRequest { query }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, search, proto::SearchRequest { query });
         Ok(convert::search_results_from_proto(response.get_ref()))
     }
 
     async fn playlists(&self) -> Result<api::PlaylistCatalog, ApiError> {
-        let response = self
-            .client()
-            .get_playlists(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_playlists, proto::Empty {});
         Ok(convert::playlist_catalog_from_proto(response.get_ref()))
     }
 
@@ -554,14 +454,14 @@ impl KopuzApi for GrpcApi {
         &self,
         request: api::PlaylistTracksRequest,
     ) -> Result<TrackPage, ApiError> {
-        let response = self
-            .client()
-            .get_playlist_tracks(Request::new(proto::PlaylistTracksRequest {
+        let response = rpc!(
+            self,
+            get_playlist_tracks,
+            proto::PlaylistTracksRequest {
                 id: request.id,
                 page: Some(convert::page_to_proto(request.page)),
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(convert::track_page_from_proto(response.get_ref()))
     }
 
@@ -569,105 +469,93 @@ impl KopuzApi for GrpcApi {
         &self,
         request: api::PlaylistTracksRequest,
     ) -> Result<api::TrackPage, ApiError> {
-        let response = self
-            .client()
-            .refresh_playlist(Request::new(proto::PlaylistTracksRequest {
+        let response = rpc!(
+            self,
+            refresh_playlist,
+            proto::PlaylistTracksRequest {
                 id: request.id,
                 page: Some(convert::page_to_proto(request.page)),
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(convert::track_page_from_proto(response.get_ref()))
     }
 
     async fn create_playlist(&self, name: String, keys: Vec<String>) -> Result<String, ApiError> {
-        let response = self
-            .client()
-            .create_playlist(Request::new(proto::CreatePlaylistRequest { name, keys }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            create_playlist,
+            proto::CreatePlaylistRequest { name, keys }
+        );
         Ok(response.get_ref().id.clone())
     }
 
     async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError> {
-        self.client()
-            .rename_playlist(Request::new(proto::NamedEntity { id, name }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, rename_playlist, proto::NamedEntity { id, name });
         Ok(())
     }
 
     async fn delete_playlist(&self, id: String) -> Result<(), ApiError> {
-        self.client()
-            .delete_playlist(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, delete_playlist, proto::EntityRef { id });
         Ok(())
     }
 
     async fn add_playlist_tracks(&self, id: String, keys: Vec<String>) -> Result<(), ApiError> {
-        self.client()
-            .add_playlist_tracks(Request::new(proto::PlaylistKeysRequest { id, keys }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            add_playlist_tracks,
+            proto::PlaylistKeysRequest { id, keys }
+        );
         Ok(())
     }
 
     async fn remove_playlist_tracks(&self, id: String, keys: Vec<String>) -> Result<(), ApiError> {
-        self.client()
-            .remove_playlist_tracks(Request::new(proto::PlaylistKeysRequest { id, keys }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            remove_playlist_tracks,
+            proto::PlaylistKeysRequest { id, keys }
+        );
         Ok(())
     }
 
     async fn reorder_playlist_tracks(&self, id: String, keys: Vec<String>) -> Result<(), ApiError> {
-        self.client()
-            .reorder_playlist_tracks(Request::new(proto::PlaylistKeysRequest { id, keys }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            reorder_playlist_tracks,
+            proto::PlaylistKeysRequest { id, keys }
+        );
         Ok(())
     }
 
     async fn create_playlist_folder(&self, name: String) -> Result<String, ApiError> {
-        let response = self
-            .client()
-            .create_playlist_folder(Request::new(proto::Name { name }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, create_playlist_folder, proto::Name { name });
         Ok(response.get_ref().id.clone())
     }
 
     async fn rename_playlist_folder(&self, id: String, name: String) -> Result<(), ApiError> {
-        self.client()
-            .rename_playlist_folder(Request::new(proto::NamedEntity { id, name }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            rename_playlist_folder,
+            proto::NamedEntity { id, name }
+        );
         Ok(())
     }
 
     async fn delete_playlist_folder(&self, id: String) -> Result<(), ApiError> {
-        self.client()
-            .delete_playlist_folder(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, delete_playlist_folder, proto::EntityRef { id });
         Ok(())
     }
 
     async fn move_playlist(&self, id: String, folder_id: Option<String>) -> Result<(), ApiError> {
-        self.client()
-            .move_playlist(Request::new(proto::MovePlaylistRequest { id, folder_id }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            move_playlist,
+            proto::MovePlaylistRequest { id, folder_id }
+        );
         Ok(())
     }
 
     async fn sources(&self) -> Result<Vec<api::SourceInfo>, ApiError> {
-        let response = self
-            .client()
-            .get_sources(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_sources, proto::Empty {});
         Ok(response
             .get_ref()
             .sources
@@ -677,11 +565,7 @@ impl KopuzApi for GrpcApi {
     }
 
     async fn switch_source(&self, id: String) -> Result<api::SourceInfo, ApiError> {
-        let response = self
-            .client()
-            .switch_source(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, switch_source, proto::EntityRef { id });
         Ok(convert::source_info_from_proto(response.get_ref()))
     }
 
@@ -689,19 +573,16 @@ impl KopuzApi for GrpcApi {
         &self,
         source: api::LocalSourceDraft,
     ) -> Result<api::SourceInfo, ApiError> {
-        let response = self
-            .client()
-            .upsert_local_source(Request::new(convert::local_source_draft_to_proto(&source)))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            upsert_local_source,
+            convert::local_source_draft_to_proto(&source)
+        );
         Ok(convert::source_info_from_proto(response.get_ref()))
     }
 
     async fn delete_local_source(&self, id: String) -> Result<(), ApiError> {
-        self.client()
-            .delete_local_source(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, delete_local_source, proto::EntityRef { id });
         Ok(())
     }
 
@@ -710,28 +591,21 @@ impl KopuzApi for GrpcApi {
         id: String,
         directories: Vec<String>,
     ) -> Result<api::SourceInfo, ApiError> {
-        let response = self
-            .client()
-            .set_source_directories(Request::new(proto::SourceDirectories { id, directories }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            set_source_directories,
+            proto::SourceDirectories { id, directories }
+        );
         Ok(convert::source_info_from_proto(response.get_ref()))
     }
 
     async fn upsert_server(&self, server: api::ServerDraft) -> Result<api::SourceInfo, ApiError> {
-        let response = self
-            .client()
-            .upsert_server(Request::new(convert::server_draft_to_proto(&server)))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, upsert_server, convert::server_draft_to_proto(&server));
         Ok(convert::source_info_from_proto(response.get_ref()))
     }
 
     async fn delete_server(&self, id: String) -> Result<(), ApiError> {
-        self.client()
-            .delete_server(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, delete_server, proto::EntityRef { id });
         Ok(())
     }
 
@@ -739,11 +613,11 @@ impl KopuzApi for GrpcApi {
         &self,
         provision: api::CredentialProvision,
     ) -> Result<api::SourceInfo, ApiError> {
-        let response = self
-            .client()
-            .provision_credentials(Request::new(convert::credential_to_proto(&provision)))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            provision_credentials,
+            convert::credential_to_proto(&provision)
+        );
         Ok(convert::source_info_from_proto(response.get_ref()))
     }
 
@@ -751,28 +625,17 @@ impl KopuzApi for GrpcApi {
         &self,
         request: api::SourceLoginRequest,
     ) -> Result<api::SourceInfo, ApiError> {
-        let response = self
-            .client()
-            .login_source(Request::new(convert::source_login_to_proto(&request)))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, login_source, convert::source_login_to_proto(&request));
         Ok(convert::source_info_from_proto(response.get_ref()))
     }
 
     async fn clear_credentials(&self, id: String) -> Result<(), ApiError> {
-        self.client()
-            .clear_credentials(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, clear_credentials, proto::EntityRef { id });
         Ok(())
     }
 
     async fn authenticate_source(&self, id: String) -> Result<api::SourceInfo, ApiError> {
-        let response = self
-            .client()
-            .authenticate_source(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, authenticate_source, proto::EntityRef { id });
         Ok(convert::source_info_from_proto(response.get_ref()))
     }
 
@@ -781,14 +644,14 @@ impl KopuzApi for GrpcApi {
         id: String,
         path: String,
     ) -> Result<Vec<api::SourceFolderEntry>, ApiError> {
-        let response = self
-            .client()
-            .browse_source(Request::new(proto::SourceFolderRequest {
+        let response = rpc!(
+            self,
+            browse_source,
+            proto::SourceFolderRequest {
                 server_id: id,
                 path,
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(response
             .get_ref()
             .entries
@@ -800,11 +663,7 @@ impl KopuzApi for GrpcApi {
     async fn integration_credentials(
         &self,
     ) -> Result<Vec<api::IntegrationCredentialStatus>, ApiError> {
-        let response = self
-            .client()
-            .get_integration_credentials(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_integration_credentials, proto::Empty {});
         Ok(response
             .get_ref()
             .statuses
@@ -817,13 +676,11 @@ impl KopuzApi for GrpcApi {
         &self,
         provision: api::IntegrationCredentialProvision,
     ) -> Result<api::IntegrationCredentialStatus, ApiError> {
-        let response = self
-            .client()
-            .provision_integration_credentials(Request::new(
-                convert::integration_provision_to_proto(&provision),
-            ))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            provision_integration_credentials,
+            convert::integration_provision_to_proto(&provision)
+        );
         Ok(convert::integration_status_from_proto(response.get_ref()))
     }
 
@@ -831,12 +688,13 @@ impl KopuzApi for GrpcApi {
         &self,
         kind: api::IntegrationKind,
     ) -> Result<(), ApiError> {
-        self.client()
-            .clear_integration_credentials(Request::new(proto::IntegrationRef {
+        rpc!(
+            self,
+            clear_integration_credentials,
+            proto::IntegrationRef {
                 kind: convert::integration_kind_to_proto(kind) as i32,
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(())
     }
 
@@ -844,31 +702,25 @@ impl KopuzApi for GrpcApi {
         &self,
         provision: api::IntegrationCredentialProvision,
     ) -> Result<api::IntegrationCredentialStatus, ApiError> {
-        let response = self
-            .client()
-            .authenticate_integration(Request::new(convert::integration_provision_to_proto(
-                &provision,
-            )))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            authenticate_integration,
+            convert::integration_provision_to_proto(&provision)
+        );
         Ok(convert::integration_status_from_proto(response.get_ref()))
     }
 
     async fn validate_source(&self, id: String) -> Result<api::SourceState, ApiError> {
-        let response = self
-            .client()
-            .validate_source(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, validate_source, proto::EntityRef { id });
         Ok(convert::source_state_from_proto(response.get_ref().state))
     }
 
     async fn external_access(&self, kind: String) -> Result<api::ExternalAccess, ApiError> {
-        let response = self
-            .client()
-            .get_external_access(Request::new(proto::ExternalAccessRequest { kind }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            get_external_access,
+            proto::ExternalAccessRequest { kind }
+        );
         Ok(convert::external_access_from_proto(response.get_ref()))
     }
 
@@ -876,15 +728,16 @@ impl KopuzApi for GrpcApi {
         &self,
         external: Option<api::ExternalPlayback>,
     ) -> Result<(), ApiError> {
-        self.client()
-            .set_external_playback(Request::new(proto::SetExternalPlaybackRequest {
+        rpc!(
+            self,
+            set_external_playback,
+            proto::SetExternalPlaybackRequest {
                 external: external.map(|external| proto::ExternalPlayback {
                     kind: external.kind,
                     device: external.device,
                 }),
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(())
     }
 
@@ -892,11 +745,11 @@ impl KopuzApi for GrpcApi {
         &self,
         external: api::ExternalPlayback,
     ) -> Result<api::ExternalPlaybackLease, ApiError> {
-        let response = self
-            .client()
-            .claim_external_playback(Request::new(convert::external_playback_to_proto(&external)))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            claim_external_playback,
+            convert::external_playback_to_proto(&external)
+        );
         Ok(convert::external_lease_from_proto(response.get_ref()))
     }
 
@@ -904,41 +757,35 @@ impl KopuzApi for GrpcApi {
         &self,
         report: api::ExternalPlaybackReport,
     ) -> Result<(), ApiError> {
-        self.client()
-            .report_external_playback(Request::new(convert::external_report_to_proto(&report)))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            report_external_playback,
+            convert::external_report_to_proto(&report)
+        );
         Ok(())
     }
 
     async fn release_external_playback(&self, lease_id: String) -> Result<(), ApiError> {
-        self.client()
-            .release_external_playback(Request::new(proto::ExternalPlaybackLease {
+        rpc!(
+            self,
+            release_external_playback,
+            proto::ExternalPlaybackLease {
                 lease_id,
                 expires_in_ms: 0,
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(())
     }
 
     async fn start_ytdlp(&self, request: api::YtdlpRequest) -> Result<JobRef, ApiError> {
-        let response = self
-            .client()
-            .start_ytdlp(Request::new(convert::ytdlp_request_to_proto(&request)))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, start_ytdlp, convert::ytdlp_request_to_proto(&request));
         Ok(JobRef {
             job_id: response.get_ref().job_id.clone(),
         })
     }
 
     async fn catalog(&self, continuation: Option<String>) -> Result<api::CatalogPage, ApiError> {
-        let response = self
-            .client()
-            .get_catalog(Request::new(proto::CatalogRequest { continuation }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_catalog, proto::CatalogRequest { continuation });
         Ok(convert::catalog_page_from_proto(response.get_ref()))
     }
 
@@ -946,22 +793,16 @@ impl KopuzApi for GrpcApi {
         &self,
         request: api::CatalogDetailRequest,
     ) -> Result<api::CatalogDetail, ApiError> {
-        let response = self
-            .client()
-            .get_catalog_detail(Request::new(convert::catalog_detail_request_to_proto(
-                &request,
-            )))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            get_catalog_detail,
+            convert::catalog_detail_request_to_proto(&request)
+        );
         Ok(convert::catalog_detail_from_proto(response.get_ref()))
     }
 
     async fn radio_stations(&self) -> Result<Vec<api::RadioStationInfo>, ApiError> {
-        let response = self
-            .client()
-            .get_radio_stations(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_radio_stations, proto::Empty {});
         Ok(response
             .get_ref()
             .stations
@@ -971,12 +812,7 @@ impl KopuzApi for GrpcApi {
     }
 
     async fn track_radio(&self, key: String) -> Result<Vec<api::TrackInfo>, ApiError> {
-        let response = self
-            .client()
-            .start_track_radio(Request::new(proto::TrackRef { key }))
-            .await
-            .map_err(wire_error)?
-            .into_inner();
+        let response = rpc!(self, start_track_radio, proto::TrackRef { key }).into_inner();
         Ok(response
             .tracks
             .iter()
@@ -985,12 +821,7 @@ impl KopuzApi for GrpcApi {
     }
 
     async fn playlist_radio(&self, id: String) -> Result<Vec<api::TrackInfo>, ApiError> {
-        let response = self
-            .client()
-            .start_playlist_radio(Request::new(proto::EntityRef { id }))
-            .await
-            .map_err(wire_error)?
-            .into_inner();
+        let response = rpc!(self, start_playlist_radio, proto::EntityRef { id }).into_inner();
         Ok(response
             .tracks
             .iter()
@@ -1003,11 +834,11 @@ impl KopuzApi for GrpcApi {
         query: String,
         limit: u32,
     ) -> Result<Vec<api::RadioStationInfo>, ApiError> {
-        let response = self
-            .client()
-            .search_radio(Request::new(proto::RadioSearchRequest { query, limit }))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            search_radio,
+            proto::RadioSearchRequest { query, limit }
+        );
         Ok(response
             .get_ref()
             .stations
@@ -1017,11 +848,7 @@ impl KopuzApi for GrpcApi {
     }
 
     async fn radio_registries(&self) -> Result<Vec<api::RadioRegistryInfo>, ApiError> {
-        let response = self
-            .client()
-            .get_radio_registries(Request::new(proto::Empty {}))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(self, get_radio_registries, proto::Empty {});
         Ok(response
             .get_ref()
             .registries
@@ -1031,29 +858,21 @@ impl KopuzApi for GrpcApi {
     }
 
     async fn add_radio_registry(&self, url: String) -> Result<(), ApiError> {
-        self.client()
-            .add_radio_registry(Request::new(proto::RegistryRequest { url }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, add_radio_registry, proto::RegistryRequest { url });
         Ok(())
     }
 
     async fn remove_radio_registry(&self, url: String) -> Result<(), ApiError> {
-        self.client()
-            .remove_radio_registry(Request::new(proto::RegistryRequest { url }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(self, remove_radio_registry, proto::RegistryRequest { url });
         Ok(())
     }
 
     async fn set_radio_registry_enabled(&self, url: String, enabled: bool) -> Result<(), ApiError> {
-        self.client()
-            .set_radio_registry_enabled(Request::new(proto::SetRegistryEnabledRequest {
-                url,
-                enabled,
-            }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            set_radio_registry_enabled,
+            proto::SetRegistryEnabledRequest { url, enabled }
+        );
         Ok(())
     }
 
@@ -1062,13 +881,14 @@ impl KopuzApi for GrpcApi {
         station: api::RadioStationInfo,
         pinned: bool,
     ) -> Result<(), ApiError> {
-        self.client()
-            .pin_radio_station(Request::new(proto::PinRadioStationRequest {
+        rpc!(
+            self,
+            pin_radio_station,
+            proto::PinRadioStationRequest {
                 station: Some(convert::radio_station_to_proto(&station)),
                 pinned,
-            }))
-            .await
-            .map_err(wire_error)?;
+            }
+        );
         Ok(())
     }
 
@@ -1076,43 +896,47 @@ impl KopuzApi for GrpcApi {
         &self,
         patch: api::TrackMetadataPatch,
     ) -> Result<api::TrackInfo, ApiError> {
-        let response = self
-            .client()
-            .update_track_metadata(Request::new(convert::metadata_patch_to_proto(&patch)))
-            .await
-            .map_err(wire_error)?;
+        let response = rpc!(
+            self,
+            update_track_metadata,
+            convert::metadata_patch_to_proto(&patch)
+        );
         Ok(convert::track_info_from_proto(response.get_ref()))
     }
 
     async fn delete_tracks(&self, keys: Vec<String>, from_disk: bool) -> Result<(), ApiError> {
-        self.client()
-            .delete_tracks(Request::new(proto::DeleteTracksRequest { keys, from_disk }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            delete_tracks,
+            proto::DeleteTracksRequest { keys, from_disk }
+        );
         Ok(())
     }
 
     async fn delete_album(&self, id: String, from_disk: bool) -> Result<(), ApiError> {
-        self.client()
-            .delete_album(Request::new(proto::DeleteAlbumRequest { id, from_disk }))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            delete_album,
+            proto::DeleteAlbumRequest { id, from_disk }
+        );
         Ok(())
     }
 
     async fn upload_artwork(&self, upload: api::ArtworkUpload) -> Result<(), ApiError> {
-        self.client()
-            .upload_artwork(Request::new(convert::artwork_upload_to_proto(&upload)))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            upload_artwork,
+            convert::artwork_upload_to_proto(&upload)
+        );
         Ok(())
     }
 
     async fn remove_artwork(&self, target: api::ArtworkTarget) -> Result<(), ApiError> {
-        self.client()
-            .remove_artwork(Request::new(convert::remove_artwork_to_proto(&target)))
-            .await
-            .map_err(wire_error)?;
+        rpc!(
+            self,
+            remove_artwork,
+            convert::remove_artwork_to_proto(&target)
+        );
         Ok(())
     }
 

@@ -18,74 +18,110 @@ pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("kopu
 pub mod convert {
     use super::*;
 
-    pub fn phase_to_proto(value: api::Phase) -> Phase {
-        match value {
+    macro_rules! enum_conversion {
+        (
+            $to_proto:ident, $from_proto:ident,
+            $api_type:path, $proto_type:path,
+            default $default:path, unspecified $unspecified:path,
+            { $($api_variant:path => $proto_variant:path),+ $(,)? }
+            $(, unknown $unknown:path)?
+        ) => {
+            pub fn $to_proto(value: $api_type) -> $proto_type {
+                match value {
+                    $($api_variant => $proto_variant,)+
+                    $($unknown => $unspecified,)?
+                }
+            }
+
+            pub fn $from_proto(value: i32) -> $api_type {
+                match <$proto_type>::try_from(value).unwrap_or($unspecified) {
+                    $($proto_variant => $api_variant,)+
+                    $unspecified => $default,
+                }
+            }
+        };
+    }
+
+    macro_rules! struct_conversion {
+        (
+            $to_proto:ident, $from_proto:ident,
+            $api_type:path, $proto_type:path,
+            copy { $($copy:ident),* $(,)? },
+            clone { $($clone:ident),* $(,)? }
+        ) => {
+            pub fn $to_proto(value: &$api_type) -> $proto_type {
+                $proto_type {
+                    $($copy: value.$copy,)*
+                    $($clone: value.$clone.clone(),)*
+                }
+            }
+
+            pub fn $from_proto(value: &$proto_type) -> $api_type {
+                $api_type {
+                    $($copy: value.$copy,)*
+                    $($clone: value.$clone.clone(),)*
+                }
+            }
+        };
+    }
+
+    macro_rules! artwork_target_conversion {
+        (
+            $to_proto:ident, $from_proto:ident, $proto_type:path,
+            track $track:path, album $album:path,
+            artist $artist:path, playlist $playlist:path
+        ) => {
+            fn $to_proto(value: &api::ArtworkTarget) -> $proto_type {
+                match value {
+                    api::ArtworkTarget::Track { key } => $track(key.clone()),
+                    api::ArtworkTarget::Album { id } => $album(id.clone()),
+                    api::ArtworkTarget::Artist { name } => $artist(name.clone()),
+                    api::ArtworkTarget::Playlist { id } => $playlist(id.clone()),
+                }
+            }
+
+            fn $from_proto(value: &$proto_type) -> api::ArtworkTarget {
+                match value {
+                    $track(key) => api::ArtworkTarget::Track { key: key.clone() },
+                    $album(id) => api::ArtworkTarget::Album { id: id.clone() },
+                    $artist(name) => api::ArtworkTarget::Artist { name: name.clone() },
+                    $playlist(id) => api::ArtworkTarget::Playlist { id: id.clone() },
+                }
+            }
+        };
+    }
+
+    enum_conversion!(phase_to_proto, phase_from_proto, api::Phase, Phase,
+        default api::Phase::Idle, unspecified Phase::Unspecified, {
             api::Phase::Idle => Phase::Idle,
             api::Phase::Playing => Phase::Playing,
             api::Phase::Paused => Phase::Paused,
             api::Phase::Ended => Phase::Ended,
         }
-    }
-
-    pub fn phase_from_proto(value: i32) -> api::Phase {
-        match Phase::try_from(value).unwrap_or(Phase::Unspecified) {
-            Phase::Playing => api::Phase::Playing,
-            Phase::Paused => api::Phase::Paused,
-            Phase::Ended => api::Phase::Ended,
-            Phase::Idle | Phase::Unspecified => api::Phase::Idle,
-        }
-    }
-
-    pub fn loop_to_proto(value: api::LoopMode) -> LoopMode {
-        match value {
+    );
+    enum_conversion!(loop_to_proto, loop_from_proto, api::LoopMode, LoopMode,
+        default api::LoopMode::None, unspecified LoopMode::Unspecified, {
             api::LoopMode::None => LoopMode::None,
             api::LoopMode::Queue => LoopMode::Queue,
             api::LoopMode::Track => LoopMode::Track,
         }
-    }
-
-    pub fn loop_from_proto(value: i32) -> api::LoopMode {
-        match LoopMode::try_from(value).unwrap_or(LoopMode::Unspecified) {
-            LoopMode::Queue => api::LoopMode::Queue,
-            LoopMode::Track => api::LoopMode::Track,
-            LoopMode::None | LoopMode::Unspecified => api::LoopMode::None,
-        }
-    }
-
-    pub fn track_kind_to_proto(value: api::TrackKind) -> TrackKind {
-        match value {
+    );
+    enum_conversion!(track_kind_to_proto, track_kind_from_proto, api::TrackKind, TrackKind,
+        default api::TrackKind::Normal, unspecified TrackKind::Unspecified, {
             api::TrackKind::Normal => TrackKind::Normal,
             api::TrackKind::Radio => TrackKind::Radio,
         }
-    }
-
-    pub fn track_kind_from_proto(value: i32) -> api::TrackKind {
-        match TrackKind::try_from(value).unwrap_or(TrackKind::Unspecified) {
-            TrackKind::Radio => api::TrackKind::Radio,
-            TrackKind::Normal | TrackKind::Unspecified => api::TrackKind::Normal,
-        }
-    }
-
-    pub fn queue_mode_to_proto(value: api::QueueMode) -> QueueMode {
-        match value {
+    );
+    enum_conversion!(queue_mode_to_proto, queue_mode_from_proto, api::QueueMode, QueueMode,
+        default api::QueueMode::Replace, unspecified QueueMode::Unspecified, {
             api::QueueMode::Replace => QueueMode::Replace,
             api::QueueMode::Append => QueueMode::Append,
             api::QueueMode::PlayNext => QueueMode::PlayNext,
             api::QueueMode::Insert => QueueMode::Insert,
         }
-    }
-
-    pub fn queue_mode_from_proto(value: i32) -> api::QueueMode {
-        match QueueMode::try_from(value).unwrap_or(QueueMode::Unspecified) {
-            QueueMode::Append => api::QueueMode::Append,
-            QueueMode::PlayNext => api::QueueMode::PlayNext,
-            QueueMode::Insert => api::QueueMode::Insert,
-            QueueMode::Replace | QueueMode::Unspecified => api::QueueMode::Replace,
-        }
-    }
-
-    pub fn table_to_proto(value: api::Table) -> Table {
-        match value {
+    );
+    enum_conversion!(table_to_proto, table_from_proto, api::Table, Table,
+        default api::Table::Unknown, unspecified Table::Unspecified, {
             api::Table::Tracks => Table::Tracks,
             api::Table::Albums => Table::Albums,
             api::Table::Playlists => Table::Playlists,
@@ -93,103 +129,42 @@ pub mod convert {
             api::Table::Folders => Table::Folders,
             api::Table::Servers => Table::Servers,
             api::Table::Recents => Table::Recents,
-            api::Table::Unknown => Table::Unspecified,
-        }
-    }
-
-    pub fn table_from_proto(value: i32) -> api::Table {
-        match Table::try_from(value).unwrap_or(Table::Unspecified) {
-            Table::Tracks => api::Table::Tracks,
-            Table::Albums => api::Table::Albums,
-            Table::Playlists => api::Table::Playlists,
-            Table::Favorites => api::Table::Favorites,
-            Table::Folders => api::Table::Folders,
-            Table::Servers => api::Table::Servers,
-            Table::Recents => api::Table::Recents,
-            Table::Unspecified => api::Table::Unknown,
-        }
-    }
-
-    pub fn job_kind_to_proto(value: api::JobKind) -> JobKind {
-        match value {
+        }, unknown api::Table::Unknown
+    );
+    enum_conversion!(job_kind_to_proto, job_kind_from_proto, api::JobKind, JobKind,
+        default api::JobKind::Unknown, unspecified JobKind::Unspecified, {
             api::JobKind::Scan => JobKind::Scan,
             api::JobKind::LibrarySync => JobKind::LibrarySync,
             api::JobKind::FavoritesSync => JobKind::FavoritesSync,
             api::JobKind::PlaylistSync => JobKind::PlaylistSync,
             api::JobKind::Download => JobKind::Download,
             api::JobKind::Ytdlp => JobKind::Ytdlp,
-            api::JobKind::Unknown => JobKind::Unspecified,
-        }
-    }
-
-    pub fn job_kind_from_proto(value: i32) -> api::JobKind {
-        match JobKind::try_from(value).unwrap_or(JobKind::Unspecified) {
-            JobKind::Scan => api::JobKind::Scan,
-            JobKind::LibrarySync => api::JobKind::LibrarySync,
-            JobKind::FavoritesSync => api::JobKind::FavoritesSync,
-            JobKind::PlaylistSync => api::JobKind::PlaylistSync,
-            JobKind::Download => api::JobKind::Download,
-            JobKind::Ytdlp => api::JobKind::Ytdlp,
-            JobKind::Unspecified => api::JobKind::Unknown,
-        }
-    }
-
-    pub fn job_state_to_proto(value: api::JobState) -> JobState {
-        match value {
+        }, unknown api::JobKind::Unknown
+    );
+    enum_conversion!(job_state_to_proto, job_state_from_proto, api::JobState, JobState,
+        default api::JobState::Failed, unspecified JobState::Unspecified, {
             api::JobState::Running => JobState::Running,
             api::JobState::Finished => JobState::Finished,
             api::JobState::Failed => JobState::Failed,
             api::JobState::Cancelled => JobState::Cancelled,
-            api::JobState::Unknown => JobState::Unspecified,
         }
-    }
-
-    pub fn job_state_from_proto(value: i32) -> api::JobState {
-        match JobState::try_from(value).unwrap_or(JobState::Unspecified) {
-            JobState::Running => api::JobState::Running,
-            JobState::Finished => api::JobState::Finished,
-            JobState::Cancelled => api::JobState::Cancelled,
-            JobState::Failed => api::JobState::Failed,
-            JobState::Unspecified => api::JobState::Unknown,
-        }
-    }
-
-    pub fn source_state_to_proto(value: api::SourceState) -> SourceState {
-        match value {
+    );
+    enum_conversion!(source_state_to_proto, source_state_from_proto, api::SourceState, SourceState,
+        default api::SourceState::Offline, unspecified SourceState::Unspecified, {
             api::SourceState::Online => SourceState::Online,
             api::SourceState::AuthExpired => SourceState::AuthExpired,
             api::SourceState::Offline => SourceState::Offline,
         }
-    }
-
-    pub fn source_state_from_proto(value: i32) -> api::SourceState {
-        match SourceState::try_from(value).unwrap_or(SourceState::Unspecified) {
-            SourceState::Online => api::SourceState::Online,
-            SourceState::AuthExpired => api::SourceState::AuthExpired,
-            SourceState::Offline | SourceState::Unspecified => api::SourceState::Offline,
-        }
-    }
-
-    pub fn notice_level_to_proto(value: api::NoticeLevel) -> NoticeLevel {
-        match value {
+    );
+    enum_conversion!(notice_level_to_proto, notice_level_from_proto, api::NoticeLevel, NoticeLevel,
+        default api::NoticeLevel::Error, unspecified NoticeLevel::Unspecified, {
             api::NoticeLevel::Info => NoticeLevel::Info,
             api::NoticeLevel::Warning => NoticeLevel::Warning,
             api::NoticeLevel::Error => NoticeLevel::Error,
-            api::NoticeLevel::Unknown => NoticeLevel::Unspecified,
         }
-    }
-
-    pub fn notice_level_from_proto(value: i32) -> api::NoticeLevel {
-        match NoticeLevel::try_from(value).unwrap_or(NoticeLevel::Unspecified) {
-            NoticeLevel::Info => api::NoticeLevel::Info,
-            NoticeLevel::Warning => api::NoticeLevel::Warning,
-            NoticeLevel::Error => api::NoticeLevel::Error,
-            NoticeLevel::Unspecified => api::NoticeLevel::Unknown,
-        }
-    }
-
-    pub fn error_code_to_proto(value: api::ErrorCode) -> ErrorCode {
-        match value {
+    );
+    enum_conversion!(error_code_to_proto, error_code_from_proto, api::ErrorCode, ErrorCode,
+        default api::ErrorCode::Internal, unspecified ErrorCode::Unspecified, {
             api::ErrorCode::InvalidInput => ErrorCode::InvalidInput,
             api::ErrorCode::Unauthorized => ErrorCode::Unauthorized,
             api::ErrorCode::NotFound => ErrorCode::NotFound,
@@ -199,20 +174,7 @@ pub mod convert {
             api::ErrorCode::Unsupported => ErrorCode::Unsupported,
             api::ErrorCode::Internal => ErrorCode::Internal,
         }
-    }
-
-    pub fn error_code_from_proto(value: i32) -> api::ErrorCode {
-        match ErrorCode::try_from(value).unwrap_or(ErrorCode::Unspecified) {
-            ErrorCode::InvalidInput => api::ErrorCode::InvalidInput,
-            ErrorCode::Unauthorized => api::ErrorCode::Unauthorized,
-            ErrorCode::NotFound => api::ErrorCode::NotFound,
-            ErrorCode::Conflict => api::ErrorCode::Conflict,
-            ErrorCode::SourceAuthExpired => api::ErrorCode::SourceAuthExpired,
-            ErrorCode::SourceUnreachable => api::ErrorCode::SourceUnreachable,
-            ErrorCode::Unsupported => api::ErrorCode::Unsupported,
-            ErrorCode::Internal | ErrorCode::Unspecified => api::ErrorCode::Internal,
-        }
-    }
+    );
 
     pub fn error_body_to_proto(value: &api::ErrorBody) -> ErrorBody {
         ErrorBody {
@@ -234,22 +196,11 @@ pub mod convert {
     }
 
     pub fn api_error_to_proto(value: &api::ApiError) -> ErrorBody {
-        ErrorBody {
-            code: error_code_to_proto(value.code) as i32,
-            message: value.message.clone(),
-            details_json: value.details.as_ref().map(|details| details.to_string()),
-        }
+        error_body_to_proto(&value.body())
     }
 
     pub fn api_error_from_proto(value: &ErrorBody) -> api::ApiError {
-        api::ApiError {
-            code: error_code_from_proto(value.code),
-            message: value.message.clone(),
-            details: value
-                .details_json
-                .as_deref()
-                .and_then(|json| serde_json::from_str(json).ok()),
-        }
+        error_body_from_proto(value).into()
     }
 
     pub fn intent_to_proto(value: &api::Intent) -> Intent {
@@ -309,37 +260,22 @@ pub mod convert {
         }
     }
 
-    pub fn anchor_to_proto(value: &api::PositionAnchor) -> PositionAnchor {
-        PositionAnchor {
-            ms: value.ms,
-            at_ms: value.at_ms,
-            playing: value.playing,
-        }
-    }
-
-    pub fn anchor_from_proto(value: &PositionAnchor) -> api::PositionAnchor {
-        api::PositionAnchor {
-            ms: value.ms,
-            at_ms: value.at_ms,
-            playing: value.playing,
-        }
-    }
-
-    pub fn buffered_to_proto(value: &api::BufferedRange) -> BufferedRange {
-        BufferedRange {
-            start: value.start,
-            end: value.end,
-            total: value.total,
-        }
-    }
-
-    pub fn buffered_from_proto(value: &BufferedRange) -> api::BufferedRange {
-        api::BufferedRange {
-            start: value.start,
-            end: value.end,
-            total: value.total,
-        }
-    }
+    struct_conversion!(
+        anchor_to_proto,
+        anchor_from_proto,
+        api::PositionAnchor,
+        PositionAnchor,
+        copy { ms, at_ms, playing },
+        clone {}
+    );
+    struct_conversion!(
+        buffered_to_proto,
+        buffered_from_proto,
+        api::BufferedRange,
+        BufferedRange,
+        copy { start, end, total },
+        clone {}
+    );
 
     pub fn queue_summary_to_proto(value: &api::QueueSummary) -> QueueSummary {
         QueueSummary {
@@ -715,27 +651,20 @@ pub mod convert {
         })
     }
 
-    pub fn track_filter_to_proto(value: &api::TrackFilter) -> TrackFilter {
-        TrackFilter {
-            search: value.search.clone(),
-            artist: value.artist.clone(),
-            album: value.album.clone(),
-            genre: value.genre.clone(),
-            favorite: value.favorite,
-            sort: value.sort.clone(),
+    struct_conversion!(
+        track_filter_to_proto,
+        track_filter_from_proto,
+        api::TrackFilter,
+        TrackFilter,
+        copy { favorite },
+        clone {
+            search,
+            artist,
+            album,
+            genre,
+            sort
         }
-    }
-
-    pub fn track_filter_from_proto(value: &TrackFilter) -> api::TrackFilter {
-        api::TrackFilter {
-            search: value.search.clone(),
-            artist: value.artist.clone(),
-            album: value.album.clone(),
-            genre: value.genre.clone(),
-            favorite: value.favorite,
-            sort: value.sort.clone(),
-        }
-    }
+    );
 
     pub fn page_to_proto(value: api::Page) -> Page {
         Page {
@@ -812,33 +741,22 @@ pub mod convert {
         }
     }
 
-    pub fn external_playback_to_proto(value: &api::ExternalPlayback) -> ExternalPlayback {
-        ExternalPlayback {
-            kind: value.kind.clone(),
-            device: value.device.clone(),
-        }
-    }
-
-    pub fn external_playback_from_proto(value: &ExternalPlayback) -> api::ExternalPlayback {
-        api::ExternalPlayback {
-            kind: value.kind.clone(),
-            device: value.device.clone(),
-        }
-    }
-
-    pub fn external_lease_to_proto(value: &api::ExternalPlaybackLease) -> ExternalPlaybackLease {
-        ExternalPlaybackLease {
-            lease_id: value.lease_id.clone(),
-            expires_in_ms: value.expires_in_ms,
-        }
-    }
-
-    pub fn external_lease_from_proto(value: &ExternalPlaybackLease) -> api::ExternalPlaybackLease {
-        api::ExternalPlaybackLease {
-            lease_id: value.lease_id.clone(),
-            expires_in_ms: value.expires_in_ms,
-        }
-    }
+    struct_conversion!(
+        external_playback_to_proto,
+        external_playback_from_proto,
+        api::ExternalPlayback,
+        ExternalPlayback,
+        copy {},
+        clone { kind, device }
+    );
+    struct_conversion!(
+        external_lease_to_proto,
+        external_lease_from_proto,
+        api::ExternalPlaybackLease,
+        ExternalPlaybackLease,
+        copy { expires_in_ms },
+        clone { lease_id }
+    );
 
     pub fn external_report_to_proto(value: &api::ExternalPlaybackReport) -> ExternalPlaybackReport {
         ExternalPlaybackReport {
@@ -992,31 +910,22 @@ pub mod convert {
         }
     }
 
-    pub fn stats_to_proto(value: &api::StatsView) -> Stats {
-        Stats {
-            listen_counts: value.listen_counts.clone().into_iter().collect(),
-        }
-    }
-
-    pub fn stats_from_proto(value: &Stats) -> api::StatsView {
-        api::StatsView {
-            listen_counts: value.listen_counts.clone().into_iter().collect(),
-        }
-    }
-
-    pub fn favorites_to_proto(value: &api::FavoritesView) -> Favorites {
-        Favorites {
-            refs: value.refs.clone(),
-            generation: value.generation,
-        }
-    }
-
-    pub fn favorites_from_proto(value: &Favorites) -> api::FavoritesView {
-        api::FavoritesView {
-            refs: value.refs.clone(),
-            generation: value.generation,
-        }
-    }
+    struct_conversion!(
+        stats_to_proto,
+        stats_from_proto,
+        api::StatsView,
+        Stats,
+        copy {},
+        clone { listen_counts }
+    );
+    struct_conversion!(
+        favorites_to_proto,
+        favorites_from_proto,
+        api::FavoritesView,
+        Favorites,
+        copy { generation },
+        clone { refs }
+    );
 
     pub fn job_status_to_proto(value: &api::JobStatus) -> JobStatus {
         JobStatus {
@@ -1054,27 +963,22 @@ pub mod convert {
         }
     }
 
-    pub fn download_item_state_to_proto(value: api::DownloadItemState) -> DownloadItemState {
-        match value {
+    enum_conversion!(
+        download_item_state_to_proto,
+        download_item_state_from_proto,
+        api::DownloadItemState,
+        DownloadItemState,
+        default api::DownloadItemState::Unknown,
+        unspecified DownloadItemState::Unspecified,
+        {
             api::DownloadItemState::Queued => DownloadItemState::Queued,
             api::DownloadItemState::Downloading => DownloadItemState::Downloading,
             api::DownloadItemState::Finished => DownloadItemState::Finished,
             api::DownloadItemState::Failed => DownloadItemState::Failed,
             api::DownloadItemState::Cancelled => DownloadItemState::Cancelled,
-            api::DownloadItemState::Unknown => DownloadItemState::Unspecified,
-        }
-    }
-
-    pub fn download_item_state_from_proto(value: i32) -> api::DownloadItemState {
-        match DownloadItemState::try_from(value).unwrap_or(DownloadItemState::Unspecified) {
-            DownloadItemState::Queued => api::DownloadItemState::Queued,
-            DownloadItemState::Downloading => api::DownloadItemState::Downloading,
-            DownloadItemState::Finished => api::DownloadItemState::Finished,
-            DownloadItemState::Failed => api::DownloadItemState::Failed,
-            DownloadItemState::Cancelled => api::DownloadItemState::Cancelled,
-            DownloadItemState::Unspecified => api::DownloadItemState::Unknown,
-        }
-    }
+        },
+        unknown api::DownloadItemState::Unknown
+    );
 
     pub fn download_status_to_proto(value: &api::DownloadItemStatus) -> DownloadItemStatus {
         DownloadItemStatus {
@@ -1096,8 +1000,8 @@ pub mod convert {
         }
     }
 
-    pub fn music_service_to_proto(value: api::MusicService) -> MusicService {
-        match value {
+    enum_conversion!(music_service_to_proto, music_service_from_proto, api::MusicService, MusicService,
+        default api::MusicService::Unknown, unspecified MusicService::Unspecified, {
             api::MusicService::Jellyfin => MusicService::Jellyfin,
             api::MusicService::Subsonic => MusicService::Subsonic,
             api::MusicService::Custom => MusicService::Custom,
@@ -1106,65 +1010,40 @@ pub mod convert {
             api::MusicService::SoundCloud => MusicService::SoundCloud,
             api::MusicService::Spotify => MusicService::Spotify,
             api::MusicService::Nextcloud => MusicService::Nextcloud,
-            api::MusicService::Unknown => MusicService::Unspecified,
-        }
-    }
+        }, unknown api::MusicService::Unknown
+    );
 
-    pub fn music_service_from_proto(value: i32) -> api::MusicService {
-        match MusicService::try_from(value).unwrap_or(MusicService::Unspecified) {
-            MusicService::Jellyfin => api::MusicService::Jellyfin,
-            MusicService::Subsonic => api::MusicService::Subsonic,
-            MusicService::Custom => api::MusicService::Custom,
-            MusicService::YtMusic => api::MusicService::YtMusic,
-            MusicService::AppleMusic => api::MusicService::AppleMusic,
-            MusicService::SoundCloud => api::MusicService::SoundCloud,
-            MusicService::Spotify => api::MusicService::Spotify,
-            MusicService::Nextcloud => api::MusicService::Nextcloud,
-            MusicService::Unspecified => api::MusicService::Unknown,
+    struct_conversion!(
+        album_filter_to_proto,
+        album_filter_from_proto,
+        api::AlbumFilter,
+        AlbumFilter,
+        copy {},
+        clone {
+            search,
+            artist,
+            genre,
+            sort
         }
-    }
+    );
 
-    pub fn album_filter_to_proto(value: &api::AlbumFilter) -> AlbumFilter {
-        AlbumFilter {
-            search: value.search.clone(),
-            artist: value.artist.clone(),
-            genre: value.genre.clone(),
-            sort: value.sort.clone(),
+    struct_conversion!(
+        album_info_to_proto,
+        album_info_from_proto,
+        api::AlbumInfo,
+        AlbumInfo,
+        copy {
+            year,
+            manual_artwork
+        },
+        clone {
+            id,
+            title,
+            artist,
+            genre,
+            artwork
         }
-    }
-
-    pub fn album_filter_from_proto(value: &AlbumFilter) -> api::AlbumFilter {
-        api::AlbumFilter {
-            search: value.search.clone(),
-            artist: value.artist.clone(),
-            genre: value.genre.clone(),
-            sort: value.sort.clone(),
-        }
-    }
-
-    pub fn album_info_to_proto(value: &api::AlbumInfo) -> AlbumInfo {
-        AlbumInfo {
-            id: value.id.clone(),
-            title: value.title.clone(),
-            artist: value.artist.clone(),
-            genre: value.genre.clone(),
-            year: value.year,
-            artwork: value.artwork.clone(),
-            manual_artwork: value.manual_artwork,
-        }
-    }
-
-    pub fn album_info_from_proto(value: &AlbumInfo) -> api::AlbumInfo {
-        api::AlbumInfo {
-            id: value.id.clone(),
-            title: value.title.clone(),
-            artist: value.artist.clone(),
-            genre: value.genre.clone(),
-            year: value.year,
-            artwork: value.artwork.clone(),
-            manual_artwork: value.manual_artwork,
-        }
-    }
+    );
 
     pub fn album_page_to_proto(value: &api::AlbumPage) -> AlbumPage {
         AlbumPage {
@@ -1182,25 +1061,18 @@ pub mod convert {
         }
     }
 
-    pub fn artist_info_to_proto(value: &api::ArtistInfo) -> ArtistInfo {
-        ArtistInfo {
-            name: value.name.clone(),
-            track_count: value.track_count,
-            album_count: value.album_count,
-            artwork: value.artwork.clone(),
-            manual_artwork: value.manual_artwork,
-        }
-    }
-
-    pub fn artist_info_from_proto(value: &ArtistInfo) -> api::ArtistInfo {
-        api::ArtistInfo {
-            name: value.name.clone(),
-            track_count: value.track_count,
-            album_count: value.album_count,
-            artwork: value.artwork.clone(),
-            manual_artwork: value.manual_artwork,
-        }
-    }
+    struct_conversion!(
+        artist_info_to_proto,
+        artist_info_from_proto,
+        api::ArtistInfo,
+        ArtistInfo,
+        copy {
+            track_count,
+            album_count,
+            manual_artwork
+        },
+        clone { name, artwork }
+    );
 
     pub fn artist_page_to_proto(value: &api::ArtistPage) -> ArtistPage {
         ArtistPage {
@@ -1232,43 +1104,34 @@ pub mod convert {
         }
     }
 
-    pub fn playlist_info_to_proto(value: &api::PlaylistInfo) -> PlaylistInfo {
-        PlaylistInfo {
-            id: value.id.clone(),
-            name: value.name.clone(),
-            track_count: value.track_count,
-            artwork: value.artwork.clone(),
-            track_keys: value.track_keys.clone(),
-            manual_artwork: value.manual_artwork,
+    struct_conversion!(
+        playlist_info_to_proto,
+        playlist_info_from_proto,
+        api::PlaylistInfo,
+        PlaylistInfo,
+        copy {
+            track_count,
+            manual_artwork
+        },
+        clone {
+            id,
+            name,
+            artwork,
+            track_keys
         }
-    }
-
-    pub fn playlist_info_from_proto(value: &PlaylistInfo) -> api::PlaylistInfo {
-        api::PlaylistInfo {
-            id: value.id.clone(),
-            name: value.name.clone(),
-            track_count: value.track_count,
-            artwork: value.artwork.clone(),
-            track_keys: value.track_keys.clone(),
-            manual_artwork: value.manual_artwork,
+    );
+    struct_conversion!(
+        playlist_folder_to_proto,
+        playlist_folder_from_proto,
+        api::PlaylistFolderInfo,
+        PlaylistFolderInfo,
+        copy {},
+        clone {
+            id,
+            name,
+            playlist_ids
         }
-    }
-
-    pub fn playlist_folder_to_proto(value: &api::PlaylistFolderInfo) -> PlaylistFolderInfo {
-        PlaylistFolderInfo {
-            id: value.id.clone(),
-            name: value.name.clone(),
-            playlist_ids: value.playlist_ids.clone(),
-        }
-    }
-
-    pub fn playlist_folder_from_proto(value: &PlaylistFolderInfo) -> api::PlaylistFolderInfo {
-        api::PlaylistFolderInfo {
-            id: value.id.clone(),
-            name: value.name.clone(),
-            playlist_ids: value.playlist_ids.clone(),
-        }
-    }
+    );
 
     pub fn playlist_catalog_to_proto(value: &api::PlaylistCatalog) -> PlaylistCatalog {
         PlaylistCatalog {
@@ -1292,93 +1155,38 @@ pub mod convert {
         }
     }
 
-    pub fn source_kind_to_proto(value: api::SourceKind) -> SourceKind {
-        match value {
+    enum_conversion!(source_kind_to_proto, source_kind_from_proto, api::SourceKind, SourceKind,
+        default api::SourceKind::Unknown, unspecified SourceKind::Unspecified, {
             api::SourceKind::Local => SourceKind::Local,
             api::SourceKind::LocalLibrary => SourceKind::LocalLibrary,
             api::SourceKind::Server => SourceKind::Server,
-            api::SourceKind::Unknown => SourceKind::Unspecified,
-        }
-    }
-
-    pub fn source_kind_from_proto(value: i32) -> api::SourceKind {
-        match SourceKind::try_from(value).unwrap_or(SourceKind::Unspecified) {
-            SourceKind::Local => api::SourceKind::Local,
-            SourceKind::LocalLibrary => api::SourceKind::LocalLibrary,
-            SourceKind::Server => api::SourceKind::Server,
-            SourceKind::Unspecified => api::SourceKind::Unknown,
-        }
-    }
-
-    pub fn playlist_capability_to_proto(value: api::PlaylistCapability) -> PlaylistCapability {
-        match value {
+        }, unknown api::SourceKind::Unknown
+    );
+    enum_conversion!(playlist_capability_to_proto, playlist_capability_from_proto, api::PlaylistCapability, PlaylistCapability,
+        default api::PlaylistCapability::None, unspecified PlaylistCapability::Unspecified, {
             api::PlaylistCapability::None => PlaylistCapability::None,
             api::PlaylistCapability::AddRemove => PlaylistCapability::AddRemove,
             api::PlaylistCapability::Reorder => PlaylistCapability::Reorder,
-            api::PlaylistCapability::Unknown => PlaylistCapability::Unspecified,
-        }
-    }
-
-    pub fn playlist_capability_from_proto(value: i32) -> api::PlaylistCapability {
-        match PlaylistCapability::try_from(value).unwrap_or(PlaylistCapability::Unspecified) {
-            PlaylistCapability::AddRemove => api::PlaylistCapability::AddRemove,
-            PlaylistCapability::Reorder => api::PlaylistCapability::Reorder,
-            PlaylistCapability::None | PlaylistCapability::Unspecified => {
-                api::PlaylistCapability::None
-            }
-        }
-    }
-
-    pub fn artist_presentation_to_proto(value: api::ArtistPresentation) -> ArtistPresentation {
-        match value {
+        }, unknown api::PlaylistCapability::Unknown
+    );
+    enum_conversion!(artist_presentation_to_proto, artist_presentation_from_proto, api::ArtistPresentation, ArtistPresentation,
+        default api::ArtistPresentation::Library, unspecified ArtistPresentation::Unspecified, {
             api::ArtistPresentation::Library => ArtistPresentation::Library,
             api::ArtistPresentation::Remote => ArtistPresentation::Remote,
-            api::ArtistPresentation::Unknown => ArtistPresentation::Unspecified,
-        }
-    }
-
-    pub fn artist_presentation_from_proto(value: i32) -> api::ArtistPresentation {
-        match ArtistPresentation::try_from(value).unwrap_or(ArtistPresentation::Unspecified) {
-            ArtistPresentation::Remote => api::ArtistPresentation::Remote,
-            ArtistPresentation::Library | ArtistPresentation::Unspecified => {
-                api::ArtistPresentation::Library
-            }
-        }
-    }
-
-    pub fn album_presentation_to_proto(value: api::AlbumPresentation) -> AlbumPresentation {
-        match value {
+        }, unknown api::ArtistPresentation::Unknown
+    );
+    enum_conversion!(album_presentation_to_proto, album_presentation_from_proto, api::AlbumPresentation, AlbumPresentation,
+        default api::AlbumPresentation::Standard, unspecified AlbumPresentation::Unspecified, {
             api::AlbumPresentation::Standard => AlbumPresentation::Standard,
             api::AlbumPresentation::Remote => AlbumPresentation::Remote,
-            api::AlbumPresentation::Unknown => AlbumPresentation::Unspecified,
-        }
-    }
-
-    pub fn album_presentation_from_proto(value: i32) -> api::AlbumPresentation {
-        match AlbumPresentation::try_from(value).unwrap_or(AlbumPresentation::Unspecified) {
-            AlbumPresentation::Remote => api::AlbumPresentation::Remote,
-            AlbumPresentation::Standard | AlbumPresentation::Unspecified => {
-                api::AlbumPresentation::Standard
-            }
-        }
-    }
-
-    pub fn favorites_sync_to_proto(value: api::FavoritesSyncMode) -> FavoritesSyncMode {
-        match value {
+        }, unknown api::AlbumPresentation::Unknown
+    );
+    enum_conversion!(favorites_sync_to_proto, favorites_sync_from_proto, api::FavoritesSyncMode, FavoritesSyncMode,
+        default api::FavoritesSyncMode::Instant, unspecified FavoritesSyncMode::Unspecified, {
             api::FavoritesSyncMode::Instant => FavoritesSyncMode::Instant,
             api::FavoritesSyncMode::Paginated => FavoritesSyncMode::Paginated,
-            api::FavoritesSyncMode::Unknown => FavoritesSyncMode::Unspecified,
-        }
-    }
-
-    pub fn favorites_sync_from_proto(value: i32) -> api::FavoritesSyncMode {
-        match FavoritesSyncMode::try_from(value).unwrap_or(FavoritesSyncMode::Unspecified) {
-            FavoritesSyncMode::Paginated => api::FavoritesSyncMode::Paginated,
-            FavoritesSyncMode::Instant | FavoritesSyncMode::Unspecified => {
-                api::FavoritesSyncMode::Instant
-            }
-        }
-    }
+        }, unknown api::FavoritesSyncMode::Unknown
+    );
 
     pub fn source_capabilities_to_proto(value: &api::SourceCapabilities) -> SourceCapabilities {
         SourceCapabilities {
@@ -1457,21 +1265,18 @@ pub mod convert {
         }
     }
 
-    pub fn local_source_draft_to_proto(value: &api::LocalSourceDraft) -> LocalSourceDraft {
-        LocalSourceDraft {
-            id: value.id.clone(),
-            name: value.name.clone(),
-            directories: value.directories.clone(),
+    struct_conversion!(
+        local_source_draft_to_proto,
+        local_source_draft_from_proto,
+        api::LocalSourceDraft,
+        LocalSourceDraft,
+        copy {},
+        clone {
+            id,
+            name,
+            directories
         }
-    }
-
-    pub fn local_source_draft_from_proto(value: &LocalSourceDraft) -> api::LocalSourceDraft {
-        api::LocalSourceDraft {
-            id: value.id.clone(),
-            name: value.name.clone(),
-            directories: value.directories.clone(),
-        }
-    }
+    );
 
     pub fn server_draft_to_proto(value: &api::ServerDraft) -> ServerDraft {
         ServerDraft {
@@ -1499,57 +1304,39 @@ pub mod convert {
         }
     }
 
-    pub fn credential_to_proto(value: &api::CredentialProvision) -> CredentialProvision {
-        CredentialProvision {
-            server_id: value.server_id.clone(),
-            secret: value.secret.clone(),
-            user_id: value.user_id.clone(),
-            browser: value.browser.clone(),
+    struct_conversion!(
+        credential_to_proto,
+        credential_from_proto,
+        api::CredentialProvision,
+        CredentialProvision,
+        copy {},
+        clone {
+            server_id,
+            secret,
+            user_id,
+            browser
         }
-    }
-
-    pub fn credential_from_proto(value: &CredentialProvision) -> api::CredentialProvision {
-        api::CredentialProvision {
-            server_id: value.server_id.clone(),
-            secret: value.secret.clone(),
-            user_id: value.user_id.clone(),
-            browser: value.browser.clone(),
+    );
+    struct_conversion!(
+        source_login_to_proto,
+        source_login_from_proto,
+        api::SourceLoginRequest,
+        SourceLoginRequest,
+        copy {},
+        clone {
+            server_id,
+            username,
+            password
         }
-    }
+    );
 
-    pub fn source_login_to_proto(value: &api::SourceLoginRequest) -> SourceLoginRequest {
-        SourceLoginRequest {
-            server_id: value.server_id.clone(),
-            username: value.username.clone(),
-            password: value.password.clone(),
-        }
-    }
-
-    pub fn source_login_from_proto(value: &SourceLoginRequest) -> api::SourceLoginRequest {
-        api::SourceLoginRequest {
-            server_id: value.server_id.clone(),
-            username: value.username.clone(),
-            password: value.password.clone(),
-        }
-    }
-
-    pub fn integration_kind_to_proto(value: api::IntegrationKind) -> IntegrationKind {
-        match value {
+    enum_conversion!(integration_kind_to_proto, integration_kind_from_proto, api::IntegrationKind, IntegrationKind,
+        default api::IntegrationKind::Unknown, unspecified IntegrationKind::Unspecified, {
             api::IntegrationKind::ListenBrainz => IntegrationKind::ListenBrainz,
             api::IntegrationKind::LastFm => IntegrationKind::LastFm,
             api::IntegrationKind::LibreFm => IntegrationKind::LibreFm,
-            api::IntegrationKind::Unknown => IntegrationKind::Unspecified,
-        }
-    }
-
-    pub fn integration_kind_from_proto(value: i32) -> api::IntegrationKind {
-        match IntegrationKind::try_from(value).unwrap_or(IntegrationKind::Unspecified) {
-            IntegrationKind::ListenBrainz => api::IntegrationKind::ListenBrainz,
-            IntegrationKind::LastFm => api::IntegrationKind::LastFm,
-            IntegrationKind::LibreFm => api::IntegrationKind::LibreFm,
-            IntegrationKind::Unspecified => api::IntegrationKind::Unknown,
-        }
-    }
+        }, unknown api::IntegrationKind::Unknown
+    );
 
     pub fn integration_status_to_proto(
         value: &api::IntegrationCredentialStatus,
@@ -1593,22 +1380,17 @@ pub mod convert {
         }
     }
 
-    pub fn source_folder_to_proto(value: &api::SourceFolderEntry) -> SourceFolderEntry {
-        SourceFolderEntry {
-            path: value.path.clone(),
-            name: value.name.clone(),
-        }
-    }
+    struct_conversion!(
+        source_folder_to_proto,
+        source_folder_from_proto,
+        api::SourceFolderEntry,
+        SourceFolderEntry,
+        copy {},
+        clone { path, name }
+    );
 
-    pub fn source_folder_from_proto(value: &SourceFolderEntry) -> api::SourceFolderEntry {
-        api::SourceFolderEntry {
-            path: value.path.clone(),
-            name: value.name.clone(),
-        }
-    }
-
-    pub fn ytdlp_format_to_proto(value: api::YtdlpAudioFormat) -> YtdlpAudioFormat {
-        match value {
+    enum_conversion!(ytdlp_format_to_proto, ytdlp_format_from_proto, api::YtdlpAudioFormat, YtdlpAudioFormat,
+        default api::YtdlpAudioFormat::Best, unspecified YtdlpAudioFormat::Unspecified, {
             api::YtdlpAudioFormat::Best => YtdlpAudioFormat::Best,
             api::YtdlpAudioFormat::Mp3 => YtdlpAudioFormat::Mp3,
             api::YtdlpAudioFormat::M4a => YtdlpAudioFormat::M4a,
@@ -1616,21 +1398,8 @@ pub mod convert {
             api::YtdlpAudioFormat::Flac => YtdlpAudioFormat::Flac,
             api::YtdlpAudioFormat::Wav => YtdlpAudioFormat::Wav,
             api::YtdlpAudioFormat::Video => YtdlpAudioFormat::Video,
-            api::YtdlpAudioFormat::Unknown => YtdlpAudioFormat::Unspecified,
-        }
-    }
-
-    pub fn ytdlp_format_from_proto(value: i32) -> api::YtdlpAudioFormat {
-        match YtdlpAudioFormat::try_from(value).unwrap_or(YtdlpAudioFormat::Unspecified) {
-            YtdlpAudioFormat::Mp3 => api::YtdlpAudioFormat::Mp3,
-            YtdlpAudioFormat::M4a => api::YtdlpAudioFormat::M4a,
-            YtdlpAudioFormat::Opus => api::YtdlpAudioFormat::Opus,
-            YtdlpAudioFormat::Flac => api::YtdlpAudioFormat::Flac,
-            YtdlpAudioFormat::Wav => api::YtdlpAudioFormat::Wav,
-            YtdlpAudioFormat::Video => api::YtdlpAudioFormat::Video,
-            YtdlpAudioFormat::Best | YtdlpAudioFormat::Unspecified => api::YtdlpAudioFormat::Best,
-        }
-    }
+        }, unknown api::YtdlpAudioFormat::Unknown
+    );
 
     pub fn ytdlp_request_to_proto(value: &api::YtdlpRequest) -> YtdlpRequest {
         YtdlpRequest {
@@ -1654,43 +1423,28 @@ pub mod convert {
         })
     }
 
-    pub fn external_access_to_proto(value: &api::ExternalAccess) -> ExternalAccess {
-        ExternalAccess {
-            kind: value.kind.clone(),
-            access_token: value.access_token.clone(),
-            client_id: value.client_id.clone(),
+    struct_conversion!(
+        external_access_to_proto,
+        external_access_from_proto,
+        api::ExternalAccess,
+        ExternalAccess,
+        copy {},
+        clone {
+            kind,
+            access_token,
+            client_id
         }
-    }
+    );
 
-    pub fn external_access_from_proto(value: &ExternalAccess) -> api::ExternalAccess {
-        api::ExternalAccess {
-            kind: value.kind.clone(),
-            access_token: value.access_token.clone(),
-            client_id: value.client_id.clone(),
-        }
-    }
-
-    pub fn catalog_item_kind_to_proto(value: api::CatalogItemKind) -> CatalogItemKind {
-        match value {
+    enum_conversion!(catalog_item_kind_to_proto, catalog_item_kind_from_proto, api::CatalogItemKind, CatalogItemKind,
+        default api::CatalogItemKind::Unknown, unspecified CatalogItemKind::Unspecified, {
             api::CatalogItemKind::Track => CatalogItemKind::Track,
             api::CatalogItemKind::Album => CatalogItemKind::Album,
             api::CatalogItemKind::Playlist => CatalogItemKind::Playlist,
             api::CatalogItemKind::Artist => CatalogItemKind::Artist,
             api::CatalogItemKind::Mood => CatalogItemKind::Mood,
-            api::CatalogItemKind::Unknown => CatalogItemKind::Unspecified,
-        }
-    }
-
-    pub fn catalog_item_kind_from_proto(value: i32) -> api::CatalogItemKind {
-        match CatalogItemKind::try_from(value).unwrap_or(CatalogItemKind::Unspecified) {
-            CatalogItemKind::Track => api::CatalogItemKind::Track,
-            CatalogItemKind::Album => api::CatalogItemKind::Album,
-            CatalogItemKind::Playlist => api::CatalogItemKind::Playlist,
-            CatalogItemKind::Artist => api::CatalogItemKind::Artist,
-            CatalogItemKind::Mood => api::CatalogItemKind::Mood,
-            CatalogItemKind::Unspecified => api::CatalogItemKind::Unknown,
-        }
-    }
+        }, unknown api::CatalogItemKind::Unknown
+    );
 
     pub fn catalog_item_to_proto(value: &api::CatalogItem) -> CatalogItem {
         CatalogItem {
@@ -1864,60 +1618,64 @@ pub mod convert {
         }
     }
 
-    pub fn radio_registry_to_proto(value: &api::RadioRegistryInfo) -> RadioRegistryInfo {
-        RadioRegistryInfo {
-            url: value.url.clone(),
-            enabled: value.enabled,
-            built_in: value.built_in,
+    struct_conversion!(
+        radio_registry_to_proto,
+        radio_registry_from_proto,
+        api::RadioRegistryInfo,
+        RadioRegistryInfo,
+        copy { enabled, built_in },
+        clone { url }
+    );
+    struct_conversion!(
+        metadata_patch_to_proto,
+        metadata_patch_from_proto,
+        api::TrackMetadataPatch,
+        TrackMetadataPatch,
+        copy {
+            track_number,
+            clear_track_number,
+            disc_number,
+            clear_disc_number
+        },
+        clone {
+            key,
+            title,
+            artist,
+            album
         }
-    }
+    );
 
-    pub fn radio_registry_from_proto(value: &RadioRegistryInfo) -> api::RadioRegistryInfo {
-        api::RadioRegistryInfo {
-            url: value.url.clone(),
-            enabled: value.enabled,
-            built_in: value.built_in,
-        }
-    }
-
-    pub fn metadata_patch_to_proto(value: &api::TrackMetadataPatch) -> TrackMetadataPatch {
-        TrackMetadataPatch {
-            key: value.key.clone(),
-            title: value.title.clone(),
-            artist: value.artist.clone(),
-            album: value.album.clone(),
-            track_number: value.track_number,
-            clear_track_number: value.clear_track_number,
-            disc_number: value.disc_number,
-            clear_disc_number: value.clear_disc_number,
-        }
-    }
-
-    pub fn metadata_patch_from_proto(value: &TrackMetadataPatch) -> api::TrackMetadataPatch {
-        api::TrackMetadataPatch {
-            key: value.key.clone(),
-            title: value.title.clone(),
-            artist: value.artist.clone(),
-            album: value.album.clone(),
-            track_number: value.track_number,
-            clear_track_number: value.clear_track_number,
-            disc_number: value.disc_number,
-            clear_disc_number: value.clear_disc_number,
-        }
-    }
+    artwork_target_conversion!(
+        artwork_target_to_upload,
+        artwork_target_from_upload,
+        artwork_upload::Target,
+        track artwork_upload::Target::TrackKey,
+        album artwork_upload::Target::AlbumId,
+        artist artwork_upload::Target::ArtistName,
+        playlist artwork_upload::Target::PlaylistId
+    );
+    artwork_target_conversion!(
+        artwork_target_to_request,
+        artwork_target_from_request,
+        artwork_request::Entity,
+        track artwork_request::Entity::Track,
+        album artwork_request::Entity::Album,
+        artist artwork_request::Entity::Artist,
+        playlist artwork_request::Entity::Playlist
+    );
+    artwork_target_conversion!(
+        artwork_target_to_remove,
+        artwork_target_from_remove,
+        remove_artwork_request::Target,
+        track remove_artwork_request::Target::TrackKey,
+        album remove_artwork_request::Target::AlbumId,
+        artist remove_artwork_request::Target::ArtistName,
+        playlist remove_artwork_request::Target::PlaylistId
+    );
 
     pub fn artwork_upload_to_proto(value: &api::ArtworkUpload) -> ArtworkUpload {
         ArtworkUpload {
-            target: value.target.as_ref().map(|target| match target {
-                api::ArtworkTarget::Track { key } => artwork_upload::Target::TrackKey(key.clone()),
-                api::ArtworkTarget::Album { id } => artwork_upload::Target::AlbumId(id.clone()),
-                api::ArtworkTarget::Artist { name } => {
-                    artwork_upload::Target::ArtistName(name.clone())
-                }
-                api::ArtworkTarget::Playlist { id } => {
-                    artwork_upload::Target::PlaylistId(id.clone())
-                }
-            }),
+            target: value.target.as_ref().map(artwork_target_to_upload),
             content_type: value.content_type.clone(),
             data: value.data.clone(),
         }
@@ -1925,90 +1683,34 @@ pub mod convert {
 
     pub fn artwork_request_to_proto(value: &api::ArtworkRequest) -> ArtworkRequest {
         ArtworkRequest {
-            entity: value.entity.as_ref().map(|entity| match entity {
-                api::ArtworkEntity::Track { key } => artwork_request::Entity::Track(key.clone()),
-                api::ArtworkEntity::Album { id } => artwork_request::Entity::Album(id.clone()),
-                api::ArtworkEntity::Artist { name } => {
-                    artwork_request::Entity::Artist(name.clone())
-                }
-                api::ArtworkEntity::Playlist { id } => {
-                    artwork_request::Entity::Playlist(id.clone())
-                }
-            }),
+            entity: value.entity.as_ref().map(artwork_target_to_request),
             hq: value.hq,
         }
     }
 
     pub fn artwork_request_from_proto(value: &ArtworkRequest) -> api::ArtworkRequest {
         api::ArtworkRequest {
-            entity: value.entity.as_ref().map(|entity| match entity {
-                artwork_request::Entity::Track(key) => {
-                    api::ArtworkEntity::Track { key: key.clone() }
-                }
-                artwork_request::Entity::Album(id) => api::ArtworkEntity::Album { id: id.clone() },
-                artwork_request::Entity::Artist(name) => {
-                    api::ArtworkEntity::Artist { name: name.clone() }
-                }
-                artwork_request::Entity::Playlist(id) => {
-                    api::ArtworkEntity::Playlist { id: id.clone() }
-                }
-            }),
+            entity: value.entity.as_ref().map(artwork_target_from_request),
             hq: value.hq,
         }
     }
 
     pub fn artwork_upload_from_proto(value: &ArtworkUpload) -> api::ArtworkUpload {
         api::ArtworkUpload {
-            target: value.target.as_ref().map(|target| match target {
-                artwork_upload::Target::TrackKey(key) => {
-                    api::ArtworkTarget::Track { key: key.clone() }
-                }
-                artwork_upload::Target::AlbumId(id) => api::ArtworkTarget::Album { id: id.clone() },
-                artwork_upload::Target::ArtistName(name) => {
-                    api::ArtworkTarget::Artist { name: name.clone() }
-                }
-                artwork_upload::Target::PlaylistId(id) => {
-                    api::ArtworkTarget::Playlist { id: id.clone() }
-                }
-            }),
+            target: value.target.as_ref().map(artwork_target_from_upload),
             content_type: value.content_type.clone(),
             data: value.data.clone(),
         }
     }
 
     pub fn remove_artwork_to_proto(value: &api::ArtworkTarget) -> RemoveArtworkRequest {
-        let target = match value {
-            api::ArtworkTarget::Track { key } => {
-                remove_artwork_request::Target::TrackKey(key.clone())
-            }
-            api::ArtworkTarget::Album { id } => remove_artwork_request::Target::AlbumId(id.clone()),
-            api::ArtworkTarget::Artist { name } => {
-                remove_artwork_request::Target::ArtistName(name.clone())
-            }
-            api::ArtworkTarget::Playlist { id } => {
-                remove_artwork_request::Target::PlaylistId(id.clone())
-            }
-        };
         RemoveArtworkRequest {
-            target: Some(target),
+            target: Some(artwork_target_to_remove(value)),
         }
     }
 
     pub fn remove_artwork_from_proto(value: &RemoveArtworkRequest) -> Option<api::ArtworkTarget> {
-        Some(match value.target.as_ref()? {
-            remove_artwork_request::Target::TrackKey(key) => {
-                api::ArtworkTarget::Track { key: key.clone() }
-            }
-            remove_artwork_request::Target::AlbumId(id) => {
-                api::ArtworkTarget::Album { id: id.clone() }
-            }
-            remove_artwork_request::Target::ArtistName(name) => {
-                api::ArtworkTarget::Artist { name: name.clone() }
-            }
-            remove_artwork_request::Target::PlaylistId(id) => {
-                api::ArtworkTarget::Playlist { id: id.clone() }
-            }
-        })
+        value.target.as_ref().map(artwork_target_from_remove)
     }
 
     pub fn config_view_to_proto(value: &api::ConfigView) -> ConfigView {
@@ -2225,12 +1927,6 @@ mod tests {
         for intent in intents {
             assert_eq!(intent, intent_from_proto(Some(&intent_to_proto(&intent))));
         }
-    }
-
-    #[test]
-    fn unspecified_status_values_are_unknown() {
-        assert_eq!(job_state_from_proto(0), api::JobState::Unknown);
-        assert_eq!(notice_level_from_proto(0), api::NoticeLevel::Unknown);
     }
 
     #[test]
