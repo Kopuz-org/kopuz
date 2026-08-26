@@ -137,6 +137,10 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
                 file_path
             };
 
+            // Cover paths persisted before the 0.16 identity rename still
+            // point into the old app directories.
+            let file_path = crate::legacy::remap_identity_path(&file_path).unwrap_or(file_path);
+
             if high_quality {
                 let cache_path = hq_cache_path(&file_path);
                 if cache_path.exists()

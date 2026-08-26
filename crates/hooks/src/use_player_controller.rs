@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use utils;
 
-use crate::playback_ref::ResolvedStreamRef;
+use utils::playback_ref::ResolvedStreamRef;
 
 use player::decoder;
 

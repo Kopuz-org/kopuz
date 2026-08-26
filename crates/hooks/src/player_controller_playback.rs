@@ -9,9 +9,9 @@ use player::decoder;
 use player::engine::{SourceFactory, Transition};
 use player::player::{LoadArgs, NowPlayingMeta};
 
-use crate::playback_ref::{PlaybackItemRef, ResolvedStreamRef};
 use crate::scrobble_scheduler::{self, ScrobbleOptions};
 use crate::use_player_controller::{PlaybackIntent, PlayerController, network_factory};
+use utils::playback_ref::{PlaybackItemRef, ResolvedStreamRef};
 
 impl PlayerController {
     /// Remap an index after moving one queue item from `from` to `to`.

@@ -61,7 +61,7 @@ fn is_streamable_queue_track(track: &Track) -> bool {
     // on ytmusic/soundcloud). Parsing is case-exact, matching playback: uid()
     // emits lowercase scheme prefixes, so a mis-cased id that would play back as
     // Local is correctly excluded here too.
-    hooks::playback_ref::PlaybackItemRef::parse(&track.id.uid()).is_server()
+    utils::playback_ref::PlaybackItemRef::parse(&track.id.uid()).is_server()
 }
 
 fn is_restorable_queue_track(track: &Track) -> bool {

@@ -56,6 +56,42 @@ fn move_dir(from: &Path, to: &Path) -> Option<String> {
     }
 }
 
+/// Rewrite an absolute path stored under the pre-rename identity onto the
+/// current directory layout. Cover paths in the database are absolute, so
+/// after `migrate_identity` moved the directories they keep pointing at the
+/// old identity (e.g. `.../Caches/com.temidaradev.kopuz/covers/x.jpg`).
+/// Returns the remapped path only when the file actually exists there; the
+/// durable fix is rewriting the stored refs, which lands with the daemon's
+/// entity-addressed artwork.
+pub fn remap_identity_path(path: &str) -> Option<String> {
+    if Path::new(path).exists() {
+        return None;
+    }
+    let (old, new) = (
+        directories::ProjectDirs::from(LEGACY_IDENTITY.0, LEGACY_IDENTITY.1, LEGACY_IDENTITY.2)?,
+        directories::ProjectDirs::from("moe", "kopuz", "kopuz")?,
+    );
+    let pairs = [
+        (old.config_dir(), new.config_dir()),
+        (old.data_dir(), new.data_dir()),
+        (old.data_local_dir(), new.data_local_dir()),
+        (old.cache_dir(), new.cache_dir()),
+    ];
+    remap_across(path, &pairs)
+}
+
+fn remap_across(path: &str, pairs: &[(&Path, &Path)]) -> Option<String> {
+    for (from, to) in pairs {
+        if let Ok(rest) = Path::new(path).strip_prefix(from) {
+            let candidate = to.join(rest);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
+}
+
 pub fn migrate_locations() {
     let Some(dirs) = directories::ProjectDirs::from("moe", "kopuz", "kopuz") else {
         return;
@@ -123,6 +159,26 @@ mod tests {
 
         assert!(move_dir(&from, &to).is_none());
         assert_eq!(fs::read(to.join("kopuz.db")).unwrap(), b"live");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remap_rewrites_only_paths_that_exist_at_the_new_root() {
+        let root = tmp("remap");
+        let (old_cache, new_cache) = (root.join("old-cache"), root.join("new-cache"));
+        fs::create_dir_all(new_cache.join("covers")).unwrap();
+        fs::write(new_cache.join("covers/a.jpg"), b"img").unwrap();
+        let pairs = [(old_cache.as_path(), new_cache.as_path())];
+
+        let stored = old_cache.join("covers/a.jpg");
+        let remapped = super::remap_across(&stored.to_string_lossy(), &pairs);
+        assert_eq!(remapped.as_deref(), new_cache.join("covers/a.jpg").to_str());
+
+        let missing = old_cache.join("covers/b.jpg");
+        assert!(super::remap_across(&missing.to_string_lossy(), &pairs).is_none());
+
+        let unrelated = root.join("elsewhere/c.jpg");
+        assert!(super::remap_across(&unrelated.to_string_lossy(), &pairs).is_none());
         let _ = fs::remove_dir_all(&root);
     }
 

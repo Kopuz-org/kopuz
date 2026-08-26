@@ -156,7 +156,7 @@ pub(super) fn use_player_event_pump(ctrl: PlayerController, mut config: Signal<A
                 if let Some(next_track) = lyrics_prefetch {
                     let next_track_key = next_track.id.uid().to_string();
                     // Radio has no lyrics to prefetch.
-                    if !crate::playback_ref::PlaybackItemRef::parse(&next_track_key).is_radio()
+                    if !utils::playback_ref::PlaybackItemRef::parse(&next_track_key).is_radio()
                         && last_lyrics_prefetch_track.as_ref() != Some(&next_track_key)
                     {
                         last_lyrics_prefetch_track = Some(next_track_key);
