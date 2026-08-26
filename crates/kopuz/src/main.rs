@@ -34,6 +34,8 @@ mod artwork_protocol;
 mod chrome_trace;
 mod desktop_shell;
 #[cfg(not(target_os = "android"))]
+mod exit_flush;
+#[cfg(not(target_os = "android"))]
 mod legacy;
 mod logging;
 mod queue_state;
@@ -359,9 +361,6 @@ fn main() {
         dioxus::LaunchBuilder::desktop()
             .with_cfg(config)
             .launch(App);
-        // Window closed → flush the log file tail + finalize the
-        // chrome trace's closing bracket.
-        logging::shutdown();
     }
 
     #[cfg(target_os = "android")]
@@ -719,25 +718,7 @@ fn App() -> Element {
                     cfg.volume = *volume.peek();
                     cfg
                 });
-                let _ = std::thread::spawn(move || {
-                    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                    else {
-                        return;
-                    };
-                    rt.block_on(async move {
-                        if let Some(snap) = queue_snap
-                            && let Err(e) = db.save_queue(&snap).await
-                        {
-                            tracing::warn!(error = %e, "queue flush on close failed");
-                        }
-                        if let Some(cfg) = cfg {
-                            let _ = db.save_config(&cfg).await;
-                        }
-                    });
-                })
-                .join();
+                exit_flush::persist_on_fresh_thread(db, queue_snap, cfg);
             }
             // After the persists, so they (and any failure warnings) land in
             // latest.log and the trace. Idempotent across CloseRequested/
@@ -1015,6 +996,16 @@ fn App() -> Element {
         let _ = *persisted_volume.read();
         config_dirty += 1;
     });
+    #[cfg(not(target_os = "android"))]
+    use_effect(move || {
+        if !*initial_load_done.read() || !*config_loaded_ok.read() {
+            return;
+        }
+        let mut snapshot = config.read().clone();
+        let _ = *persisted_volume.read();
+        snapshot.volume = *volume.peek();
+        exit_flush::stash_config(snapshot);
+    });
     let db_for_cfg_save = db.clone();
     use_future(move || {
         let db = db_for_cfg_save.clone();
@@ -1256,6 +1247,13 @@ fn App() -> Element {
         );
 
         if *pending_queue_state_snapshot.peek() != queue_state {
+            #[cfg(not(target_os = "android"))]
+            exit_flush::stash_queue(
+                queue_state
+                    .clone()
+                    .map(queue_state::snapshot)
+                    .unwrap_or_default(),
+            );
             pending_queue_state_snapshot.set(queue_state);
             pending_queue_state_revision.with_mut(|revision| *revision += 1);
         }
