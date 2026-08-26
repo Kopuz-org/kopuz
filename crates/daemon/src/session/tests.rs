@@ -104,6 +104,25 @@ impl QueueMaterializer for StubLibrary {
     }
 }
 
+struct BlockingMaterializer {
+    started: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl QueueMaterializer for BlockingMaterializer {
+    async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
+        let QueueContext::Tracks { keys } = context else {
+            return Err(ApiError::unsupported("tracks only"));
+        };
+        if keys.first().is_some_and(|key| key == "slow") {
+            self.started.notify_one();
+            self.release.notified().await;
+        }
+        Ok(keys.iter().map(test_track).collect())
+    }
+}
+
 fn test_track(key: &String) -> Track {
     let duration = if key.starts_with("radio:") {
         u64::MAX
@@ -244,6 +263,7 @@ fn replace(keys: &[&str]) -> SetQueueRequest {
         },
         start_index: Some(0),
         shuffle: None,
+        insert_index: None,
     }
 }
 
@@ -314,6 +334,136 @@ async fn set_queue_then_window_round_trips() {
     assert_eq!(window.total, 3);
     assert_eq!(window.items[0].track.title, "track-0");
     assert_eq!(window.rev, ack.rev);
+}
+
+#[tokio::test]
+async fn materialization_does_not_block_actor_and_newer_queue_wins() {
+    let sink = FakeSinkHandle::default();
+    let player = Player::try_with_sink(Box::new(FakeSink(sink))).expect("headless player starts");
+    let materializer = Arc::new(BlockingMaterializer {
+        started: tokio::sync::Notify::new(),
+        release: tokio::sync::Notify::new(),
+    });
+    let session = SessionHandle::spawn_with_factory(
+        materializer.clone(),
+        player,
+        PlaybackServices::default(),
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+
+    let slow_session = session.clone();
+    let slow = tokio::spawn(async move { slow_session.set_queue(replace(&["slow"])).await });
+    materializer.started.notified().await;
+
+    tokio::time::timeout(
+        Duration::from_millis(250),
+        session.player_command(PlayerCommand::SetVolume { volume: 0.25 }),
+    )
+    .await
+    .expect("actor remains responsive")
+    .expect("volume command succeeds");
+    session
+        .set_queue(replace(&["newer"]))
+        .await
+        .expect("newer queue applies");
+
+    materializer.release.notify_one();
+    let error = slow
+        .await
+        .expect("slow task joins")
+        .expect_err("stale materialization is rejected");
+    assert_eq!(error.code, ErrorCode::Conflict);
+    let window = session
+        .queue_window(Page::default())
+        .await
+        .expect("queue window");
+    assert_eq!(window.items[0].track.title, "newer");
+}
+
+#[tokio::test]
+async fn external_playback_forwards_transport_commands() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["track-0"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+
+    let mut events = harness.api.session.subscribe();
+    harness
+        .api
+        .session
+        .set_external(Some(api::ExternalPlayback {
+            kind: "spotify".to_string(),
+            device: None,
+        }));
+    wait_state(&harness.api, "external flag set", |state| {
+        state.external.is_some()
+    })
+    .await;
+    harness
+        .api
+        .session
+        .report_external(
+            Some(test_track(&"external-track".to_string())),
+            12_000,
+            true,
+            false,
+            Some("browser".into()),
+        )
+        .await
+        .expect("external state report");
+
+    harness
+        .api
+        .player_command(PlayerCommand::Pause)
+        .await
+        .expect("pause ack");
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for the passthrough event"
+        );
+        match tokio::time::timeout(Duration::from_secs(1), events.recv()).await {
+            Ok(Ok((_, api::ApiEvent::PlayerExternalCommand(PlayerCommand::Pause)))) => break,
+            Ok(Ok(_)) => continue,
+            Ok(Err(error)) => panic!("event stream closed: {error}"),
+            Err(_) => continue,
+        }
+    }
+
+    let state = harness.api.player_state().await.expect("player state");
+    assert_eq!(
+        state.phase,
+        ApiPhase::Playing,
+        "a forwarded command must not change reported external state"
+    );
+
+    harness.api.session.set_external(None);
+    wait_state(&harness.api, "external flag cleared", |state| {
+        state.external.is_none() && state.phase == ApiPhase::Idle
+    })
+    .await;
+    harness
+        .api
+        .player_command(PlayerCommand::Play)
+        .await
+        .expect("resume engine after clearing external");
+    wait_committed(&harness.api).await;
+    harness
+        .api
+        .player_command(PlayerCommand::Pause)
+        .await
+        .expect("pause ack");
+    wait_state(
+        &harness.api,
+        "engine pause after clearing external",
+        |state| state.phase == ApiPhase::Paused,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -450,6 +600,57 @@ async fn set_mode_and_events_flow_through() {
     let state = harness.api.player_state().await.expect("state");
     assert!(state.queue.shuffle);
     assert_eq!(state.queue.loop_mode, LoopMode::Queue);
+}
+
+#[tokio::test]
+async fn explicit_replace_start_pins_the_seed_while_shuffling() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["old-0", "old-1"]))
+        .await
+        .expect("set old queue");
+    wait_committed(&harness.api).await;
+    harness
+        .api
+        .player_command(PlayerCommand::SetMode {
+            shuffle: Some(true),
+            loop_mode: None,
+        })
+        .await
+        .expect("enable shuffle");
+
+    harness
+        .api
+        .set_queue(SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: QueueContext::Tracks {
+                keys: ["seed", "next-1", "next-2"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            },
+            start_index: Some(0),
+            shuffle: Some(true),
+            insert_index: None,
+        })
+        .await
+        .expect("start radio queue");
+
+    let state = wait_state(&harness.api, "radio seed playing", |state| {
+        state.queue.index == Some(0) && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    assert_eq!(
+        state.track.as_ref().map(|track| track.title.as_str()),
+        Some("seed")
+    );
+    let window = harness
+        .api
+        .queue_window(Page::default())
+        .await
+        .expect("radio queue");
+    assert_eq!(window.items[0].track.title, "seed");
 }
 
 #[tokio::test]
@@ -1092,6 +1293,62 @@ async fn queue_edit_moves_removes_and_guards_the_playing_row() {
         state.track.as_ref().map(|t| t.title.as_str()),
         Some("/c.wav")
     );
+}
+
+#[tokio::test]
+async fn queue_jump_preserves_the_running_shuffle_order() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["/a.wav", "/b.wav", "/c.wav", "/d.wav"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    harness
+        .api
+        .player_command(PlayerCommand::SetMode {
+            shuffle: Some(true),
+            loop_mode: None,
+        })
+        .await
+        .expect("enable shuffle");
+
+    let before = harness
+        .api
+        .queue_window(Page::default())
+        .await
+        .expect("queue before jump");
+    let expected_title = before.items[2].track.title.clone();
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 2 })
+        .await
+        .expect("jump in play order");
+
+    let state = wait_state(&harness.api, "shuffle jump target playing", |state| {
+        state.queue.index == Some(2) && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    assert_eq!(
+        state.track.as_ref().map(|track| track.title.as_str()),
+        Some(expected_title.as_str())
+    );
+    let after = harness
+        .api
+        .queue_window(Page::default())
+        .await
+        .expect("queue after jump");
+    let before_titles: Vec<_> = before
+        .items
+        .iter()
+        .map(|item| item.track.title.as_str())
+        .collect();
+    let after_titles: Vec<_> = after
+        .items
+        .iter()
+        .map(|item| item.track.title.as_str())
+        .collect();
+    assert_eq!(after_titles, before_titles);
 }
 
 #[tokio::test]

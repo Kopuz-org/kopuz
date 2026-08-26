@@ -174,14 +174,17 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                             class: "flex items-center h-full px-4 hover:bg-white/5 rounded-xl cursor-pointer transition-colors group",
                                             onclick: move |_| {
                                                 let f = filter.peek().clone();
-                                                let read_db = consume_context::<hooks::ReadDb>();
+                                                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                                 spawn(async move {
-                                                    let all = read_db
-                                                        .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
+                                                    let all = api
+                                                        .tracks(
+                                                            hooks::use_db_queries::track_filter_to_api(&f),
+                                                            api::Page { offset: 0, limit: u32::MAX },
+                                                        )
                                                         .await
+                                                        .map(|page| page.items.into_iter().map(hooks::use_db_queries::track_from_api).collect())
                                                         .unwrap_or_default();
-                                                    ctrl.queue.set(all);
-                                                    ctrl.play_track(idx);
+                                                    ctrl.play_queue_at(all, idx);
                                                 });
                                             },
                                             div { class: "w-12 shrink-0 flex items-center justify-center tabular-nums text-white/50 font-medium group-hover:text-white transition-colors relative",

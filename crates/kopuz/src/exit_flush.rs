@@ -46,14 +46,26 @@ pub fn persist_on_fresh_thread(
     config: Option<config::AppConfig>,
 ) {
     if queue.is_none() && config.is_none() {
+        tracing::info!("daemon shutdown has no pending state to flush");
         return;
     }
-    let _ = std::thread::spawn(move || {
-        let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+    let queue_pending = queue.is_some();
+    let config_pending = config.is_some();
+    tracing::info!(
+        queue_pending,
+        config_pending,
+        "daemon shutdown flush started"
+    );
+    let worker = std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-        else {
-            return;
+        {
+            Ok(rt) => rt,
+            Err(error) => {
+                tracing::error!(%error, "daemon shutdown flush runtime could not start");
+                return;
+            }
         };
         rt.block_on(async move {
             if let Some(snap) = queue
@@ -67,8 +79,15 @@ pub fn persist_on_fresh_thread(
                 tracing::warn!(error = %e, "config flush on exit failed");
             }
         });
-    })
-    .join();
+    });
+    match worker.join() {
+        Ok(()) => tracing::info!(
+            queue_pending,
+            config_pending,
+            "daemon shutdown flush finished"
+        ),
+        Err(_) => tracing::error!("daemon shutdown flush worker panicked"),
+    }
 }
 
 /// SIGINT path: persist whatever the app last stashed. A no-op before the

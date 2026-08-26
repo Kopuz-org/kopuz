@@ -9,25 +9,18 @@
 //! they land so the grid fills progressively, hits persisted to the DB
 //! (`artist_images` kind `"server"`) so future runs skip the search.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
-use db::ReadDb;
+use api::KopuzApi;
 use dioxus::prelude::*;
 use reader::ArtistImageRef;
 use server::cover::FetchedArtistImages;
-use server::source::{ActiveSource, ArtistView};
+use server::source::ArtistView;
 use tracing::Instrument;
 use utils::artist::{joined_credit_primary, normalize_artist_key};
 
 use crate::use_db_queries::use_active_source;
-
-/// `metadata_cache` kind marking "searched, no photo exists" per normalized
-/// artist name — so a miss isn't re-searched every session.
-const ARTIST_PHOTO_MISS_KIND: &str = "artist_photo_miss";
-/// How long a recorded miss suppresses a re-search. One day: a newly uploaded
-/// artist photo shows up on the next day's first visit.
-const ARTIST_PHOTO_MISS_TTL_SECS: i64 = 86_400;
 
 /// Drives the photo fetch for the active source. The page passes its own
 /// query resources in (they're `Copy`) so the hook doesn't duplicate them.
@@ -37,8 +30,8 @@ pub fn use_artist_photo_fetch(
     artist_images: Resource<db::ArtistImages>,
 ) {
     let source = use_active_source();
-    let active_source = use_context::<Signal<ActiveSource>>();
-    let read_db = use_context::<ReadDb>();
+    let active_source = use_context::<Signal<server::source::ActiveSource>>();
+    let api = use_context::<Arc<dyn KopuzApi>>();
     let caps = use_memo(move || active_source.read().capabilities());
     let mut fetched_artist_images = use_context::<Signal<FetchedArtistImages>>();
     // In-flight guard, and WHICH source a fetch already ran for — keyed by
@@ -47,41 +40,13 @@ pub fn use_artist_photo_fetch(
     let mut is_fetching = use_signal(|| false);
     let mut fetch_done = use_signal(|| None::<config::Source>);
 
-    // Library servers: one bulk artist-image listing fills the session map.
     use_effect(move || {
-        // A Remote-artist source (YT) resolves its avatars per-artist below;
-        // this bulk server path would yield nothing for it anyway.
-        if !caps().sync || caps().artist_view != ArtistView::Library {
-            return;
-        }
         if *is_fetching.read() || *fetch_done.read() == Some(source()) {
             return;
         }
-        is_fetching.set(true);
-        let src = active_source.peek().clone();
-        let this_source = source.peek().clone();
-        spawn(
-            async move {
-                let images = src.fetch_artist_images().await.unwrap_or_default();
-                fetched_artist_images.write().replace_all(images);
-                fetch_done.set(Some(this_source));
-                is_fetching.set(false);
-            }
-            .instrument(tracing::info_span!("artist.fetch_images")),
-        );
-    });
-
-    // Remote-artist catalogs (YT): per-artist avatar resolution.
-    use_effect(move || {
-        if caps().artist_view != ArtistView::Remote {
+        if caps().artist_view == ArtistView::Library && !caps().sync {
             return;
         }
-        if *is_fetching.read() || *fetch_done.read() == Some(source()) {
-            return;
-        }
-        // Wait for the DB artist-image cache to load so artists whose photo was
-        // persisted on a previous run are skipped (otherwise every page open
-        // would re-search them).
         let db_imgs = artist_images.read();
         let Some((_, db_photos)) = db_imgs.clone() else {
             return;
@@ -98,10 +63,6 @@ pub fn use_artist_photo_fetch(
             let already = fetched_artist_images.read();
             fetch_queue(&albums, &sample, &db_photos, &already)
         };
-        // Mark done up front so the effect doesn't respawn as the workers write
-        // partial results back into the map; mark every queued name pending so
-        // its tile shows a placeholder instead of the last resort it'd get as
-        // "not fetching".
         fetch_done.set(Some(source.peek().clone()));
         if names.is_empty() {
             return;
@@ -111,19 +72,31 @@ pub fn use_artist_photo_fetch(
             .write()
             .mark_pending(names.iter().cloned());
 
-        // One coordinator task owns the whole fetch: it settles the TTL'd
-        // misses first (only after that does it touch any signal), then drains
-        // the remainder with a small worker pool.
-        let src = active_source.peek().clone();
-        let db = read_db.clone();
+        let api = api.clone();
         spawn(
             async move {
-                let to_fetch = settle_fresh_misses(&db, fetched_artist_images, names).await;
-                drain_queue(src, fetched_artist_images, to_fetch).await;
+                let available: HashSet<String> = api
+                    .refresh_artist_artwork(names.clone())
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
+                let mut fetched = fetched_artist_images.write();
+                for name in names {
+                    if available.contains(&name) {
+                        fetched.insert_hit(
+                            name.clone(),
+                            crate::use_db_queries::artist_artwork_url(&name),
+                        );
+                    } else {
+                        fetched.insert_miss(name);
+                    }
+                }
+                drop(fetched);
+                is_fetching.set(false);
             }
-            .instrument(tracing::info_span!("artist.fetch_yt_images")),
+            .instrument(tracing::info_span!("artist.fetch_images")),
         );
-        is_fetching.set(false);
     });
 }
 
@@ -167,78 +140,6 @@ fn fetch_queue(
         .collect();
     names.sort_by_key(|n| n.to_lowercase());
     names
-}
-
-/// Record the names whose "no photo exists" result is still fresh (within the
-/// TTL) as resolved misses, and return the remainder to actually fetch.
-async fn settle_fresh_misses(
-    db: &ReadDb,
-    mut fetched: Signal<FetchedArtistImages>,
-    names: Vec<String>,
-) -> Vec<String> {
-    let fresh_misses: std::collections::HashSet<String> = db
-        .meta_keys_since(ARTIST_PHOTO_MISS_KIND, ARTIST_PHOTO_MISS_TTL_SECS)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let (missed, to_fetch): (Vec<String>, Vec<String>) = names
-        .into_iter()
-        .partition(|n| fresh_misses.contains(&normalize_artist_key(n)));
-    if !missed.is_empty() {
-        let mut map = fetched.write();
-        for name in missed {
-            map.insert_miss(name);
-        }
-    }
-    to_fetch
-}
-
-/// Drain the fetch queue with a small pool of identical workers, each pulling
-/// the next name off a shared iterator.
-async fn drain_queue(src: ActiveSource, fetched: Signal<FetchedArtistImages>, names: Vec<String>) {
-    let shared = Arc::new(Mutex::new(names.into_iter()));
-    let worker = || {
-        let src = src.clone();
-        let shared = shared.clone();
-        async move {
-            while let Some(name) = shared.lock().ok().and_then(|mut it| it.next()) {
-                resolve_one(&src, fetched, name).await;
-            }
-        }
-    };
-    // Six concurrent lookups — enough to fill a grid page quickly without
-    // hammering the catalog. `join!` (not tokio::spawn) keeps the workers on
-    // the Dioxus runtime, where the signal writes are allowed.
-    tokio::join!(worker(), worker(), worker(), worker(), worker(), worker());
-}
-
-/// Resolve one artist's photo and record the outcome — always: the grid must be
-/// able to tell "resolved, no photo" (→ the last resort) from "still loading"
-/// (→ placeholder).
-async fn resolve_one(src: &ActiveSource, mut fetched: Signal<FetchedArtistImages>, name: String) {
-    match src.fetch_artist_image(&name).await {
-        Ok(Some(url)) => {
-            // Persist found photos to the DB (kind "server" → the grid's
-            // `photos` map) so future opens load them instantly instead of
-            // re-searching.
-            let _ = src
-                .set_artist_image(&normalize_artist_key(&name), "server", Some(&url))
-                .await;
-            fetched.write().insert_hit(name, url);
-        }
-        Ok(None) => {
-            // A definitive miss persists (TTL'd) so it isn't re-searched every
-            // session.
-            let _ = src
-                .set_meta(&normalize_artist_key(&name), ARTIST_PHOTO_MISS_KIND, "")
-                .await;
-            fetched.write().insert_miss(name);
-        }
-        // A transient error is a session-only miss — it must not hide the
-        // artist for a whole TTL.
-        Err(_) => fetched.write().insert_miss(name),
-    }
 }
 
 #[cfg(test)]

@@ -20,6 +20,7 @@ workspace = true
 rfd = { workspace = true }
 
 [dependencies]
+api = { workspace = true }
 dioxus = { workspace = true, features = ["desktop"] }
 directories = { workspace = true }
 uuid = { workspace = true }

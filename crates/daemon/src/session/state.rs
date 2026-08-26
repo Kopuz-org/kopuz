@@ -101,8 +101,9 @@ impl Session {
 
     pub(super) fn build_state(&self) -> PlayerState {
         let track = self
-            .model
-            .current_track()
+            .external_track
+            .as_ref()
+            .or_else(|| self.model.current_track())
             .map(|track| now_playing_from(track, &self.config));
         let fading = self.pending_transition.as_ref().and_then(|pending| {
             (pending.stage == TransitionStage::Fading).then(|| FadingState {
@@ -133,8 +134,8 @@ impl Session {
             output_latency_ms: Some(self.player.output_latency().as_millis() as u64),
             buffered: self.buffered.clone(),
             fading,
+            external: self.external.clone(),
             error: self.error.clone(),
-            ..Default::default()
         }
     }
 }

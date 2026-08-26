@@ -26,6 +26,7 @@ impl Session {
                     let next_phase = engine_phase(phase);
                     if self.phase != next_phase {
                         self.phase = next_phase;
+                        tracing::info!(token, phase = ?next_phase, "playback phase changed");
                         self.publish(state_tx, false);
                         self.publish_position_anchor(
                             state_tx,

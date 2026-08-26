@@ -1,6 +1,8 @@
 //! FavoritesService: the optimistic toggle and the background reconciler,
 //! ported from `hooks/src/favorites.rs` and `hooks/src/use_sync_task.rs`.
 
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
@@ -9,7 +11,7 @@ use api::{ApiError, ApiEvent, ErrorCode, FavoritesView, JobKind, JobRef, Table};
 use server::sync::{SyncError, SyncReason, reconcile_favorites};
 use tokio::sync::Notify;
 
-use crate::jobs::JobRunner;
+use crate::jobs::{JobCtx, JobRunner};
 use crate::session::SessionHandle;
 
 const NUDGE_DEBOUNCE: Duration = Duration::from_secs(2);
@@ -128,8 +130,111 @@ impl FavoritesService {
         let service = self.clone();
         runner.start(JobKind::FavoritesSync, move |ctx| async move {
             ctx.progress("reconciling", None, None, None);
-            service.reconcile(SyncReason::Manual).await
+            service.manual_sync(&ctx).await
         })
+    }
+
+    async fn manual_sync(&self, ctx: &JobCtx) -> Result<(), ApiError> {
+        let config = self.session.config_watch().borrow().clone();
+        let Some(source) = server::source::configured_server(self.db.clone(), &config) else {
+            return Err(ApiError::invalid_input("no server configured"));
+        };
+        if source.capabilities().favorites_sync == server::source::FavoritesSync::Paginated {
+            return self.sync_paginated(ctx, source.as_ref()).await;
+        }
+        self.reconcile(SyncReason::Manual).await
+    }
+
+    async fn sync_paginated(
+        &self,
+        ctx: &JobCtx,
+        source: &dyn server::source::MediaSource,
+    ) -> Result<(), ApiError> {
+        match source.validate().await {
+            server::source::AuthOutcome::Valid => {}
+            server::source::AuthOutcome::Expired => {
+                return Err(ApiError::new(
+                    ErrorCode::SourceAuthExpired,
+                    "credentials expired; sign in again",
+                ));
+            }
+            server::source::AuthOutcome::Unreachable => {
+                return Err(ApiError::new(
+                    ErrorCode::SourceUnreachable,
+                    "server unreachable",
+                ));
+            }
+        }
+
+        let source_id = source.source().clone();
+        let epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or_default();
+        let mut cursor = None;
+        let mut seen = HashSet::new();
+        let mut keys = Vec::new();
+        let mut keep_albums = Vec::new();
+        loop {
+            if ctx.cancelled() {
+                return Ok(());
+            }
+            let page = source
+                .fetch_favorites_page(cursor)
+                .await
+                .map_err(source_error)?;
+            let next = page.next;
+            let tracks: Vec<reader::Track> = page
+                .tracks
+                .into_iter()
+                .filter(|track| {
+                    let key = track.id.key().into_owned();
+                    !key.is_empty() && seen.insert(key)
+                })
+                .collect();
+            if !tracks.is_empty() {
+                let page_keys: Vec<String> = tracks
+                    .iter()
+                    .map(|track| track.id.key().into_owned())
+                    .collect();
+                let start = keys.len() as i64;
+                keys.extend(page_keys.iter().cloned());
+                keep_albums.extend(tracks.iter().map(|track| track.album_id.clone()));
+                self.db
+                    .upsert_tracks(&source_id, &tracks)
+                    .await
+                    .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+                self.db
+                    .upsert_albums(&source_id, &synthesize_albums(&tracks))
+                    .await
+                    .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+                self.db
+                    .upsert_favorites_page(source_id.as_str(), &page_keys, start, epoch)
+                    .await
+                    .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+                ctx.progress("fetching favorites", Some(keys.len() as u64), None, None);
+                self.bump(Table::Tracks);
+                self.bump(Table::Favorites);
+            }
+            match next {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+        keep_albums.sort();
+        keep_albums.dedup();
+        self.db
+            .prune_source(&source_id, &keys, &keep_albums)
+            .await
+            .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+        self.db
+            .sweep_favorites(source_id.as_str(), epoch)
+            .await
+            .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+        self.bump(Table::Tracks);
+        self.bump(Table::Albums);
+        self.bump(Table::Favorites);
+        Ok(())
     }
 
     async fn reconcile(&self, reason: SyncReason) -> Result<(), ApiError> {
@@ -217,4 +322,29 @@ impl FavoritesService {
             }
         })
     }
+}
+
+fn synthesize_albums(tracks: &[reader::Track]) -> Vec<reader::Album> {
+    let mut by_album: HashMap<String, &reader::Track> = HashMap::new();
+    for track in tracks {
+        if !track.album_id.is_empty() {
+            by_album.entry(track.album_id.clone()).or_insert(track);
+        }
+    }
+    by_album
+        .into_iter()
+        .map(|(id, track)| reader::Album {
+            id,
+            title: if track.album.is_empty() {
+                "Singles".to_string()
+            } else {
+                track.album.clone()
+            },
+            artist: track.artist.clone(),
+            genre: String::new(),
+            year: 0,
+            cover_path: track.cover.as_deref().map(PathBuf::from),
+            manual_cover: false,
+        })
+        .collect()
 }

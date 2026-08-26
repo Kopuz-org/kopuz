@@ -138,6 +138,10 @@ craneLib.mkCargoDerivation (
       ''}
 
       dx build --release --platform desktop -p kopuz --offline --frozen
+
+      # The headless daemon: same core, no webview. Frontends attach over
+      # gRPC via the discovery file.
+      cargo build --release -p kopuz-daemon --features kopuzd --bin kopuzd --offline --frozen
     '';
 
     installPhase = ''
@@ -160,6 +164,11 @@ craneLib.mkCargoDerivation (
 
             install -Dm644 crates/kopuz/assets/logo.png \
               $out/share/icons/hicolor/256x256/apps/moe.kopuz.kopuz.png
+
+            install -Dm644 ${../systemd/kopuzd.service} \
+              $out/share/systemd/user/kopuzd.service
+            substituteInPlace $out/share/systemd/user/kopuzd.service \
+              --replace-fail "ExecStart=/usr/bin/kopuzd" "ExecStart=$out/bin/kopuzd"
           ''
         else
           ''
@@ -168,6 +177,8 @@ craneLib.mkCargoDerivation (
             ln -s "$macBin" $out/bin/kopuz
           ''
       }
+
+      install -Dm755 target/release/kopuzd $out/bin/kopuzd
 
       runHook postInstall
     '';

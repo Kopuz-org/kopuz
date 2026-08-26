@@ -22,7 +22,7 @@ impl<'a> PlaybackItemRef<'a> {
                 stream_id: parts.next().unwrap_or_default(),
             },
             "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "applemusic"
-            | "spotify" => Self::Server {
+            | "spotify" | "nextcloud" => Self::Server {
                 service: scheme,
                 item_id: parts.next().unwrap_or_default(),
                 extra: parts.next(),
@@ -117,6 +117,14 @@ mod tests {
                 service: "ytmusic",
                 item_id: "video_id",
                 extra: Some("extra"),
+            }
+        );
+        assert_eq!(
+            PlaybackItemRef::parse("nextcloud:Music/song.flac"),
+            PlaybackItemRef::Server {
+                service: "nextcloud",
+                item_id: "Music/song.flac",
+                extra: None,
             }
         );
     }

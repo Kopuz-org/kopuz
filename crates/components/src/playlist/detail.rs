@@ -3,25 +3,7 @@ use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
 #[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
-use std::collections::HashSet;
 use std::path::PathBuf;
-use tracing::Instrument;
-
-/// Wall-clock seconds since the epoch — the playlist-pull staleness stamp.
-fn unix_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-/// Wall-clock millis since the epoch — one reconcile's sweep epoch token.
-fn unix_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
 
 #[component]
 #[tracing::instrument(name = "render.playlist_detail", skip_all)]
@@ -73,131 +55,38 @@ pub fn PlaylistDetail(
         }
     });
 
+    let api = use_context::<std::sync::Arc<dyn api::KopuzApi>>();
     let pid = playlist_id.clone();
-    // Only sources with remote entries reconcile; a local playlist's tracks live
-    // entirely in the seed, and the end-of-walk sweep would wipe them.
     let remote_entries = caps.sync;
     use_effect(move || {
-        if *has_loaded_remote.read() {
-            return;
-        }
-        if !remote_entries {
+        if *has_loaded_remote.read() || !remote_entries {
             return;
         }
         let pid_clone = pid.clone();
-        let load_span = tracing::info_span!("playlist.reconcile", playlist_id = %pid_clone);
-        let source = active_source.peek().clone();
-        let read_db = consume_context::<hooks::ReadDb>();
-        spawn(
-            async move {
-                // Staleness gate (mirrors the favorites pull): the cached seed shows
-                // instantly; only re-walk the remote when the last reconcile is
-                // older than 15 min. First visit (last_pull == 0) always pulls.
-                let now = unix_secs();
-                let last_pull: u64 = read_db
-                    .meta_get("pl_pull", &pid_clone)
-                    .await
-                    .ok()
-                    .flatten()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
-                if last_pull <= now && now - last_pull < 15 * 60 {
-                    return;
-                }
-
-                // Stream the entries page by page under one epoch. Each page upserts
-                // its tracks + positions into the cache (and grows the visible list);
-                // the end sweep drops entries the remote no longer has. The visible
-                // list only grows mid-walk, so re-reconciling an already-cached
-                // playlist never blinks shorter — removals/reorders land at the end.
-                let epoch = unix_millis();
-                let mut cursor: Option<String> = None;
-                let mut seen: HashSet<String> = HashSet::new();
-                let mut acc: Vec<reader::models::Track> = Vec::new();
-                let mut position: i64 = 0;
-                let mut completed = true;
-                loop {
-                    let (src, id, cur) = (source.clone(), pid_clone.clone(), cursor.clone());
-                    let page = match utils::offload(
-                        async move { src.fetch_playlist_entries_page(&id, cur).await }
-                            .instrument(tracing::Span::current()),
-                    )
-                    .await
-                    {
-                        Ok(p) => p,
-                        Err(e) => {
-                            tracing::warn!(error = %e, "playlist page fetch failed");
-                            completed = false;
-                            break;
-                        }
-                    };
-                    let next = page.next.clone();
-                    // YT repeats tracks at page boundaries — dedup across the walk.
-                    let fresh: Vec<reader::models::Track> = page
-                        .tracks
+        let api = api.clone();
+        has_loaded_remote.set(true);
+        spawn(async move {
+            match api
+                .refresh_playlist(api::PlaylistTracksRequest {
+                    id: pid_clone.clone(),
+                    page: api::Page {
+                        offset: 0,
+                        limit: u32::MAX,
+                    },
+                })
+                .await
+            {
+                Ok(page) => tracks.set(
+                    page.items
                         .into_iter()
-                        .filter(|t| {
-                            let k = t.id.key().to_string();
-                            !k.is_empty() && seen.insert(k)
-                        })
-                        .collect();
-                    if fresh.is_empty() {
-                        match next {
-                            Some(n) => {
-                                cursor = Some(n);
-                                continue;
-                            }
-                            None => break,
-                        }
-                    }
-                    let page_refs: Vec<String> =
-                        fresh.iter().map(|t| t.id.key().to_string()).collect();
-                    let start = position;
-                    position += fresh.len() as i64;
-                    let (src, id) = (source.clone(), pid_clone.clone());
-                    let fresh = utils::offload(
-                        async move {
-                            for chunk in fresh.chunks(100) {
-                                let _ = src.upsert_tracks(chunk).await;
-                            }
-                            let _ = src
-                                .upsert_playlist_tracks_page(&id, &page_refs, start, epoch)
-                                .await;
-                            fresh
-                        }
-                        .instrument(tracing::Span::current()),
-                    )
-                    .await;
-                    acc.extend(fresh);
-                    // Grow-only: never shrink the visible list mid-walk.
-                    if acc.len() > tracks.peek().len() {
-                        tracks.set(acc.clone());
-                    }
-                    has_loaded_remote.set(true);
-                    gens.bump_coalesced(Table::Tracks);
-                    match next {
-                        Some(n) => cursor = Some(n),
-                        None => break,
-                    }
-                }
-                if completed {
-                    tracing::debug!(count = acc.len(), "playlist reconciled");
-                    tracks.set(acc);
-                    let (src, id) = (source.clone(), pid_clone.clone());
-                    utils::offload(
-                        async move {
-                            let _ = src.sweep_playlist_tracks(&id, epoch).await;
-                            let _ = src.set_meta("pl_pull", &id, &unix_secs().to_string()).await;
-                        }
-                        .instrument(tracing::Span::current()),
-                    )
-                    .await;
-                    gens.bump(Table::Playlists);
-                    gens.bump(Table::Tracks);
+                        .map(hooks::use_db_queries::track_from_api)
+                        .collect(),
+                ),
+                Err(error) => {
+                    tracing::warn!(playlist_id = %pid_clone, %error, "playlist refresh failed");
                 }
             }
-            .instrument(load_span),
-        );
+        });
     });
 
     let store_loading = playlists_res.read().is_none();
@@ -215,20 +104,14 @@ pub fn PlaylistDetail(
 
     // A custom (locally-picked) cover wins; then a server playlist's remote image
     // tag; then the first track's cover via the source-agnostic seam.
-    let playlist_cover = playlist_custom_cover
-        .as_ref()
-        .and_then(|p| utils::format_artwork_url(Some(p)))
-        .or_else(|| {
-            let tag = playlist_image_tag.as_ref()?;
-            let conf = config.read();
-            let server = conf.server.as_ref()?;
-            server::cover::resolve(
-                &conf,
-                reader::CoverRef::remote_item(server.service, &playlist_id, Some(tag.as_str())),
-                512,
-            )
-        })
-        .or_else(|| tracks_val.first().and_then(&cover_for));
+    let playlist_cover = server::cover::playlist(
+        &config.read(),
+        &playlist_id,
+        playlist_custom_cover.as_deref(),
+        playlist_image_tag.as_deref(),
+        512,
+    )
+    .or_else(|| tracks_val.first().and_then(&cover_for));
 
     let start_radio = crate::radio_actions::playlist_radio_handler(playlist_id.clone());
 
@@ -236,8 +119,6 @@ pub fn PlaylistDetail(
     let pid_for_move_up = playlist_id.clone();
     let pid_for_move_down = playlist_id.clone();
     let pid_for_cover = playlist_id.clone();
-    let name_for_cover = playlist_name.clone();
-    let tag_for_cover = playlist_image_tag.clone();
 
     rsx! {
         crate::track_list_view::TrackListView {
@@ -250,26 +131,34 @@ pub fn PlaylistDetail(
             enable_metadata: caps.edit_tags,
             on_cover_click: move |_| {
                 let _ = &pid_for_cover;
-                let _ = &name_for_cover;
-                let _ = &tag_for_cover;
                 #[cfg(not(target_os = "android"))]
                 {
                     let pid = pid_for_cover.clone();
-                    let pl_name = name_for_cover.clone();
-                    let pl_tag = tag_for_cover.clone();
-                    let source = active_source.peek().clone();
                     spawn(async move {
                         let file = AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
                             .pick_file()
                             .await;
                         if let Some(file) = file {
-                            let path = file.path().to_path_buf();
-                            // The source decides what "set a cover" means — Jellyfin
-                            // pushes the image upstream, everyone else just records
-                            // the local path.
-                            if source
-                                .set_playlist_cover(&pid, &pl_name, &path, pl_tag.as_deref())
+                            let content_type = match file
+                                .path()
+                                .extension()
+                                .and_then(|value| value.to_str())
+                                .map(str::to_ascii_lowercase)
+                                .as_deref()
+                            {
+                                Some("png") => "image/png",
+                                Some("webp") => "image/webp",
+                                _ => "image/jpeg",
+                            };
+                            let data = file.read().await;
+                            let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
+                            if api
+                                .upload_artwork(api::ArtworkUpload {
+                                    target: Some(api::ArtworkTarget::Playlist { id: pid }),
+                                    content_type: content_type.to_string(),
+                                    data,
+                                })
                                 .await
                                 .is_ok()
                             {
@@ -282,13 +171,11 @@ pub fn PlaylistDetail(
             on_delete_track: move |idx: usize| {
                 if caps.delete_from_disk
                     && let Some(t) = tracks.read().get(idx).cloned()
-                    && let Some(del_path) = t.id.local_path()
-                    && std::fs::remove_file(del_path).is_ok()
                 {
-                    let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                    let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                     let key = t.id.key().into_owned();
                     spawn(async move {
-                        if source.delete_tracks(&[key]).await.is_ok() {
+                        if api.delete_tracks(vec![key], true).await.is_ok() {
                             gens.bump(Table::Tracks);
                         }
                     });
@@ -296,30 +183,27 @@ pub fn PlaylistDetail(
             },
             on_selection_delete: move |paths: Vec<PathBuf>| {
                 if caps.delete_from_disk {
-                    {
-                        let mut keys = Vec::new();
-                        for path in &paths {
-                            if std::fs::remove_file(path).is_ok() {
-                                keys.push(path.to_string_lossy().into_owned());
+                    let keys: Vec<String> = paths
+                        .into_iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect();
+                    if !keys.is_empty() {
+                        let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
+                        spawn(async move {
+                            if api.delete_tracks(keys, true).await.is_ok() {
+                                gens.bump(Table::Tracks);
                             }
-                        }
-                        if !keys.is_empty() {
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            spawn(async move {
-                                if source.delete_tracks(&keys).await.is_ok() {
-                                    gens.bump(Table::Tracks);
-                                }
-                            });
-                        }
+                        });
                     }
                 }
             },
             on_remove_from_playlist: move |idx: usize| {
                 if let Some(t) = tracks.read().get(idx).cloned() {
                     let pid = pid_for_remove.clone();
-                    let source = active_source.peek().clone();
+                    let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
+                    let key = t.id.key().into_owned();
                     spawn(async move {
-                        if source.remove_from_playlist(&pid, &t, idx).await.is_ok() {
+                        if api.remove_playlist_tracks(pid, vec![key]).await.is_ok() {
                             let mut tw = tracks.write();
                             if idx < tw.len() {
                                 tw.remove(idx);
@@ -349,16 +233,10 @@ pub fn PlaylistDetail(
                     pl.tracks.clone()
                 };
                 refs.swap(idx - 1, idx);
-                let Some(moved) = tracks.read().get(idx - 1).cloned() else {
-                    return;
-                };
                 let pid = pid_for_move_up.clone();
-                let source = active_source.peek().clone();
+                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                 spawn(async move {
-                    if source
-                        .reorder_playlist(&pid, &refs, &moved, idx - 1)
-                        .await
-                        .is_ok()
+                    if api.reorder_playlist_tracks(pid, refs).await.is_ok()
                     {
                         gens.bump(Table::Playlists);
                     }
@@ -384,16 +262,10 @@ pub fn PlaylistDetail(
                     pl.tracks.clone()
                 };
                 refs.swap(idx, idx + 1);
-                let Some(moved) = tracks.read().get(idx + 1).cloned() else {
-                    return;
-                };
                 let pid = pid_for_move_down.clone();
-                let source = active_source.peek().clone();
+                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                 spawn(async move {
-                    if source
-                        .reorder_playlist(&pid, &refs, &moved, idx + 1)
-                        .await
-                        .is_ok()
+                    if api.reorder_playlist_tracks(pid, refs).await.is_ok()
                     {
                         gens.bump(Table::Playlists);
                     }

@@ -2,27 +2,39 @@
 //!
 //! Everything here is transport-neutral: `LocalApi` (daemon crate) implements
 //! [`KopuzApi`] with direct in-process calls; `GrpcApi` (client crate)
-//! implements it over the gRPC wire. The protobuf schema in `kopuz-proto` is
-//! the versioned wire contract.
+//! implements it over the gRPC wire. The protobuf schema owns wire stability;
+//! serde remains available for local persistence and control-CLI output.
 //!
 //! The trait starts with the playback core and grows one resource group at a
 //! time as the daemon services land.
 
 mod error;
 mod events;
+mod frontend;
 mod library;
 mod player;
 mod queue;
 
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
+pub use frontend::{
+    AlbumFilter, AlbumInfo, AlbumPage, AlbumPresentation, ArtistInfo, ArtistPage,
+    ArtistPresentation, ArtworkData, ArtworkEntity, ArtworkRequest, ArtworkTarget, ArtworkUpload,
+    CatalogDetail, CatalogDetailRequest, CatalogItem, CatalogItemKind, CatalogPage, CatalogShelf,
+    CredentialProvision, ExternalAccess, IntegrationCredentialProvision,
+    IntegrationCredentialStatus, IntegrationKind, MusicService, PlaylistCapability,
+    PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistTracksRequest, RadioRegistryInfo,
+    RadioStationInfo, RadioStreamInfo, SearchResults, ServerDraft, SourceCapabilities,
+    SourceFolderEntry, SourceInfo, SourceKind, TrackMetadataPatch, YtdlpAudioFormat, YtdlpRequest,
+};
 pub use library::{
     DEFAULT_PAGE_LIMIT, LyricChunkView, LyricLineView, LyricsView, Page, StatsView, TrackFilter,
     TrackInfo, TrackPage,
 };
 pub use player::{
-    BufferedRange, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying, Phase,
-    PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
+    BufferedRange, ExternalPlayback, ExternalPlaybackLease, ExternalPlaybackReport, FadingState,
+    Intent, LoopMode, NowPlaying, Phase, PlayerCommand, PlayerState, PositionAnchor, QueueSummary,
+    TrackKind,
 };
 pub use queue::{QueueContext, QueueEdit, QueueItem, QueueMode, QueueWindow, SetQueueRequest};
 
@@ -47,6 +59,7 @@ pub struct CommandAck {
 }
 
 pub type EventStream = futures_util::stream::BoxStream<'static, ApiEvent>;
+pub type LyricsStream = futures_util::stream::BoxStream<'static, Result<LyricsView, ApiError>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct JobRef {
@@ -86,6 +99,30 @@ pub struct FavoritesView {
     pub generation: u64,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadItemState {
+    #[default]
+    Queued,
+    Downloading,
+    Finished,
+    Failed,
+    Cancelled,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DownloadItemStatus {
+    pub key: String,
+    pub state: DownloadItemState,
+    pub bytes_done: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[async_trait::async_trait]
 pub trait KopuzApi: Send + Sync {
     async fn player_state(&self) -> Result<PlayerState, ApiError>;
@@ -122,6 +159,10 @@ pub trait KopuzApi: Send + Sync {
     /// Item ids with a registered offline copy.
     async fn downloads(&self) -> Result<Vec<String>, ApiError>;
 
+    async fn download_statuses(&self) -> Result<Vec<DownloadItemStatus>, ApiError>;
+
+    async fn cancel_download_item(&self, key: String) -> Result<(), ApiError>;
+
     async fn remove_download(&self, key: String) -> Result<(), ApiError>;
 
     async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError>;
@@ -135,7 +176,172 @@ pub trait KopuzApi: Send + Sync {
 
     async fn lyrics(&self, key: String) -> Result<LyricsView, ApiError>;
 
+    fn lyrics_stream(&self, key: String) -> LyricsStream;
+
     async fn stats(&self) -> Result<StatsView, ApiError>;
+
+    async fn albums(&self, filter: AlbumFilter, page: Page) -> Result<AlbumPage, ApiError>;
+
+    async fn album(&self, id: String) -> Result<AlbumInfo, ApiError>;
+
+    async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError>;
+
+    async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<Vec<String>, ApiError>;
+
+    async fn genres(&self) -> Result<Vec<String>, ApiError>;
+
+    async fn recent_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;
+
+    async fn album_tracks(&self, id: String, page: Page) -> Result<TrackPage, ApiError>;
+
+    async fn artist_tracks(&self, name: String, page: Page) -> Result<TrackPage, ApiError>;
+
+    async fn genre_tracks(&self, name: String, page: Page) -> Result<TrackPage, ApiError>;
+
+    async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;
+
+    async fn tracks_by_keys(&self, keys: Vec<String>) -> Result<Vec<TrackInfo>, ApiError>;
+
+    async fn track_web_url(&self, key: String) -> Result<Option<String>, ApiError>;
+
+    async fn top_genre(&self) -> Result<Option<String>, ApiError>;
+
+    async fn search(&self, query: String) -> Result<SearchResults, ApiError>;
+
+    async fn playlists(&self) -> Result<PlaylistCatalog, ApiError>;
+
+    async fn playlist_tracks(&self, request: PlaylistTracksRequest) -> Result<TrackPage, ApiError>;
+
+    async fn refresh_playlist(&self, request: PlaylistTracksRequest)
+    -> Result<TrackPage, ApiError>;
+
+    async fn create_playlist(&self, name: String, keys: Vec<String>) -> Result<String, ApiError>;
+
+    async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError>;
+
+    async fn delete_playlist(&self, id: String) -> Result<(), ApiError>;
+
+    async fn add_playlist_tracks(&self, id: String, keys: Vec<String>) -> Result<(), ApiError>;
+
+    async fn remove_playlist_tracks(&self, id: String, keys: Vec<String>) -> Result<(), ApiError>;
+
+    async fn reorder_playlist_tracks(&self, id: String, keys: Vec<String>) -> Result<(), ApiError>;
+
+    async fn create_playlist_folder(&self, name: String) -> Result<String, ApiError>;
+
+    async fn rename_playlist_folder(&self, id: String, name: String) -> Result<(), ApiError>;
+
+    async fn delete_playlist_folder(&self, id: String) -> Result<(), ApiError>;
+
+    async fn move_playlist(&self, id: String, folder_id: Option<String>) -> Result<(), ApiError>;
+
+    async fn sources(&self) -> Result<Vec<SourceInfo>, ApiError>;
+
+    async fn switch_source(&self, id: String) -> Result<SourceInfo, ApiError>;
+
+    async fn upsert_server(&self, server: ServerDraft) -> Result<SourceInfo, ApiError>;
+
+    async fn delete_server(&self, id: String) -> Result<(), ApiError>;
+
+    async fn provision_credentials(
+        &self,
+        provision: CredentialProvision,
+    ) -> Result<SourceInfo, ApiError>;
+
+    async fn clear_credentials(&self, id: String) -> Result<(), ApiError>;
+
+    /// Launch a daemon-owned browser authentication flow and store the
+    /// resulting source credentials without returning them to the caller.
+    async fn authenticate_source(&self, id: String) -> Result<SourceInfo, ApiError>;
+
+    async fn browse_source(
+        &self,
+        id: String,
+        path: String,
+    ) -> Result<Vec<SourceFolderEntry>, ApiError>;
+
+    async fn integration_credentials(&self) -> Result<Vec<IntegrationCredentialStatus>, ApiError>;
+
+    async fn provision_integration_credentials(
+        &self,
+        provision: IntegrationCredentialProvision,
+    ) -> Result<IntegrationCredentialStatus, ApiError>;
+
+    async fn clear_integration_credentials(&self, kind: IntegrationKind) -> Result<(), ApiError>;
+
+    async fn authenticate_integration(
+        &self,
+        provision: IntegrationCredentialProvision,
+    ) -> Result<IntegrationCredentialStatus, ApiError>;
+
+    async fn validate_source(&self, id: String) -> Result<SourceState, ApiError>;
+
+    async fn external_access(&self, kind: String) -> Result<ExternalAccess, ApiError>;
+
+    async fn set_external_playback(
+        &self,
+        external: Option<ExternalPlayback>,
+    ) -> Result<(), ApiError>;
+
+    async fn claim_external_playback(
+        &self,
+        external: ExternalPlayback,
+    ) -> Result<ExternalPlaybackLease, ApiError>;
+
+    async fn report_external_playback(
+        &self,
+        report: ExternalPlaybackReport,
+    ) -> Result<(), ApiError>;
+
+    async fn release_external_playback(&self, lease_id: String) -> Result<(), ApiError>;
+
+    async fn start_ytdlp(&self, request: YtdlpRequest) -> Result<JobRef, ApiError>;
+
+    async fn catalog(&self, continuation: Option<String>) -> Result<CatalogPage, ApiError>;
+
+    async fn catalog_detail(
+        &self,
+        request: CatalogDetailRequest,
+    ) -> Result<CatalogDetail, ApiError>;
+
+    async fn radio_stations(&self) -> Result<Vec<RadioStationInfo>, ApiError>;
+
+    async fn track_radio(&self, key: String) -> Result<Vec<TrackInfo>, ApiError>;
+
+    async fn playlist_radio(&self, id: String) -> Result<Vec<TrackInfo>, ApiError>;
+
+    async fn search_radio(
+        &self,
+        query: String,
+        limit: u32,
+    ) -> Result<Vec<RadioStationInfo>, ApiError>;
+
+    async fn radio_registries(&self) -> Result<Vec<RadioRegistryInfo>, ApiError>;
+
+    async fn add_radio_registry(&self, url: String) -> Result<(), ApiError>;
+
+    async fn remove_radio_registry(&self, url: String) -> Result<(), ApiError>;
+
+    async fn set_radio_registry_enabled(&self, url: String, enabled: bool) -> Result<(), ApiError>;
+
+    async fn pin_radio_station(
+        &self,
+        station: RadioStationInfo,
+        pinned: bool,
+    ) -> Result<(), ApiError>;
+
+    async fn update_track_metadata(&self, patch: TrackMetadataPatch)
+    -> Result<TrackInfo, ApiError>;
+
+    async fn delete_tracks(&self, keys: Vec<String>, from_disk: bool) -> Result<(), ApiError>;
+
+    async fn delete_album(&self, id: String, from_disk: bool) -> Result<(), ApiError>;
+
+    async fn upload_artwork(&self, upload: ArtworkUpload) -> Result<(), ApiError>;
+
+    async fn remove_artwork(&self, target: ArtworkTarget) -> Result<(), ApiError>;
+
+    async fn artwork(&self, request: ArtworkRequest) -> Result<ArtworkData, ApiError>;
 
     /// Subscribe to the state stream. Every subscriber gets every event from
     /// the moment of subscription; a snapshot fetch plus this stream is the
@@ -146,14 +352,6 @@ pub trait KopuzApi: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn error_codes_map_to_statuses() {
-        assert_eq!(ErrorCode::InvalidInput.http_status(), 400);
-        assert_eq!(ErrorCode::SourceAuthExpired.http_status(), 401);
-        assert_eq!(ErrorCode::Unsupported.http_status(), 501);
-        assert_eq!(ErrorCode::SourceUnreachable.http_status(), 502);
-    }
 
     #[test]
     fn api_event_serializes_with_dotted_names() {

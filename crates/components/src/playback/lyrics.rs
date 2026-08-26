@@ -54,6 +54,34 @@ const RIGHTBAR_DEPTH_BLUR_STEP_PX: f64 = 1.1;
 const RIGHTBAR_DEPTH_BLUR_MAX_PX: f64 = 6.0;
 pub use crate::shared::LayoutMode;
 
+pub fn from_api(value: api::LyricsView) -> utils::lyrics::Lyrics {
+    if let Some(plain) = value.plain {
+        return utils::lyrics::Lyrics::Plain(plain);
+    }
+    utils::lyrics::Lyrics::Synced(
+        value
+            .synced
+            .into_iter()
+            .map(|line| utils::lyrics::LyricLine {
+                start_time: line.start_ms as f64 / 1000.0,
+                end_time: line.end_ms.map(|value| value as f64 / 1000.0),
+                text: line.text,
+                chunks: line
+                    .chunks
+                    .into_iter()
+                    .map(|chunk| utils::lyrics::LyricChunk {
+                        start_time: chunk.start_ms as f64 / 1000.0,
+                        text: chunk.text,
+                    })
+                    .collect(),
+                parent_line_index: line.parent_line_index.map(|index| index as usize),
+                background: line.background,
+                opposite_turn: line.opposite_turn,
+            })
+            .collect(),
+    )
+}
+
 fn lyric_line_class(
     layout: LayoutMode,
     line: &utils::lyrics::LyricLine,

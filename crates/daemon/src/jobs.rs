@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use api::{ApiError, ApiEvent, ErrorCode, JobKind, JobRef, JobState, JobStatus};
+use tracing::Instrument;
 
 use crate::session::SessionHandle;
 
@@ -48,7 +49,17 @@ impl JobCtx {
         total: Option<u64>,
         message: Option<String>,
     ) {
-        self.record(phase, current, total, message.clone());
+        let phase_changed = self.record(phase, current, total, message.clone());
+        if phase_changed {
+            tracing::info!(
+                job_id = %self.id,
+                kind = ?self.kind,
+                %phase,
+                current = ?current,
+                total = ?total,
+                "daemon job entered phase"
+            );
+        }
         self.session
             .emit_event(ApiEvent::JobProgress(api::JobProgress {
                 id: self.id.clone(),
@@ -85,15 +96,18 @@ impl JobCtx {
         current: Option<u64>,
         total: Option<u64>,
         message: Option<String>,
-    ) {
+    ) -> bool {
+        let mut phase_changed = false;
         if let Ok(mut entries) = self.entries.lock()
             && let Some(entry) = entries.iter_mut().find(|entry| entry.status.id == self.id)
         {
+            phase_changed = entry.status.phase != phase;
             entry.status.phase = phase.to_string();
             entry.status.current = current;
             entry.status.total = total;
             entry.status.message = message;
         }
+        phase_changed
     }
 }
 
@@ -161,30 +175,57 @@ impl JobRunner {
         let session = self.session.clone();
         let job_id = id.clone();
         let future = job(ctx);
-        tokio::spawn(async move {
-            let result = tokio::spawn(future).await;
-            let (state, error) = match result {
-                Err(error) => (
-                    JobState::Failed,
-                    Some(ApiError::internal(format!("job task failed: {error}")).body()),
-                ),
-                Ok(_) if cancelled.load(Ordering::Relaxed) => (JobState::Cancelled, None),
-                Ok(Ok(())) => (JobState::Finished, None),
-                Ok(Err(error)) => (JobState::Failed, Some(error.body())),
-            };
-            if let Ok(mut entries) = entries.lock()
-                && let Some(entry) = entries.iter_mut().find(|entry| entry.status.id == job_id)
-            {
-                entry.status.state = state;
-                entry.status.error = error.clone();
+        tracing::info!(job_id = %id, ?kind, "daemon job started");
+        let span = tracing::info_span!("daemon.job", job_id = %job_id, ?kind);
+        tokio::spawn(
+            async move {
+                let started = Instant::now();
+                let result = future.await;
+                let (state, error) = if cancelled.load(Ordering::Relaxed) {
+                    (JobState::Cancelled, None)
+                } else {
+                    match result {
+                        Ok(()) => (JobState::Finished, None),
+                        Err(error) => (JobState::Failed, Some(error.body())),
+                    }
+                };
+                if let Ok(mut entries) = entries.lock()
+                    && let Some(entry) = entries.iter_mut().find(|entry| entry.status.id == job_id)
+                {
+                    entry.status.state = state;
+                    entry.status.error = error.clone();
+                }
+                let elapsed_ms = started.elapsed().as_millis();
+                match state {
+                    JobState::Finished => {
+                        tracing::info!(elapsed_ms, "daemon job finished");
+                    }
+                    JobState::Cancelled => {
+                        tracing::info!(elapsed_ms, "daemon job cancelled");
+                    }
+                    JobState::Failed => {
+                        if let Some(error) = error.as_ref() {
+                            tracing::warn!(
+                                elapsed_ms,
+                                code = ?error.code,
+                                error = %error.message,
+                                "daemon job failed"
+                            );
+                        } else {
+                            tracing::warn!(elapsed_ms, "daemon job failed");
+                        }
+                    }
+                    JobState::Running => {}
+                }
+                session.emit_event(ApiEvent::JobFinished {
+                    id: job_id,
+                    kind,
+                    ok: state == JobState::Finished,
+                    error,
+                });
             }
-            session.emit_event(ApiEvent::JobFinished {
-                id: job_id,
-                kind,
-                ok: state == JobState::Finished,
-                error,
-            });
-        });
+            .instrument(span),
+        );
         Ok(JobRef { job_id: id })
     }
 
@@ -206,6 +247,7 @@ impl JobRunner {
             return Err(ApiError::invalid_input("job is not running"));
         }
         entry.cancelled.store(true, Ordering::Relaxed);
+        tracing::info!(job_id = %id, kind = ?entry.status.kind, "daemon job cancellation requested");
         Ok(())
     }
 }

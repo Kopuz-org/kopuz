@@ -175,14 +175,12 @@ pub fn SearchResults(
                                         on_close_menu: move |_| active_menu_track.set(None),
                                         on_delete: move |_| {
                                             active_menu_track.set(None);
-                                            if let Some(del_path) = track_delete.id.local_path()
-                                                && std::fs::remove_file(del_path).is_ok()
-                                            {
-                                                let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                            if track_delete.id.local_path().is_some() {
+                                                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                                 let key = track_delete.id.key().into_owned();
                                                 spawn(async move {
-                                                    if local
-                                                        .delete_tracks(&[key])
+                                                    if api
+                                                        .delete_tracks(vec![key], true)
                                                         .await
                                                         .is_ok()
                                                     {
@@ -192,8 +190,7 @@ pub fn SearchResults(
                                             }
                                         },
                                         on_play: move |_| {
-                                            queue.set(queue_source.clone());
-                                            ctrl.play_track(idx);
+                                            ctrl.play_queue_at(queue_source.clone(), idx);
                                         }
                                     }
                                 }

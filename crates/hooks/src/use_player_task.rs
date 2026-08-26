@@ -65,28 +65,13 @@ mod android_media {
     }
 }
 
-/// Persist a play-count increment as a single-row upsert. The in-memory
-/// `config.listen_counts` is bumped by the caller for live views; this is the
-/// durable side (no whole-config rewrite on the play hot path).
-fn bump_listen_count_db(track_uid: String, source: ::server::source::ActiveSource) {
-    spawn(async move {
-        if let Err(e) = source.bump_listen_count(&track_uid).await {
-            tracing::warn!(error = %e, "listen count persist failed");
-        }
-    });
-}
-
-/// Record one completed listen for the current track — the same accounting the
-/// engine's completion path does, used by the external (Spotify) advance paths.
-fn record_listen(mut config: Signal<AppConfig>, ctrl: &PlayerController) {
-    let idx = *ctrl.current_queue_index.peek();
-    if let Some(track) = ctrl.get_track_at(idx) {
-        let track_id = track.id.uid().to_string();
-        let source = ctrl.active_source.peek().clone();
-        let count_key = source.source().listen_count_key(&track_id);
-        *config.write().listen_counts.entry(count_key).or_insert(0) += 1;
-        bump_listen_count_db(track_id, source);
-    }
+fn report_completed(ctrl: &PlayerController) {
+    let track = ctrl.current_track();
+    let position_ms = ctrl.current_song_progress.peek().saturating_mul(1000);
+    let device = ctrl.spotify_device_override.peek().clone();
+    ctrl.session
+        .peek()
+        .report_external_detached(track, position_ms, false, true, device);
 }
 
 /// The now-playing fields the OS media widget needs, cloned out of the Dioxus
@@ -372,7 +357,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         if !st.is_playing && ended_before && at_end {
                             prev_playing = false;
                             prev_progress = 0;
-                            record_listen(config, &ctrl);
+                            report_completed(&ctrl);
                             ctrl.play_next();
                             continue;
                         }
@@ -382,7 +367,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     }
                     Ok(None) => {
                         if ended_before {
-                            record_listen(config, &ctrl);
+                            report_completed(&ctrl);
                             ctrl.play_next();
                         }
                         prev_playing = false;
@@ -471,7 +456,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             && ctrl.spotify_device_override.peek().is_none()
                         {
                             if ended {
-                                record_listen(config, &ctrl);
+                                report_completed(&ctrl);
                                 ctrl.play_next();
                             } else if !ctrl.spotify_report_is_stale(track_id.as_deref()) {
                                 ctrl.is_playing.set(!paused);

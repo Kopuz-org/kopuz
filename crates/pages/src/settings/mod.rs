@@ -156,18 +156,18 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         );
     };
 
-    let db_for_switch = use_context::<hooks::ReadDb>();
-    let db_for_local_switch = db_for_switch.clone();
+    let api_for_switch = use_context::<std::sync::Arc<dyn api::KopuzApi>>();
+    let api_for_local_switch = api_for_switch.clone();
     let handle_switch_local = move |source: config::Source| {
-        let db = db_for_local_switch.clone();
+        let api = api_for_local_switch.clone();
         spawn(async move {
-            hooks::source_switch::apply_source_switch(config, db, source).await;
+            hooks::source_switch::apply_source_switch(api, source).await;
         });
     };
     let handle_switch_server = move |id: String| {
         crate::settings_actions::switch_server(
             config,
-            db_for_switch.clone(),
+            api_for_switch.clone(),
             id,
             yt_browser,
             error,

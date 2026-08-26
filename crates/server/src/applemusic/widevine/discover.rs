@@ -47,7 +47,9 @@ fn env_dir(key: &str) -> Option<PathBuf> {
 
 /// Directories that may contain a CDM, most-likely first.
 fn search_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
+    let roots = Vec::new();
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    let mut roots = roots;
     let home = home();
 
     // Firefox family (GMP). Forks keep Mozilla's layout under their own dir.

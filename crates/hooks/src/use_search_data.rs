@@ -1,6 +1,7 @@
 use config::AppConfig;
 use dioxus::prelude::*;
 use reader::models::{Album, Track};
+use std::sync::Arc;
 use tracing::Instrument;
 
 type TrackRes = Vec<(Track, Option<utils::CoverUrl>)>;
@@ -14,7 +15,7 @@ pub struct SearchData {
 }
 
 pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) -> SearchData {
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let api = use_context::<Arc<dyn api::KopuzApi>>();
     let source = use_memo(move || config.read().active_source.clone());
     let albums_res = crate::use_db_queries::use_albums(source);
     let gens = crate::db_reactivity::use_generations();
@@ -53,30 +54,35 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
         // YT queries its catalog (see `MediaSource::search`). Covers are resolved
         // here through the cover seam, which dispatches on the source/track.
         let conf = config.read().clone();
-        let source = active_source.read().clone();
+        let api = api.clone();
 
         utils::offload(async move {
             if query.trim().is_empty() {
                 return None;
             }
             let span = tracing::info_span!("query.search", source = conf.active_source.as_str());
-            let (tracks, albums) = source
-                .search(&query)
+            let result = api
+                .search(query)
                 .instrument(span)
                 .await
                 .inspect_err(|e| tracing::warn!(error = %e, "search failed"))
                 .ok()?;
-            let result_tracks: TrackRes = tracks
-                .iter()
-                .map(|t| (t.clone(), server::cover::track(&conf, t, 80)))
+            let result_tracks: TrackRes = result
+                .tracks
+                .into_iter()
+                .map(crate::use_db_queries::track_from_api)
+                .map(|track| {
+                    let artwork = server::cover::track(&conf, &track, 80);
+                    (track, artwork)
+                })
                 .collect();
-            let result_albums: AlbumRes = albums
-                .iter()
-                .map(|a| {
-                    (
-                        a.clone(),
-                        server::cover::from_path(&conf, a.cover_path.as_deref(), 360),
-                    )
+            let result_albums: AlbumRes = result
+                .albums
+                .into_iter()
+                .map(crate::use_db_queries::album_from_api)
+                .map(|album| {
+                    let artwork = server::cover::from_path(&conf, album.cover_path.as_deref(), 360);
+                    (album, artwork)
                 })
                 .collect();
             Some((result_tracks, result_albums))

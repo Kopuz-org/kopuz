@@ -41,7 +41,7 @@ ndk-context = { workspace = true }
 
 [dependencies]
 api = { workspace = true }
-daemon = { workspace = true }
+daemon = { workspace = true, features = ["grpc"] }
 base64 = { workspace = true }
 directories = { workspace = true }
 uuid = { workspace = true }

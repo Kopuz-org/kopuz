@@ -56,12 +56,7 @@ pub fn snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
 }
 
 fn is_streamable_queue_track(track: &Track) -> bool {
-    // Defer to the same scheme parser playback uses, so the restore filter can't
-    // drift from the list of server sources (this copy had already fallen behind
-    // on ytmusic/soundcloud). Parsing is case-exact, matching playback: uid()
-    // emits lowercase scheme prefixes, so a mis-cased id that would play back as
-    // Local is correctly excluded here too.
-    utils::playback_ref::PlaybackItemRef::parse(&track.id.uid()).is_server()
+    track.id.service().is_some()
 }
 
 fn is_restorable_queue_track(track: &Track) -> bool {

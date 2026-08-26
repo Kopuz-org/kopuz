@@ -5,13 +5,14 @@
 //! Both tasks are event-driven off the session's state stream with their
 //! timers gated on activity, so an idle daemon takes no wakeups from them.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use api::{ApiEvent, Phase, PlayerState};
 use reader::Track;
 use tokio::sync::{broadcast, watch};
 
+use crate::ConfigService;
 use crate::session::{PlaybackRecorder, SessionHandle};
 
 const DISCORD_APP_ID: &str = "1470087339639443658";
@@ -19,28 +20,167 @@ const JELLYFIN_REPORT_SECS: u64 = 5;
 const JELLYFIN_KEEPALIVE_TICKS: u32 = 6;
 const DISCORD_TICK_SECS: u64 = 30;
 
+#[derive(Clone, PartialEq, Eq)]
+enum CredentialIdentity {
+    YtMusic(String),
+    Spotify(String),
+}
+
+fn credential_identity(config: &config::AppConfig) -> Option<CredentialIdentity> {
+    let server = config.server.as_ref()?;
+    let token = server
+        .access_token
+        .as_deref()
+        .filter(|token| !token.is_empty())?;
+    match server.service {
+        config::MusicService::YtMusic => {
+            server::ytmusic::derive_user_id(token).map(CredentialIdentity::YtMusic)
+        }
+        config::MusicService::Spotify => Some(CredentialIdentity::Spotify(
+            server.id.clone().unwrap_or_else(|| server.url.clone()),
+        )),
+        _ => None,
+    }
+}
+
+async fn maintain_credentials(
+    config_service: &Arc<ConfigService>,
+    session: &SessionHandle,
+    identity: &CredentialIdentity,
+) {
+    let snapshot = config_service.snapshot().await;
+    let Some(server) = snapshot.server.as_ref() else {
+        return;
+    };
+    let Some(previous) = server.access_token.clone() else {
+        return;
+    };
+    let Some(server_id) = server.id.clone() else {
+        tracing::warn!("active source credential cannot be rotated without a server id");
+        return;
+    };
+    let rotated = match identity {
+        CredentialIdentity::YtMusic(_) => {
+            match server::ytmusic::verify_session_keepalive::tick(&previous).await {
+                Ok(Some(rotated)) => Some(rotated),
+                Ok(None) => None,
+                Err(error) => {
+                    tracing::warn!(%error, "YT Music session keepalive failed");
+                    None
+                }
+            }
+        }
+        CredentialIdentity::Spotify(_) => {
+            match server::spotify::auth::refresh_packed(&previous, server.url.clone()).await {
+                Ok(rotated) => Some(rotated),
+                Err(error) => {
+                    tracing::warn!(%error, "Spotify credential refresh failed");
+                    None
+                }
+            }
+        }
+    };
+    let Some(rotated) = rotated else {
+        return;
+    };
+    let updated = match config_service
+        .rotate_active_server_credential(&server_id, &previous, rotated)
+        .await
+    {
+        Ok(Some(updated)) => updated,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(%error, "rotated source credential could not be persisted");
+            return;
+        }
+    };
+    session.set_active_source(Some(config_service.playback_source(&updated)));
+    session.set_config(updated, vec!["servers".to_string()]);
+}
+
+/// Headless source credential maintenance. The task parks on the config watch
+/// when no supported authenticated source is active, and only arms a timer for
+/// the active credential.
+pub fn spawn_credential_maintenance(
+    config_service: Arc<ConfigService>,
+    session: SessionHandle,
+) -> tokio::task::JoinHandle<()> {
+    let mut updates = config_service.subscribe();
+    tokio::spawn(async move {
+        loop {
+            let Some(identity) = credential_identity(&updates.borrow().clone()) else {
+                if updates.changed().await.is_err() {
+                    return;
+                }
+                continue;
+            };
+            maintain_credentials(&config_service, &session, &identity).await;
+            let interval = match identity {
+                CredentialIdentity::YtMusic(_) => Duration::from_secs(300),
+                CredentialIdentity::Spotify(_) => Duration::from_secs(1800),
+            };
+            let deadline = tokio::time::Instant::now() + interval;
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep_until(deadline) => break,
+                    changed = updates.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                        if credential_identity(&updates.borrow().clone()).as_ref() != Some(&identity) {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
 /// Durable recents + listen counts over the active source, matching the
 /// pump: recents record under the DB key, listen counts under the uid.
 pub struct SourceRecorder {
-    source: server::source::ActiveSource,
+    db: db::Db,
+    session: OnceLock<SessionHandle>,
 }
 
 impl SourceRecorder {
-    pub fn new(source: server::source::ActiveSource) -> Self {
-        Self { source }
+    pub fn new(db: db::Db) -> Self {
+        Self {
+            db,
+            session: OnceLock::new(),
+        }
+    }
+
+    pub fn attach_session(&self, session: SessionHandle) {
+        let _ = self.session.set(session);
+    }
+
+    fn active_source(&self) -> Option<server::source::ActiveSource> {
+        let config = self.session.get()?.config_watch().borrow().clone();
+        Some(server::source::ActiveSource::from(server::source::active(
+            self.db.clone(),
+            &config,
+        )))
     }
 }
 
 #[async_trait::async_trait]
 impl PlaybackRecorder for SourceRecorder {
     async fn record_recent(&self, track: &Track) {
-        if let Err(error) = self.source.record_recent(&track.id.key()).await {
+        let Some(source) = self.active_source() else {
+            return;
+        };
+        if let Err(error) = source.record_recent(&track.id.key()).await {
             tracing::warn!(%error, "recent record failed");
         }
     }
 
     async fn bump_listen_count(&self, track: &Track) {
-        if let Err(error) = self.source.bump_listen_count(&track.id.uid()).await {
+        let Some(source) = self.active_source() else {
+            return;
+        };
+        if let Err(error) = source.bump_listen_count(&track.id.uid()).await {
             tracing::warn!(%error, "listen count persist failed");
         }
     }
@@ -73,12 +213,12 @@ async fn next_state(
 /// runs while a Jellyfin session exists instead of forever.
 pub fn spawn_jellyfin_reporter(
     session: &SessionHandle,
-    source: server::source::ActiveSource,
+    db: db::Db,
     config: watch::Receiver<config::AppConfig>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
     tokio::spawn(async move {
-        let mut last_id: Option<String> = None;
+        let mut active: Option<(config::Source, String, server::source::ActiveSource)> = None;
         let mut last_state: Option<(Box<PlayerState>, Instant)> = None;
         let mut was_playing = false;
         let mut ticks_until_keepalive = 0u32;
@@ -86,8 +226,8 @@ pub fn spawn_jellyfin_reporter(
         report.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
-            let jellyfin_configured = config
-                .borrow()
+            let current_config = config.borrow().clone();
+            let jellyfin_configured = current_config
                 .server
                 .as_ref()
                 .is_some_and(|server| server.service == config::MusicService::Jellyfin);
@@ -98,20 +238,20 @@ pub fn spawn_jellyfin_reporter(
                     let Some(state) = state else { continue };
                     let received = Instant::now();
                     let current_id = jellyfin_configured
-                        .then(|| {
-                            state
-                                .track
-                                .as_ref()
-                                .and_then(|track| track.key.strip_prefix("jellyfin:"))
-                                .map(str::to_string)
-                        })
+                        .then(|| state.track.as_ref().map(|track| track.key.clone()))
                         .flatten();
+                    let current_identity = current_id
+                        .as_ref()
+                        .map(|id| (current_config.active_source.clone(), id.clone()));
                     let playing = state.phase == Phase::Playing;
                     let position_ms = interpolated_ms(&state, received);
 
-                    if current_id != last_id {
-                        if let Some(old) = last_id.take() {
-                            let source = source.clone();
+                    if current_identity
+                        != active
+                            .as_ref()
+                            .map(|(source, id, _)| (source.clone(), id.clone()))
+                    {
+                        if let Some((_, old, source)) = active.take() {
                             let ticks = last_state
                                 .as_ref()
                                 .map(|(state, received)| interpolated_ms(state, *received))
@@ -121,18 +261,23 @@ pub fn spawn_jellyfin_reporter(
                                 let _ = source.report_playback_stopped(&old, ticks).await;
                             });
                         }
-                        if let Some(new) = current_id.clone() {
-                            let source = source.clone();
+                        if let Some(new) = current_id {
+                            let source = server::source::ActiveSource::from(
+                                server::source::active(db.clone(), &current_config),
+                            );
+                            let start_source = source.clone();
+                            let source_key = current_config.active_source.clone();
+                            active = Some((source_key, new.clone(), source));
                             tokio::spawn(async move {
-                                let _ = source.report_playback_start(&new).await;
+                                let _ = start_source.report_playback_start(&new).await;
                             });
                         }
-                        last_id = current_id.clone();
                         ticks_until_keepalive = 0;
                     } else if playing != was_playing
-                        && let Some(id) = current_id.clone()
+                        && let Some((_, id, source)) = active.as_ref()
                     {
                         let source = source.clone();
+                        let id = id.clone();
                         let ticks = position_ms * 10_000;
                         tokio::spawn(async move {
                             let _ = source
@@ -143,8 +288,10 @@ pub fn spawn_jellyfin_reporter(
                     was_playing = playing;
                     last_state = Some((state, received));
                 }
-                _ = report.tick(), if jellyfin_configured && last_id.is_some() => {
-                    let Some(id) = last_id.clone() else { continue };
+                _ = report.tick(), if jellyfin_configured && active.is_some() => {
+                    let Some((_, id, source)) = active.as_ref() else { continue };
+                    let id = id.clone();
+                    let source = source.clone();
                     let position_ms = last_state
                         .as_ref()
                         .map(|(state, received)| interpolated_ms(state, *received))

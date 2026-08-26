@@ -14,9 +14,6 @@ use config::AppConfig;
 use daemon::SessionHandle;
 use dioxus::prelude::*;
 use reader::Track;
-use utils::playback_ref::PlaybackItemRef;
-
-use crate::scrobble_scheduler::{self, ScrobbleOptions};
 
 #[path = "player_controller_spotify.rs"]
 mod spotify;
@@ -132,7 +129,17 @@ impl PlayerController {
     /// While shuffle is on the permutation re-pins around it, exactly like the
     /// daemon's jump.
     pub fn play_track(&mut self, idx: usize) {
-        self.play_physical(idx);
+        let tracks = self.queue.peek().clone();
+        self.play_queue_at(tracks, idx);
+    }
+
+    /// Replace the engine queue with a track-list result and start its physical row.
+    pub fn play_queue_at(&mut self, tracks: Vec<Track>, idx: usize) {
+        if idx >= tracks.len() {
+            return;
+        }
+        let shuffle = *self.shuffle.peek();
+        self.play_replacement(tracks, Some(idx), Some(shuffle));
     }
 
     /// Play the track at a play-order (logical) index, as the queue view uses.
@@ -165,32 +172,16 @@ impl PlayerController {
         });
     }
 
-    /// Command the Spotify transport to start `track` and schedule its
-    /// scrobble; the caller has already positioned the queue signals.
+    /// Command the Spotify transport to start `track`; the caller has already
+    /// positioned the queue signals.
     fn start_spotify_track(&mut self, track: &Track) {
-        let Some(item_id) = PlaybackItemRef::parse(&track.id.uid())
-            .primary_id()
-            .map(str::to_string)
-        else {
+        let reader::TrackId::Server { item_id, .. } = &track.id else {
             return;
         };
         self.spotify_progress_anchor
             .set(Some((0, std::time::Instant::now())));
         self.is_playing.set(true);
-        self.spotify_play(&item_id, track);
-        let generation = *self.spotify_scrobble_token.peek() + 1;
-        self.spotify_scrobble_token.set(generation);
-        scrobble_scheduler::schedule(
-            track.clone(),
-            Some(item_id),
-            self.config,
-            self.spotify_scrobble_token,
-            generation,
-            self.is_playing,
-            Some(self.active_source),
-            ScrobbleOptions::REMOTE_NATIVE,
-            self.db.peek().clone(),
-        );
+        self.spotify_play(item_id, track);
     }
 
     /// Play the track at a physical queue index. Spotify tracks route to the
@@ -211,14 +202,17 @@ impl PlayerController {
             let tracks = self.queue.peek().clone();
             let handle = self.handle();
             spawn(async move {
-                let _ = handle
+                if let Err(error) = handle
                     .set_queue_tracks(
                         tracks,
                         api::QueueMode::Replace,
                         Some(physical_idx),
                         Some(shuffle),
                     )
-                    .await;
+                    .await
+                {
+                    tracing::warn!(%error, "external queue handoff failed");
+                }
             });
             return;
         }
@@ -294,9 +288,12 @@ impl PlayerController {
         }
         let handle = self.handle();
         spawn(async move {
-            let _ = handle
+            if let Err(error) = handle
                 .set_queue_tracks(tracks, api::QueueMode::Replace, start_index, shuffle)
-                .await;
+                .await
+            {
+                tracing::warn!(%error, "queue replacement failed");
+            }
         });
     }
 
@@ -306,7 +303,16 @@ impl PlayerController {
             return;
         }
         if *self.external_active.peek() {
+            let first_new = self.queue.peek().len();
+            let count = tracks.len();
+            if *self.shuffle.peek() {
+                self.repair_shuffle_order();
+            }
             self.queue.with_mut(|queue| queue.extend(tracks));
+            if *self.shuffle.peek() {
+                self.shuffle_order
+                    .with_mut(|order| order.extend(first_new..first_new + count));
+            }
             return;
         }
         let handle = self.handle();
@@ -324,11 +330,7 @@ impl PlayerController {
         }
         if *self.external_active.peek() {
             let insert_at = (*self.current_queue_index.peek() + 1).min(self.queue.peek().len());
-            self.queue.with_mut(|queue| {
-                for (offset, track) in tracks.into_iter().enumerate() {
-                    queue.insert(insert_at + offset, track);
-                }
-            });
+            self.insert_queue_tracks_local(insert_at, tracks);
             return;
         }
         let handle = self.handle();
@@ -467,6 +469,13 @@ impl PlayerController {
             if insert_at <= current {
                 self.current_queue_index.set(current + count);
             }
+            self.history.with_mut(|history| {
+                for idx in history.iter_mut() {
+                    if *idx >= insert_at {
+                        *idx += count;
+                    }
+                }
+            });
         }
     }
 
@@ -601,6 +610,7 @@ impl PlayerController {
             },
             start_index: Some(0),
             shuffle: None,
+            insert_index: None,
         };
         spawn(async move {
             if let Err(error) = handle.set_queue(request).await {
@@ -611,13 +621,32 @@ impl PlayerController {
 
     pub fn move_queue_item(&mut self, from: usize, to: usize) {
         if *self.external_active.peek() {
-            let len = self.queue.peek().len();
+            let len = if *self.shuffle.peek() {
+                self.shuffle_order.peek().len()
+            } else {
+                self.queue.peek().len()
+            };
             if from >= len || to >= len || from == to {
                 return;
             }
-            self.queue.with_mut(|queue| {
-                let track = queue.remove(from);
-                queue.insert(to, track);
+            if *self.shuffle.peek() {
+                self.shuffle_order.with_mut(|order| {
+                    let physical = order.remove(from);
+                    order.insert(to, physical);
+                });
+            } else {
+                self.queue.with_mut(|queue| {
+                    let track = queue.remove(from);
+                    queue.insert(to, track);
+                });
+            }
+            let current =
+                daemon::QueueModel::remap_queue_index(*self.current_queue_index.peek(), from, to);
+            self.current_queue_index.set(current);
+            self.history.with_mut(|history| {
+                for index in history {
+                    *index = daemon::QueueModel::remap_queue_index(*index, from, to);
+                }
             });
             return;
         }
@@ -636,9 +665,8 @@ impl PlayerController {
         self.move_queue_item(from, to);
     }
 
-    /// Hard reset when the active server changes: stop everything and clear
-    /// the queue so a queued remote track cannot replay through the wrong
-    /// backend.
+    /// Clear frontend-owned state after the daemon has switched sources and
+    /// reset its engine queue.
     pub fn reset_for_backend_switch(&mut self) {
         self.stop_external_playback();
         self.playback_error.set(None);
@@ -646,13 +674,6 @@ impl PlayerController {
         self.queue.write().clear();
         self.history.write().clear();
         self.current_queue_index.set(0);
-        let handle = self.handle();
-        spawn(async move {
-            let _ = handle.player_command(api::PlayerCommand::Stop).await;
-            let _ = handle
-                .set_queue_tracks(Vec::new(), api::QueueMode::Replace, None, None)
-                .await;
-        });
     }
 
     pub fn restore_queue_state(
@@ -966,6 +987,32 @@ pub fn use_player_controller(
         spotify_device_chosen,
         external_active,
     };
+
+    // Report external (Spotify) playback to the session so wire clients see
+    // it in `PlayerState.external` and the daemon forwards transport
+    // commands (OS media keys, remote frontends) back to this frontend.
+    use_effect(move || {
+        let active = *external_active.read();
+        let device = spotify_device_override.read().clone();
+        let handle = session.peek().clone();
+        handle.set_external(active.then(|| api::ExternalPlayback {
+            kind: "spotify".to_string(),
+            device,
+        }));
+    });
+
+    use_effect(move || {
+        if !*external_active.read() {
+            return;
+        }
+        let track = current_track_snapshot.read().clone();
+        let position_ms = current_song_progress.read().saturating_mul(1000);
+        let playing = *is_playing.read();
+        let device = spotify_device_override.read().clone();
+        session
+            .peek()
+            .report_external_detached(track, position_ms, playing, false, device);
+    });
 
     crate::session_projector::use_session_projector(ctrl);
     ctrl

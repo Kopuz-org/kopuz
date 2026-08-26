@@ -26,7 +26,6 @@ use windows::Win32::Foundation::HWND;
 
 mod app_db;
 mod app_lifecycle;
-#[cfg(not(target_os = "android"))]
 mod artwork_protocol;
 #[cfg(not(target_os = "android"))]
 mod chrome_trace;
@@ -177,6 +176,18 @@ fn init_android_tls() -> Result<(), String> {
 }
 
 fn main() {
+    // `kopuz pause`, `kopuz status`, ...: act as a control client of the
+    // running instance (or kopuzd) and exit, instead of starting the app.
+    // Unknown args fall through to the normal launch, so nothing an OS or
+    // launcher passes can hijack startup.
+    #[cfg(not(target_os = "android"))]
+    {
+        let cli_args: Vec<String> = std::env::args().skip(1).collect();
+        if let Some(code) = daemon::ctl::run(&cli_args) {
+            std::process::exit(code);
+        }
+    }
+
     #[cfg(target_os = "android")]
     if let Err(e) = init_android_tls() {
         panic!("android certificate verifier failed to initialize: {e}");
@@ -369,6 +380,30 @@ fn main() {
             // receives base64 data URLs from utils, but keep a synchronous handler for any
             // code path that still emits artwork:// URLs.
             .with_custom_protocol("artwork".to_string(), |_headers, request| {
+                fn err_resp(status: u16) -> http::Response<std::borrow::Cow<'static, [u8]>> {
+                    http::Response::builder()
+                        .status(status)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(std::borrow::Cow::from(Vec::new()))
+                        .unwrap_or_else(|_| {
+                            http::Response::builder()
+                                .status(500)
+                                .header("Access-Control-Allow-Origin", "*")
+                                .body(std::borrow::Cow::from(Vec::new()))
+                                .expect("static fallback response")
+                        })
+                }
+
+                if let Some(result) = artwork_protocol::fetch_api_sync(request.uri()) {
+                    return match result {
+                        Ok(payload) => http::Response::builder()
+                            .header("Content-Type", payload.content_type)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(std::borrow::Cow::from(payload.data))
+                            .unwrap_or_else(|_| err_resp(500)),
+                        Err(_) => err_resp(404),
+                    };
+                }
                 let query = request.uri().query().unwrap_or("");
                 let raw_p = query
                     .split('&')
@@ -394,10 +429,10 @@ fn main() {
                     if let Ok(home) = std::env::var("HOME") {
                         decoded_path = decoded_path.replacen("/~", &home, 1);
                     }
-                } else if decoded_path.starts_with('~') {
-                    if let Ok(home) = std::env::var("HOME") {
-                        decoded_path = decoded_path.replacen('~', &home, 1);
-                    }
+                } else if decoded_path.starts_with('~')
+                    && let Ok(home) = std::env::var("HOME")
+                {
+                    decoded_path = decoded_path.replacen('~', &home, 1);
                 }
 
                 let read_result =
@@ -408,20 +443,6 @@ fn main() {
                             Err(std::io::Error::from(std::io::ErrorKind::NotFound))
                         }
                     });
-
-                fn err_resp(status: u16) -> http::Response<std::borrow::Cow<'static, [u8]>> {
-                    http::Response::builder()
-                        .status(status)
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(std::borrow::Cow::from(Vec::new()))
-                        .unwrap_or_else(|_| {
-                            http::Response::builder()
-                                .status(500)
-                                .header("Access-Control-Allow-Origin", "*")
-                                .body(std::borrow::Cow::from(Vec::new()))
-                                .expect("static fallback response")
-                        })
-                }
 
                 match read_result {
                     Ok(bytes) => http::Response::builder()
@@ -509,7 +530,12 @@ fn App() -> Element {
     // ROOT-owned: detached tasks (download workers, close-flush) read/write
     // these after the spawning page — and in principle this component — is
     // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
-    let mut config = use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
+    let mut config = use_hook(|| {
+        Signal::new_in_scope(
+            app_db::BOOT_CONFIG.get().cloned().unwrap_or_default(),
+            ScopeId::ROOT,
+        )
+    });
     // Snapshot of the file/env config layers (issue #530): which settings file
     // is in play, whether it is Nix-managed, and which keys are pinned by an
     // unwritable layer — the settings UI grays those out.
@@ -594,6 +620,30 @@ fn App() -> Element {
             // applies the same config to the UI signals and re-pushes it
             // through `set_config` (idempotent).
             let seeded = app_db::BOOT_CONFIG.get().cloned().unwrap_or_default();
+            let database_path = db::default_db_path();
+            let configured_roots = configured_local_sources(&seeded)
+                .iter()
+                .map(|(_, roots)| roots.len())
+                .sum::<usize>();
+            tracing::info!(
+                mode = "embedded",
+                database = %database_path.display(),
+                source = %daemon::active_source_label(&seeded),
+                source_id = %seeded.active_source.as_str(),
+                configured_roots,
+                remote_api = seeded.remote_api_enabled,
+                "daemon core starting"
+            );
+            let settings_path = config::store::settings_path_for(
+                database_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new(".")),
+            );
+            let config_service = Arc::new(daemon::ConfigService::new(
+                db_boot.clone(),
+                settings_path,
+                seeded.clone(),
+            ));
             let registry = Arc::new(radio::registry::StationRegistry::default());
             let library = Arc::new(daemon::LibraryService::new(
                 db_boot.clone(),
@@ -604,6 +654,7 @@ fn App() -> Element {
             let initial_source: ::server::source::ActiveSource =
                 Arc::from(::server::source::active(db_boot.clone(), &seeded));
             let scrobbler = daemon::Scrobbler::new(db_boot.clone());
+            let recorder = Arc::new(daemon::SourceRecorder::new(db_boot.clone()));
             let services = daemon::PlaybackServices {
                 config: seeded,
                 active_source: Some(initial_source.clone()),
@@ -613,9 +664,7 @@ fn App() -> Element {
                 // on the close path — the session's own store is left off so
                 // the two never race on the same row.
                 queue_store: None,
-                recorder: Some(Arc::new(daemon::SourceRecorder::new(
-                    initial_source.clone(),
-                ))),
+                recorder: Some(recorder.clone()),
                 scrobbler: Some(scrobbler.clone()),
             };
             let session = match daemon::SessionHandle::try_spawn(library.clone(), services) {
@@ -626,22 +675,52 @@ fn App() -> Element {
                 }
             };
             library.attach_session(session.clone());
+            recorder.attach_session(session.clone());
             scrobbler.attach_session(session.clone());
             let jobs = Arc::new(daemon::JobRunner::new(session.clone()));
-            let favorites = daemon::FavoritesService::new(db_boot, session.clone());
+            let downloads = daemon::DownloadsService::new(
+                db_boot.clone(),
+                session.clone(),
+                config_service.clone(),
+                cache_dir().join("offline_tracks"),
+            );
+            let favorites = daemon::FavoritesService::new(db_boot.clone(), session.clone());
             favorites.spawn_reconciler();
             daemon::os_media::spawn(&session);
             daemon::integrations::spawn_jellyfin_reporter(
                 &session,
-                initial_source,
+                db_boot.clone(),
                 session.config_watch(),
             );
             daemon::integrations::spawn_discord_presence(&session, session.config_watch());
-            Ok((session, library, jobs, favorites, scrobbler))
+            let artwork =
+                daemon::ArtworkService::new(db_boot, session.clone(), cache_dir().join("artwork"));
+            tracing::info!(
+                mode = "embedded",
+                "daemon services ready: playback, library, config, jobs, downloads, favorites, artwork, scrobbling, integrations, OS media"
+            );
+            Ok((
+                session,
+                library,
+                config_service,
+                jobs,
+                downloads,
+                favorites,
+                scrobbler,
+                artwork,
+            ))
         })
     };
-    let (session, library_service, job_runner, favorites_service, scrobbler) =
-        match embedded_services {
+    let (
+        session,
+        library_service,
+        config_service,
+        job_runner,
+        downloads_service,
+        favorites_service,
+        scrobbler,
+        artwork_service,
+    ) = match embedded_services {
             Ok(services) => services,
             Err(error) => {
                 return rsx! {
@@ -653,6 +732,47 @@ fn App() -> Element {
                 };
             }
         };
+
+    let frontend_service = {
+        let db = db.clone();
+        let config_service = config_service.clone();
+        let library_service = library_service.clone();
+        let session = session.clone();
+        use_hook(move || {
+            daemon::FrontendService::new(
+                db,
+                config_service,
+                library_service,
+                session,
+                cache_dir().join("uploaded_artwork"),
+            )
+        })
+    };
+    let local_api = {
+        let session = session.clone();
+        let library_service = library_service.clone();
+        let config_service = config_service.clone();
+        let job_runner = job_runner.clone();
+        let favorites_service = favorites_service.clone();
+        let downloads_service = downloads_service.clone();
+        let frontend_service = frontend_service.clone();
+        let artwork_service = artwork_service.clone();
+        use_hook(move || {
+            Arc::new(
+                daemon::LocalApi::new(session)
+                    .with_library(library_service)
+                    .with_config(config_service)
+                    .with_jobs(job_runner)
+                    .with_favorites(favorites_service)
+                    .with_downloads(downloads_service)
+                    .with_frontend(frontend_service)
+                    .with_artwork(artwork_service),
+            )
+        })
+    };
+    let frontend_api: Arc<dyn api::KopuzApi> = local_api.clone();
+    artwork_protocol::install_api(frontend_api.clone());
+    provide_context(frontend_api.clone());
 
     // A server switch or credential rotation rebuilds the shared source
     // handle; the session's loader has to follow it.
@@ -669,6 +789,7 @@ fn App() -> Element {
     // audio-pipeline keys apply to the engine when their slice changes.
     {
         let session = session.clone();
+        let config_service = config_service.clone();
         let mut last_audio_slice = use_signal(String::new);
         use_effect(move || {
             let snapshot = config.read().clone();
@@ -696,7 +817,140 @@ fn App() -> Element {
             } else {
                 Vec::new()
             };
-            session.set_config(snapshot, changed);
+            session.set_config(snapshot.clone(), changed);
+            let config_service = config_service.clone();
+            spawn(async move {
+                config_service.adopt(snapshot).await;
+            });
+        });
+    }
+
+    {
+        let updates = config_service.subscribe();
+        use_future(move || {
+            let mut updates = updates.clone();
+            async move {
+                while updates.changed().await.is_ok() {
+                    let updated = updates.borrow().clone();
+                    let current = config.peek().clone();
+                    if serde_json::to_value(&updated).ok() != serde_json::to_value(&current).ok() {
+                        config.set(updated);
+                    }
+                }
+            }
+        });
+    }
+
+    // The remote control API: serve the same gRPC surface kopuzd exposes
+    // from this process, so custom frontends and the control CLI can attach
+    // to the running app (loopback only, bearer token in the discovery
+    // file). Sharing the process sidesteps the two-writers-on-one-SQLite
+    // problem that running kopuzd next to the app would have.
+    let mut remote_api_port = use_signal(|| None::<u16>);
+    let mut remote_api_token = use_signal(|| None::<String>);
+    {
+        let session = session.clone();
+        let api = frontend_api.clone();
+        let mut server_task = use_signal(|| None::<dioxus_core::Task>);
+        let remote_api_cfg = use_memo(move || {
+            let cfg = config.read();
+            (cfg.remote_api_enabled, cfg.remote_api_port)
+        });
+        use_effect(move || {
+            let (enabled, port) = *remote_api_cfg.read();
+            if !*initial_load_done.read() {
+                return;
+            }
+            if let Some(task) = server_task.take() {
+                tracing::info!(
+                    reason = if enabled {
+                        "configuration changed"
+                    } else {
+                        "disabled"
+                    },
+                    "embedded daemon API stopping"
+                );
+                task.cancel();
+                remote_api_port.set(None);
+                remote_api_token.set(None);
+            }
+            if !enabled {
+                tracing::info!("embedded daemon API disabled");
+                return;
+            }
+            let session = session.clone();
+            let api = api.clone();
+            let task = spawn(async move {
+                tracing::info!(requested_port = port, "embedded daemon API starting");
+                let discovery_path = daemon::discovery::path();
+                if let Some(path) = discovery_path.as_deref() {
+                    match daemon::discovery::read(path) {
+                        Some(existing) if daemon::discovery::is_serving(&existing).await => {
+                            tracing::warn!(
+                                port = existing.port,
+                                "another daemon already serves the API; embedded daemon API will stay stopped"
+                            );
+                            return;
+                        }
+                        Some(existing) => {
+                            let _ = daemon::discovery::remove_record(path, &existing);
+                        }
+                        None if path.exists() => {
+                            let _ = daemon::discovery::remove_invalid(path);
+                        }
+                        None => {}
+                    }
+                }
+                let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
+                    Ok(listener) => listener,
+                    Err(error) => {
+                        tracing::warn!(%error, port, "embedded daemon API could not bind");
+                        return;
+                    }
+                };
+                let Ok(addr) = listener.local_addr() else {
+                    return;
+                };
+                let token = daemon::discovery::random_token();
+                let _discovery_lease = match discovery_path.as_deref() {
+                    Some(path) => {
+                        match daemon::discovery::DiscoveryLease::claim(path, addr.port(), &token) {
+                            Ok(lease) => {
+                                tracing::info!(
+                                %addr,
+                                path = %path.display(),
+                                "embedded daemon API listening (token in the discovery file)"
+                                );
+                                Some(lease)
+                            }
+                            Err(error) => {
+                                tracing::warn!(%error, "could not claim the discovery file");
+                                return;
+                            }
+                        }
+                    }
+                    None => {
+                        tracing::warn!("no usable directory for the discovery file");
+                        None
+                    }
+                };
+                remote_api_port.set(Some(addr.port()));
+                remote_api_token.set(Some(token.clone()));
+                let state = Arc::new(daemon::grpc::GrpcState {
+                    api,
+                    session,
+                    token,
+                    started: std::time::Instant::now(),
+                    shutdown: None,
+                });
+                match daemon::grpc::serve(listener, state).await {
+                    Ok(()) => tracing::info!("embedded daemon API stopped"),
+                    Err(error) => tracing::warn!(%error, "embedded daemon API stopped"),
+                }
+                remote_api_port.set(None);
+                remote_api_token.set(None);
+            });
+            server_task.set(Some(task));
         });
     }
     let download_queue = use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
@@ -788,6 +1042,13 @@ fn App() -> Element {
                 });
                 exit_flush::persist_on_fresh_thread(db, queue_snap, cfg);
             }
+            // A quitting app must not leave a discovery file pointing at a
+            // dead port; frontends would keep trying to attach to it.
+            if let Some(token) = remote_api_token.peek().clone()
+                && let Some(path) = daemon::discovery::path()
+            {
+                let _ = daemon::discovery::remove_owned(&path, &token);
+            }
             // After the persists, so they (and any failure warnings) land in
             // latest.log and the trace. Idempotent across CloseRequested/
             // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.
@@ -874,7 +1135,7 @@ fn App() -> Element {
 
     let mut last_radio_registry_key = use_signal(|| None::<String>);
 
-    let session_for_registry = session.clone();
+    let frontend_service_for_registry = frontend_service.clone();
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -897,7 +1158,7 @@ fn App() -> Element {
         }
         last_radio_registry_key.set(Some(key));
 
-        let session_for_registry = session_for_registry.clone();
+        let frontend_service = frontend_service_for_registry.clone();
         spawn(async move {
             let (new_registry, import_count) = utils::offload(
                 async move {
@@ -925,7 +1186,9 @@ fn App() -> Element {
             )
             .await;
 
-            session_for_registry.set_station_registry(Arc::new(new_registry.clone()));
+            frontend_service
+                .adopt_radio_registry(new_registry.clone())
+                .await;
             station_registry.set(new_registry);
 
             if import_count > 0 {
@@ -944,12 +1207,12 @@ fn App() -> Element {
     // search at render time.
     let mut selected_artist_channel_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
-    let fetched_artist_images: Signal<::server::cover::FetchedArtistImages> =
+    let mut fetched_artist_images: Signal<::server::cover::FetchedArtistImages> =
         use_signal(Default::default);
     let mut search_query = use_signal(String::new);
-    let mut last_server_playlist_key = use_signal(|| None::<String>);
-    let mut server_playlist_key_initialized = use_signal(|| false);
-    let mut queue = use_signal(Vec::<reader::Track>::new);
+    let mut last_backend_key = use_signal(|| None::<String>);
+    let mut backend_key_initialized = use_signal(|| false);
+    let queue = use_signal(Vec::<reader::Track>::new);
     let current_queue_index = use_signal(|| 0usize);
 
     let mut network_banner: Signal<Option<bool>> = use_signal(|| None);
@@ -984,32 +1247,41 @@ fn App() -> Element {
             return;
         }
 
-        // Server identity excludes access_token: tokens rotate without making it a
-        // different account, but their rotation would otherwise reset playback.
-        let current_server_key = {
+        // Tokens rotate without changing the source identity, but changing the
+        // selected source, server URL, or account must clear source-owned state.
+        let current_backend_key = {
             let conf = config.read();
-            conf.server.as_ref().map(|server| {
-                format!(
-                    "{:?}|{}|{}",
-                    server.service,
-                    server.url,
-                    server.user_id.as_deref().unwrap_or_default(),
-                )
-            })
+            let server = conf
+                .server
+                .as_ref()
+                .map(|server| {
+                    format!(
+                        "{:?}|{}|{}",
+                        server.service,
+                        server.url,
+                        server.user_id.as_deref().unwrap_or_default(),
+                    )
+                })
+                .unwrap_or_default();
+            format!("{}|{server}", conf.active_source.as_str())
         };
 
-        if !*server_playlist_key_initialized.read() {
-            last_server_playlist_key.set(current_server_key);
-            server_playlist_key_initialized.set(true);
+        if !*backend_key_initialized.read() {
+            last_backend_key.set(Some(current_backend_key));
+            backend_key_initialized.set(true);
             return;
         }
 
-        if *last_server_playlist_key.read() != current_server_key {
-            last_server_playlist_key.set(current_server_key);
+        if last_backend_key.peek().as_deref() != Some(current_backend_key.as_str()) {
+            last_backend_key.set(Some(current_backend_key));
+            selected_album_id.set(String::new());
             selected_playlist_id.set(None);
+            discover_selected_playlist_id.set(None);
+            discover_selected_playlist_title.set(None);
+            selected_artist_channel_id.set(None);
+            selected_artist_name.set(String::new());
+            fetched_artist_images.set(Default::default());
             ctrl.reset_for_backend_switch();
-            // Nothing to reload: pages query by source, so switching servers is
-            // just a key change — every hook re-queries the new server's rows.
         }
     });
 
@@ -1412,7 +1684,15 @@ fn App() -> Element {
                     }
                 };
 
-                let cfg_loaded = cfg_loaded.unwrap_or_default();
+                let cfg_loaded = cfg_loaded.unwrap_or_else(|| {
+                    app_db::BOOT_CONFIG.get().cloned().unwrap_or_default()
+                });
+                let startup_source = daemon::active_source_label(&cfg_loaded);
+                let startup_source_id = cfg_loaded.active_source.as_str().to_string();
+                let startup_roots = configured_local_sources(&cfg_loaded)
+                    .iter()
+                    .map(|(_, roots)| roots.len())
+                    .sum::<usize>();
                 {
                     let _apply = tracing::info_span!("startup.apply_config").entered();
                     let loaded = cfg_loaded;
@@ -1454,6 +1734,9 @@ fn App() -> Element {
                 })
                 .instrument(tracing::info_span!("startup.sanitize_queue"))
                 .await;
+                let restored_queue_tracks = queue_state
+                    .as_ref()
+                    .map_or(0, |queue_state| queue_state.queue.len());
                 {
                     let _restore = tracing::info_span!("startup.restore_queue").entered();
                     if let Some(queue_state) = queue_state {
@@ -1468,6 +1751,14 @@ fn App() -> Element {
                 }
 
                 initial_load_done.set(true);
+                tracing::info!(
+                    mode = "embedded",
+                    source = %startup_source,
+                    source_id = %startup_source_id,
+                    configured_roots = startup_roots,
+                    restored_queue_tracks,
+                    "daemon startup state restored"
+                );
                 // Kick one reconcile shortly after startup so pending offline
                 // likes from the previous session push now, not on the first
                 // multi-minute interval; drain queued scrobbles the same way.
@@ -2257,8 +2548,7 @@ fn App() -> Element {
                                                     disc_cmp
                                                 }
                                             });
-                                            queue.set(tracks);
-                                            ctrl.play_track(0);
+                                            ctrl.play_queue_at(tracks, 0);
                                         }
                                     });
                                 },
@@ -2483,29 +2773,33 @@ fn App() -> Element {
                 QuickSearch {
                     show: show_quick_search,
                     on_play: move |(track, fallback): (reader::Track, Vec<reader::Track>)| {
-                        let read_db = consume_context::<hooks::ReadDb>();
+                        let api = consume_context::<Arc<dyn api::KopuzApi>>();
                         let filter = hooks::TrackFilter {
                             source: quick_search_source(),
                             sort: hooks::TrackSort::Fields(config.peek().library_sort.clone()),
                             ..Default::default()
                         };
                         spawn(async move {
-                            let all = read_db
-                                .tracks_page(
-                                    &filter,
-                                    hooks::Page {
+                            let all = api
+                                .tracks(
+                                    hooks::use_db_queries::track_filter_to_api(&filter),
+                                    api::Page {
                                         offset: 0,
                                         limit: u32::MAX,
                                     },
                                 )
                                 .await
+                                .map(|page| {
+                                    page.items
+                                        .into_iter()
+                                        .map(hooks::use_db_queries::track_from_api)
+                                        .collect::<Vec<_>>()
+                                })
                                 .unwrap_or_default();
                             if let Some(idx) = all.iter().position(|t| t.id == track.id) {
-                                queue.set(all);
-                                ctrl.play_track(idx);
+                                ctrl.play_queue_at(all, idx);
                             } else if let Some(idx) = fallback.iter().position(|t| t.id == track.id) {
-                                queue.set(fallback);
-                                ctrl.play_track(idx);
+                                ctrl.play_queue_at(fallback, idx);
                             }
                         });
                     },

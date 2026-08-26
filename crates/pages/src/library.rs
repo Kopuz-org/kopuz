@@ -255,15 +255,11 @@ pub fn LibraryPage(
                             })),
                             on_delete: move |_| {
                                 active_menu_track.set(None);
-                                if caps().delete_from_disk
-                                    && let Some(p) = track_delete.id.local_path()
-                                    && crate::local_files::remove(&config.read(), &source(), p)
-                                        .is_ok_and(|removed| removed)
-                                {
-                                    let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                if caps().delete_from_disk {
+                                    let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                     let key = track_delete.id.key().into_owned();
                                     spawn(async move {
-                                        if s.delete_tracks(&[key]).await.is_ok() {
+                                        if api.delete_tracks(vec![key], true).await.is_ok() {
                                             gens.bump(Table::Tracks);
                                         }
                                     });
@@ -281,15 +277,26 @@ pub fn LibraryPage(
                             })),
                             on_start_radio: components::track_row::radio_handler(track_radio.clone()),
                             on_play: move |_| {
-                                let read_db = consume_context::<hooks::ReadDb>();
+                                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                 let f = filter();
                                 spawn(async move {
-                                    let all = read_db
-                                        .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
+                                    let all = api
+                                        .tracks(
+                                            hooks::use_db_queries::track_filter_to_api(&f),
+                                            api::Page {
+                                                offset: 0,
+                                                limit: u32::MAX,
+                                            },
+                                        )
                                         .await
+                                        .map(|page| {
+                                            page.items
+                                                .into_iter()
+                                                .map(hooks::use_db_queries::track_from_api)
+                                                .collect()
+                                        })
                                         .unwrap_or_default();
-                                    queue.set(all);
-                                    ctrl.play_track(idx);
+                                    ctrl.play_queue_at(all, idx);
                                 });
                             },
                         }
@@ -319,9 +326,9 @@ pub fn LibraryPage(
                         };
                         let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
                         if !refs.is_empty() {
-                            let s = active_source.peek().clone();
+                            let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                             spawn(async move {
-                                if s.add_to_playlist(&playlist_id, &refs).await.is_ok() {
+                                if api.add_playlist_tracks(playlist_id, refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
                                 }
                             });
@@ -339,9 +346,9 @@ pub fn LibraryPage(
                         };
                         let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
                         if !refs.is_empty() {
-                            let s = active_source.peek().clone();
+                            let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                             spawn(async move {
-                                if s.create_playlist(&name, &refs).await.is_ok() {
+                                if api.create_playlist(name, refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
                                 }
                             });
@@ -359,39 +366,19 @@ pub fn LibraryPage(
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
                     on_save: move |edits: reader::models::TrackEdits| {
-                        let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
-                            return;
-                        };
-                        match reader::write_tags(&path, &edits) {
-                            Ok(()) => {
-                                let mut t = track.clone();
-                                t.title = edits.title.trim().to_string();
-                                t.artist = edits.artist.trim().to_string();
-                                t.artists = edits
-                                    .artist
-                                    .split([';', ','])
-                                    .map(|a| a.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-                                t.album = edits.album.trim().to_string();
-                                t.track_number = edits.track_number;
-                                t.disc_number = edits.disc_number;
-                                t.album_id = reader::metadata::make_album_id(
-                                    edits.album.trim(),
-                                    edits.artist.trim(),
-                                );
-                                let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                spawn(async move {
-                                    if s.upsert_tracks(&[t]).await.is_ok() {
-                                        gens.bump(Table::Tracks);
-                                    }
-                                });
-                                metadata_track.set(None);
+                        let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
+                        let key = track.id.key().into_owned();
+                        spawn(async move {
+                            match hooks::use_db_queries::save_track_edits(api.as_ref(), key, edits).await {
+                                Ok(_) => {
+                                    gens.bump(Table::Tracks);
+                                    metadata_track.set(None);
+                                }
+                                Err(error) => {
+                                    tracing::error!(%error, "failed to update track metadata");
+                                }
                             }
-                            Err(e) => {
-                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
-                            }
-                        }
+                        });
                     },
                 }
             }
@@ -405,15 +392,22 @@ pub fn LibraryPage(
                         if selected.is_empty() {
                             return;
                         }
-                        let read_db = consume_context::<hooks::ReadDb>();
+                        let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                         let f = filter();
                         spawn(async move {
-                            let total = read_db.tracks_count(&f).await.unwrap_or(0);
-                            let tracks: Vec<_> = read_db
-                                .tracks_page(&f, Page { offset: 0, limit: total })
+                            let tracks: Vec<_> = api
+                                .tracks(
+                                    hooks::use_db_queries::track_filter_to_api(&f),
+                                    api::Page {
+                                        offset: 0,
+                                        limit: u32::MAX,
+                                    },
+                                )
                                 .await
+                                .map(|page| page.items)
                                 .unwrap_or_default()
                                 .into_iter()
+                                .map(hooks::use_db_queries::track_from_api)
                                 .filter(|t| selected.contains(&t.id))
                                 .collect();
                             if !tracks.is_empty() {
@@ -426,22 +420,15 @@ pub fn LibraryPage(
                     on_add_to_playlist: move |_| show_playlist_modal.set(true),
                     on_delete: move |_| {
                         if caps().delete_from_disk {
-                            let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
-                            let mut keys = Vec::new();
-                            for id in paths {
-                                let Some(path) = id.local_path() else {
-                                    continue;
-                                };
-                                if crate::local_files::remove(&config.read(), &source(), path)
-                                    .is_ok_and(|removed| removed)
-                                {
-                                    keys.push(id.key().into_owned());
-                                }
-                            }
+                            let keys: Vec<String> = selected_tracks
+                                .read()
+                                .iter()
+                                .map(|id| id.key().into_owned())
+                                .collect();
                             if !keys.is_empty() {
-                                let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                 spawn(async move {
-                                    if s.delete_tracks(&keys).await.is_ok() {
+                                    if api.delete_tracks(keys, true).await.is_ok() {
                                         gens.bump(Table::Tracks);
                                     }
                                 });
@@ -526,13 +513,24 @@ pub fn LibraryPage(
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                let read_db = consume_context::<hooks::ReadDb>();
+                                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                 let f = filter();
                                 spawn(async move {
-                                    let total = read_db.tracks_count(&f).await.unwrap_or(0);
-                                    let tracks = read_db
-                                        .tracks_page(&f, Page { offset: 0, limit: total })
+                                    let tracks = api
+                                        .tracks(
+                                            hooks::use_db_queries::track_filter_to_api(&f),
+                                            api::Page {
+                                                offset: 0,
+                                                limit: u32::MAX,
+                                            },
+                                        )
                                         .await
+                                        .map(|page| {
+                                            page.items
+                                                .into_iter()
+                                                .map(hooks::use_db_queries::track_from_api)
+                                                .collect::<Vec<_>>()
+                                        })
                                         .unwrap_or_default();
                                     selected_tracks
                                         .set(tracks.into_iter().map(|track| track.id).collect());

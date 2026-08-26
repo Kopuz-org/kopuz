@@ -11,6 +11,7 @@ use server::source::PlaylistOps;
 pub(crate) fn TrackActions(track: Track) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let api = use_context::<std::sync::Arc<dyn api::KopuzApi>>();
     let generations = hooks::db_reactivity::use_generations();
     let mut is_open = use_signal(|| false);
     let mut show_playlist_modal = use_signal(|| false);
@@ -57,6 +58,9 @@ pub(crate) fn TrackActions(track: Track) -> Element {
         i18n::t("view_metadata").to_string(),
         "fa-solid fa-circle-info",
     ));
+    let api_menu = api.clone();
+    let api_add = api.clone();
+    let api_create = api.clone();
 
     rsx! {
         DotsMenu {
@@ -82,8 +86,7 @@ pub(crate) fn TrackActions(track: Track) -> Element {
                         let source = active_source.peek().clone();
                         crate::track_row::share_track(action_track.clone(), source);
                     } else if radio_idx == Some(idx) {
-                        let source = active_source.peek().clone();
-                        crate::track_row::play_radio(action_track.clone(), source, ctrl);
+                        crate::track_row::play_radio(action_track.clone(), api_menu.clone(), ctrl);
                     } else if idx == metadata_idx {
                         show_metadata.set(true);
                     }
@@ -99,9 +102,9 @@ pub(crate) fn TrackActions(track: Track) -> Element {
                     let playlist_track = track.clone();
                     move |playlist_id: String| {
                         let item_ref = playlist_track.id.key().into_owned();
-                        let source = active_source.peek().clone();
+                        let api = api_add.clone();
                         spawn(async move {
-                            match source.add_to_playlist(&playlist_id, &[item_ref]).await {
+                            match api.add_playlist_tracks(playlist_id, vec![item_ref]).await {
                                 Ok(_) => generations.bump(Table::Playlists),
                                 Err(error) => tracing::warn!(%error, "failed to add fullscreen track to playlist"),
                             }
@@ -113,9 +116,9 @@ pub(crate) fn TrackActions(track: Track) -> Element {
                     let playlist_track = track.clone();
                     move |name: String| {
                         let item_ref = playlist_track.id.key().into_owned();
-                        let source = active_source.peek().clone();
+                        let api = api_create.clone();
                         spawn(async move {
-                            match source.create_playlist(&name, &[item_ref]).await {
+                            match api.create_playlist(name, vec![item_ref]).await {
                                 Ok(_) => generations.bump(Table::Playlists),
                                 Err(error) => tracing::warn!(%error, "failed to create playlist from fullscreen track"),
                             }

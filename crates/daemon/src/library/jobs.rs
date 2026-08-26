@@ -35,6 +35,14 @@ impl LibraryService {
         })
     }
 
+    pub fn spawn_playlist_sync(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
+        let service = self.clone();
+        runner.start(JobKind::PlaylistSync, move |ctx| async move {
+            let config = service.current_config();
+            service.run_playlist_sync(&ctx, &config).await
+        })
+    }
+
     /// Local filesystem scan, ported from the app's rescan effect: DB-seeded
     /// working set, per-root scan, retain-by-root, chunked upserts, prune,
     /// local artist images with self-heal, then cover indexing and (when
@@ -331,6 +339,104 @@ impl LibraryService {
         let _ = source.prune(&keep_keys, &keep_albums).await;
         self.invalidate(Table::Tracks);
         self.invalidate(Table::Albums);
+        Ok(())
+    }
+
+    pub async fn run_playlist_sync(
+        &self,
+        ctx: &JobCtx,
+        config: &config::AppConfig,
+    ) -> Result<(), ApiError> {
+        let source: server::source::ActiveSource =
+            Arc::from(server::source::active(self.db.clone(), config));
+        if !source.capabilities().sync {
+            return Err(ApiError::unsupported(
+                "the active source has no playlist sync",
+            ));
+        }
+        let partition = config.active_source.clone();
+        let existing = self
+            .db
+            .load_playlists(&partition)
+            .await
+            .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+        ctx.progress("fetching playlists", None, None, None);
+        let playlists = source
+            .fetch_playlists()
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        let total = playlists.len() as u64;
+        for (index, playlist) in playlists.iter().enumerate() {
+            if ctx.cancelled() {
+                return Ok(());
+            }
+            let manual_cover = existing
+                .playlists
+                .iter()
+                .find(|stored| stored.id == playlist.id)
+                .and_then(|stored| stored.cover_path.as_deref())
+                .and_then(Path::to_str);
+            self.db
+                .upsert_playlist_meta(
+                    &partition,
+                    &playlist.id,
+                    &playlist.name,
+                    manual_cover,
+                    playlist.image_tag.as_deref(),
+                )
+                .await
+                .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+
+            let mut entries = Vec::new();
+            let mut cursor = None;
+            loop {
+                let page = source
+                    .fetch_playlist_entries_page(&playlist.id, cursor)
+                    .await
+                    .map_err(|error| ApiError::internal(error.to_string()))?;
+                let next = page.next;
+                entries.extend(page.tracks);
+                match next {
+                    Some(next) => cursor = Some(next),
+                    None => break,
+                }
+            }
+            for chunk in entries.chunks(100) {
+                self.db
+                    .upsert_tracks(&partition, chunk)
+                    .await
+                    .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+            }
+            let keys: Vec<String> = entries
+                .iter()
+                .map(|track| track.id.key().into_owned())
+                .filter(|key| !key.is_empty())
+                .collect();
+            self.db
+                .set_playlist_tracks(&partition, &playlist.id, &keys)
+                .await
+                .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+            ctx.progress(
+                "fetching playlist entries",
+                Some(index as u64 + 1),
+                Some(total),
+                Some(playlist.name.clone()),
+            );
+            self.invalidate(Table::Tracks);
+            self.invalidate(Table::Playlists);
+        }
+        for stale in existing
+            .playlists
+            .iter()
+            .filter(|stored| !playlists.iter().any(|playlist| playlist.id == stored.id))
+        {
+            self.db
+                .delete_playlist(&partition, &stale.id)
+                .await
+                .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+        }
+        self.invalidate(Table::Tracks);
+        self.invalidate(Table::Playlists);
         Ok(())
     }
 }

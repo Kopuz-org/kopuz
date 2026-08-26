@@ -197,6 +197,23 @@ impl QueueModel {
         self.current
     }
 
+    /// Explicit jump to a logical play-order position without changing the
+    /// running shuffle permutation.
+    pub fn jump_to_position(&mut self, position: usize) -> Option<usize> {
+        let queue_len = if self.shuffle {
+            self.repair_shuffle_order();
+            self.shuffle_order.len()
+        } else {
+            self.items.len()
+        };
+        if position >= queue_len {
+            return None;
+        }
+        self.push_history_dedup();
+        self.current = position;
+        Some(position)
+    }
+
     /// Replace the queue contents. Callers follow up with [`Self::jump_to`];
     /// history and permutation carry over exactly like the hooks version,
     /// where the jump's rebuild covers the shuffle case.
@@ -716,6 +733,19 @@ mod tests {
             m.current_track().map(|t| t.title.clone()),
             Some("t3".into())
         );
+    }
+
+    #[test]
+    fn logical_jump_preserves_shuffle_order() {
+        let mut m = model(5);
+        m.toggle_shuffle();
+        let order = m.shuffle_order().to_vec();
+        let target = m.track_at(2).map(|track| track.title.clone());
+
+        assert_eq!(m.jump_to_position(2), Some(2));
+        assert_eq!(m.current_position(), 2);
+        assert_eq!(m.current_track().map(|track| track.title.clone()), target);
+        assert_eq!(m.shuffle_order(), order);
     }
 
     #[test]

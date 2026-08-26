@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use api::{
-    ApiError, ApiEvent, BufferedRange, CommandAck, FadingState, Intent, NowPlaying, Page,
-    Phase as ApiPhase, PlayerCommand, PlayerState, PositionAnchor, QueueContext, QueueEdit,
-    QueueItem, QueueMode, QueueSummary, QueueWindow, SetQueueRequest, TrackKind,
+    ApiError, ApiEvent, BufferedRange, CommandAck, ExternalPlayback, FadingState, Intent,
+    NowPlaying, Page, Phase as ApiPhase, PlayerCommand, PlayerState, PositionAnchor, QueueContext,
+    QueueEdit, QueueItem, QueueMode, QueueSummary, QueueWindow, SetQueueRequest, TrackKind,
 };
 use player::engine::{Event as EngineEvent, Phase as EnginePhase, SourceFactory, Transition};
 use player::player::{LoadArgs, NowPlayingMeta, Player, PlayerInitError};
@@ -93,10 +93,12 @@ enum SessionCmd {
         title: String,
         artist: Option<String>,
     },
-    SetQueue(
-        SetQueueRequest,
-        oneshot::Sender<Result<CommandAck, ApiError>>,
-    ),
+    SetQueueMaterialized {
+        request_id: u64,
+        request: SetQueueRequest,
+        tracks: Vec<Track>,
+        reply: oneshot::Sender<Result<CommandAck, ApiError>>,
+    },
     Window(Page, oneshot::Sender<Result<QueueWindow, ApiError>>),
     RestoreQueue(
         Box<db::QueueSnapshot>,
@@ -109,6 +111,16 @@ enum SessionCmd {
     Emit(Box<ApiEvent>),
     SetStationRegistry(Arc<radio::registry::StationRegistry>),
     SetActiveSource(Option<server::source::ActiveSource>),
+    SetExternal(Option<ExternalPlayback>),
+    ReportExternal {
+        track: Option<Track>,
+        position_ms: u64,
+        playing: bool,
+        completed: bool,
+        device: Option<String>,
+        reply: oneshot::Sender<Result<(), ApiError>>,
+    },
+    ResetPlayback(oneshot::Sender<Result<CommandAck, ApiError>>),
     SetQueueRaw {
         tracks: Vec<Track>,
         mode: QueueMode,
@@ -137,6 +149,8 @@ pub struct SessionHandle {
     events: broadcast::Sender<(u64, ApiEvent)>,
     seq: Arc<AtomicU64>,
     history: Arc<Mutex<VecDeque<(u64, ApiEvent)>>>,
+    materializer: Arc<dyn QueueMaterializer>,
+    queue_request_seq: Arc<AtomicU64>,
 }
 
 impl SessionHandle {
@@ -166,6 +180,7 @@ impl SessionHandle {
         let (events, _) = broadcast::channel(EVENT_BUFFER);
         let seq = Arc::new(AtomicU64::new(0));
         let history = Arc::new(Mutex::new(VecDeque::new()));
+        let queue_request_seq = Arc::new(AtomicU64::new(0));
         let (config_tx, config_rx) = watch::channel(services.config.clone());
         let engine_events = player.subscribe();
         player.set_volume(services.config.volume);
@@ -174,6 +189,19 @@ impl SessionHandle {
         player.set_device_change_behavior(services.config.device_change_behavior);
         player.set_sample_rate_mode(services.config.sample_rate_mode);
 
+        let queue_writer = services.queue_store.map(|store| {
+            let (tx, mut rx) =
+                mpsc::unbounded_channel::<(db::QueueSnapshot, Option<oneshot::Sender<()>>)>();
+            tokio::spawn(async move {
+                while let Some((snapshot, reply)) = rx.recv().await {
+                    store.save(snapshot).await;
+                    if let Some(reply) = reply {
+                        let _ = reply.send(());
+                    }
+                }
+            });
+            tx
+        });
         let session = Session {
             model: QueueModel::default(),
             player,
@@ -197,14 +225,17 @@ impl SessionHandle {
             events: events.clone(),
             seq: seq.clone(),
             history: history.clone(),
-            materializer,
-            queue_store: services.queue_store,
+            queue_writer,
+            queue_request_seq: queue_request_seq.clone(),
             queue_dirty: false,
             recorder: services.recorder,
             scrobbler: services.scrobbler,
             last_recent_key: None,
             config_tx,
             config: services.config,
+            external: None,
+            external_track: None,
+            external_completed_key: None,
             active_source: services.active_source,
             station_registry: services.station_registry,
             cmd_tx: cmd_tx.clone(),
@@ -219,6 +250,8 @@ impl SessionHandle {
             events,
             seq,
             history,
+            materializer,
+            queue_request_seq,
         }
     }
 
@@ -236,6 +269,10 @@ impl SessionHandle {
 
     pub fn state(&self) -> PlayerState {
         self.state_rx.borrow().clone()
+    }
+
+    pub fn state_watch(&self) -> watch::Receiver<PlayerState> {
+        self.state_rx.clone()
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<(u64, ApiEvent)> {
@@ -289,20 +326,72 @@ impl SessionHandle {
     }
 
     pub async fn set_queue(&self, request: SetQueueRequest) -> Result<CommandAck, ApiError> {
-        self.request(|tx| SessionCmd::SetQueue(request, tx)).await
+        if request.mode != QueueMode::Replace
+            && (request.start_index.is_some() || request.shuffle.is_some())
+        {
+            return Err(ApiError::invalid_input(
+                "start_index and shuffle apply to mode \"replace\" only",
+            ));
+        }
+        if request.mode == QueueMode::Insert && request.insert_index.is_none() {
+            return Err(ApiError::invalid_input(
+                "insert_index is required for mode \"insert\"",
+            ));
+        }
+        if request.mode != QueueMode::Insert && request.insert_index.is_some() {
+            return Err(ApiError::invalid_input(
+                "insert_index applies to mode \"insert\" only",
+            ));
+        }
+        let request_id = self.queue_request_seq.fetch_add(1, Ordering::AcqRel) + 1;
+        let tracks = tokio::time::timeout(
+            MATERIALIZE_TIMEOUT,
+            self.materializer.materialize(&request.context),
+        )
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                api::ErrorCode::SourceUnreachable,
+                "queue materialization timed out",
+            )
+        })??;
+        if self.queue_request_seq.load(Ordering::Acquire) != request_id {
+            return Err(ApiError::new(
+                api::ErrorCode::Conflict,
+                "queue request superseded",
+            ));
+        }
+        self.request(|reply| SessionCmd::SetQueueMaterialized {
+            request_id,
+            request,
+            tracks,
+            reply,
+        })
+        .await
     }
 
     pub async fn queue_window(&self, page: Page) -> Result<QueueWindow, ApiError> {
         self.request(|tx| SessionCmd::Window(page, tx)).await
     }
 
+    pub async fn materialize_track(&self, key: String) -> Result<Track, ApiError> {
+        self.materializer
+            .materialize(&QueueContext::Tracks { keys: vec![key] })
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| ApiError::not_found("unknown track key"))
+    }
+
     pub async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError> {
+        self.queue_request_seq.fetch_add(1, Ordering::AcqRel);
         self.request(|tx| SessionCmd::Edit(edit, tx)).await
     }
 
     /// Restore a persisted queue: paused, with a resume point at the saved
     /// progress, exactly like the app's startup restore.
     pub async fn restore_queue(&self, snapshot: db::QueueSnapshot) -> Result<CommandAck, ApiError> {
+        self.queue_request_seq.fetch_add(1, Ordering::AcqRel);
         self.request(|tx| SessionCmd::RestoreQueue(Box::new(snapshot), tx))
             .await
     }
@@ -325,6 +414,58 @@ impl SessionHandle {
         let _ = self.cmd_tx.send(SessionCmd::SetActiveSource(source));
     }
 
+    /// Declare (or clear) external playback: while set, `PlayerState.external`
+    /// is populated and transport commands are forwarded to the owning
+    /// frontend as `player.external_command` events instead of driving the
+    /// stopped engine.
+    pub fn set_external(&self, external: Option<ExternalPlayback>) {
+        let _ = self.cmd_tx.send(SessionCmd::SetExternal(external));
+    }
+
+    pub async fn report_external(
+        &self,
+        track: Option<Track>,
+        position_ms: u64,
+        playing: bool,
+        completed: bool,
+        device: Option<String>,
+    ) -> Result<(), ApiError> {
+        self.request(|reply| SessionCmd::ReportExternal {
+            track,
+            position_ms,
+            playing,
+            completed,
+            device,
+            reply,
+        })
+        .await
+    }
+
+    pub fn report_external_detached(
+        &self,
+        track: Option<Track>,
+        position_ms: u64,
+        playing: bool,
+        completed: bool,
+        device: Option<String>,
+    ) {
+        let (reply, _ignored) = oneshot::channel();
+        let _ = self.cmd_tx.send(SessionCmd::ReportExternal {
+            track,
+            position_ms,
+            playing,
+            completed,
+            device,
+            reply,
+        });
+    }
+
+    /// Serialize source teardown so external ownership cannot race engine reset.
+    pub async fn reset_playback(&self) -> Result<CommandAck, ApiError> {
+        self.queue_request_seq.fetch_add(1, Ordering::AcqRel);
+        self.request(SessionCmd::ResetPlayback).await
+    }
+
     /// In-process queue replacement with literal tracks (catalog rows that
     /// may not exist in the database yet). Wire clients use `set_queue` with
     /// a context instead; this is the embedded frontend's path.
@@ -335,6 +476,7 @@ impl SessionHandle {
         start_index: Option<usize>,
         shuffle: Option<bool>,
     ) -> Result<CommandAck, ApiError> {
+        self.queue_request_seq.fetch_add(1, Ordering::AcqRel);
         self.request(|reply| SessionCmd::SetQueueRaw {
             tracks,
             mode,
@@ -359,6 +501,7 @@ impl SessionHandle {
         position: usize,
         tracks: Vec<Track>,
     ) -> Result<CommandAck, ApiError> {
+        self.queue_request_seq.fetch_add(1, Ordering::AcqRel);
         self.request(|reply| SessionCmd::InsertTracksAt {
             position,
             tracks,
@@ -480,14 +623,17 @@ struct Session {
     events: broadcast::Sender<(u64, ApiEvent)>,
     seq: Arc<AtomicU64>,
     history: Arc<Mutex<VecDeque<(u64, ApiEvent)>>>,
-    materializer: Arc<dyn QueueMaterializer>,
-    queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
+    queue_writer: Option<mpsc::UnboundedSender<(db::QueueSnapshot, Option<oneshot::Sender<()>>)>>,
+    queue_request_seq: Arc<AtomicU64>,
     queue_dirty: bool,
     recorder: Option<Arc<dyn PlaybackRecorder>>,
     scrobbler: Option<Arc<crate::scrobbler::Scrobbler>>,
     last_recent_key: Option<String>,
     config_tx: watch::Sender<config::AppConfig>,
     config: config::AppConfig,
+    external: Option<ExternalPlayback>,
+    external_track: Option<Track>,
+    external_completed_key: Option<String>,
     active_source: Option<server::source::ActiveSource>,
     station_registry: Arc<radio::registry::StationRegistry>,
     cmd_tx: mpsc::UnboundedSender<SessionCmd>,
@@ -524,10 +670,10 @@ impl Session {
                     let Some(event) = event else { break };
                     self.handle_engine_event(event, &state_tx);
                 }
-                _ = correction.tick(), if self.phase == ApiPhase::Playing => {
+                _ = correction.tick(), if self.phase == ApiPhase::Playing && self.external.is_none() => {
                     self.publish_position_anchor(&state_tx, None, None, true);
                 }
-                _ = persist.tick(), if self.queue_dirty && self.queue_store.is_some() => {
+                _ = persist.tick(), if self.queue_dirty && self.queue_writer.is_some() => {
                     self.persist_async();
                 }
             }
@@ -540,8 +686,32 @@ impl Session {
                 let result = self.handle_player_command(command, state_tx);
                 let _ = reply.send(result);
             }
-            SessionCmd::SetQueue(request, reply) => {
-                let result = self.handle_set_queue(request, state_tx).await;
+            SessionCmd::SetQueueMaterialized {
+                request_id,
+                request,
+                tracks,
+                reply,
+            } => {
+                let result = if self.queue_request_seq.load(Ordering::Acquire) == request_id {
+                    if request.mode == QueueMode::Insert {
+                        self.model
+                            .insert_at(request.insert_index.unwrap_or_default() as usize, tracks);
+                        Ok(self.publish(state_tx, true))
+                    } else {
+                        self.apply_queue_tracks(
+                            tracks,
+                            request.mode,
+                            request.start_index.map(|index| index as usize),
+                            request.shuffle,
+                            state_tx,
+                        )
+                    }
+                } else {
+                    Err(ApiError::new(
+                        api::ErrorCode::Conflict,
+                        "queue request superseded",
+                    ))
+                };
                 let _ = reply.send(result);
             }
             SessionCmd::Window(page, reply) => {
@@ -566,6 +736,51 @@ impl Session {
             SessionCmd::Emit(event) => self.emit(*event),
             SessionCmd::SetStationRegistry(registry) => self.station_registry = registry,
             SessionCmd::SetActiveSource(source) => self.active_source = source,
+            SessionCmd::SetExternal(external) => {
+                if self.external != external {
+                    if external.is_some() && self.external.is_none() {
+                        self.stop(state_tx);
+                    }
+                    self.external = external;
+                    if self.external.is_none() {
+                        self.external_track = None;
+                        self.external_completed_key = None;
+                        self.set_intent(PlaybackIntent::Stopped);
+                        self.phase = ApiPhase::Idle;
+                        self.position = None;
+                    }
+                    self.publish(state_tx, false);
+                }
+            }
+            SessionCmd::ReportExternal {
+                track,
+                position_ms,
+                playing,
+                completed,
+                device,
+                reply,
+            } => {
+                let result = self.apply_external_report(
+                    track,
+                    position_ms,
+                    playing,
+                    completed,
+                    device,
+                    state_tx,
+                );
+                let _ = reply.send(result);
+            }
+            SessionCmd::ResetPlayback(reply) => {
+                let was_external = self.external.take().is_some();
+                if was_external {
+                    self.emit(ApiEvent::PlayerExternalCommand(PlayerCommand::Stop));
+                }
+                tracing::info!(external = was_external, "playback reset");
+                self.stop(state_tx);
+                let result =
+                    self.apply_queue_tracks(Vec::new(), QueueMode::Replace, None, None, state_tx);
+                let _ = reply.send(result);
+            }
             SessionCmd::SetQueueRaw {
                 tracks,
                 mode,
@@ -603,12 +818,17 @@ impl Session {
                 });
             }
             SessionCmd::Persist(reply) => {
-                if let Some(store) = self.queue_store.clone() {
+                if let Some(writer) = self.queue_writer.clone() {
                     let snapshot = self.snapshot();
                     self.queue_dirty = false;
-                    store.save(snapshot).await;
+                    if let Err(error) = writer.send((snapshot, Some(reply)))
+                        && let Some(reply) = error.0.1
+                    {
+                        let _ = reply.send(());
+                    }
+                } else {
+                    let _ = reply.send(());
                 }
-                let _ = reply.send(());
             }
             SessionCmd::LoadPrepared(result) => self.handle_prepared_load(*result, state_tx),
             SessionCmd::LoadFinished(result) => self.handle_load_finished(result, state_tx),
@@ -621,6 +841,38 @@ impl Session {
         command: PlayerCommand,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
+        if matches!(command, PlayerCommand::SetVolume { .. }) {
+            tracing::debug!(
+                ?command,
+                external = self.external.is_some(),
+                "playback command"
+            );
+        } else {
+            tracing::info!(
+                ?command,
+                external = self.external.is_some(),
+                "playback command"
+            );
+        }
+        // While playback is external the engine is stopped and transport
+        // commands would silently no-op against it; forward them to the
+        // frontend that owns the external session instead. Volume and mode
+        // stay engine/queue-side (the queue mode is daemon state either way).
+        if self.external.is_some()
+            && matches!(
+                command,
+                PlayerCommand::Play
+                    | PlayerCommand::Pause
+                    | PlayerCommand::Toggle
+                    | PlayerCommand::Next
+                    | PlayerCommand::Previous
+                    | PlayerCommand::Stop
+                    | PlayerCommand::Seek { .. }
+            )
+        {
+            self.emit(ApiEvent::PlayerExternalCommand(command));
+            return Ok(CommandAck { rev: self.rev });
+        }
         let mut queue_changed = false;
         match command {
             PlayerCommand::Play => self.resume(state_tx),
@@ -659,19 +911,14 @@ impl Session {
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
         let len = self.model.len();
+        tracing::info!(?edit, queue_len = len, "queue edit requested");
         match edit {
             QueueEdit::Jump { index } => {
                 let index = index as usize;
-                let position_exists = self.model.track_at(index).is_some();
-                if !position_exists {
-                    return Err(ApiError::invalid_input("no track at that queue position"));
-                }
-                let physical = self
-                    .model
-                    .physical_index_of(index)
-                    .ok_or_else(|| ApiError::invalid_input("no track at that queue position"))?;
                 let mut candidate = self.model.clone();
-                let position = candidate.jump_to(physical);
+                let position = candidate
+                    .jump_to_position(index)
+                    .ok_or_else(|| ApiError::invalid_input("no track at that queue position"))?;
                 self.start_immediate_load(candidate, position)?;
                 Ok(self.publish(state_tx, true))
             }
@@ -737,67 +984,17 @@ impl Session {
         shuffle: Option<bool>,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
+        let affected = tracks.len();
         match mode {
-            QueueMode::Replace => {
-                self.model.replace(tracks);
-                if let Some(on) = shuffle {
-                    self.model.set_shuffle(on);
-                }
-                let len = self.model.len();
-                if len > 0 {
-                    let start = start_index.unwrap_or_else(|| {
-                        if self.model.shuffle() {
-                            use rand::RngExt;
-                            rand::rng().random_range(0..len)
-                        } else {
-                            0
-                        }
-                    });
-                    let position = self.model.jump_to(start.min(len - 1));
-                    self.start_load(position, false, None);
-                }
-            }
-            QueueMode::Append => self.model.add(tracks),
-            QueueMode::PlayNext => self.model.insert_next(tracks),
-        }
-        Ok(self.publish(state_tx, true))
-    }
-
-    async fn handle_set_queue(
-        &mut self,
-        request: SetQueueRequest,
-        state_tx: &watch::Sender<PlayerState>,
-    ) -> Result<CommandAck, ApiError> {
-        if request.mode != QueueMode::Replace
-            && (request.start_index.is_some() || request.shuffle.is_some())
-        {
-            return Err(ApiError::invalid_input(
-                "start_index and shuffle apply to mode \"replace\" only",
-            ));
-        }
-        // Bounded so a hanging materializer (a slow source resolve) cannot
-        // wedge the whole session command loop.
-        let tracks = tokio::time::timeout(
-            MATERIALIZE_TIMEOUT,
-            self.materializer.materialize(&request.context),
-        )
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                api::ErrorCode::SourceUnreachable,
-                "queue materialization timed out",
-            )
-        })??;
-        match request.mode {
             QueueMode::Replace => {
                 let mut candidate = self.model.clone();
                 candidate.replace(tracks);
-                if let Some(on) = request.shuffle {
+                if let Some(on) = shuffle {
                     candidate.set_shuffle(on);
                 }
                 let len = candidate.len();
                 if len > 0 {
-                    let start = request.start_index.map(|i| i as usize).unwrap_or_else(|| {
+                    let start = start_index.unwrap_or_else(|| {
                         if candidate.shuffle() {
                             use rand::RngExt;
                             rand::rng().random_range(0..len)
@@ -805,8 +1002,8 @@ impl Session {
                             0
                         }
                     });
-                    let idx = candidate.jump_to(start.min(len - 1));
-                    self.start_immediate_load(candidate, idx)?;
+                    let position = candidate.jump_to(start.min(len - 1));
+                    self.start_immediate_load(candidate, position)?;
                 } else {
                     self.model = candidate;
                     self.stop_playback();
@@ -814,7 +1011,18 @@ impl Session {
             }
             QueueMode::Append => self.model.add(tracks),
             QueueMode::PlayNext => self.model.insert_next(tracks),
+            QueueMode::Insert => {
+                return Err(ApiError::invalid_input(
+                    "insert mode requires an explicit logical position",
+                ));
+            }
         }
+        tracing::info!(
+            ?mode,
+            affected,
+            queue_len = self.model.len(),
+            "queue updated"
+        );
         Ok(self.publish(state_tx, true))
     }
 
@@ -1012,29 +1220,101 @@ impl Session {
         self.publish(state_tx, false);
     }
 
-    /// Record the committed track as recently played, once per session track.
-    /// The invalidation event lets clients refresh recents immediately even
-    /// though the durable write is fire-and-forget.
-    fn maybe_record_recent(&mut self) {
-        let Some(recorder) = self.recorder.clone() else {
-            return;
+    fn apply_external_report(
+        &mut self,
+        track: Option<Track>,
+        position_ms: u64,
+        playing: bool,
+        completed: bool,
+        device: Option<String>,
+        state_tx: &watch::Sender<PlayerState>,
+    ) -> Result<(), ApiError> {
+        let Some(external) = self.external.as_mut() else {
+            return Err(ApiError::new(
+                api::ErrorCode::Conflict,
+                "external playback is not claimed",
+            ));
         };
-        let Some(track) = self.model.current_track() else {
-            return;
+        external.device = device;
+        let mut committed = None;
+        let changed = track.as_ref().map(|track| track.id.uid())
+            != self.external_track.as_ref().map(|track| track.id.uid());
+        if changed {
+            self.external_completed_key = None;
+            self.last_recent_key = None;
+            self.external_track = track;
+            if let Some(track) = self.external_track.clone() {
+                let token = self.allocate_token();
+                self.set_intent(PlaybackIntent::Committed { token });
+                self.record_recent_track(track.clone());
+                committed = Some((track, token));
+            } else {
+                self.set_intent(PlaybackIntent::Stopped);
+            }
+        }
+        self.phase = if self.external_track.is_none() {
+            ApiPhase::Idle
+        } else if playing {
+            ApiPhase::Playing
+        } else {
+            ApiPhase::Paused
         };
+        self.position = self.external_track.as_ref().map(|_| PositionAnchor {
+            ms: position_ms,
+            at_ms: self.now_ms(),
+            playing,
+        });
+        self.position_token = self.external_track.as_ref().map(|_| self.current_token);
+        if completed
+            && let Some(track) = self.external_track.clone()
+            && self.external_completed_key.as_deref() != Some(track.id.uid().as_str())
+        {
+            self.external_completed_key = Some(track.id.uid());
+            self.record_listen_track(track);
+        }
+        self.publish(state_tx, false);
+        if let (Some(scrobbler), Some((track, token))) = (self.scrobbler.clone(), committed) {
+            scrobbler.track_committed(track, token);
+        }
+        Ok(())
+    }
+
+    fn record_recent_track(&mut self, track: Track) {
         let uid = track.id.uid();
         if self.last_recent_key.as_deref() == Some(uid.as_str()) {
             return;
         }
         self.last_recent_key = Some(uid);
-        let track = track.clone();
-        tokio::spawn(async move {
-            recorder.record_recent(&track).await;
-        });
-        self.emit(ApiEvent::LibraryInvalidated {
-            table: api::Table::Recents,
-            generation: self.rev,
-        });
+        if let Some(recorder) = self.recorder.clone() {
+            tokio::spawn(async move {
+                recorder.record_recent(&track).await;
+            });
+            self.emit(ApiEvent::LibraryInvalidated {
+                table: api::Table::Recents,
+                generation: self.rev,
+            });
+        }
+    }
+
+    fn record_listen_track(&self, track: Track) {
+        if track.duration == u64::MAX {
+            return;
+        }
+        if let Some(recorder) = self.recorder.clone() {
+            tokio::spawn(async move {
+                recorder.bump_listen_count(&track).await;
+            });
+        }
+    }
+
+    /// Record the committed track as recently played, once per session track.
+    /// The invalidation event lets clients refresh recents immediately even
+    /// though the durable write is fire-and-forget.
+    fn maybe_record_recent(&mut self) {
+        let Some(track) = self.model.current_track() else {
+            return;
+        };
+        self.record_recent_track(track.clone());
     }
 
     /// Count a completed listen (auto-advance or crossfade arm), mirroring
@@ -1043,19 +1323,7 @@ impl Session {
         let Some(track) = self.model.current_track() else {
             return;
         };
-        self.record_listen(track.clone());
-    }
-
-    pub(super) fn record_listen(&self, track: Track) {
-        let Some(recorder) = self.recorder.clone() else {
-            return;
-        };
-        if track.duration == u64::MAX {
-            return;
-        }
-        tokio::spawn(async move {
-            recorder.bump_listen_count(&track).await;
-        });
+        self.record_listen_track(track.clone());
     }
 
     /// Port of the app's `restore_queue_state`: stop, restore the model,
@@ -1105,7 +1373,11 @@ impl Session {
     }
 
     fn snapshot(&self) -> db::QueueSnapshot {
-        let progress_secs = if self.phase == ApiPhase::Playing {
+        let progress_secs = if self.external.is_some() {
+            self.position
+                .map(|anchor| anchor.ms / 1000)
+                .unwrap_or_default()
+        } else if self.phase == ApiPhase::Playing {
             let secs = self.displayed_position().as_secs();
             (secs / PROGRESS_STEP_SECS) * PROGRESS_STEP_SECS
         } else {
@@ -1123,17 +1395,13 @@ impl Session {
         }
     }
 
-    /// Fire-and-forget save off the actor thread; overlapping writes are
-    /// last-write-wins on one SQLite row.
     fn persist_async(&mut self) {
-        let Some(store) = self.queue_store.clone() else {
+        let Some(writer) = self.queue_writer.clone() else {
             return;
         };
         let snapshot = self.snapshot();
         self.queue_dirty = false;
-        tokio::spawn(async move {
-            store.save(snapshot).await;
-        });
+        let _ = writer.send((snapshot, None));
     }
 
     fn commit_transition_model(&mut self, token: u64) -> bool {

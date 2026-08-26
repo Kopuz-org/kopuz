@@ -17,7 +17,6 @@ impl Session {
         let Some(track) = source_model.track_at(idx).cloned() else {
             return false;
         };
-        let track_key = track.id.uid();
         let (restore_seek, clear_pending_resume) = self.pending_resume_seek(&track);
         let use_crossfade = allow_crossfade
             && self.should_crossfade()
@@ -31,11 +30,21 @@ impl Session {
             None
         };
         let crossfade_duration = Duration::from_secs(self.config.crossfade_seconds as u64);
-        let item_ref = PlaybackItemRef::parse(&track_key);
-        let is_radio = item_ref.is_radio();
-        let is_server = item_ref.is_server();
-        let item_id = item_ref.primary_id().unwrap_or_default().to_string();
-        let stream_id = item_ref.stream_id().unwrap_or_default().to_string();
+        let is_radio = track.duration == u64::MAX;
+        let (is_server, item_id) = match &track.id {
+            reader::TrackId::Server { item_id, .. } => (true, item_id.clone()),
+            reader::TrackId::Local(_) => (false, String::new()),
+        };
+        let (radio_id, stream_id) = if is_radio {
+            let uid = track.id.uid();
+            let item_ref = PlaybackItemRef::parse(&uid);
+            (
+                item_ref.primary_id().unwrap_or_default().to_string(),
+                item_ref.stream_id().unwrap_or_default().to_string(),
+            )
+        } else {
+            (String::new(), String::new())
+        };
 
         let factory_override = self
             .factory_override
@@ -73,7 +82,7 @@ impl Session {
         let remote_ref = if factory_override.is_some() || offline_path.is_some() {
             None
         } else if is_radio {
-            let station = self.station_registry.get(&item_id);
+            let station = self.station_registry.get(&radio_id);
             use_icy = station.is_some_and(|station| !station.has_live_metadata());
             let cover = station
                 .and_then(|station| match &station.metadata {
@@ -124,11 +133,32 @@ impl Session {
             from_token,
         });
         self.buffered.clear();
+        let source_kind = if factory_override.is_some() {
+            "injected"
+        } else if offline_path.is_some() {
+            "offline"
+        } else if local_path.is_some() {
+            "local"
+        } else if is_radio {
+            "radio"
+        } else {
+            "remote"
+        };
+        tracing::info!(
+            token,
+            queue_index = idx,
+            title = %track.title,
+            artist = %track.artist,
+            source = source_kind,
+            crossfade = use_crossfade,
+            resume_ms = ?restore_seek.map(|position| position.as_millis()),
+            "track load started"
+        );
 
         if is_radio
             && let Some(station) = self
                 .station_registry
-                .get(&item_id)
+                .get(&radio_id)
                 .filter(|station| station.has_live_metadata())
                 .cloned()
         {
@@ -192,7 +222,7 @@ impl Session {
             idx,
             track,
             is_radio,
-            item_id,
+            item_id: if is_radio { radio_id } else { item_id },
             use_icy,
             factory_override,
             offline_path,
@@ -290,16 +320,23 @@ impl Session {
                     self.pending_resume = None;
                 }
                 self.maybe_record_recent();
-                if let Some(scrobbler) = self.scrobbler.clone() {
-                    let committed_track = self
-                        .pending_transition
-                        .as_ref()
-                        .filter(|pending| pending.to_token == finished.token)
-                        .and_then(|pending| pending.model.current_track().cloned())
-                        .or_else(|| self.model.current_track().cloned());
-                    if let Some(track) = committed_track {
-                        scrobbler.track_committed(track, finished.token);
-                    }
+                let committed_track = self
+                    .pending_transition
+                    .as_ref()
+                    .filter(|pending| pending.to_token == finished.token)
+                    .and_then(|pending| pending.model.current_track().cloned())
+                    .or_else(|| self.model.current_track().cloned());
+                if let Some(track) = committed_track.as_ref() {
+                    tracing::info!(
+                        token = finished.token,
+                        title = %track.title,
+                        artist = %track.artist,
+                        crossfaded = outcome.crossfaded,
+                        "track load committed"
+                    );
+                }
+                if let (Some(scrobbler), Some(track)) = (self.scrobbler.clone(), committed_track) {
+                    scrobbler.track_committed(track, finished.token);
                 }
                 let matching_transition = self
                     .pending_transition
@@ -330,7 +367,7 @@ impl Session {
                 }
             }
             Some(Err(error)) => {
-                tracing::error!(error = %error, "playback failed");
+                tracing::error!(token = finished.token, error = %error, "playback failed");
                 if self.fail_load(finished.token, error) {
                     self.publish(state_tx, false);
                 }

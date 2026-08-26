@@ -169,6 +169,29 @@ pub fn from_path(
     resolve(config, CoverRef::parse(&stored), max_width)
 }
 
+pub fn playlist(
+    config: &AppConfig,
+    id: &str,
+    cover_path: Option<&Path>,
+    image_tag: Option<&str>,
+    max_width: u32,
+) -> Option<CoverUrl> {
+    if let Some(cover) = from_path(config, cover_path, max_width) {
+        return Some(cover);
+    }
+    if let Some(tag) = image_tag
+        && tag.starts_with("directurl:")
+    {
+        return from_path(config, Some(Path::new(tag)), max_width);
+    }
+    let server = config.server.as_ref()?;
+    resolve(
+        config,
+        CoverRef::remote_item(server.service, id, image_tag),
+        max_width,
+    )
+}
+
 /// Session-scoped artist-photo fetch outcomes, keyed by DISPLAY name (the DB
 /// caches are keyed by the normalized name — [`ArtistArt::from_caches`] bridges
 /// the two). A newtype so every state is constructed through a method — the old
@@ -302,7 +325,7 @@ impl<'a> ArtistArt<'a> {
 /// declared view; none of them branches on the service.
 pub fn artist(config: &AppConfig, art: ArtistArt<'_>, max_width: u32) -> Option<CoverUrl> {
     let override_owned = art.override_path.map(Path::to_path_buf);
-    if let Some(cover) = utils::format_artwork_url(override_owned.as_deref()) {
+    if let Some(cover) = from_path(config, override_owned.as_deref(), max_width) {
         return Some(cover);
     }
     if let Some(ArtistImageRef::Remote(url)) = art.photo {

@@ -4414,6 +4414,8 @@ dependencies = [
  "base64",
  "dioxus",
  "directories",
+ "futures-util",
+ "kopuz-api",
  "kopuz-config",
  "kopuz-hooks",
  "kopuz-i18n",
@@ -4481,6 +4483,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid 1.23.5",
+ "webbrowser",
 ]
 
 [[package]]
@@ -4555,6 +4558,7 @@ version = "0.16.1"
 dependencies = [
  "dioxus",
  "directories",
+ "kopuz-api",
  "kopuz-components",
  "kopuz-config",
  "kopuz-hooks",

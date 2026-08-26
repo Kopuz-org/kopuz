@@ -283,6 +283,15 @@ pub trait Storage: ReadStore {
     /// of the settings into the standalone config file when it is writable.
     async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
 
+    /// Replace one saved server's credentials without changing the active
+    /// source. Credential provisioning uses this for inactive servers.
+    async fn set_server_credentials(
+        &self,
+        id: &str,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<(), DbError>;
+
     /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
     /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op
     /// if the DB already holds data or the sentinel exists. Idempotent; safe to

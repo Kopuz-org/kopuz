@@ -377,8 +377,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                                     }
                                                 },
                                                 on_play: move |_| {
-                                                    ctrl.queue.set((*play_queue).clone());
-                                                    ctrl.play_track(display_idx);
+                                                    ctrl.play_queue_at((*play_queue).clone(), display_idx);
                                                 },
                                             }
                                         }

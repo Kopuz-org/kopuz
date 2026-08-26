@@ -1,3 +1,6 @@
+// Clippy 1.95 reports this on Android even though the initializer is const.
+#![cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local))]
+
 use config::{AppConfig, MusicService};
 use dioxus::core::spawn_forever;
 use dioxus::prelude::*;

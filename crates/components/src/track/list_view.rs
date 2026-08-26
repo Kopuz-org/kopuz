@@ -141,8 +141,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                     }
                 },
                 on_play: move |idx: usize| {
-                    ctrl.queue.set(tracks_play.clone());
-                    ctrl.play_track(idx);
+                    ctrl.play_queue_at(tracks_play.clone(), idx);
                 },
                 on_add_to_playlist: move |idx: usize| {
                     if let Some(t) = tracks_add.get(idx) {
@@ -225,39 +224,19 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
                     on_save: move |edits: reader::models::TrackEdits| {
-                        let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
-                            return;
-                        };
-                        match reader::write_tags(&path, &edits) {
-                            Ok(()) => {
-                                let mut t = track.clone();
-                                t.title = edits.title.trim().to_string();
-                                t.artist = edits.artist.trim().to_string();
-                                t.artists = edits
-                                    .artist
-                                    .split([';', ','])
-                                    .map(|a| a.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-                                t.album = edits.album.trim().to_string();
-                                t.track_number = edits.track_number;
-                                t.disc_number = edits.disc_number;
-                                t.album_id = reader::metadata::make_album_id(
-                                    edits.album.trim(),
-                                    edits.artist.trim(),
-                                );
-                                let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                spawn(async move {
-                                    if source.upsert_tracks(&[t]).await.is_ok() {
-                                        gens.bump(Table::Tracks);
-                                    }
-                                });
-                                metadata_track.set(None);
+                        let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
+                        let key = track.id.key().into_owned();
+                        spawn(async move {
+                            match hooks::use_db_queries::save_track_edits(api.as_ref(), key, edits).await {
+                                Ok(_) => {
+                                    gens.bump(Table::Tracks);
+                                    metadata_track.set(None);
+                                }
+                                Err(error) => {
+                                    tracing::error!(%error, "failed to update track metadata");
+                                }
                             }
-                            Err(e) => {
-                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
-                            }
-                        }
+                        });
                     },
                 }
             }
@@ -283,9 +262,9 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                                 .iter()
                                 .map(|p| p.key().into_owned())
                                 .collect();
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                            let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                             spawn(async move {
-                                if source.add_to_playlist(&playlist_id, &refs).await.is_ok() {
+                                if api.add_playlist_tracks(playlist_id, refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
                                 }
                             });
@@ -306,9 +285,9 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                                 .iter()
                                 .map(|p| p.key().into_owned())
                                 .collect();
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                            let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                             spawn(async move {
-                                if source.create_playlist(&name, &refs).await.is_ok() {
+                                if api.create_playlist(name, refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
                                 }
                             });
