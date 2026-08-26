@@ -36,6 +36,12 @@ rfd = "0.17.2"
 percent-encoding = "2.3.2"
 dotenvy = "0.15"
 http = "1.4.0"
+tonic = "0.12"
+tonic-reflection = "0.12"
+prost = "0.13"
+tonic-build = "0.12"
+protox = "0.7"
+tokio-stream = "0.1"
 uuid = { version = "1.20.0", features = [
   "v4",
   "fast-rng",
@@ -117,6 +123,10 @@ pages = { package = "kopuz-pages", version = "0.16.0", path = "./crates/pages" }
 utils = { package = "kopuz-utils", version = "0.16.0", path = "./crates/utils" }
 config = { package = "kopuz-config", version = "0.16.0", path = "./crates/config" }
 db = { package = "kopuz-db", version = "0.16.0", path = "./crates/db" }
+api = { package = "kopuz-api", version = "0.16.0", path = "./crates/api" }
+proto = { package = "kopuz-proto", version = "0.16.0", path = "./crates/proto" }
+daemon = { package = "kopuz-daemon", version = "0.16.0", path = "./crates/daemon" }
+client = { package = "kopuz-client", version = "0.16.0", path = "./crates/client" }
 kopuz = { version = "0.16.0", path = "./crates/kopuz" }
 server = { package = "kopuz-server", version = "0.16.0", path = "./crates/server" }
 kopuz_route = { package = "kopuz-route", version = "0.16.0", path = "./crates/kopuz_route" }

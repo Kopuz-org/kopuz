@@ -1,0 +1,595 @@
+// The Kopuz daemon wire contract, v1.
+//
+// One gRPC endpoint on loopback, discovered through the {port, token, pid}
+// discovery file. The bearer token travels as metadata
+// (authorization: Bearer <token>) and is checked constant-time.
+//
+// The bidirectional Attach stream is the control plane: the client writes
+// transport commands, the server writes acks and every state event. Reads
+// and non-transport mutations are unary. A client MUST ignore an Event whose
+// oneof it does not know (it decodes as unset) and MUST treat unknown enum
+// values as their UNSPECIFIED default.
+
+syntax = "proto3";
+package kopuz.v1;
+
+service Kopuz {
+  // On connect the client sends Hello first, carrying the last event
+  // sequence it saw; the server replays newer events from its ring or
+  // emits Resync when the gap is too old, then streams live. Commands are
+  // correlated by client-chosen request_id and answered with an Ack whose
+  // rev names the state revision containing the command's effect.
+  rpc Attach(stream ClientMessage) returns (stream ServerMessage);
+
+  rpc GetStatus(Empty) returns (DaemonStatus);
+  rpc GetPlayerState(Empty) returns (PlayerState);
+  rpc GetQueue(Page) returns (QueueWindow);
+  rpc GetTracks(TracksRequest) returns (TrackPage);
+  rpc GetFolderTracks(FolderRequest) returns (TrackPage);
+  rpc GetStats(Empty) returns (Stats);
+  rpc GetLyrics(TrackRef) returns (Lyrics);
+  rpc GetFavorites(Empty) returns (Favorites);
+  rpc GetJobs(Empty) returns (JobList);
+  rpc GetDownloads(Empty) returns (DownloadList);
+  rpc GetConfig(Empty) returns (ConfigView);
+
+  rpc SetQueue(SetQueueRequest) returns (Ack);
+  rpc EditQueue(QueueEditRequest) returns (Ack);
+  rpc SetFavorite(FavoriteRequest) returns (Empty);
+  rpc StartJob(StartJobRequest) returns (JobRef);
+  rpc CancelJob(JobId) returns (Empty);
+  rpc StartDownloads(DownloadRequest) returns (JobRef);
+  rpc RemoveDownload(TrackRef) returns (Empty);
+  rpc PatchConfig(ConfigPatch) returns (ConfigView);
+
+  rpc GetArtwork(ArtworkRequest) returns (stream ArtworkChunk);
+}
+
+message Empty {}
+
+// ---------------- control stream ----------------
+
+message ClientMessage {
+  oneof msg {
+    Hello hello = 1;
+    Command command = 2;
+  }
+}
+
+// First client message on Attach. last_sequence 0 means no resume: the
+// client should fetch snapshots itself.
+message Hello {
+  uint64 last_sequence = 1;
+}
+
+message Command {
+  uint64 request_id = 1;
+  oneof cmd {
+    Empty play = 2;
+    Empty pause = 3;
+    Empty toggle = 4;
+    Empty next = 5;
+    Empty previous = 6;
+    Empty stop = 7;
+    Seek seek = 8;
+    SetVolume volume = 9;
+    SetMode mode = 10;
+  }
+}
+
+message Seek {
+  uint64 position_ms = 1;
+}
+
+message SetVolume {
+  // 0.0 to 1.0.
+  float volume = 1;
+}
+
+message SetMode {
+  optional bool shuffle = 1;
+  optional LoopMode loop = 2;
+}
+
+message ServerMessage {
+  // Monotonic event sequence; the resume key for Hello.last_sequence.
+  // Acks carry the sequence 0: they are per-connection, not replayable.
+  uint64 sequence = 1;
+  oneof msg {
+    Ack ack = 2;
+    Event event = 3;
+  }
+}
+
+message Ack {
+  uint64 request_id = 1;
+  uint64 rev = 2;
+  // A command-level failure (for example a seek on an unseekable track)
+  // answers here instead of killing the stream.
+  optional ErrorBody error = 3;
+}
+
+// ---------------- events ----------------
+
+message Event {
+  oneof kind {
+    PlayerState player_state = 1;
+    PositionEvent position = 2;
+    BufferedEvent buffered = 3;
+    QueueChanged queue_changed = 5;
+    LibraryInvalidated library_invalidated = 6;
+    JobProgress job_progress = 7;
+    JobFinished job_finished = 8;
+    ConfigChanged config_changed = 9;
+    SourceStatusEvent source_status = 10;
+    Notice notice = 11;
+    // The reconnect gap exceeded the replay ring: refetch snapshots.
+    Empty resync = 12;
+  }
+}
+
+message PositionEvent {
+  uint64 token = 1;
+  uint64 position_ms = 2;
+  uint64 at_ms = 3;
+  bool playing = 4;
+}
+
+message BufferedEvent {
+  uint64 token = 1;
+  repeated BufferedRange ranges = 2;
+}
+
+message QueueChanged {
+  uint64 rev = 1;
+  uint32 length = 2;
+  optional uint32 index = 3;
+}
+
+message LibraryInvalidated {
+  Table table = 1;
+  uint64 generation = 2;
+}
+
+message JobProgress {
+  string id = 1;
+  JobKind kind = 2;
+  string phase = 3;
+  optional uint64 current = 4;
+  optional uint64 total = 5;
+  optional string message = 6;
+}
+
+message JobFinished {
+  string id = 1;
+  JobKind kind = 2;
+  bool ok = 3;
+  optional ErrorBody error = 4;
+}
+
+message ConfigChanged {
+  repeated string keys = 1;
+}
+
+message SourceStatusEvent {
+  string source = 1;
+  SourceState state = 2;
+}
+
+message Notice {
+  NoticeLevel level = 1;
+  string code = 2;
+  optional string message = 3;
+}
+
+// ---------------- player state ----------------
+
+message PlayerState {
+  uint64 rev = 1;
+  // Daemon monotonic clock at send time; pairs with position.at_ms so
+  // clients compute one clock offset and interpolate locally. There is no
+  // per-second tick stream.
+  uint64 now_ms = 2;
+  Phase phase = 3;
+  Intent intent = 4;
+  optional NowPlaying track = 5;
+  optional PositionAnchor position = 6;
+  QueueSummary queue = 7;
+  float volume = 8;
+  repeated BufferedRange buffered = 9;
+  // While present, keep displaying this track and drive the seek bar from
+  // its position_ms (a crossfade is resolving).
+  optional FadingState fading = 10;
+  optional ExternalPlayback external = 11;
+  optional ErrorBody error = 12;
+}
+
+// phase is engine truth; intent is what the daemon is trying to do.
+// Frontends render optimistic UI from intent, exactly like the built-in
+// GUI (pause glyph while loading).
+message Intent {
+  oneof kind {
+    Empty stopped = 1;
+    Loading loading = 2;
+    Committed committed = 3;
+  }
+  message Loading {
+    uint64 token = 1;
+    optional uint64 from_token = 2;
+  }
+  message Committed {
+    uint64 token = 1;
+  }
+}
+
+message NowPlaying {
+  string key = 1;
+  string title = 2;
+  string artist = 3;
+  string album = 4;
+  optional uint64 duration_ms = 5;
+  uint32 khz = 6;
+  uint32 bitrate = 7;
+  TrackKind kind = 8;
+  bool seekable = 9;
+  // Daemon-relative artwork hint; fetch the bytes via GetArtwork.
+  optional string artwork = 10;
+}
+
+message PositionAnchor {
+  uint64 ms = 1;
+  uint64 at_ms = 2;
+  bool playing = 3;
+}
+
+message BufferedRange {
+  uint64 start = 1;
+  uint64 end = 2;
+  optional uint64 total = 3;
+}
+
+message FadingState {
+  uint64 from_token = 1;
+  NowPlaying track = 2;
+  uint64 position_ms = 3;
+}
+
+message ExternalPlayback {
+  string kind = 1;
+  optional string device = 2;
+}
+
+message QueueSummary {
+  uint64 rev = 1;
+  uint32 length = 2;
+  optional uint32 index = 3;
+  bool shuffle = 4;
+  LoopMode loop = 5;
+}
+
+// ---------------- queue ----------------
+
+message SetQueueRequest {
+  QueueMode mode = 1;
+  QueueContext context = 2;
+  // replace mode only.
+  optional uint32 start_index = 3;
+  optional bool shuffle = 4;
+}
+
+// Reference-shaped contexts materialize daemon-side, so "play this album"
+// never round-trips a track list through the client.
+message QueueContext {
+  oneof kind {
+    TrackKeys tracks = 1;
+    Id album = 2;
+    Name artist = 3;
+    Name genre = 4;
+    Id playlist = 5;
+    TrackFilter filter = 6;
+    Radio radio = 7;
+  }
+  message TrackKeys {
+    repeated string keys = 1;
+  }
+  message Id {
+    string id = 1;
+  }
+  message Name {
+    string name = 1;
+  }
+  message Radio {
+    string station_id = 1;
+    string stream_id = 2;
+  }
+}
+
+// Positions are play-order (logical) indices, the same space
+// QueueSummary.index and QueueItem.index use.
+message QueueEditRequest {
+  oneof op {
+    Jump jump = 1;
+    Move move = 2;
+    Remove remove = 3;
+  }
+  message Jump {
+    uint32 index = 1;
+  }
+  message Move {
+    uint32 from = 1;
+    uint32 to = 2;
+  }
+  message Remove {
+    uint32 index = 1;
+  }
+}
+
+message Page {
+  uint32 offset = 1;
+  // 0 means the server default (200).
+  uint32 limit = 2;
+}
+
+message QueueWindow {
+  uint64 rev = 1;
+  uint32 total = 2;
+  uint32 offset = 3;
+  repeated QueueItem items = 4;
+}
+
+message QueueItem {
+  uint32 index = 1;
+  TrackInfo track = 2;
+}
+
+// ---------------- library ----------------
+
+message TrackFilter {
+  optional string search = 1;
+  optional string artist = 2;
+  optional string album = 3;
+  optional string genre = 4;
+  optional bool favorite = 5;
+  optional string sort = 6;
+}
+
+message TracksRequest {
+  TrackFilter filter = 1;
+  Page page = 2;
+}
+
+message FolderRequest {
+  string prefix = 1;
+  Page page = 2;
+}
+
+message TrackPage {
+  uint32 total = 1;
+  uint32 offset = 2;
+  repeated TrackInfo items = 3;
+}
+
+message TrackInfo {
+  // The stable library ref; use it for queueing, favorites, and artwork.
+  string key = 1;
+  string uid = 2;
+  string title = 3;
+  string artist = 4;
+  string album = 5;
+  string album_id = 6;
+  optional uint64 duration_ms = 7;
+  uint32 khz = 8;
+  uint32 bitrate = 9;
+  optional uint32 track_number = 10;
+  optional uint32 disc_number = 11;
+  TrackKind kind = 12;
+  bool seekable = 13;
+  optional string artwork = 14;
+  bool offline = 15;
+}
+
+message TrackRef {
+  string key = 1;
+}
+
+message Stats {
+  map<string, uint64> listen_counts = 1;
+}
+
+message Lyrics {
+  optional string plain = 1;
+  repeated LyricLine synced = 2;
+}
+
+message LyricLine {
+  uint64 start_ms = 1;
+  optional uint64 end_ms = 2;
+  string text = 3;
+  // Word or syllable timing where the provider has it.
+  repeated LyricChunk chunks = 4;
+  optional uint32 parent_line_index = 5;
+  bool background = 6;
+  bool opposite_turn = 7;
+}
+
+message LyricChunk {
+  uint64 start_ms = 1;
+  string text = 2;
+}
+
+// ---------------- favorites, jobs, downloads ----------------
+
+message Favorites {
+  repeated string refs = 1;
+  uint64 generation = 2;
+}
+
+message FavoriteRequest {
+  string key = 1;
+  bool favorite = 2;
+}
+
+message StartJobRequest {
+  JobKind kind = 1;
+}
+
+message JobRef {
+  string job_id = 1;
+}
+
+message JobId {
+  string id = 1;
+}
+
+message JobList {
+  repeated JobStatus jobs = 1;
+}
+
+message JobStatus {
+  string id = 1;
+  JobKind kind = 2;
+  JobState state = 3;
+  string phase = 4;
+  optional uint64 current = 5;
+  optional uint64 total = 6;
+  optional string message = 7;
+  optional ErrorBody error = 8;
+}
+
+message DownloadRequest {
+  repeated string keys = 1;
+}
+
+message DownloadList {
+  repeated string keys = 1;
+}
+
+// ---------------- config, status, artwork ----------------
+
+// The config travels as JSON inside the proto: it is an open key space
+// the daemon versions independently. Credential keys are stripped from
+// views and refused in patches; locked_keys are pinned by a managed
+// settings layer and render read-only.
+message ConfigView {
+  string config_json = 1;
+  repeated string locked_keys = 2;
+}
+
+// RFC 7396 merge patch, as JSON.
+message ConfigPatch {
+  string merge_patch_json = 1;
+}
+
+message DaemonStatus {
+  string version = 1;
+  uint32 api_version = 2;
+  uint64 uptime_secs = 3;
+}
+
+message ArtworkRequest {
+  oneof entity {
+    string track = 1;
+    string album = 2;
+    string artist = 3;
+  }
+  bool hq = 4;
+}
+
+message ArtworkChunk {
+  // Set on the first chunk only.
+  string content_type = 1;
+  bytes data = 2;
+}
+
+// ---------------- shared ----------------
+
+// Stable machine-readable error identity; localize by code, never by
+// message. The same codes ride tonic Status metadata (kopuz-error-code)
+// for RPC-level failures.
+message ErrorBody {
+  ErrorCode code = 1;
+  string message = 2;
+  optional string details_json = 3;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INVALID_INPUT = 1;
+  ERROR_CODE_UNAUTHORIZED = 2;
+  ERROR_CODE_NOT_FOUND = 3;
+  ERROR_CODE_CONFLICT = 4;
+  ERROR_CODE_SOURCE_AUTH_EXPIRED = 5;
+  ERROR_CODE_SOURCE_UNREACHABLE = 6;
+  ERROR_CODE_UNSUPPORTED = 7;
+  ERROR_CODE_INTERNAL = 8;
+}
+
+enum Phase {
+  PHASE_UNSPECIFIED = 0;
+  PHASE_IDLE = 1;
+  PHASE_PLAYING = 2;
+  PHASE_PAUSED = 3;
+  PHASE_ENDED = 4;
+}
+
+enum LoopMode {
+  LOOP_MODE_UNSPECIFIED = 0;
+  LOOP_MODE_NONE = 1;
+  LOOP_MODE_QUEUE = 2;
+  LOOP_MODE_TRACK = 3;
+}
+
+enum TrackKind {
+  TRACK_KIND_UNSPECIFIED = 0;
+  TRACK_KIND_NORMAL = 1;
+  TRACK_KIND_RADIO = 2;
+}
+
+enum QueueMode {
+  QUEUE_MODE_UNSPECIFIED = 0;
+  QUEUE_MODE_REPLACE = 1;
+  QUEUE_MODE_APPEND = 2;
+  QUEUE_MODE_PLAY_NEXT = 3;
+}
+
+enum Table {
+  TABLE_UNSPECIFIED = 0;
+  TABLE_TRACKS = 1;
+  TABLE_ALBUMS = 2;
+  TABLE_PLAYLISTS = 3;
+  TABLE_FAVORITES = 4;
+  TABLE_FOLDERS = 5;
+  TABLE_SERVERS = 6;
+  TABLE_RECENTS = 7;
+}
+
+enum JobKind {
+  JOB_KIND_UNSPECIFIED = 0;
+  JOB_KIND_SCAN = 1;
+  JOB_KIND_LIBRARY_SYNC = 2;
+  JOB_KIND_FAVORITES_SYNC = 3;
+  JOB_KIND_PLAYLIST_SYNC = 4;
+  JOB_KIND_DOWNLOAD = 5;
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_RUNNING = 1;
+  JOB_STATE_FINISHED = 2;
+  JOB_STATE_FAILED = 3;
+  JOB_STATE_CANCELLED = 4;
+}
+
+enum SourceState {
+  SOURCE_STATE_UNSPECIFIED = 0;
+  SOURCE_STATE_ONLINE = 1;
+  SOURCE_STATE_AUTH_EXPIRED = 2;
+  SOURCE_STATE_OFFLINE = 3;
+}
+
+enum NoticeLevel {
+  NOTICE_LEVEL_UNSPECIFIED = 0;
+  NOTICE_LEVEL_INFO = 1;
+  NOTICE_LEVEL_WARNING = 2;
+  NOTICE_LEVEL_ERROR = 3;
+}

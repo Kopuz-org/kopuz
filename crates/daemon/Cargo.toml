@@ -1,0 +1,74 @@
+[package]
+name = "kopuz-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "daemon"
+
+[[bin]]
+name = "kopuzd"
+path = "src/bin/kopuzd.rs"
+required-features = ["kopuzd"]
+
+[lints]
+workspace = true
+
+[dependencies]
+api = { workspace = true }
+db = { workspace = true }
+discord-presence = { workspace = true }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+image = { workspace = true }
+percent-encoding = { workspace = true }
+base64 = { workspace = true }
+config = { workspace = true }
+player = { workspace = true }
+radio = { workspace = true }
+reader = { workspace = true }
+server = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+rand = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+utils = { workspace = true }
+tonic = { workspace = true, optional = true }
+tonic-reflection = { workspace = true, optional = true }
+proto = { workspace = true, optional = true }
+tokio-stream = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
+directories = { workspace = true, optional = true }
+
+[dev-dependencies]
+daemon = { workspace = true, features = ["grpc", "kopuzd"] }
+client = { workspace = true }
+tempfile = { workspace = true }
+
+[features]
+grpc = [
+  "dep:tonic",
+  "dep:tonic-reflection",
+  "dep:proto",
+  "dep:tokio-stream",
+  "dep:directories",
+  "tokio/net",
+  "tokio/time",
+]
+kopuzd = [
+  "grpc",
+  "dep:tracing-subscriber",
+  "dep:directories",
+  "tokio/rt-multi-thread",
+  "tokio/signal",
+]

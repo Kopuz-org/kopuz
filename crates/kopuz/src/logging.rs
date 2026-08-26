@@ -199,9 +199,12 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
     });
 
     // SIGINT (Ctrl+C from a terminal `cargo run`) skips stack/global
-    // Drop, leaving the trace truncated. Flush guards explicitly, then
-    // exit with the conventional 130.
+    // Drop, losing both the pending queue/config debounce window and the
+    // trace tail. Persist the last stashed snapshots first so their
+    // outcome lands in the log, flush guards, then exit with the
+    // conventional 130.
     let _ = ctrlc::set_handler(|| {
+        crate::exit_flush::flush_stashed_blocking();
         shutdown();
         std::process::exit(130);
     });
