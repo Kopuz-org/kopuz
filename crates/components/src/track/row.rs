@@ -1,13 +1,11 @@
 use crate::NavigationController;
 use crate::constants::*;
-use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::queue_drag::{
     clear_dragged_queue_track, handle_select_click, is_queue_drag_enabled, set_dragged_queue_track,
     set_dragged_queue_tracks,
 };
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
-use hooks::PlayerController;
 use hooks::toast::toast;
 use reader::models::Track;
 use tracing::Instrument;
@@ -44,7 +42,6 @@ pub fn TrackRow(
     is_menu_open: bool,
     #[props(default = false)] is_album: bool,
     on_add_to_playlist: EventHandler<()>,
-    on_queue: Option<EventHandler<()>>,
     on_close_menu: EventHandler<()>,
     on_play: EventHandler<()>,
     on_delete: EventHandler<()>,
@@ -56,7 +53,6 @@ pub fn TrackRow(
     on_select: Option<EventHandler<bool>>,
     on_long_press: Option<EventHandler<()>>,
     on_download: Option<EventHandler<()>>,
-    on_start_radio: Option<EventHandler<()>>,
     #[props(default = false)] is_downloaded: bool,
     #[props(default = false)] is_downloading: bool,
     #[props(default = false)] is_currently_playing: bool,
@@ -64,8 +60,6 @@ pub fn TrackRow(
     #[props(default = None)] row_num: Option<usize>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let show_row_images = config.read().show_row_images;
@@ -84,159 +78,9 @@ pub fn TrackRow(
     let mut pending_queue_drag = use_signal(|| None::<(f64, f64)>);
     let mut pending_queue_drag_normal = use_signal(|| None::<(f64, f64)>);
     const QUEUE_DRAG_THRESHOLD_PX: f64 = 6.0;
-    let play_next_text = i18n::t("play_next").to_string();
-    let add_to_queue_text = i18n::t("add_to_queue").to_string();
-    let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
-    let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
-    let delete_song_text = i18n::t("delete").to_string();
-    let share_text = i18n::t("share_musicbrainz").to_string();
-    let view_metadata_text = i18n::t("view_metadata").to_string();
-
-    let mut actions = Vec::new();
-
-    let has_queue = on_queue.is_some();
-    if has_queue {
-        actions.push(MenuAction::new(
-            play_next_text.as_str(),
-            "fa-solid fa-forward-step",
-        ));
-        actions.push(MenuAction::new(
-            add_to_queue_text.as_str(),
-            "fa-solid fa-list-ul",
-        ));
-    }
-
-    actions.push(MenuAction::new(
-        add_to_playlist_text.as_str(),
-        "fa-solid fa-plus",
-    ));
-
-    let has_remove = on_remove_from_playlist.is_some();
-    if has_remove {
-        actions.push(MenuAction::new(
-            remove_from_playlist_text.as_str(),
-            "fa-solid fa-minus",
-        ));
-    }
-
-    // `on_download` is only wired by sources that support downloads (servers),
-    // so its presence is the gate — no separate source check needed.
-    let has_download = on_download.is_some();
-
-    if has_download {
-        let (dl_label, dl_icon) = if is_downloading {
-            ("Downloading...", "fa-solid fa-spinner fa-spin")
-        } else if is_downloaded {
-            ("Remove Download", "fa-solid fa-trash-can")
-        } else {
-            ("Download Offline", "fa-solid fa-download")
-        };
-        let mut action = MenuAction::new(dl_label, dl_icon);
-        if is_downloaded {
-            action = action.destructive();
-        }
-        actions.push(action);
-    }
-
-    let delete_action_idx = if !hide_delete {
-        let idx = actions.len();
-        actions.push(MenuAction::new(delete_song_text.as_str(), "fa-solid fa-trash").destructive());
-        Some(idx)
-    } else {
-        None
-    };
-
-    let share_idx = actions.len();
-    actions.push(MenuAction::new(
-        share_text.as_str(),
-        "fa-solid fa-share-nodes",
-    ));
-
-    let mix_idx = if on_start_radio.is_some() {
-        let idx = actions.len();
-        actions.push(MenuAction::new(
-            crate::radio_actions::radio_label(),
-            crate::radio_actions::RADIO_ICON,
-        ));
-        Some(idx)
-    } else {
-        None
-    };
-
-    let has_view_metadata = on_view_metadata.is_some();
-    let view_metadata_idx = if has_view_metadata {
-        let idx = actions.len();
-        actions.push(MenuAction::new(
-            view_metadata_text.as_str(),
-            "fa-solid fa-circle-info",
-        ));
-        Some(idx)
-    } else {
-        None
-    };
-
-    let play_next_idx = if has_queue { Some(0) } else { None };
-    let add_to_queue_idx = if has_queue { Some(1) } else { None };
-    let add_to_playlist_idx = if has_queue { 2 } else { 0 };
-    let remove_action_idx = if has_remove {
-        Some(add_to_playlist_idx + 1)
-    } else {
-        None
-    };
-    let download_action_idx = if has_download {
-        add_to_playlist_idx + 1 + usize::from(has_remove)
-    } else {
-        0
-    };
-
-    // One handler for every layout — the action list is identical, only the
-    // chrome around it differs.
     let menu_track = track.clone();
-    let on_menu_action = EventHandler::new(move |idx: usize| {
-        if let Some(play_next_idx) = play_next_idx
-            && idx == play_next_idx
-        {
-            ctrl.queue_play_next(vec![menu_track.clone()]);
-            on_close_menu.call(());
-            return;
-        }
-        if let Some(queue_idx) = add_to_queue_idx
-            && idx == queue_idx
-        {
-            if let Some(handler) = on_queue {
-                handler.call(());
-            }
-            return;
-        }
-
-        if idx == add_to_playlist_idx {
-            on_add_to_playlist.call(());
-        } else if remove_action_idx == Some(idx) {
-            if let Some(handler) = on_remove_from_playlist {
-                handler.call(());
-            }
-        } else if has_download && idx == download_action_idx {
-            if let Some(handler) = on_download {
-                handler.call(());
-            }
-        } else if idx == share_idx {
-            let src = active_source.peek().clone();
-            share_track(menu_track.clone(), src);
-            on_close_menu.call(());
-        } else if mix_idx == Some(idx) {
-            if let Some(handler) = on_start_radio {
-                handler.call(());
-            }
-            on_close_menu.call(());
-        } else if view_metadata_idx == Some(idx) {
-            if let Some(handler) = on_view_metadata {
-                handler.call(());
-            }
-            on_close_menu.call(());
-        } else if Some(idx) == delete_action_idx {
-            on_delete.call(());
-        }
-    });
+    let menu_track_normal = track.clone();
+    let menu_track_android = track.clone();
 
     let mut long_press_task = use_signal(|| None);
     let mut long_press_occurred = use_signal(|| false);
@@ -358,14 +202,20 @@ pub fn TrackRow(
 
                 if !is_selection_mode {
                     div { class: "shrink-0",
-                        DotsMenu {
-                            actions,
-                            is_open: is_menu_open,
-                            on_open: move |_| on_click_menu.call(()),
-                            on_close: move |_| on_close_menu.call(()),
+                        crate::track_actions::TrackActionsMenu {
+                            track: menu_track_android.clone(),
+                            is_open: Some(is_menu_open),
+                            on_open: Some(EventHandler::new(move |_| on_click_menu.call(()))),
+                            on_close: Some(EventHandler::new(move |_| on_close_menu.call(()))),
                             button_class: "active:scale-95".to_string(),
                             anchor: "right".to_string(),
-                            on_action: on_menu_action,
+                            on_add_to_playlist: Some(on_add_to_playlist),
+                            on_remove_from_playlist,
+                            on_download,
+                            on_view_metadata,
+                            on_delete: (!hide_delete).then_some(on_delete),
+                            is_downloaded,
+                            is_downloading,
                         }
                     }
                 }
@@ -439,6 +289,7 @@ pub fn TrackRow(
                 ontouchend: move |_| cancel_long_press(),
                 oncontextmenu: move |evt| {
                     evt.prevent_default();
+                    crate::dots_menu::open_at_pointer(&evt);
                     if !is_selection_mode { on_click_menu.call(()); }
                 },
 
@@ -595,14 +446,20 @@ pub fn TrackRow(
 
                 div { class: "flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity",
                     if !is_selection_mode {
-                        DotsMenu {
-                            actions,
-                            is_open: is_menu_open,
-                            on_open: move |_| on_click_menu.call(()),
-                            on_close: move |_| on_close_menu.call(()),
+                        crate::track_actions::TrackActionsMenu {
+                            track: menu_track.clone(),
+                            is_open: Some(is_menu_open),
+                            on_open: Some(EventHandler::new(move |_| on_click_menu.call(()))),
+                            on_close: Some(EventHandler::new(move |_| on_close_menu.call(()))),
                             button_class: "active:scale-95".to_string(),
                             anchor: "right".to_string(),
-                            on_action: on_menu_action,
+                            on_add_to_playlist: Some(on_add_to_playlist),
+                            on_remove_from_playlist,
+                            on_download,
+                            on_view_metadata,
+                            on_delete: (!hide_delete).then_some(on_delete),
+                            is_downloaded,
+                            is_downloading,
                         }
                     }
                 }
@@ -692,6 +549,7 @@ pub fn TrackRow(
             ontouchend: move |_| cancel_long_press(),
             oncontextmenu: move |evt| {
                 evt.prevent_default();
+                crate::dots_menu::open_at_pointer(&evt);
                 if !is_selection_mode {
                     on_click_menu.call(());
                 }
@@ -828,14 +686,20 @@ pub fn TrackRow(
 
             div { class: "flex items-center justify-end",
                 if !is_selection_mode {
-                    DotsMenu {
-                        actions,
-                        is_open: is_menu_open,
-                        on_open: move |_| on_click_menu.call(()),
-                        on_close: move |_| on_close_menu.call(()),
+                    crate::track_actions::TrackActionsMenu {
+                        track: menu_track_normal.clone(),
+                        is_open: Some(is_menu_open),
+                        on_open: Some(EventHandler::new(move |_| on_click_menu.call(()))),
+                        on_close: Some(EventHandler::new(move |_| on_close_menu.call(()))),
                         button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100 active:scale-95".to_string(),
                         anchor: "right".to_string(),
-                        on_action: on_menu_action,
+                        on_add_to_playlist: Some(on_add_to_playlist),
+                        on_remove_from_playlist,
+                        on_download,
+                        on_view_metadata,
+                        on_delete: (!hide_delete).then_some(on_delete),
+                        is_downloaded,
+                        is_downloading,
                     }
                 }
             }

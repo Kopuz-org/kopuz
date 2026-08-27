@@ -126,7 +126,6 @@ pub struct ShowcaseProps {
     pub tracks: Vec<Track>,
     pub on_play_all: EventHandler<()>,
     pub on_play: EventHandler<usize>,
-    pub on_queue: Option<EventHandler<usize>>,
     pub on_add_to_playlist: Option<EventHandler<usize>>,
     pub on_delete_track: Option<EventHandler<usize>>,
     pub on_remove_from_playlist: Option<EventHandler<usize>>,

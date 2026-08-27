@@ -1,11 +1,34 @@
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
+use hooks::toast::toast_error;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
 #[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tracing::Instrument;
+
+/// Unlink `path`, reporting whether its rows are now safe to drop.
+///
+/// A file that is already gone counts as done: the delete runs file-first, so
+/// `NotFound` means an earlier attempt unlinked it and then failed on the rows.
+/// Returning `false` there would make the early return permanent and leave the
+/// stale rows unreachable forever, since every retry would stop at the same
+/// point. Anything else is a real failure and the rows must stay, or the track
+/// would vanish from the library while its file is still on disk.
+fn unlink_or_already_gone(path: &std::path::Path) -> bool {
+    match std::fs::remove_file(path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            tracing::info!(path = %path.display(), "delete: file already gone, clearing its rows");
+            true
+        }
+        Err(error) => {
+            tracing::warn!(%error, path = %path.display(), "delete: removing the file failed");
+            false
+        }
+    }
+}
 
 /// Wall-clock seconds since the epoch — the playlist-pull staleness stamp.
 fn unix_secs() -> u64 {
@@ -280,39 +303,58 @@ pub fn PlaylistDetail(
                 }
             },
             on_delete_track: move |idx: usize| {
-                if caps.delete_from_disk
-                    && let Some(t) = tracks.read().get(idx).cloned()
-                    && let Some(del_path) = t.id.local_path()
-                    && std::fs::remove_file(del_path).is_ok()
-                {
-                    let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                    let key = t.id.key().into_owned();
-                    spawn(async move {
-                        if source.delete_tracks(&[key]).await.is_ok() {
-                            gens.bump(Table::Tracks);
-                        }
-                    });
+                let Some(t) = tracks.read().get(idx).cloned() else { return };
+                let Some(del_path) = t.id.local_path().map(|p| p.to_path_buf()) else {
+                    tracing::warn!(track = %t.id.uid(), "delete: track has no local file");
+                    return;
+                };
+                if !unlink_or_already_gone(&del_path) {
+                    toast_error(&i18n::t("delete_incomplete"));
+                    return;
                 }
-            },
-            on_selection_delete: move |paths: Vec<PathBuf>| {
-                if caps.delete_from_disk {
-                    {
-                        let mut keys = Vec::new();
-                        for path in &paths {
-                            if std::fs::remove_file(path).is_ok() {
-                                keys.push(path.to_string_lossy().into_owned());
-                            }
-                        }
-                        if !keys.is_empty() {
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            spawn(async move {
-                                if source.delete_tracks(&keys).await.is_ok() {
-                                    gens.bump(Table::Tracks);
-                                }
-                            });
+                let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                let key = t.id.key().into_owned();
+                spawn(async move {
+                    match source.delete_tracks(&[key]).await {
+                        Ok(_) => gens.bump(Table::Tracks),
+                        Err(error) => {
+                            // The row survives, so the track stays on screen and
+                            // deleting again reaches this call a second time.
+                            tracing::warn!(%error, "delete: the file went but its rows stayed");
+                            toast_error(&i18n::t("delete_incomplete"));
                         }
                     }
+                });
+            },
+            on_selection_delete: move |paths: Vec<PathBuf>| {
+                if !caps.delete_from_disk {
+                    return;
                 }
+                let mut keys = Vec::new();
+                let mut stuck = false;
+                for path in &paths {
+                    if unlink_or_already_gone(path) {
+                        keys.push(path.to_string_lossy().into_owned());
+                    } else {
+                        stuck = true;
+                    }
+                }
+                if stuck {
+                    toast_error(&i18n::t("delete_incomplete"));
+                }
+                if keys.is_empty() {
+                    return;
+                }
+                let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                spawn(async move {
+                    match source.delete_tracks(&keys).await {
+                        Ok(_) => gens.bump(Table::Tracks),
+                        Err(error) => {
+                            tracing::warn!(%error, "delete: the files went but their rows stayed");
+                            toast_error(&i18n::t("delete_incomplete"));
+                        }
+                    }
+                });
             },
             on_remove_from_playlist: move |idx: usize| {
                 if let Some(t) = tracks.read().get(idx).cloned() {

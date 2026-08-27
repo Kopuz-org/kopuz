@@ -17,6 +17,29 @@ pub(crate) struct ScannedTrack {
     pub album: Album,
 }
 
+/// The tagger's own per-artist values, if it wrote any: a multi-value `ARTISTS`
+/// frame first, then a multi-value `ARTIST`. A single value is not structure,
+/// it is the joined display credit under another name, so it is left to the
+/// credit splitter instead.
+fn structured_artists(tag: &Tag) -> Vec<String> {
+    let artists: Vec<String> = tag
+        .get_strings(ItemKey::TrackArtists)
+        .map(str::to_string)
+        .collect();
+    if artists.len() > 1 {
+        return artists;
+    }
+    let primary: Vec<String> = tag
+        .get_strings(ItemKey::TrackArtist)
+        .map(str::to_string)
+        .collect();
+    if primary.len() > 1 {
+        primary
+    } else {
+        Vec::new()
+    }
+}
+
 fn slugify_album_key(value: &str) -> String {
     value
         .to_lowercase()
@@ -93,26 +116,8 @@ pub fn extract_metadata(
         .and_then(|t| t.artist().map(|a| a.to_string()))
         .unwrap_or_else(|| "Unknown Artist".to_string());
 
-    let artists: Vec<String> = tag
-        .map(|t| {
-            let from_tag: Vec<String> = t
-                .get_strings(ItemKey::TrackArtists)
-                .flat_map(|s| s.split(';').map(|a| a.trim().to_string()))
-                .filter(|s| !s.is_empty())
-                .collect();
-            if !from_tag.is_empty() {
-                from_tag
-            } else if artist.contains(';') {
-                artist
-                    .split(';')
-                    .map(|a| a.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            } else {
-                vec![artist.clone()]
-            }
-        })
-        .unwrap_or_else(|| vec![artist.clone()]);
+    let artists =
+        crate::artist::credited(&artist, &tag.map(structured_artists).unwrap_or_default());
 
     let album_title = tag.and_then(|t| t.album().map(|a| a.to_string()));
 
@@ -472,7 +477,7 @@ fn read_with_symphonia(track_path: &Path) -> Option<ScannedTrack> {
         album_id: make_album_id(album_title.as_deref().unwrap_or(""), grouping_key),
         title,
         artist: artist.clone(),
-        artists: vec![artist.clone()],
+        artists: crate::artist::split_credit(&artist),
         album: album_title.unwrap_or_else(|| "Unknown Album".to_string()),
         khz: sample_rate,
         bitrate: bitrate_kbps,

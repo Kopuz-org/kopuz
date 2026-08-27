@@ -274,20 +274,24 @@ pub(super) fn fold_artist_name(s: &str) -> String {
         .to_lowercase()
 }
 
-/// Split an unlinked artist credit into individual names: "feat."/"ft."
-/// (space-prefixed, any case) and commas separate; a bare "&" does NOT —
-/// "MYTH & ROID" is one artist. Leading "&"s left by a ", & C" tail are
-/// stripped. A plain single name passes through unchanged.
+/// An unlinked artist run is YT's own comma-joined credit list, so unlike a
+/// free-form tag a comma here really is a separator. The marker rules come
+/// from the shared credit splitter, which is what keeps "MYTH & ROID" whole.
+///
+/// The "&" opening an Oxford tail (", & C") is dropped, but only in that
+/// connector form, which always carries a space after it. "&ME" is a whole
+/// artist name and keeps its ampersand.
 fn split_unlinked_artists(text: &str) -> Vec<String> {
-    let mut joined = text.to_string();
-    for sep in [" feat.", " Feat.", " FEAT.", " ft.", " Ft.", " FT."] {
-        joined = joined.replace(sep, ",");
-    }
-    joined
-        .split([',', '、'])
-        .map(|part| part.trim().trim_start_matches('&').trim())
+    text.split([',', '、'])
+        .map(|part| {
+            let part = part.trim();
+            match part.strip_prefix('&') {
+                Some(rest) if rest.starts_with(char::is_whitespace) => rest.trim(),
+                _ => part,
+            }
+        })
         .filter(|part| !part.is_empty())
-        .map(|part| part.to_string())
+        .flat_map(reader::artist::split_credit)
         .collect()
 }
 
@@ -446,11 +450,7 @@ fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
     Some(ParsedRow {
         video_id,
         title,
-        artists: if artist.is_empty() {
-            Vec::new()
-        } else {
-            vec![artist]
-        },
+        artists: reader::artist::split_credit(&artist),
         album,
         album_browse_id,
         duration: 0,
@@ -493,11 +493,7 @@ fn parse_playlist_track(
     thumbnail_url: Option<String>,
 ) -> ParsedRow {
     let primary_artist = pick_run(row, 1, 0);
-    let artists = if primary_artist.is_empty() {
-        Vec::new()
-    } else {
-        vec![primary_artist]
-    };
+    let artists = reader::artist::split_credit(&primary_artist);
     let album = if mvt.has_album() {
         let s = pick_run(row, 2, 0);
         if s.is_empty() { None } else { Some(s) }
@@ -895,5 +891,17 @@ mod artist_split_tests {
             vec!["Taylor Swift."]
         );
         assert_eq!(split_unlinked_artists("Reol"), vec!["Reol"]);
+    }
+
+    /// An ampersand that opens a name is part of it. Only the Oxford connector
+    /// form, which carries a space, is dropped.
+    #[test]
+    fn split_unlinked_artists_keeps_a_leading_ampersand_in_a_name() {
+        assert_eq!(split_unlinked_artists("&ME"), vec!["&ME"]);
+        assert_eq!(split_unlinked_artists("&ME, Rampa"), vec!["&ME", "Rampa"]);
+        assert_eq!(
+            split_unlinked_artists("Keinemusik, &ME, & Adam Port"),
+            vec!["Keinemusik", "&ME", "Adam Port"]
+        );
     }
 }

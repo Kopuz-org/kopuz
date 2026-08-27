@@ -71,7 +71,6 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
     let tracks_play_all = props.tracks.clone();
     let tracks_play = props.tracks.clone();
     let tracks_add = props.tracks.clone();
-    let tracks_queue = props.tracks.clone();
     let tracks_menu = props.tracks.clone();
     let tracks_sel_delete = props.tracks.clone();
     let tracks_sel_queue = props.tracks.clone();
@@ -148,12 +147,6 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                     if let Some(t) = tracks_add.get(idx) {
                         selected_track_for_playlist.set(Some(t.id.clone()));
                         show_playlist_modal.set(true);
-                        active_menu_track.set(None);
-                    }
-                },
-                on_queue: move |idx: usize| {
-                    if let Some(t) = tracks_queue.get(idx) {
-                        ctrl.add_to_queue(vec![t.clone()]);
                         active_menu_track.set(None);
                     }
                 },

@@ -141,6 +141,11 @@ impl MediaSource for JellyfinSource {
                         .and_then(|tags| tags.get("Primary").cloned());
                     let bitrate_u16 =
                         (item.bitrate.unwrap_or(0) / 1000).min(u16::MAX as u32) as u16;
+                    let artist_str = item
+                        .album_artist
+                        .clone()
+                        .or_else(|| item.artists.as_ref().map(|a| a.join(", ")))
+                        .unwrap_or_default();
                     tracks.push(reader::Track {
                         id: reader::models::TrackId::Server {
                             service: MusicService::Jellyfin,
@@ -152,11 +157,7 @@ impl MediaSource for JellyfinSource {
                             .map(|id| format!("jellyfin:{}", id))
                             .unwrap_or_default(),
                         title: item.name,
-                        artist: item
-                            .album_artist
-                            .clone()
-                            .or_else(|| item.artists.as_ref().map(|a| a.join(", ")))
-                            .unwrap_or_default(),
+                        artist: artist_str.clone(),
                         album: item.album.unwrap_or_default(),
                         duration: item.run_time_ticks.unwrap_or(0) / 10_000_000,
                         khz: item.sample_rate.unwrap_or(0),
@@ -167,9 +168,12 @@ impl MediaSource for JellyfinSource {
                         musicbrainz_recording_id: None,
                         musicbrainz_track_id: None,
                         playlist_item_id: None,
-                        artists: item
-                            .artists
-                            .unwrap_or_else(|| item.album_artist.into_iter().collect()),
+                        artists: reader::artist::credited(
+                            &artist_str,
+                            &item
+                                .artists
+                                .unwrap_or_else(|| item.album_artist.into_iter().collect()),
+                        ),
                     });
                 }
                 start += count;
@@ -398,7 +402,7 @@ impl MediaSource for JellyfinSource {
                         .map(|id| format!("jellyfin:{}", id))
                         .unwrap_or_default(),
                     title: item.name,
-                    artist: artist_str,
+                    artist: artist_str.clone(),
                     album: item.album.unwrap_or_default(),
                     duration: duration_secs,
                     khz: item.sample_rate.unwrap_or(0),
@@ -409,7 +413,10 @@ impl MediaSource for JellyfinSource {
                     musicbrainz_recording_id: None,
                     musicbrainz_track_id: None,
                     playlist_item_id: item.playlist_item_id,
-                    artists: item.artists.unwrap_or_default(),
+                    artists: reader::artist::credited(
+                        &artist_str,
+                        &item.artists.unwrap_or_default(),
+                    ),
                 }
             })
             .collect())

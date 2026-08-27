@@ -518,6 +518,68 @@ impl PlayerController {
         });
     }
 
+    /// Where a queue position lands once the entry at `removed` is dropped.
+    /// `None` for the removed entry itself.
+    pub(crate) fn index_after_removal(idx: usize, removed: usize) -> Option<usize> {
+        match idx.cmp(&removed) {
+            std::cmp::Ordering::Less => Some(idx),
+            std::cmp::Ordering::Equal => None,
+            std::cmp::Ordering::Greater => Some(idx - 1),
+        }
+    }
+
+    /// Drop the entry shown at display position `idx`: a `shuffle_order` slot
+    /// while shuffle is on, a raw queue slot otherwise.
+    ///
+    /// Removing the playing track would have to decide what plays next, so it
+    /// is refused here rather than left to each call site.
+    pub fn remove_queue_item(&mut self, idx: usize) {
+        let shuffle = *self.shuffle.peek();
+        let len = if shuffle {
+            self.shuffle_order.len()
+        } else {
+            self.queue.peek().len()
+        };
+
+        if idx >= len || idx == *self.current_queue_index.peek() {
+            return;
+        }
+
+        if shuffle {
+            let queue_idx = self.shuffle_order.remove(idx);
+            self.queue.with_mut(|queue| {
+                queue.remove(queue_idx);
+            });
+            // shuffle_order stores queue positions, so every slot past the
+            // dropped track now points one entry too far.
+            self.shuffle_order.with_mut(|order| {
+                for slot in order.iter_mut() {
+                    if *slot > queue_idx {
+                        *slot -= 1;
+                    }
+                }
+            });
+        } else {
+            self.queue.with_mut(|queue| {
+                queue.remove(idx);
+            });
+        }
+
+        let current_idx = *self.current_queue_index.peek();
+        if let Some(current) = Self::index_after_removal(current_idx, idx) {
+            self.current_queue_index.set(current);
+        }
+
+        self.history.with_mut(|history| {
+            history.retain(|&entry| entry != idx);
+            for entry in history.iter_mut() {
+                if *entry > idx {
+                    *entry -= 1;
+                }
+            }
+        });
+    }
+
     pub fn move_queue_item(&mut self, from: usize, to: usize) {
         let shuffle = *self.shuffle.peek();
         let len = if shuffle {
@@ -659,5 +721,16 @@ mod tests {
         let repaired = PlayerController::repaired_order(&[2, 9, 2, 0], 3);
         assert_eq!(&repaired[..2], &[2, 0]);
         assert_eq!(repaired.len(), 3);
+    }
+
+    // Queue removal shifts every position after the dropped one down by one;
+    // the current-index and history remaps both depend on this holding.
+    #[test]
+    fn index_after_removal_shifts_later_positions_down() {
+        assert_eq!(PlayerController::index_after_removal(0, 2), Some(0));
+        assert_eq!(PlayerController::index_after_removal(1, 2), Some(1));
+        assert_eq!(PlayerController::index_after_removal(2, 2), None);
+        assert_eq!(PlayerController::index_after_removal(3, 2), Some(2));
+        assert_eq!(PlayerController::index_after_removal(9, 0), Some(8));
     }
 }

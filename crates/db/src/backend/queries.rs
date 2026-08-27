@@ -307,18 +307,41 @@ pub async fn tracks_by_keys(
     Ok(keys.iter().filter_map(|k| by_key.get(k).cloned()).collect())
 }
 
+/// Distinct credited artists for a source with their track counts, A to Z.
+///
+/// Counts run over `artists_json`, the split credit list, so a featured artist
+/// is counted on every track that credits them rather than only on the ones
+/// where they happen to be first. A row whose credit list is empty (nothing was
+/// ever split out of it) still falls back to the joined `artist` column,
+/// trimmed the same way the credit list is so a padded legacy value lands in
+/// the same bucket as its clean spelling rather than becoming its own artist.
 pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<(String, u32)>, DbError> {
-    let src = source.as_str();
-    let rows = sqlx::query!(
-        r#"SELECT artist, COUNT(*) AS "cnt!: i64" FROM tracks WHERE source = ?1 AND artist != ''
-         GROUP BY artist ORDER BY artist COLLATE NOCASE"#,
-        src
-    )
-    .fetch_all(pool)
-    .await?;
+    // SQLite's bare TRIM() strips spaces and nothing else, so the other
+    // whitespace has to be named or a tab-only credit survives as its own
+    // artist. Rust trims all of it, and the two have to agree.
+    const WS: &str = "char(32) || char(9) || char(10) || char(13)";
+    let sql = format!(
+        "SELECT name, COUNT(*) AS cnt FROM ( \
+             SELECT t.rowid_pk AS pk, TRIM(j.value, {WS}) AS name \
+               FROM tracks t, \
+                    json_each(CASE WHEN json_valid(t.artists_json) \
+                                   THEN t.artists_json ELSE '[]' END) j \
+              WHERE t.source = ?1 AND TRIM(j.value, {WS}) != '' \
+             UNION \
+             SELECT t.rowid_pk, TRIM(t.artist, {WS}) \
+               FROM tracks t \
+              WHERE t.source = ?1 AND TRIM(t.artist, {WS}) != '' \
+                AND (NOT json_valid(t.artists_json) \
+                     OR json_array_length(t.artists_json) = 0) \
+         ) GROUP BY name ORDER BY name COLLATE NOCASE"
+    );
+    let rows: Vec<(String, i64)> = sqlx::query_as(&sql)
+        .bind(source.as_str())
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .into_iter()
-        .map(|r| (r.artist, r.cnt.max(0) as u32))
+        .map(|(name, cnt)| (name, cnt.max(0) as u32))
         .collect())
 }
 

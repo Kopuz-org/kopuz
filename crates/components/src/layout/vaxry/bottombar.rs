@@ -28,7 +28,7 @@ pub fn BottombarVaxry(
     is_devices_open: Signal<bool>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let mut track_menu_open = use_signal(|| false);
     let nav_ctrl = use_context::<NavigationController>();
     let fav_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_fav = hooks::use_db_queries::use_track_is_favorite(fav_track);
@@ -123,6 +123,12 @@ pub fn BottombarVaxry(
         PlayerBarPosition::Top => "border-b border-white/5",
     };
 
+    // The bar sits against one edge of the window, so the menu has to open
+    // away from it.
+    let menu_placement = match position {
+        PlayerBarPosition::Bottom => "top",
+        PlayerBarPosition::Top => "bottom",
+    };
     let bar_as_fullscreen = *is_fullscreen.read() && config.read().fullscreen_use_player_bar;
     let lift_class = if bar_as_fullscreen {
         "relative z-[60]"
@@ -160,6 +166,13 @@ pub fn BottombarVaxry(
 
             div {
                 class: "flex flex-col flex-1 min-w-0 justify-center gap-0.5",
+                oncontextmenu: move |evt| {
+                    evt.prevent_default();
+                    crate::dots_menu::open_at_pointer(&evt);
+                    if ctrl.current_track_snapshot.peek().is_some() {
+                        track_menu_open.set(true);
+                    }
+                },
                 if !bar_as_fullscreen {
                     div {
                         class: "flex items-baseline gap-1.5 min-w-0",
@@ -209,16 +222,15 @@ pub fn BottombarVaxry(
                     is_rightbar_open,
                     is_devices_open,
                 }
-                button {
-                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
-                    title: i18n::t("share_musicbrainz").to_string(),
-                    onclick: move |_| {
-                        if let Some(t) = ctrl.current_track_snapshot.read().clone() {
-                            let src = active_source.peek().clone();
-                            crate::track_row::share_track(t, src);
-                        }
-                    },
-                    i { class: "fa-solid fa-share-nodes text-[10px]" }
+                if let Some(track) = ctrl.current_track_snapshot.read().clone() {
+                    crate::track_actions::TrackActionsMenu {
+                        track,
+                        is_open: Some(track_menu_open()),
+                        on_open: Some(EventHandler::new(move |_| track_menu_open.set(true))),
+                        on_close: Some(EventHandler::new(move |_| track_menu_open.set(false))),
+                        placement: menu_placement.to_string(),
+                        button_class: "w-9 h-9 text-slate-500 hover:bg-white/10 active:scale-95 text-[10px]".to_string(),
+                    }
                 }
                 if cfg!(not(target_os = "android")) {
                     button {

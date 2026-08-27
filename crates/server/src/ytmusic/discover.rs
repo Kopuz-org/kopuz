@@ -391,11 +391,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
         .map(|s| normalize_yt_thumbnail(s.to_string()));
 
     let cover = thumbnail.map(|u| u.to_string()).filter(|u| !u.is_empty());
-    let artists = if artist.is_empty() {
-        Vec::new()
-    } else {
-        vec![artist.clone()]
-    };
+    let artists = reader::artist::split_credit(&artist);
     Some(Track {
         id: super::yt_id(video_id.clone()),
         cover,
@@ -700,11 +696,7 @@ fn parse_album_row(
     let duration = fixed_columns_duration(row).or(flex_duration).unwrap_or(0);
     let track_number = row_index_text(row).and_then(|s| s.parse::<u32>().ok());
 
-    let artists = if primary_artist.is_empty() {
-        Vec::new()
-    } else {
-        vec![primary_artist.clone()]
-    };
+    let artists = reader::artist::split_credit(&primary_artist);
     let cover = album_thumbnail
         .map(|u| u.to_string())
         .filter(|u| !u.is_empty());
@@ -953,11 +945,7 @@ fn build_song_track(video_id: &str, title: &str, subtitle: &str, thumbnail: Opti
     // the first run as the primary artist; everything after the first
     // dot is metadata that doesn't belong in the artist field.
     let primary_artist = subtitle.split('•').next().unwrap_or("").trim().to_string();
-    let artists = if primary_artist.is_empty() {
-        Vec::new()
-    } else {
-        vec![primary_artist.clone()]
-    };
+    let artists = reader::artist::split_credit(&primary_artist);
     let cover = thumbnail.map(|u| u.to_string()).filter(|u| !u.is_empty());
     let album_id = synthesize_album_id("", &primary_artist);
     Track {

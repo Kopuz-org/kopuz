@@ -307,7 +307,8 @@ fn main() {
         let config = dioxus::desktop::Config::new()
             .with_custom_head(
                 "<style>html,body{background:#000;margin:0;padding:0}body{opacity:0}</style>"
-                    .to_string(),
+                    .to_string()
+                    + desktop_shell::UNGATE_EDITS_FROM_FRAME_CLOCK,
             )
             .with_background_color((0, 0, 0, 255))
             .with_data_directory(webview_data_dir)

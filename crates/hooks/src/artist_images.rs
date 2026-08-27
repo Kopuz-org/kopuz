@@ -143,9 +143,9 @@ fn fetch_queue(
 ) -> Vec<String> {
     let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for album in albums {
-        if !album.artist.trim().is_empty() {
-            names.insert(album.artist.clone());
-        }
+        // Same split the grid applies, so the queue never burns a search on a
+        // whole collab credit that gets no tile.
+        names.extend(reader::artist::split_credit(&album.artist));
     }
     for track in sample {
         for artist in &track.artists {

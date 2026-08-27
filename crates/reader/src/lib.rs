@@ -1,6 +1,7 @@
 //! Media file reader for Kopuz: parses audio metadata (tags, cover art),
 //! manages favorites, and provides library scanning utilities.
 
+pub mod artist;
 pub mod cover_fetcher;
 pub mod cover_indexer;
 pub mod metadata;

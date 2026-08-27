@@ -188,7 +188,6 @@ pub fn SearchGenreDetail(
                              let track_key = track.id.uid();
                              let track_menu = track.clone();
                              let track_add = track.clone();
-                             let track_queue = track.clone();
                              let track_delete = track.clone();
                              let queue_source = genre_tracks_list.clone();
                              let matches_current_path = currently_playing_path.as_ref() == Some(&track.id);
@@ -221,7 +220,6 @@ pub fn SearchGenreDetail(
                                      key: "{track_key}",
                                      track: track.clone(),
                                      cover_url: cover_url.clone(),
-                                     on_start_radio: crate::track_row::radio_handler(track.clone()),
                                      row_num: Some(idx + 1),
                                      is_menu_open: is_menu_open,
                                      is_album: false,
@@ -237,10 +235,6 @@ pub fn SearchGenreDetail(
                                      on_add_to_playlist: move |_| {
                                          selected_track_for_playlist.set(Some(track_add.id.clone()));
                                          show_playlist_modal.set(true);
-                                         active_menu_track.set(None);
-                                     },
-                                     on_queue: move |_| {
-                                         ctrl.add_to_queue(vec![track_queue.clone()]);
                                          active_menu_track.set(None);
                                      },
                                      on_close_menu: move |_| active_menu_track.set(None),

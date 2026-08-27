@@ -38,6 +38,7 @@ impl Native {
         migrations::snapshot_if_pending(path).await;
         let pool = open_pool(path).await?;
         migrations::run_migrations(&pool).await?;
+        migrations::backfill_artist_credits(&pool).await?;
         let db_dir = match path.parent() {
             Some(parent) if !parent.as_os_str().is_empty() => parent,
             _ => Path::new("."),
@@ -470,6 +471,7 @@ impl Storage for Native {
         }
         let pool = open_pool(db_path).await?;
         migrations::run_migrations(&pool).await?;
+        migrations::backfill_artist_credits(&pool).await?;
         self.swap_pool(pool);
         Ok(())
     }

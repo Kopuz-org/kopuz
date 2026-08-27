@@ -340,32 +340,41 @@ pub fn HomeBody(
         };
         let mut unique_artists = std::collections::HashSet::new();
         let mut artist_list = Vec::new();
-        for track in &tracks {
-            if is_unknown_artist(&track.artist) {
-                continue;
-            }
-            if unique_artists.insert(track.artist.clone()) {
-                // The same image chain the Artists grid uses: photo where one
-                // exists, the track's album cover as the Library last resort
-                // (a Remote catalog resolves photo-or-placeholder instead).
-                let norm = utils::artist::normalize_artist_key(&track.artist);
-                let album_cover = albums
-                    .iter()
-                    .find(|a| a.id == track.album_id)
-                    .and_then(|a| a.cover_path.as_deref());
-                let art = ::server::cover::ArtistArt::from_caches(
-                    &images,
-                    &fetched,
-                    &norm,
-                    &track.artist,
-                    album_cover,
-                    caps().artist_view,
-                );
-                let cover_url = ::server::cover::artist(&conf, art, 384).map(|c| c.to_string());
-                artist_list.push((track.artist.clone(), cover_url));
-            }
-            if artist_list.len() >= 10 {
-                break;
+        'tracks: for track in &tracks {
+            // Credited artists, not the joined display string, so a featured
+            // guest gets a card of their own instead of the whole credit.
+            let credits = if track.artists.is_empty() {
+                reader::artist::split_credit(&track.artist)
+            } else {
+                track.artists.clone()
+            };
+            for credit in credits {
+                if is_unknown_artist(&credit) {
+                    continue;
+                }
+                let norm = utils::artist::normalize_artist_key(&credit);
+                if unique_artists.insert(norm.clone()) {
+                    // The same image chain the Artists grid uses: photo where
+                    // one exists, the track's album cover as the Library last
+                    // resort (a Remote catalog resolves photo-or-placeholder).
+                    let album_cover = albums
+                        .iter()
+                        .find(|a| a.id == track.album_id)
+                        .and_then(|a| a.cover_path.as_deref());
+                    let art = ::server::cover::ArtistArt::from_caches(
+                        &images,
+                        &fetched,
+                        &norm,
+                        &credit,
+                        album_cover,
+                        caps().artist_view,
+                    );
+                    let cover_url = ::server::cover::artist(&conf, art, 384).map(|c| c.to_string());
+                    artist_list.push((credit, cover_url));
+                }
+                if artist_list.len() >= 10 {
+                    break 'tracks;
+                }
             }
         }
         artist_list

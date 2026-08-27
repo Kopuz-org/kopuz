@@ -14,6 +14,7 @@ pub(crate) fn TrackMetadata(
     current_song_bitrate: Signal<u16>,
 ) -> Element {
     let ctrl = use_context::<PlayerController>();
+    let mut track_menu_open = use_signal(|| false);
     let nav_ctrl = use_context::<NavigationController>();
     let favorite_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_favorite = hooks::use_db_queries::use_track_is_favorite(favorite_track)();
@@ -54,6 +55,11 @@ pub(crate) fn TrackMetadata(
         div {
             class: "flex items-center gap-4 w-full mb-1",
             style: "max-width: 640px;",
+            oncontextmenu: move |evt| {
+                evt.prevent_default();
+                crate::dots_menu::open_at_pointer(&evt);
+                track_menu_open.set(true);
+            },
             div {
                 class: "flex flex-col items-start min-w-0 flex-1",
                 h1 { class: "text-[28px] font-semibold tracking-tight text-white mb-1 line-clamp-2 w-full", "{current_song_title}" }
@@ -106,7 +112,7 @@ pub(crate) fn TrackMetadata(
                     }
                 }
                 if let Some(track) = actions_track {
-                    TrackActions { track }
+                    TrackActions { track, menu_open: track_menu_open }
                 }
             }
         }
