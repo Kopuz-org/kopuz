@@ -83,6 +83,7 @@ pub fn TrackRow(
     let drag_cover_url_normal = drag_cover_url.clone();
     let mut pending_queue_drag = use_signal(|| None::<(f64, f64)>);
     let mut pending_queue_drag_normal = use_signal(|| None::<(f64, f64)>);
+    let mut context_menu_position = use_signal(|| None::<(f64, f64)>);
     const QUEUE_DRAG_THRESHOLD_PX: f64 = 6.0;
     let play_next_text = i18n::t("play_next").to_string();
     let add_to_queue_text = i18n::t("add_to_queue").to_string();
@@ -361,8 +362,14 @@ pub fn TrackRow(
                         DotsMenu {
                             actions,
                             is_open: is_menu_open,
-                            on_open: move |_| on_click_menu.call(()),
-                            on_close: move |_| on_close_menu.call(()),
+                            on_open: move |_| {
+                                context_menu_position.set(None);
+                                on_click_menu.call(());
+                            },
+                            on_close: move |_| {
+                                context_menu_position.set(None);
+                                on_close_menu.call(());
+                            },
                             button_class: "active:scale-95".to_string(),
                             anchor: "right".to_string(),
                             on_action: on_menu_action,
@@ -439,7 +446,11 @@ pub fn TrackRow(
                 ontouchend: move |_| cancel_long_press(),
                 oncontextmenu: move |evt| {
                     evt.prevent_default();
-                    if !is_selection_mode { on_click_menu.call(()); }
+                    if !is_selection_mode {
+                        let point = evt.client_coordinates();
+                        context_menu_position.set(Some((point.x, point.y)));
+                        on_click_menu.call(());
+                    }
                 },
 
                 div { class: "flex items-center h-8",
@@ -598,8 +609,15 @@ pub fn TrackRow(
                         DotsMenu {
                             actions,
                             is_open: is_menu_open,
-                            on_open: move |_| on_click_menu.call(()),
-                            on_close: move |_| on_close_menu.call(()),
+                            position: *context_menu_position.read(),
+                            on_open: move |_| {
+                                context_menu_position.set(None);
+                                on_click_menu.call(());
+                            },
+                            on_close: move |_| {
+                                context_menu_position.set(None);
+                                on_close_menu.call(());
+                            },
                             button_class: "active:scale-95".to_string(),
                             anchor: "right".to_string(),
                             on_action: on_menu_action,
@@ -693,6 +711,8 @@ pub fn TrackRow(
             oncontextmenu: move |evt| {
                 evt.prevent_default();
                 if !is_selection_mode {
+                    let point = evt.client_coordinates();
+                    context_menu_position.set(Some((point.x, point.y)));
                     on_click_menu.call(());
                 }
             },
@@ -831,8 +851,15 @@ pub fn TrackRow(
                     DotsMenu {
                         actions,
                         is_open: is_menu_open,
-                        on_open: move |_| on_click_menu.call(()),
-                        on_close: move |_| on_close_menu.call(()),
+                        position: *context_menu_position.read(),
+                        on_open: move |_| {
+                            context_menu_position.set(None);
+                            on_click_menu.call(());
+                        },
+                        on_close: move |_| {
+                            context_menu_position.set(None);
+                            on_close_menu.call(());
+                        },
                         button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100 active:scale-95".to_string(),
                         anchor: "right".to_string(),
                         on_action: on_menu_action,
