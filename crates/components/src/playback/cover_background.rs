@@ -1,15 +1,14 @@
 use config::AppConfig;
 use dioxus::prelude::*;
 
-/// Upgrade a local-artwork URL to the protocol's high-quality variant. The
-/// default URL serves a 400px thumbnail, which visibly blurs anywhere the cover
-/// is painted large (backdrops, the home hero). Remote URLs pass through — they
-/// carry their own size parameter.
+/// Upgrade artwork for views that paint it large. Local files use the artwork
+/// protocol's HQ variant; provider URLs with a resizable image endpoint are
+/// raised to a desktop-sized request instead of enlarging the row thumbnail.
 pub fn high_quality_artwork_url(cover: String) -> String {
     if cover.starts_with("artwork://") || cover.starts_with("http://artwork.dioxus.localhost/") {
         format!("{cover}&hq=1")
     } else {
-        cover
+        ::server::cover::remote_artwork_url_at_size(cover, 1920)
     }
 }
 
@@ -67,5 +66,15 @@ mod tests {
             ),
             "http://artwork.dioxus.localhost/local?p=C%3A%5Ccover.jpg&hq=1"
         );
+    }
+
+    #[test]
+    fn subsonic_artwork_is_upgraded_for_large_views() {
+        let got = high_quality_artwork_url(
+            "https://music.example/rest/getCoverArt.view?id=cover-1&size=80".to_string(),
+        );
+        assert!(got.contains("id=cover-1"));
+        assert!(got.contains("size=1920"));
+        assert!(!got.contains("size=80"));
     }
 }

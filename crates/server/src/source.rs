@@ -206,8 +206,9 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("discover"))
     }
 
-    /// The tracks of a remote album / browse id (discover surfaces). Default
-    /// unsupported; only catalog remotes (YT) override.
+    /// The tracks of a remote album / browse id. Standard library remotes use
+    /// this to open or act on an album before a full cache sync; catalog remotes
+    /// use it for discover surfaces. Default unsupported.
     async fn fetch_album_tracks(
         &self,
         _browse_id: &str,
@@ -351,14 +352,23 @@ pub trait MediaSource: Send + Sync {
 
     // --- uniform ops (default): a plain source-scoped DB read/write ---------
 
-    /// One album's tracks (disc/track-ordered), read from this source's library
-    /// cache. Uniform across sources — the UI goes through the source rather than
-    /// touching the DB directly.
     async fn album_tracks(&self, album_id: &str) -> Result<Vec<reader::Track>, SourceError> {
-        self.db()
+        let cached = self
+            .db()
             .album_tracks(self.source(), album_id)
             .await
-            .map_err(SourceError::from)
+            .map_err(SourceError::from)?;
+        let caps = self.capabilities();
+        if caps.sync && caps.albums == AlbumType::Standard {
+            match self.fetch_album_tracks(album_id).await {
+                Ok(remote) if !remote.is_empty() => return Ok(remote),
+                Ok(_) | Err(SourceError::Unsupported(_)) => {}
+                Err(error) => {
+                    tracing::debug!(%error, %album_id, "remote album lookup failed; using cache");
+                }
+            }
+        }
+        Ok(cached)
     }
 
     /// This source's favorite refs — its partition of the favorites table. The
