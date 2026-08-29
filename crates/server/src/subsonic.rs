@@ -62,8 +62,8 @@ impl CallFailure {
     }
 }
 
-/// Token auth unsupported (41), mechanism (42, 43). Not 40: bad password.
-const AUTH_REJECTED_CODES: [i32; 3] = [41, 42, 43];
+/// Bad credentials (40), token auth unsupported (41), mechanism (42, 43).
+const AUTH_REJECTED_CODES: [i32; 4] = [40, 41, 42, 43];
 
 /// Global so the throwaway clients behind the URL builders see it too.
 static LEGACY_AUTH_SERVERS: LazyLock<RwLock<HashSet<String>>> = LazyLock::new(Default::default);
@@ -641,11 +641,17 @@ impl SubsonicClient {
     }
 
     fn auth_params(&self) -> Vec<(String, String)> {
-        if self.uses_legacy_auth() {
+        if self.uses_legacy_auth() && self.allows_legacy_auth() {
             self.legacy_auth_params()
         } else {
             self.token_auth_params()
         }
+    }
+
+    /// `p=enc:` is reversible and rides in the query string, so it is never
+    /// constructed or sent for a non-HTTPS base URL.
+    fn allows_legacy_auth(&self) -> bool {
+        self.base_url.starts_with("https://")
     }
 
     fn token_auth_params(&self) -> Vec<(String, String)> {
@@ -729,6 +735,12 @@ impl SubsonicClient {
                 if AUTH_REJECTED_CODES.contains(code) && !self.uses_legacy_auth()
         );
         if !retry_auth {
+            return first.map_err(CallFailure::into_message);
+        }
+        if !self.allows_legacy_auth() {
+            tracing::warn!(
+                "server rejected token auth; not falling back over plain http, the legacy scheme would put the password in the URL"
+            );
             return first.map_err(CallFailure::into_message);
         }
 
@@ -905,10 +917,15 @@ mod tests {
         assert!(!params.iter().any(|(k, _)| k == "t" || k == "s"));
     }
 
-    async fn serve_legacy_only(listener: tokio::net::TcpListener, requests: usize) {
+    /// A server that refuses every credential with `code`, recording what it saw.
+    async fn serve_rejecting(
+        listener: tokio::net::TcpListener,
+        code: i32,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        for _ in 0..requests {
+        loop {
             let (mut sock, _) = listener.accept().await.expect("accept");
             let mut req = Vec::new();
             let mut buf = [0u8; 1024];
@@ -919,14 +936,13 @@ mod tests {
                 }
                 req.extend_from_slice(&buf[..n]);
             }
-            let req = String::from_utf8_lossy(&req);
-            let body = if req.contains("&t=") {
-                r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":41,"message":"Token-based authentication not supported"}}}"#
-            } else if req.contains("p=enc%3A70617373776f7264") {
-                r#"{"subsonic-response":{"status":"ok","version":"1.16.1"}}"#
-            } else {
-                r#"{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":40,"message":"Wrong username or password"}}}"#
-            };
+            seen.lock()
+                .expect("seen lock")
+                .push(String::from_utf8_lossy(&req).into_owned());
+
+            let body = format!(
+                r#"{{"subsonic-response":{{"status":"failed","version":"1.16.1","error":{{"code":{code},"message":"rejected"}}}}}}"#
+            );
             let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
@@ -936,23 +952,61 @@ mod tests {
         }
     }
 
+    /// The legacy scheme would put a reversible password on an unencrypted
+    /// wire, so a plain-http server that refuses the token gets no second try.
     #[tokio::test]
-    async fn token_rejection_falls_back_to_legacy_password_auth() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind");
-        let addr = listener.local_addr().expect("local addr");
-        let server = tokio::spawn(serve_legacy_only(listener, 2));
+    async fn plain_http_never_sends_the_legacy_password() {
+        for code in [41, 40] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
+            let addr = listener.local_addr().expect("local addr");
+            let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            tokio::spawn(serve_rejecting(listener, code, seen.clone()));
 
-        let client = SubsonicClient::new(&format!("http://{addr}"), "user", "password");
-        client.ping().await.expect("fallback should succeed");
+            let client = SubsonicClient::new(&format!("http://{addr}"), "user", "password");
+            let err = client
+                .ping()
+                .await
+                .expect_err("plain http must not fall back");
+            assert!(err.contains(&format!("({code})")), "{err}");
 
-        let url = SubsonicClient::new(&format!("http://{addr}"), "user", "password")
-            .stream_url("song-1")
-            .expect("stream url");
-        assert!(url.contains("p=enc%3A70617373776f7264"));
-        assert!(!url.contains("&t="));
+            let seen = seen.lock().expect("seen lock");
+            assert_eq!(seen.len(), 1, "code {code} must not be retried");
+            assert!(!seen.iter().any(|req| req.contains("p=enc")));
+        }
+    }
 
-        server.await.expect("server task");
+    #[test]
+    fn sticky_legacy_auth_applies_only_over_https() {
+        let secure = SubsonicClient::new("https://secure.example.test", "user", "password");
+        let plain = SubsonicClient::new("http://plain.example.test", "user", "password");
+        secure.remember_legacy_auth();
+        plain.remember_legacy_auth();
+
+        assert!(
+            secure
+                .auth_params()
+                .iter()
+                .any(|(k, v)| k == "p" && v.starts_with("enc:"))
+        );
+        assert!(secure.stream_url("song-1").expect("url").contains("p=enc"));
+        assert!(
+            secure
+                .cover_art_url("cover-1", None)
+                .expect("url")
+                .contains("p=enc")
+        );
+
+        let plain_params = plain.auth_params();
+        assert!(!plain_params.iter().any(|(k, _)| k == "p"));
+        assert!(plain_params.iter().any(|(k, _)| k == "t"));
+        assert!(!plain.stream_url("song-1").expect("url").contains("p=enc"));
+        assert!(
+            !plain
+                .cover_art_url("cover-1", None)
+                .expect("url")
+                .contains("p=enc")
+        );
     }
 }
