@@ -1356,9 +1356,19 @@ fn App() -> Element {
                     i18n::set_locale(&loaded.language);
                 }
 
-                // Local is the source of truth: no auto-switch to a server on
-                // startup. An unselected source stays Local (the config default);
-                // the user picks a server explicitly via the sidebar.
+                // No auto-switch on startup; an unselected source stays Local.
+                // A restored server still needs `config.server` rehydrated: creds
+                // live in the servers table, not the blob, and the player reads
+                // them to resolve a track.
+                let restored_source = config.peek().active_source.clone();
+                if restored_source.server_id().is_some() {
+                    hooks::source_switch::apply_source_switch(
+                        config,
+                        db.reads(),
+                        restored_source,
+                    )
+                    .await;
+                }
 
                 let queue_state = utils::offload(async move {
                     queue_loaded.and_then(|snap| {
