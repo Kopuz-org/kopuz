@@ -1,7 +1,8 @@
 use components::{
     CoverArtBackground, QuickSearch, bottombar::Bottombar, compact_player::CompactPlayer,
     download_overlay::DownloadOverlay, fullscreen::Fullscreen, rightbar::Rightbar,
-    sidebar::Sidebar, spotify_devices::SpotifyDevicesPanel, titlebar::Titlebar,
+    sidebar::Sidebar, spotify_devices::SpotifyDevicesPanel, titlebar::ResizeHandles,
+    titlebar::Titlebar,
 };
 #[cfg(not(target_os = "android"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
@@ -2040,6 +2041,10 @@ fn App() -> Element {
             }
             if cfg!(any(target_os = "linux", target_os = "windows")) {
                 div { dir: "ltr", Titlebar {} }
+            }
+
+            if cfg!(target_os = "linux") {
+                ResizeHandles {}
             }
 
             if active_source().is_local() {
