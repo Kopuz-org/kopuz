@@ -268,4 +268,4 @@ project.
 ## License
 
 By contributing to Kopuz, you agree that your contribution is licensed under the
-MIT license used by this repository.
+European Union Public Licence v. 1.2 (EUPL-1.2) used by this repository.

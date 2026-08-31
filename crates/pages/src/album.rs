@@ -547,24 +547,6 @@ fn AlbumDetail(
         })
     };
 
-    let full_album_tracks_res = use_resource(move || {
-        let want = caps().albums == ::server::source::AlbumType::Standard
-            && caps().sync
-            && !*is_offline.read();
-        let ids = matching_ids();
-        let src = active_source.peek().clone();
-        utils::offload(async move {
-            if !want {
-                return Vec::new();
-            }
-            let mut out: Vec<reader::models::Track> = Vec::new();
-            for id in &ids {
-                out.extend(src.fetch_album_tracks(id).await.unwrap_or_default());
-            }
-            out
-        })
-    });
-
     let tracks = use_memo(move || {
         let offline = caps().downloads && *is_offline.read();
         let conf = config.read();
@@ -593,12 +575,6 @@ fn AlbumDetail(
             .into_iter()
             .filter(|t| !offline || conf.offline_tracks.contains_key(t.id.key().as_ref()))
             .collect();
-        if !offline {
-            let full = full_album_tracks_res.read().clone().unwrap_or_default();
-            if full.len() > tracks.len() {
-                tracks = full;
-            }
-        }
         tracks.sort_by(|a, b| {
             a.disc_number
                 .unwrap_or(1)

@@ -1,7 +1,8 @@
 use components::{
     CoverArtBackground, QuickSearch, bottombar::Bottombar, compact_player::CompactPlayer,
     download_overlay::DownloadOverlay, fullscreen::Fullscreen, rightbar::Rightbar,
-    sidebar::Sidebar, spotify_devices::SpotifyDevicesPanel, titlebar::Titlebar,
+    sidebar::Sidebar, spotify_devices::SpotifyDevicesPanel, titlebar::ResizeHandles,
+    titlebar::Titlebar,
 };
 #[cfg(not(target_os = "android"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
@@ -219,6 +220,18 @@ fn main() {
     #[cfg(target_os = "android")]
     if let Err(e) = init_android_tls() {
         panic!("android certificate verifier failed to initialize: {e}");
+    }
+
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_FORCE_VBLANK_TIMER").is_none() {
+        // SAFETY: first statement of main, before any thread is spawned.
+        unsafe { std::env::set_var("WEBKIT_FORCE_VBLANK_TIMER", "1") };
+    }
+
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_FORCE_VBLANK_TIMER").is_none() {
+        // SAFETY: first statement of main, before any thread is spawned.
+        unsafe { std::env::set_var("WEBKIT_FORCE_VBLANK_TIMER", "1") };
     }
 
     #[cfg(not(target_os = "android"))]
@@ -2028,6 +2041,10 @@ fn App() -> Element {
             }
             if cfg!(any(target_os = "linux", target_os = "windows")) {
                 div { dir: "ltr", Titlebar {} }
+            }
+
+            if cfg!(target_os = "linux") {
+                ResizeHandles {}
             }
 
             if active_source().is_local() {

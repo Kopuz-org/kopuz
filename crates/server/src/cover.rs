@@ -70,12 +70,38 @@ fn subsonic_item_url(
     Some(url.to_string())
 }
 
+pub fn remote_artwork_url_at_size(url: String, max_width: u32) -> String {
+    let Ok(mut parsed) = reqwest::Url::parse(&url) else {
+        return url;
+    };
+    if !parsed.path().ends_with("/rest/getCoverArt.view") {
+        return url;
+    }
+
+    let pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .filter(|(key, _)| key != "size")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    {
+        let mut query = parsed.query_pairs_mut();
+        query.clear();
+        query.extend_pairs(
+            pairs
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
+        query.append_pair("size", &max_width.to_string());
+    }
+    parsed.to_string()
+}
+
 /// Resolve a typed cover reference to a renderable URL.
 pub fn resolve(config: &AppConfig, cover: CoverRef, max_width: u32) -> Option<CoverUrl> {
     let server = config.server.as_ref();
     let url = match cover {
         CoverRef::Local(path) => return utils::format_artwork_url(Some(&path)),
-        CoverRef::EmbeddedUrl(url) => url,
+        CoverRef::EmbeddedUrl(url) => remote_artwork_url_at_size(url, max_width),
         CoverRef::JellyfinItem { item_id, tag } => {
             let server = server.filter(|server| server.service == MusicService::Jellyfin)?;
             jellyfin_item_url(
@@ -471,6 +497,36 @@ mod tests {
         let got = resolve(&local_active(), CoverRef::EmbeddedUrl(url.to_string()), 320)
             .expect("embedded cover");
         assert_eq!(&*got, url);
+    }
+
+    #[test]
+    fn persisted_subsonic_urls_follow_the_view_size() {
+        let url =
+            "https://music.example/rest/getCoverArt.view?u=user&t=token&s=salt&id=cover-1&size=512";
+        let got = resolve(
+            &local_active(),
+            CoverRef::EmbeddedUrl(url.to_string()),
+            1920,
+        )
+        .expect("embedded cover");
+        let parsed = reqwest::Url::parse(&got).expect("valid cover URL");
+
+        assert_eq!(
+            parsed
+                .query_pairs()
+                .find_map(|(key, value)| (key == "size").then(|| value.into_owned())),
+            Some("1920".to_string())
+        );
+        assert!(
+            parsed
+                .query_pairs()
+                .any(|(key, value)| key == "t" && value == "token")
+        );
+        assert!(
+            parsed
+                .query_pairs()
+                .any(|(key, value)| key == "id" && value == "cover-1")
+        );
     }
 
     #[test]

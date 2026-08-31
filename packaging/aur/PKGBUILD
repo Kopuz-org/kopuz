@@ -10,7 +10,7 @@ arch=('x86_64')
 url="https://github.com/Kopuz-org/kopuz"
 provides=('kopuz')
 conflicts=('kopuz')
-license=('MIT')
+license=('EUPL-1.2')
 depends=(
     'webkit2gtk-4.1'
     'gtk3'

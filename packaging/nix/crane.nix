@@ -28,7 +28,7 @@
 }:
 let
   pname = "kopuz";
-  version = "0.16.0";
+  version = "0.16.1";
 
   # `deno_core` pulls in the `v8` crate, whose build script fetches a prebuilt
   # librusty_v8 archive — impossible in the network-less Nix sandbox. Fetch it as
@@ -183,7 +183,7 @@ craneLib.mkCargoDerivation (
     meta = {
       description = "Fast, modern music player with Jellyfin and local library support";
       homepage = "https://github.com/temidaradev/kopuz";
-      license = lib.licenses.mit;
+      license = lib.licenses.eupl12;
       maintainers = with lib.maintainers; [
         temidaradev
         NotAShelf

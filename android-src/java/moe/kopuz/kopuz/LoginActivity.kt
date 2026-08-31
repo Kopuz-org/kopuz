@@ -9,7 +9,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 
 /**
- * Full-screen in-app browser for provider sign-ins (YT Music, SoundCloud).
+ * Full-screen in-app browser for provider sign-ins (YT Music, SoundCloud,
+ * Apple Music).
  * Desktop harvests cookies from a spawned system browser's profile; Android has
  * no such thing, so this WebView plays that role: its cookies land in the
  * app-global [CookieManager], where the Rust side polls for the auth cookies

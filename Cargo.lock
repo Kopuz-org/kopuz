@@ -4222,7 +4222,7 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
 name = "kopuz"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "base64",
  "block2",
@@ -4272,7 +4272,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-components"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "base64",
  "dioxus",
@@ -4297,7 +4297,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-config"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "directories",
  "serde",
@@ -4310,7 +4310,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-db"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -4330,7 +4330,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-discord-presence"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "discord-rich-presence",
  "kopuz-config",
@@ -4345,7 +4345,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-hooks"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "base64",
  "dioxus",
@@ -4367,7 +4367,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-i18n"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "fluent-bundle",
  "unic-langid",
@@ -4375,7 +4375,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-pages"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "dioxus",
  "directories",
@@ -4404,7 +4404,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-player"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "arc-swap",
  "base64",
@@ -4431,7 +4431,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-radio"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "futures-util",
  "reqwest 0.13.4",
@@ -4446,7 +4446,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-reader"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "kopuz-config",
  "lofty",
@@ -4460,11 +4460,11 @@ dependencies = [
 
 [[package]]
 name = "kopuz-route"
-version = "0.16.0"
+version = "0.16.1"
 
 [[package]]
 name = "kopuz-scrobble"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "dioxus",
  "kopuz-config",
@@ -4479,7 +4479,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-server"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "aes-gcm 0.11.0",
  "async-trait",
@@ -4523,7 +4523,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-utils"
-version = "0.16.0"
+version = "0.16.1"
 dependencies = [
  "base64",
  "color-thief",

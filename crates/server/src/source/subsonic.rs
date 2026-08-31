@@ -71,6 +71,15 @@ fn song_to_track(
     }
 }
 
+fn album_item_id(stored: &str) -> &str {
+    ["subsonic:", "custom:"]
+        .into_iter()
+        .find_map(|prefix| stored.strip_prefix(prefix))
+        .and_then(|rest| rest.split(':').next())
+        .filter(|id| !id.is_empty())
+        .unwrap_or(stored)
+}
+
 fn playlist_meta(
     client: &SubsonicClient,
     playlist: crate::subsonic::SubsonicPlaylist,
@@ -355,6 +364,14 @@ impl MediaSource for SubsonicSource {
             .collect())
     }
 
+    async fn fetch_album_tracks(&self, album_id: &str) -> Result<Vec<reader::Track>, SourceError> {
+        let items = self.client.get_album_songs(album_item_id(album_id)).await?;
+        Ok(items
+            .into_iter()
+            .map(|item| song_to_track(&self.client, self.service, item))
+            .collect())
+    }
+
     /// Song-seeded radio. Which endpoint answers is the client's call (see
     /// [`SubsonicClient::get_similar_songs`](crate::subsonic::SubsonicClient));
     /// either way it returns neighbours only, so the seed goes at the head of the
@@ -406,6 +423,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn stored_album_refs_are_reduced_to_provider_ids() {
+        assert_eq!(album_item_id("subsonic:album-42:urlhex_00"), "album-42");
+        assert_eq!(album_item_id("custom:album-7"), "album-7");
+        assert_eq!(album_item_id("already-raw"), "already-raw");
+    }
+
+    #[test]
     fn playlist_cover_art_becomes_a_renderable_image_tag() {
         let client = SubsonicClient::new("https://music.example.test", "user", "password");
         let playlist = serde_json::from_value(serde_json::json!({
@@ -436,7 +460,7 @@ mod tests {
         assert!(
             parsed
                 .query_pairs()
-                .any(|(key, value)| { key == "size" && value == "512" })
+                .any(|(key, value)| { key == "size" && value == "384" })
         );
     }
 

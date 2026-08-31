@@ -375,16 +375,30 @@ pub fn applemusic_auto_login(
         playback_error.set(Some(msg));
     };
     spawn(async move {
-        let token = match ::server::applemusic::signin::launch_signin_and_extract(
+        #[cfg(not(target_os = "android"))]
+        let signin = ::server::applemusic::signin::launch_signin_and_extract(
             browser,
             &server_id,
             std::time::Duration::from_secs(300),
         )
-        .await
-        {
+        .await;
+        #[cfg(target_os = "android")]
+        let signin = {
+            let _ = &server_id;
+            webview_signin(
+                ::server::applemusic::signin::SIGNIN_URL,
+                "https://music.apple.com",
+                |header| cookie_value(header, ::server::applemusic::signin::TOKEN_COOKIE),
+            )
+            .await
+        };
+        let token = match signin {
             Ok(token) => token,
             Err(err) => {
-                report(format!("Apple Music sign-in failed ({browser}): {err}"));
+                report(format!(
+                    "Apple Music sign-in failed ({}): {err}",
+                    signin_surface(browser)
+                ));
                 return;
             }
         };

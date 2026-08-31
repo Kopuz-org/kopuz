@@ -1,6 +1,6 @@
 Categories:
   - Multimedia
-License: MIT
+License: EUPL-1.2
 AuthorName: temidaradev
 SourceCode: https://github.com/Kopuz-org/kopuz
 IssueTracker: https://github.com/Kopuz-org/kopuz/issues
@@ -60,7 +60,29 @@ Builds:
         aarch64-linux-android
       - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
 
+  - versionName: 0.16.1
+    versionCode: 1601
+    commit: v0.16.1
+    ndk: 26.3.11579264
+    sudo:
+      - apt-get update
+      - apt-get install -y build-essential cmake pkg-config curl
+      - curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+    init:
+      - $$rustup$$/rustup toolchain install stable --profile minimal
+      - $$rustup$$/rustup target add aarch64-linux-android
+      - $$rustup$$/cargo install dioxus-cli@0.7.9 --locked
+      - npm ci
+      - npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css
+    output: target/dx/kopuz/release/android/app/app/build/outputs/apk/release/app-release-unsigned.apk
+    build:
+      - export SQLX_OFFLINE=true
+      - export ANDROID_NDK_HOME=$$NDK$$
+      - dx build --package kopuz --platform android --release --locked --target
+        aarch64-linux-android
+      - cd target/dx/kopuz/release/android/app && ./gradlew assembleRelease
+
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[0-9.]+$
-CurrentVersion: 0.16.0
-CurrentVersionCode: 1600
+CurrentVersion: 0.16.1
+CurrentVersionCode: 1601

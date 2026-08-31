@@ -17,6 +17,17 @@
 <br/>
   <br/>
   <p>
+    <a href="https://flathub.org/apps/moe.kopuz.kopuz">
+      <img src="https://dl.flathub.org/assets/badges/flathub-badge-en.svg" alt="Download on Flathub" height="60" align="middle">
+    </a>
+    <a href="https://play.google.com/store/apps/details?id=moe.kopuz.kopuz">
+      <img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play" height="88" align="middle">
+    </a>
+  </p>
+
+<br/>
+  <br/>
+  <p>
     <b>English</b> | <a href="docs/README-TR.md">Türkçe</a> | <a href="docs/README-PT-PT.md">Português de Portugal</a> | <a href="docs/README-ML.md">മലയാളം</a>
   </p>
 </div>
@@ -283,17 +294,23 @@ paru -S kopuz-bin
 
 ### Flatpak (Recommended)
 
-Kopuz is soon available on Flathub. In the meantime, you can install it via our
-pre-built Flatpak repository, or build it yourself from source.
+Kopuz is on Flathub. You can also install it from our own Flatpak repository, or
+build it yourself from source.
 
-#### Option 1: Install pre-built (recommended)
+#### Option 1: Install from Flathub (recommended)
+
+```bash
+flatpak install flathub moe.kopuz.kopuz
+```
+
+#### Option 2: Install pre-built from our repository
 
 ```bash
 flatpak install --user --or-update \
     https://kopuz-org.github.io/kopuz-flatpak/moe.kopuz.kopuz.flatpakref
 ```
 
-#### Option 2: Build from source manifest
+#### Option 3: Build from source manifest
 
 ##### Requirements
 
@@ -348,7 +365,9 @@ sudo ln -s /usr/lib/webkit2gtk-4.1/WebKitGPUProcess /usr/libexec/webkit2gtk-4.1/
 
 ### Android
 
-Grab `kopuz-<version>-arm64-v8a.apk` from the
+Install from
+[Google Play](https://play.google.com/store/apps/details?id=moe.kopuz.kopuz), or
+grab `kopuz-<version>-arm64-v8a.apk` from the
 [releases page](https://github.com/Kopuz-org/kopuz/releases) and install it.
 Only 64-bit ARM devices are supported (Android 7.0 / API 24 and newer). The APK
 is signed with the project release key, so an install from a different source
@@ -920,6 +939,14 @@ longer than needed.
 - **Lofty**: Metadata parsing
 - **SQLite / sqlx**: Local storage with compile-time-checked queries
 - **TailwindCSS**: Styling framework based on CSS
+
+## License
+
+Copyright (c) 2026 Temidaradev and the Kopuz contributors
+
+Licensed under the EUPL — see [LICENSE](LICENSE) for the full text of the
+European Union Public Licence v. 1.2. The source code is available at
+<https://github.com/Kopuz-org/kopuz>.
 
 ## Crypto Donation
 

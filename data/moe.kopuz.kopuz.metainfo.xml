@@ -2,10 +2,14 @@
 <component type="desktop-application">
   <id>moe.kopuz.kopuz</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>MIT</project_license>
+  <project_license>EUPL-1.2</project_license>
   <name>Kopuz</name>
   <icon type="stock">moe.kopuz.kopuz</icon>
-  <summary>Fast, modern music player with local library and Jellyfin support</summary>
+  <branding>
+  <color type="primary" scheme_preference="light">#fcf0f0</color>
+  <color type="primary" scheme_preference="dark">#0f0303</color>
+  </branding>
+  <summary>Hi-Res multi-backend music player</summary>
   <description>
     <p>
       Kopuz is a fast, modern music player built with Rust and the Dioxus framework.
@@ -18,15 +22,39 @@
       Designed for performance and simplicity.
     </p>
   </description>
+  <categories>
+        <category>AudioVideo</category>
+  </categories>
+  <keywords>
+        <keyword>jellyfin</keyword>
+        <keyword>subsonic</keyword>
+        <keyword>navidrome</keyword>
+        <keyword>nextcloud</keyword>
+        <keyword>music</keyword>
+        <keyword>youtube</keyword>
+        <keyword>apple</keyword>
+        <keyword>soundcloud</keyword>
+        <keyword>spotify</keyword>
+        <keyword>audio</keyword>
+        <keyword>yt-dlp</keyword>
+        <keyword>hi-res</keyword>
+  </keywords>
 
   <screenshots>
     <screenshot type="default">
       <caption>The main interface</caption>
-      <image>https://github.com/user-attachments/assets/8366b1ea-021f-4631-a97b-5ed6e5bf1562</image>
+      <image>https://github.com/user-attachments/assets/ca88f0c0-15d7-4a4d-8e81-78a61a70084f</image>
     </screenshot>
   </screenshots>
 
   <releases>
+    <release version="0.16.1" date="2026-08-26">
+      <description>
+        <p>
+          Scrolling no longer stutters on high-refresh displays: the webview's frame clock is capped at 60fps instead of chasing the monitor's vblank, which a large window could never keep up with. Apple Music signs in through the in-app WebView on Android, passwords can be forced into the system store with a configurable login URL, playlist folder changes survive until the move completes, and background lyric lines stay lit on their own timing. Packaging gains branding colours and keywords.
+        </p>
+      </description>
+    </release>
     <release version="0.16.0" date="2026-08-23">
       <description>
         <p>

@@ -242,6 +242,25 @@ fn active_main_line_index(
         .last()
 }
 
+/// A background line carries its own timing and often outlasts the line it
+/// was attached to, or overlaps the next one (Apple starts the next main row
+/// while the backing vocal is still going). Judge it on that timing alone,
+/// not on which main line is current. Without an end time it runs until the
+/// next main line starts after it.
+fn background_line_bound(
+    lines: &[utils::lyrics::LyricLine],
+    main_line_indices: &[usize],
+    line: &utils::lyrics::LyricLine,
+) -> Option<f64> {
+    if line.end_time.is_some() {
+        return None;
+    }
+    main_line_indices
+        .iter()
+        .map(|&index| lines[index].start_time)
+        .find(|&start| start > line.start_time)
+}
+
 fn active_secondary_lines(
     lines: &[utils::lyrics::LyricLine],
     main_line_indices: &[usize],
@@ -252,15 +271,16 @@ fn active_secondary_lines(
         .iter()
         .enumerate()
         .filter(|(index, line)| {
-            let next_start = (!line.background)
-                .then(|| next_main_line_start(lines, main_line_indices, *index))
-                .flatten();
+            let next_start = if line.background {
+                background_line_bound(lines, main_line_indices, line)
+            } else {
+                next_main_line_start(lines, main_line_indices, *index)
+            };
             if *index == main_line_index || !line_active_at(line, current_time, next_start) {
                 return false;
             }
 
-            (line.background && line.parent_line_index == Some(main_line_index))
-                || (!line.background && main_line_index != usize::MAX)
+            line.background || main_line_index != usize::MAX
         })
         .map(|(index, _)| index.to_string())
         .collect::<Vec<_>>()
@@ -450,9 +470,9 @@ pub fn LyricsView(
                 let inactiveClass = "{inactive_class}";
                 window.__{layout}_autoSync = true;
 
-                // Depth-of-field state: only re-swept when the active index or the
-                // setting itself changes, not on every clock tick.
-                let lastBlurIndex = null;
+                // Depth-of-field state: only re-swept when the set of lit lines or
+                // the setting itself changes, not on every clock tick.
+                let lastBlurLit = null;
                 let lastBlurEnabled = null;
                 let lastBlurStrength = null;
                 const BLUR_STEP_PX = {depth_blur_step_px};
@@ -698,29 +718,42 @@ pub fn LyricsView(
                 // A filter hands the line its own compositing layer and backing
                 // store, so a whole song's lines meant a whole song's layers. Half
                 // pixels land on a device pixel at 2x and a blur under one is not
-                // visible anyway; past the window the line cannot reach the
-                // viewport. macOS 27 betas paint unpainted backing store as magenta
+                // visible anyway. The reach is measured in pixels, not lines: a
+                // line count cuts off inside a tall panel with small type, leaving
+                // the bottom line sharp under a fully blurred one, while a
+                // viewport's height either way is past what the scroll can show.
+                // macOS 27 betas paint unpainted backing store as magenta
                 // (WebKit 303157), so the layer count is worth keeping down.
                 const BLUR_QUANTUM_PX = 0.5;
-                const BLUR_DISTANCE_LIMIT = 12;
 
-                const applyDepthBlur = (activeIndex, enabled, strengthPercent) => {{
-                    if (activeIndex === lastBlurIndex
+                // Lit lines (the active one plus any background or overlapping
+                // line) stay sharp. With no main line lit the anchor sits on the
+                // last lit line, so a backing vocal running past its main line
+                // does not fog the whole list and then snap back.
+                const applyDepthBlur = (mainIndex, litIndices, enabled, strengthPercent) => {{
+                    const anchorIndex = mainIndex >= 0
+                        ? mainIndex
+                        : (litIndices.size ? Math.max(...litIndices) : -1);
+                    const litKey = `${{anchorIndex}}:${{[...litIndices].sort((a, b) => a - b).join(',')}}`;
+                    if (litKey === lastBlurLit
                         && enabled === lastBlurEnabled
                         && strengthPercent === lastBlurStrength) return;
-                    lastBlurIndex = activeIndex;
+                    lastBlurLit = litKey;
                     lastBlurEnabled = enabled;
                     lastBlurStrength = strengthPercent;
                     const scale = strengthPercent / 100;
                     const container = document.getElementById('{layout}-lyrics-content');
                     if (!container) return;
+                    const anchorEl = document.getElementById(`{layout}-lyrics-${{anchorIndex}}`);
+                    const reach = container.clientHeight;
                     container.querySelectorAll('[data-lyric-line]').forEach((lineEl) => {{
-                        const distance = enabled && activeIndex >= 0
-                            ? Math.abs(Number(lineEl.dataset.lyricIndex) - activeIndex)
+                        const index = Number(lineEl.dataset.lyricIndex);
+                        const inReach = anchorEl
+                            && Math.abs(lineEl.offsetTop - anchorEl.offsetTop) <= reach;
+                        const distance = enabled && inReach && !litIndices.has(index)
+                            ? Math.abs(index - anchorIndex)
                             : 0;
-                        const rawBlurPx = distance > 0 && distance <= BLUR_DISTANCE_LIMIT
-                            ? depthBlurPx(distance, scale)
-                            : 0;
+                        const rawBlurPx = distance > 0 ? depthBlurPx(distance, scale) : 0;
                         const blurPx = Math.round(rawBlurPx / BLUR_QUANTUM_PX) * BLUR_QUANTUM_PX;
                         const nextFilter = blurPx > 0 ? `blur(${{blurPx.toFixed(2)}}px)` : '';
                         if (lineEl.__lyricBlur !== nextFilter) {{
@@ -754,10 +787,12 @@ pub fn LyricsView(
                     clock.time = currentTime;
                     clock.at = performance.now();
                     clock.playing = playing;
-                    applyDepthBlur(nextIndex, depthBlurEnabled, depthBlurStrength);
 
                     let nextEl = document.getElementById(`{layout}-lyrics-${{nextIndex}}`)
                     let nextSecondary = new Set(JSON.parse(activeLinesJson));
+                    const lit = new Set(nextSecondary);
+                    if (nextIndex >= 0) lit.add(nextIndex);
+                    applyDepthBlur(nextIndex, lit, depthBlurEnabled, depthBlurStrength);
                     for (const lineEl of activeSecondaryEls) {{
                         const idx = Number(lineEl.dataset.lyricIndex);
                         if (!nextSecondary.has(idx) && lineEl !== nextEl) {{
@@ -817,7 +852,7 @@ pub fn LyricsView(
                         .forEach((lineEl) => deactivateLine(lineEl));
                     currEl = null;
                     activeSecondaryEls = new Set();
-                    lastBlurIndex = null;
+                    lastBlurLit = null;
                     lastBlurEnabled = null;
                     lastBlurStrength = null;
                     container?.scrollTo({{ top: 0, left: 0 }});
@@ -1121,6 +1156,62 @@ mod tests {
         assert_eq!(display[2].start_time, 9.0);
         assert_eq!(display[3].parent_line_index, None);
         assert_eq!(display[1].parent_line_index, Some(0));
+    }
+
+    fn background_line(start_time: f64, end_time: Option<f64>, parent: usize) -> LyricLine {
+        let mut line = line(start_time, end_time);
+        line.background = true;
+        line.parent_line_index = Some(parent);
+        line
+    }
+
+    #[test]
+    fn background_line_stays_lit_when_the_next_main_line_starts() {
+        // Apple's rows for The Chain: the next main line begins while the
+        // backing vocal of the previous one is still running.
+        let lines = vec![
+            line(63.167, Some(67.299)),
+            background_line(65.48, Some(67.299), 0),
+            line(66.236, Some(70.567)),
+        ];
+        let main = main_line_indices(&lines);
+
+        assert_eq!(active_main_line_index(&lines, &main, 66.5), Some(2));
+        assert_eq!(active_secondary_lines(&lines, &main, 66.5, 2), "[0,1]");
+        assert_eq!(active_secondary_lines(&lines, &main, 67.5, 2), "[]");
+    }
+
+    #[test]
+    fn background_line_stays_lit_after_its_parent_ends_with_no_main_line_active() {
+        let lines = vec![
+            line(1.0, Some(2.0)),
+            background_line(1.5, Some(5.0), 0),
+            line(10.0, Some(12.0)),
+        ];
+        let main = main_line_indices(&lines);
+
+        assert_eq!(active_main_line_index(&lines, &main, 3.0), None);
+        assert_eq!(
+            active_secondary_lines(&lines, &main, 3.0, usize::MAX),
+            "[1]"
+        );
+        assert_eq!(active_secondary_lines(&lines, &main, 5.5, usize::MAX), "[]");
+    }
+
+    #[test]
+    fn untimed_background_line_runs_until_the_next_main_line() {
+        let lines = vec![
+            line(1.0, Some(2.0)),
+            background_line(1.5, None, 0),
+            line(4.0, Some(6.0)),
+        ];
+        let main = main_line_indices(&lines);
+
+        assert_eq!(
+            active_secondary_lines(&lines, &main, 3.0, usize::MAX),
+            "[1]"
+        );
+        assert_eq!(active_secondary_lines(&lines, &main, 4.5, 2), "[]");
     }
 
     #[test]

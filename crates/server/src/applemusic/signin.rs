@@ -5,7 +5,11 @@ use config::Browser;
 
 use crate::cookies::browser as ip;
 
-const SIGNIN_URL: &str = "https://music.apple.com/signin";
+/// Where a sign-in starts. Public because Android drives the same flow through
+/// its in-app WebView rather than a spawned browser profile.
+pub const SIGNIN_URL: &str = "https://music.apple.com/signin";
+/// The cookie the flow is waiting for, on either platform.
+pub const TOKEN_COOKIE: &str = "media-user-token";
 const COOKIE_DOMAIN: &str = "music.apple.com";
 pub fn profile_dir(server_id: &str) -> PathBuf {
     let safe: String = server_id
@@ -75,6 +79,7 @@ pub async fn launch_signin_and_extract(
     let mut cmd = ip::browser_command(&bin);
     cmd.arg("--no-first-run")
         .arg("--no-default-browser-check")
+        .arg("--password-store=basic")
         .arg(format!("--user-data-dir={}", profile.display()));
     #[cfg(target_os = "windows")]
     {
@@ -82,7 +87,7 @@ pub async fn launch_signin_and_extract(
         cmd.creation_flags(0x0100_0000);
     }
     let mut child = cmd
-        .arg(SIGNIN_URL)
+        .arg(format!("--app={SIGNIN_URL}"))
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
@@ -110,7 +115,7 @@ pub async fn launch_signin_and_extract(
 
 async fn extract_media_user_token(browser: Browser, profile: &Path) -> Option<String> {
     tracing::debug!("am.signin.extract: looking for media-user-token cookie");
-    let result = extract_cookie(browser, profile, "media-user-token")
+    let result = extract_cookie(browser, profile, TOKEN_COOKIE)
         .await
         .ok()
         .flatten();

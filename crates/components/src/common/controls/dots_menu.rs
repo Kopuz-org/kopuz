@@ -35,6 +35,8 @@ pub struct DotsMenuProps {
     pub anchor: String,
     #[props(default = "bottom".to_string())]
     pub placement: String,
+    #[props(default)]
+    pub position: Option<(f64, f64)>,
     #[props(default = "fa-solid fa-ellipsis-vertical".to_string())]
     pub icon: String,
 }
@@ -96,29 +98,35 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                     onmounted: {
                         let anchor = props.anchor.clone();
                         let placement = props.placement.clone();
+                        let position = props.position;
                         move |panel_evt: MountedEvent| {
                             let trigger_evt = trigger_element.peek().clone();
                             let anchor = anchor.clone();
                             let placement = placement.clone();
                             async move {
-                                let Some(trigger_evt) = trigger_evt else {
-                                    return;
-                                };
-                                let Ok(trigger_rect) = trigger_evt.get_client_rect().await else {
-                                    return;
-                                };
                                 let Ok(panel_rect) = panel_evt.get_client_rect().await else {
                                     return;
                                 };
-                                let left = if (anchor == "left") != is_rtl {
-                                    trigger_rect.min_x()
+                                let (left, top) = if let Some((left, top)) = position {
+                                    (left, top)
                                 } else {
-                                    trigger_rect.max_x() - panel_rect.width()
-                                };
-                                let top = if placement == "top" {
-                                    trigger_rect.min_y() - panel_rect.height() - 4.0
-                                } else {
-                                    trigger_rect.max_y() + 4.0
+                                    let Some(trigger_evt) = trigger_evt else {
+                                        return;
+                                    };
+                                    let Ok(trigger_rect) = trigger_evt.get_client_rect().await else {
+                                        return;
+                                    };
+                                    let left = if (anchor == "left") != is_rtl {
+                                        trigger_rect.min_x()
+                                    } else {
+                                        trigger_rect.max_x() - panel_rect.width()
+                                    };
+                                    let top = if placement == "top" {
+                                        trigger_rect.min_y() - panel_rect.height() - 4.0
+                                    } else {
+                                        trigger_rect.max_y() + 4.0
+                                    };
+                                    (left, top)
                                 };
                                 panel_geometry.set(Some((
                                     left,
