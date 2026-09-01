@@ -20,14 +20,39 @@ fn set_if_changed<T: PartialEq + 'static>(signal: &mut Signal<T>, value: T) {
     }
 }
 
+#[derive(Clone, Copy)]
+struct DaemonClock {
+    daemon_ms: u64,
+    local: Instant,
+}
+
+impl DaemonClock {
+    fn sample(daemon_ms: u64) -> Self {
+        Self {
+            daemon_ms,
+            local: Instant::now(),
+        }
+    }
+
+    fn local_instant(self, daemon_ms: u64) -> Instant {
+        if daemon_ms >= self.daemon_ms {
+            self.local
+                .checked_add(Duration::from_millis(daemon_ms - self.daemon_ms))
+                .unwrap_or(self.local)
+        } else {
+            self.local
+                .checked_sub(Duration::from_millis(self.daemon_ms - daemon_ms))
+                .unwrap_or(self.local)
+        }
+    }
+}
+
 /// Translate a daemon-clock position anchor into a local-clock one and the
 /// whole-second progress the signal carries.
-fn local_anchor(state: &PlayerState) -> Option<(u64, Instant, bool, u64)> {
+fn local_anchor(state: &PlayerState, clock: DaemonClock) -> Option<(u64, Instant, bool, u64)> {
     let anchor = state.position?;
     let elapsed_ms = state.now_ms.saturating_sub(anchor.at_ms);
-    let instant = Instant::now()
-        .checked_sub(Duration::from_millis(elapsed_ms))
-        .unwrap_or_else(Instant::now);
+    let instant = clock.local_instant(anchor.at_ms);
     let position_ms = if anchor.playing {
         anchor.ms.saturating_add(elapsed_ms)
     } else {
@@ -36,7 +61,8 @@ fn local_anchor(state: &PlayerState) -> Option<(u64, Instant, bool, u64)> {
     Some((anchor.ms, instant, anchor.playing, position_ms / 1000))
 }
 
-fn apply_state(ctrl: &mut PlayerController, state: PlayerState) {
+fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
+    let clock = DaemonClock::sample(state.now_ms);
     let playing = match state.intent {
         Intent::Loading { .. } => true,
         Intent::Committed { .. } => state.phase == Phase::Playing,
@@ -115,7 +141,7 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) {
     }
 
     if state.fading.is_none() {
-        match local_anchor(&state) {
+        match local_anchor(&state, clock) {
             Some((ms, instant, anchor_playing, progress_secs)) => {
                 set_if_changed(&mut ctrl.engine_anchor, Some((ms, instant, anchor_playing)));
                 set_if_changed(&mut ctrl.current_song_progress, progress_secs);
@@ -134,6 +160,7 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) {
         })
         .collect();
     set_if_changed(&mut ctrl.buffered_ranges, buffered);
+    clock
 }
 
 fn apply_queue(ctrl: &mut PlayerController, mirror: daemon::QueueMirrorSnapshot) {
@@ -150,7 +177,7 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
         let mut rx = handle.subscribe();
         let mirror = handle.queue_mirror().await;
         apply_queue(&mut ctrl, mirror);
-        apply_state(&mut ctrl, handle.state());
+        let mut daemon_clock = apply_state(&mut ctrl, handle.state());
         loop {
             let ticking = !*ctrl.external_active.peek()
                 && *ctrl.is_playing.peek()
@@ -162,16 +189,31 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
                             continue;
                         }
                         match event {
-                            ApiEvent::PlayerState(state) => apply_state(&mut ctrl, *state),
+                            ApiEvent::PlayerState(state) => {
+                                daemon_clock = apply_state(&mut ctrl, *state);
+                            }
                             ApiEvent::QueueChanged { .. } | ApiEvent::Resync => {
                                 let mirror = handle.queue_mirror().await;
                                 apply_queue(&mut ctrl, mirror);
-                                apply_state(&mut ctrl, handle.state());
+                                daemon_clock = apply_state(&mut ctrl, handle.state());
                             }
-                            ApiEvent::PlayerPosition { position_ms, at_ms: _, playing, .. } => {
+                            ApiEvent::PlayerPosition { position_ms, at_ms, playing, .. } => {
+                                let received_at = Instant::now();
+                                let instant = daemon_clock.local_instant(at_ms);
+                                let elapsed_ms = if playing {
+                                    received_at
+                                        .saturating_duration_since(instant)
+                                        .as_millis()
+                                        .min(u64::MAX as u128) as u64
+                                } else {
+                                    0
+                                };
                                 ctrl.engine_anchor
-                                    .set(Some((position_ms, Instant::now(), playing)));
-                                set_if_changed(&mut ctrl.current_song_progress, position_ms / 1000);
+                                    .set(Some((position_ms, instant, playing)));
+                                set_if_changed(
+                                    &mut ctrl.current_song_progress,
+                                    position_ms.saturating_add(elapsed_ms) / 1000,
+                                );
                             }
                             ApiEvent::PlayerBuffered { ranges, .. } => {
                                 let buffered: Vec<BufferedRange> = ranges
@@ -191,7 +233,7 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
                         if !*ctrl.external_active.peek() {
                             let mirror = handle.queue_mirror().await;
                             apply_queue(&mut ctrl, mirror);
-                            apply_state(&mut ctrl, handle.state());
+                            daemon_clock = apply_state(&mut ctrl, handle.state());
                         }
                     }
                     Err(RecvError::Closed) => break,

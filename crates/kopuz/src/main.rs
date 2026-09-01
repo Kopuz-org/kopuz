@@ -585,7 +585,7 @@ fn App() -> Element {
     // in-process. The UI's PlayerController is a signal mirror over the
     // session; the scan job, scrobbler, favorites reconciler, OS media
     // integration, and Jellyfin/Discord reporting all live behind it.
-    let (session, library_service, job_runner, favorites_service, scrobbler) = {
+    let embedded_services = {
         let db_boot = db.clone();
         use_hook(move || {
             // Seeded with the persisted config loaded before launch, so the
@@ -618,8 +618,13 @@ fn App() -> Element {
                 ))),
                 scrobbler: Some(scrobbler.clone()),
             };
-            let session = daemon::SessionHandle::try_spawn(library.clone(), services)
-                .expect("audio engine init failed");
+            let session = match daemon::SessionHandle::try_spawn(library.clone(), services) {
+                Ok(session) => session,
+                Err(error) => {
+                    tracing::error!(%error, "audio engine initialization failed");
+                    return Err(format!("Audio engine initialization failed: {error}"));
+                }
+            };
             library.attach_session(session.clone());
             scrobbler.attach_session(session.clone());
             let jobs = Arc::new(daemon::JobRunner::new(session.clone()));
@@ -632,9 +637,22 @@ fn App() -> Element {
                 session.config_watch(),
             );
             daemon::integrations::spawn_discord_presence(&session, session.config_watch());
-            (session, library, jobs, favorites, scrobbler)
+            Ok((session, library, jobs, favorites, scrobbler))
         })
     };
+    let (session, library_service, job_runner, favorites_service, scrobbler) =
+        match embedded_services {
+            Ok(services) => services,
+            Err(error) => {
+                return rsx! {
+                    main {
+                        role: "alert",
+                        style: "height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center;",
+                        "{error}"
+                    }
+                };
+            }
+        };
 
     // A server switch or credential rotation rebuilds the shared source
     // handle; the session's loader has to follow it.
