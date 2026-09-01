@@ -74,6 +74,18 @@ impl FrontendService {
         crate::error::db(error)
     }
 
+    fn validate_server_id(id: &str) -> Result<(), ApiError> {
+        if id.trim().is_empty() {
+            return Err(ApiError::invalid_input("server id is required"));
+        }
+        if id == "local" || id.starts_with("local:") {
+            return Err(ApiError::invalid_input(
+                "server id uses the reserved local source namespace",
+            ));
+        }
+        Ok(())
+    }
+
     fn persisted_track(value: &api::TrackInfo) -> Result<reader::Track, ApiError> {
         if value.key.trim().is_empty() {
             return Err(ApiError::invalid_input("persisted track key is required"));
@@ -1265,6 +1277,7 @@ impl FrontendService {
             return Err(ApiError::invalid_input("server URL must use HTTP or HTTPS"));
         }
         let id = draft.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        Self::validate_server_id(&id)?;
         let browser = match draft.browser.as_deref() {
             Some(browser) => Some(
                 config::Browser::from_id(browser)
@@ -2989,6 +3002,15 @@ impl FrontendService {
 #[cfg(test)]
 mod tests {
     use super::FrontendService;
+
+    #[test]
+    fn server_ids_cannot_use_the_local_source_namespace() {
+        for id in ["", "local", "local:library"] {
+            let error = FrontendService::validate_server_id(id).expect_err("reserved id");
+            assert_eq!(error.code, api::ErrorCode::InvalidInput);
+        }
+        assert!(FrontendService::validate_server_id("server-id").is_ok());
+    }
 
     fn server_track(key: &str, title: &str) -> reader::Track {
         reader::Track {

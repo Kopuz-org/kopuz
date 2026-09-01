@@ -78,6 +78,34 @@ impl PlayerController {
         self.api.peek().clone()
     }
 
+    fn claim_external_playback(&self) {
+        if !*self.external_active.peek() || self.external_lease_id.peek().is_some() {
+            return;
+        }
+        let api = self.api();
+        let device = self.spotify_device_override.peek().clone();
+        let active = self.external_active;
+        let mut lease_id = self.external_lease_id;
+        spawn(async move {
+            match api
+                .claim_external_playback(api::ExternalPlayback {
+                    kind: "spotify".to_string(),
+                    device,
+                })
+                .await
+            {
+                Ok(lease) => {
+                    if *active.peek() && lease_id.peek().is_none() {
+                        lease_id.set(Some(lease.lease_id));
+                    } else if let Err(error) = api.release_external_playback(lease.lease_id).await {
+                        tracing::warn!(%error, "late external playback release failed");
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "external playback claim failed"),
+            }
+        });
+    }
+
     fn command(&self, command: api::PlayerCommand) {
         let api = self.api();
         spawn(async move {
@@ -92,7 +120,7 @@ impl PlayerController {
             return;
         };
         let report = api::ExternalPlaybackReport {
-            lease_id,
+            lease_id: lease_id.clone(),
             track: self
                 .current_track_snapshot
                 .peek()
@@ -104,9 +132,15 @@ impl PlayerController {
             device: self.spotify_device_override.peek().clone(),
         };
         let api = self.api();
+        let mut current_lease_id = self.external_lease_id;
         spawn(async move {
             if let Err(error) = api.report_external_playback(report).await {
                 tracing::warn!(%error, "external playback report failed");
+                if error.code == api::ErrorCode::Conflict
+                    && current_lease_id.peek().as_deref() == Some(lease_id.as_str())
+                {
+                    current_lease_id.set(None);
+                }
             }
         });
     }
@@ -1045,42 +1079,29 @@ pub fn use_player_controller(
         external_lease_id,
     };
 
+    let lease_ctrl = ctrl;
     use_effect(move || {
-        let active = *external_active.read();
-        let device = spotify_device_override.read().clone();
-        let api = api.peek().clone();
-        let mut lease_id = external_lease_id;
-        let active_signal = external_active;
+        let active = *lease_ctrl.external_active.read();
+        let _ = lease_ctrl.spotify_device_override.read();
+        let current_lease_id = lease_ctrl.external_lease_id.read().clone();
+        if active && current_lease_id.is_none() {
+            lease_ctrl.claim_external_playback();
+            return;
+        }
+        if active {
+            return;
+        }
+        let Some(release_id) = current_lease_id else {
+            return;
+        };
+        let api = lease_ctrl.api();
+        let mut lease_id = lease_ctrl.external_lease_id;
         spawn(async move {
-            if active {
-                if lease_id.peek().is_none() {
-                    match api
-                        .claim_external_playback(api::ExternalPlayback {
-                            kind: "spotify".to_string(),
-                            device,
-                        })
-                        .await
-                    {
-                        Ok(lease) => {
-                            if *active_signal.peek() {
-                                lease_id.set(Some(lease.lease_id));
-                            } else if let Err(error) =
-                                api.release_external_playback(lease.lease_id).await
-                            {
-                                tracing::warn!(%error, "late external playback release failed");
-                            }
-                        }
-                        Err(error) => tracing::warn!(%error, "external playback claim failed"),
-                    }
-                }
-            } else {
-                let release_id = lease_id.peek().clone();
-                if let Some(id) = release_id {
-                    if let Err(error) = api.release_external_playback(id).await {
-                        tracing::warn!(%error, "external playback release failed");
-                    }
-                    lease_id.set(None);
-                }
+            if let Err(error) = api.release_external_playback(release_id.clone()).await {
+                tracing::warn!(%error, "external playback release failed");
+            }
+            if lease_id.peek().as_deref() == Some(release_id.as_str()) {
+                lease_id.set(None);
             }
         });
     });
@@ -1103,7 +1124,11 @@ pub fn use_player_controller(
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
             if *renew_ctrl.external_active.peek() {
-                renew_ctrl.report_external_state(false);
+                if renew_ctrl.external_lease_id.peek().is_none() {
+                    renew_ctrl.claim_external_playback();
+                } else {
+                    renew_ctrl.report_external_state(false);
+                }
             }
         }
     });
