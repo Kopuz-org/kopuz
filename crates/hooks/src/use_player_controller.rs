@@ -577,12 +577,10 @@ impl PlayerController {
 
     pub fn set_loop_mode(&mut self, mode: LoopMode) {
         self.loop_mode.set(mode);
-        if !*self.external_active.peek() {
-            self.command(api::PlayerCommand::SetMode {
-                shuffle: None,
-                loop_mode: Some(mode),
-            });
-        }
+        self.command(api::PlayerCommand::SetMode {
+            shuffle: None,
+            loop_mode: Some(mode),
+        });
     }
 
     pub fn toggle_loop(&mut self) {
