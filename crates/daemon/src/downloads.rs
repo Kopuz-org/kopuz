@@ -105,19 +105,7 @@ impl DownloadsService {
     }
 
     async fn register(&self, item_id: &str, path: Option<String>) -> Result<(), ApiError> {
-        let _ = self.db.set_offline_track(item_id, path.as_deref()).await;
-        let item_id = item_id.to_string();
-        let updated = self
-            .config
-            .mutate_state(move |config| match path {
-                Some(path) => {
-                    config.offline_tracks.insert(item_id, path);
-                }
-                None => {
-                    config.offline_tracks.remove(&item_id);
-                }
-            })
-            .await?;
+        let updated = self.config.set_offline_track(item_id, path).await?;
         self.session
             .set_config(updated, vec!["offline_tracks".to_string()]);
         self.session.emit_event(ApiEvent::LibraryInvalidated {

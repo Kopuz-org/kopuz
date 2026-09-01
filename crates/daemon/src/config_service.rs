@@ -86,19 +86,28 @@ impl ConfigService {
             .collect()
     }
 
-    /// Internal state mutation (offline registrations, play state): bypasses
-    /// the wire-facing sensitive/locked checks, persists immediately, and
-    /// returns the updated config for the caller to push into the session.
-    pub async fn mutate_state(
+    /// Persist one offline-track registration without rewriting the whole
+    /// config, then update the in-memory snapshot used by daemon services.
+    pub async fn set_offline_track(
         &self,
-        mutate: impl FnOnce(&mut config::AppConfig),
+        item_id: &str,
+        path: Option<String>,
     ) -> Result<config::AppConfig, ApiError> {
         let mut current = self.current.write().await;
-        mutate(&mut current);
         self.db
-            .save_config(&current)
+            .set_offline_track(item_id, path.as_deref())
             .await
-            .map_err(|error| ApiError::internal(format!("config save failed: {error}")))?;
+            .map_err(|error| {
+                ApiError::internal(format!("offline track registration failed: {error}"))
+            })?;
+        match path {
+            Some(path) => {
+                current.offline_tracks.insert(item_id.to_string(), path);
+            }
+            None => {
+                current.offline_tracks.remove(item_id);
+            }
+        }
         Ok(current.clone())
     }
 
