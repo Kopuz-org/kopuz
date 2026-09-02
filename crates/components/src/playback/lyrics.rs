@@ -496,6 +496,21 @@ pub fn LyricsView(
                     : clock.time;
 
                 const chunkAlpha = (lineEl) => lineEl.dataset.backgroundLine === 'true' ? 0.7 : 1;
+                const getLyricRgb = () => {
+                    const raw = getComputedStyle(document.documentElement).getPropertyValue('--color-white').trim() || '#ffffff';
+                    if (raw.startsWith('rgb')) {
+                        const m = raw.match(/\d+/g);
+                        if (m && m.length >= 3) return `${m[0]},${m[1]},${m[2]}`;
+                        return '255,255,255';
+                    }
+                    if (!raw.startsWith('#')) return '255,255,255';
+                    let h = raw.slice(1);
+                    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+                    if (h.length !== 6) return '255,255,255';
+                    const n = parseInt(h, 16);
+                    if (Number.isNaN(n)) return '255,255,255';
+                    return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+                };
 
                 // The gradient is 2.2 chunk-widths with a soft band in the middle, so
                 // sliding it from 99% to 1% wipes the fill across the glyphs and still
@@ -505,8 +520,9 @@ pub fn LyricsView(
                     if (lineEl.dataset.lyricPrimedFor === lineEl.className) return;
                     lineEl.dataset.lyricPrimedFor = lineEl.className;
                     const alpha = chunkAlpha(lineEl);
-                    const sung = `rgba(255,255,255,${{alpha}})`;
-                    const unsung = `rgba(255,255,255,${{alpha * UNSUNG_ALPHA}})`;
+                    const rgb = getLyricRgb();
+                    const sung = `rgba(${{rgb}},${{alpha}})`;
+                    const unsung = `rgba(${{rgb}},${{alpha * UNSUNG_ALPHA}})`;
                     const image = `linear-gradient(to right, ${{sung}} 0%, ${{sung}} 46%, ${{unsung}} 54%, ${{unsung}} 100%)`;
                     for (const chunk of chunks) {{
                         chunk.style.backgroundImage = image;
@@ -574,8 +590,9 @@ pub fn LyricsView(
                         const nextGlow = Math.round(glow * 20) / 20;
                         if (chunk.__lyricGlow !== nextGlow) {{
                             chunk.__lyricGlow = nextGlow;
+                            const rgb = getLyricRgb();
                             chunk.style.textShadow = nextGlow > 0
-                                ? `0 0 ${{(4 + nextGlow * 6).toFixed(1)}}px rgba(255,255,255,${{(nextGlow * 0.3 * alpha).toFixed(3)}})`
+                                ? `0 0 ${{(4 + nextGlow * 6).toFixed(1)}}px rgba(${{rgb}},${{(nextGlow * 0.3 * alpha).toFixed(3)}})`
                                 : '';
                         }}
                     }}
