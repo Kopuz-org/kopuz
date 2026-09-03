@@ -45,7 +45,7 @@ const STATE_KEYS: &[&str] = &[
     "listen_counts",
     "device_id",
     "offline_tracks",
-    "ytdlp_history",
+    "youtube_download_history",
     "source_explicitly_set",
     "fullscreen_tabs_collapsed",
 ];
@@ -463,7 +463,10 @@ mod tests {
         assert_eq!(restored.equalizer, defaults.equalizer);
         assert_eq!(restored.radio_registries, defaults.radio_registries);
         assert_eq!(restored.sidebar_order, defaults.sidebar_order);
-        assert_eq!(restored.ytdlp_options, defaults.ytdlp_options);
+        assert_eq!(
+            restored.youtube_download_options,
+            defaults.youtube_download_options
+        );
     }
 
     /// Every collection/enum/nested shape at once: the default config is
@@ -536,7 +539,7 @@ mod tests {
             },
             device_change_behavior: DeviceChangeBehavior::Resume,
             sample_rate_mode: SampleRateMode::Source,
-            ytdlp_output_dir: "/downloads".into(),
+            youtube_download_output_dir: "/downloads".into(),
             titlebar_mode: TitlebarMode::System,
             offline_quality: OfflineQuality::Original,
             player_bar_position: PlayerBarPosition::Top,
@@ -606,7 +609,10 @@ mod tests {
         assert_eq!(restored.equalizer, cfg.equalizer);
         assert_eq!(restored.device_change_behavior, cfg.device_change_behavior);
         assert_eq!(restored.sample_rate_mode, cfg.sample_rate_mode);
-        assert_eq!(restored.ytdlp_output_dir, cfg.ytdlp_output_dir);
+        assert_eq!(
+            restored.youtube_download_output_dir,
+            cfg.youtube_download_output_dir
+        );
         assert_eq!(restored.titlebar_mode, cfg.titlebar_mode);
         assert_eq!(restored.offline_quality, cfg.offline_quality);
         assert_eq!(restored.player_bar_position, cfg.player_bar_position);

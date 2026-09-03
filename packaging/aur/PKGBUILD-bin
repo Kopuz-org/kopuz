@@ -22,8 +22,7 @@ depends=(
 )
 
 optdepends=(
-    'yt-dlp'
-    'python-mutagen'
+    'ffmpeg: format conversion, metadata, and embedded artwork for YouTube downloads'
 )
 
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Kopuz-org/kopuz/releases/download/v${pkgver}/kopuz_v${pkgver}_x86_64-linux.tar.gz")

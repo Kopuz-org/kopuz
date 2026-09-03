@@ -112,10 +112,12 @@ próprias credenciais e os seus próprios favoritos.
   músicas em compilações nativas de ambiente de trabalho. A reprodução no navegador atualmente usa uma troca normal de faixas.
 - **Modo de Canal**: Alterne entre modos de saída `Estéreo`, `Mono`, `Apenas Esquerdo`, `Apenas Direito`,
   e `Trocar E/D`.
-- **Integração com yt-dlp**: Transfira áudio diretamente do YouTube e outros
-  sites suportados via yt-dlp. Escolha o seu formato de saída (Melhor Áudio, MP3, FLAC,
-  WAV ou vídeo MP4). O FLAC não é recomendado pois o yt-dlp gera áudio com perdas
-  em vez de descodificar de uma fonte sem perdas. Suporta SponsorBlock, divisão de capítulos, cookies, limitação de taxa e mais. Requer `yt-dlp` instalado no seu sistema.
+- **Transferências nativas do YouTube**: Pesquise por música, artista ou álbum
+  e transfira o resultado através do cliente YouTube Music integrado no Kopuz.
+  Mantenha o áudio original ou converta-o para MP3, FLAC, Opus ou WAV, com
+  opções de pasta, metadados, capa, organização por álbum e substituição. O
+  áudio original não requer um programa de transferência externo; a conversão
+  e o pós-processamento usam `ffmpeg`.
 - **Definições de Metadados**: Uma secção dedicada de Metadados nas Definições permite-lhe
   controlar como as imagens de artistas são obtidas. Escolha entre **Capa de Álbum** (usa
   a primeira capa de álbum como foto do artista, predefinido) ou **Foto de Artista**
@@ -388,9 +390,9 @@ O diálogo de configuração oferece dois métodos:
 
 ### Faixas Premium
 
-As faixas bloqueadas pelo Music Premium recorrem a uma resolução local
-[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) quando o caminho principal
-retorna `UNPLAYABLE`, por isso ter o `yt-dlp` instalado pode ajudar nessas situações. O modo anónimo não pode reproduzir conteúdo exclusivo do Premium.
+As contas Music Premium autenticadas resolvem as transmissões de maior qualidade
+através do cliente YouTube nativo do Kopuz. O modo anónimo não consegue
+reproduzir conteúdo exclusivo do Premium.
 
 ## Configuração do SoundCloud
 

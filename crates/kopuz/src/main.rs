@@ -639,11 +639,10 @@ fn App() -> Element {
         use_hook(|| Signal::new_in_scope(::server::DownloadProgress::default(), ScopeId::ROOT));
     pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
-    // Applies detached yt-dlp completions (history + rescan) in this scope —
-    // the job drivers outlive the downloads page and can't write these. There is
-    // no yt-dlp on Android, so the whole module is gated out there.
-    #[cfg(not(target_os = "android"))]
-    pages::ytdlp_jobs::use_ytdlp_completion_sink(config, trigger_rescan);
+    // Applies detached native YouTube completions (history + rescan) in this scope —
+    // the job drivers outlive the downloads page and can't write these. Unlike the
+    // yt-dlp path this replaced, the downloader is in-process, so Android keeps it.
+    pages::youtube_download_jobs::use_youtube_download_completion_sink(config, trigger_rescan);
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
@@ -2513,7 +2512,9 @@ fn App() -> Element {
                             }
                         },
                         #[cfg(not(target_os = "android"))]
-                        Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config } },
+                        Route::YoutubeDownloads => rsx! {
+                            pages::youtube_downloads::YoutubeDownloadsPage { config }
+                        },
                         Route::Settings => rsx! { pages::settings::Settings { config } },
                         #[cfg(not(target_os = "android"))]
                         Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { config } },
