@@ -19,6 +19,11 @@ use crate::config_service::ConfigService;
 use crate::jobs::{JobCtx, JobRunner};
 use crate::session::SessionHandle;
 
+/// Upper bound on a single read from the download stream; a server that
+/// accepts the request and then stalls without closing the socket would
+/// otherwise leave the job Running forever.
+const CHUNK_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 pub struct DownloadsService {
     db: db::Db,
     session: SessionHandle,
@@ -430,7 +435,10 @@ impl DownloadsService {
                             "download server ignored byte range {start}-{end}"
                         )));
                     }
-                    let bytes = response.bytes().await.map_err(http)?;
+                    let bytes = tokio::time::timeout(CHUNK_READ_TIMEOUT, response.bytes())
+                        .await
+                        .map_err(|_| ApiError::internal("download range read timed out"))?
+                        .map_err(http)?;
                     let expected = end - start + 1;
                     if bytes.len() as u64 != expected {
                         return Err(ApiError::internal(format!(
@@ -465,7 +473,10 @@ impl DownloadsService {
         if let Some(user_agent) = user_agent {
             request = request.header(reqwest::header::USER_AGENT, user_agent);
         }
-        let mut response = request.send().await.map_err(http)?;
+        let mut response = tokio::time::timeout(std::time::Duration::from_secs(60), request.send())
+            .await
+            .map_err(|_| ApiError::internal("download request timed out"))?
+            .map_err(http)?;
         response.error_for_status_ref().map_err(http)?;
         let total = response.content_length();
         let extension = response
@@ -486,11 +497,16 @@ impl DownloadsService {
                 .map_err(io)?;
             let mut writer = tokio::io::BufWriter::with_capacity(256 * 1024, file);
             let mut bytes_done = 0;
+            // A stalled socket must not hang the job forever: bound every
+            // chunk read, matching the old download-queue behavior.
             loop {
                 if ctx.cancelled() || self.item_cancelled(key) {
                     return Err(ApiError::new(ErrorCode::Conflict, "download cancelled"));
                 }
-                let chunk = response.chunk().await.map_err(http)?;
+                let chunk = tokio::time::timeout(CHUNK_READ_TIMEOUT, response.chunk())
+                    .await
+                    .map_err(|_| ApiError::internal("download stalled: chunk read timed out"))?
+                    .map_err(http)?;
                 if ctx.cancelled() || self.item_cancelled(key) {
                     return Err(ApiError::new(ErrorCode::Conflict, "download cancelled"));
                 }
