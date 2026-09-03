@@ -128,13 +128,20 @@ async fn drive_download_queue(
             break;
         }
 
-        let cached: HashSet<String> = api
-            .downloads()
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-        downloaded.0.set(cached.clone());
+        // A failed read must not clobber the shared downloaded set (offline
+        // badges everywhere) or forget which keys are already on disk; fall
+        // back to the last known set instead.
+        let cached: HashSet<String> = match api.downloads().await {
+            Ok(keys) => {
+                let cached: HashSet<String> = keys.into_iter().collect();
+                downloaded.0.set(cached.clone());
+                cached
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not list daemon downloads");
+                downloaded.0.peek().clone()
+            }
+        };
         {
             let mut state = queue.write();
             for item in &mut state.items {
