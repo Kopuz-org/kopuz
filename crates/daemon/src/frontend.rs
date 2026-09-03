@@ -1542,13 +1542,9 @@ impl FrontendService {
             let browser = server.yt_browser.unwrap_or(config::Browser::Chrome);
             let (secret, user_id) = match server.service {
                 config::MusicService::YtMusic => {
-                    let secret = server::ytmusic::isolated_profile::launch_signin_and_extract(
-                        browser,
-                        id,
-                        Duration::from_secs(300),
-                    )
-                    .await
-                    .map_err(ApiError::internal)?;
+                    let secret = ensure_ytmusic_signed_in(server.access_token.clone(), browser, id)
+                        .await
+                        .map_err(ApiError::internal)?;
                     let user_id = server::ytmusic::derive_user_id(&secret)
                         .unwrap_or_else(|| "me".to_string());
                     (secret, user_id)
@@ -2997,6 +2993,58 @@ impl FrontendService {
         self.library.invalidate(api::Table::Tracks);
         Ok(())
     }
+}
+
+/// Accept `seed` cookies if they still validate, else try one keepalive
+/// rotation before giving up on them.
+#[cfg(not(target_os = "android"))]
+async fn try_resume_ytmusic(seed: Option<String>) -> Option<String> {
+    let cookies = seed?;
+    if server::provider::validate_ytmusic_cookies(&cookies).await {
+        return Some(cookies);
+    }
+    if let Ok(Some(rotated)) = server::ytmusic::verify_session_keepalive::tick(&cookies).await
+        && server::provider::validate_ytmusic_cookies(&rotated).await
+    {
+        return Some(rotated);
+    }
+    None
+}
+
+/// The old settings-actions flow: resume from stored cookies, then from the
+/// isolated browser profile, and only then force a full browser sign-in,
+/// which must validate before it is trusted. Skipping the resume steps would
+/// wipe the profile and demand password/2FA on every transient error.
+#[cfg(not(target_os = "android"))]
+async fn ensure_ytmusic_signed_in(
+    config_cookies: Option<String>,
+    browser: config::Browser,
+    server_id: &str,
+) -> Result<String, String> {
+    if let Some(cookies) = try_resume_ytmusic(config_cookies).await {
+        return Ok(cookies);
+    }
+
+    let profile = server::ytmusic::isolated_profile::profile_dir(server_id);
+    if profile.is_dir() {
+        let from_profile = server::ytmusic::cookies::extract_from(browser, &profile)
+            .await
+            .ok();
+        if let Some(cookies) = try_resume_ytmusic(from_profile).await {
+            return Ok(cookies);
+        }
+    }
+
+    let cookies = server::ytmusic::isolated_profile::launch_signin_and_extract(
+        browser,
+        server_id,
+        Duration::from_secs(300),
+    )
+    .await?;
+    if !server::provider::validate_ytmusic_cookies(&cookies).await {
+        return Err("sign-in completed but YouTube Music validation still failed".to_string());
+    }
+    Ok(cookies)
 }
 
 #[cfg(test)]
