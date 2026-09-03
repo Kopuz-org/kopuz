@@ -17,6 +17,11 @@ use crate::config_service::ConfigService;
 use crate::jobs::{JobCtx, JobRunner};
 use crate::session::SessionHandle;
 
+/// Upper bound on a single read from the download stream; a server that
+/// accepts the request and then stalls without closing the socket would
+/// otherwise leave the job Running forever.
+const CHUNK_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 pub struct DownloadsService {
     db: db::Db,
     session: SessionHandle,
@@ -252,7 +257,10 @@ impl DownloadsService {
             .read_timeout(Duration::from_secs(15))
             .build()
             .map_err(http)?;
-        let mut response = client.get(url).send().await.map_err(http)?;
+        let mut response = tokio::time::timeout(CHUNK_READ_TIMEOUT, client.get(url).send())
+            .await
+            .map_err(|_| ApiError::internal("download request timed out"))?
+            .map_err(http)?;
         response.error_for_status_ref().map_err(http)?;
 
         let extension = response
@@ -278,7 +286,10 @@ impl DownloadsService {
                 if ctx.cancelled() {
                     return Err(ApiError::internal("download cancelled"));
                 }
-                let chunk = response.chunk().await.map_err(http)?;
+                let chunk = tokio::time::timeout(CHUNK_READ_TIMEOUT, response.chunk())
+                    .await
+                    .map_err(|_| ApiError::internal("download stalled: chunk read timed out"))?
+                    .map_err(http)?;
                 if ctx.cancelled() {
                     return Err(ApiError::internal("download cancelled"));
                 }
