@@ -26,7 +26,14 @@ struct StubLibrary;
 impl QueueMaterializer for StubLibrary {
     async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
         match context {
-            QueueContext::Tracks { keys } => Ok(keys.iter().map(|key| track(key)).collect()),
+            // Keys containing "nope" stay unresolved, standing in for a track
+            // that neither the DB, the transient cache, nor disk can produce;
+            // the favorites contract test uses one to assert NotFound mapping.
+            QueueContext::Tracks { keys } => Ok(keys
+                .iter()
+                .filter(|key| !key.contains("nope"))
+                .map(|key| track(key))
+                .collect()),
             QueueContext::InlineTracks { tracks } => Ok(tracks
                 .iter()
                 .map(|value| Track {

@@ -69,14 +69,20 @@ impl FavoritesService {
         }
         let source = self.active_source();
         let config = self.session.config_watch().borrow().clone();
-        let track = self
+        // Live search results are not in the DB yet; the materializer resolves
+        // them from the library's transient cache so hearting them still works
+        // (record_favorite then upserts the track like the old direct path).
+        let track = match self
             .db
             .tracks_by_keys(&config.active_source, &[key.to_string()])
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()
             .next()
-            .ok_or_else(|| ApiError::not_found("unknown track key"))?;
+        {
+            Some(track) => track,
+            None => self.session.materialize_track(key.to_string()).await?,
+        };
 
         if source.is_favorite(key).await == favorite {
             return Ok(());
