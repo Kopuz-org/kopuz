@@ -139,6 +139,7 @@ pub struct SessionHandle {
     state_rx: watch::Receiver<PlayerState>,
     config_rx: watch::Receiver<config::AppConfig>,
     events: broadcast::Sender<ApiEvent>,
+    materializer: Arc<dyn QueueMaterializer>,
 }
 
 impl SessionHandle {
@@ -195,7 +196,7 @@ impl SessionHandle {
             volume: services.config.volume,
             epoch: Instant::now(),
             events: events.clone(),
-            materializer,
+            materializer: materializer.clone(),
             queue_store: services.queue_store,
             queue_dirty: false,
             recorder: services.recorder,
@@ -215,6 +216,7 @@ impl SessionHandle {
             state_rx,
             config_rx,
             events,
+            materializer,
         }
     }
 
@@ -232,6 +234,17 @@ impl SessionHandle {
 
     pub fn state(&self) -> PlayerState {
         self.state_rx.borrow().clone()
+    }
+
+    /// Resolve a track the database has never seen: live search results live
+    /// only in the library's transient cache, which the materializer can read.
+    pub async fn materialize_track(&self, key: String) -> Result<Track, ApiError> {
+        self.materializer
+            .materialize(&QueueContext::Tracks { keys: vec![key] })
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| ApiError::not_found("unknown track key"))
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<ApiEvent> {
