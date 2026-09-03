@@ -1350,6 +1350,7 @@ fn App() -> Element {
                     player.peek().set_volume(loaded.volume);
                     player.peek().set_channel_mode(loaded.channel_mode);
                     player.peek().set_equalizer(loaded.equalizer.clone());
+                    player.peek().set_replay_gain(loaded.replay_gain);
                     player
                         .peek()
                         .set_device_change_behavior(loaded.device_change_behavior);

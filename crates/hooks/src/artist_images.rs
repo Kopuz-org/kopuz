@@ -275,6 +275,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: artists.iter().map(|a| a.to_string()).collect(),
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 

@@ -1,4 +1,6 @@
-use config::{AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, SampleRateMode};
+use config::{
+    AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, ReplayGainMode, SampleRateMode,
+};
 use dioxus::prelude::*;
 use scrobble::lastfm;
 use scrobble::librefm;
@@ -773,6 +775,54 @@ pub fn SampleRateModeSelector(
             options,
             on_change: move |value: String| on_change.call(SampleRateMode::from_value_str(&value)),
             class: "settings-select",
+        }
+    }
+}
+
+#[component]
+pub fn ReplayGainModeSelector(
+    current: ReplayGainMode,
+    on_change: EventHandler<ReplayGainMode>,
+) -> Element {
+    rsx! {
+        select {
+            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
+            value: current.value_str(),
+            onchange: move |evt| on_change.call(ReplayGainMode::from_value_str(&evt.value())),
+            for mode in ReplayGainMode::ALL {
+                option {
+                    value: mode.value_str(),
+                    selected: *mode == current,
+                    "{i18n::t(mode.i18n_key())}"
+                }
+            }
+        }
+    }
+}
+
+/// A dB slider with a signed monospace readout, for the two ReplayGain trims.
+#[component]
+pub fn GainSlider(value: f32, min: f32, max: f32, on_change: EventHandler<f32>) -> Element {
+    rsx! {
+        div { class: "flex items-center gap-3 min-w-[220px]",
+            input {
+                r#type: "range",
+                min: "{min}",
+                max: "{max}",
+                step: "0.5",
+                value: format!("{value:.1}"),
+                class: "w-40",
+                style: "accent-color: var(--color-indigo-500);",
+                oninput: move |evt| {
+                    if let Ok(parsed) = evt.value().parse::<f32>() {
+                        on_change.call(parsed.clamp(min, max));
+                    }
+                }
+            }
+            span {
+                class: "text-xs font-mono text-white/80 w-16 text-right",
+                {format!("{value:+.1} dB")}
+            }
         }
     }
 }

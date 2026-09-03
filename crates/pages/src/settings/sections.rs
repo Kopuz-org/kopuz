@@ -1,9 +1,10 @@
 use components::settings_items::{
     ChannelModeSelector, DeviceChangeBehaviorSelector, DiscordPresencePausedSettings,
-    DiscordPresenceSettings, EqualizerPanel, LastFmSettings, LibreFmSettings, MusicBrainzSettings,
-    SampleRateModeSelector, SettingItem, SettingsSection, ToggleSetting,
+    DiscordPresenceSettings, EqualizerPanel, GainSlider, LastFmSettings, LibreFmSettings,
+    MusicBrainzSettings, ReplayGainModeSelector, SampleRateModeSelector, SettingItem,
+    SettingsSection, ToggleSetting,
 };
-use config::{AppConfig, FetchStrategy, LYRICS_OFFSET_LIMIT_MS, OfflineQuality};
+use config::{AppConfig, FetchStrategy, LYRICS_OFFSET_LIMIT_MS, OfflineQuality, ReplayGainMode};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -331,6 +332,72 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                         on_change: move |mode| {
                             config.write().channel_mode = mode;
                             ctrl.player.peek().set_channel_mode(mode);
+                        }
+                    }
+                }
+            }
+            SettingItem {
+                title: i18n::t("replay_gain").to_string(),
+                config_key: "replay_gain",
+                control: rsx! {
+                    ReplayGainModeSelector {
+                        current: config.read().replay_gain.mode,
+                        on_change: move |mode| {
+                            let mut settings = config.peek().replay_gain;
+                            settings.mode = mode;
+                            config.write().replay_gain = settings;
+                            ctrl.player.peek().set_replay_gain(settings);
+                        }
+                    }
+                }
+            }
+            if config.read().replay_gain.mode != ReplayGainMode::Off {
+                SettingItem {
+                    title: i18n::t("replay_gain_prevent_clipping").to_string(),
+                    config_key: "replay_gain",
+                    control: rsx! {
+                        ToggleSetting {
+                            enabled: config.read().replay_gain.prevent_clipping,
+                            on_change: move |enabled| {
+                                let mut settings = config.peek().replay_gain;
+                                settings.prevent_clipping = enabled;
+                                config.write().replay_gain = settings;
+                                ctrl.player.peek().set_replay_gain(settings);
+                            }
+                        }
+                    }
+                }
+                SettingItem {
+                    title: i18n::t("replay_gain_preamp").to_string(),
+                    config_key: "replay_gain",
+                    control: rsx! {
+                        GainSlider {
+                            value: config.read().replay_gain.preamp_db,
+                            min: -15.0,
+                            max: 15.0,
+                            on_change: move |db| {
+                                let mut settings = config.peek().replay_gain;
+                                settings.preamp_db = db;
+                                config.write().replay_gain = settings;
+                                ctrl.player.peek().set_replay_gain(settings);
+                            }
+                        }
+                    }
+                }
+                SettingItem {
+                    title: i18n::t("replay_gain_fallback").to_string(),
+                    config_key: "replay_gain",
+                    control: rsx! {
+                        GainSlider {
+                            value: config.read().replay_gain.fallback_gain_db,
+                            min: -15.0,
+                            max: 15.0,
+                            on_change: move |db| {
+                                let mut settings = config.peek().replay_gain;
+                                settings.fallback_gain_db = db;
+                                config.write().replay_gain = settings;
+                                ctrl.player.peek().set_replay_gain(settings);
+                            }
                         }
                     }
                 }

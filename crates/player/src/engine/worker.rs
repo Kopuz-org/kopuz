@@ -23,6 +23,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::Time;
 
 use super::{ActorMsg, SourceFactory};
+use crate::replaygain;
 
 pub(crate) enum WorkerCmd {
     /// Begin decoding into the given ring. Sent once, after `Ready`.
@@ -58,6 +59,9 @@ pub(crate) enum WorkerMsg {
         token: u64,
         source_sample_rate: Option<u32>,
         seekable: bool,
+        /// Read off the probed container, so a service that transcodes and
+        /// drops the tags reports no gain rather than a stale one.
+        replay_gain: config::ReplayGainInfo,
     },
     /// Natural end of the source. The worker stays parked and seekable. The
     /// epoch identifies which ring generation ended, so an `Eof` that races a
@@ -198,6 +202,7 @@ fn run(
         token,
         source_sample_rate,
         seekable,
+        replay_gain: replaygain::from_format(format.as_mut()),
     });
 
     // Wait for the actor's decision. A superseded load simply drops our

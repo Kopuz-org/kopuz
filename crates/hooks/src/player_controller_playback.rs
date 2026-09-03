@@ -83,6 +83,8 @@ impl PlayerController {
         };
 
         let path_str = track.id.uid().to_string();
+        let album_context = self.album_context_at(idx, &track.album_id);
+        let service_replay_gain = track.replay_gain;
         let (restore_seek_secs, clear_pending_resume_on_success) = self.pending_resume_seek(&track);
         let use_crossfade = allow_crossfade
             && self.should_crossfade()
@@ -376,6 +378,8 @@ impl PlayerController {
                     meta,
                     transition,
                     start_at,
+                    album_context,
+                    service_replay_gain,
                     reply: Some(reply_tx),
                 });
 

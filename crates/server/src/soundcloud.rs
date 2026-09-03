@@ -398,6 +398,7 @@ fn parse_track(item: &Value) -> Option<Track> {
         } else {
             vec![artist]
         },
+        replay_gain: config::ReplayGainInfo::default(),
     })
 }
 

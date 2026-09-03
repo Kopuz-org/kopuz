@@ -109,6 +109,7 @@ pub fn track_from_song_data(song: &types::TrackData) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists,
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 
@@ -190,6 +191,7 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: vec![song.attributes.artistName.clone()],
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 

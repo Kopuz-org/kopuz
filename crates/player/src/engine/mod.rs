@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use config::{ChannelMode, EqualizerSettings};
+use config::{ChannelMode, EqualizerSettings, ReplayGainInfo, ReplayGainSettings};
 use symphonia::core::formats::probe::Hint;
 
 /// Builds the media source on the decode worker thread, so slow constructions
@@ -66,6 +66,13 @@ pub struct LoadRequest {
     pub duration: Duration,
     pub transition: Transition,
     pub start_at: Option<Duration>,
+    /// The queue is walking an album, so `ReplayGainMode::Auto` levels this
+    /// track by its album gain instead of its own.
+    pub album_context: bool,
+    /// ReplayGain the media server reported for this track. The stream's own
+    /// tags win where it has them; this is what a transcoded stream, whose
+    /// tags the server dropped, falls back to.
+    pub service_replay_gain: ReplayGainInfo,
     pub reply: Option<LoadReply>,
 }
 
@@ -88,6 +95,7 @@ pub enum Command {
     SetVolume(f32),
     SetChannelMode(ChannelMode),
     SetEqualizer(EqualizerSettings),
+    SetReplayGain(ReplayGainSettings),
     SetDeviceChangeBehavior(config::DeviceChangeBehavior),
     SetSampleRateMode(config::SampleRateMode),
     SetDuration(Duration),

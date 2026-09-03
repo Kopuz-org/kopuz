@@ -464,6 +464,163 @@ impl Default for EqualizerSettings {
     }
 }
 
+/// Which of a track's ReplayGain values to apply.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum ReplayGainMode {
+    #[default]
+    Off,
+    Track,
+    Album,
+    /// Album gain while the queue is walking through one album, track gain
+    /// otherwise — so a shuffled mix levels song to song but an album keeps
+    /// the loud/quiet relief its mastering intended.
+    Auto,
+}
+
+impl ReplayGainMode {
+    pub const ALL: &'static [Self] = &[Self::Off, Self::Track, Self::Album, Self::Auto];
+
+    pub const fn value_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Track => "track",
+            Self::Album => "album",
+            Self::Auto => "auto",
+        }
+    }
+
+    pub fn from_value_str(value: &str) -> Self {
+        match value {
+            "track" => Self::Track,
+            "album" => Self::Album,
+            "auto" => Self::Auto,
+            _ => Self::Off,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Off => "replay_gain_mode_off",
+            Self::Track => "replay_gain_mode_track",
+            Self::Album => "replay_gain_mode_album",
+            Self::Auto => "replay_gain_mode_auto",
+        }
+    }
+}
+
+/// ReplayGain values carried by a track, in the units the tags use: gains in
+/// dB relative to the reference loudness, peaks as a linear sample amplitude
+/// where 1.0 is full scale.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct ReplayGainInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_gain_db: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_peak: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_gain_db: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_peak: Option<f32>,
+}
+
+impl ReplayGainInfo {
+    pub fn is_empty(&self) -> bool {
+        self.track_gain_db.is_none() && self.album_gain_db.is_none()
+    }
+
+    /// Fill in whatever this one is missing from `other`, field by field.
+    /// Used to back a stream's own tags with the values the media server
+    /// reported, which is all a transcoded stream has left.
+    pub fn or(self, other: Self) -> Self {
+        Self {
+            track_gain_db: self.track_gain_db.or(other.track_gain_db),
+            track_peak: self.track_peak.or(other.track_peak),
+            album_gain_db: self.album_gain_db.or(other.album_gain_db),
+            album_peak: self.album_peak.or(other.album_peak),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct ReplayGainSettings {
+    #[serde(default)]
+    pub mode: ReplayGainMode,
+    /// Hold the gain down far enough that the track's stored peak stays under
+    /// full scale. Only does something for tracks that tagged a peak.
+    #[serde(default = "default_prevent_clipping")]
+    pub prevent_clipping: bool,
+    /// Applied on top of every resolved gain, tagged or not.
+    #[serde(default)]
+    pub preamp_db: f32,
+    /// Used in place of a gain for tracks that carry none.
+    #[serde(default)]
+    pub fallback_gain_db: f32,
+}
+
+fn default_prevent_clipping() -> bool {
+    true
+}
+
+impl Default for ReplayGainSettings {
+    fn default() -> Self {
+        Self {
+            mode: ReplayGainMode::Off,
+            prevent_clipping: true,
+            preamp_db: 0.0,
+            fallback_gain_db: 0.0,
+        }
+    }
+}
+
+/// Gains outside this range are a broken tag, not a mastering choice; ±15 dB
+/// already covers everything ReplayGain scanners emit in practice.
+const GAIN_LIMIT_DB: f32 = 15.0;
+
+impl ReplayGainSettings {
+    /// Linear factor to scale a track's samples by. `album_context` says the
+    /// queue is currently walking an album, which is what [`ReplayGainMode::Auto`]
+    /// switches on.
+    pub fn linear_gain(&self, info: ReplayGainInfo, album_context: bool) -> f32 {
+        let prefer_album = match self.mode {
+            ReplayGainMode::Off => return 1.0,
+            ReplayGainMode::Track => false,
+            ReplayGainMode::Album => true,
+            ReplayGainMode::Auto => album_context,
+        };
+
+        let (gain_db, peak) = if prefer_album {
+            (
+                info.album_gain_db.or(info.track_gain_db),
+                info.album_peak.or(info.track_peak),
+            )
+        } else {
+            (
+                info.track_gain_db.or(info.album_gain_db),
+                info.track_peak.or(info.album_peak),
+            )
+        };
+
+        let db = gain_db
+            .filter(|db| db.is_finite())
+            .unwrap_or(self.fallback_gain_db)
+            .clamp(-GAIN_LIMIT_DB, GAIN_LIMIT_DB)
+            + self.preamp_db.clamp(-GAIN_LIMIT_DB, GAIN_LIMIT_DB);
+
+        let mut linear = 10.0_f32.powf(db / 20.0);
+        if self.prevent_clipping
+            && let Some(peak) = peak.filter(|peak| peak.is_finite() && *peak > 0.0)
+        {
+            linear = linear.min(1.0 / peak);
+        }
+
+        if linear.is_finite() {
+            linear.clamp(0.0, 8.0)
+        } else {
+            1.0
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum OfflineQuality {
     Kbps128,
@@ -762,6 +919,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub equalizer: EqualizerSettings,
     #[serde(default)]
+    pub replay_gain: ReplayGainSettings,
+    #[serde(default)]
     pub device_change_behavior: DeviceChangeBehavior,
     #[serde(default)]
     pub sample_rate_mode: SampleRateMode,
@@ -1006,6 +1165,7 @@ impl Default for AppConfig {
             back_behavior: BackBehavior::RewindThenPrev,
             channel_mode: ChannelMode::Stereo,
             equalizer: EqualizerSettings::default(),
+            replay_gain: ReplayGainSettings::default(),
             device_change_behavior: DeviceChangeBehavior::Pause,
             sample_rate_mode: SampleRateMode::System,
             ytdlp_output_dir: String::new(),
@@ -1220,10 +1380,109 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, BackBehavior, Browser, EqualizerSettings, MusicServer, ServerAuth,
-        SettingsLayout,
+        AppConfig, BackBehavior, Browser, EqualizerSettings, MusicServer, ReplayGainInfo,
+        ReplayGainMode, ReplayGainSettings, ServerAuth, SettingsLayout,
     };
     use std::path::PathBuf;
+
+    fn tagged() -> ReplayGainInfo {
+        ReplayGainInfo {
+            track_gain_db: Some(-6.0),
+            track_peak: Some(0.5),
+            album_gain_db: Some(-3.0),
+            album_peak: Some(0.9),
+        }
+    }
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 1e-4,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn off_leaves_the_signal_alone() {
+        let settings = ReplayGainSettings::default();
+        assert_eq!(settings.mode, ReplayGainMode::Off);
+        assert_close(settings.linear_gain(tagged(), true), 1.0);
+    }
+
+    #[test]
+    fn track_and_album_modes_pick_their_own_gain() {
+        let track = ReplayGainSettings {
+            mode: ReplayGainMode::Track,
+            prevent_clipping: false,
+            ..Default::default()
+        };
+        let album = ReplayGainSettings {
+            mode: ReplayGainMode::Album,
+            ..track
+        };
+        assert_close(
+            track.linear_gain(tagged(), false),
+            10.0_f32.powf(-6.0 / 20.0),
+        );
+        assert_close(
+            album.linear_gain(tagged(), false),
+            10.0_f32.powf(-3.0 / 20.0),
+        );
+    }
+
+    #[test]
+    fn auto_follows_the_album_context() {
+        let settings = ReplayGainSettings {
+            mode: ReplayGainMode::Auto,
+            prevent_clipping: false,
+            ..Default::default()
+        };
+        assert_close(
+            settings.linear_gain(tagged(), true),
+            10.0_f32.powf(-3.0 / 20.0),
+        );
+        assert_close(
+            settings.linear_gain(tagged(), false),
+            10.0_f32.powf(-6.0 / 20.0),
+        );
+    }
+
+    #[test]
+    fn preamp_and_fallback_apply_to_untagged_tracks() {
+        let settings = ReplayGainSettings {
+            mode: ReplayGainMode::Track,
+            prevent_clipping: false,
+            preamp_db: 2.0,
+            fallback_gain_db: -4.0,
+        };
+        assert_close(
+            settings.linear_gain(ReplayGainInfo::default(), false),
+            10.0_f32.powf(-2.0 / 20.0),
+        );
+    }
+
+    #[test]
+    fn clip_prevention_caps_the_gain_at_the_stored_peak() {
+        let info = ReplayGainInfo {
+            track_gain_db: Some(6.0),
+            track_peak: Some(0.8),
+            ..Default::default()
+        };
+        let settings = ReplayGainSettings {
+            mode: ReplayGainMode::Track,
+            prevent_clipping: true,
+            ..Default::default()
+        };
+        assert_close(settings.linear_gain(info, false), 1.25);
+
+        let unclamped = ReplayGainSettings {
+            prevent_clipping: false,
+            ..settings
+        };
+        assert_close(
+            unclamped.linear_gain(info, false),
+            10.0_f32.powf(6.0 / 20.0),
+        );
+    }
 
     #[test]
     fn legacy_five_band_custom_eq_migrates_to_nearest_slots() {

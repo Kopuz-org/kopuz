@@ -5,4 +5,5 @@ pub mod decoder;
 pub mod engine;
 pub mod eq;
 pub mod player;
+pub(crate) mod replaygain;
 pub mod systemint;

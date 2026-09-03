@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use config::{ChannelMode, EqualizerSettings};
+use config::{ChannelMode, EqualizerSettings, ReplayGainInfo, ReplayGainSettings};
 
 use crate::engine::{
     ActorMsg, AudioSink, Command, CpalSink, EngineHandle, EngineStatus, Event, LoadReply,
@@ -57,6 +57,10 @@ pub struct LoadArgs {
     pub meta: NowPlayingMeta,
     pub transition: Transition,
     pub start_at: Option<Duration>,
+    /// The queue is walking an album; see [`LoadRequest::album_context`].
+    pub album_context: bool,
+    /// See [`LoadRequest::service_replay_gain`].
+    pub service_replay_gain: ReplayGainInfo,
     /// Resolves once the source is playing or failed; dropped on cancellation.
     pub reply: Option<LoadReply>,
 }
@@ -117,6 +121,8 @@ impl Player {
             meta,
             transition,
             start_at,
+            album_context,
+            service_replay_gain,
             reply,
         } = args;
         self.engine.send(Command::Load(LoadRequest {
@@ -125,6 +131,8 @@ impl Player {
             duration: meta.duration,
             transition,
             start_at,
+            album_context,
+            service_replay_gain,
             reply,
         }));
         self.now_playing = Some(meta);
@@ -217,6 +225,11 @@ impl Player {
 
     pub fn set_equalizer(&self, settings: EqualizerSettings) {
         self.engine.send(Command::SetEqualizer(settings));
+    }
+
+    /// Takes effect on the playing track too, not just the next one.
+    pub fn set_replay_gain(&self, settings: ReplayGainSettings) {
+        self.engine.send(Command::SetReplayGain(settings));
     }
 
     /// Whether playback keeps going or holds paused after migrating to a new
