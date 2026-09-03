@@ -24,7 +24,7 @@ impl std::fmt::Display for BrowserBin {
 
 pub(crate) fn browser_candidates(browser: Browser) -> &'static [&'static str] {
     match browser {
-        Browser::Brave => &["brave", "brave-browser"],
+        Browser::Brave => &["brave", "brave-browser", "brave-origin"],
         Browser::Chrome => &["google-chrome", "google-chrome-stable", "chrome"],
         Browser::Chromium => &["chromium", "chromium-browser"],
         Browser::Edge => &[
