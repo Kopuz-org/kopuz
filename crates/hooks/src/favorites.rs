@@ -21,11 +21,17 @@ pub fn toggle_favorite(track: Option<Track>) {
 
     spawn(async move {
         let key = track.id.key().to_string();
-        let favorite = api
-            .favorites()
-            .await
-            .map(|favorites| favorites.refs.contains(&key))
-            .unwrap_or(false);
+        // Guessing "not favorited" on a failed read would invert the toggle
+        // (sending favorite=true for an already-favorited track no-ops), so a
+        // failed read fails the whole action.
+        let favorite = match api.favorites().await {
+            Ok(favorites) => favorites.refs.contains(&key),
+            Err(error) => {
+                tracing::warn!(%error, track = %track.id.uid(), "favorite state read failed");
+                crate::toast::toast_error("Couldn't update favorite");
+                return;
+            }
+        };
         if let Err(error) = api.set_favorite(key, !favorite).await {
             tracing::warn!(%error, track = %track.id.uid(), "favorite update failed");
             let msg = match track.id.service() {
@@ -47,18 +53,26 @@ pub fn set_favorite_many(tracks: Vec<Track>, on: bool) {
     let api = consume_context::<Arc<dyn KopuzApi>>();
 
     spawn(async move {
-        let current: std::collections::HashSet<String> = api
-            .favorites()
-            .await
-            .map(|favorites| favorites.refs.into_iter().collect())
-            .unwrap_or_default();
+        // The current set only exists to skip writes that are already in the
+        // desired state; when the read fails, push every key instead of
+        // silently skipping them all (set_favorite is idempotent).
+        let current: Option<std::collections::HashSet<String>> = match api.favorites().await {
+            Ok(favorites) => Some(favorites.refs.into_iter().collect()),
+            Err(error) => {
+                tracing::warn!(%error, "favorite state read failed");
+                None
+            }
+        };
         let mut failed = false;
         for track in tracks {
             let key = track.id.key().to_string();
             if key.trim().is_empty() {
                 continue;
             }
-            if current.contains(&key) == on {
+            if current
+                .as_ref()
+                .is_some_and(|current| current.contains(&key) == on)
+            {
                 continue;
             }
             if let Err(error) = api.set_favorite(key, on).await {
