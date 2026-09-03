@@ -95,22 +95,10 @@ pub fn LibraryPage(
     });
 
     // Remote sync (servers). Local never calls this — its refresh is `on_rescan`.
-    let mut is_loading = use_signal(|| false);
     let mut has_fetched = use_signal(|| false);
-    let mut fetch_generation = use_signal(|| 0usize);
     let mut sync_server = move || {
         has_fetched.set(true);
-        is_loading.set(true);
-        fetch_generation.with_mut(|g| *g += 1);
-        let current_gen = *fetch_generation.peek();
-        spawn(async move {
-            if *fetch_generation.read() == current_gen {
-                let _ = crate::server::subsonic_sync::sync_server_library(true).await;
-                if *fetch_generation.read() == current_gen {
-                    is_loading.set(false);
-                }
-            }
-        });
+        crate::server::subsonic_sync::spawn_library_sync(true);
     };
     // First visit with an empty server library → auto-pull once.
     use_effect(move || {
@@ -572,7 +560,7 @@ pub fn LibraryPage(
                     scroll_positions.write().insert(Route::Library, scroll);
                 },
                 if is_empty {
-                    if window.total.read().is_none() || *is_loading.read() {
+                    if window.total.read().is_none() || crate::server::subsonic_sync::SYNC_RUNNING() {
                         div { class: "flex items-center justify-center py-12",
                             i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
                         }
@@ -581,7 +569,7 @@ pub fn LibraryPage(
                     }
                 } else {
                     {tracks_nodes.into_iter()}
-                    if *is_loading.read() {
+                    if crate::server::subsonic_sync::SYNC_RUNNING() {
                         div { class: "flex items-center justify-center py-4",
                             i { class: "fa-solid fa-spinner fa-spin text-xl text-white/20" }
                         }
