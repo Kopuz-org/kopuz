@@ -1245,6 +1245,7 @@ fn App() -> Element {
         let queue_snapshot = queue.read().clone();
         let shuffle_order_snapshot = ctrl.shuffle_order.read().clone();
         let shuffle_enabled_snapshot = *ctrl.shuffle.read();
+        let loop_mode_snapshot = *ctrl.loop_mode.read();
 
         let queue_state = queue_state::build_snapshot(
             &queue_snapshot,
@@ -1253,6 +1254,7 @@ fn App() -> Element {
             *is_playing.read(),
             &shuffle_order_snapshot,
             shuffle_enabled_snapshot,
+            loop_mode_snapshot,
         );
 
         if *pending_queue_state_snapshot.peek() != queue_state {
@@ -1370,6 +1372,7 @@ fn App() -> Element {
                             progress_secs: snap.progress_secs,
                             shuffle_order: snap.shuffle_order,
                             shuffle_enabled: snap.shuffle_enabled,
+                            loop_mode: snap.loop_mode,
                         })
                     })
                 })
@@ -1384,6 +1387,7 @@ fn App() -> Element {
                             queue_state.progress_secs,
                             queue_state.shuffle_order,
                             queue_state.shuffle_enabled,
+                            queue_state.loop_mode,
                         );
                     }
                 }

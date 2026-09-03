@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO playlists (source, source_pl_id, name, cover_path, image_tag) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(source, source_pl_id) DO UPDATE SET name=?3, cover_path=?4, image_tag=?5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "a88c698b096612ca35d774805c417b7502944dfa1d91df0fbe8aba5ca2ddccbc"
+}

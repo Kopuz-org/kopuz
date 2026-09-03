@@ -1,0 +1,1 @@
+ALTER TABLE queue_state ADD COLUMN loop_mode INTEGER NOT NULL DEFAULT 0;

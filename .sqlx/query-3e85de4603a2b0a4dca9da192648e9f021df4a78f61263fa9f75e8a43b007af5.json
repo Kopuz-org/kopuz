@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM artist_images WHERE artist_norm = ?1 AND kind = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "3e85de4603a2b0a4dca9da192648e9f021df4a78f61263fa9f75e8a43b007af5"
+}

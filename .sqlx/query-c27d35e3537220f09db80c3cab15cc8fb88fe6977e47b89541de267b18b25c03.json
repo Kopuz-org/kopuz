@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE albums SET cover_path = ?3, manual_cover = ?4 WHERE source = ?1 AND source_album_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "c27d35e3537220f09db80c3cab15cc8fb88fe6977e47b89541de267b18b25c03"
+}

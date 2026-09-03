@@ -25,6 +25,24 @@ pub enum LoopMode {
     Track,
 }
 
+impl LoopMode {
+    pub fn to_u8(self) -> u8 {
+        match self {
+            LoopMode::None => 0,
+            LoopMode::Queue => 1,
+            LoopMode::Track => 2,
+        }
+    }
+
+    pub fn from_u8(v: u8) -> Self {
+        match v {
+            1 => LoopMode::Queue,
+            2 => LoopMode::Track,
+            _ => LoopMode::None,
+        }
+    }
+}
+
 /// What the UI intends to be playing. The `token` is the engine session token;
 /// event consumers filter by it, which is what lets one signal replace the old
 /// three-way cancellation (task cancel + engine cancel + generation bump).

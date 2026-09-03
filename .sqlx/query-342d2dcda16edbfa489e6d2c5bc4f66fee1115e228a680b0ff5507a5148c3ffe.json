@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM folder_playlists WHERE playlist_ref = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "342d2dcda16edbfa489e6d2c5bc4f66fee1115e228a680b0ff5507a5148c3ffe"
+}
