@@ -135,6 +135,11 @@ enum SessionCmd {
     LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
     LoadFinished(LoadFinished),
     BufferProgress(BufferProgressEvent),
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    ArtworkFetched {
+        token: u64,
+        meta: Box<NowPlayingMeta>,
+    },
 }
 
 #[derive(Clone)]
@@ -750,6 +755,11 @@ impl Session {
             SessionCmd::LoadPrepared(result) => self.handle_prepared_load(*result, state_tx),
             SessionCmd::LoadFinished(result) => self.handle_load_finished(result, state_tx),
             SessionCmd::BufferProgress(event) => self.handle_buffer_progress(event, state_tx),
+            SessionCmd::ArtworkFetched { token, meta } => {
+                if self.intent.token() == token {
+                    self.player.update_metadata(*meta);
+                }
+            }
         }
     }
 

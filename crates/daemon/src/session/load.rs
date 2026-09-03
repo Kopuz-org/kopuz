@@ -305,6 +305,26 @@ impl Session {
             prepared.bitrate,
         );
 
+        // macOS Now Playing needs a file path (`NSImage initWithContentsOfFile`
+        // cannot load a URL), so a remote cover is fetched to a temp file in
+        // the background and re-pushed; the other platforms take URLs as-is.
+        #[cfg(target_os = "macos")]
+        let artwork_fetch = prepared
+            .artwork
+            .as_deref()
+            .filter(|artwork| artwork.starts_with("http://") || artwork.starts_with("https://"))
+            .map(|url| {
+                (
+                    url.to_string(),
+                    NowPlayingMeta {
+                        title: prepared.track.title.clone(),
+                        artist: prepared.track.artist.clone(),
+                        album: prepared.track.album.clone(),
+                        duration: Duration::from_secs(prepared.track.duration),
+                        artwork: None,
+                    },
+                )
+            });
         let (reply_tx, reply_rx) = oneshot::channel();
         self.player.load(LoadArgs {
             token: prepared.token,
@@ -321,6 +341,20 @@ impl Session {
             reply: Some(reply_tx),
         });
         let token = prepared.token;
+        #[cfg(target_os = "macos")]
+        if let Some((url, mut meta)) = artwork_fetch {
+            let artwork_tx = self.cmd_tx.clone();
+            tokio::spawn(async move {
+                let Some(path) = fetch_cover_to_temp(&url).await else {
+                    return;
+                };
+                meta.artwork = Some(path);
+                let _ = artwork_tx.send(SessionCmd::ArtworkFetched {
+                    token,
+                    meta: Box::new(meta),
+                });
+            });
+        }
         let tx = self.cmd_tx.clone();
         let task = tokio::spawn(async move {
             let result = reply_rx.await.ok();
@@ -410,6 +444,35 @@ impl Session {
             }
         }
     }
+}
+
+/// Download a cover to a temp file named by its URL hash, so repeated plays
+/// of the same album reuse the file instead of growing the temp dir.
+#[cfg(target_os = "macos")]
+async fn fetch_cover_to_temp(url: &str) -> Option<String> {
+    use sha2::{Digest as _, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let digest = hasher.finalize();
+    let mut name = String::from("kopuz_cover_");
+    for byte in &digest[..12] {
+        use std::fmt::Write as _;
+        let _ = write!(name, "{byte:02x}");
+    }
+    name.push_str(".jpg");
+    let path = std::env::temp_dir().join(name);
+    if tokio::fs::metadata(&path).await.is_ok() {
+        return Some(path.to_string_lossy().to_string());
+    }
+    let fetch = async {
+        let response = reqwest::get(url).await.ok()?.error_for_status().ok()?;
+        response.bytes().await.ok()
+    };
+    let bytes = tokio::time::timeout(Duration::from_secs(30), fetch)
+        .await
+        .ok()??;
+    tokio::fs::write(&path, &bytes).await.ok()?;
+    Some(path.to_string_lossy().to_string())
 }
 
 pub(super) enum ClassifiedSource {
