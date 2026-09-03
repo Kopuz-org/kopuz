@@ -22,14 +22,6 @@ impl Session {
         let use_crossfade = allow_crossfade
             && self.should_crossfade()
             && restore_seek.is_none_or(|position| position.is_zero());
-        let transition_model = if use_crossfade {
-            let Some(model) = transition_model else {
-                return false;
-            };
-            Some(model)
-        } else {
-            None
-        };
         let crossfade_duration = Duration::from_secs(self.config.crossfade_seconds as u64);
         let item_ref = PlaybackItemRef::parse(&track_key);
         let is_radio = item_ref.is_radio();
@@ -106,6 +98,42 @@ impl Session {
             && local_path.is_none()
             && remote_ref.is_none()
         {
+            // A crossfade candidate that cannot resolve is dropped whole; the
+            // end-of-track advance retries on the committed model and reports
+            // through the branch below.
+            if transition_model.is_some() {
+                return false;
+            }
+            // The caller already moved the queue pointer and will publish, so
+            // a silent return would present the new track as playing while the
+            // old audio continues. Fail the way a resolve failure would.
+            tracing::warn!(
+                queue_index = idx,
+                title = %track.title,
+                radio = is_radio,
+                "no source can play this track"
+            );
+            self.cancel_load_task();
+            self.cancel_radio_task();
+            self.pending_transition = None;
+            self.player.stop_for_transition();
+            self.set_intent(PlaybackIntent::Stopped);
+            self.phase = ApiPhase::Idle;
+            self.buffered.clear();
+            self.position = Some(PositionAnchor {
+                ms: 0,
+                at_ms: self.now_ms(),
+                playing: false,
+            });
+            let message = if is_radio {
+                "couldn't load this track: the radio station or stream is unknown"
+            } else {
+                "couldn't load this track: no connected source can provide it"
+            };
+            self.error = Some(api::ErrorBody {
+                code: api::ErrorCode::SourceUnreachable,
+                message: message.to_string(),
+            });
             return false;
         }
 
@@ -148,7 +176,11 @@ impl Session {
             self.radio_task = Some(handle);
         }
 
-        if let Some(model) = transition_model {
+        if use_crossfade {
+            let Some(model) = transition_model else {
+                self.fail_load(token, "crossfade transition has no queue candidate");
+                return false;
+            };
             self.pending_transition = Some(PendingTransition {
                 model,
                 to_token: token,
