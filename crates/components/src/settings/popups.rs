@@ -2,6 +2,11 @@ use crate::settings_items::MultiDirectoryPicker;
 use config::{Browser, MusicService};
 use dioxus::prelude::*;
 
+const APPLE_MUSIC_STOREFRONTS: &[&str] = &[
+    "us", "gb", "jp", "de", "fr", "au", "br", "mx", "kr", "nl", "it", "es", "ca", "ua", "tr",
+];
+const CUSTOM_APPLE_MUSIC_STOREFRONT: &str = "__custom";
+
 #[component]
 pub fn AddLocalSourcePopup(
     name: Signal<String>,
@@ -444,14 +449,38 @@ fn ServerServiceFields(
             div { class: "mb-2",
                 label { class: "text-xs text-white/60 block mb-1", "Storefront" }
                 select {
-                    onchange: move |e| apple_music_storefront.set(e.value()),
+                    onchange: move |e| {
+                        let storefront = e.value();
+                        apple_music_storefront.set(
+                            if storefront == CUSTOM_APPLE_MUSIC_STOREFRONT {
+                                String::new()
+                            } else {
+                                storefront
+                            },
+                        );
+                    },
                     onkeydown: move |e| e.stop_propagation(),
-                    for code in &["us", "gb", "jp", "de", "fr", "au", "br", "mx", "kr", "nl", "it", "es", "ca"] {
+                    for code in APPLE_MUSIC_STOREFRONTS {
                         option {
                             value: "{code}",
                             selected: apple_music_storefront() == *code,
                             "{code}"
                         }
+                    }
+                    option {
+                        value: CUSTOM_APPLE_MUSIC_STOREFRONT,
+                        selected: !APPLE_MUSIC_STOREFRONTS
+                            .contains(&apple_music_storefront().as_str()),
+                        "Custom…"
+                    }
+                }
+                if !APPLE_MUSIC_STOREFRONTS.contains(&apple_music_storefront().as_str()) {
+                    input {
+                        class: "w-full mt-2",
+                        placeholder: "Storefront ID",
+                        value: "{apple_music_storefront()}",
+                        oninput: move |e| apple_music_storefront.set(e.value()),
+                        onkeydown: move |e| e.stop_propagation(),
                     }
                 }
             }
