@@ -149,6 +149,13 @@ pub async fn player(
         req = req
             .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
             .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
+    } else if client.client_name == "VISIONOS" {
+        req = req
+            .header("Origin", "https://www.youtube.com")
+            .header("Referer", "https://www.youtube.com/");
+    }
+    if let Some(vd) = extras.visitor_data {
+        req = req.header("X-Goog-Visitor-Id", vd);
     }
     if client.login_supported
         && let Some(c) = cookies

@@ -15,8 +15,7 @@ use serde_json::Value;
 use tokio::sync::OnceCell;
 use tracing::Instrument;
 
-use super::botguard;
-use super::clients::{ANDROID_VR_1_61_48, STREAM_FALLBACK_CLIENTS, WEB_REMIX, YouTubeClient};
+use super::clients::{STREAM_FALLBACK_CLIENTS, VISIONOS, WEB_REMIX, YouTubeClient};
 use super::decipher;
 use super::innertube::{self, PlayerExtras};
 
@@ -81,116 +80,74 @@ async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
 /// ANDROID_VR bare.
 #[tracing::instrument(name = "yt.resolve", skip(cookies), fields(video_id = %video_id, anon = cookies.is_none()))]
 pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
-    // A Premium *subscription* — not merely being signed in — is what exempts a
-    // stream from a PO token. The signal is the itag: subscribers get 774-class
-    // Opus; a signed-in *free* account gets the same 251 as anon and still 403s
-    // on deep ranges without a content pot. So only short-circuit on a Premium
-    // itag; otherwise fall through to the pot path (which ignores cookies — free
-    // accounts cap at 251 regardless, so nothing is lost).
-    // Hold a non-Premium decipher result as a graceful fallback: if no pot can
-    // be minted (e.g. minter not running / unported platform), this still plays
-    // from the start — only deep seeks 403 — which beats total failure.
-    let mut decipher_fallback: Option<YtStreamInfo> = None;
+    // 1. Authenticated sessions with Premium: try WEB_REMIX decipher for 256k itag 774.
     if let Some(c) = cookies {
         let uid = super::derive_user_id(c);
         if let Some(u) = &uid {
             seed_tier_from_db(u).await;
         }
-        // Skip the Premium decipher attempt for accounts already known to be
-        // non-Premium — but only when a pot can actually be minted (the decipher
-        // stream is our fallback when it can't). Saves a /player round-trip per
-        // track once the account's tier is learned.
-        let skip = uid.as_deref().is_some_and(known_non_premium) && botguard::is_available();
-        if !skip {
-            match try_native_decipher(video_id, cookies).await {
-                Ok(info) if is_premium_itag(info.itag) => {
-                    if let Some(u) = &uid {
-                        remember_tier(u, true);
-                    }
+        if uid.as_deref().is_some_and(known_premium) {
+            if let Ok(info) = try_native_decipher(video_id, cookies).await {
+                if is_premium_itag(info.itag) {
                     return Ok(info);
                 }
-                Ok(info) => {
-                    if let Some(u) = &uid {
-                        remember_tier(u, false);
-                    }
-                    tracing::debug!(itag = ?info.itag, "signed-in but non-Premium — needs a content pot, trying ANDROID_VR");
-                    decipher_fallback = Some(info);
-                }
-                Err(e) => tracing::debug!(error = %e, "premium decipher failed — falling back"),
             }
         }
     }
 
-    // Anonymous: ANDROID_VR + content_pot. Mint + visitor_data in parallel.
-    let mut last_err = {
-        let (pot, visitor) = tokio::join!(botguard::mint_content_pot(video_id), visitor_data(None));
-        match (pot, visitor) {
-            (Ok(pot), Ok(visitor)) => {
-                let extras = PlayerExtras {
-                    content_pot: Some(&pot),
-                    visitor_data: Some(visitor),
-                    signature_timestamp: None,
-                };
-                match innertube::player(ANDROID_VR_1_61_48, video_id, None, extras).await {
-                    Ok(json) => {
-                        let status = PlayabilityStatus::from_response(&json);
-                        if status == PlayabilityStatus::Ok {
-                            if let Some(info) = pick_plain_format(&json, ANDROID_VR_1_61_48) {
-                                return Ok(info);
-                            }
-                            "ANDROID_VR+pot: no plain audio format".to_string()
-                        } else {
-                            format!(
-                                "ANDROID_VR+pot playability {}: {}",
-                                status.as_str(),
-                                playability_reason(&json)
-                            )
-                        }
-                    }
-                    Err(e) => format!("ANDROID_VR+pot: {e}"),
-                }
-            }
-            (Err(e), _) => format!("PO mint: {e}"),
-            (_, Err(e)) => format!("visitor_data: {e}"),
-        }
-    };
-    tracing::debug!(%last_err, "ANDROID_VR+pot failed — trying bare clients");
-
-    for client in STREAM_FALLBACK_CLIENTS {
-        let cookies_for = if client.login_supported {
-            cookies
-        } else {
-            None
+    // 2. Primary resolver: VISIONOS. Returns plain direct audio formats (itag 251/140)
+    // without deciphering or bot-check blocks, supporting full Range seeks (range_safe: true).
+    {
+        let (visitor, player) = tokio::join!(visitor_data(cookies), decipher::player_js(video_id));
+        let extras = PlayerExtras {
+            visitor_data: visitor.ok(),
+            signature_timestamp: player.as_ref().ok().map(|p| p.1),
+            ..Default::default()
         };
-        match innertube::player(*client, video_id, cookies_for, PlayerExtras::default()).await {
+        match innertube::player(VISIONOS, video_id, cookies, extras).await {
             Ok(json) => {
                 let status = PlayabilityStatus::from_response(&json);
-                if !status.is_attemptable() {
-                    last_err = format!(
-                        "{} playability {}: {}",
-                        client.client_name,
-                        status.as_str(),
-                        playability_reason(&json)
+                if status == PlayabilityStatus::Ok {
+                    if let Some(info) = pick_plain_format(&json, VISIONOS) {
+                        tracing::info!(itag = ?info.itag, "resolved stream via VISIONOS (plain, range_safe)");
+                        return Ok(info);
+                    }
+                } else {
+                    tracing::debug!(
+                        status = %status.as_str(),
+                        reason = %playability_reason(&json),
+                        "VISIONOS playability failed"
                     );
-                    continue;
                 }
-                if let Some(info) = pick_plain_format(&json, *client) {
-                    return Ok(info);
-                }
-                last_err = format!("{} returned no plain audio formats", client.client_name);
             }
-            Err(e) => last_err = format!("{}: {e}", client.client_name),
+            Err(e) => tracing::debug!(error = %e, "VISIONOS player request failed"),
         }
     }
-    if let Some(mut info) = decipher_fallback {
-        tracing::warn!(
-            "no content pot available (minter not running?) — using the non-Premium decipher \
-             stream sequentially (range requests 403 without a pot, so seeking is disabled)"
+
+    // 3. Fallback: native decipher via WEB_REMIX.
+    if let Ok(mut info) = try_native_decipher(video_id, cookies).await {
+        tracing::info!(
+            itag = ?info.itag,
+            "resolved stream via WEB_REMIX native decipher (sequential)"
         );
         info.range_safe = false;
         return Ok(info);
     }
-    Err(format!("all stream paths failed; last error: {last_err}"))
+
+    // 4. Last resort: bare clients.
+    for client in STREAM_FALLBACK_CLIENTS {
+        let cookies_for = if client.login_supported { cookies } else { None };
+        if let Ok(json) = innertube::player(*client, video_id, cookies_for, PlayerExtras::default()).await {
+            let status = PlayabilityStatus::from_response(&json);
+            if status.is_attemptable() {
+                if let Some(info) = pick_plain_format(&json, *client) {
+                    return Ok(info);
+                }
+            }
+        }
+    }
+
+    Err("all stream paths failed".to_string())
 }
 
 /// A Premium *subscription* yields 774-class Opus and is PO-token-exempt. Any
@@ -237,10 +194,18 @@ fn account_premium() -> &'static Mutex<HashMap<String, (Instant, bool)>> {
     ACCOUNT_PREMIUM.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+#[allow(dead_code)]
 fn known_non_premium(user_id: &str) -> bool {
     matches!(
         account_premium().lock().ok().and_then(|m| m.get(user_id).copied()),
         Some((at, false)) if at.elapsed() < FREE_TIER_TTL
+    )
+}
+
+fn known_premium(user_id: &str) -> bool {
+    matches!(
+        account_premium().lock().ok().and_then(|m| m.get(user_id).copied()),
+        Some((_, true))
     )
 }
 
@@ -279,6 +244,7 @@ async fn seed_tier_from_db(user_id: &str) {
     }
 }
 
+#[allow(dead_code)]
 fn remember_tier(user_id: &str, premium: bool) {
     if !premium {
         // Asymmetric trust (see ACCOUNT_PREMIUM): a known-premium account is
@@ -568,7 +534,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "hits live YouTube + needs a system JS runtime"]
     async fn resolve_populates_bitrate_itag_duration() {
-        let info = resolve("dQw4w9WgXcQ", None)
+        let info = resolve("Oe8ix1u3lvE", None)
             .await
             .expect("resolve should succeed");
         tracing::debug!(
@@ -584,5 +550,6 @@ mod tests {
             info.bitrate
         );
         assert!(info.duration_secs.unwrap_or(0) > 0, "duration must be set");
+        assert!(info.range_safe, "stream must be range_safe");
     }
 }

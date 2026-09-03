@@ -99,6 +99,22 @@ pub const ANDROID_VR_1_61_48: YouTubeClient = YouTubeClient {
     is_embedded: false,
 };
 
+pub const VISIONOS: YouTubeClient = YouTubeClient {
+    client_name: "VISIONOS",
+    client_version: "1.02",
+    client_id: "101",
+    user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 \
+                 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+    os_name: "visionOS",
+    os_version: "26.5.23O471",
+    device_make: "Apple",
+    device_model: "RealityDevice17,1",
+    android_sdk_version: None,
+    login_supported: false,
+    use_signature_timestamp: true,
+    is_embedded: false,
+};
+
 /// Default client for browse/search and the main-path `/player` attempt
 /// inside the fallback chain — WEB_REMIX with the user's auth cookies.
 pub const MAIN_CLIENT: YouTubeClient = WEB_REMIX;
