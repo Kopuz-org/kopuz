@@ -4,6 +4,7 @@ pub static DB_HANDLE: std::sync::OnceLock<db::Db> = std::sync::OnceLock::new();
 pub static BOOT_CONFIG: std::sync::OnceLock<config::AppConfig> = std::sync::OnceLock::new();
 static REMOTE_API: std::sync::OnceLock<Arc<dyn api::KopuzApi>> = std::sync::OnceLock::new();
 static DATABASE_LEASE: std::sync::OnceLock<daemon::DatabaseLease> = std::sync::OnceLock::new();
+static STARTUP_ERROR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 #[cfg(not(target_os = "android"))]
 static DISCOVERY_GUARD: std::sync::OnceLock<daemon::discovery::DiscoveryGuard> =
     std::sync::OnceLock::new();
@@ -15,6 +16,16 @@ pub fn is_embedded() -> bool {
 
 pub fn remote_api() -> Option<Arc<dyn api::KopuzApi>> {
     REMOTE_API.get().cloned()
+}
+
+/// A fatal backend-selection failure recorded before the window exists; the
+/// app renders it as an error screen instead of starting any daemon service.
+pub fn set_startup_error(message: String) {
+    let _ = STARTUP_ERROR.set(message);
+}
+
+pub fn startup_error() -> Option<&'static str> {
+    STARTUP_ERROR.get().map(String::as_str)
 }
 
 #[cfg(not(target_os = "android"))]

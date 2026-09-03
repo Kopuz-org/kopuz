@@ -294,8 +294,18 @@ fn main() {
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
-        let config_tracing_enabled = app_db::select_desktop_backend()
-            .unwrap_or_else(|error| panic!("Kopuz daemon ownership failed: {error}"));
+        // A backend-selection failure (another instance holds the daemon
+        // lock, unreachable daemon, ...) must not panic here: the tracing
+        // subscriber doesn't exist yet, so nothing would be logged and no
+        // window would explain anything. Record it and let App() render the
+        // same error screen it uses for the other startup failures.
+        let config_tracing_enabled = match app_db::select_desktop_backend() {
+            Ok(enabled) => enabled,
+            Err(error) => {
+                app_db::set_startup_error(format!("Kopuz daemon ownership failed: {error}"));
+                false
+            }
+        };
 
         // Guards live in a global inside `logging`; flushed by
         // logging::shutdown() after launch returns or on Ctrl+C.
@@ -305,7 +315,9 @@ fn main() {
             tracing::info!("{line}");
         }
 
-        if app_db::is_embedded() {
+        if let Some(error) = app_db::startup_error() {
+            tracing::error!("{error}");
+        } else if app_db::is_embedded() {
             legacy::migrate_locations();
             let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
         } else {
@@ -313,7 +325,7 @@ fn main() {
         }
 
         #[cfg(target_os = "macos")]
-        if app_db::is_embedded() {
+        if app_db::startup_error().is_none() && app_db::is_embedded() {
             player::systemint::init();
         }
 
@@ -639,6 +651,9 @@ fn App() -> Element {
     let _ = std::fs::create_dir_all(cover_cache());
 
     let embedded_result = use_hook(|| {
+        if let Some(error) = app_db::startup_error() {
+            return Err(error.to_string());
+        }
         app_db::DB_HANDLE
             .get()
             .cloned()
