@@ -442,6 +442,7 @@ pub fn add_server(
     let is_soundcloud = selected_service == MusicService::SoundCloud;
     let is_spotify = selected_service == MusicService::Spotify;
     let is_browser_signin = selected_service.uses_browser_signin();
+    let apple_music_storefront_value = apple_music_storefront().trim().to_string();
 
     if server_name().trim().is_empty() {
         error.set(Some(i18n::t("server_name_required").to_string()));
@@ -470,6 +471,11 @@ pub fn add_server(
         error.set(Some(
             "Enter your Apple Music media-user-token, or switch to browser sign-in".to_string(),
         ));
+        return;
+    }
+
+    if selected_service == MusicService::AppleMusic && apple_music_storefront_value.is_empty() {
+        error.set(Some("Enter an Apple Music storefront ID".to_string()));
         return;
     }
 
@@ -509,7 +515,7 @@ pub fn add_server(
             // previous server's token to one that is about to sign in through
             // the browser, and leave it there if that sign-in fails.
             if selected_service == MusicService::AppleMusic {
-                new_server.apple_music_storefront = apple_music_storefront();
+                new_server.apple_music_storefront = apple_music_storefront_value;
                 new_server.apple_music_language = apple_music_language();
                 if *apple_music_use_manual.peek() {
                     let manual = apple_music_manual_token();
