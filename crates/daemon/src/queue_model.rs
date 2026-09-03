@@ -197,10 +197,33 @@ impl QueueModel {
         self.current
     }
 
+    /// Explicit jump to a logical play-order position, leaving the running
+    /// shuffle permutation alone (unlike [`Self::jump_to`], which rebuilds it
+    /// around a physical row).
+    pub fn jump_to_position(&mut self, position: usize) -> Option<usize> {
+        let queue_len = if self.shuffle {
+            self.repair_shuffle_order();
+            self.shuffle_order.len()
+        } else {
+            self.items.len()
+        };
+        if position >= queue_len {
+            return None;
+        }
+        self.push_history_dedup();
+        self.current = position;
+        Some(position)
+    }
+
     /// Replace the queue contents. Callers follow up with [`Self::jump_to`];
     /// history and permutation carry over exactly like the hooks version,
-    /// where the jump's rebuild covers the shuffle case.
+    /// where the jump's rebuild covers the shuffle case. An empty replacement
+    /// has no follow-up jump to repair the pointer, so it resets everything.
     pub fn replace(&mut self, tracks: Vec<Track>) {
+        if tracks.is_empty() {
+            self.clear();
+            return;
+        }
         self.items = tracks;
     }
 
@@ -844,6 +867,27 @@ mod tests {
             assert!(title.is_some());
             assert_ne!(title, victim_title);
         }
+    }
+
+    #[test]
+    fn empty_replace_resets_pointer_history_and_permutation() {
+        let mut m = model(10);
+        m.toggle_shuffle();
+        m.jump_to_position(7);
+        m.replace(Vec::new());
+        assert!(m.is_empty());
+        assert_eq!(m.current_position(), 0);
+        assert!(m.history().is_empty());
+        assert!(m.shuffle_order().is_empty());
+        assert!(m.current_track().is_none());
+
+        m.add(vec![track(0), track(1), track(2)]);
+        assert_eq!(m.current_position(), 0);
+        assert_eq!(m.shuffle_order().len(), 3);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t0".into())
+        );
     }
 
     #[test]
