@@ -318,10 +318,20 @@ pub fn spawn(
     config: Arc<ConfigService>,
     library: Arc<LibraryService>,
     session: SessionHandle,
-    request: api::YtdlpRequest,
+    mut request: api::YtdlpRequest,
 ) -> Result<JobRef, ApiError> {
     if request.url.trim().is_empty() {
         return Err(ApiError::invalid_input("yt-dlp URL is required"));
+    }
+    if request.output_dir.trim().is_empty() {
+        // Fresh installs have no configured output directory; fall back to
+        // the home directory like the old in-app runner instead of rejecting
+        // every job.
+        request.output_dir = ["HOME", "USERPROFILE"]
+            .iter()
+            .find_map(|var| std::env::var(var).ok())
+            .filter(|home| !home.trim().is_empty())
+            .unwrap_or_else(|| ".".to_string());
     }
     validate_output(&request.output_dir)?;
     let scan_runner = runner.clone();
