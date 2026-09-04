@@ -36,29 +36,7 @@ pub fn init_blocking() -> db::Db {
                 db::init(&db_path).await.expect("recreate kopuz database")
             }
         };
-        match handle.import_legacy_json(&db::config_dir()).await {
-            Ok(r) if r.ran => tracing::info!(
-                tracks = r.tracks,
-                albums = r.albums,
-                playlists = r.playlists,
-                favorites = r.favorites,
-                servers = r.servers,
-                "kopuz: migrated legacy JSON store into SQLite"
-            ),
-            Ok(_) => {}
-            Err(e) => tracing::error!(error = %e, "kopuz: legacy JSON import failed"),
-        }
-        if cfg!(debug_assertions) {
-            tracing::info!("kopuz: debug build - leaving legacy *.json in place for re-testing");
-        } else {
-            match handle.finalize_migration(&db::config_dir()).await {
-                Ok(n) if n > 0 => {
-                    tracing::info!(files = n, "kopuz: legacy *.json renamed to *.json.bak")
-                }
-                Ok(_) => {}
-                Err(e) => tracing::warn!(error = %e, "kopuz: legacy json backup rename failed"),
-            }
-        }
+        db::legacy::migrate_json_store(&handle, &db::config_dir()).await;
         server::ytmusic::player::init_tier_store(handle.clone());
         utils::db_cache::init(handle.clone());
         handle

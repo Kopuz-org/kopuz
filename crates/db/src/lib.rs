@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 mod backend;
+pub mod legacy;
 
 pub use backend::{QueuedScrobbleRow, ScrobbleService};
 
