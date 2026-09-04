@@ -57,15 +57,13 @@ impl FavoritesService {
     }
 
     pub async fn list(&self) -> Result<FavoritesView, ApiError> {
+        let generation = self.generation.load(Ordering::Relaxed);
         let refs = self
             .active_source()
             .favorites()
             .await
             .map_err(source_error)?;
-        Ok(FavoritesView {
-            refs,
-            generation: self.generation.load(Ordering::Relaxed),
-        })
+        Ok(FavoritesView { refs, generation })
     }
 
     /// Optimistic set, matching the hooks toggle: local write reflected

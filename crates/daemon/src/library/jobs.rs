@@ -254,11 +254,12 @@ impl LibraryService {
             .albums(&src)
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+        let existing_albums_by_id: HashMap<String, &reader::Album> = existing_albums
+            .iter()
+            .map(|album| (normalize_album_id(&album.id), album))
+            .collect();
         let merge_cover = |mut album: reader::Album| -> reader::Album {
-            if let Some(old) = existing_albums
-                .iter()
-                .find(|existing| normalize_album_id(&existing.id) == normalize_album_id(&album.id))
-            {
+            if let Some(old) = existing_albums_by_id.get(&normalize_album_id(&album.id)) {
                 if album.cover_path.is_none() || old.manual_cover {
                     album.cover_path = old.cover_path.clone();
                 }

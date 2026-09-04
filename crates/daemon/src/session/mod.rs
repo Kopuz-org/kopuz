@@ -661,7 +661,9 @@ impl Session {
             let _ = self.revert_transition();
         }
         match self.model.advance_next() {
-            NextOutcome::Play(idx) => self.start_load(idx, false, None),
+            NextOutcome::Play(idx) => {
+                self.start_load(idx, false, None);
+            }
             NextOutcome::EndOfQueue => {
                 // End of queue: kill an in-flight load so it cannot restart
                 // playback later; the stale-Loaded rule catches a promoted one.
@@ -846,16 +848,19 @@ impl Session {
     /// Count a completed listen (auto-advance or crossfade arm), mirroring
     /// the pump: bumped for the outgoing track, never for radio.
     pub(super) fn record_listen_of_current(&mut self) {
-        let Some(recorder) = self.recorder.clone() else {
+        let Some(track) = self.model.current_track() else {
             return;
         };
-        let Some(track) = self.model.current_track() else {
+        self.record_listen(track.clone());
+    }
+
+    pub(super) fn record_listen(&self, track: Track) {
+        let Some(recorder) = self.recorder.clone() else {
             return;
         };
         if track.duration == u64::MAX {
             return;
         }
-        let track = track.clone();
         tokio::spawn(async move {
             recorder.bump_listen_count(&track).await;
         });

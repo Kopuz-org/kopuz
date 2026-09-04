@@ -424,9 +424,13 @@ async fn engine_position_ticks_do_not_become_one_hz_api_events() {
     tokio::time::sleep(Duration::from_millis(150)).await;
 
     let mut anchors = 0;
-    while let Ok((_, event)) = events.try_recv() {
-        if matches!(event, ApiEvent::PlayerPosition { .. }) {
-            anchors += 1;
+    loop {
+        match events.try_recv() {
+            Ok((_, ApiEvent::PlayerPosition { .. })) => anchors += 1,
+            Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+            Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed) => {
+                break;
+            }
         }
     }
     assert_eq!(anchors, 1, "only the initial play anchor is emitted");

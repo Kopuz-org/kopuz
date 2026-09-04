@@ -53,8 +53,9 @@ pub struct JobProgress {
 pub enum NoticeLevel {
     Info,
     Warning,
-    #[serde(other)]
     Error,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -7,6 +7,7 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use api::ApiError;
 use sha2::{Digest, Sha256};
@@ -16,11 +17,14 @@ use crate::session::SessionHandle;
 const THUMB_MAX: u32 = 400;
 const HQ_MAX: u32 = 1920;
 const HQ_REENCODE_THRESHOLD: usize = 2 * 1024 * 1024;
+const MAX_REMOTE_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
+const REMOTE_ARTWORK_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct ArtworkService {
     db: db::Db,
     session: SessionHandle,
     cache_dir: PathBuf,
+    http: reqwest::Client,
 }
 
 #[derive(Debug)]
@@ -96,6 +100,7 @@ impl ArtworkService {
             db,
             session,
             cache_dir,
+            http: reqwest::Client::new(),
         })
     }
 
@@ -181,7 +186,7 @@ impl ArtworkService {
             hash_name(path)
         ));
         if let Ok(bytes) = tokio::fs::read(&cache_path).await {
-            return Ok(self.payload(bytes, "image/jpeg", &cache_path.to_string_lossy()));
+            return Ok(self.payload(bytes, "image/jpeg", path));
         }
         let raw = tokio::fs::read(path)
             .await
@@ -220,21 +225,36 @@ impl ArtworkService {
         let cache_path = self.cache_dir.join(format!("remote_{}", hash_name(url)));
         if let Ok(bytes) = tokio::fs::read(&cache_path).await {
             let content_type = sniff_content_type(&bytes);
-            return Ok(self.payload(bytes, content_type, &cache_path.to_string_lossy()));
+            return Ok(self.payload(bytes, content_type, url));
         }
-        let response = reqwest::get(url)
-            .await
-            .and_then(|response| response.error_for_status())
-            .map_err(|error| {
-                ApiError::internal(format!("artwork fetch failed: {}", error.without_url()))
-            })?;
-        let bytes = response
-            .bytes()
+        let mut response = self
+            .http
+            .get(url)
+            .timeout(REMOTE_ARTWORK_TIMEOUT)
+            .send()
             .await
             .map_err(|error| {
                 ApiError::internal(format!("artwork fetch failed: {}", error.without_url()))
             })?
-            .to_vec();
+            .error_for_status()
+            .map_err(|error| {
+                ApiError::internal(format!("artwork fetch failed: {}", error.without_url()))
+            })?;
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_REMOTE_ARTWORK_BYTES as u64)
+        {
+            return Err(ApiError::internal("artwork exceeds the maximum size"));
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            ApiError::internal(format!("artwork fetch failed: {}", error.without_url()))
+        })? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_REMOTE_ARTWORK_BYTES {
+                return Err(ApiError::internal("artwork exceeds the maximum size"));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
         if let Some(parent) = cache_path.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
         }

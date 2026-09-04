@@ -94,6 +94,11 @@ pub fn migrate_locations() {
         return;
     }
 
+    if let Err(error) = std::fs::create_dir_all(&new_config) {
+        tracing::warn!(%error, path = %new_config.display(), "legacy config directory creation failed");
+        return;
+    }
+
     let old_cache = dirs.cache_dir().to_path_buf();
     let files = [
         "library.json",
@@ -101,11 +106,13 @@ pub fn migrate_locations() {
         "favorites.json",
         "queue_state.json",
     ];
+    let mut all_moved = true;
     for file in files {
         let source = old_cache.join(file);
         let destination = new_config.join(file);
         if source.exists() && !destination.exists() {
             if let Err(error) = std::fs::rename(&source, &destination) {
+                all_moved = false;
                 tracing::warn!(%error, file, "legacy store location migration failed");
             } else {
                 tracing::info!(file, "legacy store moved to the config directory");
@@ -113,6 +120,9 @@ pub fn migrate_locations() {
         }
     }
 
+    if !all_moved {
+        return;
+    }
     if let Err(error) = std::fs::write(&sentinel, "") {
         tracing::warn!(%error, path = %sentinel.display(), "legacy location sentinel write failed");
     }
@@ -130,7 +140,10 @@ pub async fn migrate_json_store(database: &crate::Db, config_dir: &Path) {
             "migrated legacy JSON store into SQLite"
         ),
         Ok(_) => {}
-        Err(error) => tracing::error!(%error, "legacy JSON import failed"),
+        Err(error) => {
+            tracing::error!(%error, "legacy JSON import failed");
+            return;
+        }
     }
     if cfg!(debug_assertions) {
         tracing::info!("debug build: leaving legacy JSON stores in place");
