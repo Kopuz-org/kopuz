@@ -131,8 +131,13 @@ impl Session {
         let NextOutcome::Play(idx) = candidate.advance_next() else {
             return;
         };
-        self.armed_transition = Some(self.current_token);
-        self.record_listen_of_current();
-        self.start_load(idx, true, Some(candidate));
+        let outgoing_token = self.current_token;
+        let outgoing = self.model.current_track().cloned();
+        if self.start_load(idx, true, Some(candidate)) {
+            self.armed_transition = Some(outgoing_token);
+            if let Some(track) = outgoing {
+                self.record_listen(track);
+            }
+        }
     }
 }

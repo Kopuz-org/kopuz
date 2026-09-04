@@ -310,6 +310,7 @@ impl QueueModel {
     pub fn repair_shuffle_order(&mut self) {
         let queue_len = self.items.len();
         if self.shuffle_order.len() == queue_len
+            && self.shuffle_order.iter().all(|&idx| idx < queue_len)
             && self
                 .shuffle_order
                 .iter()
@@ -485,6 +486,10 @@ impl QueueModel {
         if queue_len == 0 {
             self.current = 0;
             return None;
+        }
+
+        if self.shuffle {
+            self.repair_shuffle_order();
         }
 
         let idx = current_position.min(queue_len - 1);
@@ -769,6 +774,19 @@ mod tests {
         let mut m = QueueModel::default();
         assert_eq!(m.restore(Vec::new(), 3, vec![], true), None);
         assert_eq!(m.current_position(), 0);
+    }
+
+    #[test]
+    fn restore_repairs_invalid_shuffle_order() {
+        let mut m = QueueModel::default();
+        assert_eq!(
+            m.restore((0..3).map(track).collect(), 1, vec![8, 9, 10], true),
+            Some(1)
+        );
+        let mut order = m.shuffle_order().to_vec();
+        order.sort_unstable();
+        assert_eq!(order, vec![0, 1, 2]);
+        assert!(m.current_track().is_some());
     }
 
     #[test]

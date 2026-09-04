@@ -6,6 +6,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use api::{ApiError, ApiEvent, JobKind, JobRef, Table};
 use sha2::{Digest, Sha256};
@@ -145,7 +146,10 @@ impl DownloadsService {
                 Some(total),
                 Some(key.clone()),
             );
-            if let Err(error) = self.download_one(&source, &config, key).await {
+            if let Err(error) = self.download_one(ctx, &source, &config, key).await {
+                if ctx.cancelled() {
+                    return Ok(());
+                }
                 tracing::warn!(%error, %key, "download failed");
                 failed.push(key.clone());
             }
@@ -165,6 +169,7 @@ impl DownloadsService {
 
     async fn download_one(
         &self,
+        ctx: &JobCtx,
         source: &server::source::ActiveSource,
         config: &config::AppConfig,
         key: &str,
@@ -197,6 +202,9 @@ impl DownloadsService {
 
         let path = match source.download_track(&item_id, None).await {
             Ok(bytes) => {
+                if ctx.cancelled() {
+                    return Ok(());
+                }
                 let path = self.cache_file_path(&item_id, "m4a")?;
                 self.publish_bytes(&path, &bytes).await?
             }
@@ -204,11 +212,14 @@ impl DownloadsService {
                 let info = source.resolve_stream(&item_id).await.map_err(|error| {
                     ApiError::internal(format!("stream resolve failed: {error}"))
                 })?;
+                if ctx.cancelled() {
+                    return Ok(());
+                }
                 let hint = info
                     .format
                     .map(|(format, _)| format.extension())
                     .unwrap_or("m4a");
-                self.fetch_to_cache(&item_id, &info.url, hint).await?
+                self.fetch_to_cache(ctx, &item_id, &info.url, hint).await?
             }
             Err(error) => {
                 return Err(ApiError::internal(format!("download failed: {error}")));
@@ -229,6 +240,7 @@ impl DownloadsService {
 
     async fn fetch_to_cache(
         &self,
+        ctx: &JobCtx,
         item_id: &str,
         url: &str,
         extension_hint: &str,
@@ -236,7 +248,11 @@ impl DownloadsService {
         let http = |error: reqwest::Error| {
             ApiError::internal(format!("download request failed: {}", error.without_url()))
         };
-        let mut response = reqwest::get(url).await.map_err(http)?;
+        let client = reqwest::Client::builder()
+            .read_timeout(Duration::from_secs(15))
+            .build()
+            .map_err(http)?;
+        let mut response = client.get(url).send().await.map_err(http)?;
         response.error_for_status_ref().map_err(http)?;
 
         let extension = response
@@ -258,7 +274,16 @@ impl DownloadsService {
         let result: Result<(), ApiError> = async {
             let file = tokio::fs::File::create(&partial_path).await.map_err(io)?;
             let mut writer = tokio::io::BufWriter::with_capacity(256 * 1024, file);
-            while let Some(chunk) = response.chunk().await.map_err(http)? {
+            loop {
+                if ctx.cancelled() {
+                    return Err(ApiError::internal("download cancelled"));
+                }
+                let Some(chunk) = response.chunk().await.map_err(http)? else {
+                    break;
+                };
+                if ctx.cancelled() {
+                    return Err(ApiError::internal("download cancelled"));
+                }
                 writer.write_all(&chunk).await.map_err(io)?;
             }
             writer.flush().await.map_err(io)

@@ -214,7 +214,7 @@ impl LibraryService {
         }
 
         let db_filter = db::TrackFilter {
-            source: self.source.clone(),
+            source: self.query_source(),
             sort: map_sort(filter.sort.as_deref()),
             search: filter.search.unwrap_or_default(),
         };
@@ -358,12 +358,11 @@ impl LibraryService {
     /// Keys the database does not know but that exist as local audio files are
     /// probed directly, so ad-hoc file playback keeps working alongside the
     /// library.
-    async fn probe_local_files(keys: Vec<String>) -> Vec<Track> {
+    async fn probe_local_files(keys: Vec<String>, cover_cache: PathBuf) -> Vec<Track> {
         if keys.is_empty() {
             return Vec::new();
         }
         tokio::task::spawn_blocking(move || {
-            let cover_cache = std::env::temp_dir();
             let mut library = reader::Library::default();
             keys.iter()
                 .filter_map(|key| {
@@ -400,7 +399,7 @@ impl QueueMaterializer for LibraryService {
                     .filter(|key| !by_key.contains_key(*key))
                     .cloned()
                     .collect();
-                for track in Self::probe_local_files(missing).await {
+                for track in Self::probe_local_files(missing, self.cover_cache.clone()).await {
                     by_key.insert(track.id.key().to_string(), track);
                 }
                 Ok(keys.iter().filter_map(|key| by_key.remove(key)).collect())

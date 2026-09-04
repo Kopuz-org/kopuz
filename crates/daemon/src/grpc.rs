@@ -116,6 +116,43 @@ impl Kopuz for KopuzGrpc {
                 }
             }
 
+            let (command_tx, mut commands) = mpsc::channel::<proto::Command>(64);
+            let api = state.api.clone();
+            let ack_tx = tx.clone();
+            tokio::spawn(async move {
+                while let Some(command) = commands.recv().await {
+                    let request_id = command.request_id;
+                    let ack = match convert::command_from_proto(&command) {
+                        Some(command) => match api.player_command(command).await {
+                            Ok(ack) => proto::Ack {
+                                request_id,
+                                rev: ack.rev,
+                                error: None,
+                            },
+                            Err(error) => proto::Ack {
+                                request_id,
+                                rev: 0,
+                                error: Some(convert::api_error_to_proto(&error)),
+                            },
+                        },
+                        None => proto::Ack {
+                            request_id,
+                            rev: 0,
+                            error: Some(convert::api_error_to_proto(&ApiError::invalid_input(
+                                "unknown command",
+                            ))),
+                        },
+                    };
+                    let message = proto::ServerMessage {
+                        sequence: 0,
+                        msg: Some(proto::server_message::Msg::Ack(ack)),
+                    };
+                    if ack_tx.send(Ok(message)).await.is_err() {
+                        return;
+                    }
+                }
+            });
+
             // An events-only client half-closes after Hello; that ends the
             // command lane, not the stream.
             let mut inbound_done = false;
@@ -142,33 +179,7 @@ impl Kopuz for KopuzGrpc {
                         Ok(Some(proto::ClientMessage {
                             msg: Some(proto::client_message::Msg::Command(command)),
                         })) => {
-                            let request_id = command.request_id;
-                            let ack = match convert::command_from_proto(&command) {
-                                Some(command) => match state.api.player_command(command).await {
-                                    Ok(ack) => proto::Ack {
-                                        request_id,
-                                        rev: ack.rev,
-                                        error: None,
-                                    },
-                                    Err(error) => proto::Ack {
-                                        request_id,
-                                        rev: 0,
-                                        error: Some(convert::api_error_to_proto(&error)),
-                                    },
-                                },
-                                None => proto::Ack {
-                                    request_id,
-                                    rev: 0,
-                                    error: Some(convert::api_error_to_proto(
-                                        &ApiError::invalid_input("unknown command"),
-                                    )),
-                                },
-                            };
-                            let message = proto::ServerMessage {
-                                sequence: 0,
-                                msg: Some(proto::server_message::Msg::Ack(ack)),
-                            };
-                            if tx.send(Ok(message)).await.is_err() {
+                            if command_tx.send(command).await.is_err() {
                                 return;
                             }
                         }
@@ -443,6 +454,8 @@ pub async fn serve(
     listener: tokio::net::TcpListener,
     state: Arc<GrpcState>,
 ) -> std::io::Result<()> {
+    let bind_addr = listener.local_addr()?;
+    validate_plaintext_bind(bind_addr)?;
     let token = state.token.clone();
     let auth = move |request: Request<()>| -> Result<Request<()>, Status> {
         let provided = request
@@ -471,4 +484,28 @@ pub async fn serve(
         .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
         .await
         .map_err(std::io::Error::other)
+}
+
+fn validate_plaintext_bind(bind_addr: std::net::SocketAddr) -> std::io::Result<()> {
+    if bind_addr.ip().is_loopback() {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!("plaintext gRPC may only bind to a loopback address, not {bind_addr}"),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_plaintext_bind;
+
+    #[test]
+    fn plaintext_bind_requires_loopback() {
+        assert!(validate_plaintext_bind("127.0.0.1:1".parse().expect("IPv4 address")).is_ok());
+        assert!(validate_plaintext_bind("[::1]:1".parse().expect("IPv6 address")).is_ok());
+        let error = validate_plaintext_bind("0.0.0.0:1".parse().expect("wildcard address"))
+            .expect_err("wildcard plaintext listener refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    }
 }

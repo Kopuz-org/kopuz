@@ -60,6 +60,8 @@ pub enum JobState {
     Finished,
     Failed,
     Cancelled,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -195,6 +197,10 @@ mod tests {
         assert_eq!(code, ErrorCode::Internal);
         let table: Table = serde_json::from_value("brand_new_table".into()).expect("table");
         assert_eq!(table, Table::Unknown);
+        let state: JobState = serde_json::from_value("brand_new_state".into()).expect("state");
+        assert_eq!(state, JobState::Unknown);
+        let level: NoticeLevel = serde_json::from_value("brand_new_level".into()).expect("level");
+        assert_eq!(level, NoticeLevel::Unknown);
     }
 
     #[test]

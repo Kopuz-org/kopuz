@@ -249,6 +249,7 @@ mod tests {
         assert_eq!(err.code, api::ErrorCode::InvalidInput);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn locked_keys_are_reported_and_refused() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -263,12 +264,11 @@ mod tests {
 
         let service = ConfigService::new(database, settings, config::AppConfig::default());
         let view = service.view().await.expect("view");
-        if view.locked_keys.contains(&"theme".to_string()) {
-            let err = service
-                .patch(serde_json::json!({"theme": "other"}))
-                .await
-                .expect_err("locked key refused");
-            assert_eq!(err.code, api::ErrorCode::InvalidInput);
-        }
+        assert!(view.locked_keys.contains(&"theme".to_string()));
+        let err = service
+            .patch(serde_json::json!({"theme": "other"}))
+            .await
+            .expect_err("locked key refused");
+        assert_eq!(err.code, api::ErrorCode::InvalidInput);
     }
 }

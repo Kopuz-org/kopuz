@@ -35,7 +35,7 @@ player = { workspace = true }
 radio = { workspace = true }
 reader = { workspace = true }
 server = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
 tracing = { workspace = true }
 rand = { workspace = true }
 async-trait = { workspace = true }
@@ -63,7 +63,6 @@ grpc = [
   "dep:tokio-stream",
   "dep:directories",
   "tokio/net",
-  "tokio/time",
 ]
 kopuzd = [
   "grpc",

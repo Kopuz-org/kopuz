@@ -677,6 +677,8 @@ fn App() -> Element {
 
     let mut pending_queue_state_snapshot = use_signal(|| None::<PersistedQueueState>);
     let mut pending_queue_state_revision = use_signal(|| 0u64);
+    #[cfg(not(target_os = "android"))]
+    let close_hides_window = use_signal(|| false);
 
     // tao calls process::exit() after CloseRequested, killing the debounced
     // save loops — without this, the last debounce window of queue/store
@@ -689,14 +691,15 @@ fn App() -> Element {
     #[cfg(not(target_os = "android"))]
     dioxus::desktop::use_wry_event_handler(move |event, _| {
         use dioxus::desktop::tao::event::{Event, WindowEvent};
-        if matches!(
-            event,
-            Event::LoopDestroyed
-                | Event::WindowEvent {
+        let shutting_down = matches!(event, Event::LoopDestroyed)
+            || matches!(
+                event,
+                Event::WindowEvent {
                     event: WindowEvent::CloseRequested,
                     ..
                 }
-        ) {
+            ) && !*close_hides_window.peek();
+        if shutting_down {
             if let Some(db) = app_db::DB_HANDLE.get() {
                 let db = db.clone();
                 // None = the queue is empty (a cleared queue must persist as
@@ -1143,6 +1146,7 @@ fn App() -> Element {
         let win_ctx = window();
         let handle_menu = {
             let win_ctx = win_ctx.clone();
+            let mut close_hides_window = close_hides_window;
             move |id: &dioxus::desktop::trayicon::menu::MenuId| {
                 tracing::debug!("tray menu event id={:?}", id);
                 if *id == TRAY_SHOW_ID {
@@ -1153,23 +1157,25 @@ fn App() -> Element {
                         win_ctx.set_focus();
                     }
                 } else if *id == TRAY_QUIT_ID {
+                    close_hides_window.set(false);
                     win_ctx.set_close_behavior(WindowCloseBehaviour::WindowCloses);
                     win_ctx.close();
                 }
             }
         };
         dioxus::desktop::use_tray_menu_event_handler({
-            let handle_menu = handle_menu.clone();
+            let mut handle_menu = handle_menu.clone();
             move |event| handle_menu(&event.id)
         });
         dioxus::desktop::use_muda_event_handler({
-            let handle_menu = handle_menu.clone();
+            let mut handle_menu = handle_menu.clone();
             move |event| handle_menu(&event.id)
         });
 
         use_effect({
             let tray_slot = tray_slot.clone();
             let tray_warned = tray_warned.clone();
+            let mut close_hides_window = close_hides_window;
             move || {
                 use dioxus::desktop::trayicon::TrayIconBuilder;
                 let want_tray = config.read().minimize_to_tray;
@@ -1191,6 +1197,7 @@ fn App() -> Element {
                     *warned = false;
                 }
                 drop(warned);
+                close_hides_window.set(enabled);
                 window().set_close_behavior(if enabled {
                     WindowCloseBehaviour::WindowHides
                 } else {

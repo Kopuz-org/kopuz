@@ -136,6 +136,7 @@ pub mod convert {
             api::JobState::Finished => JobState::Finished,
             api::JobState::Failed => JobState::Failed,
             api::JobState::Cancelled => JobState::Cancelled,
+            api::JobState::Unknown => JobState::Unspecified,
         }
     }
 
@@ -144,7 +145,8 @@ pub mod convert {
             JobState::Running => api::JobState::Running,
             JobState::Finished => api::JobState::Finished,
             JobState::Cancelled => api::JobState::Cancelled,
-            JobState::Failed | JobState::Unspecified => api::JobState::Failed,
+            JobState::Failed => api::JobState::Failed,
+            JobState::Unspecified => api::JobState::Unknown,
         }
     }
 
@@ -169,6 +171,7 @@ pub mod convert {
             api::NoticeLevel::Info => NoticeLevel::Info,
             api::NoticeLevel::Warning => NoticeLevel::Warning,
             api::NoticeLevel::Error => NoticeLevel::Error,
+            api::NoticeLevel::Unknown => NoticeLevel::Unspecified,
         }
     }
 
@@ -176,7 +179,8 @@ pub mod convert {
         match NoticeLevel::try_from(value).unwrap_or(NoticeLevel::Unspecified) {
             NoticeLevel::Info => api::NoticeLevel::Info,
             NoticeLevel::Warning => api::NoticeLevel::Warning,
-            NoticeLevel::Error | NoticeLevel::Unspecified => api::NoticeLevel::Error,
+            NoticeLevel::Error => api::NoticeLevel::Error,
+            NoticeLevel::Unspecified => api::NoticeLevel::Unknown,
         }
     }
 
@@ -1123,6 +1127,12 @@ mod tests {
         let state = sample_state();
         let back = player_state_from_proto(&player_state_to_proto(&state));
         assert_eq!(state, back);
+    }
+
+    #[test]
+    fn unspecified_status_values_are_unknown() {
+        assert_eq!(job_state_from_proto(0), api::JobState::Unknown);
+        assert_eq!(notice_level_from_proto(0), api::NoticeLevel::Unknown);
     }
 
     #[test]

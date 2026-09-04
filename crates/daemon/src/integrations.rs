@@ -112,7 +112,11 @@ pub fn spawn_jellyfin_reporter(
                     if current_id != last_id {
                         if let Some(old) = last_id.take() {
                             let source = source.clone();
-                            let ticks = position_ms * 10_000;
+                            let ticks = last_state
+                                .as_ref()
+                                .map(|(state, received)| interpolated_ms(state, *received))
+                                .unwrap_or_default()
+                                * 10_000;
                             tokio::spawn(async move {
                                 let _ = source.report_playback_stopped(&old, ticks).await;
                             });

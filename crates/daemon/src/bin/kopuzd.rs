@@ -29,6 +29,26 @@ use daemon::{
     PlaybackServices, QueueStore, SessionHandle, SourceRecorder,
 };
 
+async fn terminate_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        match signal(SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not install SIGTERM handler");
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    std::future::pending::<()>().await;
+}
+
 struct Args {
     bind: String,
     token: Option<String>,
@@ -285,6 +305,10 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         served = daemon::grpc::serve(listener, state) => served.map_err(Into::into),
         signal = tokio::signal::ctrl_c() => {
             signal?;
+            tracing::info!("shutting down");
+            Ok(())
+        }
+        () = terminate_signal() => {
             tracing::info!("shutting down");
             Ok(())
         }

@@ -12,16 +12,24 @@ impl Session {
         idx: usize,
         allow_crossfade: bool,
         transition_model: Option<QueueModel>,
-    ) {
+    ) -> bool {
         let source_model = transition_model.as_ref().unwrap_or(&self.model);
         let Some(track) = source_model.track_at(idx).cloned() else {
-            return;
+            return false;
         };
         let track_key = track.id.uid();
         let (restore_seek, clear_pending_resume) = self.pending_resume_seek(&track);
         let use_crossfade = allow_crossfade
             && self.should_crossfade()
             && restore_seek.is_none_or(|position| position.is_zero());
+        let transition_model = if use_crossfade {
+            let Some(model) = transition_model else {
+                return false;
+            };
+            Some(model)
+        } else {
+            None
+        };
         let crossfade_duration = Duration::from_secs(self.config.crossfade_seconds as u64);
         let item_ref = PlaybackItemRef::parse(&track_key);
         let is_radio = item_ref.is_radio();
@@ -98,7 +106,7 @@ impl Session {
             && local_path.is_none()
             && remote_ref.is_none()
         {
-            return;
+            return false;
         }
 
         self.error = None;
@@ -140,11 +148,7 @@ impl Session {
             self.radio_task = Some(handle);
         }
 
-        if use_crossfade {
-            let Some(model) = transition_model else {
-                self.fail_load(token, "crossfade transition has no queue candidate");
-                return;
-            };
+        if let Some(model) = transition_model {
             self.pending_transition = Some(PendingTransition {
                 model,
                 to_token: token,
@@ -211,6 +215,7 @@ impl Session {
             let _ = tx.send(SessionCmd::LoadPrepared(Box::new(result)));
         });
         self.load_task = Some((token, task));
+        true
     }
 
     pub(super) fn handle_prepared_load(
