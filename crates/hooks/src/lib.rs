@@ -5,15 +5,14 @@ pub mod artist_images;
 pub mod db_reactivity;
 pub mod debug_db;
 pub mod favorites;
-mod player_controller_queue;
 pub mod scrobble_scheduler;
+mod session_projector;
 pub mod source_switch;
 pub mod toast;
 pub mod use_db_queries;
 pub mod use_player_controller;
 pub mod use_player_task;
 pub mod use_search_data;
-pub mod use_sync_task;
 
 pub use use_player_controller::*;
 pub use use_player_task::*;

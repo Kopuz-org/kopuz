@@ -13,10 +13,8 @@ use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 #[cfg(target_os = "linux")]
 use dioxus::desktop::wry::WebViewExtUnix;
 use dioxus::prelude::*;
-use discord_presence::Presence;
 use kopuz_route::Route;
 use pages::server::download_manager::DownloadQueue;
-use player::player::Player;
 use queue_state::PersistedQueueState;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -78,44 +76,6 @@ fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, 
             )
         }))
         .collect()
-}
-
-async fn persist_resolved_covers(
-    db: &db::Db,
-    source: &config::Source,
-    albums: &[reader::Album],
-    missing_ids: &std::collections::HashSet<String>,
-    gens: hooks::db_reactivity::Generations,
-    scan_is_current: &impl Fn() -> bool,
-) {
-    let mut changed = false;
-    for album in albums {
-        if !missing_ids.contains(&album.id) {
-            continue;
-        }
-        let Some(cover) = album.cover_path.as_ref() else {
-            continue;
-        };
-        if !scan_is_current() {
-            break;
-        }
-        let path = cover.to_string_lossy().into_owned();
-        match db
-            .update_album_cover_if_not_manual(source, &album.id, &path)
-            .await
-        {
-            Ok(written) => changed |= written,
-            Err(error) => tracing::warn!(
-                album_id = %album.id,
-                source = %source.as_str(),
-                %error,
-                "failed to persist automatically resolved album cover"
-            ),
-        }
-    }
-    if changed {
-        gens.bump(hooks::db_reactivity::Table::Albums);
-    }
 }
 
 /// Build the `@font-face` + `body`/`#app-root` override CSS for a user-picked
@@ -189,8 +149,6 @@ fn StaticHeadAssets() -> Element {
     }
 }
 
-static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
-
 /// Hand the Android trust store to rustls before anything opens a TLS
 /// connection. `rustls-platform-verifier` panics on first verification if it was
 /// never given a JVM and Context, which takes down the first sync or cover fetch.
@@ -263,16 +221,6 @@ fn main() {
         legacy::migrate_locations();
 
         let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
-
-        let presence: Option<Arc<Presence>> = match Presence::new("1470087339639443658") {
-            Ok(p) => Some(Arc::new(p)),
-            Err(e) => {
-                tracing::warn!("Discord presence unavailable: {e}");
-                None
-            }
-        };
-
-        PRESENCE.set(presence).ok();
 
         #[cfg(target_os = "macos")]
         {
@@ -628,11 +576,129 @@ fn App() -> Element {
     let active_caps = use_memo(move || active_source.read().capabilities());
     // The PoToken minter isn't armed here: it's a headless deno_core runtime that
     // self-starts on the first `mint_content_pot` (only when YT demands a pot).
-    hooks::use_sync_task::use_sync_task(config, db.clone());
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]
     let cover_cache = use_memo(move || cache_dir().join("covers"));
     let _ = std::fs::create_dir_all(cover_cache());
+
+    // The embedded daemon: the same session actor and services kopuzd runs,
+    // in-process. The UI's PlayerController is a signal mirror over the
+    // session; the scan job, scrobbler, favorites reconciler, OS media
+    // integration, and Jellyfin/Discord reporting all live behind it.
+    let embedded_services = {
+        let db_boot = db.clone();
+        use_hook(move || {
+            // Seeded with the persisted config loaded before launch, so the
+            // scan job, scrobbler, and reconciler can never observe default
+            // library roots or credentials. The async startup loader still
+            // applies the same config to the UI signals and re-pushes it
+            // through `set_config` (idempotent).
+            let seeded = app_db::BOOT_CONFIG.get().cloned().unwrap_or_default();
+            let registry = Arc::new(radio::registry::StationRegistry::default());
+            let library = Arc::new(daemon::LibraryService::new(
+                db_boot.clone(),
+                seeded.active_source.clone(),
+                registry.clone(),
+                cover_cache(),
+            ));
+            let initial_source: ::server::source::ActiveSource =
+                Arc::from(::server::source::active(db_boot.clone(), &seeded));
+            let scrobbler = daemon::Scrobbler::new(db_boot.clone());
+            let services = daemon::PlaybackServices {
+                config: seeded,
+                active_source: Some(initial_source.clone()),
+                station_registry: registry,
+                // Queue persistence stays with the app's exit-flush machinery
+                // below, which can snapshot the mirror signals synchronously
+                // on the close path — the session's own store is left off so
+                // the two never race on the same row.
+                queue_store: None,
+                recorder: Some(Arc::new(daemon::SourceRecorder::new(
+                    initial_source.clone(),
+                ))),
+                scrobbler: Some(scrobbler.clone()),
+            };
+            let session = match daemon::SessionHandle::try_spawn(library.clone(), services) {
+                Ok(session) => session,
+                Err(error) => {
+                    tracing::error!(%error, "audio engine initialization failed");
+                    return Err(format!("Audio engine initialization failed: {error}"));
+                }
+            };
+            library.attach_session(session.clone());
+            scrobbler.attach_session(session.clone());
+            let jobs = Arc::new(daemon::JobRunner::new(session.clone()));
+            let favorites = daemon::FavoritesService::new(db_boot, session.clone());
+            favorites.spawn_reconciler();
+            daemon::os_media::spawn(&session);
+            daemon::integrations::spawn_jellyfin_reporter(
+                &session,
+                initial_source,
+                session.config_watch(),
+            );
+            daemon::integrations::spawn_discord_presence(&session, session.config_watch());
+            Ok((session, library, jobs, favorites, scrobbler))
+        })
+    };
+    let (session, library_service, job_runner, favorites_service, scrobbler) =
+        match embedded_services {
+            Ok(services) => services,
+            Err(error) => {
+                return rsx! {
+                    main {
+                        role: "alert",
+                        style: "height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center;",
+                        "{error}"
+                    }
+                };
+            }
+        };
+
+    // A server switch or credential rotation rebuilds the shared source
+    // handle; the session's loader has to follow it.
+    {
+        let session = session.clone();
+        use_effect(move || {
+            let source = active_source.read().clone();
+            session.set_active_source(Some(source));
+        });
+    }
+
+    // Bridge config changes into the session: every change updates its
+    // config watch (crossfade, scrobble creds, Jellyfin reporting), and
+    // audio-pipeline keys apply to the engine when their slice changes.
+    {
+        let session = session.clone();
+        let mut last_audio_slice = use_signal(String::new);
+        use_effect(move || {
+            let snapshot = config.read().clone();
+            if !*initial_load_done.peek() {
+                return;
+            }
+            let audio_slice = format!(
+                "{:?}|{:?}|{:?}|{:?}",
+                snapshot.equalizer,
+                snapshot.channel_mode,
+                snapshot.sample_rate_mode,
+                snapshot.device_change_behavior,
+            );
+            let changed = if *last_audio_slice.peek() != audio_slice {
+                last_audio_slice.set(audio_slice);
+                [
+                    "equalizer",
+                    "channel_mode",
+                    "sample_rate_mode",
+                    "device_change_behavior",
+                ]
+                .iter()
+                .map(|key| key.to_string())
+                .collect()
+            } else {
+                Vec::new()
+            };
+            session.set_config(snapshot, changed);
+        });
+    }
     let download_queue = use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
     let download_progress =
         use_hook(|| Signal::new_in_scope(::server::DownloadProgress::default(), ScopeId::ROOT));
@@ -646,7 +712,6 @@ fn App() -> Element {
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
-    let player = use_signal(Player::new);
     let current_song_cover_url = use_signal(String::new);
     let current_song_title = use_signal(String::new);
     let current_song_artist = use_signal(String::new);
@@ -804,14 +869,12 @@ fn App() -> Element {
         }
     });
 
-    let presence = PRESENCE.get().cloned().flatten();
-    provide_context(presence.clone());
-
     let mut station_registry = use_signal(radio::registry::StationRegistry::new);
     provide_context(station_registry);
 
     let mut last_radio_registry_key = use_signal(|| None::<String>);
 
+    let session_for_registry = session.clone();
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -834,6 +897,7 @@ fn App() -> Element {
         }
         last_radio_registry_key.set(Some(key));
 
+        let session_for_registry = session_for_registry.clone();
         spawn(async move {
             let (new_registry, import_count) = utils::offload(
                 async move {
@@ -861,6 +925,7 @@ fn App() -> Element {
             )
             .await;
 
+            session_for_registry.set_station_registry(Arc::new(new_registry.clone()));
             station_registry.set(new_registry);
 
             if import_count > 0 {
@@ -891,7 +956,7 @@ fn App() -> Element {
     let mut update_banner: Signal<Option<updates::AvailableUpdate>> = use_signal(|| None);
     let mut did_check_updates = use_signal(|| false);
     let mut ctrl = hooks::use_player_controller(
-        player,
+        session.clone(),
         is_playing,
         queue,
         current_queue_index,
@@ -1301,6 +1366,9 @@ fn App() -> Element {
     let _is_offline = app_lifecycle::use_connectivity_probe(config, network_banner);
 
     let db_for_load = db.clone();
+    let session_for_load = session.clone();
+    let favorites_for_load = favorites_service.clone();
+    let scrobbler_for_load = scrobbler.clone();
     use_hook(move || {
         {
             let db = db_for_load;
@@ -1352,13 +1420,19 @@ fn App() -> Element {
                     configured_local_libraries.set(configured_local_sources(&loaded));
                     volume.set(loaded.volume);
                     persisted_volume.set(loaded.volume);
-                    player.peek().set_volume(loaded.volume);
-                    player.peek().set_channel_mode(loaded.channel_mode);
-                    player.peek().set_equalizer(loaded.equalizer.clone());
-                    player
-                        .peek()
-                        .set_device_change_behavior(loaded.device_change_behavior);
-                    player.peek().set_sample_rate_mode(loaded.sample_rate_mode);
+                    session_for_load.set_config(
+                        loaded.clone(),
+                        [
+                            "volume",
+                            "equalizer",
+                            "channel_mode",
+                            "sample_rate_mode",
+                            "device_change_behavior",
+                        ]
+                        .iter()
+                        .map(|key| key.to_string())
+                        .collect(),
+                    );
                     i18n::set_locale(&loaded.language);
                 }
 
@@ -1396,29 +1470,31 @@ fn App() -> Element {
                 initial_load_done.set(true);
                 // Kick one reconcile shortly after startup so pending offline
                 // likes from the previous session push now, not on the first
-                // multi-minute interval.
-                hooks::use_sync_task::nudge_activate();
+                // multi-minute interval; drain queued scrobbles the same way.
+                favorites_for_load.nudge_activate();
+                {
+                    let scrobbler = scrobbler_for_load.clone();
+                    let drain_config = config.peek().clone();
+                    spawn(async move {
+                        scrobbler.drain_queue(&drain_config).await;
+                    });
+                }
             }.instrument(tracing::info_span!("startup.load")));
         }
     });
 
-    let db_for_rescan = db.clone();
     let db_for_play_album = db.clone();
+    let library_for_scan = library_service.clone();
+    let jobs_for_scan = job_runner.clone();
     use_effect(move || {
         // config_loaded_ok matters here: a defaulted config (load failure) has
-        // an empty music_directory, and the no-dirs branch below prunes the
-        // local library — which must never happen off phantom state.
+        // an empty music_directory, and the daemon's no-dirs branch prunes the
+        // local library - which must never happen off phantom state.
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
         let configured_sources = configured_local_libraries.read().clone();
         let trigger = *trigger_rescan.read();
-        let fetch_covers = config.peek().auto_fetch_covers;
-        let fetch_strategy = config.peek().cover_fetch_strategy;
-        let lastfm_key = {
-            let key = config.peek().lastfm_api_key.trim().to_owned();
-            (!key.is_empty()).then_some(key)
-        };
 
         let scan_key = format!(
             "{}|{}",
@@ -1437,219 +1513,68 @@ fn App() -> Element {
         }
         last_scan_key.set(Some(scan_key));
 
-        // Scans aren't cancelled, so two can overlap (a root removed mid-scan
-        // respawns this effect). Only the newest may persist — a stale scan's
-        // upserts + prune would resurrect the removed root.
-        static SCAN_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let epoch = SCAN_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        let scan_is_current =
-            move || SCAN_EPOCH.load(std::sync::atomic::Ordering::Relaxed) == epoch;
-
-        let db_scan = db_for_rescan.clone();
-        let gens_scan = gens_for_albums;
-        spawn(async move {
-            let db = db_scan;
-            let gens = gens_scan;
-            for (source, configured_dirs) in configured_sources {
-            let scannable_dirs: Vec<PathBuf> = configured_dirs
-                .iter()
-                .filter(|d| d.exists())
-                .cloned()
-                .collect();
-            // Seed the scan working set from the DB (the scanner skips files it
-            // already knows; album-merge keeps manual covers). One folder query
-            // per root, deduped by key in case roots nest.
-            // An errored seed must abort the scan: the keep-set fed to
-            // prune_source comes from these, and defaulting to empty would
-            // turn one transient DB error into a pruned library.
-            let mut seed_tracks: Vec<reader::Track> = Vec::new();
-            let mut seen_keys = std::collections::HashSet::new();
-            for dir in &configured_dirs {
-                let mut prefix = dir.to_string_lossy().into_owned();
-                if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
-                    prefix.push(std::path::MAIN_SEPARATOR);
-                }
-                let found = match db.folder_tracks(&source, &prefix).await {
-                    Ok(t) => t,
-                    Err(e) => {
-                        tracing::error!(error = %e, root = %prefix, "rescan: seed query failed — aborting scan");
-                        return;
-                    }
-                };
-                for t in found {
-                    if seen_keys.insert(t.id.key().into_owned()) {
-                        seed_tracks.push(t);
-                    }
-                }
-            }
-            let seed_albums = match db.albums(&source).await {
-                Ok(a) => a,
-                Err(e) => {
-                    tracing::error!(error = %e, "rescan: album seed failed — aborting scan");
-                    return;
-                }
-            };
-            let mut current_lib = reader::Library {
-                root_paths: configured_dirs.clone(),
-                tracks: seed_tracks,
-                albums: seed_albums,
-                ..Default::default()
-            };
-
-            if !configured_dirs.is_empty() {
-                scan_current_file.set(Some(String::new()));
-
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-                spawn(async move {
-                    while let Some(file) = rx.recv().await {
-                        scan_current_file.set(Some(file));
-                    }
-                    scan_current_file.set(None);
-                });
-
-                let progress_cb: std::sync::Arc<dyn Fn(String) + Send + Sync> =
-                    std::sync::Arc::new(move |file: String| {
-                        let _ = tx.send(file);
-                    });
-                for dir in &scannable_dirs {
-                    let _ = reader::scan_directory(
-                        dir.clone(),
-                        cover_cache(),
-                        &mut current_lib,
-                        progress_cb.clone(),
-                    )
-                    .await;
-                }
-
-                current_lib.tracks.retain(|t| {
-                    let in_configured_root = configured_dirs
-                        .iter()
-                        .any(|d| t.id.local_path().is_some_and(|p| p.starts_with(d)));
-                    let in_scannable_root = scannable_dirs
-                        .iter()
-                        .any(|d| t.id.local_path().is_some_and(|p| p.starts_with(d)));
-
-                    in_configured_root
-                        && (!in_scannable_root || t.id.local_path().is_some_and(|p| p.exists()))
-                });
-
-                let valid_album_ids: std::collections::HashSet<_> = current_lib
-                    .tracks
-                    .iter()
-                    .map(|t| t.album_id.clone())
-                    .collect();
-                current_lib
-                    .albums
-                    .retain(|a| valid_album_ids.contains(&a.id));
-
-                // Persist the scan directly: chunked upserts, prune what's gone,
-                // bump so the page hooks re-query. No in-memory mirror.
-                if !scan_is_current() {
-                    tracing::info!("rescan superseded by a newer scan — discarding results");
-                    return;
-                }
-                for chunk in current_lib.tracks.chunks(100) {
-                    let _ = db.upsert_tracks(&source, chunk).await;
-                    gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
-                }
-                let _ = db.upsert_albums(&source, &current_lib.albums).await;
-                let keep_keys: Vec<String> = current_lib
-                    .tracks
-                    .iter()
-                    .map(|t| t.id.key().into_owned())
-                    .collect();
-                let keep_albums: Vec<String> =
-                    current_lib.albums.iter().map(|a| a.id.clone()).collect();
-                if !scan_is_current() {
-                    tracing::info!("rescan superseded mid-persist — skipping prune");
-                    return;
-                }
-                let _ = db
-                    .prune_source(&source, &keep_keys, &keep_albums)
-                    .await;
-                for (artist, img) in &current_lib.local_artist_images {
-                    let p = img.to_string_lossy().into_owned();
-                    let _ = db.set_artist_image(artist, "local", Some(&p)).await;
-                }
-                // Drop stored local artist images whose file disappeared (the
-                // old scan rebuilt the whole map each pass, self-healing this).
-                if let Ok((_, photos)) = db.artist_images().await {
-                    for (artist, photo) in photos {
-                        if let reader::ArtistImageRef::Local(path) = photo
-                            && !path.exists()
-                        {
-                            let _ = db.set_artist_image(&artist, "local", None).await;
-                        }
-                    }
-                }
-                gens.bump(hooks::db_reactivity::Table::Tracks);
-                gens.bump(hooks::db_reactivity::Table::Albums);
-
-                let lib_for_covers = current_lib;
-                let db = db.clone();
-                let source = source.clone();
-                let lastfm_key = lastfm_key.clone();
-                spawn(async move {
-                    let mut lib = lib_for_covers;
-                    let missing_local = reader::missing_cover_ids(&lib);
-                    let local_report = reader::index_local_covers(
-                        &mut lib,
-                        cover_cache(),
-                        progress_cb.clone(),
-                    )
-                    .await;
-                    tracing::info!(
-                        attempted = local_report.attempted,
-                        found = local_report.found,
-                        missing = local_report.missing,
-                        "local cover indexing complete"
-                    );
-                    persist_resolved_covers(
-                        &db,
-                        &source,
-                        &lib.albums,
-                        &missing_local,
-                        gens,
-                        &scan_is_current,
-                    )
-                    .await;
-
-                    if fetch_covers {
-                        let fetcher = reader::cover_fetcher::CoverFetcher::new(
-                            cover_cache(),
-                            fetch_strategy,
-                            lastfm_key,
-                            progress_cb.clone(),
-                        );
-                        let missing_before = reader::missing_cover_ids(&lib);
-                        let report = fetcher.fetch_missing_covers(&mut lib).await;
-                        tracing::info!(
-                            "Cover auto-fetch: {} found, {} missing, {} errors",
-                            report.found,
-                            report.missing,
-                            report.errors,
-                        );
-                        persist_resolved_covers(
-                            &db,
-                            &source,
-                            &lib.albums,
-                            &missing_before,
-                            gens,
-                            &scan_is_current,
-                        )
-                        .await;
-                    }
-                    drop(progress_cb);
-                }.instrument(tracing::info_span!("library.index_covers")));
-            } else {
-                // No music directories configured: the local library is empty.
-                let _ = db.prune_source(&source, &[], &[]).await;
-                gens.bump(hooks::db_reactivity::Table::Tracks);
-                gens.bump(hooks::db_reactivity::Table::Albums);
-            }
-            }
-        }.instrument(tracing::info_span!("library.rescan")));
+        // The scan itself lives in the daemon's LibraryService now; the job
+        // runner's single-flight replaces the old epoch supersession, and the
+        // event bridge below feeds progress and invalidations back to the UI.
+        // The roots travel with the call: the config signal is the authority
+        // here, and the session's own copy may not have caught up yet.
+        if let Err(error) =
+            library_for_scan.spawn_scan_with_config(&jobs_for_scan, config.peek().clone())
+        {
+            tracing::warn!(%error, "library scan could not start");
+        }
     });
+
+    // Feed daemon events back into the UI: library invalidations re-run the
+    // query hooks, and scan job progress drives the scan indicator.
+    {
+        let session = session.clone();
+        let gens = gens_for_albums;
+        use_future(move || {
+            let session = session.clone();
+            async move {
+                use tokio::sync::broadcast::error::RecvError;
+                let mut rx = session.subscribe();
+                loop {
+                    match rx.recv().await {
+                        Ok((_, event)) => match event {
+                            api::ApiEvent::LibraryInvalidated { table, .. } => {
+                                use hooks::db_reactivity::Table;
+                                let mapped = match table {
+                                    api::Table::Tracks => Some(Table::Tracks),
+                                    api::Table::Albums => Some(Table::Albums),
+                                    api::Table::Playlists => Some(Table::Playlists),
+                                    api::Table::Favorites => Some(Table::Favorites),
+                                    api::Table::Folders => Some(Table::Folders),
+                                    api::Table::Servers => Some(Table::Servers),
+                                    api::Table::Recents => Some(Table::Recents),
+                                    _ => None,
+                                };
+                                if let Some(table) = mapped {
+                                    gens.bump_coalesced(table);
+                                }
+                            }
+                            api::ApiEvent::JobProgress(progress)
+                                if progress.kind == api::JobKind::Scan =>
+                            {
+                                scan_current_file
+                                    .set(Some(progress.message.unwrap_or(progress.phase)));
+                            }
+                            api::ApiEvent::JobFinished {
+                                kind: api::JobKind::Scan,
+                                ..
+                            } => {
+                                scan_current_file.set(None);
+                            }
+                            _ => {}
+                        },
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => break,
+                    }
+                }
+            }
+        });
+    }
 
     use_effect(move || {
         let route = *current_route.read();
@@ -2198,7 +2123,6 @@ fn App() -> Element {
                     current_song_cover_url: current_song_cover_url,
                     current_song_title: current_song_title,
                     current_song_artist: current_song_artist,
-                    player: player,
                     is_playing: is_playing,
                     is_fullscreen: is_fullscreen,
                     current_song_duration: current_song_duration,
@@ -2382,8 +2306,7 @@ fn App() -> Element {
                             pages::search::Search {
                                 config: config,
                                 search_query: search_query,
-                                player: player,
-                                is_playing: is_playing,
+                                            is_playing: is_playing,
                                 current_playing: current_playing,
                                 current_song_cover_url: current_song_cover_url,
                                 current_song_title: current_song_title,
@@ -2402,8 +2325,7 @@ fn App() -> Element {
                             pages::library::LibraryPage {
                                 config: config,
                                 on_rescan: move |_| *trigger_rescan.write() += 1,
-                                player: player,
-                                is_playing: is_playing,
+                                            is_playing: is_playing,
                                 current_playing: current_playing,
                                 current_song_cover_url: current_song_cover_url,
                                 current_song_title: current_song_title,
@@ -2468,8 +2390,7 @@ fn App() -> Element {
                                     pages::artist::Artist {
                                         config: config,
                                         artist_name: selected_artist_name,
-                                        player: player,
-                                        on_navigate: move |album_id| {
+                                                            on_navigate: move |album_id| {
                                             selected_album_id.set(album_id);
                                             current_route.set(Route::Album);
                                         },
@@ -2489,7 +2410,6 @@ fn App() -> Element {
                         Route::Favorites => rsx! {
                             pages::favorites::FavoritesPage {
                                 config,
-                                player,
                                 is_playing,
                                 current_playing,
                                 current_song_cover_url,
@@ -2542,7 +2462,6 @@ fn App() -> Element {
                 }
             }
             Fullscreen {
-                player: player,
                 is_playing: is_playing,
                 is_fullscreen: is_fullscreen,
                 current_song_duration: current_song_duration,
@@ -2598,7 +2517,6 @@ fn App() -> Element {
                     current_song_cover_url: current_song_cover_url,
                     current_song_title: current_song_title,
                     current_song_artist: current_song_artist,
-                    player: player,
                     is_playing: is_playing,
                     is_fullscreen: is_fullscreen,
                     current_song_duration: current_song_duration,

@@ -111,6 +111,19 @@ impl FavoritesService {
         Ok(())
     }
 
+    /// Ask the reconciler to push soon (debounced): called after an
+    /// in-process favorite mutation by the embedded frontend.
+    pub fn nudge_after_mutation(&self) {
+        self.mutation_nudge.store(true, Ordering::Relaxed);
+        self.nudge.notify_one();
+    }
+
+    /// Ask the reconciler to run soon without the after-mutation marker
+    /// (the app window regained focus).
+    pub fn nudge_activate(&self) {
+        self.nudge.notify_one();
+    }
+
     pub fn spawn_sync(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
         let service = self.clone();
         runner.start(JobKind::FavoritesSync, move |ctx| async move {

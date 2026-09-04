@@ -4,11 +4,9 @@ use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, Volu
 use crate::queue_list_view::QueueListView;
 use config::AppConfig;
 use dioxus::prelude::*;
-use player::player::Player;
 
 #[component]
 pub(crate) fn FullscreenAndroid(
-    player: Signal<Player>,
     is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
     config: Signal<AppConfig>,
@@ -149,7 +147,7 @@ pub(crate) fn FullscreenAndroid(
                         }
                         SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Fullscreen }
                         TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
-                        VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
+                        VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
                     }
                 } else if tab == 1 {
                     QueueListView {

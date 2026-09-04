@@ -34,6 +34,15 @@ const MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 const PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 const PROGRESS_STEP_SECS: u64 = 5;
 
+/// The embedded frontend's raw view of the queue model.
+#[derive(Debug, Clone, Default)]
+pub struct QueueMirrorSnapshot {
+    pub tracks: Vec<Track>,
+    pub shuffle_order: Vec<usize>,
+    pub position: usize,
+    pub shuffle: bool,
+}
+
 /// Resolves a wire queue context into concrete tracks daemon-side.
 #[async_trait::async_trait]
 pub trait QueueMaterializer: Send + Sync {
@@ -58,6 +67,7 @@ pub struct PlaybackServices {
     pub station_registry: Arc<radio::registry::StationRegistry>,
     pub queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
     pub recorder: Option<Arc<dyn PlaybackRecorder>>,
+    pub scrobbler: Option<Arc<crate::scrobbler::Scrobbler>>,
 }
 
 impl Default for PlaybackServices {
@@ -68,6 +78,7 @@ impl Default for PlaybackServices {
             station_registry: Arc::new(radio::registry::StationRegistry::default()),
             queue_store: None,
             recorder: None,
+            scrobbler: None,
         }
     }
 }
@@ -96,6 +107,22 @@ enum SessionCmd {
         changed: Vec<String>,
     },
     Emit(Box<ApiEvent>),
+    SetStationRegistry(Arc<radio::registry::StationRegistry>),
+    SetActiveSource(Option<server::source::ActiveSource>),
+    SetQueueRaw {
+        tracks: Vec<Track>,
+        mode: QueueMode,
+        start_index: Option<usize>,
+        shuffle: Option<bool>,
+        reply: oneshot::Sender<Result<CommandAck, ApiError>>,
+    },
+    JumpPhysical(usize, oneshot::Sender<Result<CommandAck, ApiError>>),
+    InsertTracksAt {
+        position: usize,
+        tracks: Vec<Track>,
+        reply: oneshot::Sender<Result<CommandAck, ApiError>>,
+    },
+    QueueMirror(oneshot::Sender<QueueMirrorSnapshot>),
     Persist(oneshot::Sender<()>),
     LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
     LoadFinished(LoadFinished),
@@ -174,6 +201,7 @@ impl SessionHandle {
             queue_store: services.queue_store,
             queue_dirty: false,
             recorder: services.recorder,
+            scrobbler: services.scrobbler,
             last_recent_key: None,
             config_tx,
             config: services.config,
@@ -285,6 +313,70 @@ impl SessionHandle {
         let _ = self.cmd_tx.send(SessionCmd::Emit(Box::new(event)));
     }
 
+    /// Swap the radio station registry after a registry import completes, so
+    /// radio contexts resolve against live manifests.
+    pub fn set_station_registry(&self, registry: Arc<radio::registry::StationRegistry>) {
+        let _ = self.cmd_tx.send(SessionCmd::SetStationRegistry(registry));
+    }
+
+    /// Swap the active media source after a server switch or credential
+    /// rotation, so subsequent loads resolve against the new backend.
+    pub fn set_active_source(&self, source: Option<server::source::ActiveSource>) {
+        let _ = self.cmd_tx.send(SessionCmd::SetActiveSource(source));
+    }
+
+    /// In-process queue replacement with literal tracks (catalog rows that
+    /// may not exist in the database yet). Wire clients use `set_queue` with
+    /// a context instead; this is the embedded frontend's path.
+    pub async fn set_queue_tracks(
+        &self,
+        tracks: Vec<Track>,
+        mode: QueueMode,
+        start_index: Option<usize>,
+        shuffle: Option<bool>,
+    ) -> Result<CommandAck, ApiError> {
+        self.request(|reply| SessionCmd::SetQueueRaw {
+            tracks,
+            mode,
+            start_index,
+            shuffle,
+            reply,
+        })
+        .await
+    }
+
+    /// Explicit jump to a physical queue index (a row click), with the
+    /// history push and shuffle re-pin semantics of the app's `play_track`.
+    pub async fn jump_physical(&self, index: usize) -> Result<CommandAck, ApiError> {
+        self.request(|reply| SessionCmd::JumpPhysical(index, reply))
+            .await
+    }
+
+    /// Insert literal tracks at a play-order position (the queue view's
+    /// drag-drop). Wire clients use `queue_edit` moves instead.
+    pub async fn insert_tracks_at(
+        &self,
+        position: usize,
+        tracks: Vec<Track>,
+    ) -> Result<CommandAck, ApiError> {
+        self.request(|reply| SessionCmd::InsertTracksAt {
+            position,
+            tracks,
+            reply,
+        })
+        .await
+    }
+
+    /// The raw queue plus its permutation, for the embedded frontend's
+    /// signal mirror. Wire clients use `queue_window`.
+    pub async fn queue_mirror(&self) -> QueueMirrorSnapshot {
+        let (tx, rx) = oneshot::channel();
+        if self.cmd_tx.send(SessionCmd::QueueMirror(tx)).is_err() {
+            return QueueMirrorSnapshot::default();
+        }
+        rx.await.unwrap_or_default()
+    }
+
     /// Adopt a new config (a ConfigService patch): applies live audio
     /// settings and emits `config.changed`.
     pub fn set_config(&self, config: config::AppConfig, changed: Vec<String>) {
@@ -392,6 +484,7 @@ struct Session {
     queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
     queue_dirty: bool,
     recorder: Option<Arc<dyn PlaybackRecorder>>,
+    scrobbler: Option<Arc<crate::scrobbler::Scrobbler>>,
     last_recent_key: Option<String>,
     config_tx: watch::Sender<config::AppConfig>,
     config: config::AppConfig,
@@ -471,6 +564,44 @@ impl Session {
                 self.apply_config(*config, changed, state_tx);
             }
             SessionCmd::Emit(event) => self.emit(*event),
+            SessionCmd::SetStationRegistry(registry) => self.station_registry = registry,
+            SessionCmd::SetActiveSource(source) => self.active_source = source,
+            SessionCmd::SetQueueRaw {
+                tracks,
+                mode,
+                start_index,
+                shuffle,
+                reply,
+            } => {
+                let result = self.apply_queue_tracks(tracks, mode, start_index, shuffle, state_tx);
+                let _ = reply.send(result);
+            }
+            SessionCmd::JumpPhysical(index, reply) => {
+                let result = if self.model.items().get(index).is_some() {
+                    let position = self.model.jump_to(index);
+                    self.start_load(position, false, None);
+                    Ok(self.publish(state_tx, true))
+                } else {
+                    Err(ApiError::invalid_input("no track at that queue position"))
+                };
+                let _ = reply.send(result);
+            }
+            SessionCmd::InsertTracksAt {
+                position,
+                tracks,
+                reply,
+            } => {
+                self.model.insert_at(position, tracks);
+                let _ = reply.send(Ok(self.publish(state_tx, true)));
+            }
+            SessionCmd::QueueMirror(reply) => {
+                let _ = reply.send(QueueMirrorSnapshot {
+                    tracks: self.model.items().to_vec(),
+                    shuffle_order: self.model.shuffle_order().to_vec(),
+                    position: self.model.current_position(),
+                    shuffle: self.model.shuffle(),
+                });
+            }
             SessionCmd::Persist(reply) => {
                 if let Some(store) = self.queue_store.clone() {
                     let snapshot = self.snapshot();
@@ -596,6 +727,40 @@ impl Session {
         if let Some(task) = self.radio_task.take() {
             task.abort();
         }
+    }
+
+    fn apply_queue_tracks(
+        &mut self,
+        tracks: Vec<Track>,
+        mode: QueueMode,
+        start_index: Option<usize>,
+        shuffle: Option<bool>,
+        state_tx: &watch::Sender<PlayerState>,
+    ) -> Result<CommandAck, ApiError> {
+        match mode {
+            QueueMode::Replace => {
+                self.model.replace(tracks);
+                if let Some(on) = shuffle {
+                    self.model.set_shuffle(on);
+                }
+                let len = self.model.len();
+                if len > 0 {
+                    let start = start_index.unwrap_or_else(|| {
+                        if self.model.shuffle() {
+                            use rand::RngExt;
+                            rand::rng().random_range(0..len)
+                        } else {
+                            0
+                        }
+                    });
+                    let position = self.model.jump_to(start.min(len - 1));
+                    self.start_load(position, false, None);
+                }
+            }
+            QueueMode::Append => self.model.add(tracks),
+            QueueMode::PlayNext => self.model.insert_next(tracks),
+        }
+        Ok(self.publish(state_tx, true))
     }
 
     async fn handle_set_queue(

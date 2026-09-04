@@ -1,6 +1,5 @@
 use config::UiStyle;
 use dioxus::prelude::*;
-use player::player::Player;
 
 use crate::normal::bottombar::BottombarNormal;
 use crate::queue_drag::{install_native_artwork_drag_prevention, set_queue_drag_enabled};
@@ -9,7 +8,6 @@ use crate::vaxry::bottombar::BottombarVaxry;
 #[component]
 pub fn Bottombar(
     config: Signal<config::AppConfig>,
-    player: Signal<Player>,
     is_playing: Signal<bool>,
     is_fullscreen: Signal<bool>,
     current_song_duration: Signal<u64>,
@@ -34,7 +32,7 @@ pub fn Bottombar(
     match config.read().ui_style {
         UiStyle::Normal => rsx! {
             BottombarNormal {
-                config, player, is_playing, is_fullscreen,
+                config, is_playing, is_fullscreen,
                 current_song_duration, current_song_progress, queue, current_queue_index,
                 current_song_title, current_song_artist, current_song_cover_url,
                 volume, persisted_volume, is_rightbar_open, is_devices_open,
@@ -42,7 +40,7 @@ pub fn Bottombar(
         },
         UiStyle::Vaxry => rsx! {
             BottombarVaxry {
-                config, player, is_playing, is_fullscreen,
+                config, is_playing, is_fullscreen,
                 current_song_duration, current_song_progress, queue, current_queue_index,
                 current_song_title, current_song_artist, current_song_cover_url,
                 volume, persisted_volume, is_rightbar_open, is_devices_open,

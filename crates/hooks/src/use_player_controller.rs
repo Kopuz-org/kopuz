@@ -1,79 +1,34 @@
-use config::AppConfig;
-use dioxus::{logger::tracing, prelude::*};
-use player::engine::SourceFactory;
-use player::player::Player;
-use reader::Track;
-use std::sync::Arc;
+//! The player controller, as a mirror over the embedded daemon session.
+//!
+//! The signal surface and method names the UI consumes are unchanged from the
+//! old in-hooks state machine, but every field is now a projection of the
+//! daemon's `PlayerState` stream and every transport method forwards a
+//! session command. The one exception is Spotify external playback, whose
+//! browser host still lives frontend-side: while `external_active` is set the
+//! local queue signals are authoritative, and handing control back to the
+//! engine pushes them into the daemon.
+
 use std::time::Duration;
-use utils;
 
-use utils::playback_ref::ResolvedStreamRef;
+use config::AppConfig;
+use daemon::SessionHandle;
+use dioxus::prelude::*;
+use reader::Track;
+use utils::playback_ref::PlaybackItemRef;
 
-use player::decoder;
+use crate::scrobble_scheduler::{self, ScrobbleOptions};
 
-#[path = "player_controller_metadata.rs"]
-mod metadata;
-#[path = "player_controller_playback.rs"]
-mod playback;
 #[path = "player_controller_spotify.rs"]
 mod spotify;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum LoopMode {
-    None,
-    Queue,
-    Track,
-}
-
-/// What the UI intends to be playing. The `token` is the engine session token;
-/// event consumers filter by it, which is what lets one signal replace the old
-/// three-way cancellation (task cancel + engine cancel + generation bump).
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub(crate) enum PlaybackIntent {
-    Stopped,
-    /// `from_token`: the session still playing during a crossfade resolve — a
-    /// failed or reverted crossfade falls back to it.
-    Loading {
-        token: u64,
-        idx: usize,
-        crossfade: bool,
-        from_token: u64,
-    },
-    Committed {
-        token: u64,
-    },
-}
-
-impl PlaybackIntent {
-    pub(crate) fn token(self) -> u64 {
-        match self {
-            Self::Stopped => 0,
-            Self::Loading { token, .. } | Self::Committed { token } => token,
-        }
-    }
-
-    pub(crate) fn is_loading(self) -> bool {
-        matches!(self, Self::Loading { .. })
-    }
-}
-
-impl LoopMode {
-    pub fn next(&self) -> Self {
-        match self {
-            LoopMode::None => LoopMode::Queue,
-            LoopMode::Queue => LoopMode::Track,
-            LoopMode::Track => LoopMode::None,
-        }
-    }
-}
+pub use api::LoopMode;
 
 #[derive(Clone, Copy)]
 pub struct PlayerController {
-    pub player: Signal<Player>,
+    pub(crate) session: Signal<SessionHandle>,
     pub is_playing: Signal<bool>,
-    /// Derived from the intent (plus the browse spinner) — read-only, so it
-    /// can't be left stuck by a cancel path that forgets to clear it.
     pub is_loading: Memo<bool>,
+    pub(crate) loading: Signal<bool>,
     pub history: Signal<Vec<usize>>,
     pub queue: Signal<Vec<Track>>,
     pub shuffle: Signal<bool>,
@@ -87,100 +42,34 @@ pub struct PlayerController {
     pub current_song_bitrate: Signal<u16>,
     pub current_song_duration: Signal<u64>,
     pub current_song_progress: Signal<u64>,
-    /// Byte ranges already fetched for the active network track. The UI draws
-    /// these behind playback position, like a browser media seek bar.
     pub buffered_ranges: Signal<Vec<BufferedRange>>,
-    buffer_progress_tx: Signal<tokio::sync::mpsc::UnboundedSender<BufferProgressEvent>>,
     pub current_song_cover_url: Signal<String>,
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
     pub config: Signal<AppConfig>,
-    /// Storage handle (in a `Signal` so the controller stays `Copy`) — used by
-    /// the still-`Db`-taking factories (`local`/`for_track`) the player calls.
     pub db: Signal<db::Db>,
-    /// The cached active [`MediaSource`](::server::source::ActiveSource) — the
-    /// player reads this shared handle to resolve streams instead of rebuilding
-    /// the source (and its HTTP client) on every play/skip.
     pub active_source: Signal<::server::source::ActiveSource>,
-    pub(crate) intent: Signal<PlaybackIntent>,
-    /// Monotonic session-token allocator (0 = none).
-    pub(crate) next_token: Signal<u64>,
-    /// The current token as a plain `Signal` (not a memo) so the scrobble
-    /// scheduler can `origin_scope` off it.
-    pub(crate) current_token: Signal<u64>,
-    /// The token a crossfade last armed for; cleared on seek so a fresh fade
-    /// can arm at the outgoing track's real end.
-    pub(crate) armed_transition: Signal<Option<u64>>,
-    /// Discover tiles want the spinner shown synchronously on click, before any
-    /// load intent exists; folded into `is_loading`, cleared by `set_intent`.
-    pub browse_loading: Signal<bool>,
-    pub(crate) pending_resume: Signal<Option<PendingResumeState>>,
-    pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
-    pub radio_task: Signal<Option<dioxus_core::Task>>,
-    /// The in-flight load pipeline (resolve → source factory → engine Load).
-    /// Starting a new transition cancels the previous one, so a superseded
-    /// load can never write back stale state.
-    pub(crate) load_task: Signal<Option<dioxus_core::Task>>,
-    pub station_registry: Signal<radio::registry::StationRegistry>,
-    /// User-visible playback error. Set when something needs the user's
-    /// attention (expired YT cookies, a failed stream resolve, …).
-    /// Rendered as a banner by whoever subscribes — currently the
-    /// settings popup error sink mirrors it on next open.
     pub playback_error: Signal<Option<String>>,
-    /// The Spotify playback host (a browser tab running the Web Playback SDK),
-    /// lazily started on the first Spotify play. `None` until then. Spotify audio
-    /// plays in the browser, not the Symphonia engine, so its transport is routed
-    /// here instead of to `player`.
-    pub spotify_host: Signal<Option<::server::spotify::host::SpotifyHost>>,
-    /// The SDK's Connect device id, set once the host reports `Ready`. Playback is
-    /// started against it via the Web API; the device picker hides it from the
-    /// remote-device list (it renders as the in-app entry).
+    pub browse_loading: Signal<bool>,
+    pub(crate) engine_anchor: Signal<Option<(u64, std::time::Instant, bool)>>,
+    pub(crate) fading_progress: Signal<Option<f64>>,
+    pub(crate) output_latency_ms: Signal<u64>,
+    pub(crate) spotify_scrobble_token: Signal<u64>,
+
+    pub(crate) spotify_host: Signal<Option<::server::spotify::host::SpotifyHost>>,
     pub spotify_device: Signal<Option<String>>,
-    /// A Spotify track URI waiting for the device to become ready (first play).
     pub(crate) spotify_pending_uri: Signal<Option<String>>,
-    /// Whether the browser tab reported playback is allowed (autoplay probe or
-    /// the enable-playback click). Plays issued before this just storm autoplay
-    /// errors and can wedge the SDK, so the first play waits on it.
     pub(crate) spotify_activated: Signal<bool>,
-    /// Spotify Connect device playback is routed to instead of the in-app SDK
-    /// device (`None`). While set, transport goes through the Web API and a
-    /// poll loop owns progress/auto-advance.
     pub spotify_device_override: Signal<Option<String>>,
-    /// Millisecond-precision progress anchor for external playback: the last
-    /// reported position and when it arrived. Reads interpolate elapsed time on
-    /// top, so second-granular state ticks don't lag the lyric clock.
     pub(crate) spotify_progress_anchor: Signal<Option<(u64, std::time::Instant)>>,
-    /// Whether a host launch is in flight — serializes rapid first plays so
-    /// they can't spawn multiple hosts (and browser tabs).
     pub(crate) spotify_host_starting: Signal<bool>,
-    /// Latest Spotify start request, canceled when superseded.
     pub(crate) spotify_start_task: Signal<Option<dioxus_core::Task>>,
-    /// Track id kopuz last asked Spotify to play, and when.
     pub(crate) spotify_commanded: Signal<Option<(String, std::time::Instant)>>,
-    /// Whether the current track is playing through the Spotify host rather than
-    /// the engine — transport methods and the progress pump branch on this.
-    pub(crate) external_active: Signal<bool>,
-    /// Set once the user explicitly picks a playback target from the device
-    /// panel (including "this app"). Suppresses automatic adoption of an
-    /// externally active Connect device so it can't override a deliberate choice.
     pub(crate) spotify_device_chosen: Signal<bool>,
+    pub external_active: Signal<bool>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PendingResumeState {
-    track_path: String,
-    progress_secs: u64,
-}
-
-/// A crossfade whose UI hasn't committed to the incoming track yet — held until
-/// the engine's `TrackSwitched`; a seek/prev before then reverts to `from_token`.
-#[derive(Clone, Copy, Debug)]
-pub struct PendingCrossfadeUiState {
-    pub next_idx: usize,
-    pub to_token: u64,
-    pub from_token: u64,
-}
-
+/// A buffered byte range of the current stream, for the seek-bar underlay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BufferedRange {
     pub start: u64,
@@ -188,66 +77,22 @@ pub struct BufferedRange {
     pub total: u64,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct BufferProgressEvent {
-    token: u64,
-    start: u64,
-    end: u64,
-    total: Option<u64>,
-}
-
-fn merge_buffered_range(ranges: &mut Vec<BufferedRange>, incoming: BufferedRange) {
-    if incoming.total == 0 || incoming.start >= incoming.end {
-        return;
-    }
-    if ranges
-        .first()
-        .is_some_and(|range| range.total != incoming.total)
-    {
-        ranges.clear();
-    }
-    ranges.push(BufferedRange {
-        end: incoming.end.min(incoming.total),
-        ..incoming
-    });
-    ranges.sort_unstable_by_key(|range| range.start);
-
-    let mut merged: Vec<BufferedRange> = Vec::with_capacity(ranges.len());
-    for range in ranges.drain(..) {
-        if let Some(previous) = merged.last_mut()
-            && range.start <= previous.end
-        {
-            previous.end = previous.end.max(range.end);
-            continue;
-        }
-        merged.push(range);
-    }
-    *ranges = merged;
-}
-
 impl PlayerController {
-    fn buffer_progress_callback(&self, token: u64) -> utils::stream_buffer::BufferProgressCallback {
-        let progress_tx = self.buffer_progress_tx.peek().clone();
-        Arc::new(move |start, end, total| {
-            let _ = progress_tx.send(BufferProgressEvent {
-                token,
-                start,
-                end,
-                total,
-            });
-        })
+    fn handle(&self) -> SessionHandle {
+        self.session.peek().clone()
     }
 
-    fn track_key(track: &Track) -> String {
-        track.id.uid().to_string()
-    }
-
-    pub(crate) fn shift_indices_at_or_after(indices: &mut [usize], at: usize, by: usize) {
-        for idx in indices {
-            if *idx >= at {
-                *idx += by;
+    fn command(&self, command: api::PlayerCommand) {
+        let handle = self.handle();
+        spawn(async move {
+            if let Err(error) = handle.player_command(command).await {
+                tracing::warn!(%error, "session command failed");
             }
-        }
+        });
+    }
+
+    fn is_spotify_track(track: &Track) -> bool {
+        track.id.service() == Some(config::MusicService::Spotify)
     }
 
     /// Retrieves the queue index for a given index, taking into account the shuffle state.
@@ -259,26 +104,400 @@ impl PlayerController {
         }
     }
 
-    /// Retrieves the current track index in the queue, taking into account the shuffle state.
-    /// Useful when it is not required to be a reactive value
     pub fn get_current_track_index(&self) -> Option<usize> {
         self.get_queue_index(*self.current_queue_index.peek())
     }
 
-    /// Retrieves the track at a given index in the queue, taking into account the shuffle state.
     pub fn get_track_at(&self, idx: usize) -> Option<Track> {
         let idx = self.get_queue_index(idx)?;
         self.queue.peek().get(idx).cloned()
     }
 
-    /// Retrieves the current track
     pub fn current_track(&self) -> Option<Track> {
         self.get_track_at(*self.current_queue_index.peek())
     }
 
-    /// Stamp a resolved stream's probed duration/bitrate (YT ships them late)
-    /// onto the queue Track and, if it's still the shown track, the live
-    /// signals — in a single `queue.write()`.
+    pub fn has_next_track(&self) -> bool {
+        let queue_len = self.queue.peek().len();
+        if queue_len == 0 {
+            return false;
+        }
+        match *self.loop_mode.peek() {
+            LoopMode::Track | LoopMode::Queue => true,
+            LoopMode::None => *self.current_queue_index.peek() + 1 < queue_len,
+        }
+    }
+
+    /// Play the track at a physical queue index (a track-list row click).
+    /// While shuffle is on the permutation re-pins around it, exactly like the
+    /// daemon's jump.
+    pub fn play_track(&mut self, idx: usize) {
+        self.play_physical(idx);
+    }
+
+    /// Play the track at a play-order (logical) index, as the queue view uses.
+    pub fn play_track_no_history(&mut self, idx: usize) {
+        let Some(physical) = self.get_queue_index(idx) else {
+            return;
+        };
+        let Some(track) = self.queue.peek().get(physical).cloned() else {
+            return;
+        };
+        if Self::is_spotify_track(&track) {
+            if !*self.external_active.peek() {
+                self.command(api::PlayerCommand::Stop);
+            }
+            self.external_active.set(true);
+            self.current_queue_index.set(idx);
+            self.hydrate_current_track_metadata(idx, 0);
+            self.start_spotify_track(&track);
+            return;
+        }
+        if *self.external_active.peek() {
+            self.play_physical(physical);
+            return;
+        }
+        let handle = self.handle();
+        spawn(async move {
+            let _ = handle
+                .queue_edit(api::QueueEdit::Jump { index: idx as u32 })
+                .await;
+        });
+    }
+
+    /// Command the Spotify transport to start `track` and schedule its
+    /// scrobble; the caller has already positioned the queue signals.
+    fn start_spotify_track(&mut self, track: &Track) {
+        let Some(item_id) = PlaybackItemRef::parse(&track.id.uid())
+            .primary_id()
+            .map(str::to_string)
+        else {
+            return;
+        };
+        self.spotify_progress_anchor
+            .set(Some((0, std::time::Instant::now())));
+        self.is_playing.set(true);
+        self.spotify_play(&item_id, track);
+        let generation = *self.spotify_scrobble_token.peek() + 1;
+        self.spotify_scrobble_token.set(generation);
+        scrobble_scheduler::schedule(
+            track.clone(),
+            Some(item_id),
+            self.config,
+            self.spotify_scrobble_token,
+            generation,
+            self.is_playing,
+            Some(self.active_source),
+            ScrobbleOptions::REMOTE_NATIVE,
+            self.db.peek().clone(),
+        );
+    }
+
+    /// Play the track at a physical queue index. Spotify tracks route to the
+    /// browser host; everything else is a session jump. Returning from
+    /// external playback pushes the locally accumulated queue back into the
+    /// daemon so nothing the Spotify session added is lost.
+    fn play_physical(&mut self, physical_idx: usize) {
+        let Some(track) = self.queue.peek().get(physical_idx).cloned() else {
+            return;
+        };
+        if Self::is_spotify_track(&track) {
+            self.play_spotify_physical(physical_idx, track);
+            return;
+        }
+        let shuffle = *self.shuffle.peek();
+        if *self.external_active.peek() {
+            self.stop_external_playback();
+            let tracks = self.queue.peek().clone();
+            let handle = self.handle();
+            spawn(async move {
+                let _ = handle
+                    .set_queue_tracks(
+                        tracks,
+                        api::QueueMode::Replace,
+                        Some(physical_idx),
+                        Some(shuffle),
+                    )
+                    .await;
+            });
+            return;
+        }
+        let handle = self.handle();
+        spawn(async move {
+            if let Err(error) = handle.jump_physical(physical_idx).await {
+                tracing::warn!(%error, "queue jump failed");
+            }
+        });
+    }
+
+    fn play_spotify_physical(&mut self, physical_idx: usize, track: Track) {
+        if !*self.external_active.peek() {
+            self.command(api::PlayerCommand::Stop);
+        }
+        let current = *self.current_queue_index.peek();
+        self.history.with_mut(|history| {
+            if history.last() != Some(&current) {
+                history.push(current);
+            }
+        });
+        let logical_idx = if *self.shuffle.peek() {
+            self.current_queue_index.set(physical_idx);
+            self.rebuild_shuffle_order();
+            0
+        } else {
+            physical_idx
+        };
+        self.external_active.set(true);
+        self.hydrate_current_track_metadata(logical_idx, 0);
+        self.start_spotify_track(&track);
+    }
+
+    pub fn play_queue_linear(&mut self, tracks: Vec<Track>) {
+        self.play_replacement(tracks, None, None);
+    }
+
+    /// Historical shuffle-play semantics: a random starting track, with the
+    /// shuffle toggle left as the user set it.
+    pub fn play_queue_shuffled(&mut self, tracks: Vec<Track>) {
+        use rand::RngExt;
+        if tracks.is_empty() {
+            return;
+        }
+        let start = rand::rng().random_range(0..tracks.len());
+        self.play_replacement(tracks, Some(start), None);
+    }
+
+    fn play_replacement(
+        &mut self,
+        tracks: Vec<Track>,
+        start_index: Option<usize>,
+        shuffle: Option<bool>,
+    ) {
+        if tracks.is_empty() {
+            return;
+        }
+        if tracks.first().is_some_and(Self::is_spotify_track) {
+            self.queue.set(tracks);
+            self.history.write().clear();
+            if shuffle == Some(true) {
+                self.shuffle.set(true);
+            }
+            let start = start_index.unwrap_or(0);
+            let target = self.queue.peek().get(start).cloned();
+            if let Some(track) = target {
+                self.play_spotify_physical(start, track);
+            }
+            return;
+        }
+        if *self.external_active.peek() {
+            self.stop_external_playback();
+        }
+        let handle = self.handle();
+        spawn(async move {
+            let _ = handle
+                .set_queue_tracks(tracks, api::QueueMode::Replace, start_index, shuffle)
+                .await;
+        });
+    }
+
+    pub fn add_to_queue(&mut self, tracks: impl IntoIterator<Item = Track>) {
+        let tracks: Vec<Track> = tracks.into_iter().collect();
+        if tracks.is_empty() {
+            return;
+        }
+        if *self.external_active.peek() {
+            self.queue.with_mut(|queue| queue.extend(tracks));
+            return;
+        }
+        let handle = self.handle();
+        spawn(async move {
+            let _ = handle
+                .set_queue_tracks(tracks, api::QueueMode::Append, None, None)
+                .await;
+        });
+    }
+
+    pub fn queue_play_next(&mut self, tracks: impl IntoIterator<Item = Track>) {
+        let tracks: Vec<Track> = tracks.into_iter().collect();
+        if tracks.is_empty() {
+            return;
+        }
+        if *self.external_active.peek() {
+            let insert_at = (*self.current_queue_index.peek() + 1).min(self.queue.peek().len());
+            self.queue.with_mut(|queue| {
+                for (offset, track) in tracks.into_iter().enumerate() {
+                    queue.insert(insert_at + offset, track);
+                }
+            });
+            return;
+        }
+        let handle = self.handle();
+        spawn(async move {
+            let _ = handle
+                .set_queue_tracks(tracks, api::QueueMode::PlayNext, None, None)
+                .await;
+        });
+    }
+
+    pub fn play_next(&mut self) {
+        if *self.external_active.peek() {
+            self.external_step(1);
+            return;
+        }
+        self.command(api::PlayerCommand::Next);
+    }
+
+    pub fn play_prev(&mut self) {
+        if *self.external_active.peek() {
+            self.external_step(-1);
+            return;
+        }
+        self.command(api::PlayerCommand::Previous);
+    }
+
+    /// Local queue stepping for external playback, where the daemon is not
+    /// driving the advance.
+    fn external_step(&mut self, delta: i64) {
+        let queue_len = if *self.shuffle.peek() {
+            self.repair_shuffle_order();
+            self.shuffle_order.peek().len()
+        } else {
+            self.queue.peek().len()
+        };
+        if queue_len == 0 {
+            return;
+        }
+        let idx = *self.current_queue_index.peek() as i64;
+        let loop_mode = *self.loop_mode.peek();
+        let next = match loop_mode {
+            LoopMode::Track => idx,
+            _ => {
+                let stepped = idx + delta;
+                if stepped < 0 {
+                    (queue_len as i64) - 1
+                } else if stepped >= queue_len as i64 {
+                    if loop_mode == LoopMode::None && delta > 0 {
+                        self.spotify_transport_pause();
+                        self.is_playing.set(false);
+                        return;
+                    }
+                    0
+                } else {
+                    stepped
+                }
+            }
+        } as usize;
+        let Some(physical) = self.get_queue_index(next) else {
+            return;
+        };
+        let Some(track) = self.queue.peek().get(physical).cloned() else {
+            return;
+        };
+        self.current_queue_index.set(next);
+        self.hydrate_current_track_metadata(next, 0);
+        if Self::is_spotify_track(&track) {
+            self.start_spotify_track(&track);
+        } else {
+            self.play_physical(physical);
+        }
+    }
+
+    /// Insert tracks at a play-order position, as the queue view's drag-drop
+    /// uses.
+    pub fn insert_queue_tracks(&mut self, insert_at: usize, tracks: Vec<Track>) {
+        if tracks.is_empty() {
+            return;
+        }
+        if *self.external_active.peek() {
+            self.insert_queue_tracks_local(insert_at, tracks);
+            return;
+        }
+        let handle = self.handle();
+        spawn(async move {
+            let _ = handle.insert_tracks_at(insert_at, tracks).await;
+        });
+    }
+
+    fn insert_queue_tracks_local(&mut self, insert_at: usize, tracks: Vec<Track>) {
+        let count = tracks.len();
+        if *self.shuffle.peek() {
+            self.repair_shuffle_order();
+            let visual_insert = insert_at.min(self.shuffle_order.peek().len());
+            let physical_insert = self
+                .shuffle_order
+                .peek()
+                .get(visual_insert)
+                .copied()
+                .unwrap_or_else(|| self.queue.peek().len());
+            self.queue.with_mut(|queue| {
+                let insert_pos = physical_insert.min(queue.len());
+                for (offset, track) in tracks.into_iter().enumerate() {
+                    queue.insert(insert_pos + offset, track);
+                }
+            });
+            self.shuffle_order.with_mut(|order| {
+                for idx in order.iter_mut() {
+                    if *idx >= physical_insert {
+                        *idx += count;
+                    }
+                }
+                for offset in 0..count {
+                    order.insert(visual_insert + offset, physical_insert + offset);
+                }
+            });
+            let current = *self.current_queue_index.peek();
+            if visual_insert <= current {
+                self.current_queue_index.set(current + count);
+            }
+            self.history.with_mut(|history| {
+                for idx in history.iter_mut() {
+                    if *idx >= visual_insert {
+                        *idx += count;
+                    }
+                }
+            });
+        } else {
+            let insert_at = insert_at.min(self.queue.peek().len());
+            self.queue.with_mut(|queue| {
+                for (offset, track) in tracks.into_iter().enumerate() {
+                    queue.insert(insert_at + offset, track);
+                }
+            });
+            let current = *self.current_queue_index.peek();
+            if insert_at <= current {
+                self.current_queue_index.set(current + count);
+            }
+        }
+    }
+
+    pub fn pause(&mut self) {
+        if *self.external_active.peek() {
+            self.spotify_transport_pause();
+            self.is_playing.set(false);
+            return;
+        }
+        self.is_playing.set(false);
+        self.command(api::PlayerCommand::Pause);
+    }
+
+    pub fn resume(&mut self) {
+        if *self.external_active.peek() {
+            self.spotify_transport_resume();
+            self.is_playing.set(true);
+            return;
+        }
+        self.is_playing.set(true);
+        self.command(api::PlayerCommand::Play);
+    }
+
+    pub fn toggle(&mut self) {
+        if *self.is_playing.peek() {
+            self.pause();
+        } else {
+            self.resume();
+        }
+    }
+
     /// Seek the current track. All progress-bar and lyric scrubbers route here.
     pub fn seek(&mut self, time: Duration) {
         if *self.external_active.peek() {
@@ -297,15 +516,167 @@ impl PlayerController {
             self.current_song_progress.set(time.as_secs());
             return;
         }
-        // The scrub targets the visible track. During a crossfade that's the
-        // outgoing session: revert the armed transition and seek it by its own
-        // token, so a fade that just completed can't misdirect the seek.
-        if let Some(from_token) = self.revert_transition() {
-            self.player.peek().seek_for_session(time, from_token);
-        } else {
-            self.player.peek().seek(time);
-        }
         self.current_song_progress.set(time.as_secs());
+        self.engine_anchor.set(Some((
+            time.as_millis() as u64,
+            std::time::Instant::now(),
+            *self.is_playing.peek(),
+        )));
+        self.command(api::PlayerCommand::Seek {
+            position_ms: time.as_millis() as u64,
+        });
+    }
+
+    /// Volume changes route through the session; the local signal keeps the
+    /// slider responsive.
+    pub fn set_volume(&mut self, value: f32) {
+        self.volume.set(value);
+        self.command(api::PlayerCommand::SetVolume { volume: value });
+    }
+
+    /// Apply an equalizer preview to the engine without committing it to the
+    /// config; a commit goes through the config signal and the session's
+    /// config bridge instead.
+    pub fn preview_equalizer(&self, equalizer: config::EqualizerSettings) {
+        let mut snapshot = self.config.peek().clone();
+        snapshot.equalizer = equalizer;
+        self.handle()
+            .set_config(snapshot, vec!["equalizer".to_string()]);
+    }
+
+    pub fn set_shuffle(&mut self, on: bool) {
+        if *self.shuffle.peek() != on {
+            self.toggle_shuffle();
+        }
+    }
+
+    pub fn toggle_shuffle(&mut self) {
+        let now_on = !*self.shuffle.peek();
+        if *self.external_active.peek() {
+            self.shuffle.set(now_on);
+            if now_on {
+                self.rebuild_shuffle_order();
+            } else {
+                let current = *self.current_queue_index.peek();
+                let physical = self
+                    .shuffle_order
+                    .peek()
+                    .get(current)
+                    .copied()
+                    .unwrap_or(current);
+                self.current_queue_index.set(physical);
+            }
+            return;
+        }
+        self.shuffle.set(now_on);
+        self.command(api::PlayerCommand::SetMode {
+            shuffle: Some(now_on),
+            loop_mode: None,
+        });
+    }
+
+    pub fn set_loop_mode(&mut self, mode: LoopMode) {
+        self.loop_mode.set(mode);
+        self.command(api::PlayerCommand::SetMode {
+            shuffle: None,
+            loop_mode: Some(mode),
+        });
+    }
+
+    pub fn toggle_loop(&mut self) {
+        let next = self.loop_mode.peek().next();
+        self.set_loop_mode(next);
+    }
+
+    pub fn play_radio(&mut self, station_id: &str, stream_id: &str) {
+        if *self.external_active.peek() {
+            self.stop_external_playback();
+        }
+        let handle = self.handle();
+        let request = api::SetQueueRequest {
+            mode: api::QueueMode::Replace,
+            context: api::QueueContext::Radio {
+                station_id: station_id.to_string(),
+                stream_id: stream_id.to_string(),
+            },
+            start_index: Some(0),
+            shuffle: None,
+        };
+        spawn(async move {
+            if let Err(error) = handle.set_queue(request).await {
+                tracing::warn!(%error, "radio start failed");
+            }
+        });
+    }
+
+    pub fn move_queue_item(&mut self, from: usize, to: usize) {
+        if *self.external_active.peek() {
+            let len = self.queue.peek().len();
+            if from >= len || to >= len || from == to {
+                return;
+            }
+            self.queue.with_mut(|queue| {
+                let track = queue.remove(from);
+                queue.insert(to, track);
+            });
+            return;
+        }
+        let handle = self.handle();
+        spawn(async move {
+            let _ = handle
+                .queue_edit(api::QueueEdit::Move {
+                    from: from as u32,
+                    to: to as u32,
+                })
+                .await;
+        });
+    }
+
+    pub fn swap_queue_item(&mut self, from: usize, to: usize) {
+        self.move_queue_item(from, to);
+    }
+
+    /// Hard reset when the active server changes: stop everything and clear
+    /// the queue so a queued remote track cannot replay through the wrong
+    /// backend.
+    pub fn reset_for_backend_switch(&mut self) {
+        self.stop_external_playback();
+        self.playback_error.set(None);
+        self.clear_current_track_metadata();
+        self.queue.write().clear();
+        self.history.write().clear();
+        self.current_queue_index.set(0);
+        let handle = self.handle();
+        spawn(async move {
+            let _ = handle.player_command(api::PlayerCommand::Stop).await;
+            let _ = handle
+                .set_queue_tracks(Vec::new(), api::QueueMode::Replace, None, None)
+                .await;
+        });
+    }
+
+    pub fn restore_queue_state(
+        &mut self,
+        queue: Vec<Track>,
+        current_queue_index: usize,
+        progress_secs: u64,
+        shuffle_order: Vec<usize>,
+        shuffle_enabled: bool,
+    ) {
+        let handle = self.handle();
+        spawn(async move {
+            let snapshot = db::QueueSnapshot {
+                version: 1,
+                queue,
+                current_queue_index,
+                progress_secs,
+                shuffle_order,
+                shuffle_enabled,
+            };
+            if let Err(error) = handle.restore_queue(snapshot).await {
+                tracing::warn!(%error, "queue restore failed");
+            }
+        });
     }
 
     /// Zero for an external player: its position comes from the service, not us.
@@ -313,7 +684,7 @@ impl PlayerController {
         if *self.external_active.peek() {
             return 0.0;
         }
-        self.player.peek().output_latency().as_secs_f64()
+        *self.output_latency_ms.peek() as f64 / 1000.0
     }
 
     pub fn displayed_progress_secs_f64(&self) -> f64 {
@@ -331,172 +702,181 @@ impl PlayerController {
             }
             return *self.current_song_progress.peek() as f64;
         }
-        // Mid-crossfade the bar shows the outgoing (fading) track's live position.
-        if self.pending_crossfade_ui.peek().is_some()
-            && let Some(fading) = self.player.peek().fading_position()
-        {
-            return fading.as_secs_f64();
+        if let Some(fading) = *self.fading_progress.peek() {
+            return fading;
         }
-        self.player.peek().get_position().as_secs_f64()
+        if let Some((ms, at, playing)) = *self.engine_anchor.peek() {
+            let mut pos = ms as f64 / 1000.0;
+            if playing {
+                pos += at.elapsed().as_secs_f64();
+            }
+            let dur = *self.current_song_duration.peek();
+            if dur > 0 && dur != u64::MAX {
+                pos = pos.min(dur as f64);
+            }
+            return pos;
+        }
+        *self.current_song_progress.peek() as f64
     }
-}
 
-/// Factory for a resolved network stream (radio, YT range/sequential,
-/// SoundCloud HLS, or a plain buffered stream). Returns a `SourceFactory` so the
-/// symphonia types stay inferred inside the closure — hooks can't name them.
-fn network_factory(
-    stream_url: String,
-    yt_format: Option<(::server::ytmusic::player::AudioFormat, bool)>,
-    yt_user_agent: Option<String>,
-    is_radio: bool,
-    icy_tx: Option<tokio::sync::watch::Sender<utils::icy::IcyMeta>>,
-    rt_handle: tokio::runtime::Handle,
-    buffer_progress: Option<utils::stream_buffer::BufferProgressCallback>,
-) -> SourceFactory {
-    Box::new(move || {
-        let build = || -> std::io::Result<_> {
-            if is_radio {
-                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
-                    stream_url,
-                    true,
-                    yt_user_agent,
-                    icy_tx,
-                    rt_handle,
-                );
-                Ok(decoder::from_stream_with_hint(stream, "ogg"))
-            } else if let Some((fmt, range_safe)) = yt_format {
-                if range_safe {
-                    // YT: HTTP Range-backed source. Symphonia can seek freely
-                    // (Matroska Cues at the end, scrub anywhere) and startup
-                    // probes only fetch the ~512 KiB they need.
-                    let range = utils::range_source::RangeStreamSource::new_with_progress(
-                        stream_url,
-                        yt_user_agent,
-                        buffer_progress,
-                    )?;
-                    let len = Some(range.total_size());
-                    let (source, mut hint) = decoder::from_stream_with_len(range, len);
-                    hint.with_extension(fmt.extension());
-                    Ok((source, hint))
-                } else {
-                    // No-pot fallback: googlevideo 403s deep ranges, and the
-                    // probe reads the webm tail — stream sequentially instead of
-                    // failing outright (issue #386). No scrubbing.
-                    let stream = utils::stream_buffer::StreamBuffer::with_user_agent_and_progress(
-                        stream_url,
-                        false,
-                        yt_user_agent,
-                        None,
-                        rt_handle,
-                        buffer_progress,
-                    );
-                    stream.wait_for_response_headers();
-                    let len = stream.known_total_size();
-                    let (source, mut hint) = decoder::from_stream_with_len(stream, len);
-                    hint.with_extension(fmt.extension());
-                    Ok((source, hint))
-                }
-            } else if let ResolvedStreamRef::SoundCloudHls(hls_url) =
-                ResolvedStreamRef::parse(&stream_url)
-            {
-                // SoundCloud Go+ AAC: assemble the HLS playlist's fMP4 segments
-                // into one in-memory buffer Symphonia can decode (no HLS demuxer).
-                let bytes = utils::hls_source::assemble(hls_url, yt_user_agent.as_deref())?;
-                let len = Some(bytes.len() as u64);
-                let cursor = std::io::Cursor::new(bytes);
-                let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
-                hint.with_extension("m4a");
-                Ok((source, hint))
-            } else if let ResolvedStreamRef::AppleMusicFmp4(payload) =
-                ResolvedStreamRef::parse(&stream_url)
-            {
-                // Apple Music: Widevine key exchange, then fetch the encrypted
-                // fMP4 and decrypt it into one in-memory buffer — same shape as
-                // the SoundCloud path above. The key exchange has panicked on
-                // malformed CDM responses, so it runs under catch_unwind rather
-                // than taking the decode worker down with it.
-                let (adam_id, storefront, language, token_b64) =
-                    ResolvedStreamRef::apple_music_parts(payload).ok_or_else(|| {
-                        std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "malformed Apple Music stream ref",
-                        )
-                    })?;
-                let token = String::from_utf8(
-                    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, token_b64)
-                        .unwrap_or_default(),
-                )
-                .unwrap_or_default();
-                let (adam_id, storefront, language) = (
-                    adam_id.to_string(),
-                    storefront.to_string(),
-                    language.to_string(),
-                );
-                let track = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    rt_handle.block_on(::server::applemusic::stream::resolve_and_decrypt(
-                        &adam_id,
-                        &token,
-                        &storefront,
-                        &language,
-                        buffer_progress.clone(),
-                    ))
-                }))
-                .unwrap_or_else(|panic| {
-                    let msg = panic
-                        .downcast_ref::<&str>()
-                        .map(|s| (*s).to_string())
-                        .or_else(|| panic.downcast_ref::<String>().cloned())
-                        .unwrap_or_else(|| "unknown panic".to_string());
-                    tracing::error!("am.playback: resolve_and_decrypt panicked: {msg}");
-                    Err(format!("Apple Music decrypt panicked: {msg}"))
-                })
-                .map_err(std::io::Error::other)?;
-                // Always seekable: samples decrypt on demand, so symphonia's probe
-                // jumping to EOF for an `mfra` index costs the handful of samples
-                // it actually reads rather than the whole track.
-                let len = Some(track.total_size());
-                let (source, mut hint) = decoder::from_stream_with_len(track, len);
-                hint.with_extension("m4a");
-                Ok((source, hint))
-            } else {
-                // Jellyfin and Subsonic/Navidrome normally support HTTP
-                // ranges. Let format probes jump straight to tail metadata
-                // instead of making a sequential buffer download everything
-                // between the start and end of the file.
-                match utils::range_source::RangeStreamSource::new_with_progress(
-                    stream_url.clone(),
-                    yt_user_agent.clone(),
-                    buffer_progress.clone(),
-                ) {
-                    Ok(range) => {
-                        let len = Some(range.total_size());
-                        Ok(decoder::from_stream_with_len(range, len))
-                    }
-                    Err(error) => {
-                        tracing::debug!(%error, "HTTP ranges unavailable; using progressive stream");
-                        let stream =
-                            utils::stream_buffer::StreamBuffer::with_user_agent_and_progress(
-                                stream_url,
-                                false,
-                                yt_user_agent,
-                                None,
-                                rt_handle,
-                                buffer_progress,
-                            );
-                        stream.wait_for_response_headers();
-                        let len = stream.known_total_size();
-                        Ok(decoder::from_stream_with_len(stream, len))
-                    }
-                }
+    pub(crate) fn cover_url_for_track(&self, track: &Track) -> String {
+        ::server::cover::track(&self.config.read(), track, 800)
+            .map(|cover| cover.as_ref().to_string())
+            .unwrap_or_else(|| utils::default_cover_url().as_ref().to_string())
+    }
+
+    pub(crate) fn clear_current_track_metadata(&mut self) {
+        self.current_song_title.set(String::new());
+        self.current_song_artist.set(String::new());
+        self.current_song_album.set(String::new());
+        self.current_song_khz.set(0);
+        self.current_song_bitrate.set(0);
+        self.current_song_duration.set(0);
+        self.current_song_progress.set(0);
+        self.buffered_ranges.set(Vec::new());
+        self.current_song_cover_url.set(String::new());
+        self.current_track_snapshot.set(None);
+    }
+
+    pub(crate) fn hydrate_current_track_metadata(&mut self, idx: usize, progress_secs: u64) {
+        if let Some(track) = self.get_track_at(idx) {
+            let progress_secs = progress_secs.min(track.duration);
+            self.current_queue_index.set(idx);
+            self.current_song_title.set(track.title.clone());
+            self.current_song_artist.set(track.artist.clone());
+            self.current_song_album.set(track.album.clone());
+            self.current_song_khz.set(track.khz);
+            self.current_song_bitrate.set(track.bitrate);
+            self.current_song_duration.set(track.duration);
+            self.current_song_progress.set(progress_secs);
+            self.current_song_cover_url
+                .set(self.cover_url_for_track(&track));
+            self.current_track_snapshot.set(Some(track));
+        } else {
+            self.current_queue_index.set(0);
+            self.clear_current_track_metadata();
+        }
+    }
+
+    /// Adopt a Spotify Connect track started elsewhere; see the old
+    /// controller's notes on shuffle stability.
+    pub(crate) fn hydrate_external_track_metadata(&mut self, track: Track, progress_secs: u64) {
+        let queued_idx = self
+            .queue
+            .peek()
+            .iter()
+            .position(|queued| queued.id == track.id);
+        let physical_idx = match queued_idx {
+            Some(idx) => {
+                self.queue.write()[idx] = track;
+                idx
+            }
+            None => {
+                let idx = self.queue.peek().len();
+                self.queue.write().push(track);
+                idx
             }
         };
-        build().map_err(|e| e.to_string())
-    })
+        let logical_idx = if *self.shuffle.peek() {
+            match queued_idx.and_then(|_| self.shuffle_position_of(physical_idx)) {
+                Some(position) => position,
+                None => {
+                    self.current_queue_index.set(physical_idx);
+                    self.rebuild_shuffle_order();
+                    0
+                }
+            }
+        } else {
+            physical_idx
+        };
+        self.hydrate_current_track_metadata(logical_idx, progress_secs);
+    }
+
+    /// Replace the provisional one-track external queue with the complete
+    /// Spotify playlist/album once its context finishes loading.
+    pub(crate) fn hydrate_external_context(
+        &mut self,
+        tracks: Vec<Track>,
+        current_track_id: &str,
+        progress_secs: u64,
+    ) {
+        let Some(physical_idx) = tracks
+            .iter()
+            .position(|track| track.id.key() == current_track_id)
+        else {
+            return;
+        };
+        self.queue.set(tracks);
+        self.history.write().clear();
+        self.current_queue_index.set(physical_idx);
+        let logical_idx = if *self.shuffle.peek() {
+            self.rebuild_shuffle_order();
+            0
+        } else {
+            physical_idx
+        };
+        self.hydrate_current_track_metadata(logical_idx, progress_secs);
+    }
+
+    pub(crate) fn rebuild_shuffle_order(&mut self) {
+        use rand::seq::SliceRandom;
+        let queue_len = self.queue.peek().len();
+        let current_idx = *self.current_queue_index.peek();
+        if queue_len == 0 {
+            self.shuffle_order.set(Vec::new());
+            self.current_queue_index.set(0);
+            return;
+        }
+        let mut order: Vec<usize> = Vec::with_capacity(queue_len);
+        order.push(current_idx);
+        let mut rest: Vec<usize> = (0..queue_len).filter(|&i| i != current_idx).collect();
+        rest.shuffle(&mut rand::rng());
+        order.extend(rest);
+        self.current_queue_index.set(0);
+        self.shuffle_order.set(order);
+    }
+
+    pub(crate) fn shuffle_position_of(&mut self, physical_idx: usize) -> Option<usize> {
+        self.repair_shuffle_order();
+        self.shuffle_order
+            .peek()
+            .iter()
+            .position(|&idx| idx == physical_idx)
+    }
+
+    fn repair_shuffle_order(&mut self) {
+        use rand::seq::SliceRandom;
+        let queue_len = self.queue.peek().len();
+        let covered = self.shuffle_order.peek().len() == queue_len
+            && self
+                .shuffle_order
+                .peek()
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == queue_len;
+        if covered {
+            return;
+        }
+        let order = self.shuffle_order.peek().clone();
+        let mut repaired: Vec<usize> = Vec::with_capacity(queue_len);
+        for idx in order {
+            if idx < queue_len && !repaired.contains(&idx) {
+                repaired.push(idx);
+            }
+        }
+        let mut missing: Vec<usize> = (0..queue_len)
+            .filter(|idx| !repaired.contains(idx))
+            .collect();
+        missing.shuffle(&mut rand::rng());
+        repaired.extend(missing);
+        self.shuffle_order.set(repaired);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn use_player_controller(
-    player: Signal<Player>,
+    session_handle: SessionHandle,
     is_playing: Signal<bool>,
     queue: Signal<Vec<Track>>,
     current_queue_index: Signal<usize>,
@@ -511,58 +891,26 @@ pub fn use_player_controller(
     current_track_snapshot: Signal<Option<Track>>,
     volume: Signal<f32>,
     config: Signal<AppConfig>,
-    config_loaded_ok: Signal<bool>,
+    _config_loaded_ok: Signal<bool>,
     db_handle: db::Db,
 ) -> PlayerController {
-    let intent = use_signal(|| PlaybackIntent::Stopped);
-    let next_token = use_signal(|| 0u64);
-    let current_token = use_signal(|| 0u64);
-    let buffered_ranges = use_signal(Vec::<BufferedRange>::new);
-    let (progress_tx, progress_rx) = use_hook(|| {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<BufferProgressEvent>();
-        (tx, std::rc::Rc::new(std::cell::RefCell::new(Some(rx))))
-    });
-    let buffer_progress_tx = use_signal(move || progress_tx);
-    let progress_rx_slot = progress_rx.clone();
-    let mut buffered_ranges_sink = buffered_ranges;
-    use_effect(move || {
-        let Some(mut progress_rx) = progress_rx_slot.borrow_mut().take() else {
-            return;
-        };
-        spawn(async move {
-            while let Some(event) = progress_rx.recv().await {
-                if *current_token.peek() != event.token {
-                    continue;
-                }
-                let Some(total) = event.total.filter(|total| *total > 0) else {
-                    continue;
-                };
-                buffered_ranges_sink.with_mut(|ranges| {
-                    merge_buffered_range(
-                        ranges,
-                        BufferedRange {
-                            start: event.start,
-                            end: event.end,
-                            total,
-                        },
-                    );
-                });
-            }
-        });
-    });
-    let armed_transition = use_signal(|| None);
+    let session = use_signal(move || session_handle);
+    let loading = use_signal(|| false);
     let browse_loading = use_signal(|| false);
-    let is_loading = use_memo(move || intent.read().is_loading() || *browse_loading.read());
+    let is_loading = use_memo(move || *loading.read() || *browse_loading.read());
     let history = use_signal(Vec::new);
     let shuffle = use_signal(|| false);
     let shuffle_order = use_signal(Vec::<usize>::new);
     let loop_mode = use_signal(|| LoopMode::None);
-    let pending_resume = use_signal(|| None::<PendingResumeState>);
-    let pending_crossfade_ui = use_signal(|| None::<PendingCrossfadeUiState>);
-    let radio_task = use_signal(|| None::<dioxus_core::Task>);
-    let load_task = use_signal(|| None::<dioxus_core::Task>);
-    let station_registry = use_context::<Signal<radio::registry::StationRegistry>>();
+    let buffered_ranges = use_signal(Vec::<BufferedRange>::new);
     let playback_error = use_signal(|| None::<String>);
+    let engine_anchor = use_signal(|| None::<(u64, std::time::Instant, bool)>);
+    let fading_progress = use_signal(|| None::<f64>);
+    let output_latency_ms = use_signal(|| 0u64);
+    let spotify_scrobble_token = use_signal(|| 0u64);
+    let db = use_signal(move || db_handle);
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+
     let spotify_host = use_signal(|| None::<::server::spotify::host::SpotifyHost>);
     let spotify_device = use_signal(|| None::<String>);
     let spotify_pending_uri = use_signal(|| None::<String>);
@@ -572,47 +920,14 @@ pub fn use_player_controller(
     let spotify_host_starting = use_signal(|| false);
     let spotify_start_task = use_signal(|| None::<dioxus_core::Task>);
     let spotify_commanded = use_signal(|| None::<(String, std::time::Instant)>);
-    let external_active = use_signal(|| false);
     let spotify_device_chosen = use_signal(|| false);
-    let db = use_signal(move || db_handle);
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let external_active = use_signal(|| false);
 
-    // Scrobbles queued while offline (issue #335): retry once on startup, in
-    // case connectivity came back between sessions.
-    let mut drained = use_signal(|| false);
-    use_effect(move || {
-        if !*config_loaded_ok.read() || *drained.peek() {
-            return;
-        }
-        drained.set(true);
-        let creds = {
-            let cfg = config.peek();
-            scrobble::queue::Credentials {
-                lastfm: (!cfg.lastfm_api_key.is_empty() && !cfg.lastfm_api_secret.is_empty()).then(
-                    || {
-                        (
-                            cfg.lastfm_api_key.clone(),
-                            cfg.lastfm_api_secret.clone(),
-                            cfg.lastfm_session_key.clone(),
-                        )
-                    },
-                ),
-                librefm_session_key: (!cfg.librefm_session_key.is_empty())
-                    .then(|| cfg.librefm_session_key.clone()),
-                listenbrainz_token: (!cfg.musicbrainz_token.trim().is_empty())
-                    .then(|| cfg.musicbrainz_token.clone()),
-            }
-        };
-        let db_handle = db.peek().clone();
-        spawn(async move {
-            scrobble::queue::drain(&db_handle, &creds).await;
-        });
-    });
-
-    PlayerController {
-        player,
+    let ctrl = PlayerController {
+        session,
         is_playing,
         is_loading,
+        loading,
         history,
         queue,
         shuffle,
@@ -627,24 +942,18 @@ pub fn use_player_controller(
         current_song_duration,
         current_song_progress,
         buffered_ranges,
-        buffer_progress_tx,
         current_song_cover_url,
         current_track_snapshot,
         volume,
         config,
         db,
         active_source,
-        intent,
-        next_token,
-        current_token,
-        armed_transition,
-        browse_loading,
-        pending_resume,
-        pending_crossfade_ui,
-        radio_task,
-        load_task,
-        station_registry,
         playback_error,
+        browse_loading,
+        engine_anchor,
+        fading_progress,
+        output_latency_ms,
+        spotify_scrobble_token,
         spotify_host,
         spotify_device,
         spotify_pending_uri,
@@ -654,75 +963,10 @@ pub fn use_player_controller(
         spotify_host_starting,
         spotify_start_task,
         spotify_commanded,
-        external_active,
         spotify_device_chosen,
-    }
-}
+        external_active,
+    };
 
-#[cfg(test)]
-mod tests {
-    use super::{BufferedRange, merge_buffered_range};
-
-    #[test]
-    fn buffered_ranges_merge_adjacent_and_overlapping_chunks() {
-        let mut ranges = Vec::new();
-        for (start, end) in [(500, 750), (0, 250), (200, 500)] {
-            merge_buffered_range(
-                &mut ranges,
-                BufferedRange {
-                    start,
-                    end,
-                    total: 1_000,
-                },
-            );
-        }
-
-        assert_eq!(
-            ranges,
-            vec![BufferedRange {
-                start: 0,
-                end: 750,
-                total: 1_000,
-            }]
-        );
-    }
-
-    #[test]
-    fn buffered_ranges_preserve_gaps_and_reset_for_a_new_total() {
-        let mut ranges = Vec::new();
-        merge_buffered_range(
-            &mut ranges,
-            BufferedRange {
-                start: 0,
-                end: 100,
-                total: 1_000,
-            },
-        );
-        merge_buffered_range(
-            &mut ranges,
-            BufferedRange {
-                start: 900,
-                end: 1_000,
-                total: 1_000,
-            },
-        );
-        assert_eq!(ranges.len(), 2);
-
-        merge_buffered_range(
-            &mut ranges,
-            BufferedRange {
-                start: 0,
-                end: 50,
-                total: 500,
-            },
-        );
-        assert_eq!(
-            ranges,
-            vec![BufferedRange {
-                start: 0,
-                end: 50,
-                total: 500,
-            }]
-        );
-    }
+    crate::session_projector::use_session_projector(ctrl);
+    ctrl
 }
