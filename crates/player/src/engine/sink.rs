@@ -40,6 +40,57 @@ pub trait AudioSink: Send {
     fn close(&mut self);
 }
 
+/// Discards audio: opens successfully, never pulls samples. Lets the full
+/// actor/decoder state machine run in headless integration tests and tools
+/// without an output device.
+#[derive(Default)]
+pub struct NullSink {
+    config: Option<SinkConfig>,
+}
+
+impl NullSink {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl AudioSink for NullSink {
+    fn probe_config(&mut self, desired_sample_rate: Option<u32>) -> Result<SinkConfig, String> {
+        Ok(SinkConfig {
+            channels: 2,
+            sample_rate: desired_sample_rate.unwrap_or(44_100),
+        })
+    }
+
+    fn open(
+        &mut self,
+        desired_sample_rate: Option<u32>,
+        make_cb: DataCallbackFactory,
+    ) -> Result<SinkConfig, String> {
+        let config = SinkConfig {
+            channels: 2,
+            sample_rate: desired_sample_rate.unwrap_or(44_100),
+        };
+        drop(make_cb(config));
+        self.config = Some(config);
+        Ok(config)
+    }
+
+    fn config(&self) -> Option<SinkConfig> {
+        self.config
+    }
+
+    fn play(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn pause(&mut self) {}
+
+    fn close(&mut self) {
+        self.config = None;
+    }
+}
+
 /// Out-of-band notifications from the audio backend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SinkEvent {
