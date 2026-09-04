@@ -173,7 +173,23 @@ struct DiscordState {
     last_source: Option<String>,
     cover: Option<String>,
     cover_sent: bool,
-    cover_resolving_for: String,
+    cover_song_key: String,
+    cover_lookup_attempted: bool,
+    cover_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl DiscordState {
+    fn cancel_cover_lookup(&mut self) {
+        if let Some(task) = self.cover_task.take() {
+            task.abort();
+        }
+    }
+}
+
+impl Drop for DiscordState {
+    fn drop(&mut self) {
+        self.cancel_cover_lookup();
+    }
 }
 
 /// Discord presence projection, ported from the pump: now-playing on play,
@@ -201,7 +217,9 @@ pub fn spawn_discord_presence(
             last_source: None,
             cover: None,
             cover_sent: false,
-            cover_resolving_for: String::new(),
+            cover_song_key: String::new(),
+            cover_lookup_attempted: false,
+            cover_task: None,
         };
         let mut last_state: Option<(Box<PlayerState>, Instant)> = None;
         let mut keepalive = tokio::time::interval(Duration::from_secs(DISCORD_TICK_SECS));
@@ -218,7 +236,8 @@ pub fn spawn_discord_presence(
                 }
                 resolved = cover_rx.recv() => {
                     let Some((song_key, url)) = resolved else { break };
-                    if song_key == discord.cover_resolving_for {
+                    if song_key == discord.cover_song_key {
+                        discord.cover_task.take();
                         discord.cover = url;
                         discord.cover_sent = false;
                         if let Some((state, received)) = &last_state {
@@ -256,6 +275,18 @@ fn project(
     let title = track.map(|t| t.title.clone()).unwrap_or_default();
     let artist = track.map(|t| t.artist.clone()).unwrap_or_default();
     let album = track.map(|t| t.album.clone()).unwrap_or_default();
+    let song_key = format!("{title}|{artist}|{album}");
+    if song_key != discord.cover_song_key {
+        discord.cancel_cover_lookup();
+        discord.cover_song_key = song_key.clone();
+        discord.cover_lookup_attempted = false;
+        discord.cover = None;
+        discord.cover_sent = false;
+    }
+    if !enabled {
+        discord.cancel_cover_lookup();
+        discord.cover_lookup_attempted = false;
+    }
     let duration_secs = track
         .and_then(|t| t.duration_ms)
         .map(|ms| ms / 1000)
@@ -267,20 +298,17 @@ fn project(
     };
 
     if playing {
-        let song_key = format!("{title}|{artist}|{album}");
-        if enabled && song_key != discord.cover_resolving_for {
-            discord.cover_resolving_for = song_key.clone();
-            discord.cover = None;
-            discord.cover_sent = false;
+        if enabled && !title.is_empty() && !discord.cover_lookup_attempted {
+            discord.cover_lookup_attempted = true;
             let tx = cover_tx.clone();
             let (artist_c, album_c) = (artist.clone(), album.clone());
-            tokio::spawn(async move {
+            discord.cover_task = Some(tokio::spawn(async move {
                 let resolved = discord_presence::cover_art::resolve_cover_art_url_cached(
                     None, &artist_c, &album_c,
                 )
                 .await;
                 let _ = tx.send((song_key, resolved));
-            });
+            }));
         }
         if enabled {
             let song_changed = title != discord.last_title;

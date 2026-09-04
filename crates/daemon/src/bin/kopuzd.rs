@@ -169,12 +169,23 @@ fn main() -> ExitCode {
 }
 
 async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    let using_default_database =
+        args.db_path.is_none() && std::env::var_os("KOPUZ_DB_PATH").is_none();
+    if using_default_database {
+        for line in db::legacy::migrate_identity() {
+            tracing::info!("{line}");
+        }
+        db::legacy::migrate_locations();
+    }
     let db_path = args
         .db_path
         .map(PathBuf::from)
         .unwrap_or_else(db::default_db_path);
     tracing::info!(path = %db_path.display(), "opening library database (expects exclusive access)");
     let database = db::init(&db_path).await?;
+    if using_default_database {
+        db::legacy::migrate_json_store(&database, &db::config_dir()).await;
+    }
     let config = database.load_config().await?.unwrap_or_default();
 
     let settings_path =
@@ -195,6 +206,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         station_registry.clone(),
         cover_cache,
     ));
+    server::ytmusic::player::init_tier_store(database.clone());
     utils::db_cache::init(database.clone());
     let active_source: server::source::ActiveSource =
         Arc::from(server::source::active(database.clone(), &config));
