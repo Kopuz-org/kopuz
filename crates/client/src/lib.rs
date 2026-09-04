@@ -263,9 +263,12 @@ impl KopuzApi for GrpcApi {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let mut client = self.client();
         tokio::spawn(async move {
-            let response = client
-                .stream_lyrics(Request::new(proto::TrackRef { key }))
-                .await;
+            let cancel = tx.clone();
+            let response = tokio::select! {
+                biased;
+                () = cancel.closed() => return,
+                response = client.stream_lyrics(Request::new(proto::TrackRef { key })) => response,
+            };
             let mut stream = match response {
                 Ok(response) => response.into_inner(),
                 Err(status) => {
@@ -274,7 +277,12 @@ impl KopuzApi for GrpcApi {
                 }
             };
             loop {
-                match stream.message().await {
+                let message = tokio::select! {
+                    biased;
+                    () = cancel.closed() => return,
+                    message = stream.message() => message,
+                };
+                match message {
                     Ok(Some(lyrics)) => {
                         if tx.send(Ok(convert::lyrics_from_proto(&lyrics))).is_err() {
                             return;

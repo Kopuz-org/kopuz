@@ -420,7 +420,12 @@ impl LibraryService {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let service = self.clone();
         tokio::spawn(async move {
-            let request = match service.lyrics_request(&key).await {
+            let cancel = tx.clone();
+            let request = match tokio::select! {
+                biased;
+                () = cancel.closed() => return,
+                request = service.lyrics_request(&key) => request,
+            } {
                 Ok(request) => request,
                 Err(error) => {
                     let _ = tx.send(Err(error));
@@ -435,16 +440,22 @@ impl LibraryService {
                 return;
             }
             let mut last = None;
-            let final_lyrics =
-                utils::lyrics::fetch_lyrics_progressive_for_request(&request, |lyrics| {
-                    let view = lyrics_view(lyrics);
-                    if last.as_ref() != Some(&view) {
-                        let _ = tx.send(Ok(view.clone()));
-                        last = Some(view);
-                    }
-                })
-                .await
-                .map(lyrics_view);
+            let final_lyrics = {
+                let fetch =
+                    utils::lyrics::fetch_lyrics_progressive_for_request(&request, |lyrics| {
+                        let view = lyrics_view(lyrics);
+                        if last.as_ref() != Some(&view) {
+                            let _ = tx.send(Ok(view.clone()));
+                            last = Some(view);
+                        }
+                    });
+                tokio::pin!(fetch);
+                tokio::select! {
+                    biased;
+                    () = cancel.closed() => return,
+                    lyrics = &mut fetch => lyrics.map(lyrics_view),
+                }
+            };
             match final_lyrics {
                 Some(view) if last.as_ref() != Some(&view) => {
                     let _ = tx.send(Ok(view));
