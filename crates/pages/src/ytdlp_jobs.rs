@@ -155,6 +155,7 @@ fn apply_status(job: &mut DownloadJob, status: &api::JobStatus) {
                 .unwrap_or_else(|| "yt-dlp failed".to_string()),
         ),
         api::JobState::Cancelled => JobStatus::Failed("yt-dlp was cancelled".to_string()),
+        api::JobState::Unknown => job.status.clone(),
     };
 }
 

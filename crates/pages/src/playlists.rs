@@ -411,7 +411,7 @@ fn PlaylistsGrid(
                         yt_is_syncing.set(false);
                         return;
                     }
-                    api::JobState::Failed | api::JobState::Cancelled => {
+                    api::JobState::Failed | api::JobState::Cancelled | api::JobState::Unknown => {
                         yt_is_syncing.set(false);
                         return;
                     }

@@ -1305,6 +1305,7 @@ pub async fn serve(
     listener: tokio::net::TcpListener,
     state: Arc<GrpcState>,
 ) -> std::io::Result<()> {
+    validate_plaintext_bind(listener.local_addr()?)?;
     let token = state.token.clone();
     let auth = move |request: Request<()>| -> Result<Request<()>, Status> {
         let provided = request
@@ -1337,4 +1338,28 @@ pub async fn serve(
         .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
         .await
         .map_err(std::io::Error::other)
+}
+
+fn validate_plaintext_bind(bind_addr: SocketAddr) -> std::io::Result<()> {
+    if bind_addr.ip().is_loopback() {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!("plaintext gRPC may only bind to a loopback address, not {bind_addr}"),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_plaintext_bind;
+
+    #[test]
+    fn plaintext_bind_requires_loopback() {
+        assert!(validate_plaintext_bind("127.0.0.1:1".parse().expect("IPv4 address")).is_ok());
+        assert!(validate_plaintext_bind("[::1]:1".parse().expect("IPv6 address")).is_ok());
+        let error = validate_plaintext_bind("0.0.0.0:1".parse().expect("wildcard address"))
+            .expect_err("wildcard plaintext listener refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    }
 }

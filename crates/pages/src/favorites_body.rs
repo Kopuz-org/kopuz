@@ -110,7 +110,10 @@ pub fn FavoritesBody(
                     api::JobState::Running => {
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
-                    api::JobState::Finished | api::JobState::Failed | api::JobState::Cancelled => {
+                    api::JobState::Finished
+                    | api::JobState::Failed
+                    | api::JobState::Cancelled
+                    | api::JobState::Unknown => {
                         is_syncing.set(false);
                         return;
                     }

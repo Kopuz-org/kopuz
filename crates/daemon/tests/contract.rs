@@ -114,6 +114,8 @@ fn wav_factory(seconds: u64) -> SourceFactory {
 struct Pair {
     local: LocalApi,
     wire: client::GrpcApi,
+    jobs: Arc<JobRunner>,
+    session: SessionHandle,
     _dir: tempfile::TempDir,
 }
 
@@ -249,10 +251,59 @@ async fn spawn_pair() -> Pair {
     let addr = listener.local_addr().expect("addr");
     tokio::spawn(daemon::grpc::serve(listener, state));
     Pair {
-        local: build_api(session),
+        local: build_api(session.clone()),
         wire: client::GrpcApi::new(addr.to_string(), token).expect("wire client"),
+        jobs,
+        session,
         _dir: dir,
     }
+}
+
+async fn panicking_job() -> Result<(), ApiError> {
+    panic!("intentional test panic")
+}
+
+#[tokio::test]
+async fn panicked_jobs_finish_as_failed_and_emit_an_event() {
+    let pair = spawn_pair().await;
+    let mut events = pair.session.subscribe();
+    let job = pair
+        .jobs
+        .start(api::JobKind::Download, |_| panicking_job())
+        .expect("job starts");
+
+    let status = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some(status) = pair
+                .jobs
+                .list()
+                .into_iter()
+                .find(|status| status.id == job.job_id)
+                && status.state != api::JobState::Running
+            {
+                break status;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("job completion");
+    assert_eq!(status.state, api::JobState::Failed);
+    assert!(status.error.is_some());
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok((_, ApiEvent::JobFinished { id, ok, error, .. })) = events.recv().await
+                && id == job.job_id
+            {
+                assert!(!ok);
+                assert!(error.is_some());
+                break;
+            }
+        }
+    })
+    .await
+    .expect("job-finished event");
 }
 
 async fn activate_spotify(pair: &Pair) -> String {

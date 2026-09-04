@@ -28,6 +28,7 @@ pub async fn sync_server_library() -> Result<(), String> {
                     .map(|error| error.message.clone())
                     .unwrap_or_else(|| "library sync failed".to_string()));
             }
+            JobState::Unknown => return Err("library sync returned an unknown state".to_string()),
         }
     }
 }

@@ -236,14 +236,15 @@ impl JobRunner {
         tokio::spawn(
             async move {
                 let started = Instant::now();
-                let result = future.await;
-                let (state, error) = if cancelled.load(Ordering::Relaxed) {
-                    (JobState::Cancelled, None)
-                } else {
-                    match result {
-                        Ok(()) => (JobState::Finished, None),
-                        Err(error) => (JobState::Failed, Some(error.body())),
-                    }
+                let result = tokio::spawn(future.instrument(tracing::Span::current())).await;
+                let (state, error) = match result {
+                    Err(error) => (
+                        JobState::Failed,
+                        Some(ApiError::internal(format!("job task failed: {error}")).body()),
+                    ),
+                    Ok(_) if cancelled.load(Ordering::Relaxed) => (JobState::Cancelled, None),
+                    Ok(Ok(())) => (JobState::Finished, None),
+                    Ok(Err(error)) => (JobState::Failed, Some(error.body())),
                 };
                 if let Ok(mut entries) = entries.lock()
                     && let Some(entry) = entries.iter_mut().find(|entry| entry.status.id == job_id)
@@ -271,7 +272,7 @@ impl JobRunner {
                             tracing::warn!(elapsed_ms, "daemon job failed");
                         }
                     }
-                    JobState::Running => {}
+                    JobState::Running | JobState::Unknown => {}
                 }
                 session.emit_event(ApiEvent::JobFinished {
                     id: job_id,

@@ -1373,7 +1373,7 @@ impl Session {
         let outgoing = self.model.current_track().cloned();
         self.armed_transition = Some(outgoing_token);
         if let Some(track) = outgoing {
-            self.record_listen(track);
+            self.record_listen_track(track);
         }
         if !self.commit_transition_model(token) {
             return false;

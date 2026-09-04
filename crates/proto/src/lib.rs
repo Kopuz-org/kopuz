@@ -142,12 +142,12 @@ pub mod convert {
         }, unknown api::JobKind::Unknown
     );
     enum_conversion!(job_state_to_proto, job_state_from_proto, api::JobState, JobState,
-        default api::JobState::Failed, unspecified JobState::Unspecified, {
+        default api::JobState::Unknown, unspecified JobState::Unspecified, {
             api::JobState::Running => JobState::Running,
             api::JobState::Finished => JobState::Finished,
             api::JobState::Failed => JobState::Failed,
             api::JobState::Cancelled => JobState::Cancelled,
-        }
+        }, unknown api::JobState::Unknown
     );
     enum_conversion!(source_state_to_proto, source_state_from_proto, api::SourceState, SourceState,
         default api::SourceState::Offline, unspecified SourceState::Unspecified, {
@@ -157,11 +157,11 @@ pub mod convert {
         }
     );
     enum_conversion!(notice_level_to_proto, notice_level_from_proto, api::NoticeLevel, NoticeLevel,
-        default api::NoticeLevel::Error, unspecified NoticeLevel::Unspecified, {
+        default api::NoticeLevel::Unknown, unspecified NoticeLevel::Unspecified, {
             api::NoticeLevel::Info => NoticeLevel::Info,
             api::NoticeLevel::Warning => NoticeLevel::Warning,
             api::NoticeLevel::Error => NoticeLevel::Error,
-        }
+        }, unknown api::NoticeLevel::Unknown
     );
     enum_conversion!(error_code_to_proto, error_code_from_proto, api::ErrorCode, ErrorCode,
         default api::ErrorCode::Internal, unspecified ErrorCode::Unspecified, {
@@ -2682,6 +2682,10 @@ mod tests {
         assert_eq!(queue_mode_from_proto(i32::MAX), api::QueueMode::Replace);
         assert_eq!(table_from_proto(i32::MAX), api::Table::Unknown);
         assert_eq!(job_kind_from_proto(i32::MAX), api::JobKind::Unknown);
+        assert_eq!(job_state_from_proto(0), api::JobState::Unknown);
+        assert_eq!(notice_level_from_proto(0), api::NoticeLevel::Unknown);
+        assert_eq!(job_state_from_proto(i32::MAX), api::JobState::Unknown);
+        assert_eq!(notice_level_from_proto(i32::MAX), api::NoticeLevel::Unknown);
         assert_eq!(
             download_item_state_from_proto(i32::MAX),
             api::DownloadItemState::Unknown

@@ -395,6 +395,7 @@ impl DownloadsService {
         };
         let client = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(15))
+            .read_timeout(CHUNK_READ_TIMEOUT)
             .tcp_nodelay(true)
             .build()
             .map_err(http)?;
