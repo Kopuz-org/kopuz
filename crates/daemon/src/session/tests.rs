@@ -113,7 +113,14 @@ fn test_track(key: &String) -> Track {
         6
     };
     Track {
-        id: reader::models::TrackId::Local(PathBuf::from(key)),
+        id: if key.starts_with("unavailable-server:") {
+            reader::models::TrackId::Server {
+                service: config::MusicService::Jellyfin,
+                item_id: key.clone(),
+            }
+        } else {
+            reader::models::TrackId::Local(PathBuf::from(key))
+        },
         cover: None,
         album_id: String::new(),
         title: key.clone(),
@@ -177,6 +184,17 @@ fn gated_factory(seconds: u64, gate: Arc<(Mutex<bool>, Condvar)>) -> SourceFacto
     })
 }
 
+fn gated_failing_factory(gate: Arc<(Mutex<bool>, Condvar)>) -> SourceFactory {
+    Box::new(move || {
+        let (lock, ready) = &*gate;
+        let mut blocked = lock.lock().expect("gate lock");
+        while *blocked {
+            blocked = ready.wait(blocked).expect("gate wait");
+        }
+        Err("synthetic source failure".to_string())
+    })
+}
+
 struct Harness {
     api: LocalApi,
     sink: FakeSinkHandle,
@@ -193,10 +211,21 @@ fn harness_with_provider(
     configure: impl FnOnce(&mut config::AppConfig),
     provider: FactoryOverride,
 ) -> Harness {
+    harness_with_services(configure, provider, None)
+}
+
+fn harness_with_services(
+    configure: impl FnOnce(&mut config::AppConfig),
+    provider: FactoryOverride,
+    recorder: Option<Arc<dyn PlaybackRecorder>>,
+) -> Harness {
     let sink = FakeSinkHandle::default();
     let player =
         Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
-    let mut services = PlaybackServices::default();
+    let mut services = PlaybackServices {
+        recorder,
+        ..Default::default()
+    };
     services.config.crossfade_seconds = 0;
     configure(&mut services.config);
     let session =
@@ -324,6 +353,76 @@ async fn next_and_previous_load_the_selected_track() {
         state.track.as_ref().map(|track| track.title.as_str()),
         Some("track-0")
     );
+}
+
+#[tokio::test]
+async fn unavailable_queue_targets_do_not_replace_the_current_track() {
+    let provider: FactoryOverride = Arc::new(|track| {
+        (!track.title.starts_with("unavailable-server:"))
+            .then(|| wav_factory(track.duration.min(6)))
+    });
+    let harness = harness_with_provider(|_| {}, provider);
+    let mut request = replace(&[
+        "unavailable-server:previous",
+        "track-0",
+        "unavailable-server:next",
+    ]);
+    request.start_index = Some(1);
+    harness
+        .api
+        .set_queue(request)
+        .await
+        .expect("set initial queue");
+    let before = wait_committed(&harness.api).await;
+
+    for result in [
+        harness.api.queue_edit(QueueEdit::Jump { index: 2 }).await,
+        harness.api.player_command(PlayerCommand::Next).await,
+        harness.api.player_command(PlayerCommand::Previous).await,
+    ] {
+        let error = result.expect_err("unavailable target is rejected");
+        assert_eq!(error.code, ErrorCode::SourceUnreachable);
+        let state = harness.api.player_state().await.expect("state");
+        assert_eq!(state.queue.index, before.queue.index);
+        assert_eq!(state.track, before.track);
+        assert_eq!(state.intent, before.intent);
+    }
+
+    let error = harness
+        .api
+        .set_queue(replace(&["unavailable-server:replacement"]))
+        .await
+        .expect_err("unavailable replacement is rejected");
+    assert_eq!(error.code, ErrorCode::SourceUnreachable);
+    let state = harness.api.player_state().await.expect("state");
+    assert_eq!(state.queue.length, 3);
+    assert_eq!(state.queue.index, before.queue.index);
+    assert_eq!(state.track, before.track);
+    assert_eq!(state.intent, before.intent);
+}
+
+#[tokio::test]
+async fn replacing_with_an_empty_queue_stops_playback() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["track-0"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+
+    harness
+        .api
+        .set_queue(replace(&[]))
+        .await
+        .expect("clear queue");
+    let state = harness.api.player_state().await.expect("state");
+    assert_eq!(state.queue.length, 0);
+    assert_eq!(state.queue.index, None);
+    assert_eq!(state.track, None);
+    assert_eq!(state.intent, Intent::Stopped);
+    assert_eq!(state.phase, ApiPhase::Idle);
+    assert_eq!(state.position.expect("position").ms, 0);
 }
 
 #[tokio::test]
@@ -753,21 +852,11 @@ async fn recents_record_once_and_completion_bumps_listens() {
         recents: Mutex::new(Vec::new()),
         listens: Mutex::new(Vec::new()),
     });
-    let sink = FakeSinkHandle::default();
-    let player =
-        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
-    let services = PlaybackServices {
-        recorder: Some(recorder.clone()),
-        ..Default::default()
-    };
-    let session = SessionHandle::spawn_with_factory(
-        Arc::new(StubLibrary),
-        player,
-        services,
+    let harness = harness_with_services(
+        |_| {},
         Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+        Some(recorder.clone()),
     );
-    let api = LocalApi::new(session);
-    let harness = Harness { api, sink };
 
     harness
         .api
@@ -800,6 +889,69 @@ async fn recents_record_once_and_completion_bumps_listens() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     let recents = recorder.recents.lock().expect("lock").clone();
     assert_eq!(recents.len(), 2, "resume must not re-record the same track");
+}
+
+#[tokio::test]
+async fn failed_crossfade_preparation_records_no_listen_and_can_retry() {
+    let recorder = Arc::new(MemoryRecorder {
+        recents: Mutex::new(Vec::new()),
+        listens: Mutex::new(Vec::new()),
+    });
+    let failure_gate = Arc::new((Mutex::new(true), Condvar::new()));
+    let target_attempts = Arc::new(AtomicUsize::new(0));
+    let provider_attempts = target_attempts.clone();
+    let provider_gate = failure_gate.clone();
+    let provider: FactoryOverride = Arc::new(move |track| {
+        Some(
+            if track.title == "track-1" && provider_attempts.fetch_add(1, Ordering::Relaxed) == 0 {
+                gated_failing_factory(provider_gate.clone())
+            } else {
+                wav_factory(track.duration.min(6))
+            },
+        )
+    });
+    let harness = harness_with_services(
+        |config| config.crossfade_seconds = 1,
+        provider,
+        Some(recorder.clone()),
+    );
+
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    drive_until(&harness, "first crossfade attempt", |state| {
+        matches!(
+            state.intent,
+            Intent::Loading {
+                token: 2,
+                from_token: Some(1)
+            }
+        )
+    })
+    .await;
+    {
+        *failure_gate.0.lock().expect("gate lock") = false;
+        failure_gate.1.notify_all();
+    }
+    wait_state(&harness.api, "failed crossfade restored", |state| {
+        matches!(state.intent, Intent::Committed { token: 1 }) && state.error.is_some()
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(recorder.listens.lock().expect("lock").is_empty());
+
+    drive_until(&harness, "retried crossfade committed", |state| {
+        state.queue.index == Some(1) && matches!(state.intent, Intent::Committed { token: 3 })
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        recorder.listens.lock().expect("lock").as_slice(),
+        ["track-0"]
+    );
 }
 
 #[tokio::test]

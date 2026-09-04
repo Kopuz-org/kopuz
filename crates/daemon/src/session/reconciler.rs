@@ -60,7 +60,7 @@ impl Session {
             {
                 self.phase = ApiPhase::Ended;
                 self.record_listen_of_current();
-                self.play_next(false, state_tx);
+                let _ = self.play_next(false, state_tx);
                 self.publish(state_tx, false);
             }
             EngineEvent::TrackSwitched { token, .. }
@@ -131,13 +131,6 @@ impl Session {
         let NextOutcome::Play(idx) = candidate.advance_next() else {
             return;
         };
-        let outgoing_token = self.current_token;
-        let outgoing = self.model.current_track().cloned();
-        if self.start_load(idx, true, Some(candidate)) {
-            self.armed_transition = Some(outgoing_token);
-            if let Some(track) = outgoing {
-                self.record_listen(track);
-            }
-        }
+        self.start_load(idx, true, Some(candidate));
     }
 }

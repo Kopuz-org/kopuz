@@ -278,15 +278,20 @@ impl DownloadsService {
                 if ctx.cancelled() {
                     return Err(ApiError::internal("download cancelled"));
                 }
-                let Some(chunk) = response.chunk().await.map_err(http)? else {
-                    break;
-                };
+                let chunk = response.chunk().await.map_err(http)?;
                 if ctx.cancelled() {
                     return Err(ApiError::internal("download cancelled"));
                 }
+                let Some(chunk) = chunk else {
+                    break;
+                };
                 writer.write_all(&chunk).await.map_err(io)?;
             }
-            writer.flush().await.map_err(io)
+            writer.flush().await.map_err(io)?;
+            if ctx.cancelled() {
+                return Err(ApiError::internal("download cancelled"));
+            }
+            Ok(())
         }
         .await;
         if let Err(error) = result {

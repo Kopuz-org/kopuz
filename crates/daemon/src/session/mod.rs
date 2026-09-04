@@ -501,8 +501,8 @@ impl Session {
                     self.resume(state_tx);
                 }
             }
-            PlayerCommand::Next => self.play_next(false, state_tx),
-            PlayerCommand::Previous => self.play_previous(state_tx),
+            PlayerCommand::Next => self.play_next(false, state_tx)?,
+            PlayerCommand::Previous => self.play_previous(state_tx)?,
             PlayerCommand::Stop => self.stop(state_tx),
             PlayerCommand::Seek { position_ms } => self.seek(position_ms, state_tx)?,
             PlayerCommand::SetVolume { volume } => {
@@ -539,8 +539,9 @@ impl Session {
                     .model
                     .physical_index_of(index)
                     .ok_or_else(|| ApiError::invalid_input("no track at that queue position"))?;
-                let position = self.model.jump_to(physical);
-                self.start_load(position, false, None);
+                let mut candidate = self.model.clone();
+                let position = candidate.jump_to(physical);
+                self.start_immediate_load(candidate, position)?;
                 Ok(self.publish(state_tx, true))
             }
             QueueEdit::Move { from, to } => {
@@ -624,22 +625,26 @@ impl Session {
         })??;
         match request.mode {
             QueueMode::Replace => {
-                self.model.replace(tracks);
+                let mut candidate = self.model.clone();
+                candidate.replace(tracks);
                 if let Some(on) = request.shuffle {
-                    self.model.set_shuffle(on);
+                    candidate.set_shuffle(on);
                 }
-                let len = self.model.len();
+                let len = candidate.len();
                 if len > 0 {
                     let start = request.start_index.map(|i| i as usize).unwrap_or_else(|| {
-                        if self.model.shuffle() {
+                        if candidate.shuffle() {
                             use rand::RngExt;
                             rand::rng().random_range(0..len)
                         } else {
                             0
                         }
                     });
-                    let idx = self.model.jump_to(start.min(len - 1));
-                    self.start_load(idx, false, None);
+                    let idx = candidate.jump_to(start.min(len - 1));
+                    self.start_immediate_load(candidate, idx)?;
+                } else {
+                    self.model = candidate;
+                    self.stop_playback();
                 }
             }
             QueueMode::Append => self.model.add(tracks),
@@ -648,23 +653,31 @@ impl Session {
         Ok(self.publish(state_tx, true))
     }
 
-    fn play_next(&mut self, allow_crossfade: bool, state_tx: &watch::Sender<PlayerState>) {
+    fn play_next(
+        &mut self,
+        allow_crossfade: bool,
+        state_tx: &watch::Sender<PlayerState>,
+    ) -> Result<(), ApiError> {
         if allow_crossfade {
             let mut candidate = self.model.clone();
-            if let NextOutcome::Play(idx) = candidate.advance_next() {
-                self.start_load(idx, true, Some(candidate));
+            if let NextOutcome::Play(idx) = candidate.advance_next()
+                && !self.start_load(idx, true, Some(candidate))
+            {
+                return Err(Self::unavailable_track_error());
             }
-            return;
+            return Ok(());
         }
 
         if self.pending_transition.is_some() {
             let _ = self.revert_transition();
         }
-        match self.model.advance_next() {
+        let mut candidate = self.model.clone();
+        match candidate.advance_next() {
             NextOutcome::Play(idx) => {
-                self.start_load(idx, false, None);
+                self.start_immediate_load(candidate, idx)?;
             }
             NextOutcome::EndOfQueue => {
+                self.model = candidate;
                 // End of queue: kill an in-flight load so it cannot restart
                 // playback later; the stale-Loaded rule catches a promoted one.
                 self.cancel_load_task();
@@ -678,25 +691,29 @@ impl Session {
             }
             NextOutcome::Empty => {}
         }
+        Ok(())
     }
 
-    fn play_previous(&mut self, state_tx: &watch::Sender<PlayerState>) {
+    fn play_previous(&mut self, state_tx: &watch::Sender<PlayerState>) -> Result<(), ApiError> {
         let idx = self.model.current_position();
         if self.revert_transition().is_some() {
-            self.start_load(idx, false, None);
-            return;
+            let candidate = self.model.clone();
+            self.start_immediate_load(candidate, idx)?;
+            return Ok(());
         }
 
         if self.config.back_behavior == config::BackBehavior::RewindThenPrev
             && self.displayed_position().as_secs() > 3
         {
             let _ = self.seek(0, state_tx);
-            return;
+            return Ok(());
         }
 
-        if let Some(idx) = self.model.previous_position() {
-            self.start_load(idx, false, None);
+        let mut candidate = self.model.clone();
+        if let Some(idx) = candidate.previous_position() {
+            self.start_immediate_load(candidate, idx)?;
         }
+        Ok(())
     }
 
     fn pause(&mut self, state_tx: &watch::Sender<PlayerState>) {
@@ -753,6 +770,11 @@ impl Session {
     }
 
     fn stop(&mut self, state_tx: &watch::Sender<PlayerState>) {
+        self.stop_playback();
+        self.publish_position_anchor(state_tx, Some(0), Some(Duration::ZERO), false);
+    }
+
+    fn stop_playback(&mut self) {
         self.cancel_load_task();
         self.cancel_radio_task();
         self.pending_transition = None;
@@ -762,7 +784,12 @@ impl Session {
         self.player.stop();
         self.phase = ApiPhase::Idle;
         self.buffered.clear();
-        self.publish_position_anchor(state_tx, Some(0), Some(Duration::ZERO), false);
+        self.position = Some(PositionAnchor {
+            ms: 0,
+            at_ms: self.now_ms(),
+            playing: false,
+        });
+        self.position_token = Some(0);
     }
 
     fn seek(
@@ -957,11 +984,40 @@ impl Session {
     }
 
     fn commit_transition(&mut self, token: u64) -> bool {
+        let Some(pending) = self
+            .pending_transition
+            .as_ref()
+            .filter(|pending| pending.to_token == token)
+        else {
+            return false;
+        };
+        let outgoing_token = pending.from_token;
+        let outgoing = self.model.current_track().cloned();
+        self.armed_transition = Some(outgoing_token);
+        if let Some(track) = outgoing {
+            self.record_listen(track);
+        }
         if !self.commit_transition_model(token) {
             return false;
         }
         self.player.commit_now_playing();
         true
+    }
+
+    fn start_immediate_load(&mut self, model: QueueModel, idx: usize) -> Result<(), ApiError> {
+        let previous = std::mem::replace(&mut self.model, model);
+        if !self.start_load(idx, false, None) {
+            self.model = previous;
+            return Err(Self::unavailable_track_error());
+        }
+        Ok(())
+    }
+
+    fn unavailable_track_error() -> ApiError {
+        ApiError::new(
+            api::ErrorCode::SourceUnreachable,
+            "the selected queue track has no available playback source",
+        )
     }
 
     /// Undo either a resolving crossfade or a running fade. The queue model is
@@ -1015,6 +1071,7 @@ impl Session {
                 ..
             } => {
                 self.pending_transition = None;
+                self.armed_transition = None;
                 self.set_intent(PlaybackIntent::Committed { token: from_token });
             }
             _ => {
