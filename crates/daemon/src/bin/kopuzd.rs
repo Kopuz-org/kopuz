@@ -29,26 +29,6 @@ use daemon::{
     PlaybackServices, QueueStore, SessionHandle, SourceRecorder,
 };
 
-async fn terminate_signal() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-
-        match signal(SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
-            }
-            Err(error) => {
-                tracing::warn!(%error, "could not install SIGTERM handler");
-                std::future::pending::<()>().await;
-            }
-        }
-    }
-
-    #[cfg(not(unix))]
-    std::future::pending::<()>().await;
-}
-
 struct Args {
     bind: String,
     token: Option<String>,
@@ -73,70 +53,58 @@ fn parse_args() -> Result<Args, String> {
             "--db-path" => {
                 args.db_path = Some(iter.next().ok_or("--db-path requires a path")?);
             }
-            "--help" | "-h" => {
-                return Err(
-                    "usage: kopuzd [--bind 127.0.0.1:0] [--token <hex>] [--db-path <file>]"
-                        .to_string(),
-                );
-            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
     Ok(args)
 }
 
-fn random_token() -> String {
-    use rand::RngExt;
-    let token: u128 = rand::rng().random();
-    format!("{token:032x}")
-}
-
-fn discovery_path() -> Option<PathBuf> {
-    let base = directories::BaseDirs::new()?;
-    let dir = base
-        .runtime_dir()
-        .map(|runtime| runtime.join("kopuz"))
-        .unwrap_or_else(|| base.cache_dir().join("kopuz"));
-    Some(dir.join("daemon.json"))
-}
-
-fn write_discovery(path: &Path, port: u16, token: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let body = serde_json::json!({
-        "port": port,
-        "token": token,
-        "pid": std::process::id(),
-    });
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    // Created 0600 so the token is never world-readable, not even between
-    // create and chmod; the explicit set below repairs a pre-existing file
-    // left behind with wider permissions.
+/// Resolves when the process receives SIGTERM (a service manager stop);
+/// pends forever on platforms without unix signals.
+async fn terminate_signal() {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                sigterm.recv().await;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "SIGTERM handler unavailable");
+                std::future::pending::<()>().await;
+            }
+        }
     }
-    let mut file = options.open(path)?;
-    file.write_all(body.to_string().as_bytes())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
+    #[cfg(not(unix))]
+    std::future::pending::<()>().await
 }
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    let cli_args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = daemon::ctl::run(&cli_args) {
+        return ExitCode::from(code.clamp(0, 255) as u8);
+    }
+    if cli_args.len() == 1 && matches!(cli_args[0].as_str(), "--help" | "-h") {
+        daemon::ctl::print_daemon_usage();
+        return ExitCode::SUCCESS;
+    }
+
+    let log_filter = std::env::var("KOPUZ_LOG")
+        .or_else(|_| std::env::var("RUST_LOG"))
+        .ok()
+        .and_then(|value| tracing_subscriber::EnvFilter::try_new(value).ok())
+        .unwrap_or_else(|| {
+            let debug = std::env::var("KOPUZ_DEBUG")
+                .is_ok_and(|value| !value.is_empty() && value != "0" && value != "false");
+            tracing_subscriber::EnvFilter::new(if debug { "debug" } else { "info" })
+        });
+    tracing_subscriber::fmt().with_env_filter(log_filter).init();
+    tracing::info!(
+        mode = "headless",
+        version = utils::build_info::VERSION,
+        commit = utils::build_info::COMMIT,
+        "daemon logging initialized"
+    );
 
     let args = match parse_args() {
         Ok(args) => args,
@@ -191,6 +159,36 @@ fn main() -> ExitCode {
 async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let using_default_database =
         args.db_path.is_none() && std::env::var_os("KOPUZ_DB_PATH").is_none();
+    let discovery_path = daemon::discovery::path();
+    let _discovery_guard = match discovery_path.as_deref() {
+        Some(path) => match daemon::discovery::DiscoveryGuard::try_claim(path)? {
+            Some(guard) => Some(guard),
+            None => {
+                return Err(
+                    "another Kopuz daemon owns the discovery service or is starting".into(),
+                );
+            }
+        },
+        None => None,
+    };
+    if let Some(path) = discovery_path.as_deref() {
+        match daemon::discovery::read(path) {
+            Some(existing) if daemon::discovery::is_serving(&existing).await => {
+                return Err(format!(
+                    "another kopuz daemon is already serving on port {}",
+                    existing.port
+                )
+                .into());
+            }
+            Some(existing) => {
+                let _ = daemon::discovery::remove_record(path, &existing);
+            }
+            None if path.exists() => {
+                let _ = daemon::discovery::remove_invalid(path);
+            }
+            None => {}
+        }
+    }
     if using_default_database {
         for line in db::legacy::migrate_identity() {
             tracing::info!("{line}");
@@ -201,12 +199,26 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .db_path
         .map(PathBuf::from)
         .unwrap_or_else(db::default_db_path);
+    let _database_lease = daemon::DatabaseLease::try_claim(&db_path)?
+        .ok_or("another Kopuz daemon already owns this database")?;
     tracing::info!(path = %db_path.display(), "opening library database (expects exclusive access)");
     let database = db::init(&db_path).await?;
     if using_default_database {
         db::legacy::migrate_json_store(&database, &db::config_dir()).await;
     }
     let config = database.load_config().await?.unwrap_or_default();
+    tracing::info!(
+        mode = "headless",
+        source = %daemon::active_source_label(&config),
+        source_id = %config.active_source.as_str(),
+        configured_roots = config.music_directory.len()
+            + config
+                .local_sources
+                .iter()
+                .map(|source| source.directories.len())
+                .sum::<usize>(),
+        "daemon configuration loaded"
+    );
 
     let settings_path =
         config::store::settings_path_for(db_path.parent().unwrap_or_else(|| Path::new(".")));
@@ -232,18 +244,20 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         Arc::from(server::source::active(database.clone(), &config));
     let queue_store: Arc<dyn QueueStore> = Arc::new(DbQueueStore::new(database.clone()));
     let scrobbler = daemon::Scrobbler::new(database.clone());
+    let recorder = Arc::new(SourceRecorder::new(database.clone()));
     let services = PlaybackServices {
         config,
         active_source: Some(active_source.clone()),
         station_registry,
         queue_store: Some(queue_store.clone()),
-        recorder: Some(Arc::new(SourceRecorder::new(active_source.clone()))),
+        recorder: Some(recorder.clone()),
         scrobbler: Some(scrobbler.clone()),
     };
 
     let session = SessionHandle::try_spawn(library.clone(), services)
         .map_err(|error| format!("audio engine init failed: {error:?}"))?;
     library.attach_session(session.clone());
+    recorder.attach_session(session.clone());
     scrobbler.attach_session(session.clone());
     {
         let scrobbler = scrobbler.clone();
@@ -264,8 +278,13 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let favorites = FavoritesService::new(database.clone(), session.clone());
     favorites.spawn_reconciler();
     daemon::os_media::spawn(&session);
-    daemon::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
+    daemon::integrations::spawn_jellyfin_reporter(
+        &session,
+        database.clone(),
+        session.config_watch(),
+    );
     daemon::integrations::spawn_discord_presence(&session, session.config_watch());
+    daemon::integrations::spawn_credential_maintenance(config_service.clone(), session.clone());
     if let Some(snapshot) = queue_store.load().await
         && !snapshot.queue.is_empty()
     {
@@ -276,12 +295,27 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let flush_session = session.clone();
+    let shutdown = Arc::new(tokio::sync::Notify::new());
     let artwork = daemon::ArtworkService::new(
         database.clone(),
         session.clone(),
         directories::ProjectDirs::from("moe", "kopuz", "kopuz")
             .map(|dirs| dirs.cache_dir().join("artwork"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork")),
+    );
+    let frontend = daemon::FrontendService::new(
+        database.clone(),
+        config_service.clone(),
+        library.clone(),
+        session.clone(),
+        directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+            .map(|dirs| dirs.cache_dir().join("uploaded_artwork"))
+            .unwrap_or_else(|| std::env::temp_dir().join("kopuz-uploaded-artwork")),
+    );
+    frontend.reload_radio().await?;
+    tracing::info!(
+        mode = "headless",
+        "daemon services ready: playback, library, config, jobs, downloads, favorites, artwork, scrobbling, integrations, OS media"
     );
     let state = Arc::new(daemon::grpc::GrpcState {
         api: Arc::new(
@@ -290,25 +324,31 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 .with_config(config_service)
                 .with_jobs(jobs)
                 .with_favorites(favorites)
-                .with_downloads(downloads),
+                .with_downloads(downloads)
+                .with_frontend(frontend)
+                .with_artwork(artwork.clone()),
         ),
-        artwork: Some(artwork),
         session,
-        token: args.token.unwrap_or_else(random_token),
+        token: args.token.unwrap_or_else(daemon::discovery::random_token),
         started: Instant::now(),
+        shutdown: Some(shutdown.clone()),
     });
 
     let listener = tokio::net::TcpListener::bind(&args.bind).await?;
     let addr = listener.local_addr()?;
 
-    let discovery = discovery_path();
-    match discovery.as_deref() {
-        Some(path) => match write_discovery(path, addr.port(), &state.token) {
-            Ok(()) => tracing::info!(path = %path.display(), "discovery file written"),
-            Err(error) => tracing::warn!(%error, "could not write the discovery file"),
-        },
-        None => tracing::warn!("no usable directory for the discovery file"),
-    }
+    let _discovery_lease = match discovery_path.as_deref() {
+        Some(path) => {
+            let lease = daemon::discovery::DiscoveryLease::claim(path, addr.port(), &state.token)
+                .map_err(|error| format!("could not claim the discovery file: {error}"))?;
+            tracing::info!(path = %path.display(), "discovery file written");
+            Some(lease)
+        }
+        None => {
+            tracing::warn!("no usable directory for the discovery file");
+            None
+        }
+    };
     tracing::info!(%addr, "kopuzd listening (bearer token in the discovery file)");
 
     let result = tokio::select! {
@@ -318,16 +358,18 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             tracing::info!("shutting down");
             Ok(())
         }
-        () = terminate_signal() => {
-            tracing::info!("shutting down");
+        _ = terminate_signal() => {
+            tracing::info!("SIGTERM received; shutting down");
+            Ok(())
+        }
+        _ = shutdown.notified() => {
+            tracing::info!("shutdown requested over the API");
             Ok(())
         }
     };
 
-    flush_session.persist_now().await;
+    queue_store.save(flush_session.queue_snapshot()).await;
+    tracing::info!("daemon shutdown flush finished");
 
-    if let Some(path) = discovery {
-        let _ = std::fs::remove_file(path);
-    }
     result
 }

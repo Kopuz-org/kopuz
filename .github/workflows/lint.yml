@@ -35,6 +35,8 @@ jobs:
 
   rust-lint:
     runs-on: ubuntu-22.04
+    env:
+      SQLX_OFFLINE: true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,3 +64,9 @@ jobs:
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run release Clippy
+        run: cargo clippy --workspace --all-targets --release -- -D warnings
+
+      - name: Run daemon and frontend contract tests
+        run: cargo test -p kopuz-daemon -p kopuz-proto -p kopuz-hooks

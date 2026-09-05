@@ -737,6 +737,17 @@ pub struct AppConfig {
     pub tracing_enabled: bool,
     #[serde(default = "default_auto_check_updates")]
     pub auto_check_updates: bool,
+    /// Serve the daemon API from the running app (loopback only, bearer
+    /// token in the 0600 discovery file) so `kopuz pause` and custom
+    /// frontends work against the running app. On by default with no UI
+    /// toggle (the same trust boundary as MPRIS); settings.toml can turn
+    /// it off.
+    #[serde(default = "default_true")]
+    pub remote_api_enabled: bool,
+    /// Fixed port for the remote control API; 0 picks a free port, and the
+    /// discovery file carries whichever was bound.
+    #[serde(default)]
+    pub remote_api_port: u16,
     /// Desktop-only: when enabled, closing the window hides it to the system
     /// tray instead of quitting, so playback keeps running in the background.
     #[serde(default)]
@@ -995,6 +1006,8 @@ impl Default for AppConfig {
             custom_font_path: String::new(),
             tracing_enabled: false,
             auto_check_updates: default_auto_check_updates(),
+            remote_api_enabled: true,
+            remote_api_port: 0,
             minimize_to_tray: false,
             show_source_toggle: default_show_source_toggle(),
             show_row_images: true,
@@ -1203,17 +1216,6 @@ impl AppConfig {
 
     pub fn uses_jellyfin_server(&self) -> bool {
         self.active_service() == Some(MusicService::Jellyfin)
-    }
-
-    /// The server to activate when toggling into server mode: the current server
-    /// if already on one, else the first saved server. `None` ⇒ no servers, so
-    /// the toggle is a no-op.
-    pub fn server_toggle_target(&self) -> Option<Source> {
-        self.active_source
-            .server_id()
-            .map(String::from)
-            .or_else(|| self.servers.first().map(|s| s.id.clone()))
-            .map(Source::Server)
     }
 }
 

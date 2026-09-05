@@ -3000,6 +3000,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb540cf7bc4fe6df9d8f7f0c974cfd0dce8ed4e9e8884e73433b503ee78b4e7d"
 
 [[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4341,10 +4351,12 @@ dependencies = [
  "dioxus",
  "directories",
  "discord-rich-presence",
+ "futures-util",
  "http",
  "image",
  "jni 0.22.4",
  "kopuz-api",
+ "kopuz-client",
  "kopuz-components",
  "kopuz-config",
  "kopuz-daemon",
@@ -4413,23 +4425,20 @@ version = "0.16.1"
 dependencies = [
  "base64",
  "dioxus",
- "directories",
+ "futures-util",
+ "kopuz-api",
  "kopuz-config",
  "kopuz-hooks",
  "kopuz-i18n",
  "kopuz-player",
  "kopuz-reader",
  "kopuz-route",
- "kopuz-scrobble",
  "kopuz-server",
  "kopuz-utils",
- "rand 0.10.2",
  "rfd",
  "serde_json",
  "tokio",
  "tracing",
- "uuid 1.23.5",
- "webbrowser",
 ]
 
 [[package]]
@@ -4452,6 +4461,7 @@ dependencies = [
  "async-trait",
  "base64",
  "directories",
+ "fs2",
  "futures-util",
  "image",
  "kopuz-api",
@@ -4481,6 +4491,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid 1.23.5",
+ "webbrowser",
 ]
 
 [[package]]
@@ -4522,16 +4533,14 @@ dependencies = [
 name = "kopuz-hooks"
 version = "0.16.1"
 dependencies = [
- "base64",
  "dioxus",
+ "futures-util",
  "kopuz-api",
  "kopuz-config",
  "kopuz-daemon",
  "kopuz-db",
  "kopuz-player",
- "kopuz-radio",
  "kopuz-reader",
- "kopuz-scrobble",
  "kopuz-server",
  "kopuz-utils",
  "rand 0.10.2",
@@ -4555,23 +4564,19 @@ version = "0.16.1"
 dependencies = [
  "dioxus",
  "directories",
+ "kopuz-api",
  "kopuz-components",
  "kopuz-config",
  "kopuz-hooks",
  "kopuz-i18n",
  "kopuz-player",
- "kopuz-radio",
  "kopuz-reader",
  "kopuz-route",
  "kopuz-server",
  "kopuz-utils",
- "lofty",
  "rand 0.10.2",
- "reqwest 0.13.4",
  "rfd",
- "serde",
  "serde_json",
- "sha2 0.11.0",
  "tempfile",
  "tokio",
  "tracing",

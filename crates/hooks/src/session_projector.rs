@@ -1,5 +1,5 @@
-//! Projects the embedded daemon session's state stream onto the
-//! `PlayerController` signals the UI renders from.
+//! Projects the daemon API state stream onto the `PlayerController` signals
+//! the UI renders from.
 //!
 //! While Spotify external playback is active the local signals are
 //! authoritative and daemon state is ignored; handing control back to the
@@ -8,9 +8,9 @@
 
 use std::time::{Duration, Instant};
 
-use api::{ApiEvent, Intent, Phase, PlayerState};
+use api::{ApiEvent, Intent, NowPlaying, Phase, PlayerState};
 use dioxus::prelude::*;
-use tokio::sync::broadcast::error::RecvError;
+use futures_util::StreamExt;
 
 use crate::use_player_controller::{BufferedRange, PlayerController};
 
@@ -61,6 +61,14 @@ fn local_anchor(state: &PlayerState, clock: DaemonClock) -> Option<(u64, Instant
     Some((anchor.ms, instant, anchor.playing, position_ms / 1000))
 }
 
+fn visible_track(state: &PlayerState) -> Option<&NowPlaying> {
+    state
+        .fading
+        .as_ref()
+        .map(|fading| &fading.track)
+        .or(state.track.as_ref())
+}
+
 fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
     let clock = DaemonClock::sample(state.now_ms);
     let playing = match state.intent {
@@ -90,14 +98,13 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
     }
 
     // During a crossfade the outgoing track stays on screen and drives the
-    // seek bar; otherwise the committed track does.
-    let (shown, fading_secs) = match &state.fading {
-        Some(fading) => (
-            Some(&fading.track),
-            Some(fading.position_ms as f64 / 1000.0),
-        ),
-        None => (state.track.as_ref(), None),
-    };
+    // seek bar; otherwise the daemon's selected track does, including a
+    // stopped track restored from the previous session.
+    let shown = visible_track(&state);
+    let fading_secs = state
+        .fading
+        .as_ref()
+        .map(|fading| fading.position_ms as f64 / 1000.0);
     set_if_changed(&mut ctrl.fading_progress, fading_secs);
 
     match shown {
@@ -134,7 +141,13 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
             }
         }
         None => {
-            if state.intent == Intent::Stopped && ctrl.current_track_snapshot.peek().is_some() {
+            let has_metadata = ctrl.current_track_snapshot.peek().is_some()
+                || !ctrl.current_song_title.peek().is_empty()
+                || !ctrl.current_song_artist.peek().is_empty()
+                || !ctrl.current_song_album.peek().is_empty()
+                || *ctrl.current_song_duration.peek() != 0
+                || *ctrl.current_song_progress.peek() != 0;
+            if has_metadata {
                 ctrl.clear_current_track_metadata();
             }
         }
@@ -163,43 +176,98 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
     clock
 }
 
-fn apply_queue(ctrl: &mut PlayerController, mirror: daemon::QueueMirrorSnapshot) {
-    set_if_changed(&mut ctrl.queue, mirror.tracks);
-    set_if_changed(&mut ctrl.shuffle_order, mirror.shuffle_order);
-    set_if_changed(&mut ctrl.shuffle, mirror.shuffle);
-    set_if_changed(&mut ctrl.current_queue_index, mirror.position);
+/// A transport command the daemon forwarded because playback is external:
+/// route it through the controller, whose methods already speak Spotify
+/// while `external_active` is set.
+fn apply_external_command(ctrl: &mut PlayerController, command: api::PlayerCommand) {
+    use api::PlayerCommand;
+    match command {
+        PlayerCommand::Play => ctrl.resume(),
+        PlayerCommand::Pause => ctrl.pause(),
+        PlayerCommand::Toggle => ctrl.toggle(),
+        PlayerCommand::Next => ctrl.play_next(),
+        PlayerCommand::Previous => ctrl.play_prev(),
+        PlayerCommand::Stop => {
+            ctrl.stop_external_playback();
+            ctrl.is_playing.set(false);
+        }
+        PlayerCommand::Seek { position_ms } => {
+            ctrl.seek(Duration::from_millis(position_ms));
+        }
+        PlayerCommand::SetVolume { .. } | PlayerCommand::SetMode { .. } => {}
+    }
+}
+
+fn apply_queue(ctrl: &mut PlayerController, snapshot: api::QueuePersistenceSnapshot) {
+    let tracks = snapshot
+        .tracks
+        .into_iter()
+        .map(crate::use_db_queries::track_from_api)
+        .collect();
+    let shuffle_order = snapshot
+        .shuffle_order
+        .into_iter()
+        .map(|index| index as usize)
+        .collect();
+    set_if_changed(&mut ctrl.queue, tracks);
+    set_if_changed(&mut ctrl.shuffle_order, shuffle_order);
+    set_if_changed(&mut ctrl.shuffle, snapshot.shuffle_enabled);
+    set_if_changed(
+        &mut ctrl.current_queue_index,
+        snapshot.current_index as usize,
+    );
+}
+
+async fn resync(ctrl: &mut PlayerController, api: &dyn api::KopuzApi) -> Option<DaemonClock> {
+    match api.live_queue().await {
+        Ok(snapshot) => apply_queue(ctrl, snapshot),
+        Err(error) => tracing::warn!(%error, "queue resync failed"),
+    }
+    match api.player_state().await {
+        Ok(state) => Some(apply_state(ctrl, state)),
+        Err(error) => {
+            tracing::warn!(%error, "player resync failed");
+            None
+        }
+    }
 }
 
 pub(crate) fn use_session_projector(ctrl: PlayerController) {
     let mut ctrl = ctrl;
     use_future(move || async move {
-        let handle = ctrl.session.peek().clone();
-        let mut rx = handle.subscribe();
-        let mirror = handle.queue_mirror().await;
-        apply_queue(&mut ctrl, mirror);
-        let mut daemon_clock = apply_state(&mut ctrl, handle.state());
+        let api = ctrl.api.peek().clone();
+        let mut events = api.events();
+        let mut daemon_clock = resync(&mut ctrl, api.as_ref()).await;
         loop {
             let ticking = !*ctrl.external_active.peek()
                 && *ctrl.is_playing.peek()
                 && ctrl.engine_anchor.peek().is_some();
             tokio::select! {
-                event = rx.recv() => match event {
-                    Ok((_, event)) => {
+                event = events.next() => match event {
+                    Some(event) => {
+                        if let ApiEvent::PlayerExternalCommand(command) = event {
+                            if *ctrl.external_active.peek() {
+                                apply_external_command(&mut ctrl, command);
+                            }
+                            continue;
+                        }
                         if *ctrl.external_active.peek() {
                             continue;
                         }
                         match event {
                             ApiEvent::PlayerState(state) => {
-                                daemon_clock = apply_state(&mut ctrl, *state);
+                                daemon_clock = Some(apply_state(&mut ctrl, *state));
                             }
                             ApiEvent::QueueChanged { .. } | ApiEvent::Resync => {
-                                let mirror = handle.queue_mirror().await;
-                                apply_queue(&mut ctrl, mirror);
-                                daemon_clock = apply_state(&mut ctrl, handle.state());
+                                if let Some(clock) = resync(&mut ctrl, api.as_ref()).await {
+                                    daemon_clock = Some(clock);
+                                }
                             }
                             ApiEvent::PlayerPosition { position_ms, at_ms, playing, .. } => {
                                 let received_at = Instant::now();
-                                let instant = daemon_clock.local_instant(at_ms);
+                                let instant = daemon_clock
+                                    .map(|clock| clock.local_instant(at_ms))
+                                    .unwrap_or(received_at);
                                 let elapsed_ms = if playing {
                                     received_at
                                         .saturating_duration_since(instant)
@@ -229,14 +297,7 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
                             _ => {}
                         }
                     }
-                    Err(RecvError::Lagged(_)) => {
-                        if !*ctrl.external_active.peek() {
-                            let mirror = handle.queue_mirror().await;
-                            apply_queue(&mut ctrl, mirror);
-                            daemon_clock = apply_state(&mut ctrl, handle.state());
-                        }
-                    }
-                    Err(RecvError::Closed) => break,
+                    None => break,
                 },
                 _ = tokio::time::sleep(Duration::from_millis(1000)), if ticking => {
                     let progress = ctrl.displayed_progress_secs_f64() as u64;
@@ -245,4 +306,26 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stopped_state_keeps_its_selected_track_visible() {
+        let state = PlayerState {
+            intent: Intent::Stopped,
+            track: Some(NowPlaying {
+                title: "last played".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            visible_track(&state).map(|track| track.title.as_str()),
+            Some("last played")
+        );
+    }
 }

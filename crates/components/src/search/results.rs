@@ -28,7 +28,7 @@ pub fn SearchResults(
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
     let gens = hooks::db_reactivity::use_generations();
-    let offline_tracks = config.read().offline_tracks.clone();
+    let offline_tracks = hooks::downloads::downloaded_keys();
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let sort_state = use_signal(|| None);
     let sorted_tracks = showcase::sorted_track_pairs(&tracks, *sort_state.read());
@@ -137,13 +137,7 @@ pub fn SearchResults(
                                 };
                                 let is_downloaded = item_id
                                     .as_ref()
-                                    .is_some_and(|id| {
-                                        if let Some(path_str) = offline_tracks.get(id) {
-                                            std::path::Path::new(path_str).exists()
-                                        } else {
-                                            false
-                                        }
-                                    });
+                                    .is_some_and(|id| offline_tracks.contains(id));
 
                                 rsx! {
                                     TrackRow {
@@ -175,14 +169,12 @@ pub fn SearchResults(
                                         on_close_menu: move |_| active_menu_track.set(None),
                                         on_delete: move |_| {
                                             active_menu_track.set(None);
-                                            if let Some(del_path) = track_delete.id.local_path()
-                                                && std::fs::remove_file(del_path).is_ok()
-                                            {
-                                                let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                            if track_delete.id.local_path().is_some() {
+                                                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                                 let key = track_delete.id.key().into_owned();
                                                 spawn(async move {
-                                                    if local
-                                                        .delete_tracks(&[key])
+                                                    if api
+                                                        .delete_tracks(vec![key], true)
                                                         .await
                                                         .is_ok()
                                                     {
@@ -192,8 +184,7 @@ pub fn SearchResults(
                                             }
                                         },
                                         on_play: move |_| {
-                                            queue.set(queue_source.clone());
-                                            ctrl.play_track(idx);
+                                            ctrl.play_queue_at(queue_source.clone(), idx);
                                         }
                                     }
                                 }

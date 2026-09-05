@@ -7,7 +7,6 @@ use crate::header::Header;
 use crate::reorder_buttons::ReorderButtons;
 use crate::showcase::{self, ShowcaseProps};
 use crate::track_row::TrackRow;
-use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use reader::Track;
@@ -25,7 +24,6 @@ struct ShowcaseDerived {
 #[component]
 pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
     let _nav_ctrl = use_context::<NavigationController>();
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
@@ -34,7 +32,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     // source layer; no partition decision here).
     let cover_for = hooks::use_db_queries::use_cover_resolver(80);
 
-    let offline_tracks = config.read().offline_tracks.clone();
+    let offline_tracks = hooks::downloads::downloaded_keys();
     let sort_state = use_signal(|| None);
 
     // The body re-renders on every scroll tick (it reads `scroll_stat`), but
@@ -95,11 +93,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
         && props.tracks.iter().all(|t| {
             let p = t.id.uid();
             let id = p.split(':').nth(1).unwrap_or(&p);
-            if let Some(path_str) = offline_tracks.get(id) {
-                std::path::Path::new(path_str).exists()
-            } else {
-                false
-            }
+            offline_tracks.contains(id)
         });
 
     let columns = if props.is_album {
@@ -299,11 +293,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
 
                              let path_str = track.id.uid();
                              let item_id_str: String = path_str.split(':').nth(1).unwrap_or(&path_str).to_string();
-                             let is_downloaded = if let Some(path_str) = offline_tracks.get(&item_id_str) {
-                                 std::path::Path::new(path_str).exists()
-                             } else {
-                                 false
-                             };
+                             let is_downloaded = offline_tracks.contains(&item_id_str);
                              let is_downloading = false;
                              let play_queue = std::sync::Arc::clone(&sorted_tracks_arc);
 
@@ -400,8 +390,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                  }
                                              },
                                              on_play: move |_| {
-                                                 ctrl.queue.set((*play_queue).clone());
-                                                 ctrl.play_track(display_idx);
+                                                 ctrl.play_queue_at((*play_queue).clone(), display_idx);
                                              }
                                          }
                                      }

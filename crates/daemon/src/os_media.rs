@@ -60,36 +60,31 @@ pub fn spawn(session: &SessionHandle) {
     let mut events = session.subscribe();
     tokio::spawn(async move {
         let mut last_modes: Option<(bool, LoopMode)> = None;
-        // MPRIS delivery is a polled std channel; 200 ms matches the app's
-        // media-key latency. A push channel here is a later refinement.
-        let mut poll = tokio::time::interval(std::time::Duration::from_millis(200));
-        poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
-                _ = poll.tick() => {
-                    while let Some(event) = player::systemint::poll_event() {
-                        let mapped = match event {
-                            SystemEvent::Play => PlayerCommand::Play,
-                            SystemEvent::Pause => PlayerCommand::Pause,
-                            SystemEvent::Toggle => PlayerCommand::Toggle,
-                            SystemEvent::Next => PlayerCommand::Next,
-                            SystemEvent::Prev => PlayerCommand::Previous,
-                            SystemEvent::Seek(seconds) => seek_command(seconds),
-                            SystemEvent::SetShuffle(on) => PlayerCommand::SetMode {
-                                shuffle: Some(on),
-                                loop_mode: None,
-                            },
-                            SystemEvent::SetRepeat(mode) => PlayerCommand::SetMode {
-                                shuffle: None,
-                                loop_mode: Some(match mode {
-                                    RepeatMode::Off => LoopMode::None,
-                                    RepeatMode::Playlist => LoopMode::Queue,
-                                    RepeatMode::Track => LoopMode::Track,
-                                }),
-                            },
-                        };
-                        command(&session, mapped).await;
-                    }
+                media = player::systemint::wait_event() => {
+                    let Some(event) = media else { return };
+                    let mapped = match event {
+                        SystemEvent::Play => PlayerCommand::Play,
+                        SystemEvent::Pause => PlayerCommand::Pause,
+                        SystemEvent::Toggle => PlayerCommand::Toggle,
+                        SystemEvent::Next => PlayerCommand::Next,
+                        SystemEvent::Prev => PlayerCommand::Previous,
+                        SystemEvent::Seek(seconds) => seek_command(seconds),
+                        SystemEvent::SetShuffle(on) => PlayerCommand::SetMode {
+                            shuffle: Some(on),
+                            loop_mode: None,
+                        },
+                        SystemEvent::SetRepeat(mode) => PlayerCommand::SetMode {
+                            shuffle: None,
+                            loop_mode: Some(match mode {
+                                RepeatMode::Off => LoopMode::None,
+                                RepeatMode::Playlist => LoopMode::Queue,
+                                RepeatMode::Track => LoopMode::Track,
+                            }),
+                        },
+                    };
+                    command(&session, mapped).await;
                 }
                 received = events.recv() => {
                     match received {

@@ -240,6 +240,15 @@ impl Storage for Native {
         cfg_store::save_config(&self.pool(), cfg, &self.settings_path).await
     }
 
+    async fn set_server_credentials(
+        &self,
+        id: &str,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<(), DbError> {
+        cfg_store::set_server_credentials(&self.pool(), id, access_token, user_id).await
+    }
+
     async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {
         migrations::run_json_import(&self.pool(), config_dir).await
     }

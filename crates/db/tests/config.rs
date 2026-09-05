@@ -24,6 +24,24 @@ fn unique_db() -> PathBuf {
 }
 
 #[tokio::test]
+async fn peek_config_is_safe_inside_a_tokio_runtime() {
+    let db_path = unique_db();
+    let database = db::init(&db_path).await.unwrap();
+    let config = AppConfig {
+        tracing_enabled: true,
+        theme: "midnight".into(),
+        ..Default::default()
+    };
+    database.save_config(&config).await.unwrap();
+
+    let peeked = db::peek_config(&db_path).expect("config can be read from an async caller");
+    assert!(peeked.tracing_enabled);
+    assert_eq!(peeked.theme, "midnight");
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn config_round_trips_with_creds_in_servers_table() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();

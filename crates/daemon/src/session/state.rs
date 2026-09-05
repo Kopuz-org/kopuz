@@ -14,6 +14,7 @@ impl Session {
             self.queue_rev = self.rev;
         }
         self.queue_dirty = true;
+        self.cache_queue_snapshot();
         let state = self.build_state();
         if queue_changed {
             self.emit(ApiEvent::QueueChanged {
@@ -57,6 +58,7 @@ impl Session {
         };
         self.position = Some(anchor);
         self.queue_dirty = true;
+        self.cache_queue_snapshot();
         self.position_token = Some(token);
         let _ = state_tx.send(self.build_state());
         self.emit(ApiEvent::PlayerPosition {
@@ -101,8 +103,9 @@ impl Session {
 
     pub(super) fn build_state(&self) -> PlayerState {
         let track = self
-            .model
-            .current_track()
+            .external_track
+            .as_ref()
+            .or_else(|| self.model.current_track())
             .map(|track| now_playing_from(track, &self.config));
         let fading = self.pending_transition.as_ref().and_then(|pending| {
             (pending.stage == TransitionStage::Fading).then(|| FadingState {
@@ -133,8 +136,8 @@ impl Session {
             output_latency_ms: Some(self.player.output_latency().as_millis() as u64),
             buffered: self.buffered.clone(),
             fading,
+            external: self.external.clone(),
             error: self.error.clone(),
-            ..Default::default()
         }
     }
 }

@@ -6,9 +6,31 @@ use components::settings_items::{
 use config::{AppConfig, FetchStrategy, LYRICS_OFFSET_LIMIT_MS, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
+use std::sync::Arc;
 
 #[component]
 pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
+    let api = use_context::<Arc<dyn api::KopuzApi>>();
+    let mut credentials_refresh = use_signal(|| 0u64);
+    let credentials_api = api.clone();
+    let credentials = use_resource(move || {
+        let api = credentials_api.clone();
+        let _ = credentials_refresh();
+        async move { api.integration_credentials().await.unwrap_or_default() }
+    });
+    let configured = |kind| {
+        credentials.read().as_ref().is_some_and(|statuses| {
+            statuses
+                .iter()
+                .any(|status| status.kind == kind && status.configured)
+        })
+    };
+    let listenbrainz_configured = configured(api::IntegrationKind::ListenBrainz);
+    let lastfm_configured = configured(api::IntegrationKind::LastFm);
+    let librefm_configured = configured(api::IntegrationKind::LibreFm);
+    let listenbrainz_api = api.clone();
+    let lastfm_api = api.clone();
+    let librefm_api = api.clone();
     rsx! {
         SettingsSection { title: i18n::t("connectivity").to_string(),
             if !cfg!(target_os = "android") {
@@ -50,10 +72,28 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                 config_key: "musicbrainz_token",
                 control: rsx! {
                     MusicBrainzSettings {
-                        current: config.read().musicbrainz_token.clone(),
+                        current: String::new(),
                         on_save: move |token: String| {
-                            config.write().musicbrainz_token = token;
+                            let api = listenbrainz_api.clone();
+                            spawn(async move {
+                                let result = if token.trim().is_empty() {
+                                    api.clear_integration_credentials(api::IntegrationKind::ListenBrainz).await
+                                } else {
+                                    api.provision_integration_credentials(api::IntegrationCredentialProvision {
+                                        kind: api::IntegrationKind::ListenBrainz,
+                                        token: Some(token),
+                                        ..Default::default()
+                                    }).await.map(|_| ())
+                                };
+                                match result {
+                                    Ok(()) => *credentials_refresh.write() += 1,
+                                    Err(error) => tracing::warn!(%error, "could not update ListenBrainz credentials"),
+                                }
+                            });
                         },
+                    }
+                    if listenbrainz_configured {
+                        span { class: "text-xs text-emerald-400", "{i18n::t(\"connected\")}" }
                     }
                 }
             }
@@ -63,17 +103,20 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                 extra_config_keys: vec!["lastfm_api_secret", "lastfm_session_key"],
                 control: rsx! {
                     LastFmSettings {
-                        api_key: config.read().lastfm_api_key.clone(),
-                        api_secret: config.read().lastfm_api_secret.clone(),
-                        session_key: config.read().lastfm_session_key.clone(),
-                        on_api_key_save: move |value: String| {
-                            config.write().lastfm_api_key = value;
-                        },
-                        on_api_secret_save: move |value: String| {
-                            config.write().lastfm_api_secret = value;
-                        },
-                        on_session_key_save: move |value: String| {
-                            config.write().lastfm_session_key = value;
+                        configured: lastfm_configured,
+                        on_connect: move |(api_key, api_secret): (String, String)| {
+                            let api = lastfm_api.clone();
+                            spawn(async move {
+                                match api.authenticate_integration(api::IntegrationCredentialProvision {
+                                    kind: api::IntegrationKind::LastFm,
+                                    api_key: Some(api_key),
+                                    api_secret: Some(api_secret),
+                                    ..Default::default()
+                                }).await {
+                                    Ok(_) => *credentials_refresh.write() += 1,
+                                    Err(error) => tracing::warn!(%error, "could not authenticate Last.fm"),
+                                }
+                            });
                         },
                     }
                 }
@@ -83,9 +126,18 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                 config_key: "librefm_session_key",
                 control: rsx! {
                     LibreFmSettings {
-                        session_key: config.read().librefm_session_key.clone(),
-                        on_session_key_save: move |value: String| {
-                            config.write().librefm_session_key = value;
+                        configured: librefm_configured,
+                        on_connect: move |_| {
+                            let api = librefm_api.clone();
+                            spawn(async move {
+                                match api.authenticate_integration(api::IntegrationCredentialProvision {
+                                    kind: api::IntegrationKind::LibreFm,
+                                    ..Default::default()
+                                }).await {
+                                    Ok(_) => *credentials_refresh.write() += 1,
+                                    Err(error) => tracing::warn!(%error, "could not authenticate Libre.fm"),
+                                }
+                            });
                         },
                     }
                 }

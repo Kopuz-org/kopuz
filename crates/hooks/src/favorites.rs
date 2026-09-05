@@ -1,17 +1,13 @@
 //! Favorite toggling on the active source, optimistically.
 //!
-//! The heart flips immediately: the local state is written
-//! ([`record_favorite`](server::source::MediaSource::record_favorite)) and shown,
-//! then the change is pushed to the remote in the background
-//! ([`push_favorite`](server::source::MediaSource::push_favorite)); if the push
-//! is rejected the local state is reverted and a toast explains why, so a
-//! snapping-back heart doesn't read as a broken UI.
+//! The daemon records the optimistic state, reconciles it with the active
+//! source, and emits invalidation events if a rejected remote write reverts it.
 
+use std::sync::Arc;
+
+use api::KopuzApi;
 use dioxus::prelude::*;
 use reader::Track;
-use server::source::ActiveSource;
-
-use crate::db_reactivity::{Generations, Table};
 
 /// Toggle `track`'s favorite state on the active source, optimistically (write +
 /// show immediately, push in the background, revert + toast if the remote
@@ -21,29 +17,23 @@ pub fn toggle_favorite(track: Option<Track>) {
     if track.id.key().trim().is_empty() {
         return;
     }
-    let source = consume_context::<Signal<ActiveSource>>().peek().clone();
-    let gens = consume_context::<Generations>();
+    let api = consume_context::<Arc<dyn KopuzApi>>();
 
     spawn(async move {
         let key = track.id.key().to_string();
-        let new_fav = !source.is_favorite(&key).await;
-
-        // Optimistic: write locally and reflect it on the heart right away.
-        if let Err(e) = source.record_favorite(&track, new_fav).await {
-            tracing::warn!(error = %e, track = %track.id.uid(), "favorite: local write failed");
-            return;
-        }
-        // Favorites changed; Tracks too (record_favorite caches the track).
-        gens.bump(Table::Favorites);
-        gens.bump(Table::Tracks);
-
-        // Push in the background; revert the local state if the remote rejects it.
-        if let Err(e) = source.push_favorite(&key, new_fav).await {
-            tracing::warn!(error = %e, track = %track.id.uid(), "favorite push rejected; reverting");
-            let _ = source.record_favorite(&track, !new_fav).await;
-            gens.bump(Table::Favorites);
-            gens.bump(Table::Tracks);
-            // Name the service so a snapped-back heart doesn't read as a broken UI.
+        // Guessing "not favorited" on a failed read would invert the toggle
+        // (sending favorite=true for an already-favorited track no-ops), so a
+        // failed read fails the whole action.
+        let favorite = match api.favorites().await {
+            Ok(favorites) => favorites.refs.contains(&key),
+            Err(error) => {
+                tracing::warn!(%error, track = %track.id.uid(), "favorite state read failed");
+                crate::toast::toast_error("Couldn't update favorite");
+                return;
+            }
+        };
+        if let Err(error) = api.set_favorite(key, !favorite).await {
+            tracing::warn!(%error, track = %track.id.uid(), "favorite update failed");
             let msg = match track.id.service() {
                 Some(service) => format!("Couldn't update favorite on {}", service.display_name()),
                 None => "Couldn't update favorite".to_string(),
@@ -60,47 +50,37 @@ pub fn set_favorite_many(tracks: Vec<Track>, on: bool) {
     if tracks.is_empty() {
         return;
     }
-    let source = consume_context::<Signal<ActiveSource>>().peek().clone();
-    let gens = consume_context::<Generations>();
+    let api = consume_context::<Arc<dyn KopuzApi>>();
 
     spawn(async move {
-        // Optimistic: record every track locally, then show them all. Tracks
-        // already in the target state are skipped — pushing them again is at
-        // best wasted requests, at worst a remote rejection (e.g. deleting a
-        // like that doesn't exist) that would revert a state that was correct.
-        let mut recorded = Vec::new();
+        // The current set only exists to skip writes that are already in the
+        // desired state; when the read fails, push every key instead of
+        // silently skipping them all (set_favorite is idempotent).
+        let current: Option<std::collections::HashSet<String>> = match api.favorites().await {
+            Ok(favorites) => Some(favorites.refs.into_iter().collect()),
+            Err(error) => {
+                tracing::warn!(%error, "favorite state read failed");
+                None
+            }
+        };
+        let mut failed = false;
         for track in tracks {
             let key = track.id.key().to_string();
             if key.trim().is_empty() {
                 continue;
             }
-            if source.is_favorite(&key).await == on {
+            if current
+                .as_ref()
+                .is_some_and(|current| current.contains(&key) == on)
+            {
                 continue;
             }
-            if source.record_favorite(&track, on).await.is_ok() {
-                recorded.push(track);
+            if let Err(error) = api.set_favorite(key, on).await {
+                tracing::warn!(%error, track = %track.id.uid(), "favorite update failed");
+                failed = true;
             }
         }
-        if recorded.is_empty() {
-            return;
-        }
-        // Favorites changed; Tracks too (record_favorite caches the tracks).
-        gens.bump(Table::Favorites);
-        gens.bump(Table::Tracks);
-
-        // Push each; revert the ones the remote rejects.
-        let mut reverted = false;
-        for track in recorded {
-            let key = track.id.key().to_string();
-            if let Err(e) = source.push_favorite(&key, on).await {
-                tracing::warn!(error = %e, track = %track.id.uid(), "favorite push rejected; reverting");
-                let _ = source.record_favorite(&track, !on).await;
-                reverted = true;
-            }
-        }
-        if reverted {
-            gens.bump(Table::Favorites);
-            gens.bump(Table::Tracks);
+        if failed {
             crate::toast::toast_error("Couldn't update some favorites");
         }
     });

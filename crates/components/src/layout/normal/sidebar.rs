@@ -186,8 +186,8 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
 
     // Discover is a capability of the active source (YT), not a config flag —
     // hide the tab when the active source has no discover surface.
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let has_discover = use_memo(move || active_source.read().capabilities().discover);
+    let caps = use_context::<Signal<api::SourceCapabilities>>();
+    let has_discover = use_memo(move || caps.read().discover);
     let ordered_items: Vec<SidebarItem> = {
         let order = config.read().sidebar_order.clone();
         let mut items: Vec<SidebarItem> = order
@@ -284,7 +284,6 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
 
                 if !*is_collapsed.read() && config.read().show_source_toggle {
                     crate::source_switcher::SourceSwitcher {
-                        config,
                         on_manage: move |_| props.on_navigate.call(Route::Settings),
                     }
                 }

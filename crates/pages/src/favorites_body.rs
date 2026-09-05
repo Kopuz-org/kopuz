@@ -1,5 +1,3 @@
-use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
-use ::server::source::FavoritesSync;
 use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
@@ -9,12 +7,12 @@ use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
+use hooks::downloads::{DownloadQueue, DownloadStatus, queue_downloads};
 use hooks::use_db_queries::{use_active_source, use_favorites, use_tracks_by_keys};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
 use std::collections::HashSet;
 use std::rc::Rc;
-use tracing::Instrument;
 
 const ITEM_HEIGHT: f64 = 60.0;
 
@@ -69,17 +67,8 @@ pub fn FavoritesBody(
 
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
-    // The server id for the remote-sync effect (empty for local, which never syncs).
-    let active_server_id = use_memo(move || {
-        config
-            .read()
-            .active_source
-            .server_id()
-            .map(String::from)
-            .unwrap_or_default()
-    });
+    let caps = use_context::<Signal<api::SourceCapabilities>>();
+    let sources = use_context::<Signal<Vec<api::SourceInfo>>>();
     let favorites_res = use_favorites();
     let fav_keys = use_memo(move || favorites_res.read().clone().unwrap_or_default());
     let fav_tracks_res = use_tracks_by_keys(source, fav_keys);
@@ -91,172 +80,46 @@ pub fn FavoritesBody(
             return;
         }
         let nonce = *refresh_nonce.read();
-        // The capability — not the service — decides how favorites sync.
-        let sync_mode = caps().favorites_sync;
-        let read_db = consume_context::<hooks::ReadDb>();
-        let source = active_source.peek().clone();
-        let sid = active_server_id();
-        spawn(
-            async move {
-                // Staleness/once guard: paginated (YT) skips if a prior sync stamped
-                // or clean rows already exist; instant skips a recent pull.
-                if nonce == 0 {
-                    match sync_mode {
-                        FavoritesSync::Paginated => {
-                            let stamps: Option<serde_json::Value> = read_db
-                                .meta_get("yt_sync", "timestamps")
-                                .await
-                                .ok()
-                                .flatten()
-                                .and_then(|s| serde_json::from_str(&s).ok());
-                            // Dirty rows don't count: a locally-hearted never-pushed
-                            // like must not suppress the initial import.
-                            let favorites = read_db.favorites(&sid).await.unwrap_or_default().len();
-                            let dirty = read_db
-                                .dirty_favorites(&sid)
-                                .await
-                                .unwrap_or_default()
-                                .len();
-                            let already_synced = stamps
-                                .as_ref()
-                                .and_then(|v| v.get("last_yt_sync_at"))
-                                .and_then(|v| v.as_u64())
-                                .is_some()
-                                || favorites > dirty;
-                            if already_synced {
-                                return;
-                            }
-                        }
-                        FavoritesSync::Instant => {
-                            let now = unix_now();
-                            let last_pull: u64 = read_db
-                                .meta_get("fav_pull", &sid)
-                                .await
-                                .ok()
-                                .flatten()
-                                .and_then(|s| s.parse().ok())
-                                .unwrap_or(0);
-                            // Re-pull if the last sync is older than 15 min. The window
-                            // can be this tight because the Instant pull
-                            // (replace_favorites_clean) now diffs in place instead of
-                            // clearing then re-adding, so a refresh is invisible — no
-                            // flicker to ration against.
-                            if last_pull <= now && now - last_pull < 15 * 60 {
-                                return;
-                            }
-                        }
+        let has_cached = !favorites_res.read().clone().unwrap_or_default().is_empty();
+        if nonce == 0 && has_cached {
+            return;
+        }
+        let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
+        spawn(async move {
+            is_syncing.set(true);
+            synced_so_far.set(0);
+            let job = match api.start_job(api::JobKind::FavoritesSync).await {
+                Ok(job) => job,
+                Err(error) => {
+                    tracing::warn!(%error, "favorites sync failed to start");
+                    is_syncing.set(false);
+                    return;
+                }
+            };
+            loop {
+                let Ok(jobs) = api.jobs().await else {
+                    is_syncing.set(false);
+                    return;
+                };
+                let Some(status) = jobs.iter().find(|status| status.id == job.job_id) else {
+                    is_syncing.set(false);
+                    return;
+                };
+                synced_so_far.set(status.current.unwrap_or_default() as usize);
+                match status.state {
+                    api::JobState::Running => {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                    api::JobState::Finished
+                    | api::JobState::Failed
+                    | api::JobState::Cancelled
+                    | api::JobState::Unknown => {
+                        is_syncing.set(false);
+                        return;
                     }
                 }
-
-                is_syncing.set(true);
-                synced_so_far.set(0);
-
-                match sync_mode {
-                    FavoritesSync::Instant => {
-                        // One shot: the remote set becomes the clean baseline (dirty
-                        // local rows survive the replace — mirrors server::sync).
-                        if let Ok(ids) = source.fetch_favorites().await
-                            && source.replace_favorites_clean(&ids).await.is_ok()
-                        {
-                            let _ = source
-                                .set_meta("fav_pull", &sid, &unix_now().to_string())
-                                .await;
-                            gens.bump(Table::Favorites);
-                        }
-                    }
-                    FavoritesSync::Paginated => {
-                        // One epoch for the whole walk: each page stamps its rows with
-                        // it, and the end sweep drops anything not re-stamped (unliked
-                        // remotely). Pages stream into the DB + UI live; cross-page
-                        // dedup is ours (YT repeats tracks at page boundaries).
-                        let epoch = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_millis() as i64)
-                            .unwrap_or(0);
-                        let mut seen: HashSet<String> = HashSet::new();
-                        let mut ids: Vec<String> = Vec::new();
-                        let mut keep_albums: Vec<String> = Vec::new();
-                        let mut cursor: Option<String> = None;
-                        let mut completed = true;
-                        loop {
-                            let page = match source.fetch_favorites_page(cursor.clone()).await {
-                                Ok(p) => p,
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "favorites page fetch failed");
-                                    completed = false;
-                                    break;
-                                }
-                            };
-                            let next = page.next.clone();
-                            let fresh: Vec<reader::models::Track> = page
-                                .tracks
-                                .into_iter()
-                                .filter(|t| {
-                                    let k = t.id.key().to_string();
-                                    !k.is_empty() && seen.insert(k)
-                                })
-                                .collect();
-                            // Empty-after-dedup ⇒ exhausted (looping would hammer the
-                            // same continuation with no progress).
-                            if fresh.is_empty() {
-                                break;
-                            }
-                            let page_refs: Vec<String> = fresh
-                                .iter()
-                                .filter_map(|t| {
-                                    let k = t.id.key();
-                                    (!k.is_empty()).then(|| k.to_string())
-                                })
-                                .collect();
-                            let start_rank = ids.len() as i64;
-                            ids.extend(page_refs.iter().cloned());
-                            keep_albums.extend(fresh.iter().map(|t| t.album_id.clone()));
-                            let albums = synthesize_albums(&fresh);
-                            synced_so_far.set(ids.len());
-                            for chunk in fresh.chunks(100) {
-                                let _ = source.upsert_tracks(chunk).await;
-                            }
-                            let _ = source.upsert_albums(&albums).await;
-                            let _ = source
-                                .upsert_favorites_page(&page_refs, start_rank, epoch)
-                                .await;
-                            gens.bump_coalesced(Table::Tracks);
-                            gens.bump_coalesced(Table::Favorites);
-                            match next {
-                                Some(n) => cursor = Some(n),
-                                None => break,
-                            }
-                        }
-                        if completed {
-                            // Drop rows no longer liked remotely, then sweep favorites
-                            // not re-stamped this epoch. Dirty local toggles survive.
-                            keep_albums.sort();
-                            keep_albums.dedup();
-                            let _ = source.prune(&ids, &keep_albums).await;
-                            if source.sweep_favorites(epoch).await.is_ok() {
-                                gens.bump(Table::Favorites);
-                            }
-                            let mut stamps: serde_json::Value = read_db
-                                .meta_get("yt_sync", "timestamps")
-                                .await
-                                .ok()
-                                .flatten()
-                                .and_then(|s| serde_json::from_str(&s).ok())
-                                .unwrap_or_else(|| serde_json::json!({}));
-                            stamps["last_yt_sync_at"] = serde_json::json!(unix_now());
-                            let _ = source
-                                .set_meta("yt_sync", "timestamps", &stamps.to_string())
-                                .await;
-                            gens.bump(Table::Tracks);
-                            gens.bump(Table::Albums);
-                        }
-                    }
-                }
-
-                is_syncing.set(false);
             }
-            .instrument(tracing::info_span!("favorites.sync")),
-        );
+        });
     });
 
     let search_query_normalized = search_query.read().trim().to_lowercase();
@@ -327,13 +190,7 @@ pub fn FavoritesBody(
             let matches_current_path = currently_playing_path.as_ref() == Some(&track.id);
 
             let item_id: String = track.id.key().to_string();
-            let is_downloaded = cap.downloads
-                && config
-                    .read()
-                    .offline_tracks
-                    .get(&item_id)
-                    .map(|p| std::path::Path::new(p).exists())
-                    .unwrap_or(false);
+            let is_downloaded = cap.downloads && hooks::downloads::is_downloaded(&item_id);
             let is_downloading = cap.downloads && download_queue.read().items.iter().any(|i| i.id == item_id && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading));
             let item_id_dl = item_id.clone();
             let track_title = track.title.clone();
@@ -392,15 +249,11 @@ pub fn FavoritesBody(
                     })),
                     on_delete: move |_| {
                         active_menu_track.set(None);
-                        if cap.delete_from_disk
-                            && let Some(p) = track_delete.id.local_path()
-                            && crate::local_files::remove(&config.read(), &source(), p)
-                                .is_ok_and(|removed| removed)
-                        {
-                            let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                        if cap.delete_from_disk {
+                            let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                             let key = track_delete.id.key().into_owned();
                             spawn(async move {
-                                if s.delete_tracks(&[key]).await.is_ok() {
+                                if api.delete_tracks(vec![key], true).await.is_ok() {
                                     gens.bump(Table::Tracks);
                                 }
                             });
@@ -411,14 +264,12 @@ pub fn FavoritesBody(
                             active_menu_track.set(None);
                             queue_downloads(
                                 vec![(item_id_dl.clone(), track_title.clone(), track_artist.clone())],
-                                config,
                                 download_queue,
                             );
                         }
                     })),
                     on_play: move |_| {
-                        queue.set((*queue_source).clone());
-                        ctrl.play_track(idx);
+                        ctrl.play_queue_at((*queue_source).clone(), idx);
                     },
                 }
                 }
@@ -446,13 +297,12 @@ pub fn FavoritesBody(
                         }
 
                         if !selected_paths.is_empty() {
-                            let pid = playlist_id.clone();
-                            let src = active_source.peek().clone();
+                            let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                             let refs: Vec<String> =
                                 selected_paths.iter().map(|p| p.key().into_owned()).collect();
                             spawn(async move {
                                 if !refs.is_empty() {
-                                    let _ = src.add_to_playlist(&pid, &refs).await;
+                                    let _ = api.add_playlist_tracks(playlist_id, refs).await;
                                 }
                             });
                         }
@@ -470,13 +320,12 @@ pub fn FavoritesBody(
                         }
 
                         if !selected_paths.is_empty() {
-                            let playlist_name = name.clone();
-                            let src = active_source.peek().clone();
+                            let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                             let refs: Vec<String> =
                                 selected_paths.iter().map(|p| p.key().into_owned()).collect();
                             spawn(async move {
                                 if !refs.is_empty() {
-                                    let _ = src.create_playlist(&playlist_name, &refs).await;
+                                    let _ = api.create_playlist(name, refs).await;
                                 }
                             });
                         }
@@ -493,39 +342,19 @@ pub fn FavoritesBody(
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
                     on_save: move |edits: reader::models::TrackEdits| {
-                        let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
-                            return;
-                        };
-                        match reader::write_tags(&path, &edits) {
-                            Ok(()) => {
-                                let mut t = track.clone();
-                                t.title = edits.title.trim().to_string();
-                                t.artist = edits.artist.trim().to_string();
-                                t.artists = edits
-                                    .artist
-                                    .split([';', ','])
-                                    .map(|a| a.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-                                t.album = edits.album.trim().to_string();
-                                t.track_number = edits.track_number;
-                                t.disc_number = edits.disc_number;
-                                t.album_id = reader::metadata::make_album_id(
-                                    edits.album.trim(),
-                                    edits.artist.trim(),
-                                );
-                                let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                spawn(async move {
-                                    if s.upsert_tracks(&[t]).await.is_ok() {
-                                        gens.bump(Table::Tracks);
-                                    }
-                                });
-                                metadata_track.set(None);
+                        let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
+                        let key = track.id.key().into_owned();
+                        spawn(async move {
+                            match hooks::use_db_queries::save_track_edits(api.as_ref(), key, edits).await {
+                                Ok(_) => {
+                                    gens.bump(Table::Tracks);
+                                    metadata_track.set(None);
+                                }
+                                Err(error) => {
+                                    tracing::error!(%error, "failed to update track metadata");
+                                }
                             }
-                            Err(e) => {
-                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
-                            }
-                        }
+                        });
                     },
                 }
             }
@@ -555,22 +384,15 @@ pub fn FavoritesBody(
                     },
                     on_delete: move |_| {
                         if caps().delete_from_disk {
-                            let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
-                            let mut keys = Vec::new();
-                            for id in paths {
-                                let Some(path) = id.local_path() else {
-                                    continue;
-                                };
-                                if crate::local_files::remove(&config.read(), &source(), path)
-                                    .is_ok_and(|removed| removed)
-                                {
-                                    keys.push(id.key().into_owned());
-                                }
-                            }
+                            let keys: Vec<String> = selected_tracks
+                                .read()
+                                .iter()
+                                .map(|id| id.key().into_owned())
+                                .collect();
                             if !keys.is_empty() {
-                                let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                 spawn(async move {
-                                    if s.delete_tracks(&keys).await.is_ok() {
+                                    if api.delete_tracks(keys, true).await.is_ok() {
                                         gens.bump(Table::Tracks);
                                     }
                                 });
@@ -589,7 +411,7 @@ pub fn FavoritesBody(
             // Generic "Syncing with server" spinner for instant-sync sources.
             // Paginated sources (YT) have their own progress row below with a
             // track counter + refresh button — don't double-render.
-            if *is_syncing.read() && caps().favorites_sync == FavoritesSync::Instant {
+            if *is_syncing.read() && caps().favorites_sync == api::FavoritesSyncMode::Instant {
                 div {
                     class: "flex items-center gap-2 text-slate-400 text-sm mb-4",
                     i { class: "fa-solid fa-circle-notch fa-spin" }
@@ -603,7 +425,7 @@ pub fn FavoritesBody(
             // out of the way.
             {
                 let is_paginated_sync =
-                    caps().favorites_sync == ::server::source::FavoritesSync::Paginated;
+                    caps().favorites_sync == api::FavoritesSyncMode::Paginated;
                 let synced = *synced_so_far.read();
                 let syncing = *is_syncing.read();
                 let total = displayed_tracks.len();
@@ -651,13 +473,12 @@ pub fn FavoritesBody(
                     {
                         // Anonymous YT shows a sign-in prompt; otherwise the
                         // standard empty state with a source-appropriate hint.
-                        let yt_anon = caps().albums == ::server::source::AlbumType::YtMusic
-                            && config
+                        let yt_anon = caps().albums == api::AlbumPresentation::Remote
+                            && sources
                                 .read()
-                                .server
-                                .as_ref()
-                                .map(|s| s.yt_anonymous)
-                                .unwrap_or(false);
+                                .iter()
+                                .find(|source| source.active)
+                                .is_some_and(|source| source.anonymous);
                         let add_hint = i18n::t("heart_track_to_add");
                         let no_results = i18n::t_with(
                             "no_results_found",
@@ -767,14 +588,6 @@ pub fn FavoritesBody(
     }
 }
 
-/// Seconds since the Unix epoch (0 on a backward clock step).
-fn unix_now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 fn track_matches_filter(track: &reader::models::Track, query: &str) -> bool {
     query.is_empty()
         || track.title.to_lowercase().contains(query)
@@ -784,46 +597,6 @@ fn track_matches_filter(track: &reader::models::Track, query: &str) -> bool {
             .artists
             .iter()
             .any(|artist| artist.to_lowercase().contains(query))
-}
-
-/// Build a list of synthetic Album entries out of the user's YT tracks.
-/// YT doesn't expose a separate albums endpoint, so we group by
-/// Track.album_id (assigned in search.rs::synthesize_album_id) and pick
-/// the first track per group as the album's representative for title +
-/// artist + cover.
-fn synthesize_albums(tracks: &[reader::models::Track]) -> Vec<reader::models::Album> {
-    use std::collections::HashMap;
-    use std::path::PathBuf;
-    let mut by_album: HashMap<String, &reader::models::Track> = HashMap::new();
-    for t in tracks {
-        if t.album_id.is_empty() {
-            continue;
-        }
-        by_album.entry(t.album_id.clone()).or_insert(t);
-    }
-    by_album
-        .into_iter()
-        .map(|(album_id, t)| {
-            // Reuse the first track's thumbnail as the album cover. A YT track's
-            // `cover` is already a self-contained form — a raw URL or a
-            // `urlhex_` tag — both of which `CoverRef::parse` reads as-is, so
-            // there's no wrapper to add.
-            let cover_path = t.cover.as_deref().map(PathBuf::from);
-            reader::models::Album {
-                id: album_id,
-                title: if t.album.is_empty() {
-                    "Singles".to_string()
-                } else {
-                    t.album.clone()
-                },
-                artist: t.artist.clone(),
-                genre: String::new(),
-                year: 0,
-                cover_path,
-                manual_cover: false,
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]

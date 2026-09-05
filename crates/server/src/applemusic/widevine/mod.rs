@@ -562,6 +562,7 @@ mod tests {
     /// Every play used to open a CDM session and never close one, so they piled
     /// up for the life of the process. Opening and closing many in a row would
     /// fail — or leak until the CDM refused more — if closing didn't work.
+    #[cfg(not(target_os = "android"))]
     #[tokio::test]
     #[ignore = "requires a system Widevine CDM"]
     async fn sessions_are_closed_and_do_not_accumulate() {

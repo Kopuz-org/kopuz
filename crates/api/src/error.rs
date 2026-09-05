@@ -17,21 +17,7 @@ pub enum ErrorCode {
     Internal,
 }
 
-impl ErrorCode {
-    pub fn http_status(self) -> u16 {
-        match self {
-            Self::InvalidInput => 400,
-            Self::Unauthorized | Self::SourceAuthExpired => 401,
-            Self::NotFound => 404,
-            Self::Conflict => 409,
-            Self::Internal => 500,
-            Self::Unsupported => 501,
-            Self::SourceUnreachable => 502,
-        }
-    }
-}
-
-/// The JSON error payload: `{"error": {"code", "message", "details"}}`.
+/// Stable error details embedded in state, events, jobs, and command acks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ErrorBody {
     pub code: ErrorCode,

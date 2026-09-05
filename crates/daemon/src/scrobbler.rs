@@ -10,12 +10,10 @@ use std::time::Duration;
 
 use api::{Intent, Phase};
 use reader::Track;
-use utils::playback_ref::PlaybackItemRef;
 
 use crate::session::SessionHandle;
 
 const NOW_PLAYING_INTERVAL_SECS: u64 = 30;
-const NOW_PLAYING_MAX_IDLE_SECS: u64 = 600;
 
 pub struct Scrobbler {
     db: db::Db,
@@ -78,22 +76,30 @@ impl Scrobbler {
         )
     }
 
-    fn playing(session: &SessionHandle) -> bool {
-        session.state().phase == Phase::Playing
-    }
-
     /// Wall-clock accumulation of playing time, aborted when the session
     /// moves on, mirroring the hooks `wait_for_playtime`.
     async fn wait_for_playtime(session: &SessionHandle, threshold: Duration, token: u64) -> bool {
-        let tick = Duration::from_secs(1);
+        let mut states = session.state_watch();
         let mut played = Duration::ZERO;
         while played < threshold {
-            tokio::time::sleep(tick).await;
             if !Self::token_live(session, token) {
                 return false;
             }
-            if Self::playing(session) {
-                played += tick;
+            if states.borrow().phase != Phase::Playing {
+                if states.changed().await.is_err() {
+                    return false;
+                }
+                continue;
+            }
+            let started = tokio::time::Instant::now();
+            tokio::select! {
+                _ = tokio::time::sleep(threshold - played) => return Self::token_live(session, token),
+                changed = states.changed() => {
+                    if changed.is_err() {
+                        return false;
+                    }
+                    played += started.elapsed();
+                }
             }
         }
         true
@@ -106,13 +112,14 @@ impl Scrobbler {
         };
         let config = session.config_watch().borrow().clone();
         let uid = track.id.uid();
-        let item_ref = PlaybackItemRef::parse(&uid);
-        if item_ref.is_radio() {
+        if track.duration == u64::MAX {
             return;
         }
-        let is_server = item_ref.is_server();
-        let item_id = is_server.then(|| item_ref.primary_id().unwrap_or_default().to_string());
-        let include_ids = !is_server;
+        let item_id = match &track.id {
+            reader::TrackId::Server { item_id, .. } => Some(item_id.clone()),
+            reader::TrackId::Local(_) => None,
+        };
+        let include_ids = item_id.is_none();
 
         self.spawn_playing_now_heartbeat(&session, &track, token, &config, include_ids);
 
@@ -353,42 +360,54 @@ impl Scrobbler {
         tokio::spawn(tracing::Instrument::instrument(
             async move {
                 let mut announced = false;
-                let mut idle_secs: u64 = 0;
-                loop {
+                let mut states = session.state_watch();
+                'heartbeat: loop {
                     if !Self::token_live(&session, token) {
                         return;
                     }
-                    if Self::playing(&session) {
-                        idle_secs = 0;
-                        let now_info = listen_additional_info(&track, include_ids);
-                        let playing_now = scrobble::musicbrainz::make_playing_now(
-                            &track.artist,
-                            &track.title,
-                            Some(&track.album),
-                            Some(now_info),
-                        );
-                        let sent = scrobble::musicbrainz::submit_listens(
-                            &mb_token,
-                            vec![playing_now],
-                            "playing_now",
-                        )
-                        .await
-                        .is_ok();
-                        if sent && !announced {
-                            announced = true;
-                            tracing::info!(
-                                "ListenBrainz playing now: {} - {}",
-                                track.artist,
-                                track.title
-                            );
-                        }
-                    } else {
-                        idle_secs += NOW_PLAYING_INTERVAL_SECS;
-                        if idle_secs >= NOW_PLAYING_MAX_IDLE_SECS {
+                    if states.borrow().phase != Phase::Playing {
+                        if states.changed().await.is_err() {
                             return;
                         }
+                        continue;
                     }
-                    tokio::time::sleep(Duration::from_secs(NOW_PLAYING_INTERVAL_SECS)).await;
+                    let now_info = listen_additional_info(&track, include_ids);
+                    let playing_now = scrobble::musicbrainz::make_playing_now(
+                        &track.artist,
+                        &track.title,
+                        Some(&track.album),
+                        Some(now_info),
+                    );
+                    let sent = scrobble::musicbrainz::submit_listens(
+                        &mb_token,
+                        vec![playing_now],
+                        "playing_now",
+                    )
+                    .await
+                    .is_ok();
+                    if sent && !announced {
+                        announced = true;
+                        tracing::info!(
+                            "ListenBrainz playing now: {} - {}",
+                            track.artist,
+                            track.title
+                        );
+                    }
+                    let deadline = tokio::time::Instant::now()
+                        + Duration::from_secs(NOW_PLAYING_INTERVAL_SECS);
+                    loop {
+                        tokio::select! {
+                            _ = tokio::time::sleep_until(deadline) => break,
+                            changed = states.changed() => {
+                                if changed.is_err() || !Self::token_live(&session, token) {
+                                    return;
+                                }
+                                if states.borrow().phase != Phase::Playing {
+                                    continue 'heartbeat;
+                                }
+                            }
+                        }
+                    }
                 }
             },
             span,

@@ -295,6 +295,32 @@ pub async fn load_server(pool: &SqlitePool, id: &str) -> Result<Option<MusicServ
     }))
 }
 
+pub async fn set_server_credentials(
+    pool: &SqlitePool,
+    id: &str,
+    access_token: Option<&str>,
+    user_id: Option<&str>,
+) -> Result<(), DbError> {
+    let now = now_secs();
+    let auth_state = if access_token.is_some() {
+        "active"
+    } else {
+        "unauthenticated"
+    };
+    sqlx::query(
+        "UPDATE servers SET access_token = ?2, user_id = ?3, auth_state = ?4, \
+         cred_updated_at = ?5, updated_at = ?5 WHERE id = ?1",
+    )
+    .bind(id)
+    .bind(access_token)
+    .bind(user_id)
+    .bind(auth_state)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Increment one track's play count (1-row upsert — no whole-blob rewrite).
 pub async fn bump_listen_count(
     pool: &SqlitePool,

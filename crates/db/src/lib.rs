@@ -40,9 +40,9 @@ pub struct Page {
     pub limit: u32,
 }
 
-/// The queue/progress snapshot, reconstructed from the `queue_state` row. The
-/// in-memory `PersistedQueueState` (in the app crate) maps directly from this.
-#[derive(Clone, Debug, Default)]
+/// The queue/progress snapshot reconstructed from the `queue_state` row.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct QueueSnapshot {
     pub version: u8,
     pub queue: Vec<reader::Track>,
@@ -50,6 +50,23 @@ pub struct QueueSnapshot {
     pub progress_secs: u64,
     pub shuffle_order: Vec<usize>,
     pub shuffle_enabled: bool,
+}
+
+const fn queue_snapshot_version() -> u8 {
+    1
+}
+
+impl Default for QueueSnapshot {
+    fn default() -> Self {
+        Self {
+            version: queue_snapshot_version(),
+            queue: Vec::new(),
+            current_queue_index: 0,
+            progress_secs: 0,
+            shuffle_order: Vec::new(),
+            shuffle_enabled: false,
+        }
+    }
 }
 
 /// Sort order for a track listing — maps to an indexed `ORDER BY`.
@@ -282,6 +299,15 @@ pub trait Storage: ReadStore {
     /// Persist the whole `AppConfig`: the single-row JSON blob, plus a mirror
     /// of the settings into the standalone config file when it is writable.
     async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
+
+    /// Replace one saved server's credentials without changing the active
+    /// source. Credential provisioning uses this for inactive servers.
+    async fn set_server_credentials(
+        &self,
+        id: &str,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<(), DbError>;
 
     /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
     /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op
@@ -535,25 +561,6 @@ impl std::ops::Deref for Db {
     }
 }
 
-/// Read-only view of the storage backend — the surface the UI gets, so it
-/// cannot reach a write method (those live on `Storage`, not `ReadStore`).
-#[derive(Clone)]
-pub struct ReadDb(std::sync::Arc<dyn ReadStore>);
-
-impl std::ops::Deref for ReadDb {
-    type Target = dyn ReadStore;
-    fn deref(&self) -> &Self::Target {
-        &*self.0
-    }
-}
-
-impl Db {
-    /// A read-only view of the same backend (cheap Arc upcast).
-    pub fn reads(&self) -> ReadDb {
-        ReadDb(self.0.clone())
-    }
-}
-
 /// Open the database and apply migrations. Native callers should `block_on`
 /// this in `main()` before mounting.
 pub async fn init(db_path: &std::path::Path) -> Result<Db, DbError> {
@@ -589,25 +596,17 @@ pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
     let layers = config::store::FileLayers::read(&config::store::settings_path_for(db_dir));
 
     let blob: Option<serde_json::Value> = if db_path.exists() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .ok()?;
-        rt.block_on(async {
-            let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(db_path)
-                .create_if_missing(false)
-                .read_only(true);
-            use sqlx::ConnectOptions;
-            let mut conn = opts.connect().await.ok()?;
-            let json: Option<String> =
-                sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-                    .fetch_optional(&mut conn)
-                    .await
+        if tokio::runtime::Handle::try_current().is_ok() {
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(|| read_config_blob_blocking(db_path))
+                    .join()
                     .ok()
-                    .flatten();
-            json.and_then(|j| serde_json::from_str(&j).ok())
-        })
+                    .flatten()
+            })
+        } else {
+            read_config_blob_blocking(db_path)
+        }
     } else {
         None
     };
@@ -619,6 +618,27 @@ pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
     }
     let value = blob.unwrap_or_else(|| serde_json::json!({}));
     layers.merge_and_parse(value).ok()
+}
+
+fn read_config_blob_blocking(db_path: &std::path::Path) -> Option<serde_json::Value> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    rt.block_on(async {
+        let opts = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(db_path)
+            .create_if_missing(false)
+            .read_only(true);
+        use sqlx::ConnectOptions;
+        let mut conn = opts.connect().await.ok()?;
+        let json: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
+            .fetch_optional(&mut conn)
+            .await
+            .ok()
+            .flatten();
+        json.and_then(|json| serde_json::from_str(&json).ok())
+    })
 }
 
 /// The RELEASE database path (`kopuz.db`), independent of build profile — the

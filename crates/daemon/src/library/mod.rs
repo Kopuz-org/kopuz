@@ -5,7 +5,7 @@
 //! and the track list never round-trips through a client. Scan, sync, and
 //! write paths move in with the job runner.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
@@ -13,17 +13,27 @@ use api::{ApiError, ApiEvent, JobKind, JobRef, Page, QueueContext, Table, TrackF
 use reader::Track;
 use tokio::sync::watch;
 
+use crate::error::db as db_error;
 use crate::jobs::{JobCtx, JobRunner};
 use crate::session::{QueueMaterializer, SessionHandle};
 
 pub struct LibraryService {
     db: db::Db,
     source: config::Source,
-    station_registry: Arc<radio::registry::StationRegistry>,
+    station_registry: std::sync::RwLock<Arc<radio::registry::StationRegistry>>,
     cover_cache: PathBuf,
     config_rx: OnceLock<watch::Receiver<config::AppConfig>>,
     session: OnceLock<SessionHandle>,
+    transient: std::sync::Mutex<TransientTracks>,
 }
+
+#[derive(Default)]
+struct TransientTracks {
+    by_uid: HashMap<String, Track>,
+    order: VecDeque<String>,
+}
+
+const MAX_TRANSIENT_TRACKS: usize = 4096;
 
 fn normalize_album_id(id: &str) -> String {
     let parts: Vec<&str> = id.split(':').collect();
@@ -36,12 +46,13 @@ fn normalize_album_id(id: &str) -> String {
     }
 }
 
-fn db_error(error: db::DbError) -> ApiError {
-    ApiError::internal(format!("database error: {error}"))
-}
-
 fn map_sort(sort: Option<&str>) -> db::TrackSort {
     match sort {
+        Some(encoded) if encoded.starts_with("fields:") => encoded
+            .strip_prefix("fields:")
+            .and_then(|json| serde_json::from_str(json).ok())
+            .map(db::TrackSort::Fields)
+            .unwrap_or_default(),
         Some("title") => db::TrackSort::Title,
         Some("artist") => db::TrackSort::Artist,
         Some("album") => db::TrackSort::Album,
@@ -100,10 +111,11 @@ impl LibraryService {
         Self {
             db,
             source,
-            station_registry,
+            station_registry: std::sync::RwLock::new(station_registry),
             cover_cache,
             config_rx: OnceLock::new(),
             session: OnceLock::new(),
+            transient: std::sync::Mutex::new(TransientTracks::default()),
         }
     }
 
@@ -114,6 +126,74 @@ impl LibraryService {
         let _ = self.session.set(session);
     }
 
+    pub fn set_station_registry(&self, registry: Arc<radio::registry::StationRegistry>) {
+        if let Ok(mut current) = self.station_registry.write() {
+            *current = registry.clone();
+        }
+        if let Some(session) = self.session.get() {
+            session.set_station_registry(registry);
+        }
+    }
+
+    pub(crate) fn register_transient(&self, tracks: &[Track]) {
+        let Ok(mut cache) = self.transient.lock() else {
+            return;
+        };
+        for track in tracks {
+            let uid = track.id.uid();
+            cache.order.retain(|saved| saved != &uid);
+            cache.order.push_back(uid.clone());
+            cache.by_uid.insert(uid, track.clone());
+        }
+        while cache.order.len() > MAX_TRANSIENT_TRACKS {
+            if let Some(uid) = cache.order.pop_front() {
+                cache.by_uid.remove(&uid);
+            }
+        }
+    }
+
+    pub(crate) fn transient_track(&self, key: &str) -> Option<Track> {
+        let service = self.current_config().server.map(|server| server.service)?;
+        let uid = reader::TrackId::Server {
+            service,
+            item_id: key.to_string(),
+        }
+        .uid();
+        self.transient.lock().ok()?.by_uid.get(&uid).cloned()
+    }
+
+    pub(crate) fn transient_track_for_info(&self, value: &api::TrackInfo) -> Option<Track> {
+        let service = value
+            .service
+            .and_then(crate::wire::music_service_from_api)?;
+        let uid = reader::TrackId::Server {
+            service,
+            item_id: value.key.clone(),
+        }
+        .uid();
+        self.transient.lock().ok()?.by_uid.get(&uid).cloned()
+    }
+
+    pub(crate) fn track_from_info(value: &api::TrackInfo) -> Result<Track, ApiError> {
+        if value.key.trim().is_empty() {
+            return Err(ApiError::invalid_input("inline track key is required"));
+        }
+        let service = value
+            .service
+            .and_then(crate::wire::music_service_from_api)
+            .ok_or_else(|| ApiError::invalid_input("inline tracks must name a media service"))?;
+        let id = reader::TrackId::Server {
+            service,
+            item_id: value.key.clone(),
+        };
+        if !value.uid.is_empty() && value.uid != id.uid() {
+            return Err(ApiError::invalid_input(
+                "inline track uid does not match its service and key",
+            ));
+        }
+        Ok(crate::wire::track_from_info_parts(value, id, None))
+    }
+
     fn current_config(&self) -> config::AppConfig {
         self.config_rx
             .get()
@@ -121,7 +201,7 @@ impl LibraryService {
             .unwrap_or_default()
     }
 
-    fn invalidate(&self, table: Table) {
+    pub(crate) fn invalidate(&self, table: Table) {
         static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         if let Some(session) = self.session.get() {
             session.emit_event(ApiEvent::LibraryInvalidated {
@@ -267,7 +347,7 @@ impl LibraryService {
     /// Lyrics for one library track, through the app's full provider chain
     /// (local .lrc, server lyrics API, synced fallbacks, lrclib) with its
     /// process cache. Radio has no lyrics by construction.
-    pub async fn lyrics(&self, key: &str) -> Result<api::LyricsView, ApiError> {
+    async fn lyrics_request(&self, key: &str) -> Result<utils::lyrics::LyricsRequest, ApiError> {
         let config = self.current_config();
         let track = self
             .db
@@ -276,6 +356,7 @@ impl LibraryService {
             .map_err(db_error)?
             .into_iter()
             .next()
+            .or_else(|| self.transient_track(key))
             .ok_or_else(|| ApiError::not_found("unknown track key"))?;
         if track.duration == u64::MAX {
             return Err(ApiError::invalid_input("radio streams have no lyrics"));
@@ -296,7 +377,33 @@ impl LibraryService {
                 server.access_token.as_deref(),
                 server.user_id.as_deref(),
             );
+            if utils::lyrics::cached_lyrics_for_request(&request).is_some() {
+                return Ok(request);
+            }
+            if server.service == config::MusicService::AppleMusic
+                && let Some(token) = server.access_token.as_ref()
+            {
+                match server::applemusic::auth::get_bearer_token().await {
+                    Ok(bearer_token) => {
+                        request = request.apple_music_auth(utils::lyrics::AppleMusicLyricsAuth {
+                            token: token.clone(),
+                            bearer_token,
+                            storefront: server.apple_music_storefront.clone(),
+                            language: server.apple_music_language.clone(),
+                            catalog_id: track.id.key().into_owned(),
+                        });
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "Apple Music lyrics authorization failed");
+                    }
+                }
+            }
         }
+        Ok(request)
+    }
+
+    pub async fn lyrics(&self, key: &str) -> Result<api::LyricsView, ApiError> {
+        let request = self.lyrics_request(key).await?;
 
         let lyrics = match utils::lyrics::cached_lyrics_for_request(&request) {
             Some(cached) => cached,
@@ -307,11 +414,75 @@ impl LibraryService {
             .ok_or_else(|| ApiError::not_found("no lyrics found"))
     }
 
+    pub fn lyrics_stream(self: &Arc<Self>, key: String) -> api::LyricsStream {
+        use futures_util::StreamExt as _;
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let service = self.clone();
+        tokio::spawn(async move {
+            let cancel = tx.clone();
+            let request = match tokio::select! {
+                biased;
+                () = cancel.closed() => return,
+                request = service.lyrics_request(&key) => request,
+            } {
+                Ok(request) => request,
+                Err(error) => {
+                    let _ = tx.send(Err(error));
+                    return;
+                }
+            };
+            if let Some(cached) = utils::lyrics::cached_lyrics_for_request(&request) {
+                let result = cached
+                    .map(lyrics_view)
+                    .ok_or_else(|| ApiError::not_found("no lyrics found"));
+                let _ = tx.send(result);
+                return;
+            }
+            let mut last = None;
+            let final_lyrics = {
+                let fetch =
+                    utils::lyrics::fetch_lyrics_progressive_for_request(&request, |lyrics| {
+                        let view = lyrics_view(lyrics);
+                        if last.as_ref() != Some(&view) {
+                            let _ = tx.send(Ok(view.clone()));
+                            last = Some(view);
+                        }
+                    });
+                tokio::pin!(fetch);
+                tokio::select! {
+                    biased;
+                    () = cancel.closed() => return,
+                    lyrics = &mut fetch => lyrics.map(lyrics_view),
+                }
+            };
+            match final_lyrics {
+                Some(view) if last.as_ref() != Some(&view) => {
+                    let _ = tx.send(Ok(view));
+                }
+                Some(_) => {}
+                None if last.is_none() => {
+                    let _ = tx.send(Err(ApiError::not_found("no lyrics found")));
+                }
+                None => {}
+            }
+        });
+        futures_util::stream::unfold(rx, |mut rx| async move {
+            rx.recv().await.map(|item| (item, rx))
+        })
+        .boxed()
+    }
+
     /// Synthetic radio track, seeded from the manifest so no client ever sees
     /// raw ids while the first metadata update is in flight. The `u64::MAX`
     /// duration sentinel is translated to `TrackKind::Radio` at the wire.
     fn radio_track(&self, station_id: &str, stream_id: &str) -> Track {
-        let station = self.station_registry.get(station_id);
+        let registry = self
+            .station_registry
+            .read()
+            .map(|registry| registry.clone())
+            .unwrap_or_else(|_| Arc::new(radio::registry::StationRegistry::default()));
+        let station = registry.get(station_id);
         let title = station
             .map(|station| station.name.clone())
             .filter(|name| !name.trim().is_empty())
@@ -399,7 +570,16 @@ impl QueueMaterializer for LibraryService {
                     .filter(|key| !by_key.contains_key(*key))
                     .cloned()
                     .collect();
-                for track in Self::probe_local_files(missing, self.cover_cache.clone()).await {
+                let mut local_missing = Vec::new();
+                for key in missing {
+                    if let Some(track) = self.transient_track(&key) {
+                        by_key.insert(key, track);
+                    } else {
+                        local_missing.push(key);
+                    }
+                }
+                for track in Self::probe_local_files(local_missing, self.cover_cache.clone()).await
+                {
                     by_key.insert(track.id.key().to_string(), track);
                 }
                 Ok(keys.iter().filter_map(|key| by_key.remove(key)).collect())
@@ -449,6 +629,33 @@ impl QueueMaterializer for LibraryService {
                 station_id,
                 stream_id,
             } => Ok(vec![self.radio_track(station_id, stream_id)]),
+            QueueContext::InlineTracks { tracks } => {
+                let expected = self
+                    .current_config()
+                    .server
+                    .map(|server| server.service)
+                    .ok_or_else(|| {
+                        ApiError::invalid_input("inline tracks require an active remote source")
+                    })?;
+                tracks
+                    .iter()
+                    .map(|value| {
+                        let service = value
+                            .service
+                            .and_then(crate::wire::music_service_from_api)
+                            .ok_or_else(|| {
+                                ApiError::invalid_input("inline tracks must name a media service")
+                            })?;
+                        if service != expected {
+                            return Err(ApiError::invalid_input(
+                                "inline track does not belong to the active source",
+                            ));
+                        }
+                        let decoded = Self::track_from_info(value)?;
+                        Ok(self.transient_track_for_info(value).unwrap_or(decoded))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            }
         }
     }
 }
@@ -581,5 +788,140 @@ mod tests {
             .expect("radio context");
         assert_eq!(radio[0].duration, u64::MAX);
         assert_eq!(radio[0].title, "hi");
+    }
+
+    #[tokio::test]
+    async fn broad_track_queries_follow_the_session_source() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("source.db")).await.expect("db");
+        database
+            .upsert_tracks(&config::Source::Local, &[track(0, "Local")])
+            .await
+            .expect("seed local");
+        database
+            .upsert_tracks(
+                &config::Source::Server("server-b".into()),
+                &[track(1, "Remote")],
+            )
+            .await
+            .expect("seed server");
+        let library = Arc::new(LibraryService::new(
+            database,
+            config::Source::Local,
+            Arc::new(radio::registry::StationRegistry::default()),
+            dir.path().join("covers"),
+        ));
+        let player =
+            player::player::Player::try_with_sink(Box::new(player::engine::NullSink::new()))
+                .expect("player");
+        let services = crate::session::PlaybackServices {
+            config: config::AppConfig {
+                active_source: config::Source::Server("server-b".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let session =
+            crate::session::SessionHandle::spawn_with_player(library.clone(), player, services);
+        library.attach_session(session);
+
+        let page = library
+            .tracks(TrackFilter::default(), Page::default())
+            .await
+            .expect("tracks");
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items[0].artist, "Remote");
+    }
+
+    #[tokio::test]
+    async fn inline_tracks_preserve_qualified_transient_metadata() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("inline.db")).await.expect("db");
+        let library = Arc::new(LibraryService::new(
+            database,
+            config::Source::Local,
+            Arc::new(radio::registry::StationRegistry::default()),
+            dir.path().join("covers"),
+        ));
+        let player =
+            player::player::Player::try_with_sink(Box::new(player::engine::NullSink::new()))
+                .expect("player");
+        let mut remote = config::MusicServer::new("YT Music".into(), String::new());
+        remote.id = Some("yt".into());
+        remote.service = config::MusicService::YtMusic;
+        let services = crate::session::PlaybackServices {
+            config: config::AppConfig {
+                active_source: config::Source::Server("yt".into()),
+                server: Some(remote),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let session =
+            crate::session::SessionHandle::spawn_with_player(library.clone(), player, services);
+        library.attach_session(session);
+        let original = Track {
+            id: reader::TrackId::Server {
+                service: config::MusicService::YtMusic,
+                item_id: "same-id".into(),
+            },
+            cover: Some("https://cover.test/image".into()),
+            album_id: "album".into(),
+            title: "Original".into(),
+            artist: "Artist".into(),
+            album: "Album".into(),
+            duration: 180,
+            khz: 44,
+            bitrate: 320,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: Vec::new(),
+        };
+        library.register_transient(std::slice::from_ref(&original));
+        let info = api::TrackInfo {
+            key: "same-id".into(),
+            uid: "ytmusic:same-id".into(),
+            title: "Wire".into(),
+            duration_ms: Some(180_000),
+            service: Some(api::MusicService::YtMusic),
+            ..Default::default()
+        };
+        let materialized = library
+            .materialize(&QueueContext::InlineTracks {
+                tracks: vec![info.clone()],
+            })
+            .await
+            .expect("inline track");
+        assert_eq!(materialized, vec![original]);
+
+        let error = library
+            .materialize(&QueueContext::InlineTracks {
+                tracks: vec![api::TrackInfo {
+                    service: Some(api::MusicService::Spotify),
+                    ..info
+                }],
+            })
+            .await
+            .expect_err("cross-source track rejected");
+        assert_eq!(error.code, api::ErrorCode::InvalidInput);
+
+        let error = library
+            .materialize(&QueueContext::InlineTracks {
+                tracks: vec![api::TrackInfo {
+                    uid: "spotify:same-id".into(),
+                    ..api::TrackInfo {
+                        key: "same-id".into(),
+                        service: Some(api::MusicService::YtMusic),
+                        ..Default::default()
+                    }
+                }],
+            })
+            .await
+            .expect_err("inconsistent uid rejected");
+        assert_eq!(error.code, api::ErrorCode::InvalidInput);
     }
 }

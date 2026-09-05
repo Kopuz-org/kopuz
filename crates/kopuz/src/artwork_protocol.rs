@@ -1,5 +1,106 @@
+#[cfg(not(target_os = "android"))]
 use tracing::Instrument;
 
+use std::sync::{Arc, OnceLock};
+
+static API: OnceLock<Arc<dyn api::KopuzApi>> = OnceLock::new();
+
+#[cfg(target_os = "android")]
+struct ArtworkWork {
+    api: Arc<dyn api::KopuzApi>,
+    request: api::ArtworkRequest,
+    reply: std::sync::mpsc::SyncSender<Result<api::ArtworkData, api::ApiError>>,
+}
+
+#[cfg(target_os = "android")]
+static ARTWORK_WORKER: OnceLock<std::sync::mpsc::SyncSender<ArtworkWork>> = OnceLock::new();
+
+pub fn install_api(api: Arc<dyn api::KopuzApi>) {
+    let _ = API.set(api);
+}
+
+fn decode_hex(value: &str) -> Option<String> {
+    if !value.len().is_multiple_of(2) {
+        return None;
+    }
+    let bytes: Option<Vec<u8>> = value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let digits = std::str::from_utf8(pair).ok()?;
+            u8::from_str_radix(digits, 16).ok()
+        })
+        .collect();
+    String::from_utf8(bytes?).ok()
+}
+
+fn api_request(uri: &http::Uri) -> Option<api::ArtworkRequest> {
+    let is_api = uri.host() == Some("api") || uri.path().ends_with("/api");
+    if !is_api {
+        return None;
+    }
+    let query = uri.query().unwrap_or_default();
+    let entity = query.split('&').find_map(|part| {
+        let (kind, value) = part.split_once('=')?;
+        let value = decode_hex(value)?;
+        Some(match kind {
+            "track" => api::ArtworkEntity::Track { key: value },
+            "album" => api::ArtworkEntity::Album { id: value },
+            "artist" => api::ArtworkEntity::Artist { name: value },
+            "playlist" => api::ArtworkEntity::Playlist { id: value },
+            _ => return None,
+        })
+    });
+    Some(api::ArtworkRequest {
+        entity,
+        hq: query.split('&').any(|part| part == "hq=1"),
+    })
+}
+
+#[cfg(target_os = "android")]
+pub fn fetch_api_sync(uri: &http::Uri) -> Option<Result<api::ArtworkData, api::ApiError>> {
+    let request = api_request(uri)?;
+    let api = API.get()?.clone();
+    let worker = ARTWORK_WORKER.get_or_init(|| {
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<ArtworkWork>(32);
+        std::thread::Builder::new()
+            .name("kopuz-artwork".to_string())
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build();
+                while let Ok(work) = receiver.recv() {
+                    let result = match &runtime {
+                        Ok(runtime) => runtime.block_on(work.api.artwork(work.request)),
+                        Err(error) => Err(api::ApiError::internal(format!(
+                            "artwork runtime failed: {error}"
+                        ))),
+                    };
+                    let _ = work.reply.send(result);
+                }
+            })
+            .ok();
+        sender
+    });
+    let (reply, response) = std::sync::mpsc::sync_channel(1);
+    if worker
+        .send(ArtworkWork {
+            api,
+            request,
+            reply,
+        })
+        .is_err()
+    {
+        return Some(Err(api::ApiError::internal("artwork worker stopped")));
+    }
+    Some(
+        response
+            .recv()
+            .unwrap_or_else(|_| Err(api::ApiError::internal("artwork worker stopped"))),
+    )
+}
+
+#[cfg(not(target_os = "android"))]
 fn thumb_cache_path(file_path: &str) -> std::path::PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -8,6 +109,7 @@ fn thumb_cache_path(file_path: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("rusic_thumb_{hash:016x}.jpg"))
 }
 
+#[cfg(not(target_os = "android"))]
 fn hq_cache_path(file_path: &str) -> std::path::PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -17,6 +119,7 @@ fn hq_cache_path(file_path: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("rusic_hq_{hash:016x}.jpg"))
 }
 
+#[cfg(not(target_os = "android"))]
 fn make_thumbnail(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     use image::codecs::jpeg::JpegEncoder;
     let img = image::load_from_memory(raw).ok()?;
@@ -33,6 +136,7 @@ fn make_thumbnail(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     Some(out)
 }
 
+#[cfg(not(target_os = "android"))]
 fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     use image::codecs::jpeg::JpegEncoder;
     const SIZE_LIMIT: usize = 2 * 1024 * 1024;
@@ -54,6 +158,7 @@ fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     Some(out)
 }
 
+#[cfg(not(target_os = "android"))]
 fn mime_for_path(file_path: &str) -> &'static str {
     let extension = std::path::Path::new(file_path)
         .extension()
@@ -106,6 +211,39 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
 
     tokio::spawn(
         async move {
+            if let Some(request) = api_request(&uri) {
+                let Some(api) = API.get().cloned() else {
+                    responder.respond(resp(503, &[], Vec::new()));
+                    return;
+                };
+                let entity = match request.entity.as_ref() {
+                    Some(api::ArtworkEntity::Track { .. }) => "track",
+                    Some(api::ArtworkEntity::Album { .. }) => "album",
+                    Some(api::ArtworkEntity::Artist { .. }) => "artist",
+                    Some(api::ArtworkEntity::Playlist { .. }) => "playlist",
+                    None => "none",
+                };
+                let hq = request.hq;
+                match api.artwork(request).await {
+                    Ok(payload) => responder.respond(resp(
+                        200,
+                        &[
+                            ("Content-Type", payload.content_type.as_str()),
+                            ("Cache-Control", "public, max-age=31536000"),
+                        ],
+                        payload.data,
+                    )),
+                    Err(error) => {
+                        if error.code == api::ErrorCode::NotFound {
+                            tracing::debug!(%error, entity, hq, "API artwork unavailable");
+                        } else {
+                            tracing::warn!(%error, entity, hq, "API artwork request failed");
+                        }
+                        responder.respond(resp(404, &[], Vec::new()));
+                    }
+                }
+                return;
+            }
             let query = uri.query().unwrap_or_default();
             let file_path = query
                 .split('&')
@@ -241,7 +379,7 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
     );
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
 

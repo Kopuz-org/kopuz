@@ -26,6 +26,7 @@ impl Session {
                     let next_phase = engine_phase(phase);
                     if self.phase != next_phase {
                         self.phase = next_phase;
+                        tracing::info!(token, phase = ?next_phase, "playback phase changed");
                         self.publish(state_tx, false);
                         self.publish_position_anchor(
                             state_tx,
@@ -127,10 +128,9 @@ impl Session {
     }
 
     fn arm_crossfade(&mut self) {
-        let mut candidate = self.model.clone();
-        let NextOutcome::Play(idx) = candidate.advance_next() else {
+        let NextOutcome::Play(idx) = self.model.peek_next() else {
             return;
         };
-        self.start_load(idx, true, Some(candidate));
+        self.start_load(idx, true);
     }
 }

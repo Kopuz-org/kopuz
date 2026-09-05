@@ -2,7 +2,6 @@ use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_active_source, use_albums, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
-use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
 use reader::Track;
 use std::collections::HashMap;
@@ -24,10 +23,9 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
 
     let source = use_active_source();
     let albums_res = use_albums(source);
-    let filter = use_memo(move || TrackFilter {
-        source: source(),
-        sort: TrackSort::PlayCount,
-        search: String::new(),
+    let filter = use_memo(move || api::TrackFilter {
+        sort: Some("play_count".to_string()),
+        ..Default::default()
     });
 
     // album_id → genre (covers resolve via the source seam off the track itself).
@@ -61,7 +59,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             total_rows(),
             ITEM_HEIGHT,
         );
-        Page {
+        api::Page {
             offset: info.start_index as u32,
             limit: info.items_to_render as u32,
         }
@@ -174,14 +172,14 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                             class: "flex items-center h-full px-4 hover:bg-white/5 rounded-xl cursor-pointer transition-colors group",
                                             onclick: move |_| {
                                                 let f = filter.peek().clone();
-                                                let read_db = consume_context::<hooks::ReadDb>();
+                                                let api = consume_context::<std::sync::Arc<dyn api::KopuzApi>>();
                                                 spawn(async move {
-                                                    let all = read_db
-                                                        .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
+                                                    let all = api
+                                                        .tracks(f, api::Page { offset: 0, limit: u32::MAX })
                                                         .await
+                                                        .map(|page| page.items.into_iter().map(hooks::use_db_queries::track_from_api).collect())
                                                         .unwrap_or_default();
-                                                    ctrl.queue.set(all);
-                                                    ctrl.play_track(idx);
+                                                    ctrl.play_queue_at(all, idx);
                                                 });
                                             },
                                             div { class: "w-12 shrink-0 flex items-center justify-center tabular-nums text-white/50 font-medium group-hover:text-white transition-colors relative",

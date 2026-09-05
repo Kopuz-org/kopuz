@@ -119,10 +119,12 @@ impl QueueModel {
         }
     }
 
-    /// The Next decision: repairs the shuffle permutation first so end-of-queue
-    /// is measured against a permutation that still covers the queue. On
-    /// `Play`, history is pushed and `current` moves.
-    pub fn advance_next(&mut self) -> NextOutcome {
+    /// The Next decision without taking it: repairs the shuffle permutation so
+    /// end-of-queue is measured against a permutation that still covers the
+    /// queue, but leaves `current` and history alone. A crossfade candidate is
+    /// chosen this way, because the queue must keep reading as the outgoing
+    /// track until the engine actually switches.
+    pub fn peek_next(&mut self) -> NextOutcome {
         let idx = self.current;
         let queue_len = if self.shuffle {
             self.repair_shuffle_order();
@@ -135,21 +137,24 @@ impl QueueModel {
             return NextOutcome::Empty;
         }
 
-        match self.loop_mode {
-            LoopMode::Track => {
-                self.push_history_dedup();
-                NextOutcome::Play(idx)
-            }
-            _ => {
-                if !Self::has_following_track(idx, queue_len, self.loop_mode) {
-                    return NextOutcome::EndOfQueue;
-                }
-                let next_idx = if idx + 1 < queue_len { idx + 1 } else { 0 };
-                self.push_history_dedup();
-                self.current = next_idx;
-                NextOutcome::Play(next_idx)
-            }
+        if self.loop_mode == LoopMode::Track {
+            return NextOutcome::Play(idx);
         }
+        if !Self::has_following_track(idx, queue_len, self.loop_mode) {
+            return NextOutcome::EndOfQueue;
+        }
+        NextOutcome::Play(if idx + 1 < queue_len { idx + 1 } else { 0 })
+    }
+
+    /// The Next decision, taken: on `Play`, history is pushed and `current`
+    /// moves to the position [`Self::peek_next`] reported.
+    pub fn advance_next(&mut self) -> NextOutcome {
+        let outcome = self.peek_next();
+        if let NextOutcome::Play(idx) = outcome {
+            self.push_history_dedup();
+            self.current = idx;
+        }
+        outcome
     }
 
     /// The Previous decision, minus the caller-owned gates (crossfade revert,
@@ -197,10 +202,32 @@ impl QueueModel {
         self.current
     }
 
+    /// Explicit jump to a logical play-order position without changing the
+    /// running shuffle permutation.
+    pub fn jump_to_position(&mut self, position: usize) -> Option<usize> {
+        let queue_len = if self.shuffle {
+            self.repair_shuffle_order();
+            self.shuffle_order.len()
+        } else {
+            self.items.len()
+        };
+        if position >= queue_len {
+            return None;
+        }
+        self.push_history_dedup();
+        self.current = position;
+        Some(position)
+    }
+
     /// Replace the queue contents. Callers follow up with [`Self::jump_to`];
     /// history and permutation carry over exactly like the hooks version,
-    /// where the jump's rebuild covers the shuffle case.
+    /// where the jump's rebuild covers the shuffle case. An empty replacement
+    /// has no follow-up jump to repair the pointer, so it resets everything.
     pub fn replace(&mut self, tracks: Vec<Track>) {
+        if tracks.is_empty() {
+            self.clear();
+            return;
+        }
         self.items = tracks;
     }
 
@@ -545,7 +572,7 @@ impl QueueModel {
         Some(idx)
     }
 
-    /// A play-order window for `GET /v1/queue`: `(logical position, track)`
+    /// A play-order window for the queue API: `(logical position, track)`
     /// pairs. Repairs the permutation first so every position resolves.
     pub fn window(&mut self, offset: usize, limit: usize) -> Vec<(usize, Track)> {
         if self.shuffle {
@@ -719,6 +746,19 @@ mod tests {
     }
 
     #[test]
+    fn logical_jump_preserves_shuffle_order() {
+        let mut m = model(5);
+        m.toggle_shuffle();
+        let order = m.shuffle_order().to_vec();
+        let target = m.track_at(2).map(|track| track.title.clone());
+
+        assert_eq!(m.jump_to_position(2), Some(2));
+        assert_eq!(m.current_position(), 2);
+        assert_eq!(m.current_track().map(|track| track.title.clone()), target);
+        assert_eq!(m.shuffle_order(), order);
+    }
+
+    #[test]
     fn insert_next_lands_after_current_and_shifts_history() {
         let mut m = model(3);
         m.jump_to(1);
@@ -844,6 +884,27 @@ mod tests {
             assert!(title.is_some());
             assert_ne!(title, victim_title);
         }
+    }
+
+    #[test]
+    fn empty_replace_resets_pointer_history_and_permutation() {
+        let mut m = model(10);
+        m.toggle_shuffle();
+        m.jump_to_position(7);
+        m.replace(Vec::new());
+        assert!(m.is_empty());
+        assert_eq!(m.current_position(), 0);
+        assert!(m.history().is_empty());
+        assert!(m.shuffle_order().is_empty());
+        assert!(m.current_track().is_none());
+
+        m.add(vec![track(0), track(1), track(2)]);
+        assert_eq!(m.current_position(), 0);
+        assert_eq!(m.shuffle_order().len(), 3);
+        assert_eq!(
+            m.current_track().map(|t| t.title.clone()),
+            Some("t0".into())
+        );
     }
 
     #[test]

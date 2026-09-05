@@ -1,18 +1,14 @@
-//! Reactive plumbing over the DB (issue #347, step 5).
+//! Reactive plumbing over daemon library invalidation events.
 //!
-//! Per-table generation counters let DB query hooks ([`use_resource`]-based, in
-//! `use_db_queries`) re-run when their table changes, without holding the data
-//! in a giant signal. A writer calls [`Generations::bump`] (or, for streaming
-//! inserts, [`Generations::bump_coalesced`]) after committing; any query keyed on
-//! that table's counter re-runs.
+//! Per-table generation counters let API query hooks re-run when their resource
+//! changes without holding the data in a giant signal.
 //!
-//! Coalescing matters for bulk writes: a 20k-row scan that bumped on every batch
-//! would re-render the UI thousands of times. `bump_coalesced` instead sets a
-//! dirty flag that a single ~150ms ticker flushes, capping refreshes at ~6/sec.
+//! Coalescing matters for bulk jobs. The first invalidation arms a one-shot
+//! flush, and later invalidations join it without an idle periodic timer.
 
 use dioxus::prelude::*;
 
-/// The DB tables the UI observes. `as usize` indexes the counter/dirty arrays.
+/// The daemon resources the UI observes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Table {
     Tracks = 0,
@@ -33,6 +29,7 @@ const N: usize = 7;
 pub struct Generations {
     counters: [Signal<u64>; N],
     dirty: Signal<[bool; N]>,
+    flush_scheduled: Signal<bool>,
 }
 
 impl Generations {
@@ -46,6 +43,15 @@ impl Generations {
     /// ~150ms. Use on the hot path of a streaming insert (scan/sync batches).
     pub fn bump_coalesced(mut self, table: Table) {
         self.dirty.write()[table as usize] = true;
+        if *self.flush_scheduled.peek() {
+            return;
+        }
+        self.flush_scheduled.set(true);
+        spawn(async move {
+            utils::sleep(std::time::Duration::from_millis(150)).await;
+            self.flush_scheduled.set(false);
+            self.flush();
+        });
     }
 
     /// Current generation of a table. Read this inside a query hook so the hook
@@ -84,15 +90,9 @@ pub fn use_generations_provider() -> Generations {
             use_signal(|| 0u64),
         ],
         dirty: use_signal(|| [false; N]),
+        flush_scheduled: use_signal(|| false),
     };
     use_context_provider(|| gens);
-
-    use_future(move || async move {
-        loop {
-            utils::sleep(std::time::Duration::from_millis(150)).await;
-            gens.flush();
-        }
-    });
 
     gens
 }

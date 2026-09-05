@@ -62,6 +62,14 @@ jobs:
       - name: Build Linux application
         run: dx build --release --platform desktop --package kopuz --locked
 
+      - name: Build standalone Linux daemon
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cargo build --release -p kopuz-daemon --features kopuzd --bin kopuzd --locked
+          mkdir -p dist
+          cp target/release/kopuzd "dist/kopuzd_${VERSION}_x86_64-linux"
+
       - name: Prepare AppDir
         run: |
           mkdir -p AppDir/usr/bin
@@ -124,7 +132,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          for package in dist/*.AppImage dist/*.deb dist/*.rpm; do
+          for package in dist/*.AppImage dist/*.deb dist/*.rpm dist/kopuzd_*; do
+            case "$package" in
+              *.sha256) continue ;;
+            esac
             sha256sum "$package" > "${package}.sha256"
           done
 
@@ -180,6 +191,14 @@ jobs:
       - name: Bundle macOS application
         run: dx bundle --release --platform desktop --package kopuz --package-types macos --out-dir dist --locked
 
+      - name: Build standalone macOS daemon
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cargo build --release -p kopuz-daemon --features kopuzd --bin kopuzd --locked
+          cp target/release/kopuzd "dist/kopuzd_${VERSION}_aarch64-macos"
+          codesign --force --sign - "dist/kopuzd_${VERSION}_aarch64-macos"
+
       - name: Set bundle version and apply ad-hoc signature
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -207,6 +226,7 @@ jobs:
           hdiutil create -volname Kopuz -srcfolder dist/Kopuz.app -ov -format UDZO "$dmg"
           hdiutil verify "$dmg"
           shasum -a 256 "$dmg" > "${dmg}.sha256"
+          shasum -a 256 "dist/kopuzd_${VERSION}_aarch64-macos" > "dist/kopuzd_${VERSION}_aarch64-macos.sha256"
 
       - name: Upload macOS packages
         uses: actions/upload-artifact@v4
@@ -215,6 +235,7 @@ jobs:
           path: |
             dist/*.dmg
             dist/*.dmg.sha256
+            dist/kopuzd_*
           if-no-files-found: error
 
   windows:
@@ -270,14 +291,16 @@ jobs:
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           Move-Item bundle-nsis/*.exe dist/
           Move-Item bundle-msi/*.msi dist/
+          cargo build --release -p kopuz-daemon --features kopuzd --bin kopuzd --locked
+          Copy-Item target/release/kopuzd.exe "dist/kopuzd_${{ steps.version.outputs.version }}_x86_64-windows.exe"
 
       - name: Create Windows checksums
         shell: pwsh
         run: |
           $packages = Get-ChildItem dist -File | Where-Object { $_.Extension -in ".exe", ".msi" }
 
-          if ($packages.Count -ne 2) {
-            throw "Expected one EXE and one MSI installer, found $($packages.Count)"
+          if ($packages.Count -ne 3) {
+            throw "Expected one daemon, one EXE installer, and one MSI installer, found $($packages.Count)"
           }
 
           $packages | ForEach-Object {
@@ -459,6 +482,10 @@ jobs:
             dist/*.msi.sha256
             dist/*.apk
             dist/*.apk.sha256
+            dist/kopuzd_*-linux
+            dist/kopuzd_*-linux.sha256
+            dist/kopuzd_*-macos
+            dist/kopuzd_*-macos.sha256
 
   homebrew:
     if: github.ref_type == 'tag'

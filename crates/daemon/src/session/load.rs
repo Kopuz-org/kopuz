@@ -7,35 +7,33 @@ impl Session {
     /// Two-phase load pipeline. Classification is mutation-free except stale
     /// offline-cache eviction; only after every early bail do we cancel the
     /// old load, allocate a token, and publish Loading intent.
-    pub(super) fn start_load(
-        &mut self,
-        idx: usize,
-        allow_crossfade: bool,
-        transition_model: Option<QueueModel>,
-    ) -> bool {
-        let source_model = transition_model.as_ref().unwrap_or(&self.model);
-        let Some(track) = source_model.track_at(idx).cloned() else {
+    /// `idx` is a logical position in the live queue; `allow_crossfade` marks it
+    /// as a transition candidate, which means the pointer stays on the outgoing
+    /// track until the engine reports the switch.
+    pub(super) fn start_load(&mut self, idx: usize, allow_crossfade: bool) -> bool {
+        let Some(track) = self.model.track_at(idx).cloned() else {
             return false;
         };
-        let track_key = track.id.uid();
         let (restore_seek, clear_pending_resume) = self.pending_resume_seek(&track);
         let use_crossfade = allow_crossfade
             && self.should_crossfade()
             && restore_seek.is_none_or(|position| position.is_zero());
-        let transition_model = if use_crossfade {
-            let Some(model) = transition_model else {
-                return false;
-            };
-            Some(model)
-        } else {
-            None
-        };
         let crossfade_duration = Duration::from_secs(self.config.crossfade_seconds as u64);
-        let item_ref = PlaybackItemRef::parse(&track_key);
-        let is_radio = item_ref.is_radio();
-        let is_server = item_ref.is_server();
-        let item_id = item_ref.primary_id().unwrap_or_default().to_string();
-        let stream_id = item_ref.stream_id().unwrap_or_default().to_string();
+        let is_radio = track.duration == u64::MAX;
+        let (is_server, item_id) = match &track.id {
+            reader::TrackId::Server { item_id, .. } => (true, item_id.clone()),
+            reader::TrackId::Local(_) => (false, String::new()),
+        };
+        let (radio_id, stream_id) = if is_radio {
+            let uid = track.id.uid();
+            let item_ref = PlaybackItemRef::parse(&uid);
+            (
+                item_ref.primary_id().unwrap_or_default().to_string(),
+                item_ref.stream_id().unwrap_or_default().to_string(),
+            )
+        } else {
+            (String::new(), String::new())
+        };
 
         let factory_override = self
             .factory_override
@@ -73,7 +71,7 @@ impl Session {
         let remote_ref = if factory_override.is_some() || offline_path.is_some() {
             None
         } else if is_radio {
-            let station = self.station_registry.get(&item_id);
+            let station = self.station_registry.get(&radio_id);
             use_icy = station.is_some_and(|station| !station.has_live_metadata());
             let cover = station
                 .and_then(|station| match &station.metadata {
@@ -106,6 +104,43 @@ impl Session {
             && local_path.is_none()
             && remote_ref.is_none()
         {
+            // A crossfade candidate that cannot resolve is dropped whole; the
+            // end-of-track advance retries on the committed model and reports
+            // through the branch below.
+            if allow_crossfade {
+                return false;
+            }
+            // The caller already moved the queue pointer and will publish, so
+            // a silent return would present the new track as playing while the
+            // old audio continues. Fail the way a resolve failure would.
+            tracing::warn!(
+                queue_index = idx,
+                title = %track.title,
+                radio = is_radio,
+                "no source can play this track"
+            );
+            self.cancel_load_task();
+            self.cancel_radio_task();
+            self.pending_transition = None;
+            self.player.stop_for_transition();
+            self.set_intent(PlaybackIntent::Stopped);
+            self.phase = ApiPhase::Idle;
+            self.buffered.clear();
+            self.position = Some(PositionAnchor {
+                ms: 0,
+                at_ms: self.now_ms(),
+                playing: false,
+            });
+            let message = if is_radio {
+                "couldn't load this track: the radio station or stream is unknown"
+            } else {
+                "couldn't load this track: no connected source can provide it"
+            };
+            self.error = Some(api::ErrorBody {
+                code: api::ErrorCode::SourceUnreachable,
+                message: message.to_string(),
+                details: None,
+            });
             return false;
         }
 
@@ -124,11 +159,32 @@ impl Session {
             from_token,
         });
         self.buffered.clear();
+        let source_kind = if factory_override.is_some() {
+            "injected"
+        } else if offline_path.is_some() {
+            "offline"
+        } else if local_path.is_some() {
+            "local"
+        } else if is_radio {
+            "radio"
+        } else {
+            "remote"
+        };
+        tracing::info!(
+            token,
+            queue_index = idx,
+            title = %track.title,
+            artist = %track.artist,
+            source = source_kind,
+            crossfade = use_crossfade,
+            resume_ms = ?restore_seek.map(|position| position.as_millis()),
+            "track load started"
+        );
 
         if is_radio
             && let Some(station) = self
                 .station_registry
-                .get(&item_id)
+                .get(&radio_id)
                 .filter(|station| station.has_live_metadata())
                 .cloned()
         {
@@ -148,9 +204,9 @@ impl Session {
             self.radio_task = Some(handle);
         }
 
-        if let Some(model) = transition_model {
+        if use_crossfade {
             self.pending_transition = Some(PendingTransition {
-                model,
+                to_position: idx,
                 to_token: token,
                 from_token,
                 stage: TransitionStage::Loading,
@@ -192,7 +248,7 @@ impl Session {
             idx,
             track,
             is_radio,
-            item_id,
+            item_id: if is_radio { radio_id } else { item_id },
             use_icy,
             factory_override,
             offline_path,
@@ -243,6 +299,26 @@ impl Session {
             prepared.bitrate,
         );
 
+        // macOS Now Playing needs a file path (`NSImage initWithContentsOfFile`
+        // cannot load a URL), so a remote cover is fetched to a temp file in
+        // the background and re-pushed; the other platforms take URLs as-is.
+        #[cfg(target_os = "macos")]
+        let artwork_fetch = prepared
+            .artwork
+            .as_deref()
+            .filter(|artwork| artwork.starts_with("http://") || artwork.starts_with("https://"))
+            .map(|url| {
+                (
+                    url.to_string(),
+                    NowPlayingMeta {
+                        title: prepared.track.title.clone(),
+                        artist: prepared.track.artist.clone(),
+                        album: prepared.track.album.clone(),
+                        duration: Duration::from_secs(prepared.track.duration),
+                        artwork: None,
+                    },
+                )
+            });
         let (reply_tx, reply_rx) = oneshot::channel();
         self.player.load(LoadArgs {
             token: prepared.token,
@@ -259,6 +335,20 @@ impl Session {
             reply: Some(reply_tx),
         });
         let token = prepared.token;
+        #[cfg(target_os = "macos")]
+        if let Some((url, mut meta)) = artwork_fetch {
+            let artwork_tx = self.cmd_tx.clone();
+            tokio::spawn(async move {
+                let Some(path) = fetch_cover_to_temp(&url).await else {
+                    return;
+                };
+                meta.artwork = Some(path);
+                let _ = artwork_tx.send(SessionCmd::ArtworkFetched {
+                    token,
+                    meta: Box::new(meta),
+                });
+            });
+        }
         let tx = self.cmd_tx.clone();
         let task = tokio::spawn(async move {
             let result = reply_rx.await.ok();
@@ -290,16 +380,24 @@ impl Session {
                     self.pending_resume = None;
                 }
                 self.maybe_record_recent();
-                if let Some(scrobbler) = self.scrobbler.clone() {
-                    let committed_track = self
-                        .pending_transition
-                        .as_ref()
-                        .filter(|pending| pending.to_token == finished.token)
-                        .and_then(|pending| pending.model.current_track().cloned())
-                        .or_else(|| self.model.current_track().cloned());
-                    if let Some(track) = committed_track {
-                        scrobbler.track_committed(track, finished.token);
-                    }
+                let committed_track = self
+                    .pending_transition
+                    .as_ref()
+                    .filter(|pending| pending.to_token == finished.token)
+                    .map(|pending| pending.to_position)
+                    .and_then(|position| self.model.track_at(position).cloned())
+                    .or_else(|| self.model.current_track().cloned());
+                if let Some(track) = committed_track.as_ref() {
+                    tracing::info!(
+                        token = finished.token,
+                        title = %track.title,
+                        artist = %track.artist,
+                        crossfaded = outcome.crossfaded,
+                        "track load committed"
+                    );
+                }
+                if let (Some(scrobbler), Some(track)) = (self.scrobbler.clone(), committed_track) {
+                    scrobbler.track_committed(track, finished.token);
                 }
                 let matching_transition = self
                     .pending_transition
@@ -330,7 +428,7 @@ impl Session {
                 }
             }
             Some(Err(error)) => {
-                tracing::error!(error = %error, "playback failed");
+                tracing::error!(token = finished.token, error = %error, "playback failed");
                 if self.fail_load(finished.token, error) {
                     self.publish(state_tx, false);
                 }
@@ -341,6 +439,35 @@ impl Session {
             }
         }
     }
+}
+
+/// Download a cover to a temp file named by its URL hash, so repeated plays
+/// of the same album reuse the file instead of growing the temp dir.
+#[cfg(target_os = "macos")]
+async fn fetch_cover_to_temp(url: &str) -> Option<String> {
+    use sha2::{Digest as _, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(url.as_bytes());
+    let digest = hasher.finalize();
+    let mut name = String::from("kopuz_cover_");
+    for byte in &digest[..12] {
+        use std::fmt::Write as _;
+        let _ = write!(name, "{byte:02x}");
+    }
+    name.push_str(".jpg");
+    let path = std::env::temp_dir().join(name);
+    if tokio::fs::metadata(&path).await.is_ok() {
+        return Some(path.to_string_lossy().to_string());
+    }
+    let fetch = async {
+        let response = reqwest::get(url).await.ok()?.error_for_status().ok()?;
+        response.bytes().await.ok()
+    };
+    let bytes = tokio::time::timeout(Duration::from_secs(30), fetch)
+        .await
+        .ok()??;
+    tokio::fs::write(&path, &bytes).await.ok()?;
+    Some(path.to_string_lossy().to_string())
 }
 
 pub(super) enum ClassifiedSource {

@@ -8,15 +8,11 @@
 //! local queue signals are authoritative, and handing control back to the
 //! engine pushes them into the daemon.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use config::AppConfig;
-use daemon::SessionHandle;
 use dioxus::prelude::*;
 use reader::Track;
-use utils::playback_ref::PlaybackItemRef;
-
-use crate::scrobble_scheduler::{self, ScrobbleOptions};
 
 #[path = "player_controller_spotify.rs"]
 mod spotify;
@@ -25,7 +21,7 @@ pub use api::LoopMode;
 
 #[derive(Clone, Copy)]
 pub struct PlayerController {
-    pub(crate) session: Signal<SessionHandle>,
+    pub(crate) api: Signal<Arc<dyn api::KopuzApi>>,
     pub is_playing: Signal<bool>,
     pub is_loading: Memo<bool>,
     pub(crate) loading: Signal<bool>,
@@ -47,14 +43,13 @@ pub struct PlayerController {
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
     pub config: Signal<AppConfig>,
-    pub db: Signal<db::Db>,
-    pub active_source: Signal<::server::source::ActiveSource>,
     pub playback_error: Signal<Option<String>>,
     pub browse_loading: Signal<bool>,
     pub(crate) engine_anchor: Signal<Option<(u64, std::time::Instant, bool)>>,
     pub(crate) fading_progress: Signal<Option<f64>>,
     pub(crate) output_latency_ms: Signal<u64>,
     pub(crate) spotify_scrobble_token: Signal<u64>,
+    pub(crate) spotify_token: Signal<Option<String>>,
 
     pub(crate) spotify_host: Signal<Option<::server::spotify::host::SpotifyHost>>,
     pub spotify_device: Signal<Option<String>>,
@@ -67,6 +62,7 @@ pub struct PlayerController {
     pub(crate) spotify_commanded: Signal<Option<(String, std::time::Instant)>>,
     pub(crate) spotify_device_chosen: Signal<bool>,
     pub external_active: Signal<bool>,
+    pub(crate) external_lease_id: Signal<Option<String>>,
 }
 
 /// A buffered byte range of the current stream, for the seek-bar underlay.
@@ -78,17 +74,106 @@ pub struct BufferedRange {
 }
 
 impl PlayerController {
-    fn handle(&self) -> SessionHandle {
-        self.session.peek().clone()
+    fn api(&self) -> Arc<dyn api::KopuzApi> {
+        self.api.peek().clone()
+    }
+
+    fn claim_external_playback(&self) {
+        if !*self.external_active.peek() || self.external_lease_id.peek().is_some() {
+            return;
+        }
+        let api = self.api();
+        let device = self.spotify_device_override.peek().clone();
+        let active = self.external_active;
+        let mut lease_id = self.external_lease_id;
+        spawn(async move {
+            match api
+                .claim_external_playback(api::ExternalPlayback {
+                    kind: "spotify".to_string(),
+                    device,
+                })
+                .await
+            {
+                Ok(lease) => {
+                    if *active.peek() && lease_id.peek().is_none() {
+                        lease_id.set(Some(lease.lease_id));
+                    } else if let Err(error) = api.release_external_playback(lease.lease_id).await {
+                        tracing::warn!(%error, "late external playback release failed");
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "external playback claim failed"),
+            }
+        });
     }
 
     fn command(&self, command: api::PlayerCommand) {
-        let handle = self.handle();
+        let api = self.api();
         spawn(async move {
-            if let Err(error) = handle.player_command(command).await {
-                tracing::warn!(%error, "session command failed");
+            if let Err(error) = api.player_command(command).await {
+                tracing::warn!(%error, "player command failed");
             }
         });
+    }
+
+    pub(crate) fn report_external_state(&self, completed: bool) {
+        let Some(lease_id) = self.external_lease_id.peek().clone() else {
+            return;
+        };
+        let report = api::ExternalPlaybackReport {
+            lease_id: lease_id.clone(),
+            track: self
+                .current_track_snapshot
+                .peek()
+                .as_ref()
+                .map(daemon::track_info_for_persistence),
+            position_ms: self.current_song_progress.peek().saturating_mul(1000),
+            playing: !completed && *self.is_playing.peek(),
+            completed,
+            device: self.spotify_device_override.peek().clone(),
+        };
+        let api = self.api();
+        let mut current_lease_id = self.external_lease_id;
+        spawn(async move {
+            if let Err(error) = api.report_external_playback(report).await {
+                tracing::warn!(%error, "external playback report failed");
+                if error.code == api::ErrorCode::Conflict
+                    && current_lease_id.peek().as_deref() == Some(lease_id.as_str())
+                {
+                    current_lease_id.set(None);
+                }
+            }
+        });
+    }
+
+    fn tracks_request(
+        tracks: Vec<Track>,
+        mode: api::QueueMode,
+        start_index: Option<usize>,
+        shuffle: Option<bool>,
+        insert_index: Option<usize>,
+    ) -> api::SetQueueRequest {
+        let context = if tracks.iter().all(|track| track.id.service().is_some()) {
+            api::QueueContext::InlineTracks {
+                tracks: tracks
+                    .iter()
+                    .map(daemon::track_info_for_persistence)
+                    .collect(),
+            }
+        } else {
+            api::QueueContext::Tracks {
+                keys: tracks
+                    .into_iter()
+                    .map(|track| track.id.key().into_owned())
+                    .collect(),
+            }
+        };
+        api::SetQueueRequest {
+            mode,
+            context,
+            start_index: start_index.map(|index| index as u32),
+            shuffle,
+            insert_index: insert_index.map(|index| index as u32),
+        }
     }
 
     fn is_spotify_track(track: &Track) -> bool {
@@ -132,7 +217,17 @@ impl PlayerController {
     /// While shuffle is on the permutation re-pins around it, exactly like the
     /// daemon's jump.
     pub fn play_track(&mut self, idx: usize) {
-        self.play_physical(idx);
+        let tracks = self.queue.peek().clone();
+        self.play_queue_at(tracks, idx);
+    }
+
+    /// Replace the engine queue with a track-list result and start its physical row.
+    pub fn play_queue_at(&mut self, tracks: Vec<Track>, idx: usize) {
+        if idx >= tracks.len() {
+            return;
+        }
+        let shuffle = *self.shuffle.peek();
+        self.play_replacement(tracks, Some(idx), Some(shuffle));
     }
 
     /// Play the track at a play-order (logical) index, as the queue view uses.
@@ -157,40 +252,24 @@ impl PlayerController {
             self.play_physical(physical);
             return;
         }
-        let handle = self.handle();
+        let api = self.api();
         spawn(async move {
-            let _ = handle
+            let _ = api
                 .queue_edit(api::QueueEdit::Jump { index: idx as u32 })
                 .await;
         });
     }
 
-    /// Command the Spotify transport to start `track` and schedule its
-    /// scrobble; the caller has already positioned the queue signals.
+    /// Command the Spotify transport to start `track`; the caller has already
+    /// positioned the queue signals.
     fn start_spotify_track(&mut self, track: &Track) {
-        let Some(item_id) = PlaybackItemRef::parse(&track.id.uid())
-            .primary_id()
-            .map(str::to_string)
-        else {
+        let reader::TrackId::Server { item_id, .. } = &track.id else {
             return;
         };
         self.spotify_progress_anchor
             .set(Some((0, std::time::Instant::now())));
         self.is_playing.set(true);
-        self.spotify_play(&item_id, track);
-        let generation = *self.spotify_scrobble_token.peek() + 1;
-        self.spotify_scrobble_token.set(generation);
-        scrobble_scheduler::schedule(
-            track.clone(),
-            Some(item_id),
-            self.config,
-            self.spotify_scrobble_token,
-            generation,
-            self.is_playing,
-            Some(self.active_source),
-            ScrobbleOptions::REMOTE_NATIVE,
-            self.db.peek().clone(),
-        );
+        self.spotify_play(item_id, track);
     }
 
     /// Play the track at a physical queue index. Spotify tracks route to the
@@ -209,22 +288,38 @@ impl PlayerController {
         if *self.external_active.peek() {
             self.stop_external_playback();
             let tracks = self.queue.peek().clone();
-            let handle = self.handle();
+            let api = self.api();
+            let request = Self::tracks_request(
+                tracks,
+                api::QueueMode::Replace,
+                Some(physical_idx),
+                Some(shuffle),
+                None,
+            );
             spawn(async move {
-                let _ = handle
-                    .set_queue_tracks(
-                        tracks,
-                        api::QueueMode::Replace,
-                        Some(physical_idx),
-                        Some(shuffle),
-                    )
-                    .await;
+                if let Err(error) = api.set_queue(request).await {
+                    tracing::warn!(%error, "external queue handoff failed");
+                }
             });
             return;
         }
-        let handle = self.handle();
+        let logical_idx = if shuffle {
+            self.shuffle_order
+                .peek()
+                .iter()
+                .position(|index| *index == physical_idx)
+                .unwrap_or(physical_idx)
+        } else {
+            physical_idx
+        };
+        let api = self.api();
         spawn(async move {
-            if let Err(error) = handle.jump_physical(physical_idx).await {
+            if let Err(error) = api
+                .queue_edit(api::QueueEdit::Jump {
+                    index: logical_idx as u32,
+                })
+                .await
+            {
                 tracing::warn!(%error, "queue jump failed");
             }
         });
@@ -241,12 +336,16 @@ impl PlayerController {
             }
         });
         let logical_idx = if *self.shuffle.peek() {
-            self.current_queue_index.set(physical_idx);
-            self.rebuild_shuffle_order();
-            0
+            self.repair_shuffle_order();
+            self.shuffle_order
+                .peek()
+                .iter()
+                .position(|index| *index == physical_idx)
+                .unwrap_or(physical_idx)
         } else {
             physical_idx
         };
+        self.current_queue_index.set(logical_idx);
         self.external_active.set(true);
         self.hydrate_current_track_metadata(logical_idx, 0);
         self.start_spotify_track(&track);
@@ -282,6 +381,9 @@ impl PlayerController {
             if shuffle == Some(true) {
                 self.shuffle.set(true);
             }
+            if *self.shuffle.peek() {
+                self.rebuild_shuffle_order();
+            }
             let start = start_index.unwrap_or(0);
             let target = self.queue.peek().get(start).cloned();
             if let Some(track) = target {
@@ -292,11 +394,13 @@ impl PlayerController {
         if *self.external_active.peek() {
             self.stop_external_playback();
         }
-        let handle = self.handle();
+        let api = self.api();
+        let request =
+            Self::tracks_request(tracks, api::QueueMode::Replace, start_index, shuffle, None);
         spawn(async move {
-            let _ = handle
-                .set_queue_tracks(tracks, api::QueueMode::Replace, start_index, shuffle)
-                .await;
+            if let Err(error) = api.set_queue(request).await {
+                tracing::warn!(%error, "queue replacement failed");
+            }
         });
     }
 
@@ -306,14 +410,22 @@ impl PlayerController {
             return;
         }
         if *self.external_active.peek() {
+            let first_new = self.queue.peek().len();
+            let count = tracks.len();
+            if *self.shuffle.peek() {
+                self.repair_shuffle_order();
+            }
             self.queue.with_mut(|queue| queue.extend(tracks));
+            if *self.shuffle.peek() {
+                self.shuffle_order
+                    .with_mut(|order| order.extend(first_new..first_new + count));
+            }
             return;
         }
-        let handle = self.handle();
+        let api = self.api();
+        let request = Self::tracks_request(tracks, api::QueueMode::Append, None, None, None);
         spawn(async move {
-            let _ = handle
-                .set_queue_tracks(tracks, api::QueueMode::Append, None, None)
-                .await;
+            let _ = api.set_queue(request).await;
         });
     }
 
@@ -324,18 +436,13 @@ impl PlayerController {
         }
         if *self.external_active.peek() {
             let insert_at = (*self.current_queue_index.peek() + 1).min(self.queue.peek().len());
-            self.queue.with_mut(|queue| {
-                for (offset, track) in tracks.into_iter().enumerate() {
-                    queue.insert(insert_at + offset, track);
-                }
-            });
+            self.insert_queue_tracks_local(insert_at, tracks);
             return;
         }
-        let handle = self.handle();
+        let api = self.api();
+        let request = Self::tracks_request(tracks, api::QueueMode::PlayNext, None, None, None);
         spawn(async move {
-            let _ = handle
-                .set_queue_tracks(tracks, api::QueueMode::PlayNext, None, None)
-                .await;
+            let _ = api.set_queue(request).await;
         });
     }
 
@@ -412,9 +519,11 @@ impl PlayerController {
             self.insert_queue_tracks_local(insert_at, tracks);
             return;
         }
-        let handle = self.handle();
+        let api = self.api();
+        let request =
+            Self::tracks_request(tracks, api::QueueMode::Insert, None, None, Some(insert_at));
         spawn(async move {
-            let _ = handle.insert_tracks_at(insert_at, tracks).await;
+            let _ = api.set_queue(request).await;
         });
     }
 
@@ -467,6 +576,13 @@ impl PlayerController {
             if insert_at <= current {
                 self.current_queue_index.set(current + count);
             }
+            self.history.with_mut(|history| {
+                for idx in history.iter_mut() {
+                    if *idx >= insert_at {
+                        *idx += count;
+                    }
+                }
+            });
         }
     }
 
@@ -538,10 +654,19 @@ impl PlayerController {
     /// config; a commit goes through the config signal and the session's
     /// config bridge instead.
     pub fn preview_equalizer(&self, equalizer: config::EqualizerSettings) {
-        let mut snapshot = self.config.peek().clone();
-        snapshot.equalizer = equalizer;
-        self.handle()
-            .set_config(snapshot, vec!["equalizer".to_string()]);
+        let api = self.api();
+        spawn(async move {
+            let value = match serde_json::to_value(equalizer) {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::warn!(%error, "equalizer preview encoding failed");
+                    return;
+                }
+            };
+            if let Err(error) = api.preview_equalizer(value).await {
+                tracing::warn!(%error, "equalizer preview failed");
+            }
+        });
     }
 
     pub fn set_shuffle(&mut self, on: bool) {
@@ -592,7 +717,7 @@ impl PlayerController {
         if *self.external_active.peek() {
             self.stop_external_playback();
         }
-        let handle = self.handle();
+        let api = self.api();
         let request = api::SetQueueRequest {
             mode: api::QueueMode::Replace,
             context: api::QueueContext::Radio {
@@ -601,9 +726,10 @@ impl PlayerController {
             },
             start_index: Some(0),
             shuffle: None,
+            insert_index: None,
         };
         spawn(async move {
-            if let Err(error) = handle.set_queue(request).await {
+            if let Err(error) = api.set_queue(request).await {
                 tracing::warn!(%error, "radio start failed");
             }
         });
@@ -611,19 +737,38 @@ impl PlayerController {
 
     pub fn move_queue_item(&mut self, from: usize, to: usize) {
         if *self.external_active.peek() {
-            let len = self.queue.peek().len();
+            let len = if *self.shuffle.peek() {
+                self.shuffle_order.peek().len()
+            } else {
+                self.queue.peek().len()
+            };
             if from >= len || to >= len || from == to {
                 return;
             }
-            self.queue.with_mut(|queue| {
-                let track = queue.remove(from);
-                queue.insert(to, track);
+            if *self.shuffle.peek() {
+                self.shuffle_order.with_mut(|order| {
+                    let physical = order.remove(from);
+                    order.insert(to, physical);
+                });
+            } else {
+                self.queue.with_mut(|queue| {
+                    let track = queue.remove(from);
+                    queue.insert(to, track);
+                });
+            }
+            let current =
+                daemon::QueueModel::remap_queue_index(*self.current_queue_index.peek(), from, to);
+            self.current_queue_index.set(current);
+            self.history.with_mut(|history| {
+                for index in history {
+                    *index = daemon::QueueModel::remap_queue_index(*index, from, to);
+                }
             });
             return;
         }
-        let handle = self.handle();
+        let api = self.api();
         spawn(async move {
-            let _ = handle
+            let _ = api
                 .queue_edit(api::QueueEdit::Move {
                     from: from as u32,
                     to: to as u32,
@@ -636,9 +781,8 @@ impl PlayerController {
         self.move_queue_item(from, to);
     }
 
-    /// Hard reset when the active server changes: stop everything and clear
-    /// the queue so a queued remote track cannot replay through the wrong
-    /// backend.
+    /// Clear frontend-owned state after the daemon has switched sources and
+    /// reset its engine queue.
     pub fn reset_for_backend_switch(&mut self) {
         self.stop_external_playback();
         self.playback_error.set(None);
@@ -646,37 +790,6 @@ impl PlayerController {
         self.queue.write().clear();
         self.history.write().clear();
         self.current_queue_index.set(0);
-        let handle = self.handle();
-        spawn(async move {
-            let _ = handle.player_command(api::PlayerCommand::Stop).await;
-            let _ = handle
-                .set_queue_tracks(Vec::new(), api::QueueMode::Replace, None, None)
-                .await;
-        });
-    }
-
-    pub fn restore_queue_state(
-        &mut self,
-        queue: Vec<Track>,
-        current_queue_index: usize,
-        progress_secs: u64,
-        shuffle_order: Vec<usize>,
-        shuffle_enabled: bool,
-    ) {
-        let handle = self.handle();
-        spawn(async move {
-            let snapshot = db::QueueSnapshot {
-                version: 1,
-                queue,
-                current_queue_index,
-                progress_secs,
-                shuffle_order,
-                shuffle_enabled,
-            };
-            if let Err(error) = handle.restore_queue(snapshot).await {
-                tracing::warn!(%error, "queue restore failed");
-            }
-        });
     }
 
     /// Zero for an external player: its position comes from the service, not us.
@@ -876,7 +989,7 @@ impl PlayerController {
 
 #[allow(clippy::too_many_arguments)]
 pub fn use_player_controller(
-    session_handle: SessionHandle,
+    api_handle: Arc<dyn api::KopuzApi>,
     is_playing: Signal<bool>,
     queue: Signal<Vec<Track>>,
     current_queue_index: Signal<usize>,
@@ -892,9 +1005,8 @@ pub fn use_player_controller(
     volume: Signal<f32>,
     config: Signal<AppConfig>,
     _config_loaded_ok: Signal<bool>,
-    db_handle: db::Db,
 ) -> PlayerController {
-    let session = use_signal(move || session_handle);
+    let api = use_signal(move || api_handle);
     let loading = use_signal(|| false);
     let browse_loading = use_signal(|| false);
     let is_loading = use_memo(move || *loading.read() || *browse_loading.read());
@@ -908,8 +1020,7 @@ pub fn use_player_controller(
     let fading_progress = use_signal(|| None::<f64>);
     let output_latency_ms = use_signal(|| 0u64);
     let spotify_scrobble_token = use_signal(|| 0u64);
-    let db = use_signal(move || db_handle);
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let spotify_token = use_signal(|| None::<String>);
 
     let spotify_host = use_signal(|| None::<::server::spotify::host::SpotifyHost>);
     let spotify_device = use_signal(|| None::<String>);
@@ -922,9 +1033,10 @@ pub fn use_player_controller(
     let spotify_commanded = use_signal(|| None::<(String, std::time::Instant)>);
     let spotify_device_chosen = use_signal(|| false);
     let external_active = use_signal(|| false);
+    let external_lease_id = use_signal(|| None::<String>);
 
     let ctrl = PlayerController {
-        session,
+        api,
         is_playing,
         is_loading,
         loading,
@@ -946,14 +1058,13 @@ pub fn use_player_controller(
         current_track_snapshot,
         volume,
         config,
-        db,
-        active_source,
         playback_error,
         browse_loading,
         engine_anchor,
         fading_progress,
         output_latency_ms,
         spotify_scrobble_token,
+        spotify_token,
         spotify_host,
         spotify_device,
         spotify_pending_uri,
@@ -965,7 +1076,62 @@ pub fn use_player_controller(
         spotify_commanded,
         spotify_device_chosen,
         external_active,
+        external_lease_id,
     };
+
+    let lease_ctrl = ctrl;
+    use_effect(move || {
+        let active = *lease_ctrl.external_active.read();
+        let _ = lease_ctrl.spotify_device_override.read();
+        let current_lease_id = lease_ctrl.external_lease_id.read().clone();
+        if active && current_lease_id.is_none() {
+            lease_ctrl.claim_external_playback();
+            return;
+        }
+        if active {
+            return;
+        }
+        let Some(release_id) = current_lease_id else {
+            return;
+        };
+        let api = lease_ctrl.api();
+        let mut lease_id = lease_ctrl.external_lease_id;
+        spawn(async move {
+            if let Err(error) = api.release_external_playback(release_id.clone()).await {
+                tracing::warn!(%error, "external playback release failed");
+            }
+            if lease_id.peek().as_deref() == Some(release_id.as_str()) {
+                lease_id.set(None);
+            }
+        });
+    });
+
+    let report_ctrl = ctrl;
+    use_effect(move || {
+        let active = *report_ctrl.external_active.read();
+        let _ = report_ctrl.external_lease_id.read();
+        let _ = report_ctrl.current_track_snapshot.read();
+        let _ = report_ctrl.current_song_progress.read();
+        let _ = report_ctrl.is_playing.read();
+        let _ = report_ctrl.spotify_device_override.read();
+        if active {
+            report_ctrl.report_external_state(false);
+        }
+    });
+
+    let renew_ctrl = ctrl;
+    use_future(move || async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            if *renew_ctrl.external_active.peek() {
+                if renew_ctrl.external_lease_id.peek().is_none() {
+                    renew_ctrl.claim_external_playback();
+                } else {
+                    renew_ctrl.report_external_state(false);
+                }
+            }
+        }
+    });
 
     crate::session_projector::use_session_projector(ctrl);
     ctrl

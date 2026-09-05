@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::use_playlists;
 use std::future::Future;
+use std::sync::Arc;
 
 async fn run_folder_mutation<F, E, S, C>(mutation: F, on_success: S, on_close: C)
 where
@@ -15,13 +16,27 @@ where
     on_close();
 }
 
-async fn create_and_move_folder<C, M, E>(create: C, move_playlist: M) -> Result<(), E>
+async fn create_and_move_folder(
+    api: Arc<dyn api::KopuzApi>,
+    name: String,
+    playlist_id: String,
+) -> Result<(), api::ApiError> {
+    let move_api = api.clone();
+    create_then_move(
+        api.create_playlist_folder(name),
+        move |folder_id| async move { move_api.move_playlist(playlist_id, Some(folder_id)).await },
+    )
+    .await
+}
+
+async fn create_then_move<C, M, MFut, T, E>(create: C, move_to: M) -> Result<(), E>
 where
-    C: Future<Output = Result<(), E>>,
-    M: Future<Output = Result<(), E>>,
+    C: Future<Output = Result<T, E>>,
+    M: FnOnce(T) -> MFut,
+    MFut: Future<Output = Result<(), E>>,
 {
-    create.await?;
-    move_playlist.await
+    let folder = create.await?;
+    move_to(folder).await
 }
 
 #[component]
@@ -30,6 +45,7 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
     let mut show_create = use_signal(|| false);
     let mut is_submitting = use_signal(|| false);
     let gens = hooks::db_reactivity::use_generations();
+    let api = use_context::<Arc<dyn api::KopuzApi>>();
     let playlists_res = use_playlists();
 
     let folders = playlists_res
@@ -41,6 +57,8 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
     let pid = playlist_id.clone();
     let pid_keydown = pid.clone();
     let pid_btn = pid.clone();
+    let api_keydown = api.clone();
+    let api_btn = api.clone();
 
     rsx! {
         div {
@@ -66,6 +84,7 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                 let fid = folder.id.clone();
                                 let fname = folder.name.clone();
                                 let pid2 = pid.clone();
+                                let folder_api = api.clone();
                                 rsx! {
                                     button {
                                         key: "{fid}",
@@ -76,12 +95,12 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                                 return;
                                             }
                                             is_submitting.set(true);
-                                            let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                            let api = folder_api.clone();
                                             let pid = pid2.clone();
                                             let fid = fid.clone();
                                             spawn(async move {
                                                 run_folder_mutation(
-                                                    local.set_playlist_folder(&pid, Some(&fid)),
+                                                    api.move_playlist(pid, Some(fid)),
                                                     move || gens.bump(Table::Folders),
                                                     move || on_close.call(()),
                                                 )
@@ -110,21 +129,11 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                     let name = new_folder_name.read().trim().to_string();
                                     if !name.is_empty() && !*is_submitting.peek() {
                                         is_submitting.set(true);
-                                        let new_id = uuid::Uuid::new_v4().to_string();
                                         let pid = pid_keydown.clone();
-                                        let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                        let api = api_keydown.clone();
                                         spawn(async move {
                                             run_folder_mutation(
-                                                async move {
-                                                    create_and_move_folder(
-                                                        source.create_folder(&new_id, &name),
-                                                        source.set_playlist_folder(
-                                                            &pid,
-                                                            Some(&new_id),
-                                                        ),
-                                                    )
-                                                    .await
-                                                },
+                                                create_and_move_folder(api, name, pid),
                                                 move || gens.bump(Table::Folders),
                                                 move || on_close.call(()),
                                             )
@@ -143,21 +152,11 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                     let name = new_folder_name.read().trim().to_string();
                                     if !name.is_empty() && !*is_submitting.peek() {
                                         is_submitting.set(true);
-                                        let new_id = uuid::Uuid::new_v4().to_string();
                                         let pid = pid4.clone();
-                                        let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                                        let api = api_btn.clone();
                                         spawn(async move {
                                             run_folder_mutation(
-                                                async move {
-                                                    create_and_move_folder(
-                                                        source.create_folder(&new_id, &name),
-                                                        source.set_playlist_folder(
-                                                            &pid,
-                                                            Some(&new_id),
-                                                        ),
-                                                    )
-                                                    .await
-                                                },
+                                                create_and_move_folder(api, name, pid),
                                                 move || gens.bump(Table::Folders),
                                                 move || on_close.call(()),
                                             )
@@ -201,7 +200,7 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
 
 #[cfg(test)]
 mod tests {
-    use super::{create_and_move_folder, run_folder_mutation};
+    use super::{create_then_move, run_folder_mutation};
     use std::sync::{Arc, Mutex};
 
     fn record(events: &Arc<Mutex<Vec<&'static str>>>, event: &'static str) {
@@ -254,7 +253,7 @@ mod tests {
             let close_events = events.clone();
 
             run_folder_mutation(
-                create_and_move_folder(
+                create_then_move(
                     {
                         let events = mutation_events.clone();
                         async move {
@@ -262,9 +261,12 @@ mod tests {
                             Ok::<(), ()>(())
                         }
                     },
-                    async move {
-                        record(&mutation_events, "playlist-moved");
-                        Ok::<(), ()>(())
+                    move |_| {
+                        let events = mutation_events.clone();
+                        async move {
+                            record(&events, "playlist-moved");
+                            Ok::<(), ()>(())
+                        }
                     },
                 ),
                 move || record(&refresh_events, "refreshed"),
@@ -309,12 +311,12 @@ mod tests {
         let create_events = events.clone();
         let move_events = events.clone();
 
-        let result = create_and_move_folder(
+        let result = create_then_move(
             async move {
                 record(&create_events, "folder-create-failed");
                 Err::<(), ()>(())
             },
-            async move {
+            move |_| async move {
                 record(&move_events, "playlist-moved");
                 Ok::<(), ()>(())
             },
@@ -337,12 +339,12 @@ mod tests {
         let close_events = events.clone();
 
         run_folder_mutation(
-            create_and_move_folder(
+            create_then_move(
                 async move {
                     record(&create_events, "folder-created");
                     Ok::<(), ()>(())
                 },
-                async move {
+                move |_| async move {
                     record(&move_events, "playlist-move-failed");
                     Err::<(), ()>(())
                 },

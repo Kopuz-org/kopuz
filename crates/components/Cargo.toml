@@ -16,23 +16,20 @@ name = "components"
 workspace = true
 
 [dependencies]
+api = { workspace = true }
 dioxus = { workspace = true, features = ["desktop"] }
-directories = { workspace = true }
-webbrowser = { workspace = true }
 tracing = { workspace = true }
 base64 = { workspace = true }
-scrobble = { workspace = true }
-uuid = { workspace = true }
 player = { workspace = true }
 reader = { workspace = true }
 utils = { workspace = true }
 kopuz_route = { workspace = true }
 config = { workspace = true }
 hooks = { workspace = true }
-rand = { workspace = true }
 server = { workspace = true }
 tokio = { workspace = true, features = ["time", "fs"] }
 serde_json = { workspace = true }
+futures-util = { workspace = true }
 i18n = { workspace = true }
 
 # Native file dialogs (folder/cover pickers). rfd doesn't work on Android

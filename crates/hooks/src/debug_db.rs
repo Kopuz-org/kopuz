@@ -8,7 +8,16 @@ use dioxus::prelude::*;
 
 #[cfg(all(debug_assertions, not(target_os = "android")))]
 pub fn debug_db_section() -> Element {
-    let db = use_context::<db::Db>();
+    let Some(db) = use_context::<Option<db::Db>>() else {
+        return rsx! {
+            section {
+                h2 { class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
+                    "Database (debug)"
+                }
+                p { class: "text-xs text-white/40", "Unavailable while attached to kopuzd." }
+            }
+        };
+    };
     let gens = crate::db_reactivity::use_generations();
     let mut status = use_signal(String::new);
 

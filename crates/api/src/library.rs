@@ -3,9 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::player::TrackKind;
 
 /// A track row on the wire. `key` is the stable library ref used everywhere
-/// else in the API; `artwork` is a daemon-relative URL (append your bearer
-/// token as `?token=` when loading from an <img> tag); local filesystem
-/// paths and credentialed remote URLs never appear here.
+/// else in the API; `artwork` is the entity key for `GetArtwork`. Local
+/// filesystem paths and credentialed remote URLs never appear here.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TrackInfo {
     pub key: String,
@@ -27,6 +26,20 @@ pub struct TrackInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artwork: Option<String>,
     pub offline: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<crate::MusicService>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artists: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub musicbrainz_release_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub musicbrainz_recording_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub musicbrainz_track_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playlist_item_id: Option<String>,
+    #[serde(default)]
+    pub source: String,
 }
 
 pub const DEFAULT_PAGE_LIMIT: u32 = 200;

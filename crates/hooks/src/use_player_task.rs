@@ -6,7 +6,6 @@
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use crate::use_player_controller::LoopMode;
 use crate::use_player_controller::PlayerController;
-use config::AppConfig;
 use config::MusicService;
 use dioxus::prelude::*;
 
@@ -65,28 +64,8 @@ mod android_media {
     }
 }
 
-/// Persist a play-count increment as a single-row upsert. The in-memory
-/// `config.listen_counts` is bumped by the caller for live views; this is the
-/// durable side (no whole-config rewrite on the play hot path).
-fn bump_listen_count_db(track_uid: String, source: ::server::source::ActiveSource) {
-    spawn(async move {
-        if let Err(e) = source.bump_listen_count(&track_uid).await {
-            tracing::warn!(error = %e, "listen count persist failed");
-        }
-    });
-}
-
-/// Record one completed listen for the current track — the same accounting the
-/// engine's completion path does, used by the external (Spotify) advance paths.
-fn record_listen(mut config: Signal<AppConfig>, ctrl: &PlayerController) {
-    let idx = *ctrl.current_queue_index.peek();
-    if let Some(track) = ctrl.get_track_at(idx) {
-        let track_id = track.id.uid().to_string();
-        let source = ctrl.active_source.peek().clone();
-        let count_key = source.source().listen_count_key(&track_id);
-        *config.write().listen_counts.entry(count_key).or_insert(0) += 1;
-        bump_listen_count_db(track_id, source);
-    }
+fn report_completed(ctrl: &PlayerController) {
+    ctrl.report_external_state(true);
 }
 
 /// The now-playing fields the OS media widget needs, cloned out of the Dioxus
@@ -161,8 +140,9 @@ mod os_now_playing {
     pub(super) fn push(_track: OsTrack<'_>) {}
 }
 
-pub fn use_player_task(ctrl: PlayerController) {
-    let config: Signal<AppConfig> = use_context();
+pub fn use_player_task(mut ctrl: PlayerController) {
+    let api = use_context::<std::sync::Arc<dyn api::KopuzApi>>();
+    let spotify_access_api = api.clone();
 
     // Keep MPRIS / the Android notification in sync with the UI's own toggles.
     #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -240,22 +220,36 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
     }
 
+    let sources = use_context::<Signal<Vec<api::SourceInfo>>>();
+    let spotify_identity = use_memo(move || {
+        sources
+            .read()
+            .iter()
+            .find(|source| source.active && source.service == Some(api::MusicService::Spotify))
+            .map(|source| source.id.clone())
+    });
     use_effect(move || {
         let host = ctrl.spotify_host.read().clone();
-        let access = {
-            let cfg = config.read();
-            cfg.server
-                .as_ref()
-                .filter(|s| s.service == MusicService::Spotify)
-                .and_then(|s| s.access_token.clone())
-                .map(|p| server::spotify::auth::unpack_token(&p).0)
-                .filter(|t| !t.is_empty())
-        };
-        if let (Some(host), Some(access)) = (host, access) {
-            spawn(async move {
-                host.set_token(access).await;
-            });
+        if spotify_identity.read().is_none() {
+            ctrl.spotify_token.set(None);
+            return;
         }
+        let api = spotify_access_api.clone();
+        let mut token = ctrl.spotify_token;
+        spawn(async move {
+            match api.external_access("spotify".to_string()).await {
+                Ok(access) => {
+                    token.set(Some(access.access_token.clone()));
+                    if let Some(host) = host {
+                        host.set_token(access.access_token).await;
+                    }
+                }
+                Err(error) => {
+                    token.set(None);
+                    tracing::warn!(%error, "could not acquire Spotify frontend access");
+                }
+            }
+        });
     });
 
     use_effect(move || {
@@ -372,7 +366,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         if !st.is_playing && ended_before && at_end {
                             prev_playing = false;
                             prev_progress = 0;
-                            record_listen(config, &ctrl);
+                            report_completed(&ctrl);
                             ctrl.play_next();
                             continue;
                         }
@@ -382,7 +376,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     }
                     Ok(None) => {
                         if ended_before {
-                            record_listen(config, &ctrl);
+                            report_completed(&ctrl);
                             ctrl.play_next();
                         }
                         prev_playing = false;
@@ -397,6 +391,7 @@ pub fn use_player_task(ctrl: PlayerController) {
     });
 
     let mut spotify_pump = use_signal(|| None::<dioxus_core::Task>);
+    let spotify_api = api.clone();
     use_effect(move || {
         let host = ctrl.spotify_host.read().clone();
         if let Some(prev) = spotify_pump.take() {
@@ -405,7 +400,7 @@ pub fn use_player_task(ctrl: PlayerController) {
         let Some(host) = host else { return };
         let mut rx = host.subscribe();
         let mut ctrl = ctrl;
-        let mut config = config;
+        let api = spotify_api.clone();
         let task = spawn(async move {
             use server::spotify::host::HostEvent;
             use tokio::sync::broadcast::error::RecvError;
@@ -471,7 +466,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             && ctrl.spotify_device_override.peek().is_none()
                         {
                             if ended {
-                                record_listen(config, &ctrl);
+                                report_completed(&ctrl);
                                 ctrl.play_next();
                             } else if !ctrl.spotify_report_is_stale(track_id.as_deref()) {
                                 ctrl.is_playing.set(!paused);
@@ -581,52 +576,21 @@ pub fn use_player_task(ctrl: PlayerController) {
                             && last_auth_refresh
                                 .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(60))
                         {
-                            let creds = {
-                                let cfg = config.peek();
-                                cfg.server
-                                    .as_ref()
-                                    .filter(|s| s.service == MusicService::Spotify)
-                                    .and_then(|s| {
-                                        s.access_token.clone().map(|t| (t, s.url.clone()))
-                                    })
-                            };
-                            if let Some((packed, client_id)) = creds {
-                                last_auth_refresh = Some(std::time::Instant::now());
-                                let mut error = ctrl.playback_error;
-                                spawn(async move {
-                                    match server::spotify::auth::refresh_packed(
-                                        &packed,
-                                        client_id.clone(),
-                                    )
-                                    .await
-                                    {
-                                        Ok(new_packed) => {
-                                            let mut cfg = config.write();
-                                            if let Some(srv) = cfg.server.as_mut()
-                                                && srv.service == MusicService::Spotify
-                                                && srv.url == client_id
-                                                && srv.access_token.as_deref()
-                                                    == Some(packed.as_str())
-                                            {
-                                                srv.access_token = Some(new_packed);
-                                                tracing::info!(
-                                                    "spotify token refreshed after SDK auth error"
-                                                );
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                error = %e,
-                                                "spotify auth-error token refresh failed"
-                                            );
-                                            error.set(Some(
-                                                "Spotify session expired — re-sign in from Settings."
-                                                    .to_string(),
-                                            ));
-                                        }
+                            last_auth_refresh = Some(std::time::Instant::now());
+                            match api.external_access("spotify".to_string()).await {
+                                Ok(access) => {
+                                    ctrl.spotify_token.set(Some(access.access_token.clone()));
+                                    let spotify_host = ctrl.spotify_host.peek().clone();
+                                    if let Some(host) = spotify_host {
+                                        host.set_token(access.access_token).await;
                                     }
-                                });
-                                continue;
+                                    tracing::info!("spotify token refreshed after SDK auth error");
+                                    continue;
+                                }
+                                Err(error) => tracing::warn!(
+                                    %error,
+                                    "spotify auth-error token refresh failed"
+                                ),
                             }
                         }
                         let msg = match kind.as_str() {

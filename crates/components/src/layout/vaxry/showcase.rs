@@ -1,4 +1,3 @@
-use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -12,13 +11,12 @@ use std::collections::HashSet;
 #[component]
 pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
     let _nav_ctrl = use_context::<NavigationController>();
 
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
 
-    let offline_tracks = config.read().offline_tracks.clone();
+    let offline_tracks = hooks::downloads::downloaded_keys();
     // Per-track cover resolver (source dispatch + local-album lookup live in the
     // source layer; no partition decision here).
     let cover_for = hooks::use_db_queries::use_cover_resolver(64);
@@ -278,12 +276,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                     .nth(1)
                                     .unwrap_or(&path_str)
                                     .to_string();
-                                let is_downloaded = if let Some(path_str) = offline_tracks.get(&item_id_str) {
-                                    std::path::Path::new(path_str).exists()
-                                }
-                                else {
-                                    false
-                                };
+                                let is_downloaded = offline_tracks.contains(&item_id_str);
                                 let is_downloading = false;
                                 let play_queue = std::sync::Arc::clone(&sorted_tracks_arc);
                                 let cover_url: Option<utils::CoverUrl> =
@@ -377,8 +370,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                                     }
                                                 },
                                                 on_play: move |_| {
-                                                    ctrl.queue.set((*play_queue).clone());
-                                                    ctrl.play_track(display_idx);
+                                                    ctrl.play_queue_at((*play_queue).clone(), display_idx);
                                                 },
                                             }
                                         }

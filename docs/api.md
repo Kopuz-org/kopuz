@@ -8,6 +8,29 @@ stubs for your language, connect.
 
 Current API version: `1` (reported by `Kopuz/GetStatus`).
 
+## Quickstart for frontend authors
+
+1. Have any Kopuz running. The desktop app serves the API by default (the
+   Remote Control API toggle in Settings is the off switch); `kopuzd` serves
+   it headless. Users install nothing extra and issue no API keys.
+2. Read the discovery file for `{port, token, pid}` (paths below). Its 0600
+   permissions are the trust model: same OS user, trusted; anyone else
+   cannot read the token.
+3. Copy `proto/kopuz.proto` into your project and run your language's
+   protobuf/gRPC codegen. For poking around without codegen, use `grpcurl`:
+   reflection is enabled.
+4. Send `authorization: Bearer <token>` metadata on every call.
+5. Read state: `GetPlayerState`, `GetQueue`, `GetTracks`.
+6. Open the bidirectional `Attach` stream: send `Hello` first, then mirror
+   the `Event` messages it streams (`player_state`, `queue_changed`, ...);
+   interpolate the seek bar from the position anchor. Send transport
+   commands on the same stream; each is answered by an `Ack`.
+7. Treat `UNIMPLEMENTED` as "this daemon runs without that feature" and
+   hide it; ignore `Event`s whose oneof you do not recognize (they decode
+   as unset) and map unknown enum values to their defaults.
+8. Reference clients: kopuz-tui (Go), the built-in GUI itself, and the
+   `kopuz`/`kopuzd` control CLI.
+
 ## Running the daemon
 
 Two deployment shapes serve the same API:
@@ -17,11 +40,15 @@ Two deployment shapes serve the same API:
   integration (MPRIS/SMTC/Now Playing). No window, no webview. Build it with
   `cargo build --release -p kopuz-daemon --features kopuzd --bin kopuzd`.
   A systemd user unit ships in `packaging/systemd/kopuzd.service`.
-- **Embedded**: the desktop app can serve the identical API from its own
-  process (Settings, General, "Remote Control API"). This exists because
-  SQLite is single-writer: `kopuzd` and the GUI must never run against the
-  same library at once, so a frontend that wants to attach while the GUI is
-  open attaches to the GUI itself.
+- **Embedded**: the desktop app serves the identical API from its own
+  process, on by default. If `kopuzd` already owns the session, the desktop
+  app attaches to it instead of starting another daemon stack. Process and
+  database ownership locks prevent two audio engines or SQLite writers from
+  starting during a discovery race.
+
+Both binaries double as control clients: `kopuz pause`, `kopuz next`,
+`kopuz seek 1:30`, `kopuz volume 80`, `kopuz status [--json]`, and the same
+subcommands on `kopuzd`, act on whichever process is serving and exit.
 
 `kopuzd` flags: `--bind 127.0.0.1:0` (default: loopback, ephemeral port),
 `--token <hex>` (default: random), `--db-path <file>`.
@@ -94,7 +121,7 @@ stream. Unknown codes must be treated as `internal`; the set can grow.
   anchor after seek/pause), `buffered`, `queue_changed`,
   `library_invalidated {table, generation}`, `job_progress`,
   `job_finished`, `config_changed`, `source_status`, `notice`,
-  `resync`.
+  `external_command`, `resync`.
 - **Commands** (`play`, `pause`, `toggle`, `next`, `previous`, `stop`,
   `seek {position_ms}`, `volume {0..1}`, `mode {shuffle?, loop?}`) ride the
   same stream with a client-chosen `request_id`; each is answered by an
@@ -103,6 +130,10 @@ stream. Unknown codes must be treated as `internal`; the set can grow.
   trusting it.
 - An events-only client may half-close its send side after `Hello`; the
   daemon keeps streaming.
+- `external_command`: a transport command that arrived while playback is
+  external (Spotify in a browser next to a frontend). Only the frontend
+  that owns the external session acts on it; everyone else ignores it.
+
 Two rules make a frontend feel native:
 
 - **Position is an anchor, not a ticker.** `PlayerState.position` is
@@ -122,28 +153,69 @@ Two rules make a frontend feel native:
 | `GetStatus` | | `{version, api_version, uptime_secs}` |
 | `GetPlayerState` | | `PlayerState` snapshot |
 | `GetQueue` | `Page {offset, limit}` | play-order window `{rev, total, items: [{index, track}]}` |
+| `GetQueueSnapshot` | | durable physical-order queue, progress, and shuffle permutation |
+| `GetLiveQueue` | | current actor-owned physical queue, progress, and shuffle permutation |
 | `GetTracks` | `TracksRequest {filter, page}` | `{total, offset, items: [TrackInfo]}` |
 | `GetFolderTracks` | `{prefix, page}` | same shape |
 | `GetStats` | | `{listen_counts: {uid: count}}` |
 | `GetLyrics` | `{key}` | `{plain?, synced: [lines with word timing]}` |
+| `StreamLyrics` | `{key}` | progressive stream of complete lyrics replacements |
 | `GetFavorites` | | `{refs: [key], generation}` |
 | `GetJobs` | | `[{id, kind, state, phase, current?, total?, message?, error?}]` |
 | `GetDownloads` | | `{keys}` of offline-available tracks |
+| `GetDownloadStatuses` | | per-item state and byte progress |
 | `GetConfig` | | `{config_json, locked_keys}` (credentials stripped) |
+| `GetAlbums`, `GetAlbum`, `GetArtists`, `GetGenres` | filters/pages where applicable | library summaries |
+| `GetRecentTracks`, `GetAlbumTracks`, `GetArtistTracks`, `GetGenreTracks` | entity + page | track page |
+| `GetArtistSampleTracks`, `GetTracksByKeys`, `GetTopGenre` | page/keys/empty | library data |
+| `GetTrackWebUrl`, `GetAlbumWebUrl` | track/album ref | provider share URL when supported |
+| `Search` | query + limits | tracks, albums, artists, playlists |
+| `GetPlaylists`, `GetPlaylistTracks` | empty/entity + page | playlist tree and tracks |
+| `RefreshPlaylist` | playlist + page | refreshed playlist tracks |
+| `GetSources`, `ValidateSource` | empty/source | configured sources and health |
+| `BrowseSource` | source + path | Nextcloud folder entries without credentials |
+| `GetIntegrationCredentials` | | configured flags only, never secret values |
+| `GetCatalog`, `GetCatalogDetail` | provider catalog requests | discover feed and entity details |
+| `GetRadioStations`, `SearchRadio`, `GetRadioRegistries` | empty/query | radio data |
+| `StartTrackRadio`, `StartPlaylistRadio` | track/playlist | generated track list; track radio places its seed first |
+| `GetExternalAccess` | provider kind | short-lived frontend access, never refresh credentials |
 | `SetQueue` | mode + context (+ `start_index`/`shuffle` for replace) | ack |
 | `EditQueue` | `jump {index}` / `move {from, to}` / `remove {index}` (play-order indices) | ack |
+| `SaveQueueSnapshot` | durable physical-order queue snapshot | empty |
 | `SetFavorite` | `{key, favorite}` | optimistic; a rejected remote push reverts and emits a `notice` |
-| `StartJob` | `{kind}` (scan / library_sync / favorites_sync) | `{job_id}`; single-flight per kind, ABORTED on conflict |
+| `StartJob` | `{kind}` (scan / library_sync / favorites_sync / playlist_sync) | `{job_id}`; single-flight per kind, ABORTED on conflict |
 | `CancelJob` | `{id}` | |
 | `StartDownloads` | `{keys}` | `{job_id}` |
 | `RemoveDownload` | `{key}` | |
+| `CancelDownloadItem` | `{key}` | cancel one item without stopping its batch |
 | `PatchConfig` | RFC 7396 merge patch as JSON in `merge_patch_json` | updated view; credential keys refused, `locked_keys` are pinned by a managed settings layer |
+| `PreviewEqualizer` | equalizer JSON in `merge_patch_json` | applies to the live engine without persisting |
+| `CreatePlaylist`, `RenamePlaylist`, `DeletePlaylist` | playlist mutation | entity/empty |
+| `AddPlaylistTracks`, `RemovePlaylistTracks`, `ReorderPlaylistTracks` | playlist + keys | empty |
+| `CreatePlaylistFolder`, `RenamePlaylistFolder`, `DeletePlaylistFolder`, `MovePlaylist` | folder mutation | entity/empty |
+| `SwitchSource`, `UpsertLocalSource`, `DeleteLocalSource`, `SetSourceDirectories` | source mutation | source/empty |
+| `UpsertServer`, `DeleteServer` | credential-free server mutation | source/empty |
+| `ProvisionCredentials`, `LoginSource`, `ClearCredentials` | dedicated secret operation | source/empty |
+| `AuthenticateSource` | source | daemon-owned browser sign-in where supported |
+| `ProvisionIntegrationCredentials`, `ClearIntegrationCredentials` | write-only scrobbling secret operation | configured flag/empty |
+| `AuthenticateIntegration` | integration + public app credentials where needed | configured flag |
+| `ClaimExternalPlayback` | provider + device | short-lived exclusive lease |
+| `ReportExternalPlayback` | lease + track/position/playing/completed/device | renews lease and projects full playback state |
+| `ReleaseExternalPlayback` | lease | returns playback ownership to the daemon |
+| `StartYtdlp` | URL, output directory, format, options | `{job_id}` |
+| `SetExternalPlayback` | legacy request | retained for wire compatibility; returns UNIMPLEMENTED |
+| `AddRadioRegistry`, `RemoveRadioRegistry`, `SetRadioRegistryEnabled`, `PinRadioStation` | radio mutation | empty |
+| `UpdateTrackMetadata`, `DeleteTracks`, `DeleteAlbum` | library mutation | track/empty |
+| `UploadArtwork`, `RemoveArtwork` | artwork mutation | empty |
+| `Shutdown` | | daemon flushes and exits; UNIMPLEMENTED on the embedded server |
 | `GetArtwork` | one of `track`/`album`/`artist`, plus `hq` | a stream of `ArtworkChunk` (first chunk carries `content_type`); thumbnails resized daemon-side (400px, 1920px hq) |
 
 Queue **contexts** materialize daemon-side, so "play this album" never
 round-trips a track list through the client: `tracks {keys}`, `album {id}`,
 `artist {name}`, `genre {name}`, `playlist {id}`, `filter {TrackFilter}`,
-`radio {station_id, stream_id}`.
+`radio {station_id, stream_id}`, or `inline_tracks {tracks}` for ephemeral
+remote search, catalog, and radio results. `insert` mode requires
+`insert_index` in logical play order.
 
 `TrackInfo`: `key` (stable ref, use it for queueing/favorites/artwork),
 `uid`, `title`, `artist`, `album`, `album_id`, `duration_ms?`, `khz`,
@@ -186,12 +258,14 @@ for msg in stub.Attach(messages(), metadata=auth):
 
 - A daemon built without a service answers UNIMPLEMENTED for its RPCs
   instead of lying; probe once and hide the feature. The GUI's embedded
-  server currently runs without the config-write and downloads services
-  (the GUI owns those); `kopuzd` serves everything.
+  server and `kopuzd` expose the same feature services. Only process ownership
+  differs: `Shutdown` is unavailable on the embedded server.
 - Browser frontends need a grpc-web proxy in front of the daemon; the
   daemon itself speaks plain gRPC only.
 - Browser-based sign-ins (YT Music, Apple Music, SoundCloud, Spotify)
   cannot complete on a browserless box; local files, Jellyfin,
   Subsonic/Navidrome, and Nextcloud need nothing but the daemon.
-- Spotify playback is machine-bound to a browser with Widevine next to the
-  GUI; a headless `kopuzd` cannot play Spotify audio itself.
+- Spotify playback is frontend-owned and needs a browser with Widevine. A
+  headless `kopuzd` cannot play Spotify audio itself, but it provides access,
+  queue, ownership lease, state reporting, history, scrobbling, and media
+  control operations for a custom frontend that implements playback.

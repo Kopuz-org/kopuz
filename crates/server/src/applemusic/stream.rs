@@ -490,39 +490,41 @@ pub async fn resolve_and_decrypt(
     let phase = std::time::Instant::now();
     // Held only for challenge → licence → update. Decryption runs without it, so
     // a track already playing never blocks the next one from starting.
-    let license = cdm.begin_license().await;
-    // The session outlives the licence exchange: it holds the content keys, so it
-    // travels with the track and is closed when the track is done with it.
-    let (license_request, cdm_session) = cdm.challenge(&license, &init_data)?;
-    tracing::info!(
-        "am.timing: challenge in {:.2}s (includes waiting for the licence lock)",
-        phase.elapsed().as_secs_f64()
-    );
-    let phase = std::time::Instant::now();
-    tracing::debug!(
-        "am.stream: license challenge generated ({} bytes)",
-        license_request.len()
-    );
+    let cdm_session = {
+        let license = cdm.begin_license().await;
+        // The session outlives the licence exchange: it holds the content keys, so it
+        // travels with the track and is closed when the track is done with it.
+        let (license_request, cdm_session) = cdm.challenge(&license, &init_data)?;
+        tracing::info!(
+            "am.timing: challenge in {:.2}s (includes waiting for the licence lock)",
+            phase.elapsed().as_secs_f64()
+        );
+        let phase = std::time::Instant::now();
+        tracing::debug!(
+            "am.stream: license challenge generated ({} bytes)",
+            license_request.len()
+        );
 
-    tracing::debug!("am.stream: exchanging license with Apple");
+        tracing::debug!("am.stream: exchanging license with Apple");
 
-    load_license(
-        &cdm,
-        &license,
-        &cdm_session,
-        &license_request,
-        &adam_id,
-        &key,
-        &bearer_token,
-        media_user_token,
-    )
-    .await?;
+        load_license(
+            &cdm,
+            &license,
+            &cdm_session,
+            &license_request,
+            &adam_id,
+            &key,
+            &bearer_token,
+            media_user_token,
+        )
+        .await?;
 
-    tracing::info!(
-        "am.timing: licence exchanged in {:.2}s",
-        phase.elapsed().as_secs_f64()
-    );
-    drop(license);
+        tracing::info!(
+            "am.timing: licence exchanged in {:.2}s",
+            phase.elapsed().as_secs_f64()
+        );
+        cdm_session
+    };
 
     if cache_policy() == CachePolicy::Ciphertext
         && let Err(e) = write_sidecar(&cache_path, &key)
@@ -562,20 +564,22 @@ async fn licence_and_decrypt(
     let init_data = super::widevine::build_pssh(&key_id);
 
     let cdm = super::widevine::Cdm::open_system().await?;
-    let license = cdm.begin_license().await;
-    let (license_request, cdm_session) = cdm.challenge(&license, &init_data)?;
-    load_license(
-        &cdm,
-        &license,
-        &cdm_session,
-        &license_request,
-        adam_id,
-        key,
-        bearer_token,
-        media_user_token,
-    )
-    .await?;
-    drop(license);
+    let cdm_session = {
+        let license = cdm.begin_license().await;
+        let (license_request, cdm_session) = cdm.challenge(&license, &init_data)?;
+        load_license(
+            &cdm,
+            &license,
+            &cdm_session,
+            &license_request,
+            adam_id,
+            key,
+            bearer_token,
+            media_user_token,
+        )
+        .await?;
+        cdm_session
+    };
 
     let total = encrypted.len() as u64;
     let (track, sink) = super::progressive::ProgressiveTrack::streaming(total);

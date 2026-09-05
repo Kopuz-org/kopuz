@@ -1,0 +1,15 @@
+[Unit]
+Description=Kopuz music daemon
+Documentation=https://github.com/Kopuz-org/kopuz/blob/master/docs/api.md
+After=pipewire.service pulseaudio.service network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/kopuzd
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

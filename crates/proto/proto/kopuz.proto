@@ -24,28 +24,129 @@ service Kopuz {
   rpc GetStatus(Empty) returns (DaemonStatus);
   rpc GetPlayerState(Empty) returns (PlayerState);
   rpc GetQueue(Page) returns (QueueWindow);
+  rpc GetQueueSnapshot(Empty) returns (QueuePersistenceSnapshot);
+  rpc GetLiveQueue(Empty) returns (QueuePersistenceSnapshot);
   rpc GetTracks(TracksRequest) returns (TrackPage);
   rpc GetFolderTracks(FolderRequest) returns (TrackPage);
   rpc GetStats(Empty) returns (Stats);
   rpc GetLyrics(TrackRef) returns (Lyrics);
+  rpc StreamLyrics(TrackRef) returns (stream Lyrics);
   rpc GetFavorites(Empty) returns (Favorites);
   rpc GetJobs(Empty) returns (JobList);
   rpc GetDownloads(Empty) returns (DownloadList);
+  rpc GetDownloadStatuses(Empty) returns (DownloadStatusList);
   rpc GetConfig(Empty) returns (ConfigView);
+  rpc GetAlbums(AlbumsRequest) returns (AlbumPage);
+  rpc GetAlbum(EntityRef) returns (AlbumInfo);
+  rpc GetArtists(Page) returns (ArtistPage);
+  rpc RefreshArtistArtwork(StringList) returns (StringList);
+  rpc GetGenres(Empty) returns (StringList);
+  rpc GetRecentTracks(Page) returns (TrackPage);
+  rpc GetAlbumTracks(EntityPage) returns (TrackPage);
+  rpc GetArtistTracks(EntityPage) returns (TrackPage);
+  rpc GetGenreTracks(EntityPage) returns (TrackPage);
+  rpc GetArtistSampleTracks(Page) returns (TrackPage);
+  rpc GetTracksByKeys(TrackKeysRequest) returns (TrackList);
+  rpc GetTrackWebUrl(TrackRef) returns (OptionalString);
+  rpc GetAlbumWebUrl(EntityRef) returns (OptionalString);
+  rpc GetTopGenre(Empty) returns (OptionalString);
+  rpc Search(SearchRequest) returns (SearchResults);
+  rpc GetPlaylists(Empty) returns (PlaylistCatalog);
+  rpc GetPlaylistTracks(PlaylistTracksRequest) returns (TrackPage);
+  rpc RefreshPlaylist(PlaylistTracksRequest) returns (TrackPage);
+  rpc GetSources(Empty) returns (SourceList);
+  rpc ValidateSource(EntityRef) returns (SourceValidation);
+  rpc GetExternalAccess(ExternalAccessRequest) returns (ExternalAccess);
+  rpc BrowseSource(SourceFolderRequest) returns (SourceFolderList);
+  rpc GetIntegrationCredentials(Empty) returns (IntegrationCredentialStatusList);
+  rpc GetCatalog(CatalogRequest) returns (CatalogPage);
+  rpc GetCatalogDetail(CatalogDetailRequest) returns (CatalogDetail);
+  rpc GetRadioStations(Empty) returns (RadioStationList);
+  rpc StartTrackRadio(TrackRef) returns (TrackList);
+  rpc StartPlaylistRadio(EntityRef) returns (TrackList);
+  rpc SearchRadio(RadioSearchRequest) returns (RadioStationList);
+  rpc GetRadioRegistries(Empty) returns (RadioRegistryList);
 
   rpc SetQueue(SetQueueRequest) returns (Ack);
   rpc EditQueue(QueueEditRequest) returns (Ack);
+  rpc SaveQueueSnapshot(QueuePersistenceSnapshot) returns (Empty);
   rpc SetFavorite(FavoriteRequest) returns (Empty);
   rpc StartJob(StartJobRequest) returns (JobRef);
   rpc CancelJob(JobId) returns (Empty);
   rpc StartDownloads(DownloadRequest) returns (JobRef);
   rpc RemoveDownload(TrackRef) returns (Empty);
+  rpc CancelDownloadItem(TrackRef) returns (Empty);
   rpc PatchConfig(ConfigPatch) returns (ConfigView);
+  rpc PreviewEqualizer(ConfigPatch) returns (Empty);
+  rpc CreatePlaylist(CreatePlaylistRequest) returns (EntityRef);
+  rpc RenamePlaylist(NamedEntity) returns (Empty);
+  rpc DeletePlaylist(EntityRef) returns (Empty);
+  rpc AddPlaylistTracks(PlaylistKeysRequest) returns (Empty);
+  rpc RemovePlaylistTracks(PlaylistKeysRequest) returns (Empty);
+  rpc ReorderPlaylistTracks(PlaylistKeysRequest) returns (Empty);
+  rpc CreatePlaylistFolder(Name) returns (EntityRef);
+  rpc RenamePlaylistFolder(NamedEntity) returns (Empty);
+  rpc DeletePlaylistFolder(EntityRef) returns (Empty);
+  rpc MovePlaylist(MovePlaylistRequest) returns (Empty);
+  rpc SwitchSource(EntityRef) returns (SourceInfo);
+  rpc UpsertLocalSource(LocalSourceDraft) returns (SourceInfo);
+  rpc DeleteLocalSource(EntityRef) returns (Empty);
+  rpc SetSourceDirectories(SourceDirectories) returns (SourceInfo);
+  rpc UpsertServer(ServerDraft) returns (SourceInfo);
+  rpc DeleteServer(EntityRef) returns (Empty);
+  rpc ProvisionCredentials(CredentialProvision) returns (SourceInfo);
+  rpc LoginSource(SourceLoginRequest) returns (SourceInfo);
+  rpc ClearCredentials(EntityRef) returns (Empty);
+  rpc AuthenticateSource(EntityRef) returns (SourceInfo);
+  rpc ProvisionIntegrationCredentials(IntegrationCredentialProvision) returns (IntegrationCredentialStatus);
+  rpc ClearIntegrationCredentials(IntegrationRef) returns (Empty);
+  rpc AuthenticateIntegration(IntegrationCredentialProvision) returns (IntegrationCredentialStatus);
+  rpc SetExternalPlayback(SetExternalPlaybackRequest) returns (Empty);
+  rpc ClaimExternalPlayback(ExternalPlayback) returns (ExternalPlaybackLease);
+  rpc ReportExternalPlayback(ExternalPlaybackReport) returns (Empty);
+  rpc ReleaseExternalPlayback(ExternalPlaybackLease) returns (Empty);
+  rpc StartYtdlp(YtdlpRequest) returns (JobRef);
+  rpc AddRadioRegistry(RegistryRequest) returns (Empty);
+  rpc RemoveRadioRegistry(RegistryRequest) returns (Empty);
+  rpc SetRadioRegistryEnabled(SetRegistryEnabledRequest) returns (Empty);
+  rpc PinRadioStation(PinRadioStationRequest) returns (Empty);
+  rpc UpdateTrackMetadata(TrackMetadataPatch) returns (TrackInfo);
+  rpc DeleteTracks(DeleteTracksRequest) returns (Empty);
+  rpc DeleteAlbum(DeleteAlbumRequest) returns (Empty);
+  rpc UploadArtwork(ArtworkUpload) returns (Empty);
+  rpc RemoveArtwork(RemoveArtworkRequest) returns (Empty);
+  rpc Shutdown(Empty) returns (Empty);
 
   rpc GetArtwork(ArtworkRequest) returns (stream ArtworkChunk);
 }
 
 message Empty {}
+
+message EntityRef {
+  string id = 1;
+}
+
+message Name {
+  string name = 1;
+}
+
+message NamedEntity {
+  string id = 1;
+  string name = 2;
+}
+
+message StringList {
+  repeated string values = 1;
+}
+
+message OptionalString {
+  optional string value = 1;
+}
+
+message EntityPage {
+  string value = 1;
+  Page page = 2;
+}
 
 // ---------------- control stream ----------------
 
@@ -116,6 +217,10 @@ message Event {
     PlayerState player_state = 1;
     PositionEvent position = 2;
     BufferedEvent buffered = 3;
+    // A transport command that arrived while playback is external
+    // (Spotify in a browser next to a frontend). Only the frontend that
+    // owns the external session acts on it; everyone else ignores it.
+    Command external_command = 4;
     QueueChanged queue_changed = 5;
     LibraryInvalidated library_invalidated = 6;
     JobProgress job_progress = 7;
@@ -276,6 +381,8 @@ message SetQueueRequest {
   // replace mode only.
   optional uint32 start_index = 3;
   optional bool shuffle = 4;
+  // Insert mode only, in logical play order.
+  optional uint32 insert_index = 5;
 }
 
 // Reference-shaped contexts materialize daemon-side, so "play this album"
@@ -289,6 +396,7 @@ message QueueContext {
     Id playlist = 5;
     TrackFilter filter = 6;
     Radio radio = 7;
+    InlineTracks inline_tracks = 8;
   }
   message TrackKeys {
     repeated string keys = 1;
@@ -302,6 +410,9 @@ message QueueContext {
   message Radio {
     string station_id = 1;
     string stream_id = 2;
+  }
+  message InlineTracks {
+    repeated TrackInfo tracks = 1;
   }
 }
 
@@ -343,6 +454,14 @@ message QueueItem {
   TrackInfo track = 2;
 }
 
+message QueuePersistenceSnapshot {
+  repeated TrackInfo tracks = 1;
+  uint32 current_index = 2;
+  uint64 progress_ms = 3;
+  repeated uint32 shuffle_order = 4;
+  bool shuffle_enabled = 5;
+}
+
 // ---------------- library ----------------
 
 message TrackFilter {
@@ -370,6 +489,14 @@ message TrackPage {
   repeated TrackInfo items = 3;
 }
 
+message TrackList {
+  repeated TrackInfo tracks = 1;
+}
+
+message TrackKeysRequest {
+  repeated string keys = 1;
+}
+
 message TrackInfo {
   // The stable library ref; use it for queueing, favorites, and artwork.
   string key = 1;
@@ -387,6 +514,13 @@ message TrackInfo {
   bool seekable = 13;
   optional string artwork = 14;
   bool offline = 15;
+  optional MusicService service = 16;
+  repeated string artists = 17;
+  optional string musicbrainz_release_id = 18;
+  optional string musicbrainz_recording_id = 19;
+  optional string musicbrainz_track_id = 20;
+  optional string playlist_item_id = 21;
+  string source = 22;
 }
 
 message TrackRef {
@@ -416,6 +550,406 @@ message LyricLine {
 message LyricChunk {
   uint64 start_ms = 1;
   string text = 2;
+}
+
+// ---------------- frontend library and catalog ----------------
+
+message AlbumFilter {
+  optional string search = 1;
+  optional string artist = 2;
+  optional string genre = 3;
+  optional string sort = 4;
+}
+
+message AlbumsRequest {
+  AlbumFilter filter = 1;
+  Page page = 2;
+}
+
+message AlbumInfo {
+  string id = 1;
+  string title = 2;
+  string artist = 3;
+  string genre = 4;
+  uint32 year = 5;
+  optional string artwork = 6;
+  bool manual_artwork = 7;
+}
+
+message AlbumPage {
+  uint32 total = 1;
+  uint32 offset = 2;
+  repeated AlbumInfo items = 3;
+}
+
+message ArtistInfo {
+  string name = 1;
+  uint32 track_count = 2;
+  uint32 album_count = 3;
+  optional string artwork = 4;
+  bool manual_artwork = 5;
+}
+
+message ArtistPage {
+  uint32 total = 1;
+  uint32 offset = 2;
+  repeated ArtistInfo items = 3;
+}
+
+message SearchRequest {
+  string query = 1;
+}
+
+message SearchResults {
+  repeated TrackInfo tracks = 1;
+  repeated AlbumInfo albums = 2;
+}
+
+message PlaylistInfo {
+  string id = 1;
+  string name = 2;
+  uint32 track_count = 3;
+  optional string artwork = 4;
+  repeated string track_keys = 5;
+  bool manual_artwork = 6;
+}
+
+message PlaylistFolderInfo {
+  string id = 1;
+  string name = 2;
+  repeated string playlist_ids = 3;
+}
+
+message PlaylistCatalog {
+  repeated PlaylistInfo playlists = 1;
+  repeated PlaylistFolderInfo folders = 2;
+}
+
+message PlaylistTracksRequest {
+  string id = 1;
+  Page page = 2;
+}
+
+message CreatePlaylistRequest {
+  string name = 1;
+  repeated string keys = 2;
+}
+
+message PlaylistKeysRequest {
+  string id = 1;
+  repeated string keys = 2;
+}
+
+message MovePlaylistRequest {
+  string id = 1;
+  optional string folder_id = 2;
+}
+
+message CatalogRequest {
+  optional string continuation = 1;
+}
+
+message CatalogItem {
+  CatalogItemKind kind = 1;
+  string id = 2;
+  string title = 3;
+  optional string subtitle = 4;
+  optional string artwork = 5;
+  optional TrackInfo track = 6;
+}
+
+message CatalogShelf {
+  string title = 1;
+  optional string strapline = 2;
+  repeated CatalogItem items = 3;
+  optional string more_ref = 4;
+  bool list = 5;
+}
+
+message CatalogPage {
+  repeated CatalogShelf shelves = 1;
+  optional string continuation = 2;
+}
+
+message CatalogDetailRequest {
+  CatalogItemKind kind = 1;
+  string id = 2;
+  optional string continuation = 3;
+}
+
+message CatalogDetail {
+  CatalogItemKind kind = 1;
+  string id = 2;
+  string title = 3;
+  optional string subtitle = 4;
+  optional string description = 5;
+  optional string artwork = 6;
+  optional string playback_id = 7;
+  repeated TrackInfo tracks = 8;
+  repeated CatalogShelf shelves = 9;
+  optional string continuation = 10;
+  optional string year = 11;
+}
+
+// ---------------- sources, credentials, and external playback ----------------
+
+message SourceCapabilities {
+  bool edit_tags = 1;
+  bool delete_from_disk = 2;
+  bool scan_folders = 3;
+  bool folders = 4;
+  bool sync = 5;
+  bool downloads = 6;
+  bool discover = 7;
+  bool track_radio = 8;
+  bool playlist_radio = 9;
+  PlaylistCapability playlists = 10;
+  ArtistPresentation artists = 11;
+  AlbumPresentation albums = 12;
+  FavoritesSyncMode favorites_sync = 13;
+}
+
+message SourceInfo {
+  string id = 1;
+  string name = 2;
+  SourceKind kind = 3;
+  optional MusicService service = 4;
+  bool active = 5;
+  bool authenticated = 6;
+  SourceCapabilities capabilities = 7;
+  optional string url = 8;
+  optional string browser = 9;
+  bool anonymous = 10;
+  optional string storefront = 11;
+  optional string language = 12;
+  repeated string directories = 13;
+}
+
+message SourceList {
+  repeated SourceInfo sources = 1;
+}
+
+message LocalSourceDraft {
+  optional string id = 1;
+  string name = 2;
+  repeated string directories = 3;
+}
+
+message SourceDirectories {
+  string id = 1;
+  repeated string directories = 2;
+}
+
+message ServerDraft {
+  optional string id = 1;
+  string name = 2;
+  string url = 3;
+  MusicService service = 4;
+  optional string browser = 5;
+  bool anonymous = 6;
+  optional string storefront = 7;
+  optional string language = 8;
+}
+
+message CredentialProvision {
+  string server_id = 1;
+  string secret = 2;
+  optional string user_id = 3;
+  optional string browser = 4;
+}
+
+message SourceLoginRequest {
+  string server_id = 1;
+  string username = 2;
+  string password = 3;
+}
+
+message SourceValidation {
+  SourceState state = 1;
+}
+
+message ExternalAccessRequest {
+  string kind = 1;
+}
+
+message ExternalAccess {
+  string kind = 1;
+  string access_token = 2;
+  optional string client_id = 3;
+}
+
+message SetExternalPlaybackRequest {
+  optional ExternalPlayback external = 1;
+}
+
+message ExternalPlaybackLease {
+  string lease_id = 1;
+  uint64 expires_in_ms = 2;
+}
+
+message ExternalPlaybackReport {
+  string lease_id = 1;
+  optional TrackInfo track = 2;
+  uint64 position_ms = 3;
+  bool playing = 4;
+  bool completed = 5;
+  optional string device = 6;
+}
+
+enum IntegrationKind {
+  INTEGRATION_KIND_UNSPECIFIED = 0;
+  INTEGRATION_KIND_LISTEN_BRAINZ = 1;
+  INTEGRATION_KIND_LAST_FM = 2;
+  INTEGRATION_KIND_LIBRE_FM = 3;
+}
+
+message IntegrationRef {
+  IntegrationKind kind = 1;
+}
+
+message IntegrationCredentialStatus {
+  IntegrationKind kind = 1;
+  bool configured = 2;
+}
+
+message IntegrationCredentialStatusList {
+  repeated IntegrationCredentialStatus statuses = 1;
+}
+
+message IntegrationCredentialProvision {
+  IntegrationKind kind = 1;
+  optional string token = 2;
+  optional string api_key = 3;
+  optional string api_secret = 4;
+  optional string session_key = 5;
+}
+
+message SourceFolderRequest {
+  string server_id = 1;
+  string path = 2;
+}
+
+message SourceFolderEntry {
+  string path = 1;
+  string name = 2;
+}
+
+message SourceFolderList {
+  repeated SourceFolderEntry entries = 1;
+}
+
+enum YtdlpAudioFormat {
+  YTDLP_AUDIO_FORMAT_UNSPECIFIED = 0;
+  YTDLP_AUDIO_FORMAT_BEST = 1;
+  YTDLP_AUDIO_FORMAT_MP3 = 2;
+  YTDLP_AUDIO_FORMAT_M4A = 3;
+  YTDLP_AUDIO_FORMAT_OPUS = 4;
+  YTDLP_AUDIO_FORMAT_FLAC = 5;
+  YTDLP_AUDIO_FORMAT_WAV = 6;
+  YTDLP_AUDIO_FORMAT_VIDEO = 7;
+}
+
+message YtdlpRequest {
+  string url = 1;
+  string output_dir = 2;
+  YtdlpAudioFormat format = 3;
+  string options_json = 4;
+}
+
+// ---------------- radio ----------------
+
+message RadioStreamInfo {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  optional string icon = 4;
+}
+
+message RadioStationInfo {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated string tags = 4;
+  repeated RadioStreamInfo streams = 5;
+  bool pinned = 6;
+  string icon = 7;
+  optional string artwork = 8;
+}
+
+message RadioStationList {
+  repeated RadioStationInfo stations = 1;
+}
+
+message RadioSearchRequest {
+  string query = 1;
+  uint32 limit = 2;
+}
+
+message RadioRegistryInfo {
+  string url = 1;
+  bool enabled = 2;
+  bool built_in = 3;
+}
+
+message RadioRegistryList {
+  repeated RadioRegistryInfo registries = 1;
+}
+
+message RegistryRequest {
+  string url = 1;
+}
+
+message SetRegistryEnabledRequest {
+  string url = 1;
+  bool enabled = 2;
+}
+
+message PinRadioStationRequest {
+  RadioStationInfo station = 1;
+  bool pinned = 2;
+}
+
+// ---------------- metadata mutations ----------------
+
+message TrackMetadataPatch {
+  string key = 1;
+  optional string title = 2;
+  optional string artist = 3;
+  optional string album = 4;
+  optional uint32 track_number = 5;
+  bool clear_track_number = 6;
+  optional uint32 disc_number = 7;
+  bool clear_disc_number = 8;
+}
+
+message DeleteTracksRequest {
+  repeated string keys = 1;
+  bool from_disk = 2;
+}
+
+message DeleteAlbumRequest {
+  string id = 1;
+  bool from_disk = 2;
+}
+
+message ArtworkUpload {
+  oneof target {
+    string album_id = 1;
+    string artist_name = 2;
+    string playlist_id = 3;
+    string track_key = 6;
+  }
+  string content_type = 4;
+  bytes data = 5;
+}
+
+message RemoveArtworkRequest {
+  oneof target {
+    string album_id = 1;
+    string artist_name = 2;
+    string playlist_id = 3;
+    string track_key = 4;
+  }
 }
 
 // ---------------- favorites, jobs, downloads ----------------
@@ -455,6 +989,11 @@ message JobStatus {
   optional uint64 total = 6;
   optional string message = 7;
   optional ErrorBody error = 8;
+  optional string request = 9;
+  optional string title = 10;
+  optional string format = 11;
+  optional string speed = 12;
+  optional string eta = 13;
 }
 
 message DownloadRequest {
@@ -463,6 +1002,27 @@ message DownloadRequest {
 
 message DownloadList {
   repeated string keys = 1;
+}
+
+enum DownloadItemState {
+  DOWNLOAD_ITEM_STATE_UNSPECIFIED = 0;
+  DOWNLOAD_ITEM_STATE_QUEUED = 1;
+  DOWNLOAD_ITEM_STATE_DOWNLOADING = 2;
+  DOWNLOAD_ITEM_STATE_FINISHED = 3;
+  DOWNLOAD_ITEM_STATE_FAILED = 4;
+  DOWNLOAD_ITEM_STATE_CANCELLED = 5;
+}
+
+message DownloadItemStatus {
+  string key = 1;
+  DownloadItemState state = 2;
+  uint64 bytes_done = 3;
+  optional uint64 total_bytes = 4;
+  optional string error = 5;
+}
+
+message DownloadStatusList {
+  repeated DownloadItemStatus statuses = 1;
 }
 
 // ---------------- config, status, artwork ----------------
@@ -492,6 +1052,7 @@ message ArtworkRequest {
     string track = 1;
     string album = 2;
     string artist = 3;
+    string playlist = 5;
   }
   bool hq = 4;
 }
@@ -551,6 +1112,7 @@ enum QueueMode {
   QUEUE_MODE_REPLACE = 1;
   QUEUE_MODE_APPEND = 2;
   QUEUE_MODE_PLAY_NEXT = 3;
+  QUEUE_MODE_INSERT = 4;
 }
 
 enum Table {
@@ -571,6 +1133,7 @@ enum JobKind {
   JOB_KIND_FAVORITES_SYNC = 3;
   JOB_KIND_PLAYLIST_SYNC = 4;
   JOB_KIND_DOWNLOAD = 5;
+  JOB_KIND_YTDLP = 6;
 }
 
 enum JobState {
@@ -593,4 +1156,57 @@ enum NoticeLevel {
   NOTICE_LEVEL_INFO = 1;
   NOTICE_LEVEL_WARNING = 2;
   NOTICE_LEVEL_ERROR = 3;
+}
+
+enum MusicService {
+  MUSIC_SERVICE_UNSPECIFIED = 0;
+  MUSIC_SERVICE_JELLYFIN = 1;
+  MUSIC_SERVICE_SUBSONIC = 2;
+  MUSIC_SERVICE_CUSTOM = 3;
+  MUSIC_SERVICE_YT_MUSIC = 4;
+  MUSIC_SERVICE_APPLE_MUSIC = 5;
+  MUSIC_SERVICE_SOUND_CLOUD = 6;
+  MUSIC_SERVICE_SPOTIFY = 7;
+  MUSIC_SERVICE_NEXTCLOUD = 8;
+}
+
+enum SourceKind {
+  SOURCE_KIND_UNSPECIFIED = 0;
+  SOURCE_KIND_LOCAL = 1;
+  SOURCE_KIND_LOCAL_LIBRARY = 2;
+  SOURCE_KIND_SERVER = 3;
+}
+
+enum PlaylistCapability {
+  PLAYLIST_CAPABILITY_UNSPECIFIED = 0;
+  PLAYLIST_CAPABILITY_NONE = 1;
+  PLAYLIST_CAPABILITY_ADD_REMOVE = 2;
+  PLAYLIST_CAPABILITY_REORDER = 3;
+}
+
+enum ArtistPresentation {
+  ARTIST_PRESENTATION_UNSPECIFIED = 0;
+  ARTIST_PRESENTATION_LIBRARY = 1;
+  ARTIST_PRESENTATION_REMOTE = 2;
+}
+
+enum AlbumPresentation {
+  ALBUM_PRESENTATION_UNSPECIFIED = 0;
+  ALBUM_PRESENTATION_STANDARD = 1;
+  ALBUM_PRESENTATION_REMOTE = 2;
+}
+
+enum FavoritesSyncMode {
+  FAVORITES_SYNC_MODE_UNSPECIFIED = 0;
+  FAVORITES_SYNC_MODE_INSTANT = 1;
+  FAVORITES_SYNC_MODE_PAGINATED = 2;
+}
+
+enum CatalogItemKind {
+  CATALOG_ITEM_KIND_UNSPECIFIED = 0;
+  CATALOG_ITEM_KIND_TRACK = 1;
+  CATALOG_ITEM_KIND_ALBUM = 2;
+  CATALOG_ITEM_KIND_PLAYLIST = 3;
+  CATALOG_ITEM_KIND_ARTIST = 4;
+  CATALOG_ITEM_KIND_MOOD = 5;
 }

@@ -41,10 +41,13 @@ tracing = { workspace = true }
 rand = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
+fs2 = { workspace = true }
+webbrowser = { workspace = true }
 utils = { workspace = true }
 tonic = { workspace = true, optional = true }
 tonic-reflection = { workspace = true, optional = true }
 proto = { workspace = true, optional = true }
+client = { workspace = true, optional = true }
 tokio-stream = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -61,6 +64,7 @@ grpc = [
   "dep:tonic",
   "dep:tonic-reflection",
   "dep:proto",
+  "dep:client",
   "dep:tokio-stream",
   "dep:directories",
   "tokio/net",

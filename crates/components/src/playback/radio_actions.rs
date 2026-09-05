@@ -5,11 +5,13 @@
 //! label, the icon, the capability gate and the failure handling in one place is
 //! what stops the track row and the playlist surfaces from drifting apart.
 
+use std::sync::Arc;
+
+use api::KopuzApi;
 use dioxus::prelude::*;
 use hooks::PlayerController;
 use hooks::toast::{toast, toast_error};
 use reader::models::Track;
-use server::source::ActiveSource;
 use std::future::Future;
 use tracing::Instrument;
 
@@ -30,13 +32,13 @@ pub fn radio_label() -> String {
 /// success.
 fn spawn_radio<F>(seed: String, fut: F, mut ctrl: PlayerController)
 where
-    F: Future<Output = Result<Vec<Track>, server::source::SourceError>> + 'static,
+    F: Future<Output = Result<Vec<Track>, api::ApiError>> + 'static,
 {
     spawn(
         async move {
             toast(&i18n::t("radio_starting"));
             match fut.await {
-                Ok(tracks) if !tracks.is_empty() => ctrl.play_queue_linear(tracks),
+                Ok(tracks) if !tracks.is_empty() => ctrl.play_queue_at(tracks, 0),
                 Ok(_) => {
                     tracing::warn!(seed = %seed, "radio returned empty queue");
                     toast_error(&i18n::t("radio_empty"));
@@ -52,21 +54,39 @@ where
 }
 
 /// Start radio seeded from a track and play the generated queue. The radio
-/// operation lives in the source layer ([`MediaSource::start_radio`](server::source::MediaSource::start_radio));
+/// operation lives behind [`KopuzApi::track_radio`];
 /// this just resolves the track's id and hands the result to the player.
-pub fn play_track_radio(track: Track, source: ActiveSource, ctrl: PlayerController) {
+pub fn play_track_radio(track: Track, api: Arc<dyn KopuzApi>, ctrl: PlayerController) {
     let seed = track.id.key().into_owned();
     let fetch = seed.clone();
-    spawn_radio(seed, async move { source.start_radio(&fetch).await }, ctrl);
+    spawn_radio(
+        seed,
+        async move {
+            api.track_radio(fetch).await.map(|tracks| {
+                tracks
+                    .into_iter()
+                    .map(hooks::use_db_queries::track_from_api)
+                    .collect()
+            })
+        },
+        ctrl,
+    );
 }
 
 /// Start radio seeded from a playlist. What comes back is the source's mix for
 /// that playlist, not its track list, so it replaces the queue outright.
-pub fn play_playlist_radio(playlist_id: String, source: ActiveSource, ctrl: PlayerController) {
+pub fn play_playlist_radio(playlist_id: String, api: Arc<dyn KopuzApi>, ctrl: PlayerController) {
     let seed = playlist_id.clone();
     spawn_radio(
         seed,
-        async move { source.start_playlist_radio(&playlist_id).await },
+        async move {
+            api.playlist_radio(playlist_id).await.map(|tracks| {
+                tracks
+                    .into_iter()
+                    .map(hooks::use_db_queries::track_from_api)
+                    .collect()
+            })
+        },
         ctrl,
     );
 }
@@ -82,14 +102,11 @@ pub fn play_playlist_radio(playlist_id: String, source: ActiveSource, ctrl: Play
 /// changes (e.g. an empty server library filling in after a sync).
 pub fn track_radio_handler(track: Track) -> Option<EventHandler<()>> {
     let ctrl = consume_context::<PlayerController>();
-    let active_source = consume_context::<Signal<ActiveSource>>();
-    let supported = active_source.read().capabilities().radio.track;
-    supported.then(|| {
-        EventHandler::new(move |_| {
-            let src = active_source.peek().clone();
-            play_track_radio(track.clone(), src, ctrl)
-        })
-    })
+    let capabilities = consume_context::<Signal<api::SourceCapabilities>>();
+    let api = consume_context::<Arc<dyn KopuzApi>>();
+    let supported = capabilities.read().track_radio;
+    supported
+        .then(|| EventHandler::new(move |_| play_track_radio(track.clone(), api.clone(), ctrl)))
 }
 
 /// The playlist counterpart of [`track_radio_handler`]. Same `consume_context`
@@ -100,12 +117,10 @@ pub fn track_radio_handler(track: Track) -> Option<EventHandler<()>> {
 /// playlist cards that could only return `Unsupported`.
 pub fn playlist_radio_handler(playlist_id: String) -> Option<EventHandler<()>> {
     let ctrl = consume_context::<PlayerController>();
-    let active_source = consume_context::<Signal<ActiveSource>>();
-    let supported = active_source.read().capabilities().radio.playlist;
+    let capabilities = consume_context::<Signal<api::SourceCapabilities>>();
+    let api = consume_context::<Arc<dyn KopuzApi>>();
+    let supported = capabilities.read().playlist_radio;
     supported.then(|| {
-        EventHandler::new(move |_| {
-            let src = active_source.peek().clone();
-            play_playlist_radio(playlist_id.clone(), src, ctrl)
-        })
+        EventHandler::new(move |_| play_playlist_radio(playlist_id.clone(), api.clone(), ctrl))
     })
 }

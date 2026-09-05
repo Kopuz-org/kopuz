@@ -9,6 +9,8 @@ pub enum QueueMode {
     Replace,
     Append,
     PlayNext,
+    /// Insert at `SetQueueRequest::insert_index` in logical play order.
+    Insert,
 }
 
 /// What to put in the queue. Reference-shaped contexts are materialized by
@@ -39,6 +41,11 @@ pub enum QueueContext {
         station_id: String,
         stream_id: String,
     },
+    /// Literal source results that are not necessarily persisted in the
+    /// daemon library yet.
+    InlineTracks {
+        tracks: Vec<crate::library::TrackInfo>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -50,6 +57,8 @@ pub struct SetQueueRequest {
     pub start_index: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shuffle: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub insert_index: Option<u32>,
 }
 
 /// In-place queue edits. Positions are play-order (logical) indices, the same
@@ -77,4 +86,15 @@ pub struct QueueWindow {
     pub total: u32,
     pub offset: u32,
     pub items: Vec<QueueItem>,
+}
+
+/// Durable queue state used by frontends that temporarily own playback.
+/// Track positions and the shuffle permutation use physical queue indices.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct QueuePersistenceSnapshot {
+    pub tracks: Vec<crate::library::TrackInfo>,
+    pub current_index: u32,
+    pub progress_ms: u64,
+    pub shuffle_order: Vec<u32>,
+    pub shuffle_enabled: bool,
 }

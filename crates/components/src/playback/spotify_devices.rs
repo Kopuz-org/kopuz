@@ -11,10 +11,7 @@ use hooks::use_player_controller::PlayerController;
 /// True when Spotify is the active server and we hold an access token — the
 /// only state in which either device widget should appear.
 fn spotify_active(ctrl: &PlayerController) -> bool {
-    let cfg = ctrl.config.read();
-    cfg.server
-        .as_ref()
-        .is_some_and(|s| s.service == config::MusicService::Spotify && s.access_token.is_some())
+    ctrl.spotify_access_token().is_some()
 }
 
 /// One selectable target in the device panel, styled like the rightbar's queue

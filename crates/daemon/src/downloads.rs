@@ -5,10 +5,12 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 
-use api::{ApiError, ApiEvent, JobKind, JobRef, Table};
+use api::{
+    ApiError, ApiEvent, DownloadItemState, DownloadItemStatus, ErrorCode, JobKind, JobRef, Table,
+};
+use futures_util::{StreamExt as _, stream};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use utils::playback_ref::PlaybackItemRef;
@@ -17,11 +19,18 @@ use crate::config_service::ConfigService;
 use crate::jobs::{JobCtx, JobRunner};
 use crate::session::SessionHandle;
 
+/// Upper bound on a single read from the download stream; a server that
+/// accepts the request and then stalls without closing the socket would
+/// otherwise leave the job Running forever.
+const CHUNK_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 pub struct DownloadsService {
     db: db::Db,
     session: SessionHandle,
     config: Arc<ConfigService>,
     cache_dir: PathBuf,
+    statuses: Mutex<std::collections::BTreeMap<String, DownloadItemStatus>>,
+    cancelled_items: Mutex<std::collections::HashSet<String>>,
 }
 
 fn safe_extension(extension: &str) -> Result<&str, ApiError> {
@@ -63,6 +72,8 @@ impl DownloadsService {
             session,
             config,
             cache_dir,
+            statuses: Mutex::new(std::collections::BTreeMap::new()),
+            cancelled_items: Mutex::new(std::collections::HashSet::new()),
         })
     }
 
@@ -72,6 +83,60 @@ impl DownloadsService {
         let mut ids: Vec<String> = config.offline_tracks.keys().cloned().collect();
         ids.sort();
         ids
+    }
+
+    pub fn statuses(&self) -> Vec<DownloadItemStatus> {
+        self.statuses
+            .lock()
+            .map(|statuses| statuses.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn cancel_item(&self, key: &str) -> Result<(), ApiError> {
+        let known = self
+            .statuses
+            .lock()
+            .map(|statuses| statuses.contains_key(key))
+            .unwrap_or(false);
+        if !known {
+            return Err(ApiError::not_found("download item not found"));
+        }
+        if let Ok(mut cancelled) = self.cancelled_items.lock() {
+            cancelled.insert(key.to_string());
+        }
+        self.update_status(key, DownloadItemState::Cancelled, 0, None, None);
+        Ok(())
+    }
+
+    fn item_cancelled(&self, key: &str) -> bool {
+        self.cancelled_items
+            .lock()
+            .map(|cancelled| cancelled.contains(key))
+            .unwrap_or(true)
+    }
+
+    fn update_status(
+        &self,
+        key: &str,
+        state: DownloadItemState,
+        bytes_done: u64,
+        total_bytes: Option<u64>,
+        error: Option<String>,
+    ) {
+        if let Ok(mut statuses) = self.statuses.lock() {
+            let entry = statuses
+                .entry(key.to_string())
+                .or_insert_with(|| DownloadItemStatus {
+                    key: key.to_string(),
+                    ..Default::default()
+                });
+            entry.state = state;
+            entry.bytes_done = bytes_done;
+            if total_bytes.is_some() {
+                entry.total_bytes = total_bytes;
+            }
+            entry.error = error;
+        }
     }
 
     /// Derive a cache-local filename without trusting the remote item id.
@@ -124,36 +189,104 @@ impl DownloadsService {
         if keys.is_empty() {
             return Err(ApiError::invalid_input("no track keys to download"));
         }
+        if let Ok(mut cancelled) = self.cancelled_items.lock() {
+            for key in &keys {
+                cancelled.remove(key);
+            }
+        }
+        for key in &keys {
+            self.update_status(key, DownloadItemState::Queued, 0, None, None);
+        }
         let service = self.clone();
         runner.start(JobKind::Download, move |ctx| async move {
             service.run_downloads(&ctx, keys).await
         })
     }
 
-    async fn run_downloads(&self, ctx: &JobCtx, keys: Vec<String>) -> Result<(), ApiError> {
+    async fn run_downloads(
+        self: &Arc<Self>,
+        ctx: &JobCtx,
+        keys: Vec<String>,
+    ) -> Result<(), ApiError> {
         let config = self.session.config_watch().borrow().clone();
         let source: server::source::ActiveSource =
             Arc::from(server::source::active(self.db.clone(), &config));
         let total = keys.len() as u64;
-        let mut failed: Vec<String> = Vec::new();
-        for (index, key) in keys.iter().enumerate() {
-            if ctx.cancelled() {
-                return Ok(());
-            }
-            ctx.progress(
-                "downloading",
-                Some(index as u64),
-                Some(total),
-                Some(key.clone()),
-            );
-            if let Err(error) = self.download_one(ctx, &source, &config, key).await {
-                if ctx.cancelled() {
-                    return Ok(());
+        let completed = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let failed: Vec<String> = stream::iter(keys)
+            .map(|key| {
+                let service = self.clone();
+                let source = source.clone();
+                let config = config.clone();
+                let ctx = ctx.clone();
+                let completed = completed.clone();
+                async move {
+                    if ctx.cancelled() || service.item_cancelled(&key) {
+                        service.update_status(&key, DownloadItemState::Cancelled, 0, None, None);
+                        return None;
+                    }
+                    service.update_status(&key, DownloadItemState::Downloading, 0, None, None);
+                    let result = service.download_one(&source, &config, &key, &ctx).await;
+                    let current = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    ctx.progress("downloading", Some(current), Some(total), Some(key.clone()));
+                    match result {
+                        Ok(()) if service.item_cancelled(&key) || ctx.cancelled() => {
+                            let _ = service.remove(&key).await;
+                            service.update_status(
+                                &key,
+                                DownloadItemState::Cancelled,
+                                0,
+                                None,
+                                None,
+                            );
+                            None
+                        }
+                        Ok(()) => {
+                            service.update_status(
+                                &key,
+                                DownloadItemState::Finished,
+                                service
+                                    .statuses
+                                    .lock()
+                                    .ok()
+                                    .and_then(|statuses| {
+                                        statuses.get(&key).map(|item| item.bytes_done)
+                                    })
+                                    .unwrap_or_default(),
+                                None,
+                                None,
+                            );
+                            None
+                        }
+                        Err(error) if service.item_cancelled(&key) || ctx.cancelled() => {
+                            service.update_status(
+                                &key,
+                                DownloadItemState::Cancelled,
+                                0,
+                                None,
+                                None,
+                            );
+                            let _ = error;
+                            None
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, %key, "download failed");
+                            service.update_status(
+                                &key,
+                                DownloadItemState::Failed,
+                                0,
+                                None,
+                                Some(error.to_string()),
+                            );
+                            Some(key)
+                        }
+                    }
                 }
-                tracing::warn!(%error, %key, "download failed");
-                failed.push(key.clone());
-            }
-        }
+            })
+            .buffer_unordered(4)
+            .filter_map(|key| async move { key })
+            .collect()
+            .await;
         ctx.progress("done", Some(total), Some(total), None);
         if failed.is_empty() {
             Ok(())
@@ -169,30 +302,24 @@ impl DownloadsService {
 
     async fn download_one(
         &self,
-        ctx: &JobCtx,
         source: &server::source::ActiveSource,
         config: &config::AppConfig,
         key: &str,
+        ctx: &JobCtx,
     ) -> Result<(), ApiError> {
-        let uid = self
+        let track = self
             .db
             .tracks_by_keys(&config.active_source, &[key.to_string()])
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()
             .next()
-            .map(|track| track.id.uid())
-            .unwrap_or_else(|| key.to_string());
-        let item_ref = PlaybackItemRef::parse(&uid);
-        if !item_ref.is_server() {
+            .ok_or_else(|| ApiError::not_found("track not found"))?;
+        let reader::TrackId::Server { item_id, .. } = track.id else {
             return Err(ApiError::invalid_input(
                 "only server tracks can be cached offline",
             ));
-        }
-        let item_id = item_ref
-            .primary_id()
-            .ok_or_else(|| ApiError::invalid_input("track key has no item id"))?
-            .to_string();
+        };
 
         if let Some(existing) = config.offline_tracks.get(&item_id)
             && Path::new(existing).is_file()
@@ -202,29 +329,44 @@ impl DownloadsService {
 
         let path = match source.download_track(&item_id, None).await {
             Ok(bytes) => {
-                if ctx.cancelled() {
-                    return Ok(());
-                }
                 let path = self.cache_file_path(&item_id, "m4a")?;
-                self.publish_bytes(&path, &bytes).await?
+                let path = self.publish_bytes(&path, &bytes).await?;
+                self.update_status(
+                    key,
+                    DownloadItemState::Downloading,
+                    bytes.len() as u64,
+                    Some(bytes.len() as u64),
+                    None,
+                );
+                path
             }
             Err(server::source::SourceError::Unsupported(_)) => {
                 let info = source.resolve_stream(&item_id).await.map_err(|error| {
                     ApiError::internal(format!("stream resolve failed: {error}"))
                 })?;
-                if ctx.cancelled() {
-                    return Ok(());
-                }
                 let hint = info
                     .format
                     .map(|(format, _)| format.extension())
                     .unwrap_or("m4a");
-                self.fetch_to_cache(ctx, &item_id, &info.url, hint).await?
+                self.fetch_to_cache(
+                    key,
+                    &item_id,
+                    &info.url,
+                    hint,
+                    info.user_agent.as_deref(),
+                    info.content_length,
+                    ctx,
+                )
+                .await?
             }
             Err(error) => {
                 return Err(ApiError::internal(format!("download failed: {error}")));
             }
         };
+        if ctx.cancelled() || self.item_cancelled(key) {
+            let _ = self.remove_cache_file(&path);
+            return Err(ApiError::new(ErrorCode::Conflict, "download cancelled"));
+        }
         self.register(&item_id, Some(path.to_string_lossy().into_owned()))
             .await
     }
@@ -240,68 +382,157 @@ impl DownloadsService {
 
     async fn fetch_to_cache(
         &self,
-        ctx: &JobCtx,
+        key: &str,
         item_id: &str,
         url: &str,
         extension_hint: &str,
+        user_agent: Option<&str>,
+        content_length: Option<u64>,
+        ctx: &JobCtx,
     ) -> Result<PathBuf, ApiError> {
         let http = |error: reqwest::Error| {
             ApiError::internal(format!("download request failed: {}", error.without_url()))
         };
         let client = reqwest::Client::builder()
-            .read_timeout(Duration::from_secs(15))
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .read_timeout(CHUNK_READ_TIMEOUT)
+            .tcp_nodelay(true)
             .build()
             .map_err(http)?;
-        let mut response = client.get(url).send().await.map_err(http)?;
-        response.error_for_status_ref().map_err(http)?;
-
-        let extension = response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(content_type_to_ext)
-            .unwrap_or(extension_hint);
-        let final_path = self.cache_file_path(item_id, extension)?;
+        let final_path = self.cache_file_path(item_id, extension_hint)?;
         let io = |error: std::io::Error| ApiError::internal(format!("offline cache io: {error}"));
         if let Some(parent) = final_path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(io)?;
         }
         let partial_path = final_path.with_extension(format!(
             "{}.part-{}",
+            safe_extension(extension_hint)?,
+            uuid::Uuid::new_v4()
+        ));
+        if let (Some(user_agent), Some(total)) = (user_agent, content_length) {
+            let result: Result<(), ApiError> = async {
+                const CHUNK: u64 = 512 * 1024;
+                let file = tokio::fs::File::create(&partial_path).await.map_err(io)?;
+                let mut writer = tokio::io::BufWriter::with_capacity(256 * 1024, file);
+                let mut start = 0;
+                while start < total {
+                    if ctx.cancelled() || self.item_cancelled(key) {
+                        return Err(ApiError::new(ErrorCode::Conflict, "download cancelled"));
+                    }
+                    let end = (start + CHUNK - 1).min(total - 1);
+                    let response = tokio::time::timeout(
+                        std::time::Duration::from_secs(60),
+                        client
+                            .get(url)
+                            .header(reqwest::header::USER_AGENT, user_agent)
+                            .header(reqwest::header::RANGE, format!("bytes={start}-{end}"))
+                            .send(),
+                    )
+                    .await
+                    .map_err(|_| ApiError::internal("download range request timed out"))?
+                    .map_err(http)?;
+                    if response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+                        return Err(ApiError::internal(format!(
+                            "download server ignored byte range {start}-{end}"
+                        )));
+                    }
+                    let bytes = tokio::time::timeout(CHUNK_READ_TIMEOUT, response.bytes())
+                        .await
+                        .map_err(|_| ApiError::internal("download range read timed out"))?
+                        .map_err(http)?;
+                    let expected = end - start + 1;
+                    if bytes.len() as u64 != expected {
+                        return Err(ApiError::internal(format!(
+                            "short download range {start}-{end}: received {} of {expected} bytes",
+                            bytes.len()
+                        )));
+                    }
+                    writer.write_all(&bytes).await.map_err(io)?;
+                    start = end + 1;
+                    self.update_status(
+                        key,
+                        DownloadItemState::Downloading,
+                        start,
+                        Some(total),
+                        None,
+                    );
+                }
+                writer.flush().await.map_err(io)
+            }
+            .await;
+            if let Err(error) = result {
+                let _ = tokio::fs::remove_file(&partial_path).await;
+                return Err(error);
+            }
+            tokio::fs::rename(&partial_path, &final_path)
+                .await
+                .map_err(io)?;
+            return Ok(final_path);
+        }
+
+        let mut request = client.get(url);
+        if let Some(user_agent) = user_agent {
+            request = request.header(reqwest::header::USER_AGENT, user_agent);
+        }
+        let mut response = tokio::time::timeout(std::time::Duration::from_secs(60), request.send())
+            .await
+            .map_err(|_| ApiError::internal("download request timed out"))?
+            .map_err(http)?;
+        response.error_for_status_ref().map_err(http)?;
+        let total = response.content_length();
+        let extension = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(content_type_to_ext)
+            .unwrap_or(extension_hint);
+        let resolved_path = self.cache_file_path(item_id, extension)?;
+        let resolved_partial = resolved_path.with_extension(format!(
+            "{}.part-{}",
             safe_extension(extension)?,
             uuid::Uuid::new_v4()
         ));
         let result: Result<(), ApiError> = async {
-            let file = tokio::fs::File::create(&partial_path).await.map_err(io)?;
+            let file = tokio::fs::File::create(&resolved_partial)
+                .await
+                .map_err(io)?;
             let mut writer = tokio::io::BufWriter::with_capacity(256 * 1024, file);
+            let mut bytes_done = 0;
+            // A stalled socket must not hang the job forever: bound every
+            // chunk read, matching the old download-queue behavior.
             loop {
-                if ctx.cancelled() {
-                    return Err(ApiError::internal("download cancelled"));
+                if ctx.cancelled() || self.item_cancelled(key) {
+                    return Err(ApiError::new(ErrorCode::Conflict, "download cancelled"));
                 }
-                let chunk = response.chunk().await.map_err(http)?;
-                if ctx.cancelled() {
-                    return Err(ApiError::internal("download cancelled"));
+                let chunk = tokio::time::timeout(CHUNK_READ_TIMEOUT, response.chunk())
+                    .await
+                    .map_err(|_| ApiError::internal("download stalled: chunk read timed out"))?
+                    .map_err(http)?;
+                if ctx.cancelled() || self.item_cancelled(key) {
+                    return Err(ApiError::new(ErrorCode::Conflict, "download cancelled"));
                 }
                 let Some(chunk) = chunk else {
                     break;
                 };
                 writer.write_all(&chunk).await.map_err(io)?;
+                bytes_done += chunk.len() as u64;
+                self.update_status(key, DownloadItemState::Downloading, bytes_done, total, None);
             }
             writer.flush().await.map_err(io)?;
-            if ctx.cancelled() {
-                return Err(ApiError::internal("download cancelled"));
+            if ctx.cancelled() || self.item_cancelled(key) {
+                return Err(ApiError::new(ErrorCode::Conflict, "download cancelled"));
             }
             Ok(())
         }
         .await;
         if let Err(error) = result {
-            let _ = tokio::fs::remove_file(&partial_path).await;
+            let _ = tokio::fs::remove_file(&resolved_partial).await;
             return Err(error);
         }
-        tokio::fs::rename(&partial_path, &final_path)
+        tokio::fs::rename(&resolved_partial, &resolved_path)
             .await
             .map_err(io)?;
-        Ok(final_path)
+        Ok(resolved_path)
     }
 
     pub async fn remove(&self, key: &str) -> Result<(), ApiError> {

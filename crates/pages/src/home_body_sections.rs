@@ -1,6 +1,7 @@
 //! Rendering for individual home-page sections.
 
 use super::*;
+use std::sync::Arc;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_server_section(
@@ -338,8 +339,9 @@ fn render_continue_listening(
         return rsx! { div {} };
     }
     let mut ctrl = consume_context::<hooks::PlayerController>();
-    let active_source = consume_context::<Signal<::server::source::ActiveSource>>();
-    let can_radio = active_source.read().capabilities().radio.track;
+    let capabilities = consume_context::<Signal<api::SourceCapabilities>>();
+    let can_radio = capabilities.read().track_radio;
+    let api = consume_context::<Arc<dyn api::KopuzApi>>();
     let (song_actions, song_action_kinds) = song_card_actions(can_radio);
     rsx! {
         section { class: if is_vaxry { "mb-10" } else { "mb-12" },
@@ -389,6 +391,7 @@ fn render_continue_listening(
                         let open_key = key.clone();
                         let is_menu_open = active_card_menu.read().as_deref() == Some(key.as_str());
                         let menu_track = track.clone();
+                        let item_api = api.clone();
                         rsx! {
                             div {
                                 key: "{key}",
@@ -438,8 +441,7 @@ fn render_continue_listening(
                                                         }
                                                     }
                                                     Some(SongCardAction::Share) => {
-                                                        let src = active_source.peek().clone();
-                                                        components::track_row::share_track(menu_track.clone(), src);
+                                                        components::track_row::share_track(menu_track.clone(), item_api.clone());
                                                     }
                                                     None => {}
                                                 }
@@ -693,11 +695,9 @@ fn render_playlists(
     }
     // Radio is the one playlist action a home card can offer without the
     // playlists page's folder/rename state, so the whole menu rides its gate.
-    let can_radio = consume_context::<Signal<::server::source::ActiveSource>>()
+    let can_radio = consume_context::<Signal<api::SourceCapabilities>>()
         .read()
-        .capabilities()
-        .radio
-        .playlist;
+        .playlist_radio;
     let radio_actions = vec![MenuAction::new(
         components::radio_actions::radio_label(),
         components::radio_actions::RADIO_ICON,

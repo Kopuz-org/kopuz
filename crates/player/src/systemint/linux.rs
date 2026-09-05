@@ -2,10 +2,8 @@ use mpris_server::{
     LoopStatus, Metadata, PlaybackStatus, PlayerInterface, Property, RootInterface, Server, Time,
     zbus::fdo,
 };
-use std::sync::{
-    Arc, Mutex, OnceLock,
-    mpsc::{self, Receiver, Sender},
-};
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepeatMode {
@@ -57,15 +55,15 @@ struct MprisState {
     repeat: RepeatMode,
 }
 
-static TX: OnceLock<Sender<SystemEvent>> = OnceLock::new();
-static RX: OnceLock<Mutex<Receiver<SystemEvent>>> = OnceLock::new();
+static TX: OnceLock<UnboundedSender<SystemEvent>> = OnceLock::new();
+static RX: OnceLock<tokio::sync::Mutex<UnboundedReceiver<SystemEvent>>> = OnceLock::new();
 static STATE: OnceLock<Arc<Mutex<MprisState>>> = OnceLock::new();
 static NOTIFY: OnceLock<tokio::sync::mpsc::UnboundedSender<bool>> = OnceLock::new();
 
-fn tx() -> Sender<SystemEvent> {
+fn tx() -> UnboundedSender<SystemEvent> {
     TX.get_or_init(|| {
-        let (tx, rx) = mpsc::channel();
-        RX.set(Mutex::new(rx)).ok();
+        let (tx, rx) = mpsc::unbounded_channel();
+        RX.set(tokio::sync::Mutex::new(rx)).ok();
         tx
     })
     .clone()
@@ -91,7 +89,7 @@ fn notify() {
     }
 }
 
-struct P(Arc<Mutex<MprisState>>, Sender<SystemEvent>);
+struct P(Arc<Mutex<MprisState>>, UnboundedSender<SystemEvent>);
 
 impl RootInterface for P {
     async fn raise(&self) -> fdo::Result<()> {
@@ -286,13 +284,14 @@ fn setup() {
         let (ntx, mut nrx) = tokio::sync::mpsc::unbounded_channel();
         NOTIFY.set(ntx).ok();
         let st = state();
+        let event_tx = tx();
         std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap()
                 .block_on(async {
-                    if let Ok(srv) = Server::new("kopuz", P(st.clone(), tx())).await {
+                    if let Ok(srv) = Server::new("kopuz", P(st.clone(), event_tx)).await {
                         while let Some(seeked) = nrx.recv().await {
                             if seeked {
                                 let (metadata, status, position, shuffle, repeat) = match st.lock()
@@ -325,9 +324,9 @@ fn setup() {
     });
 }
 
-pub fn poll_event() -> Option<SystemEvent> {
+pub async fn wait_event() -> Option<SystemEvent> {
     setup();
-    RX.get()?.lock().ok()?.try_recv().ok()
+    RX.get()?.lock().await.recv().await
 }
 
 pub fn update_now_playing(

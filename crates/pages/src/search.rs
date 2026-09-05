@@ -37,7 +37,7 @@ pub fn Search(
 
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let api = use_context::<std::sync::Arc<dyn api::KopuzApi>>();
     let selected_genre_memo = use_memo(move || selected_genre.read().clone().unwrap_or_default());
     let genre_tracks_res = use_genre_tracks(source, selected_genre_memo);
 
@@ -58,6 +58,8 @@ pub fn Search(
     });
 
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    let api_add = api.clone();
+    let api_create = api.clone();
 
     rsx! {
         div {
@@ -68,13 +70,13 @@ pub fn Search(
                     on_close: move |_| show_playlist_modal.set(false),
                     on_add_to_playlist: move |playlist_id: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
-                            let source = active_source.peek().clone();
+                            let api = api_add.clone();
                             spawn(async move {
                                 let refs: Vec<String> = std::iter::once(path.key().into_owned())
                                     .filter(|r| !r.is_empty())
                                     .collect();
                                 if !refs.is_empty()
-                                    && source.add_to_playlist(&playlist_id, &refs).await.is_ok()
+                                    && api.add_playlist_tracks(playlist_id, refs).await.is_ok()
                                 {
                                     gens.bump(Table::Playlists);
                                 }
@@ -85,13 +87,13 @@ pub fn Search(
                     },
                     on_create_playlist: move |name: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
-                            let source = active_source.peek().clone();
+                            let api = api_create.clone();
                             spawn(async move {
                                 let refs: Vec<String> = std::iter::once(path.key().into_owned())
                                     .filter(|r| !r.is_empty())
                                     .collect();
                                 if !refs.is_empty()
-                                    && source.create_playlist(&name, &refs).await.is_ok()
+                                    && api.create_playlist(name, refs).await.is_ok()
                                 {
                                     gens.bump(Table::Playlists);
                                 }
