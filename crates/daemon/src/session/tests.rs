@@ -267,6 +267,18 @@ fn replace(keys: &[&str]) -> SetQueueRequest {
     }
 }
 
+fn enqueue(mode: QueueMode, keys: &[&str]) -> SetQueueRequest {
+    SetQueueRequest {
+        mode,
+        context: QueueContext::Tracks {
+            keys: keys.iter().map(|key| (*key).to_string()).collect(),
+        },
+        start_index: None,
+        shuffle: None,
+        insert_index: None,
+    }
+}
+
 async fn wait_state(
     api: &LocalApi,
     description: &str,
@@ -941,6 +953,177 @@ async fn end_of_queue_pauses_the_live_engine_session() {
     .await;
     assert_eq!(state.queue.index, Some(0));
     assert!(harness.sink.pause_calls() > pauses_before);
+}
+
+/// Play far enough into the first track that the crossfade into the second is
+/// pending, and leave it there: the fake sink only advances while `drive_until`
+/// pulls, so the transition cannot commit under the assertions that follow.
+async fn armed_crossfade(harness: &Harness) {
+    drive_until(harness, "crossfade armed", |state| {
+        state.fading.is_some()
+            || matches!(
+                state.intent,
+                Intent::Loading {
+                    from_token: Some(_),
+                    ..
+                }
+            )
+    })
+    .await;
+}
+
+async fn queue_titles(api: &LocalApi) -> Vec<String> {
+    api.queue_window(Page::default())
+        .await
+        .expect("window")
+        .items
+        .into_iter()
+        .map(|item| item.track.title)
+        .collect()
+}
+
+#[tokio::test]
+async fn append_during_a_crossfade_survives_the_commit() {
+    let harness = harness(|config| config.crossfade_seconds = 1);
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    armed_crossfade(&harness).await;
+
+    harness
+        .api
+        .set_queue(enqueue(QueueMode::Append, &["track-2"]))
+        .await
+        .expect("append mid-crossfade");
+    assert_eq!(queue_titles(&harness.api).await.len(), 3);
+
+    let state = drive_until(&harness, "crossfade committed", |state| {
+        state.queue.index == Some(1) && state.fading.is_none()
+    })
+    .await;
+    assert_eq!(state.queue.length, 3);
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        vec!["track-0", "track-1", "track-2"]
+    );
+}
+
+#[tokio::test]
+async fn play_next_during_a_crossfade_lands_after_the_incoming_track() {
+    let harness = harness(|config| config.crossfade_seconds = 1);
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    armed_crossfade(&harness).await;
+
+    harness
+        .api
+        .set_queue(enqueue(QueueMode::PlayNext, &["track-2"]))
+        .await
+        .expect("play next mid-crossfade");
+
+    let state = drive_until(&harness, "crossfade committed", |state| {
+        state.queue.index == Some(1) && state.fading.is_none()
+    })
+    .await;
+    assert_eq!(
+        state.track.as_ref().map(|track| track.title.as_str()),
+        Some("track-1")
+    );
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        vec!["track-0", "track-1", "track-2"]
+    );
+}
+
+#[tokio::test]
+async fn remove_during_a_crossfade_is_not_resurrected_by_the_commit() {
+    let harness = harness(|config| config.crossfade_seconds = 1);
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1", "track-2"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    armed_crossfade(&harness).await;
+
+    harness
+        .api
+        .queue_edit(QueueEdit::Remove { index: 2 })
+        .await
+        .expect("remove the tail mid-crossfade");
+
+    let state = drive_until(&harness, "crossfade committed", |state| {
+        state.queue.index == Some(1) && state.fading.is_none()
+    })
+    .await;
+    assert_eq!(state.queue.length, 2);
+    assert_eq!(queue_titles(&harness.api).await, vec!["track-0", "track-1"]);
+}
+
+#[tokio::test]
+async fn removing_the_track_being_faded_into_is_refused() {
+    let harness = harness(|config| config.crossfade_seconds = 1);
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    armed_crossfade(&harness).await;
+
+    let error = harness
+        .api
+        .queue_edit(QueueEdit::Remove { index: 1 })
+        .await
+        .expect_err("the incoming track cannot be removed");
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+
+    let state = drive_until(&harness, "crossfade committed", |state| {
+        state.queue.index == Some(1) && state.fading.is_none()
+    })
+    .await;
+    assert_eq!(
+        state.track.as_ref().map(|track| track.title.as_str()),
+        Some("track-1")
+    );
+}
+
+#[tokio::test]
+async fn move_during_a_crossfade_follows_the_incoming_track() {
+    let harness = harness(|config| config.crossfade_seconds = 1);
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1", "track-2"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    armed_crossfade(&harness).await;
+
+    harness
+        .api
+        .queue_edit(QueueEdit::Move { from: 2, to: 1 })
+        .await
+        .expect("move the tail ahead of the incoming track");
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        vec!["track-0", "track-2", "track-1"]
+    );
+
+    let state = drive_until(&harness, "crossfade committed", |state| {
+        state.fading.is_none() && state.queue.index == Some(2)
+    })
+    .await;
+    assert_eq!(
+        state.track.as_ref().map(|track| track.title.as_str()),
+        Some("track-1")
+    );
 }
 
 #[tokio::test]

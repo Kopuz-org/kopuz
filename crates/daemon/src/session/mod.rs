@@ -547,8 +547,13 @@ enum TransitionStage {
     Fading,
 }
 
+/// A crossfade in flight. The queue itself is not forked: only the logical
+/// position the pointer will move to once the engine reports the switch, so
+/// queue edits arriving mid-fade land on the one live model and survive the
+/// commit (issue #656). Structural edits remap `to_position` the same way they
+/// remap `current`.
 struct PendingTransition {
-    model: QueueModel,
+    to_position: usize,
     to_token: u64,
     from_token: u64,
     stage: TransitionStage,
@@ -649,8 +654,11 @@ impl Session {
             } => {
                 let result = if self.queue_request_seq.load(Ordering::Acquire) == request_id {
                     if request.mode == QueueMode::Insert {
-                        self.model
-                            .insert_at(request.insert_index.unwrap_or_default() as usize, tracks);
+                        let count = tracks.len();
+                        let at = (request.insert_index.unwrap_or_default() as usize)
+                            .min(self.model.len());
+                        self.model.insert_at(at, tracks);
+                        self.shift_transition_target(at, count);
                         Ok(self.publish(state_tx, true))
                     } else {
                         self.apply_queue_tracks(
@@ -822,7 +830,26 @@ impl Session {
             PlayerCommand::SetMode { shuffle, loop_mode } => {
                 queue_changed = shuffle.is_some();
                 if let Some(on) = shuffle {
+                    // Toggling rebuilds the permutation around the outgoing
+                    // track, so a pending crossfade target has to be re-found
+                    // by the physical index it held before the rebuild.
+                    let target = match self.pending_transition.as_ref() {
+                        Some(pending) => self.model.physical_index_of(pending.to_position),
+                        None => None,
+                    };
                     self.model.set_shuffle(on);
+                    if let Some(physical) = target {
+                        let position = if self.model.shuffle() {
+                            self.model.shuffle_position_of(physical)
+                        } else {
+                            Some(physical)
+                        };
+                        if let (Some(pending), Some(position)) =
+                            (self.pending_transition.as_mut(), position)
+                        {
+                            pending.to_position = position;
+                        }
+                    }
                 }
                 if let Some(mode) = loop_mode {
                     self.model.set_loop_mode(mode);
@@ -855,6 +882,10 @@ impl Session {
                     return Err(ApiError::invalid_input("queue position out of range"));
                 }
                 self.model.move_item(from, to);
+                if let Some(pending) = self.pending_transition.as_mut() {
+                    pending.to_position =
+                        QueueModel::remap_queue_index(pending.to_position, from, to);
+                }
                 Ok(self.publish(state_tx, true))
             }
             QueueEdit::Remove { index } => {
@@ -867,7 +898,24 @@ impl Session {
                         "cannot remove the playing position; skip or stop first",
                     ));
                 }
+                // The track a crossfade is already fading into is as much "the
+                // playing position" as the outgoing one; removing it would land
+                // the commit on its neighbour while its audio keeps running.
+                if self
+                    .pending_transition
+                    .as_ref()
+                    .is_some_and(|pending| pending.to_position == index)
+                {
+                    return Err(ApiError::invalid_input(
+                        "cannot remove the track being faded into; skip or stop first",
+                    ));
+                }
                 self.model.remove(index);
+                if let Some(pending) = self.pending_transition.as_mut()
+                    && index < pending.to_position
+                {
+                    pending.to_position -= 1;
+                }
                 Ok(self.publish(state_tx, true))
             }
         }
@@ -936,8 +984,16 @@ impl Session {
                     self.stop_playback();
                 }
             }
+            // Appending lands past every existing position, so a pending
+            // crossfade target needs no remap.
             QueueMode::Append => self.model.add(tracks),
-            QueueMode::PlayNext => self.model.insert_next(tracks),
+            QueueMode::PlayNext => match self.pending_transition.as_ref() {
+                // Mid-crossfade the queue still reads as the outgoing track,
+                // but "next" means after the one already fading in, or the
+                // insertion would be skipped the moment the fade commits.
+                Some(pending) => self.model.insert_at(pending.to_position + 1, tracks),
+                None => self.model.insert_next(tracks),
+            },
             QueueMode::Insert => {
                 return Err(ApiError::invalid_input(
                     "insert mode requires an explicit logical position",
@@ -959,9 +1015,8 @@ impl Session {
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<(), ApiError> {
         if allow_crossfade {
-            let mut candidate = self.model.clone();
-            if let NextOutcome::Play(idx) = candidate.advance_next()
-                && !self.start_load(idx, true, Some(candidate))
+            if let NextOutcome::Play(idx) = self.model.peek_next()
+                && !self.start_load(idx, true)
             {
                 return Err(Self::unavailable_track_error());
             }
@@ -1050,7 +1105,7 @@ impl Session {
                 if !is_radio {
                     self.store_pending_resume();
                 }
-                self.start_load(idx, false, None);
+                self.start_load(idx, false);
             }
             return;
         }
@@ -1357,7 +1412,13 @@ impl Session {
             self.pending_transition = Some(pending);
             return false;
         }
-        self.model = pending.model;
+        if self.model.jump_to_position(pending.to_position).is_none() {
+            tracing::warn!(
+                position = pending.to_position,
+                queue_len = self.model.len(),
+                "the crossfade target left the queue; keeping the current pointer"
+            );
+        }
         true
     }
 
@@ -1384,7 +1445,7 @@ impl Session {
 
     fn start_immediate_load(&mut self, model: QueueModel, idx: usize) -> Result<(), ApiError> {
         let previous = std::mem::replace(&mut self.model, model);
-        if !self.start_load(idx, false, None) {
+        if !self.start_load(idx, false) {
             self.model = previous;
             return Err(Self::unavailable_track_error());
         }
@@ -1398,9 +1459,20 @@ impl Session {
         )
     }
 
-    /// Undo either a resolving crossfade or a running fade. The queue model is
-    /// still outgoing until commit, so discarding the candidate also undoes
-    /// its history/index mutation.
+    /// Keep a resolving crossfade aimed at the same track after an insertion.
+    /// The transition commits by position, so an unshifted target would land on
+    /// whatever the inserted tracks pushed aside.
+    fn shift_transition_target(&mut self, at: usize, by: usize) {
+        if let Some(pending) = self.pending_transition.as_mut()
+            && at <= pending.to_position
+        {
+            pending.to_position += by;
+        }
+    }
+
+    /// Undo either a resolving crossfade or a running fade. The queue pointer
+    /// never left the outgoing track, so dropping the pending target is the
+    /// whole undo.
     fn revert_transition(&mut self) -> Option<u64> {
         let pending = self.pending_transition.take()?;
         if pending.stage == TransitionStage::Loading {
@@ -1495,13 +1567,14 @@ impl Session {
         duration_secs: Option<u64>,
         bitrate: Option<u32>,
     ) {
-        let model = self
+        // A queue edit may have shifted a crossfade candidate since its load
+        // started, so probe results follow the remapped position.
+        let idx = self
             .pending_transition
-            .as_mut()
+            .as_ref()
             .filter(|pending| pending.to_token == token)
-            .map(|pending| &mut pending.model)
-            .unwrap_or(&mut self.model);
-        if let Some(track) = model.track_at_mut(idx) {
+            .map_or(idx, |pending| pending.to_position);
+        if let Some(track) = self.model.track_at_mut(idx) {
             if let Some(duration) = duration_secs.filter(|duration| *duration > 0) {
                 track.duration = duration;
             }

@@ -128,10 +128,9 @@ impl Session {
     }
 
     fn arm_crossfade(&mut self) {
-        let mut candidate = self.model.clone();
-        let NextOutcome::Play(idx) = candidate.advance_next() else {
+        let NextOutcome::Play(idx) = self.model.peek_next() else {
             return;
         };
-        self.start_load(idx, true, Some(candidate));
+        self.start_load(idx, true);
     }
 }

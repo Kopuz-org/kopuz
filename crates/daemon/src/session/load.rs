@@ -7,29 +7,17 @@ impl Session {
     /// Two-phase load pipeline. Classification is mutation-free except stale
     /// offline-cache eviction; only after every early bail do we cancel the
     /// old load, allocate a token, and publish Loading intent.
-    pub(super) fn start_load(
-        &mut self,
-        idx: usize,
-        allow_crossfade: bool,
-        transition_model: Option<QueueModel>,
-    ) -> bool {
-        let source_model = transition_model.as_ref().unwrap_or(&self.model);
-        let Some(track) = source_model.track_at(idx).cloned() else {
+    /// `idx` is a logical position in the live queue; `allow_crossfade` marks it
+    /// as a transition candidate, which means the pointer stays on the outgoing
+    /// track until the engine reports the switch.
+    pub(super) fn start_load(&mut self, idx: usize, allow_crossfade: bool) -> bool {
+        let Some(track) = self.model.track_at(idx).cloned() else {
             return false;
         };
-        let is_transition_candidate = transition_model.is_some();
         let (restore_seek, clear_pending_resume) = self.pending_resume_seek(&track);
         let use_crossfade = allow_crossfade
             && self.should_crossfade()
             && restore_seek.is_none_or(|position| position.is_zero());
-        let transition_model = if use_crossfade {
-            let Some(model) = transition_model else {
-                return false;
-            };
-            Some(model)
-        } else {
-            None
-        };
         let crossfade_duration = Duration::from_secs(self.config.crossfade_seconds as u64);
         let is_radio = track.duration == u64::MAX;
         let (is_server, item_id) = match &track.id {
@@ -119,7 +107,7 @@ impl Session {
             // A crossfade candidate that cannot resolve is dropped whole; the
             // end-of-track advance retries on the committed model and reports
             // through the branch below.
-            if is_transition_candidate {
+            if allow_crossfade {
                 return false;
             }
             // The caller already moved the queue pointer and will publish, so
@@ -216,9 +204,9 @@ impl Session {
             self.radio_task = Some(handle);
         }
 
-        if let Some(model) = transition_model {
+        if use_crossfade {
             self.pending_transition = Some(PendingTransition {
-                model,
+                to_position: idx,
                 to_token: token,
                 from_token,
                 stage: TransitionStage::Loading,
@@ -396,7 +384,8 @@ impl Session {
                     .pending_transition
                     .as_ref()
                     .filter(|pending| pending.to_token == finished.token)
-                    .and_then(|pending| pending.model.current_track().cloned())
+                    .map(|pending| pending.to_position)
+                    .and_then(|position| self.model.track_at(position).cloned())
                     .or_else(|| self.model.current_track().cloned());
                 if let Some(track) = committed_track.as_ref() {
                     tracing::info!(
