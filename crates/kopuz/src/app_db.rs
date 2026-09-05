@@ -2,6 +2,11 @@ use std::sync::Arc;
 
 pub static DB_HANDLE: std::sync::OnceLock<db::Db> = std::sync::OnceLock::new();
 pub static BOOT_CONFIG: std::sync::OnceLock<config::AppConfig> = std::sync::OnceLock::new();
+/// Address and bearer token of the daemon this process attached to. Only the
+/// endpoint is kept: the client itself is built on the runtime that will use it
+/// (see [`remote_api`]).
+#[cfg(not(target_os = "android"))]
+static REMOTE_ENDPOINT: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
 static REMOTE_API: std::sync::OnceLock<Arc<dyn api::KopuzApi>> = std::sync::OnceLock::new();
 static DATABASE_LEASE: std::sync::OnceLock<daemon::DatabaseLease> = std::sync::OnceLock::new();
 static STARTUP_ERROR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -11,11 +16,43 @@ static DISCOVERY_GUARD: std::sync::OnceLock<daemon::discovery::DiscoveryGuard> =
 
 #[cfg(not(target_os = "android"))]
 pub fn is_embedded() -> bool {
-    REMOTE_API.get().is_none()
+    REMOTE_ENDPOINT.get().is_none()
 }
 
+/// The attached daemon's client, built on first use and cached.
+///
+/// Tonic spawns a lazy channel's connection worker onto whichever runtime
+/// constructs it, so the client must not be built during discovery: that
+/// runtime is temporary, and its drop would abort the worker and leave every
+/// later RPC failing on a dead channel (issue #661). Call this from the
+/// long-lived runtime that owns the app.
 pub fn remote_api() -> Option<Arc<dyn api::KopuzApi>> {
-    REMOTE_API.get().cloned()
+    if let Some(api) = REMOTE_API.get() {
+        return Some(api.clone());
+    }
+    connect_remote_api()
+}
+
+/// Android always embeds the daemon, and the gRPC client is a desktop-only
+/// dependency.
+#[cfg(target_os = "android")]
+fn connect_remote_api() -> Option<Arc<dyn api::KopuzApi>> {
+    None
+}
+
+#[cfg(not(target_os = "android"))]
+fn connect_remote_api() -> Option<Arc<dyn api::KopuzApi>> {
+    let (addr, token) = REMOTE_ENDPOINT.get()?;
+    match client::GrpcApi::new(addr.clone(), token.clone()) {
+        Ok(api) => {
+            let _ = REMOTE_API.set(Arc::new(api));
+            REMOTE_API.get().cloned()
+        }
+        Err(error) => {
+            tracing::error!(%error, %addr, "could not build the Kopuz daemon client");
+            None
+        }
+    }
 }
 
 /// A fatal backend-selection failure recorded before the window exists; the
@@ -37,10 +74,10 @@ pub fn select_desktop_backend() -> Result<bool, String> {
         .map_err(|error| format!("could not start the daemon discovery runtime: {error}"))?;
     let discovered_tracing = rt.block_on(async {
         let discovery_path = daemon::discovery::path();
-        if let Some((api, config)) = discovered_api(discovery_path.as_deref()).await? {
+        if let Some((endpoint, config)) = discovered_api(discovery_path.as_deref()).await? {
             let tracing_enabled = config.tracing_enabled;
             let _ = BOOT_CONFIG.set(config);
-            let _ = REMOTE_API.set(api);
+            let _ = REMOTE_ENDPOINT.set(endpoint);
             return Ok(Some(tracing_enabled));
         }
 
@@ -52,10 +89,10 @@ pub fn select_desktop_backend() -> Result<bool, String> {
                 None => {
                     for _ in 0..50 {
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                        if let Some((api, config)) = discovered_api(Some(path)).await? {
+                        if let Some((endpoint, config)) = discovered_api(Some(path)).await? {
                             let tracing_enabled = config.tracing_enabled;
                             let _ = BOOT_CONFIG.set(config);
-                            let _ = REMOTE_API.set(api);
+                            let _ = REMOTE_ENDPOINT.set(endpoint);
                             return Ok(Some(tracing_enabled));
                         }
                     }
@@ -91,27 +128,32 @@ pub fn select_desktop_backend() -> Result<bool, String> {
     }))
 }
 
+/// Probes the discovered daemon and reads its configuration, returning the
+/// endpoint to reconnect to rather than the client that did the probing: this
+/// runs on a throwaway runtime, and a tonic channel does not outlive the
+/// runtime it was built on.
 #[cfg(not(target_os = "android"))]
 async fn discovered_api(
     path: Option<&std::path::Path>,
-) -> Result<Option<(Arc<dyn api::KopuzApi>, config::AppConfig)>, String> {
+) -> Result<Option<((String, String), config::AppConfig)>, String> {
+    use api::KopuzApi as _;
+
     let Some(record) = path.and_then(daemon::discovery::read) else {
         return Ok(None);
     };
     if !daemon::discovery::is_serving(&record).await {
         return Ok(None);
     }
-    let api: Arc<dyn api::KopuzApi> = Arc::new(
-        client::GrpcApi::new(format!("127.0.0.1:{}", record.port), record.token)
-            .map_err(|error| format!("could not connect to the Kopuz daemon: {error}"))?,
-    );
+    let endpoint = (format!("127.0.0.1:{}", record.port), record.token);
+    let api = client::GrpcApi::new(endpoint.0.clone(), endpoint.1.clone())
+        .map_err(|error| format!("could not connect to the Kopuz daemon: {error}"))?;
     let view = api
         .config()
         .await
         .map_err(|error| format!("could not load daemon configuration: {error}"))?;
     let config = serde_json::from_value(view.config)
         .map_err(|error| format!("could not decode daemon configuration: {error}"))?;
-    Ok(Some((api, config)))
+    Ok(Some((endpoint, config)))
 }
 
 pub fn init_blocking() -> db::Db {
