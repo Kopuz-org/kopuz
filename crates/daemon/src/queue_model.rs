@@ -119,10 +119,12 @@ impl QueueModel {
         }
     }
 
-    /// The Next decision: repairs the shuffle permutation first so end-of-queue
-    /// is measured against a permutation that still covers the queue. On
-    /// `Play`, history is pushed and `current` moves.
-    pub fn advance_next(&mut self) -> NextOutcome {
+    /// The Next decision without taking it: repairs the shuffle permutation so
+    /// end-of-queue is measured against a permutation that still covers the
+    /// queue, but leaves `current` and history alone. A crossfade candidate is
+    /// chosen this way, because the queue must keep reading as the outgoing
+    /// track until the engine actually switches.
+    pub fn peek_next(&mut self) -> NextOutcome {
         let idx = self.current;
         let queue_len = if self.shuffle {
             self.repair_shuffle_order();
@@ -135,21 +137,24 @@ impl QueueModel {
             return NextOutcome::Empty;
         }
 
-        match self.loop_mode {
-            LoopMode::Track => {
-                self.push_history_dedup();
-                NextOutcome::Play(idx)
-            }
-            _ => {
-                if !Self::has_following_track(idx, queue_len, self.loop_mode) {
-                    return NextOutcome::EndOfQueue;
-                }
-                let next_idx = if idx + 1 < queue_len { idx + 1 } else { 0 };
-                self.push_history_dedup();
-                self.current = next_idx;
-                NextOutcome::Play(next_idx)
-            }
+        if self.loop_mode == LoopMode::Track {
+            return NextOutcome::Play(idx);
         }
+        if !Self::has_following_track(idx, queue_len, self.loop_mode) {
+            return NextOutcome::EndOfQueue;
+        }
+        NextOutcome::Play(if idx + 1 < queue_len { idx + 1 } else { 0 })
+    }
+
+    /// The Next decision, taken: on `Play`, history is pushed and `current`
+    /// moves to the position [`Self::peek_next`] reported.
+    pub fn advance_next(&mut self) -> NextOutcome {
+        let outcome = self.peek_next();
+        if let NextOutcome::Play(idx) = outcome {
+            self.push_history_dedup();
+            self.current = idx;
+        }
+        outcome
     }
 
     /// The Previous decision, minus the caller-owned gates (crossfade revert,
