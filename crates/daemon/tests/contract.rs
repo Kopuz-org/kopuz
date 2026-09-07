@@ -182,7 +182,7 @@ async fn panicked_jobs_finish_as_failed_and_emit_an_event() {
 
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            if let Ok((_, ApiEvent::JobFinished { id, ok, error, .. })) = events.recv().await
+            if let Ok(ApiEvent::JobFinished { id, ok, error, .. }) = events.recv().await
                 && id == job.job_id
             {
                 assert!(!ok);
@@ -495,4 +495,22 @@ async fn folders_and_stats_agree_across_transports() {
     let local_stats = pair.local.stats().await.expect("stats locally");
     let wire_stats = pair.wire.stats().await.expect("stats over the wire");
     assert_eq!(local_stats, wire_stats);
+}
+
+/// The other half of the UNAVAILABLE split: tonic raises that code itself
+/// when it cannot reach the socket, and the daemon sends it for a media
+/// server that did not answer. A frontend has to tell those apart to know
+/// whether to show "kopuzd is not running" or "your server is down".
+#[tokio::test]
+async fn a_missing_daemon_is_not_reported_as_a_dead_media_server() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let never_bound = dir.path().join("kopuzd.sock");
+    let api = client::GrpcApi::new(&never_bound).expect("client builds");
+
+    let error = api.player_state().await.expect_err("nothing is listening");
+    assert_eq!(
+        error.code,
+        ErrorCode::DaemonGone,
+        "a socket with no daemon behind it is DaemonGone, not SourceUnreachable"
+    );
 }

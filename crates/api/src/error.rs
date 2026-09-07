@@ -8,6 +8,9 @@ pub enum ErrorCode {
     Conflict,
     SourceAuthExpired,
     SourceUnreachable,
+    /// The daemon is not running, or its socket went away mid-call. Distinct
+    /// from SourceUnreachable, which is a media server failing to answer.
+    DaemonGone,
     Unsupported,
     Internal,
 }

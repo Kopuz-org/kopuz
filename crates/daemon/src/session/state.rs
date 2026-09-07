@@ -1,5 +1,5 @@
-//! State projection: revisioned publishes, the sequenced event stream
-//! with its replay ring, position anchors, and the wire snapshot.
+//! State projection: revisioned publishes, the event stream
+//! position anchors, and the wire snapshot.
 
 use super::*;
 
@@ -27,18 +27,12 @@ impl Session {
         CommandAck { rev: self.rev }
     }
 
-    /// Sole event egress: stamps the monotonic sequence, records the event in
-    /// the replay ring, then broadcasts. Subscribe cursors key off these
-    /// numbers.
+    /// Sole event egress. A subscriber that falls behind the channel is
+    /// told to resync rather than silently losing events; there is no
+    /// replay log, because a peer that loses this stream has lost the
+    /// process that owns it.
     pub(super) fn emit(&self, event: ApiEvent) {
-        let sequence = self.seq.fetch_add(1, Ordering::AcqRel) + 1;
-        if let Ok(mut history) = self.history.lock() {
-            if history.len() >= EVENT_BUFFER {
-                history.pop_front();
-            }
-            history.push_back((sequence, event.clone()));
-        }
-        let _ = self.events.send((sequence, event));
+        let _ = self.events.send(event);
     }
 
     pub(super) fn publish_position_anchor(

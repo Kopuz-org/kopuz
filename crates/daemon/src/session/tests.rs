@@ -525,7 +525,7 @@ async fn engine_position_ticks_do_not_become_one_hz_api_events() {
     let mut anchors = 0;
     loop {
         match events.try_recv() {
-            Ok((_, ApiEvent::PlayerPosition { .. })) => anchors += 1,
+            Ok(ApiEvent::PlayerPosition { .. }) => anchors += 1,
             Ok(_) | Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
             Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed) => {
                 break;
@@ -1092,40 +1092,6 @@ async fn queue_edit_moves_removes_and_guards_the_playing_row() {
         state.track.as_ref().map(|t| t.title.as_str()),
         Some("/c.wav")
     );
-}
-
-#[tokio::test]
-async fn replay_ring_serves_gaps_and_flags_overflow() {
-    let harness = harness(|_| {});
-    harness
-        .api
-        .player_command(PlayerCommand::SetVolume { volume: 0.5 })
-        .await
-        .expect("volume");
-
-    let (resync, replayed) = harness.api.session.replay_since(0);
-    assert!(!resync);
-    assert!(!replayed.is_empty());
-    let ids: Vec<u64> = replayed.iter().map(|(sequence, _)| *sequence).collect();
-    assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
-
-    let newest = *ids.last().expect("ids");
-    let (resync, tail) = harness.api.session.replay_since(newest);
-    assert!(!resync);
-    assert!(tail.is_empty());
-
-    for step in 0..(EVENT_BUFFER as u64 + 40) {
-        harness
-            .api
-            .player_command(PlayerCommand::SetVolume {
-                volume: (step % 100) as f32 / 100.0,
-            })
-            .await
-            .expect("volume");
-    }
-    let (resync, dropped) = harness.api.session.replay_since(1);
-    assert!(resync);
-    assert!(dropped.is_empty());
 }
 
 #[tokio::test]

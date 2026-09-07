@@ -13,9 +13,9 @@ syntax = "proto3";
 package kopuz.v1;
 
 service Kopuz {
-  // Replays events after `after_sequence` and then follows the live event
-  // stream. If the cursor is older than the replay window, the server emits
-  // one `resync` event and continues with live events.
+  // Follows the live event stream from the moment of subscription. A
+  // subscriber that falls behind gets one `resync` event and keeps going;
+  // fetch the snapshots again when you see it.
   rpc Subscribe(SubscribeRequest) returns (stream EventEnvelope);
 
   rpc Play(PlayRequest) returns (MutationResult);
@@ -76,15 +76,11 @@ message RemoveDownloadResponse {}
 // ---------------- event subscription ----------------
 
 message SubscribeRequest {
-  // Zero starts at the current live position. A non-zero value replays events
-  // strictly newer than this sequence when they are still in the ring.
-  uint64 after_sequence = 1;
+  reserved 1; // was after_sequence, from the replay-cursor design
 }
 
 message EventEnvelope {
-  // Zero is reserved for the synthetic `resync` event and does not advance
-  // the client's replay cursor.
-  uint64 sequence = 1;
+  reserved 1; // was sequence, from the replay-cursor design
   Event event = 2;
 }
 
@@ -517,6 +513,7 @@ enum ErrorCode {
   ERROR_CODE_CONFLICT = 4;
   ERROR_CODE_SOURCE_AUTH_EXPIRED = 5;
   ERROR_CODE_SOURCE_UNREACHABLE = 6;
+  ERROR_CODE_DAEMON_GONE = 9;
   ERROR_CODE_UNSUPPORTED = 7;
   ERROR_CODE_INTERNAL = 8;
 }

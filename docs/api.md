@@ -65,10 +65,16 @@ nothing rides alongside it in metadata:
 | ALREADY_EXISTS | `conflict` | a single-flight job of that kind is already running |
 | UNIMPLEMENTED | `unsupported` | this daemon runs without that service |
 | UNAVAILABLE | `source_unreachable` | the media server did not answer |
+| UNAVAILABLE | `daemon_gone` | *raised locally* — nothing is listening on the socket |
 | INTERNAL | `internal` | daemon-side failure |
 
 A failed mutation fails its own RPC with that status, so ordinary gRPC
-error handling applies. The `ErrorCode` enum in the schema is for failures
+error handling applies. Those last two share a status code because gRPC has one for "unreachable"
+and both are: the daemon distinguishes them by whether the status carries a
+transport cause, which only one tonic raised itself does. `daemon_gone` is
+never sent -- the daemon cannot report its own absence.
+
+The `ErrorCode` enum in the schema is for failures
 reported *inside* a message, where there is no status to carry them, such
 as `JobStatus.error`. Treat an unrecognized status code as `internal`.
 
@@ -81,20 +87,22 @@ Playback commands are ordinary unary RPCs: `Play`, `Pause`, `Toggle`,
 wait for your mirror to catch up before trusting it.
 
 `Kopuz/Subscribe` is the event stream, one server-streaming RPC per client.
+It carries events from the moment you subscribe -- there is no resume
+cursor and no replay log. Both processes live and die together, so a stream
+that ends means the daemon is gone, not that a connection blipped; the
+answer is to reattach and refetch, which is what a cursor would have made
+you do anyway.
 
-- **`SubscribeRequest.after_sequence`** is the resume cursor: the highest
-  event sequence you saw before a reconnect, or 0 to start at the current
-  live position. The daemon replays newer events from a 512-event ring, or
-  sends one `resync` event when the gap is too old; then live events flow.
-  On `resync`, refetch `GetPlayerState` and your queue window.
-- **Events** arrive in an `EventEnvelope` with a monotonic `sequence` (your
-  next resume point). The synthetic `resync` envelope uses sequence `0` and
-  does not advance the cursor. The kinds mirror the state machine:
-  `player_state` (full snapshot on every transition), `position` (new
-  anchor after seek/pause), `buffered`, `queue_changed`,
+- **Attach order.** Subscribe first, then fetch `GetPlayerState` and your
+  queue window. Events emitted while the snapshot is in flight are already
+  buffered for you, so nothing is missed.
+- **`resync`** means your mirror is untrustworthy: either you fell behind
+  the buffer, or the daemon restarted under you. Refetch the snapshots.
+- **Events** arrive in an `EventEnvelope`. The kinds mirror the state
+  machine: `player_state` (full snapshot on every transition), `position`
+  (new anchor after seek/pause), `buffered`, `queue_changed`,
   `library_invalidated {table, generation}`, `job_progress`,
-  `job_finished`, `config_changed`, `source_status`, `notice`,
-  `resync`.
+  `job_finished`, `config_changed`, `source_status`, `notice`, `resync`.
 
 Two rules make a frontend feel native:
 

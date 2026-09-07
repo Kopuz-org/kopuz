@@ -7,7 +7,6 @@
 //! The reflection services are registered so `grpcurl` can list the schema,
 //! which is public in the repository anyway.
 
-use std::collections::VecDeque;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -41,15 +40,14 @@ const ARTWORK_CHUNK: usize = 256 * 1024;
 
 type ServerStream<T> = Pin<Box<dyn Stream<Item = Result<T, Status>> + Send + 'static>>;
 
-fn event_message(sequence: u64, event: &ApiEvent) -> proto::EventEnvelope {
+fn event_message(event: &ApiEvent) -> proto::EventEnvelope {
     proto::EventEnvelope {
-        sequence,
         event: Some(convert::event_to_proto(event)),
     }
 }
 
 fn resync_message() -> proto::EventEnvelope {
-    event_message(0, &ApiEvent::Resync)
+    event_message(&ApiEvent::Resync)
 }
 
 impl KopuzGrpc {
@@ -62,34 +60,19 @@ impl KopuzGrpc {
     }
 }
 
-/// Replay backlog first, then the live broadcast. `floor` drops the live
-/// events the replay snapshot already covered.
+/// The live broadcast, nothing else. A subscriber that falls behind is
+/// told to resync; there is no backlog to replay, because a peer that lost
+/// this stream lost the process that owns it.
 struct EventSubscription {
-    pending: VecDeque<proto::EventEnvelope>,
-    live: broadcast::Receiver<(u64, ApiEvent)>,
-    floor: u64,
+    live: broadcast::Receiver<ApiEvent>,
 }
 
 impl EventSubscription {
     async fn next(mut self) -> Option<(Result<proto::EventEnvelope, Status>, Self)> {
-        if let Some(message) = self.pending.pop_front() {
-            return Some((Ok(message), self));
-        }
-
-        loop {
-            match self.live.recv().await {
-                Ok((sequence, event)) => {
-                    if sequence <= self.floor {
-                        continue;
-                    }
-                    self.floor = sequence;
-                    return Some((Ok(event_message(sequence, &event)), self));
-                }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    return Some((Ok(resync_message()), self));
-                }
-                Err(broadcast::error::RecvError::Closed) => return None,
-            }
+        match self.live.recv().await {
+            Ok(event) => Some((Ok(event_message(&event)), self)),
+            Err(broadcast::error::RecvError::Lagged(_)) => Some((Ok(resync_message()), self)),
+            Err(broadcast::error::RecvError::Closed) => None,
         }
     }
 }
@@ -101,37 +84,12 @@ impl Kopuz for KopuzGrpc {
 
     async fn subscribe(
         &self,
-        request: Request<proto::SubscribeRequest>,
+        _request: Request<proto::SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
-        let after_sequence = request.into_inner().after_sequence;
-        // Subscribe before taking the replay snapshot so events emitted while
-        // this RPC is being set up remain buffered for the live phase.
         let live = self.0.session.subscribe();
-        let (needs_resync, replayed) = if after_sequence > 0 {
-            self.0.session.replay_since(after_sequence)
-        } else {
-            (false, Vec::new())
-        };
-        let floor = replayed
-            .last()
-            .map(|(sequence, _)| *sequence)
-            .or_else(|| (!needs_resync && after_sequence > 0).then_some(after_sequence))
-            .unwrap_or(0);
-        let mut pending = VecDeque::new();
-        if needs_resync {
-            pending.push_back(resync_message());
-        }
-        pending.extend(
-            replayed
-                .iter()
-                .map(|(sequence, event)| event_message(*sequence, event)),
-        );
-        let subscription = EventSubscription {
-            pending,
-            live,
-            floor,
-        };
-        let stream = futures_util::stream::unfold(subscription, |subscription| subscription.next());
+        let stream = futures_util::stream::unfold(EventSubscription { live }, |subscription| {
+            subscription.next()
+        });
         Ok(Response::new(Box::pin(stream)))
     }
 

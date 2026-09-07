@@ -219,7 +219,7 @@ impl api::KopuzApi for LocalApi {
         let rx = self.session.subscribe();
         futures_util::stream::unfold(rx, |mut rx| async move {
             match rx.recv().await {
-                Ok((_, event)) => Some((event, rx)),
+                Ok(event) => Some((event, rx)),
                 Err(broadcast::error::RecvError::Lagged(_)) => Some((ApiEvent::Resync, rx)),
                 Err(broadcast::error::RecvError::Closed) => None,
             }

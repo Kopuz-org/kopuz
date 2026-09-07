@@ -57,10 +57,10 @@ fn interpolated_ms(state: &PlayerState, received: Instant) -> u64 {
 }
 
 async fn next_state(
-    events: &mut broadcast::Receiver<(u64, ApiEvent)>,
+    events: &mut broadcast::Receiver<ApiEvent>,
 ) -> Option<Option<Box<PlayerState>>> {
     match events.recv().await {
-        Ok((_, ApiEvent::PlayerState(state))) => Some(Some(state)),
+        Ok(ApiEvent::PlayerState(state)) => Some(Some(state)),
         Ok(_) => Some(None),
         Err(broadcast::error::RecvError::Lagged(_)) => Some(None),
         Err(broadcast::error::RecvError::Closed) => None,

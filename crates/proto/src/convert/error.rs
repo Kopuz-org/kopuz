@@ -7,6 +7,7 @@ pub fn error_code_to_proto(value: api::ErrorCode) -> ErrorCode {
         api::ErrorCode::Conflict => ErrorCode::Conflict,
         api::ErrorCode::SourceAuthExpired => ErrorCode::SourceAuthExpired,
         api::ErrorCode::SourceUnreachable => ErrorCode::SourceUnreachable,
+        api::ErrorCode::DaemonGone => ErrorCode::DaemonGone,
         api::ErrorCode::Unsupported => ErrorCode::Unsupported,
         api::ErrorCode::Internal => ErrorCode::Internal,
     }
@@ -19,6 +20,7 @@ pub fn error_code_from_proto(value: i32) -> api::ErrorCode {
         ErrorCode::Conflict => api::ErrorCode::Conflict,
         ErrorCode::SourceAuthExpired => api::ErrorCode::SourceAuthExpired,
         ErrorCode::SourceUnreachable => api::ErrorCode::SourceUnreachable,
+        ErrorCode::DaemonGone => api::ErrorCode::DaemonGone,
         ErrorCode::Unsupported => api::ErrorCode::Unsupported,
         ErrorCode::Internal | ErrorCode::Unspecified => api::ErrorCode::Internal,
     }

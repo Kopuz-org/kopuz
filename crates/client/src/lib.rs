@@ -7,11 +7,12 @@
 //!
 //! The transport is a Unix domain socket in the user's runtime dir. There
 //! are no credentials: the socket's file mode is the access control, so the
-//! kernel decides who may connect.
+//! kernel decides who may connect. The path is stable across daemon
+//! restarts, so `events()` reattaches to it and reports the gap as
+//! [`api::ApiEvent::Resync`].
 //!
-//! Playback mutations use typed unary RPCs. `events()` owns a reconnecting
-//! server-streaming subscription and resumes with the last sequence it
-//! applied, surfacing a ring overrun as [`api::ApiEvent::Resync`].
+//! Playback mutations use typed unary RPCs. `events()` owns a reattaching
+//! server-streaming subscription.
 
 use std::path::{Path, PathBuf};
 
@@ -327,39 +328,38 @@ impl KopuzApi for GrpcApi {
 }
 
 async fn run_event_loop(client: Client, tx: tokio::sync::mpsc::UnboundedSender<api::ApiEvent>) {
-    let mut last_sequence: u64 = 0;
+    let mut attached = false;
     loop {
-        match stream_once(client.clone(), &tx, &mut last_sequence).await {
-            Ok(()) => return,
-            Err(error) => {
-                tracing::debug!(%error, "event stream dropped; reconnecting");
-            }
+        // A reattach means the daemon restarted, so the mirror is stale in
+        // ways no cursor could reconcile. Resync tells the consumer to
+        // refetch, which is the same thing it does for a lagged channel.
+        if attached && tx.send(api::ApiEvent::Resync).is_err() {
+            return;
         }
+        match stream_once(client.clone(), &tx).await {
+            Ok(()) => return,
+            Err(error) => tracing::debug!(%error, "daemon event stream ended; reattaching"),
+        }
+        attached = true;
         if tx.is_closed() {
             return;
         }
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 
 async fn stream_once(
     mut client: Client,
     tx: &tokio::sync::mpsc::UnboundedSender<api::ApiEvent>,
-    last_sequence: &mut u64,
 ) -> Result<(), ApiError> {
     let mut inbound = client
-        .subscribe(Request::new(proto::SubscribeRequest {
-            after_sequence: *last_sequence,
-        }))
+        .subscribe(Request::new(proto::SubscribeRequest {}))
         .await
         .map_err(wire_error)?
         .into_inner();
     loop {
         match inbound.message().await {
-            Ok(Some(proto::EventEnvelope { sequence, event })) => {
-                if sequence > 0 {
-                    *last_sequence = sequence;
-                }
+            Ok(Some(proto::EventEnvelope { event })) => {
                 if let Some(event) = event.and_then(|event| convert::event_from_proto(&event))
                     && tx.send(event).is_err()
                 {

@@ -90,7 +90,7 @@ pub fn spawn(session: &SessionHandle) {
                 }
                 received = events.recv() => {
                     match received {
-                        Ok((_, ApiEvent::PlayerState(state))) => {
+                        Ok(ApiEvent::PlayerState(state)) => {
                             let modes = (state.queue.shuffle, state.queue.loop_mode);
                             if last_modes != Some(modes) {
                                 last_modes = Some(modes);

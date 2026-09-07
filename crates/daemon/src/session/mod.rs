@@ -2,10 +2,8 @@
 //! engine state. Commands and engine events are serialized through one tokio
 //! task, then projected into watch snapshots and broadcast API events.
 
-use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use api::{
@@ -28,6 +26,7 @@ mod reconciler;
 
 use load::{LoadFailure, LoadFinished, PreparedLoad};
 
+/// Events buffered per subscriber before it is considered lagged.
 pub const EVENT_BUFFER: usize = 512;
 const POSITION_CORRECTION_INTERVAL: Duration = Duration::from_secs(10);
 const MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -107,9 +106,7 @@ pub struct SessionHandle {
     cmd_tx: mpsc::UnboundedSender<SessionCmd>,
     state_rx: watch::Receiver<PlayerState>,
     config_rx: watch::Receiver<config::AppConfig>,
-    events: broadcast::Sender<(u64, ApiEvent)>,
-    seq: Arc<AtomicU64>,
-    history: Arc<Mutex<VecDeque<(u64, ApiEvent)>>>,
+    events: broadcast::Sender<ApiEvent>,
 }
 
 impl SessionHandle {
@@ -137,8 +134,6 @@ impl SessionHandle {
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (events, _) = broadcast::channel(EVENT_BUFFER);
-        let seq = Arc::new(AtomicU64::new(0));
-        let history = Arc::new(Mutex::new(VecDeque::new()));
         let (config_tx, config_rx) = watch::channel(services.config.clone());
         let engine_events = player.subscribe();
         player.set_volume(services.config.volume);
@@ -168,8 +163,6 @@ impl SessionHandle {
             volume: services.config.volume,
             epoch: Instant::now(),
             events: events.clone(),
-            seq: seq.clone(),
-            history: history.clone(),
             materializer,
             queue_store: services.queue_store,
             queue_dirty: false,
@@ -189,8 +182,6 @@ impl SessionHandle {
             state_rx,
             config_rx,
             events,
-            seq,
-            history,
         }
     }
 
@@ -210,7 +201,7 @@ impl SessionHandle {
         self.state_rx.borrow().clone()
     }
 
-    pub fn subscribe(&self) -> broadcast::Receiver<(u64, ApiEvent)> {
+    pub fn subscribe(&self) -> broadcast::Receiver<ApiEvent> {
         self.events.subscribe()
     }
 
@@ -218,30 +209,6 @@ impl SessionHandle {
     /// `set_config`. Integration tasks watch this instead of polling.
     pub fn config_watch(&self) -> watch::Receiver<config::AppConfig> {
         self.config_rx.clone()
-    }
-
-    /// Events after `last` from the replay ring. `true` means the ring no
-    /// longer reaches back that far: the client must refetch its snapshots
-    /// (the `resync` contract) and then continue from the live stream.
-    pub fn replay_since(&self, last: u64) -> (bool, Vec<(u64, ApiEvent)>) {
-        let newest = self.seq.load(Ordering::Acquire);
-        if newest <= last {
-            return (false, Vec::new());
-        }
-        let Ok(history) = self.history.lock() else {
-            return (true, Vec::new());
-        };
-        match history.front() {
-            Some((first, _)) if *first <= last + 1 => (
-                false,
-                history
-                    .iter()
-                    .filter(|(sequence, _)| *sequence > last)
-                    .cloned()
-                    .collect(),
-            ),
-            _ => (true, Vec::new()),
-        }
     }
 
     async fn request<T>(
@@ -385,9 +352,7 @@ struct Session {
     queue_rev: u64,
     volume: f32,
     epoch: Instant,
-    events: broadcast::Sender<(u64, ApiEvent)>,
-    seq: Arc<AtomicU64>,
-    history: Arc<Mutex<VecDeque<(u64, ApiEvent)>>>,
+    events: broadcast::Sender<ApiEvent>,
     materializer: Arc<dyn QueueMaterializer>,
     queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
     queue_dirty: bool,
