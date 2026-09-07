@@ -166,6 +166,28 @@ pub fn notice_level_from_proto(value: i32) -> api::NoticeLevel {
     }
 }
 
+pub fn track_sort_to_proto(value: api::TrackSort) -> TrackSort {
+    match value {
+        api::TrackSort::Default => TrackSort::Unspecified,
+        api::TrackSort::Title => TrackSort::Title,
+        api::TrackSort::Artist => TrackSort::Artist,
+        api::TrackSort::Album => TrackSort::Album,
+        api::TrackSort::DateAdded => TrackSort::DateAdded,
+        api::TrackSort::PlayCount => TrackSort::PlayCount,
+    }
+}
+
+pub fn track_sort_from_proto(value: i32) -> api::TrackSort {
+    match TrackSort::try_from(value).unwrap_or(TrackSort::Unspecified) {
+        TrackSort::Unspecified => api::TrackSort::Default,
+        TrackSort::Title => api::TrackSort::Title,
+        TrackSort::Artist => api::TrackSort::Artist,
+        TrackSort::Album => api::TrackSort::Album,
+        TrackSort::DateAdded => api::TrackSort::DateAdded,
+        TrackSort::PlayCount => api::TrackSort::PlayCount,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

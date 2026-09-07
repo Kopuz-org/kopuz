@@ -101,6 +101,15 @@ fn filter_clauses(filter: &TrackFilter) -> (String, Vec<String>) {
         ));
         binds.push(format!("%{}%", escape_like(filter.search.trim())));
     }
+    if let Some(favorite) = filter.favorite {
+        // favorites.server_id holds the same string as tracks.source, and
+        // favorites.ref holds the track_key, so this needs no extra bind.
+        let exists = if favorite { "EXISTS" } else { "NOT EXISTS" };
+        sql.push_str(&format!(
+            " AND {exists} (SELECT 1 FROM favorites f \
+              WHERE f.server_id = t.source AND f.ref = t.track_key)"
+        ));
+    }
     (sql, binds)
 }
 

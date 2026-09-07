@@ -28,6 +28,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
         source: source(),
         sort: TrackSort::PlayCount,
         search: String::new(),
+        favorite: None,
     });
 
     // album_id → genre (covers resolve via the source seam off the track itself).

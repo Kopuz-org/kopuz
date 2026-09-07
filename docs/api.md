@@ -120,7 +120,7 @@ Two rules make a frontend feel native:
 
 | rpc | request | returns |
 |---|---|---|
-| `GetStatus` | | `{version, api_version, uptime_secs}` |
+| `GetStatus` | | `{version, uptime_secs}` |
 | `GetPlayerState` | | `PlayerState` snapshot |
 | `GetQueue` | `Page {offset, limit}` | play-order window `{rev, total, items: [{index, track}]}` |
 | `GetTracks` | `TracksRequest {filter, page}` | `{total, offset, items: [TrackInfo]}` |

@@ -1,5 +1,18 @@
 use crate::player::TrackKind;
 
+/// Library ordering. `Default` is the daemon's own choice, so a caller that
+/// does not care says nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TrackSort {
+    #[default]
+    Default,
+    Title,
+    Artist,
+    Album,
+    DateAdded,
+    PlayCount,
+}
+
 /// A track row on the wire. `key` is the stable library ref used everywhere
 /// else in the API, and the entity id `GetArtwork` takes; local filesystem
 /// paths and credentialed remote URLs never appear here.
@@ -45,7 +58,7 @@ pub struct TrackFilter {
     pub album: Option<String>,
     pub genre: Option<String>,
     pub favorite: Option<bool>,
-    pub sort: Option<String>,
+    pub sort: TrackSort,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

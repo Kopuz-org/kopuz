@@ -172,7 +172,6 @@ impl Kopuz for KopuzGrpc {
     ) -> Result<Response<proto::DaemonStatus>, Status> {
         Ok(Response::new(proto::DaemonStatus {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            api_version: api::API_VERSION,
             uptime_secs: self.0.started.elapsed().as_secs(),
         }))
     }

@@ -345,7 +345,8 @@ message TrackFilter {
   optional string album = 3;
   optional string genre = 4;
   optional bool favorite = 5;
-  optional string sort = 6;
+  reserved 6; // was a free-form `sort` string
+  TrackSort sort = 7;
 }
 
 message TracksRequest {
@@ -476,7 +477,7 @@ message ConfigPatch {
 
 message DaemonStatus {
   string version = 1;
-  uint32 api_version = 2;
+  reserved 2; // was api_version; the frontend ships with the daemon
   uint64 uptime_secs = 3;
 }
 
@@ -531,6 +532,16 @@ enum LoopMode {
   LOOP_MODE_NONE = 1;
   LOOP_MODE_QUEUE = 2;
   LOOP_MODE_TRACK = 3;
+}
+
+enum TrackSort {
+  // The daemon's own default ordering.
+  TRACK_SORT_UNSPECIFIED = 0;
+  TRACK_SORT_TITLE = 1;
+  TRACK_SORT_ARTIST = 2;
+  TRACK_SORT_ALBUM = 3;
+  TRACK_SORT_DATE_ADDED = 4;
+  TRACK_SORT_PLAY_COUNT = 5;
 }
 
 enum TrackKind {

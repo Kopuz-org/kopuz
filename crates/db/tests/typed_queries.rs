@@ -171,6 +171,7 @@ async fn typed_queries_smoke() {
                 source: local.clone(),
                 sort: TrackSort::PlayCount,
                 search: String::new(),
+                favorite: None,
             },
             Page {
                 offset: 0,
@@ -248,4 +249,59 @@ async fn track_cover_projects_from_album_for_local_keeps_own_for_server() {
     );
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// The favorite filter runs in SQL so paging and totals stay correct on a
+/// large library. favorites.server_id carries the same string as
+/// tracks.source, and favorites.ref carries the track_key.
+#[tokio::test]
+async fn track_filter_selects_favorites_in_sql() {
+    let path = unique_db();
+    let db = db::init(&path).await.unwrap();
+    seed(&path).await;
+    let local = Source::Local;
+
+    db.set_favorite(local.as_str(), "/music/jazz/b_1.flac", true)
+        .await
+        .unwrap();
+    db.set_favorite(local.as_str(), "/music/rock/a1.flac", true)
+        .await
+        .unwrap();
+
+    let filter = |favorite| TrackFilter {
+        source: local.clone(),
+        sort: TrackSort::Title,
+        search: String::new(),
+        favorite,
+    };
+    let page = Page {
+        offset: 0,
+        limit: 100,
+    };
+
+    let favorites = db.tracks_page(&filter(Some(true)), page).await.unwrap();
+    let mut keys: Vec<String> = favorites
+        .iter()
+        .map(|track| track.id.key().to_string())
+        .collect();
+    keys.sort();
+    assert_eq!(keys, vec!["/music/jazz/b_1.flac", "/music/rock/a1.flac"]);
+
+    // The count must agree with the page, or the scroll spacer lies.
+    assert_eq!(db.tracks_count(&filter(Some(true))).await.unwrap(), 2);
+
+    let others = db.tracks_page(&filter(Some(false)), page).await.unwrap();
+    assert!(
+        others
+            .iter()
+            .all(|track| !keys.contains(&track.id.key().to_string())),
+        "Some(false) is the complement, not everything"
+    );
+
+    let unfiltered = db.tracks_count(&filter(None)).await.unwrap();
+    assert_eq!(
+        unfiltered,
+        2 + others.len() as u32,
+        "the two halves partition the library"
+    );
 }

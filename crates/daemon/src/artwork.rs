@@ -31,7 +31,6 @@ pub struct ArtworkService {
 pub struct ArtworkPayload {
     pub bytes: Vec<u8>,
     pub content_type: &'static str,
-    pub etag: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,7 +171,7 @@ impl ArtworkService {
             hash_name(path)
         ));
         if let Ok(bytes) = tokio::fs::read(&cache_path).await {
-            return Ok(self.payload(bytes, "image/jpeg", path));
+            return Ok(self.payload(bytes, "image/jpeg"));
         }
         let raw = tokio::fs::read(path)
             .await
@@ -202,7 +201,7 @@ impl ArtworkService {
                 }
             }
         };
-        Ok(self.payload(bytes, content_type, path))
+        Ok(self.payload(bytes, content_type))
     }
 
     /// Remote covers are fetched daemon-side (the URL may embed credentials)
@@ -211,7 +210,7 @@ impl ArtworkService {
         let cache_path = self.cache_dir.join(format!("remote_{}", hash_name(url)));
         if let Ok(bytes) = tokio::fs::read(&cache_path).await {
             let content_type = sniff_content_type(&bytes);
-            return Ok(self.payload(bytes, content_type, url));
+            return Ok(self.payload(bytes, content_type));
         }
         let mut response = self
             .http
@@ -246,15 +245,13 @@ impl ArtworkService {
         }
         let _ = tokio::fs::write(&cache_path, &bytes).await;
         let content_type = sniff_content_type(&bytes);
-        Ok(self.payload(bytes, content_type, url))
+        Ok(self.payload(bytes, content_type))
     }
 
-    fn payload(&self, bytes: Vec<u8>, content_type: &'static str, source: &str) -> ArtworkPayload {
-        let etag = format!("\"{}-{}\"", hash_name(source), bytes.len());
+    fn payload(&self, bytes: Vec<u8>, content_type: &'static str) -> ArtworkPayload {
         ArtworkPayload {
             bytes,
             content_type,
-            etag,
         }
     }
 }
@@ -342,7 +339,7 @@ mod tests {
             .fetch(ArtworkEntity::Track("/lib/art.flac"), false)
             .await
             .expect("cached artwork");
-        assert!(cached.etag.len() > 4);
+        assert!(!cached.bytes.is_empty());
 
         let missing = service
             .fetch(ArtworkEntity::Track("/nope"), false)

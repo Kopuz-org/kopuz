@@ -40,14 +40,14 @@ fn db_error(error: db::DbError) -> ApiError {
     ApiError::internal(format!("database error: {error}"))
 }
 
-fn map_sort(sort: Option<&str>) -> db::TrackSort {
+fn map_sort(sort: api::TrackSort) -> db::TrackSort {
     match sort {
-        Some("title") => db::TrackSort::Title,
-        Some("artist") => db::TrackSort::Artist,
-        Some("album") => db::TrackSort::Album,
-        Some("date_added") => db::TrackSort::DateAdded,
-        Some("play_count") => db::TrackSort::PlayCount,
-        _ => db::TrackSort::ArtistAlbum,
+        api::TrackSort::Default => db::TrackSort::ArtistAlbum,
+        api::TrackSort::Title => db::TrackSort::Title,
+        api::TrackSort::Artist => db::TrackSort::Artist,
+        api::TrackSort::Album => db::TrackSort::Album,
+        api::TrackSort::DateAdded => db::TrackSort::DateAdded,
+        api::TrackSort::PlayCount => db::TrackSort::PlayCount,
     }
 }
 
@@ -169,12 +169,6 @@ impl LibraryService {
         filter: TrackFilter,
         page: Page,
     ) -> Result<(u32, Vec<Track>), ApiError> {
-        if filter.favorite.is_some() {
-            return Err(ApiError::unsupported(
-                "favorite filtering lands with the favorites service",
-            ));
-        }
-
         let narrowed = if let Some(album) = filter.album.as_deref() {
             Some(
                 self.db
@@ -204,6 +198,17 @@ impl LibraryService {
             if let Some(search) = filter.search.as_deref().filter(|s| !s.is_empty()) {
                 rows.retain(|track| matches_search(track, search));
             }
+            if let Some(favorite) = filter.favorite {
+                let source = self.query_source();
+                let favorites: std::collections::HashSet<String> = self
+                    .db
+                    .favorites(source.as_str())
+                    .await
+                    .map_err(db_error)?
+                    .into_iter()
+                    .collect();
+                rows.retain(|track| favorites.contains(track.id.key().as_ref()) == favorite);
+            }
             let total = rows.len() as u32;
             let items = rows
                 .into_iter()
@@ -215,8 +220,9 @@ impl LibraryService {
 
         let db_filter = db::TrackFilter {
             source: self.query_source(),
-            sort: map_sort(filter.sort.as_deref()),
+            sort: map_sort(filter.sort),
             search: filter.search.unwrap_or_default(),
+            favorite: filter.favorite,
         };
         let items = self
             .db

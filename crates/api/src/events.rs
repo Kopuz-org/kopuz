@@ -55,7 +55,7 @@ pub enum SourceState {
 }
 
 /// One event on the daemon's Subscribe stream (`proto/kopuz.proto` carries the
-/// wire shape). The serde tags are the stable event identities. Clients
+/// wire shape). The variant names are the event identities. Clients
 /// must ignore unknown event types.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApiEvent {

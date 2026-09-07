@@ -18,15 +18,13 @@ pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
 pub use library::{
     DEFAULT_PAGE_LIMIT, LyricChunkView, LyricLineView, LyricsView, Page, StatsView, TrackFilter,
-    TrackInfo, TrackPage,
+    TrackInfo, TrackPage, TrackSort,
 };
 pub use player::{
     BufferedRange, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying, Phase,
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
 };
 pub use queue::{QueueContext, QueueEdit, QueueItem, QueueMode, QueueWindow, SetQueueRequest};
-
-pub const API_VERSION: u32 = 1;
 
 /// The config view: the layered config with credential keys
 /// stripped, plus the keys a managed settings file pins (rendered locked in

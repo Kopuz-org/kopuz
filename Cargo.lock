@@ -4387,7 +4387,6 @@ version = "0.16.1"
 dependencies = [
  "async-trait",
  "futures-util",
- "serde",
  "serde_json",
  "thiserror 2.0.18",
 ]
