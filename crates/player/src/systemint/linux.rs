@@ -2,10 +2,8 @@ use mpris_server::{
     LoopStatus, Metadata, PlaybackStatus, PlayerInterface, Property, RootInterface, Server, Time,
     zbus::fdo,
 };
-use std::sync::{
-    Arc, Mutex, OnceLock,
-    mpsc::{self, Receiver, Sender},
-};
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepeatMode {
@@ -57,15 +55,15 @@ struct MprisState {
     repeat: RepeatMode,
 }
 
-static TX: OnceLock<Sender<SystemEvent>> = OnceLock::new();
-static RX: OnceLock<Mutex<Receiver<SystemEvent>>> = OnceLock::new();
+static TX: OnceLock<UnboundedSender<SystemEvent>> = OnceLock::new();
+static RX: OnceLock<tokio::sync::Mutex<UnboundedReceiver<SystemEvent>>> = OnceLock::new();
 static STATE: OnceLock<Arc<Mutex<MprisState>>> = OnceLock::new();
 static NOTIFY: OnceLock<tokio::sync::mpsc::UnboundedSender<bool>> = OnceLock::new();
 
-fn tx() -> Sender<SystemEvent> {
+fn tx() -> UnboundedSender<SystemEvent> {
     TX.get_or_init(|| {
-        let (tx, rx) = mpsc::channel();
-        RX.set(Mutex::new(rx)).ok();
+        let (tx, rx) = unbounded_channel();
+        RX.set(tokio::sync::Mutex::new(rx)).ok();
         tx
     })
     .clone()
@@ -91,7 +89,7 @@ fn notify() {
     }
 }
 
-struct P(Arc<Mutex<MprisState>>, Sender<SystemEvent>);
+struct P(Arc<Mutex<MprisState>>, UnboundedSender<SystemEvent>);
 
 impl RootInterface for P {
     async fn raise(&self) -> fdo::Result<()> {
@@ -327,7 +325,17 @@ fn setup() {
 
 pub fn poll_event() -> Option<SystemEvent> {
     setup();
-    RX.get()?.lock().ok()?.try_recv().ok()
+    RX.get()?.try_lock().ok()?.try_recv().ok()
+}
+
+/// Park until the MPRIS handlers hand over a control event. The zbus
+/// handlers run on their own thread and push into an unbounded channel, so
+/// this never blocks them and a media key needs no timer to be noticed.
+pub async fn wait_event() -> Option<SystemEvent> {
+    setup();
+    let rx = RX.get()?;
+    let mut guard = rx.lock().await;
+    guard.recv().await
 }
 
 pub fn update_now_playing(
