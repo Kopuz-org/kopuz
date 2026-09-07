@@ -102,7 +102,7 @@ pub fn spawn_jellyfin_reporter(
                             state
                                 .track
                                 .as_ref()
-                                .and_then(|track| track.key.strip_prefix("jellyfin:"))
+                                .and_then(|track| track.uid.strip_prefix("jellyfin:"))
                                 .map(str::to_string)
                         })
                         .flatten();

@@ -153,8 +153,8 @@ pub(super) fn now_playing_from(track: &Track, config: &config::AppConfig) -> Now
     let _ = config;
     let radio = track.duration == u64::MAX;
     NowPlaying {
-        artwork: (!radio).then(|| track.id.key().to_string()),
-        key: track.id.uid(),
+        key: track.id.key().to_string(),
+        uid: track.id.uid(),
         title: track.title.clone(),
         artist: track.artist.clone(),
         album: track.album.clone(),

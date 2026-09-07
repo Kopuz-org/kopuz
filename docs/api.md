@@ -45,9 +45,10 @@ Every RPC needs the token as metadata, constant-time checked:
 authorization: Bearer <token>
 ```
 
-The connection is plaintext HTTP/2 on loopback. If you bind a LAN address
-you are trusting that network with your library and the bearer token;
-prefer an SSH tunnel. Server reflection (v1 and v1alpha) is served without
+The connection is plaintext HTTP/2, so the daemon refuses to start on
+anything but a loopback address: a non-loopback `--bind` fails with
+`PermissionDenied` rather than putting your library and bearer token on
+the wire in the clear. Reach it from another machine over an SSH tunnel. Server reflection (v1 and v1alpha) is served without
 auth so `grpcurl` can list the schema:
 
 ```sh
@@ -58,25 +59,25 @@ grpcurl -plaintext -H "authorization: Bearer $TOKEN" \
 
 ## Errors
 
-RPC failures are gRPC statuses. The stable machine-readable Kopuz code
-rides the `kopuz-error-code` response metadata; localize by that code,
-never by message. The gRPC code is the nearest standard equivalent:
+RPC failures are gRPC statuses, and the status code is the whole story —
+localize by it, never by the message. The mapping is one-to-one, so
+nothing rides alongside it in metadata:
 
-| kopuz-error-code | gRPC code | meaning |
+| gRPC code | `ErrorCode` | meaning |
 |---|---|---|
-| `invalid_input` | INVALID_ARGUMENT | malformed request or out-of-range position |
-| `unauthorized` | UNAUTHENTICATED | missing/invalid token |
-| `source_auth_expired` | UNAUTHENTICATED | the media server needs a re-login |
-| `not_found` | NOT_FOUND | unknown key/id |
-| `conflict` | ABORTED | a single-flight job of that kind is already running |
-| `unsupported` | UNIMPLEMENTED | this daemon runs without that service |
-| `source_unreachable` | UNAVAILABLE | the media server did not answer |
-| `internal` | INTERNAL | daemon-side failure |
+| INVALID_ARGUMENT | `invalid_input` | malformed request or out-of-range position |
+| UNAUTHENTICATED | `unauthorized` | missing/invalid bearer token — re-read the discovery file |
+| FAILED_PRECONDITION | `source_auth_expired` | the media server needs a re-login; your token is fine |
+| NOT_FOUND | `not_found` | unknown key/id |
+| ALREADY_EXISTS | `conflict` | a single-flight job of that kind is already running |
+| UNIMPLEMENTED | `unsupported` | this daemon runs without that service |
+| UNAVAILABLE | `source_unreachable` | the media server did not answer |
+| INTERNAL | `internal` | daemon-side failure |
 
-Structured details, when present, are JSON in the
-`kopuz-error-details-bin` metadata. A failed mutation fails its own RPC with
-that status, so ordinary gRPC error handling applies. Unknown codes must be
-treated as `internal`; the set can grow.
+A failed mutation fails its own RPC with that status, so ordinary gRPC
+error handling applies. The `ErrorCode` enum in the schema is for failures
+reported *inside* a message, where there is no status to carry them, such
+as `JobStatus.error`. Treat an unrecognized status code as `internal`.
 
 ## Events and playback
 
@@ -132,7 +133,7 @@ Two rules make a frontend feel native:
 | `SetQueue` | mode + context (+ `start_index`/`shuffle` for replace) | `MutationResult {rev}` |
 | `EditQueue` | `jump {index}` / `move {from, to}` / `remove {index}` (play-order indices) | `MutationResult {rev}` |
 | `SetFavorite` | `{key, favorite}` | optimistic; a rejected remote push reverts and emits a `notice` |
-| `StartJob` | `{kind}` (scan / library_sync / favorites_sync) | `{job_id}`; single-flight per kind, ABORTED on conflict |
+| `StartJob` | `{kind}` (scan / library_sync / favorites_sync) | `{job_id}`; single-flight per kind, ALREADY_EXISTS on conflict |
 | `CancelJob` | `{id}` | |
 | `StartDownloads` | `{keys}` | `{job_id}` |
 | `RemoveDownload` | `{key}` | |
@@ -144,11 +145,15 @@ round-trips a track list through the client: `tracks {keys}`, `album {id}`,
 `artist {name}`, `genre {name}`, `playlist {id}`, `filter {TrackFilter}`,
 `radio {station_id, stream_id}`.
 
-`TrackInfo`: `key` (stable ref, use it for queueing/favorites/artwork),
-`uid`, `title`, `artist`, `album`, `album_id`, `duration_ms?`, `khz`,
-`bitrate`, `track_number?`, `disc_number?`, `kind` (normal/radio),
-`seekable`, `artwork?` (an opaque hint that artwork exists; fetch bytes
-via `GetArtwork`), `offline`.
+`TrackInfo`: `key` (the library ref — use it for queueing, favorites, and
+as the `GetArtwork` track entity), `uid` (the same track qualified by its
+source, `"<service>:<id>"` for server tracks), `title`, `artist`, `album`,
+`album_id`, `duration_ms?`, `khz`, `bitrate`, `track_number?`,
+`disc_number?`, `kind` (normal/radio), `seekable`, `offline`.
+
+`NowPlaying` carries `key` and `uid` with those same two meanings. There is
+no artwork field on either: `key` is the artwork entity id, so ask
+`GetArtwork` for it and treat NOT_FOUND as "no cover".
 
 ## Minimal client (Python)
 
@@ -168,10 +173,10 @@ channel = grpc.insecure_channel(f"127.0.0.1:{disc['port']}")
 stub = rpc.KopuzStub(channel)
 auth = (("authorization", f"Bearer {disc['token']}"),)
 
-state = stub.GetPlayerState(pb.Empty(), metadata=auth)
+state = stub.GetPlayerState(pb.GetPlayerStateRequest(), metadata=auth)
 print(state.track.title if state.HasField("track") else "nothing playing")
 
-print("toggled at rev", stub.Toggle(pb.Empty(), metadata=auth).rev)
+print("toggled at rev", stub.Toggle(pb.ToggleRequest(), metadata=auth).rev)
 
 for envelope in stub.Subscribe(pb.SubscribeRequest(after_sequence=0), metadata=auth):
     print(envelope.sequence, envelope.event.WhichOneof("kind"))

@@ -18,41 +18,60 @@ service Kopuz {
   // one `resync` event and continues with live events.
   rpc Subscribe(SubscribeRequest) returns (stream EventEnvelope);
 
-  rpc Play(Empty) returns (MutationResult);
-  rpc Pause(Empty) returns (MutationResult);
-  rpc Toggle(Empty) returns (MutationResult);
-  rpc Next(Empty) returns (MutationResult);
-  rpc Previous(Empty) returns (MutationResult);
-  rpc Stop(Empty) returns (MutationResult);
+  rpc Play(PlayRequest) returns (MutationResult);
+  rpc Pause(PauseRequest) returns (MutationResult);
+  rpc Toggle(ToggleRequest) returns (MutationResult);
+  rpc Next(NextRequest) returns (MutationResult);
+  rpc Previous(PreviousRequest) returns (MutationResult);
+  rpc Stop(StopRequest) returns (MutationResult);
   rpc Seek(Seek) returns (MutationResult);
   rpc SetVolume(SetVolume) returns (MutationResult);
   rpc SetMode(SetMode) returns (MutationResult);
 
-  rpc GetStatus(Empty) returns (DaemonStatus);
-  rpc GetPlayerState(Empty) returns (PlayerState);
+  rpc GetStatus(GetStatusRequest) returns (DaemonStatus);
+  rpc GetPlayerState(GetPlayerStateRequest) returns (PlayerState);
   rpc GetQueue(Page) returns (QueueWindow);
   rpc GetTracks(TracksRequest) returns (TrackPage);
   rpc GetFolderTracks(FolderRequest) returns (TrackPage);
-  rpc GetStats(Empty) returns (Stats);
+  rpc GetStats(GetStatsRequest) returns (Stats);
   rpc GetLyrics(TrackRef) returns (Lyrics);
-  rpc GetFavorites(Empty) returns (Favorites);
-  rpc GetJobs(Empty) returns (JobList);
-  rpc GetDownloads(Empty) returns (DownloadList);
-  rpc GetConfig(Empty) returns (ConfigView);
+  rpc GetFavorites(GetFavoritesRequest) returns (Favorites);
+  rpc GetJobs(GetJobsRequest) returns (JobList);
+  rpc GetDownloads(GetDownloadsRequest) returns (DownloadList);
+  rpc GetConfig(GetConfigRequest) returns (ConfigView);
 
   rpc SetQueue(SetQueueRequest) returns (MutationResult);
   rpc EditQueue(QueueEditRequest) returns (MutationResult);
-  rpc SetFavorite(FavoriteRequest) returns (Empty);
+  rpc SetFavorite(FavoriteRequest) returns (SetFavoriteResponse);
   rpc StartJob(StartJobRequest) returns (JobRef);
-  rpc CancelJob(JobId) returns (Empty);
+  rpc CancelJob(JobId) returns (CancelJobResponse);
   rpc StartDownloads(DownloadRequest) returns (JobRef);
-  rpc RemoveDownload(TrackRef) returns (Empty);
+  rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
   rpc PatchConfig(ConfigPatch) returns (ConfigView);
 
   rpc GetArtwork(ArtworkRequest) returns (stream ArtworkChunk);
 }
 
-message Empty {}
+// One message per RPC even when it carries nothing, so any of them can gain
+// a field without a signature change. Unit is the marker inside oneofs.
+message Unit {}
+
+message PlayRequest {}
+message PauseRequest {}
+message ToggleRequest {}
+message NextRequest {}
+message PreviousRequest {}
+message StopRequest {}
+message GetStatusRequest {}
+message GetPlayerStateRequest {}
+message GetStatsRequest {}
+message GetFavoritesRequest {}
+message GetJobsRequest {}
+message GetDownloadsRequest {}
+message GetConfigRequest {}
+message SetFavoriteResponse {}
+message CancelJobResponse {}
+message RemoveDownloadResponse {}
 
 // ---------------- event subscription ----------------
 
@@ -103,7 +122,7 @@ message Event {
     SourceStatusEvent source_status = 10;
     Notice notice = 11;
     // The reconnect gap exceeded the replay ring: refetch snapshots.
-    Empty resync = 12;
+    Unit resync = 12;
   }
 }
 
@@ -188,7 +207,7 @@ message PlayerState {
 // GUI (pause glyph while loading).
 message Intent {
   oneof kind {
-    Empty stopped = 1;
+    Unit stopped = 1;
     Loading loading = 2;
     Committed committed = 3;
   }
@@ -202,7 +221,10 @@ message Intent {
 }
 
 message NowPlaying {
+  // key is the library ref and the GetArtwork entity id; uid is the
+  // source-qualified identity. Same meaning as on TrackInfo.
   string key = 1;
+  string uid = 10;
   string title = 2;
   string artist = 3;
   string album = 4;
@@ -211,8 +233,6 @@ message NowPlaying {
   uint32 bitrate = 7;
   TrackKind kind = 8;
   bool seekable = 9;
-  // Daemon-relative artwork hint; fetch the bytes via GetArtwork.
-  optional string artwork = 10;
 }
 
 message PositionAnchor {
@@ -363,8 +383,7 @@ message TrackInfo {
   optional uint32 disc_number = 11;
   TrackKind kind = 12;
   bool seekable = 13;
-  optional string artwork = 14;
-  bool offline = 15;
+  bool offline = 14;
 }
 
 message TrackRef {
@@ -488,7 +507,6 @@ message ArtworkChunk {
 message ErrorBody {
   ErrorCode code = 1;
   string message = 2;
-  optional string details_json = 3;
 }
 
 enum ErrorCode {

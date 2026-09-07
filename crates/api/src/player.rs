@@ -1,7 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Phase {
     #[default]
     Idle,
@@ -10,8 +7,7 @@ pub enum Phase {
     Ended,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum LoopMode {
     #[default]
     None,
@@ -33,14 +29,12 @@ impl LoopMode {
 /// What the daemon is trying to do, as distinct from [`Phase`] (engine truth).
 /// Frontends render optimistic UI from the intent, exactly like the current
 /// app's `is_playing` blend, but the blend is defined daemon-side.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Intent {
     #[default]
     Stopped,
     Loading {
         token: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         from_token: Option<u64>,
     },
     Committed {
@@ -48,28 +42,26 @@ pub enum Intent {
     },
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TrackKind {
     #[default]
     Normal,
     Radio,
 }
 
-/// Now-playing summary. `key` is the track's stable library ref; `artwork` is
-/// a daemon-relative URL, never a filesystem path or a credentialed remote
-/// URL.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+/// Now-playing summary. `key` and `uid` mean exactly what they do on
+/// [`crate::TrackInfo`]: `key` is the library ref, and the entity id
+/// `GetArtwork` takes; `uid` is the source-qualified identity.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct NowPlaying {
     pub key: String,
+    pub uid: String,
     pub title: String,
     pub artist: String,
     pub album: String,
     pub duration_ms: Option<u64>,
     pub khz: u32,
     pub bitrate: u16,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artwork: Option<String>,
     pub kind: TrackKind,
     pub seekable: bool,
 }
@@ -77,24 +69,23 @@ pub struct NowPlaying {
 /// Position as an anchor, not a ticker: `ms` was correct at daemon-monotonic
 /// time `at_ms`. Clients compute a clock offset from `PlayerState::now_ms`
 /// once and interpolate locally while `playing` is true.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PositionAnchor {
     pub ms: u64,
     pub at_ms: u64,
     pub playing: bool,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct BufferedRange {
     pub start: u64,
     pub end: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total: Option<u64>,
 }
 
 /// The outgoing session during a crossfade. While present, frontends keep
 /// displaying this track and drive the seek bar from `position_ms`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct FadingState {
     pub from_token: u64,
     pub track: NowPlaying,
@@ -102,49 +93,39 @@ pub struct FadingState {
 }
 
 /// Playback happening outside the engine (Spotify in a browser).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExternalPlayback {
     pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct QueueSummary {
     pub rev: u64,
     pub length: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<u32>,
     pub shuffle: bool,
-    #[serde(rename = "loop")]
     pub loop_mode: LoopMode,
 }
 
 /// The player snapshot (`GetPlayerState`) and the `player_state` event payload.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PlayerState {
     pub rev: u64,
     pub now_ms: u64,
     pub phase: Phase,
     pub intent: Intent,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<NowPlaying>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<PositionAnchor>,
     pub queue: QueueSummary,
     pub volume: f32,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub buffered: Vec<BufferedRange>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fading: Option<FadingState>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<ExternalPlayback>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<crate::error::ErrorBody>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlayerCommand {
     Play,
     Pause,
@@ -159,9 +140,7 @@ pub enum PlayerCommand {
         volume: f32,
     },
     SetMode {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         shuffle: Option<bool>,
-        #[serde(default, rename = "loop", skip_serializing_if = "Option::is_none")]
         loop_mode: Option<LoopMode>,
     },
 }

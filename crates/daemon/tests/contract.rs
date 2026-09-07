@@ -494,7 +494,6 @@ async fn folders_and_stats_agree_across_transports() {
     assert_eq!(wire_page.total, 2);
     let row = &wire_page.items[0];
     assert_eq!(row.key, "/lib/seed-0.flac");
-    assert_eq!(row.artwork.as_deref(), Some(row.key.as_str()));
     assert!(!row.offline);
 
     let local_stats = pair.local.stats().await.expect("stats locally");

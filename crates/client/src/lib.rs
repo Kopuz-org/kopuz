@@ -79,7 +79,7 @@ impl KopuzApi for GrpcApi {
     async fn player_state(&self) -> Result<PlayerState, ApiError> {
         let state = self
             .client()
-            .get_player_state(Request::new(proto::Empty {}))
+            .get_player_state(Request::new(proto::GetPlayerStateRequest {}))
             .await
             .map_err(wire_error)?;
         Ok(convert::player_state_from_proto(state.get_ref()))
@@ -87,12 +87,36 @@ impl KopuzApi for GrpcApi {
 
     async fn player_command(&self, command: PlayerCommand) -> Result<CommandAck, ApiError> {
         let response = match command {
-            PlayerCommand::Play => self.client().play(Request::new(proto::Empty {})).await,
-            PlayerCommand::Pause => self.client().pause(Request::new(proto::Empty {})).await,
-            PlayerCommand::Toggle => self.client().toggle(Request::new(proto::Empty {})).await,
-            PlayerCommand::Next => self.client().next(Request::new(proto::Empty {})).await,
-            PlayerCommand::Previous => self.client().previous(Request::new(proto::Empty {})).await,
-            PlayerCommand::Stop => self.client().stop(Request::new(proto::Empty {})).await,
+            PlayerCommand::Play => {
+                self.client()
+                    .play(Request::new(proto::PlayRequest {}))
+                    .await
+            }
+            PlayerCommand::Pause => {
+                self.client()
+                    .pause(Request::new(proto::PauseRequest {}))
+                    .await
+            }
+            PlayerCommand::Toggle => {
+                self.client()
+                    .toggle(Request::new(proto::ToggleRequest {}))
+                    .await
+            }
+            PlayerCommand::Next => {
+                self.client()
+                    .next(Request::new(proto::NextRequest {}))
+                    .await
+            }
+            PlayerCommand::Previous => {
+                self.client()
+                    .previous(Request::new(proto::PreviousRequest {}))
+                    .await
+            }
+            PlayerCommand::Stop => {
+                self.client()
+                    .stop(Request::new(proto::StopRequest {}))
+                    .await
+            }
             PlayerCommand::Seek { position_ms } => {
                 self.client()
                     .seek(Request::new(proto::Seek { position_ms }))
@@ -164,7 +188,7 @@ impl KopuzApi for GrpcApi {
     async fn config(&self) -> Result<ConfigView, ApiError> {
         let view = self
             .client()
-            .get_config(Request::new(proto::Empty {}))
+            .get_config(Request::new(proto::GetConfigRequest {}))
             .await
             .map_err(wire_error)?;
         Ok(convert::config_view_from_proto(view.get_ref()))
@@ -184,7 +208,7 @@ impl KopuzApi for GrpcApi {
     async fn favorites(&self) -> Result<FavoritesView, ApiError> {
         let favorites = self
             .client()
-            .get_favorites(Request::new(proto::Empty {}))
+            .get_favorites(Request::new(proto::GetFavoritesRequest {}))
             .await
             .map_err(wire_error)?;
         Ok(convert::favorites_from_proto(favorites.get_ref()))
@@ -235,7 +259,7 @@ impl KopuzApi for GrpcApi {
     async fn stats(&self) -> Result<api::StatsView, ApiError> {
         let stats = self
             .client()
-            .get_stats(Request::new(proto::Empty {}))
+            .get_stats(Request::new(proto::GetStatsRequest {}))
             .await
             .map_err(wire_error)?;
         Ok(convert::stats_from_proto(stats.get_ref()))
@@ -255,7 +279,7 @@ impl KopuzApi for GrpcApi {
     async fn downloads(&self) -> Result<Vec<String>, ApiError> {
         let list = self
             .client()
-            .get_downloads(Request::new(proto::Empty {}))
+            .get_downloads(Request::new(proto::GetDownloadsRequest {}))
             .await
             .map_err(wire_error)?;
         Ok(list.get_ref().keys.clone())
@@ -272,7 +296,7 @@ impl KopuzApi for GrpcApi {
     async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError> {
         let jobs = self
             .client()
-            .get_jobs(Request::new(proto::Empty {}))
+            .get_jobs(Request::new(proto::GetJobsRequest {}))
             .await
             .map_err(wire_error)?;
         Ok(jobs

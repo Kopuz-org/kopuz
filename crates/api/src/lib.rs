@@ -31,56 +31,49 @@ pub const API_VERSION: u32 = 1;
 /// The config view: the layered config with credential keys
 /// stripped, plus the keys a managed settings file pins (rendered locked in
 /// settings UIs).
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ConfigView {
     pub config: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locked_keys: Vec<String>,
 }
 
 /// Returned by every command; `rev` names the state revision that includes
 /// the command's effect, so a client can wait for the event stream to catch
 /// up before trusting its local mirror.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandAck {
     pub rev: u64,
 }
 
 pub type EventStream = futures_util::stream::BoxStream<'static, ApiEvent>;
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobRef {
     pub job_id: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobState {
     Running,
     Finished,
     Failed,
     Cancelled,
-    #[serde(other)]
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct JobStatus {
     pub id: String,
     pub kind: JobKind,
     pub state: JobState,
     pub phase: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<ErrorBody>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FavoritesView {
     pub refs: Vec<String>,
     pub generation: u64,
@@ -141,89 +134,4 @@ pub trait KopuzApi: Send + Sync {
     /// the moment of subscription; a snapshot fetch plus this stream is the
     /// complete synchronization story.
     fn events(&self) -> EventStream;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn error_codes_map_to_statuses() {
-        assert_eq!(ErrorCode::InvalidInput.http_status(), 400);
-        assert_eq!(ErrorCode::SourceAuthExpired.http_status(), 401);
-        assert_eq!(ErrorCode::Unsupported.http_status(), 501);
-        assert_eq!(ErrorCode::SourceUnreachable.http_status(), 502);
-    }
-
-    #[test]
-    fn api_event_serializes_with_dotted_names() {
-        let event = ApiEvent::LibraryInvalidated {
-            table: Table::Favorites,
-            generation: 42,
-        };
-        let json = serde_json::to_value(&event).expect("serialize");
-        assert_eq!(json["event"], "library.invalidated");
-        assert_eq!(json["data"]["table"], "favorites");
-        assert_eq!(json["data"]["generation"], 42);
-        let back: ApiEvent = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(back, event);
-    }
-
-    #[test]
-    fn resync_serializes_without_a_data_key() {
-        let json = serde_json::to_value(&ApiEvent::Resync).expect("serialize");
-        assert_eq!(json["event"], "resync");
-        assert!(json.get("data").is_none());
-        let back: ApiEvent = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(back, ApiEvent::Resync);
-    }
-
-    #[test]
-    fn set_mode_round_trips_with_the_loop_field() {
-        let command = PlayerCommand::SetMode {
-            shuffle: Some(true),
-            loop_mode: Some(LoopMode::Track),
-        };
-        let json = serde_json::to_value(command).expect("serialize");
-        assert_eq!(json["type"], "set_mode");
-        assert_eq!(json["loop"], "track");
-        let back: PlayerCommand = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(back, command);
-    }
-
-    #[test]
-    fn unknown_enum_values_fall_back_instead_of_failing() {
-        let code: ErrorCode = serde_json::from_value("brand_new_code".into()).expect("code");
-        assert_eq!(code, ErrorCode::Internal);
-        let table: Table = serde_json::from_value("brand_new_table".into()).expect("table");
-        assert_eq!(table, Table::Unknown);
-        let state: JobState = serde_json::from_value("brand_new_state".into()).expect("state");
-        assert_eq!(state, JobState::Unknown);
-        let level: NoticeLevel = serde_json::from_value("brand_new_level".into()).expect("level");
-        assert_eq!(level, NoticeLevel::Unknown);
-    }
-
-    #[test]
-    fn player_state_round_trips() {
-        let state = PlayerState {
-            rev: 7,
-            now_ms: 1234,
-            phase: Phase::Playing,
-            intent: Intent::Committed { token: 3 },
-            volume: 0.8,
-            queue: QueueSummary {
-                rev: 2,
-                length: 10,
-                index: Some(4),
-                shuffle: true,
-                loop_mode: LoopMode::Queue,
-            },
-            ..Default::default()
-        };
-        let json = serde_json::to_value(&state).expect("serialize");
-        assert_eq!(json["intent"]["kind"], "committed");
-        assert_eq!(json["queue"]["loop"], "queue");
-        let back: PlayerState = serde_json::from_value(json).expect("deserialize");
-        assert_eq!(back, state);
-    }
 }

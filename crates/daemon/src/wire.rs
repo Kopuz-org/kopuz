@@ -4,10 +4,9 @@ use api::{TrackInfo, TrackKind};
 use reader::Track;
 use utils::playback_ref::PlaybackItemRef;
 
-/// The wire row for a track: sentinel durations become an explicit kind,
-/// artwork becomes a presence marker carrying the entity key (clients fetch
-/// the bytes via the GetArtwork rpc), and the offline flag is derived from
-/// the config's registration map so clients never see paths.
+/// The wire row for a track: sentinel durations become an explicit kind, and
+/// the offline flag is derived from the config's registration map so clients
+/// never see paths.
 pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo {
     let key = track.id.key().to_string();
     let uid = track.id.uid();
@@ -17,7 +16,6 @@ pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo
         .primary_id()
         .is_some_and(|id| config.offline_tracks.contains_key(id));
     TrackInfo {
-        artwork: (!radio).then(|| key.clone()),
         key,
         uid,
         title: track.title.clone(),

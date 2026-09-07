@@ -146,42 +146,42 @@ impl Kopuz for KopuzGrpc {
 
     async fn play(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::PlayRequest>,
     ) -> Result<Response<proto::MutationResult>, Status> {
         self.player_mutation(api::PlayerCommand::Play).await
     }
 
     async fn pause(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::PauseRequest>,
     ) -> Result<Response<proto::MutationResult>, Status> {
         self.player_mutation(api::PlayerCommand::Pause).await
     }
 
     async fn toggle(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::ToggleRequest>,
     ) -> Result<Response<proto::MutationResult>, Status> {
         self.player_mutation(api::PlayerCommand::Toggle).await
     }
 
     async fn next(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::NextRequest>,
     ) -> Result<Response<proto::MutationResult>, Status> {
         self.player_mutation(api::PlayerCommand::Next).await
     }
 
     async fn previous(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::PreviousRequest>,
     ) -> Result<Response<proto::MutationResult>, Status> {
         self.player_mutation(api::PlayerCommand::Previous).await
     }
 
     async fn stop(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::StopRequest>,
     ) -> Result<Response<proto::MutationResult>, Status> {
         self.player_mutation(api::PlayerCommand::Stop).await
     }
@@ -219,7 +219,7 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_status(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::GetStatusRequest>,
     ) -> Result<Response<proto::DaemonStatus>, Status> {
         Ok(Response::new(proto::DaemonStatus {
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -230,7 +230,7 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_player_state(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::GetPlayerStateRequest>,
     ) -> Result<Response<proto::PlayerState>, Status> {
         let state = self.0.api.player_state().await.map_err(failed)?;
         Ok(Response::new(convert::player_state_to_proto(&state)))
@@ -277,7 +277,7 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_stats(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::GetStatsRequest>,
     ) -> Result<Response<proto::Stats>, Status> {
         let stats = self.0.api.stats().await.map_err(failed)?;
         Ok(Response::new(convert::stats_to_proto(&stats)))
@@ -298,7 +298,7 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_favorites(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::GetFavoritesRequest>,
     ) -> Result<Response<proto::Favorites>, Status> {
         let favorites = self.0.api.favorites().await.map_err(failed)?;
         Ok(Response::new(convert::favorites_to_proto(&favorites)))
@@ -306,7 +306,7 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_jobs(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::GetJobsRequest>,
     ) -> Result<Response<proto::JobList>, Status> {
         let jobs = self.0.api.jobs().await.map_err(failed)?;
         Ok(Response::new(proto::JobList {
@@ -316,7 +316,7 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_downloads(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::GetDownloadsRequest>,
     ) -> Result<Response<proto::DownloadList>, Status> {
         let keys = self.0.api.downloads().await.map_err(failed)?;
         Ok(Response::new(proto::DownloadList { keys }))
@@ -324,7 +324,7 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_config(
         &self,
-        _request: Request<proto::Empty>,
+        _request: Request<proto::GetConfigRequest>,
     ) -> Result<Response<proto::ConfigView>, Status> {
         let view = self.0.api.config().await.map_err(failed)?;
         Ok(Response::new(convert::config_view_to_proto(&view)))
@@ -353,14 +353,14 @@ impl Kopuz for KopuzGrpc {
     async fn set_favorite(
         &self,
         request: Request<proto::FavoriteRequest>,
-    ) -> Result<Response<proto::Empty>, Status> {
+    ) -> Result<Response<proto::SetFavoriteResponse>, Status> {
         let request = request.get_ref();
         self.0
             .api
             .set_favorite(request.key.clone(), request.favorite)
             .await
             .map_err(failed)?;
-        Ok(Response::new(proto::Empty {}))
+        Ok(Response::new(proto::SetFavoriteResponse {}))
     }
 
     async fn start_job(
@@ -375,13 +375,13 @@ impl Kopuz for KopuzGrpc {
     async fn cancel_job(
         &self,
         request: Request<proto::JobId>,
-    ) -> Result<Response<proto::Empty>, Status> {
+    ) -> Result<Response<proto::CancelJobResponse>, Status> {
         self.0
             .api
             .cancel_job(request.get_ref().id.clone())
             .await
             .map_err(failed)?;
-        Ok(Response::new(proto::Empty {}))
+        Ok(Response::new(proto::CancelJobResponse {}))
     }
 
     async fn start_downloads(
@@ -400,13 +400,13 @@ impl Kopuz for KopuzGrpc {
     async fn remove_download(
         &self,
         request: Request<proto::TrackRef>,
-    ) -> Result<Response<proto::Empty>, Status> {
+    ) -> Result<Response<proto::RemoveDownloadResponse>, Status> {
         self.0
             .api
             .remove_download(request.get_ref().key.clone())
             .await
             .map_err(failed)?;
-        Ok(Response::new(proto::Empty {}))
+        Ok(Response::new(proto::RemoveDownloadResponse {}))
     }
 
     async fn patch_config(

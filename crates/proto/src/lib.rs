@@ -214,7 +214,6 @@ pub mod convert {
         ErrorBody {
             code: error_code_to_proto(value.code) as i32,
             message: value.message.clone(),
-            details_json: value.details.as_ref().map(|details| details.to_string()),
         }
     }
 
@@ -222,10 +221,6 @@ pub mod convert {
         api::ErrorBody {
             code: error_code_from_proto(value.code),
             message: value.message.clone(),
-            details: value
-                .details_json
-                .as_deref()
-                .and_then(|json| serde_json::from_str(json).ok()),
         }
     }
 
@@ -233,7 +228,6 @@ pub mod convert {
         ErrorBody {
             code: error_code_to_proto(value.code) as i32,
             message: value.message.clone(),
-            details_json: value.details.as_ref().map(|details| details.to_string()),
         }
     }
 
@@ -241,16 +235,12 @@ pub mod convert {
         api::ApiError {
             code: error_code_from_proto(value.code),
             message: value.message.clone(),
-            details: value
-                .details_json
-                .as_deref()
-                .and_then(|json| serde_json::from_str(json).ok()),
         }
     }
 
     pub fn intent_to_proto(value: &api::Intent) -> Intent {
         let kind = match value {
-            api::Intent::Stopped => intent::Kind::Stopped(Empty {}),
+            api::Intent::Stopped => intent::Kind::Stopped(Unit {}),
             api::Intent::Loading { token, from_token } => intent::Kind::Loading(intent::Loading {
                 token: *token,
                 from_token: *from_token,
@@ -278,6 +268,7 @@ pub mod convert {
     pub fn now_playing_to_proto(value: &api::NowPlaying) -> NowPlaying {
         NowPlaying {
             key: value.key.clone(),
+            uid: value.uid.clone(),
             title: value.title.clone(),
             artist: value.artist.clone(),
             album: value.album.clone(),
@@ -286,13 +277,13 @@ pub mod convert {
             bitrate: u32::from(value.bitrate),
             kind: track_kind_to_proto(value.kind) as i32,
             seekable: value.seekable,
-            artwork: value.artwork.clone(),
         }
     }
 
     pub fn now_playing_from_proto(value: &NowPlaying) -> api::NowPlaying {
         api::NowPlaying {
             key: value.key.clone(),
+            uid: value.uid.clone(),
             title: value.title.clone(),
             artist: value.artist.clone(),
             album: value.album.clone(),
@@ -301,7 +292,6 @@ pub mod convert {
             bitrate: value.bitrate.min(u32::from(u16::MAX)) as u16,
             kind: track_kind_from_proto(value.kind),
             seekable: value.seekable,
-            artwork: value.artwork.clone(),
         }
     }
 
@@ -485,7 +475,7 @@ pub mod convert {
                 code: code.clone(),
                 message: message.clone(),
             }),
-            api::ApiEvent::Resync => event::Kind::Resync(Empty {}),
+            api::ApiEvent::Resync => event::Kind::Resync(Unit {}),
         };
         Event { kind: Some(kind) }
     }
@@ -703,7 +693,6 @@ pub mod convert {
             disc_number: value.disc_number,
             kind: track_kind_to_proto(value.kind) as i32,
             seekable: value.seekable,
-            artwork: value.artwork.clone(),
             offline: value.offline,
         }
     }
@@ -723,7 +712,6 @@ pub mod convert {
             disc_number: value.disc_number,
             kind: track_kind_from_proto(value.kind),
             seekable: value.seekable,
-            artwork: value.artwork.clone(),
             offline: value.offline,
         }
     }
@@ -900,89 +888,42 @@ pub mod convert {
 }
 
 /// ApiError <-> tonic Status, shared by the server and the Rust client so
-/// the mapping cannot drift. The stable machine-readable code rides the
-/// `kopuz-error-code` metadata entry; the gRPC code is the nearest
-/// standard equivalent for clients that only know gRPC.
+/// the mapping cannot drift. It is one-to-one, so the status code alone
+/// carries the Kopuz code and nothing rides alongside it in metadata.
 pub mod status {
     use tonic::{Code, Status};
-
-    fn code_name(code: api::ErrorCode) -> &'static str {
-        match code {
-            api::ErrorCode::InvalidInput => "invalid_input",
-            api::ErrorCode::Unauthorized => "unauthorized",
-            api::ErrorCode::NotFound => "not_found",
-            api::ErrorCode::Conflict => "conflict",
-            api::ErrorCode::SourceAuthExpired => "source_auth_expired",
-            api::ErrorCode::SourceUnreachable => "source_unreachable",
-            api::ErrorCode::Unsupported => "unsupported",
-            api::ErrorCode::Internal => "internal",
-        }
-    }
-
-    fn code_from_name(name: &str) -> Option<api::ErrorCode> {
-        Some(match name {
-            "invalid_input" => api::ErrorCode::InvalidInput,
-            "unauthorized" => api::ErrorCode::Unauthorized,
-            "not_found" => api::ErrorCode::NotFound,
-            "conflict" => api::ErrorCode::Conflict,
-            "source_auth_expired" => api::ErrorCode::SourceAuthExpired,
-            "source_unreachable" => api::ErrorCode::SourceUnreachable,
-            "unsupported" => api::ErrorCode::Unsupported,
-            "internal" => api::ErrorCode::Internal,
-            _ => return None,
-        })
-    }
 
     pub fn to_status(error: api::ApiError) -> Status {
         let grpc_code = match error.code {
             api::ErrorCode::InvalidInput => Code::InvalidArgument,
-            api::ErrorCode::Unauthorized | api::ErrorCode::SourceAuthExpired => {
-                Code::Unauthenticated
-            }
+            api::ErrorCode::Unauthorized => Code::Unauthenticated,
+            // Not UNAUTHENTICATED: that says the caller's own token failed,
+            // and a client answers it by re-reading the discovery file. An
+            // expired source login is a precondition the user must fix.
+            api::ErrorCode::SourceAuthExpired => Code::FailedPrecondition,
             api::ErrorCode::NotFound => Code::NotFound,
-            api::ErrorCode::Conflict => Code::Aborted,
+            api::ErrorCode::Conflict => Code::AlreadyExists,
             api::ErrorCode::Unsupported => Code::Unimplemented,
             api::ErrorCode::SourceUnreachable => Code::Unavailable,
             api::ErrorCode::Internal => Code::Internal,
         };
-        let mut status = Status::new(grpc_code, error.message);
-        if let Ok(value) = code_name(error.code).parse() {
-            status.metadata_mut().insert("kopuz-error-code", value);
-        }
-        if let Some(details) = error.details {
-            let bytes = details.to_string().into_bytes();
-            status.metadata_mut().insert_bin(
-                "kopuz-error-details-bin",
-                tonic::metadata::MetadataValue::from_bytes(&bytes),
-            );
-        }
-        status
+        Status::new(grpc_code, error.message)
     }
 
     pub fn from_status(status: &Status) -> api::ApiError {
-        let code = status
-            .metadata()
-            .get("kopuz-error-code")
-            .and_then(|value| value.to_str().ok())
-            .and_then(code_from_name)
-            .unwrap_or(match status.code() {
-                Code::InvalidArgument => api::ErrorCode::InvalidInput,
-                Code::Unauthenticated => api::ErrorCode::Unauthorized,
-                Code::NotFound => api::ErrorCode::NotFound,
-                Code::Aborted | Code::AlreadyExists => api::ErrorCode::Conflict,
-                Code::Unimplemented => api::ErrorCode::Unsupported,
-                Code::Unavailable => api::ErrorCode::SourceUnreachable,
-                _ => api::ErrorCode::Internal,
-            });
-        let details = status
-            .metadata()
-            .get_bin("kopuz-error-details-bin")
-            .and_then(|value| value.to_bytes().ok())
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+        let code = match status.code() {
+            Code::InvalidArgument => api::ErrorCode::InvalidInput,
+            Code::Unauthenticated => api::ErrorCode::Unauthorized,
+            Code::FailedPrecondition => api::ErrorCode::SourceAuthExpired,
+            Code::NotFound => api::ErrorCode::NotFound,
+            Code::AlreadyExists => api::ErrorCode::Conflict,
+            Code::Unimplemented => api::ErrorCode::Unsupported,
+            Code::Unavailable => api::ErrorCode::SourceUnreachable,
+            _ => api::ErrorCode::Internal,
+        };
         api::ApiError {
             code,
             message: status.message().to_string(),
-            details,
         }
     }
 
@@ -1006,7 +947,6 @@ pub mod status {
                 let error = api::ApiError {
                     code,
                     message: "m".into(),
-                    details: Some(serde_json::json!({"n": 1})),
                 };
                 let back = from_status(&to_status(error.clone()));
                 assert_eq!(error, back);
@@ -1031,13 +971,13 @@ mod tests {
             },
             track: Some(api::NowPlaying {
                 key: "k".into(),
+                uid: "ytmusic:k".into(),
                 title: "t".into(),
                 artist: "a".into(),
                 album: "al".into(),
                 duration_ms: Some(223_000),
                 khz: 44,
                 bitrate: 320,
-                artwork: Some("k".into()),
                 kind: api::TrackKind::Normal,
                 seekable: true,
             }),
@@ -1071,7 +1011,6 @@ mod tests {
             error: Some(api::ErrorBody {
                 code: api::ErrorCode::SourceUnreachable,
                 message: "m".into(),
-                details: Some(serde_json::json!({"k": 1})),
             }),
         }
     }
@@ -1131,7 +1070,6 @@ mod tests {
                 error: Some(api::ErrorBody {
                     code: api::ErrorCode::Conflict,
                     message: "busy".into(),
-                    details: None,
                 }),
             },
             api::ApiEvent::ConfigChanged {
