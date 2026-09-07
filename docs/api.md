@@ -130,7 +130,7 @@ Two rules make a frontend feel native:
 | `GetFavorites` | | `{refs: [key], generation}` |
 | `GetJobs` | | `[{id, kind, state, phase, current?, total?, message?, error?}]` |
 | `GetDownloads` | | `{keys}` of offline-available tracks |
-| `GetConfig` | | `{config_json, locked_keys}` (credentials stripped) |
+| `GetConfig` | | `{config, locked_keys}` (credentials absent) |
 | `SetQueue` | mode + context (+ `start_index`/`shuffle` for replace) | `MutationResult {rev}` |
 | `EditQueue` | `jump {index}` / `move {from, to}` / `remove {index}` (play-order indices) | `MutationResult {rev}` |
 | `SetFavorite` | `{key, favorite}` | optimistic; a rejected remote push reverts and emits a `notice` |
@@ -138,7 +138,7 @@ Two rules make a frontend feel native:
 | `CancelJob` | `{id}` | |
 | `StartDownloads` | `{keys}` | `{job_id}` |
 | `RemoveDownload` | `{key}` | |
-| `PatchConfig` | RFC 7396 merge patch as JSON in `merge_patch_json` | updated view; credential keys refused, `locked_keys` are pinned by a managed settings layer |
+| `SetConfig` | a whole `Config` | updated view; read it, change what you want, send it back |
 | `GetArtwork` | one of `track`/`album`/`artist`, plus `hq` | a stream of `ArtworkChunk` (first chunk carries `content_type`); thumbnails resized daemon-side (400px, 1920px hq) |
 
 Queue **contexts** materialize daemon-side, so "play this album" never
@@ -192,3 +192,24 @@ print("toggled at rev", stub.Toggle(pb.ToggleRequest()).rev)
   Subsonic/Navidrome, and Nextcloud need nothing but the daemon.
 - Spotify playback is machine-bound to a browser with Widevine next to the
   GUI; a headless `kopuzd` cannot play Spotify audio itself.
+
+## Settings
+
+`Config` mirrors the app's settings struct field for field. It is a real
+message, not JSON in a string: the settings are a closed Rust struct on both
+ends of one binary, so the schema says so and a wrong key or type fails to
+compile rather than at runtime.
+
+Two groups of fields never cross: credentials (media-server logins, Last.fm
+and Libre.fm keys, the MusicBrainz token) and machine-local path state
+(`offline_tracks`). They come back as defaults in the view, and `SetConfig`
+ignores whatever you send for them -- the daemon keeps its own -- so reading
+a view and writing it straight back cannot erase them.
+
+`SetConfig` replaces the surface wholesale rather than patching: read the
+view, change what you want, send it back. The daemon diffs it against what
+it holds and reports only the keys that actually changed in
+`config.changed`. `locked_keys` are pinned by a managed settings layer -- a
+read-only or Nix-store `settings.toml`, a `settings.d` drop-in, or a
+`KOPUZ_CONFIG_*` override -- and changing one is refused; leaving it at the
+value you read is not, so a read-modify-write of any other key still works.

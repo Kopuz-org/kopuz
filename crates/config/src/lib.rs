@@ -142,7 +142,7 @@ pub struct YtdlpHistoryEntry {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CustomTheme {
     pub name: String,
     pub vars: HashMap<String, String>,
@@ -617,7 +617,7 @@ fn default_hero_height() -> u32 {
     300
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub server: Option<MusicServer>,

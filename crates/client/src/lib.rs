@@ -190,11 +190,11 @@ impl KopuzApi for GrpcApi {
         Ok(convert::config_view_from_proto(view.get_ref()))
     }
 
-    async fn patch_config(&self, patch: serde_json::Value) -> Result<ConfigView, ApiError> {
+    async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError> {
         let view = self
             .client()
-            .patch_config(Request::new(proto::ConfigPatch {
-                merge_patch_json: patch.to_string(),
+            .set_config(Request::new(proto::SetConfigRequest {
+                config: Some(convert::config_to_proto(&config)),
             }))
             .await
             .map_err(wire_error)?;

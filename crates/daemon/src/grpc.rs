@@ -357,13 +357,21 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::RemoveDownloadResponse {}))
     }
 
-    async fn patch_config(
+    async fn set_config(
         &self,
-        request: Request<proto::ConfigPatch>,
+        request: Request<proto::SetConfigRequest>,
     ) -> Result<Response<proto::ConfigView>, Status> {
-        let patch: serde_json::Value = serde_json::from_str(&request.get_ref().merge_patch_json)
-            .map_err(|error| Status::invalid_argument(format!("invalid merge patch: {error}")))?;
-        let view = self.0.api.patch_config(patch).await.map_err(failed)?;
+        let config = request
+            .get_ref()
+            .config
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("SetConfig needs a config"))?;
+        let view = self
+            .0
+            .api
+            .set_config(convert::config_from_proto(config))
+            .await
+            .map_err(failed)?;
         Ok(Response::new(convert::config_view_to_proto(&view)))
     }
 

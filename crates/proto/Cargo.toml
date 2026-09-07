@@ -17,6 +17,7 @@ workspace = true
 
 [dependencies]
 api = { workspace = true }
+config = { workspace = true }
 tonic = { workspace = true }
 prost = { workspace = true }
 serde_json = { workspace = true }

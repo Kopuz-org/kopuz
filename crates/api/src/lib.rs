@@ -31,7 +31,7 @@ pub use queue::{QueueContext, QueueEdit, QueueItem, QueueMode, QueueWindow, SetQ
 /// settings UIs).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ConfigView {
-    pub config: serde_json::Value,
+    pub config: config::AppConfig,
     pub locked_keys: Vec<String>,
 }
 
@@ -91,9 +91,11 @@ pub trait KopuzApi: Send + Sync {
 
     async fn config(&self) -> Result<ConfigView, ApiError>;
 
-    /// RFC 7396 merge patch against the config surface. Credential and
-    /// locked keys are refused with `invalid_input`.
-    async fn patch_config(&self, patch: serde_json::Value) -> Result<ConfigView, ApiError>;
+    /// Replace the settings surface. Read [`Self::config`], change what you
+    /// want, send it back. Credential fields are ignored (the daemon keeps
+    /// its own), and a locked key whose value actually differs is refused
+    /// with `invalid_input`.
+    async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError>;
 
     async fn favorites(&self) -> Result<FavoritesView, ApiError>;
 

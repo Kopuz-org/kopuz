@@ -16,7 +16,7 @@ name = "api"
 workspace = true
 
 [dependencies]
-serde_json = { workspace = true }
+config = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }

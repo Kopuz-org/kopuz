@@ -354,37 +354,37 @@ async fn subscribe_stream_delivers_typed_events() {
 }
 
 #[tokio::test]
-async fn config_view_and_patch_agree_across_transports() {
+async fn config_view_and_set_agree_across_transports() {
     let pair = spawn_pair().await;
 
     let local_view = pair.local.config().await.expect("local view");
     let wire_view = pair.wire.config().await.expect("wire view");
+    // The whole 68-field surface has to survive the proto round trip for
+    // these to be equal, so this is the guard on every field mapping.
     assert_eq!(local_view, wire_view);
-    assert!(local_view.config.get("lastfm_session_key").is_none());
-    assert!(local_view.config.get("server").is_none());
+    assert!(local_view.config.lastfm_session_key.is_empty());
+    assert!(local_view.config.server.is_none());
 
-    let patched = pair
-        .wire
-        .patch_config(serde_json::json!({"crossfade_seconds": 7}))
-        .await
-        .expect("patch over the wire");
-    assert_eq!(patched.config["crossfade_seconds"], 7);
-    let local_view = pair.local.config().await.expect("local view after patch");
-    assert_eq!(local_view.config["crossfade_seconds"], 7);
+    let mut next = wire_view.config.clone();
+    next.crossfade_seconds = 7;
+    next.theme = "nord".to_string();
+    next.offline_quality = config::OfflineQuality::Kbps160;
+    let written = pair.wire.set_config(next).await.expect("set over the wire");
+    assert_eq!(written.config.crossfade_seconds, 7);
+    assert_eq!(written.config.theme, "nord");
+    assert_eq!(
+        written.config.offline_quality,
+        config::OfflineQuality::Kbps160
+    );
 
-    let local_err = pair
-        .local
-        .patch_config(serde_json::json!({"servers": []}))
-        .await
-        .expect_err("credential key locally");
-    let wire_err = pair
-        .wire
-        .patch_config(serde_json::json!({"servers": []}))
-        .await
-        .expect_err("credential key over the wire");
-    assert_eq!(local_err.code, ErrorCode::InvalidInput);
-    assert_eq!(wire_err.code, local_err.code);
-    assert_eq!(wire_err.message, local_err.message);
+    let local_view = pair.local.config().await.expect("local view after set");
+    assert_eq!(local_view.config, written.config);
+
+    // Credentials are absent from the wire, so writing a view straight back
+    // cannot erase them; the daemon keeps its own. (Seeding one is only
+    // possible below the API, so the depth test lives in config_service.)
+    assert!(written.config.lastfm_session_key.is_empty());
+    assert!(written.config.servers.is_empty());
 }
 
 #[tokio::test]
@@ -422,10 +422,10 @@ async fn scan_job_indexes_local_files_over_the_wire() {
     std::fs::write(music.join("one.wav"), wav_bytes(1)).expect("write wav");
     std::fs::write(music.join("two.wav"), wav_bytes(1)).expect("write wav");
 
+    let mut config = pair.wire.config().await.expect("view").config;
+    config.music_directory = vec![music.clone()];
     pair.wire
-        .patch_config(serde_json::json!({
-            "music_directory": [music.to_string_lossy()],
-        }))
+        .set_config(config)
         .await
         .expect("point the library at the temp dir");
 

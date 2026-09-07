@@ -47,7 +47,7 @@ service Kopuz {
   rpc CancelJob(JobId) returns (CancelJobResponse);
   rpc StartDownloads(DownloadRequest) returns (JobRef);
   rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
-  rpc PatchConfig(ConfigPatch) returns (ConfigView);
+  rpc SetConfig(SetConfigRequest) returns (ConfigView);
 
   rpc GetArtwork(ArtworkRequest) returns (stream ArtworkChunk);
 }
@@ -461,18 +461,323 @@ message DownloadList {
 
 // ---------------- config, status, artwork ----------------
 
-// The config travels as JSON inside the proto: it is an open key space
-// the daemon versions independently. Credential keys are stripped from
-// views and refused in patches; locked_keys are pinned by a managed
-// settings layer and render read-only.
+// The settings surface as a real message. Credential keys and machine-local
+// path state never leave the daemon; locked_keys are pinned by a managed
+// settings layer (a read-only or Nix-store settings.toml, a drop-in, or an
+// env override) and render read-only.
 message ConfigView {
-  string config_json = 1;
+  Config config = 1;
   repeated string locked_keys = 2;
 }
 
-// RFC 7396 merge patch, as JSON.
-message ConfigPatch {
-  string merge_patch_json = 1;
+// Replaces the settings surface wholesale: read the view, change what you
+// want, send it back. A locked key whose value actually differs is refused.
+message SetConfigRequest {
+  Config config = 1;
+}
+
+// ---------------- config ----------------
+
+// A source is Local, a named local library, or a server; the id carries the
+// namespace (`local:<uuid>` or the server id) exactly as AppConfig holds it.
+message SourceRef {
+  oneof kind {
+    Unit local = 1;
+    string local_library = 2;
+    string server = 3;
+  }
+}
+
+// proto maps cannot hold a repeated value, so the folder list is wrapped.
+message StringList {
+  repeated string values = 1;
+}
+
+message SavedLocalSource {
+  string id = 1;
+  string name = 2;
+  repeated string directories = 3;
+}
+
+message HomeSection {
+  string key = 1;
+  bool enabled = 2;
+}
+
+message RegistryEntry {
+  string url = 1;
+  bool enabled = 2;
+  bool is_default = 3;
+}
+
+message CustomTheme {
+  string name = 1;
+  map<string, string> vars = 2;
+}
+
+message YtdlpHistoryEntry {
+  string url = 1;
+  string title = 2;
+  string format = 3;
+  string status = 4;
+  optional string error = 5;
+}
+
+message EqualizerSettings {
+  bool enabled = 1;
+  EqPreset preset = 2;
+  // Exactly ten bands; a different length is rejected at the boundary.
+  repeated float bands = 3;
+  float preamp_db = 4;
+}
+
+message AlbumSortCriterion {
+  AlbumSortField field = 1;
+  SortDirection direction = 2;
+}
+
+message TrackSortCriterion {
+  TrackSortField field = 1;
+  SortDirection direction = 2;
+}
+
+message ArtistSortCriterion {
+  ArtistSortField field = 1;
+  SortDirection direction = 2;
+}
+
+message YtdlpOptions {
+  bool embed_metadata = 1;
+  bool embed_thumbnail = 2;
+  bool postprocess_thumbnail_square = 3;
+  bool embed_chapters = 4;
+  bool embed_subs = 5;
+  bool embed_info_json = 6;
+  bool write_thumbnail = 7;
+  bool write_description = 8;
+  bool write_info_json = 9;
+  bool write_subs = 10;
+  bool write_auto_subs = 11;
+  bool write_comments = 12;
+  bool sponsorblock = 13;
+  bool sponsorblock_mark = 14;
+  bool split_chapters = 15;
+  string convert_thumbnail = 16;
+  bool no_playlist = 17;
+  bool xattrs = 18;
+  bool no_mtime = 19;
+  string rate_limit = 20;
+  string cookies_from_browser = 21;
+  string js_runtimes = 22;
+  uint32 audio_quality = 23;
+}
+
+// The settings surface, mirroring config::AppConfig minus the keys the
+// daemon never sends: credentials and machine-local path state.
+message Config {
+  repeated SavedLocalSource local_sources = 1;
+  SourceRef active_source = 2;
+  bool source_explicitly_set = 3;
+  map<string, StringList> server_folders = 4;
+  optional string spotify_browser = 5;
+  bool spotify_prefer_active_device = 6;
+  repeated string music_directory = 7;
+  string theme = 8;
+  string live_theme_path = 9;
+  string device_id = 10;
+  optional bool discord_presence = 11;
+  optional bool discord_presence_paused = 12;
+  optional bool discord_presence_source = 13;
+  SortOrder sort_order = 14;
+  repeated AlbumSortCriterion album_sort = 15;
+  repeated TrackSortCriterion library_sort = 16;
+  repeated AlbumSortCriterion artist_album_sort = 17;
+  repeated ArtistSortCriterion artist_sort = 18;
+  AlbumViewMode album_view_mode = 19;
+  AlbumViewMode artist_album_view_mode = 20;
+  AlbumViewMode artists_view_mode = 21;
+  ArtistViewOrder artist_view_order = 22;
+  map<string, uint64> listen_counts = 23;
+  string language = 24;
+  bool reduce_animations = 25;
+  bool fullscreen_use_player_bar = 26;
+  bool fullscreen_tabs_collapsed = 27;
+  bool cover_art_background = 28;
+  uint32 cover_art_darkening = 29;
+  uint32 cover_art_blur = 30;
+  string custom_background_path = 31;
+  string custom_font_path = 32;
+  bool tracing_enabled = 33;
+  bool auto_check_updates = 34;
+  bool minimize_to_tray = 35;
+  bool show_source_toggle = 36;
+  bool show_row_images = 37;
+  repeated string sidebar_order = 38;
+  float volume = 39;
+  float volume_scroll_step = 40;
+  uint32 crossfade_seconds = 41;
+  map<string, CustomTheme> custom_themes = 42;
+  BackBehavior back_behavior = 43;
+  ChannelMode channel_mode = 44;
+  EqualizerSettings equalizer = 45;
+  DeviceChangeBehavior device_change_behavior = 46;
+  SampleRateMode sample_rate_mode = 47;
+  string ytdlp_output_dir = 48;
+  YtdlpOptions ytdlp_options = 49;
+  repeated YtdlpHistoryEntry ytdlp_history = 50;
+  TitlebarMode titlebar_mode = 51;
+  OfflineQuality offline_quality = 52;
+  PlayerBarPosition player_bar_position = 53;
+  UiStyle ui_style = 54;
+  SettingsLayout settings_layout = 55;
+  uint32 hero_height = 56;
+  repeated HomeSection home_sections = 57;
+  ListenNowStyle listen_now_style = 58;
+  bool auto_fetch_covers = 59;
+  FetchStrategy cover_fetch_strategy = 60;
+  repeated RegistryEntry radio_registries = 61;
+  repeated string pinned_stations = 62;
+  bool prefer_local_lyrics = 63;
+  bool enable_musixmatch_lyrics = 64;
+  int32 lyrics_offset_ms = 65;
+  bool lyrics_offset_auto = 66;
+  bool lyrics_depth_blur = 67;
+  uint32 lyrics_depth_blur_strength = 68;
+}
+
+enum AlbumViewMode {
+  ALBUM_VIEW_MODE_UNSPECIFIED = 0;
+  ALBUM_VIEW_MODE_GRID = 1;
+  ALBUM_VIEW_MODE_LIST = 2;
+}
+
+enum ArtistViewOrder {
+  ARTIST_VIEW_ORDER_UNSPECIFIED = 0;
+  ARTIST_VIEW_ORDER_TRACKS = 1;
+  ARTIST_VIEW_ORDER_ALBUMS = 2;
+}
+
+enum BackBehavior {
+  BACK_BEHAVIOR_UNSPECIFIED = 0;
+  BACK_BEHAVIOR_REWIND_THEN_PREV = 1;
+  BACK_BEHAVIOR_ALWAYS_PREV = 2;
+}
+
+enum ChannelMode {
+  CHANNEL_MODE_UNSPECIFIED = 0;
+  CHANNEL_MODE_STEREO = 1;
+  CHANNEL_MODE_MONO = 2;
+  CHANNEL_MODE_LEFT_ONLY = 3;
+  CHANNEL_MODE_RIGHT_ONLY = 4;
+  CHANNEL_MODE_SWAP_LEFT_RIGHT = 5;
+}
+
+enum DeviceChangeBehavior {
+  DEVICE_CHANGE_BEHAVIOR_UNSPECIFIED = 0;
+  DEVICE_CHANGE_BEHAVIOR_RESUME = 1;
+  DEVICE_CHANGE_BEHAVIOR_PAUSE = 2;
+}
+
+enum FetchStrategy {
+  FETCH_STRATEGY_UNSPECIFIED = 0;
+  FETCH_STRATEGY_MUSIC_BRAINZ_FIRST = 1;
+  FETCH_STRATEGY_LAST_FM_FIRST = 2;
+  FETCH_STRATEGY_MUSIC_BRAINZ_ONLY = 3;
+  FETCH_STRATEGY_LAST_FM_ONLY = 4;
+}
+
+enum ListenNowStyle {
+  LISTEN_NOW_STYLE_UNSPECIFIED = 0;
+  LISTEN_NOW_STYLE_LIST = 1;
+  LISTEN_NOW_STYLE_CARDS = 2;
+}
+
+enum OfflineQuality {
+  OFFLINE_QUALITY_UNSPECIFIED = 0;
+  OFFLINE_QUALITY_KBPS128 = 1;
+  OFFLINE_QUALITY_KBPS160 = 2;
+  OFFLINE_QUALITY_KBPS192 = 3;
+  OFFLINE_QUALITY_KBPS256 = 4;
+  OFFLINE_QUALITY_KBPS320 = 5;
+  OFFLINE_QUALITY_ORIGINAL = 6;
+}
+
+enum PlayerBarPosition {
+  PLAYER_BAR_POSITION_UNSPECIFIED = 0;
+  PLAYER_BAR_POSITION_BOTTOM = 1;
+  PLAYER_BAR_POSITION_TOP = 2;
+}
+
+enum SampleRateMode {
+  SAMPLE_RATE_MODE_UNSPECIFIED = 0;
+  SAMPLE_RATE_MODE_SYSTEM = 1;
+  SAMPLE_RATE_MODE_SOURCE = 2;
+}
+
+enum SettingsLayout {
+  SETTINGS_LAYOUT_UNSPECIFIED = 0;
+  SETTINGS_LAYOUT_CD = 1;
+  SETTINGS_LAYOUT_TOP_BAR = 2;
+}
+
+enum SortOrder {
+  SORT_ORDER_UNSPECIFIED = 0;
+  SORT_ORDER_TITLE = 1;
+  SORT_ORDER_ARTIST = 2;
+  SORT_ORDER_ALBUM = 3;
+}
+
+enum TitlebarMode {
+  TITLEBAR_MODE_UNSPECIFIED = 0;
+  TITLEBAR_MODE_CUSTOM = 1;
+  TITLEBAR_MODE_SYSTEM = 2;
+  TITLEBAR_MODE_OFF = 3;
+}
+
+enum UiStyle {
+  UI_STYLE_UNSPECIFIED = 0;
+  UI_STYLE_NORMAL = 1;
+  UI_STYLE_VAXRY = 2;
+}
+
+enum EqPreset {
+  EQ_PRESET_UNSPECIFIED = 0;
+  EQ_PRESET_FLAT = 1;
+  EQ_PRESET_BASS_BOOST = 2;
+  EQ_PRESET_TREBLE_BOOST = 3;
+  EQ_PRESET_VOCAL_BOOST = 4;
+  EQ_PRESET_LOUDNESS = 5;
+  EQ_PRESET_CUSTOM = 6;
+}
+
+enum SortDirection {
+  SORT_DIRECTION_UNSPECIFIED = 0;
+  SORT_DIRECTION_ASC = 1;
+  SORT_DIRECTION_DESC = 2;
+}
+
+enum AlbumSortField {
+  ALBUM_SORT_FIELD_UNSPECIFIED = 0;
+  ALBUM_SORT_FIELD_TITLE = 1;
+  ALBUM_SORT_FIELD_ARTIST = 2;
+  ALBUM_SORT_FIELD_YEAR = 3;
+  ALBUM_SORT_FIELD_GENRE = 4;
+}
+
+enum TrackSortField {
+  TRACK_SORT_FIELD_UNSPECIFIED = 0;
+  TRACK_SORT_FIELD_TITLE = 1;
+  TRACK_SORT_FIELD_ARTIST = 2;
+  TRACK_SORT_FIELD_ALBUM = 3;
+  TRACK_SORT_FIELD_DURATION = 4;
+  TRACK_SORT_FIELD_DATE_ADDED = 5;
+}
+
+enum ArtistSortField {
+  ARTIST_SORT_FIELD_UNSPECIFIED = 0;
+  ARTIST_SORT_FIELD_NAME = 1;
+  ARTIST_SORT_FIELD_TRACKS = 2;
+  ARTIST_SORT_FIELD_ALBUMS = 3;
 }
 
 message DaemonStatus {

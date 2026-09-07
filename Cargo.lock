@@ -4387,7 +4387,7 @@ version = "0.16.1"
 dependencies = [
  "async-trait",
  "futures-util",
- "serde_json",
+ "kopuz-config",
  "thiserror 2.0.18",
 ]
 
@@ -4399,6 +4399,7 @@ dependencies = [
  "futures-util",
  "hyper-util",
  "kopuz-api",
+ "kopuz-config",
  "kopuz-proto",
  "serde_json",
  "tokio",
@@ -4608,6 +4609,7 @@ name = "kopuz-proto"
 version = "0.16.1"
 dependencies = [
  "kopuz-api",
+ "kopuz-config",
  "prost",
  "protox",
  "serde_json",

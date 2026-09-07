@@ -94,13 +94,13 @@ impl api::KopuzApi for LocalApi {
         }
     }
 
-    async fn patch_config(&self, patch: serde_json::Value) -> Result<api::ConfigView, ApiError> {
+    async fn set_config(&self, config: config::AppConfig) -> Result<api::ConfigView, ApiError> {
         let Some(service) = &self.config else {
             return Err(ApiError::unsupported(
                 "this daemon runs without a config service",
             ));
         };
-        let (view, updated, changed) = service.patch(patch).await?;
+        let (view, updated, changed) = service.set(config).await?;
         self.session.set_config(updated, changed);
         Ok(view)
     }

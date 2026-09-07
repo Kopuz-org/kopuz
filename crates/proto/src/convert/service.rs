@@ -43,14 +43,14 @@ pub fn job_status_from_proto(value: &JobStatus) -> api::JobStatus {
 
 pub fn config_view_to_proto(value: &api::ConfigView) -> ConfigView {
     ConfigView {
-        config_json: value.config.to_string(),
+        config: Some(config_to_proto(&value.config)),
         locked_keys: value.locked_keys.clone(),
     }
 }
 
 pub fn config_view_from_proto(value: &ConfigView) -> api::ConfigView {
     api::ConfigView {
-        config: serde_json::from_str(&value.config_json).unwrap_or(serde_json::Value::Null),
+        config: config_from_proto(value.config.as_ref().unwrap_or(&Config::default())),
         locked_keys: value.locked_keys.clone(),
     }
 }
