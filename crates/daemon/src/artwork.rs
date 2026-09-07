@@ -14,9 +14,9 @@ use sha2::{Digest, Sha256};
 
 use crate::session::SessionHandle;
 
-const THUMB_MAX: u32 = 400;
-const HQ_MAX: u32 = 1920;
-const HQ_REENCODE_THRESHOLD: usize = 2 * 1024 * 1024;
+use utils::artwork_image::{
+    HQ_MAX, HQ_QUALITY, HQ_REENCODE_THRESHOLD, THUMB_MAX, THUMB_QUALITY, shrink_jpeg,
+};
 const MAX_REMOTE_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 const REMOTE_ARTWORK_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -78,20 +78,6 @@ fn hash_name(input: &str) -> String {
         let _ = write!(name, "{byte:02x}");
     }
     name
-}
-
-fn shrink_jpeg(raw: &[u8], max_dimension: u32, quality: u8) -> Option<Vec<u8>> {
-    use image::codecs::jpeg::JpegEncoder;
-    let img = image::load_from_memory(raw).ok()?;
-    let img = if img.width() > max_dimension || img.height() > max_dimension {
-        img.thumbnail(max_dimension, max_dimension)
-    } else {
-        img
-    };
-    let mut out = Vec::new();
-    img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, quality))
-        .ok()?;
-    Some(out)
 }
 
 impl ArtworkService {
@@ -177,8 +163,8 @@ impl ArtworkService {
         }
     }
 
-    /// Thumbnail policy from the app's `artwork_protocol`: 400 px JPEG q75, or
-    /// for HQ 1920 px q85 with re-encode only above 2 MiB. Cached on disk.
+    /// Resized by the shared policy in `utils::artwork_image`, then cached on
+    /// disk; an HQ original under the re-encode threshold is served as-is.
     async fn local_payload(&self, path: &str, hq: bool) -> Result<ArtworkPayload, ApiError> {
         let cache_path = self.cache_dir.join(format!(
             "{}_{}.jpg",
@@ -196,7 +182,7 @@ impl ArtworkService {
             (raw, sniffed)
         } else {
             let max = if hq { HQ_MAX } else { THUMB_MAX };
-            let quality = if hq { 85 } else { 75 };
+            let quality = if hq { HQ_QUALITY } else { THUMB_QUALITY };
             let raw_for_shrink = raw.clone();
             match tokio::task::spawn_blocking(move || shrink_jpeg(&raw_for_shrink, max, quality))
                 .await

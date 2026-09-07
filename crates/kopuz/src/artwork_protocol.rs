@@ -18,38 +18,13 @@ fn hq_cache_path(file_path: &str) -> std::path::PathBuf {
 }
 
 fn make_thumbnail(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
-    use image::codecs::jpeg::JpegEncoder;
-    let img = image::load_from_memory(raw).ok()?;
-    const MAX_DIMENSION: u32 = 400;
-    let img = if img.width() > MAX_DIMENSION || img.height() > MAX_DIMENSION {
-        img.thumbnail(MAX_DIMENSION, MAX_DIMENSION)
-    } else {
-        img
-    };
-    let mut out = Vec::new();
-    img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, 75))
-        .ok()?;
+    let out = utils::artwork_image::thumbnail(raw)?;
     let _ = std::fs::write(cache_path, &out);
     Some(out)
 }
 
 fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
-    use image::codecs::jpeg::JpegEncoder;
-    const SIZE_LIMIT: usize = 2 * 1024 * 1024;
-    const MAX_DIMENSION: u32 = 1920;
-
-    if raw.len() <= SIZE_LIMIT {
-        return None;
-    }
-    let img = image::load_from_memory(raw).ok()?;
-    let img = if img.width() > MAX_DIMENSION || img.height() > MAX_DIMENSION {
-        img.thumbnail(MAX_DIMENSION, MAX_DIMENSION)
-    } else {
-        img
-    };
-    let mut out = Vec::new();
-    img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, 85))
-        .ok()?;
+    let out = utils::artwork_image::hq_image(raw)?;
     let _ = std::fs::write(cache_path, &out);
     Some(out)
 }
