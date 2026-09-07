@@ -224,20 +224,6 @@ pub mod convert {
         }
     }
 
-    pub fn api_error_to_proto(value: &api::ApiError) -> ErrorBody {
-        ErrorBody {
-            code: error_code_to_proto(value.code) as i32,
-            message: value.message.clone(),
-        }
-    }
-
-    pub fn api_error_from_proto(value: &ErrorBody) -> api::ApiError {
-        api::ApiError {
-            code: error_code_from_proto(value.code),
-            message: value.message.clone(),
-        }
-    }
-
     pub fn intent_to_proto(value: &api::Intent) -> Intent {
         let kind = match value {
             api::Intent::Stopped => intent::Kind::Stopped(Unit {}),
