@@ -4,8 +4,7 @@
 //! subscription with a replay cursor, so the wire follows gRPC's native
 //! request/response and streaming semantics instead of simulating an HTTP
 //! request/response protocol inside a bidirectional stream.
-//! Bearer auth rides metadata and is checked constant-time; the reflection
-//! services are served unauthenticated so `grpcurl` can list the schema,
+//! The reflection services are registered so `grpcurl` can list the schema,
 //! which is public in the repository anyway.
 
 use std::collections::VecDeque;
@@ -29,18 +28,10 @@ pub struct GrpcState {
     /// Event source with sequence numbers and the replay ring; the trait's
     /// `events()` strips ids, and Subscribe cursors need them.
     pub session: SessionHandle,
-    pub token: String,
     pub started: Instant,
 }
 
 pub struct KopuzGrpc(Arc<GrpcState>);
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
 
 fn failed(error: ApiError) -> Status {
     proto::status::to_status(error)
@@ -466,25 +457,38 @@ impl Kopuz for KopuzGrpc {
 /// (v1 and v1alpha) is registered so `grpcurl` works out of the box.
 /// `result_large_err` is tonic's own Status type; nothing to shrink here.
 #[allow(clippy::result_large_err)]
+/// Bind the socket the frontend dials. A leftover file from a crashed
+/// daemon has no listener behind it, so a failed connect is the signal that
+/// it is stale -- clear it and take the path. The mode is the access
+/// control: 0600 means only this user can open the channel.
+pub fn bind_socket(path: &std::path::Path) -> std::io::Result<tokio::net::UnixListener> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if path.exists() {
+        match std::os::unix::net::UnixStream::connect(path) {
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AddrInUse,
+                    format!("a kopuzd is already serving {}", path.display()),
+                ));
+            }
+            Err(_) => std::fs::remove_file(path)?,
+        }
+    }
+    let listener = tokio::net::UnixListener::bind(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(listener)
+}
+
 pub async fn serve(
-    listener: tokio::net::TcpListener,
+    listener: tokio::net::UnixListener,
     state: Arc<GrpcState>,
 ) -> std::io::Result<()> {
-    let bind_addr = listener.local_addr()?;
-    validate_plaintext_bind(bind_addr)?;
-    let token = state.token.clone();
-    let auth = move |request: Request<()>| -> Result<Request<()>, Status> {
-        let provided = request
-            .metadata()
-            .get("authorization")
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("Bearer "));
-        if provided.is_some_and(|value| constant_time_eq(value.as_bytes(), token.as_bytes())) {
-            Ok(request)
-        } else {
-            Err(Status::unauthenticated("missing or invalid bearer token"))
-        }
-    };
     let reflection_v1 = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build_v1()
@@ -496,32 +500,39 @@ pub async fn serve(
     tonic::transport::Server::builder()
         .add_service(reflection_v1)
         .add_service(reflection_v1alpha)
-        .add_service(KopuzServer::with_interceptor(KopuzGrpc(state), auth))
-        .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+        .add_service(KopuzServer::new(KopuzGrpc(state)))
+        .serve_with_incoming(tokio_stream::wrappers::UnixListenerStream::new(listener))
         .await
         .map_err(std::io::Error::other)
 }
 
-fn validate_plaintext_bind(bind_addr: std::net::SocketAddr) -> std::io::Result<()> {
-    if bind_addr.ip().is_loopback() {
-        return Ok(());
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::PermissionDenied,
-        format!("plaintext gRPC may only bind to a loopback address, not {bind_addr}"),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::validate_plaintext_bind;
+    use super::bind_socket;
 
-    #[test]
-    fn plaintext_bind_requires_loopback() {
-        assert!(validate_plaintext_bind("127.0.0.1:1".parse().expect("IPv4 address")).is_ok());
-        assert!(validate_plaintext_bind("[::1]:1".parse().expect("IPv6 address")).is_ok());
-        let error = validate_plaintext_bind("0.0.0.0:1".parse().expect("wildcard address"))
-            .expect_err("wildcard plaintext listener refused");
-        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    #[tokio::test]
+    async fn the_socket_is_private_to_this_user() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("kopuzd.sock");
+        let _listener = bind_socket(&path).expect("bind");
+        let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "the socket mode is the access control");
+    }
+
+    #[tokio::test]
+    async fn a_stale_socket_is_reclaimed_but_a_live_one_is_not() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("kopuzd.sock");
+
+        // No listener behind it: a crashed daemon's leftover, take the path.
+        std::fs::write(&path, b"").expect("leftover");
+        let live = bind_socket(&path).expect("stale socket reclaimed");
+
+        // Now one is really serving, so a second daemon must refuse.
+        let error = bind_socket(&path).expect_err("live socket refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
+        drop(live);
     }
 }

@@ -23,4 +23,6 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 tokio = { workspace = true }
+tower = { workspace = true }
+hyper-util = { workspace = true }
 tracing = { workspace = true }

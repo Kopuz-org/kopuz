@@ -1,12 +1,12 @@
 # The Kopuz daemon API
 
 Kopuz's playback core is a daemon. Every feature the built-in GUI has goes
-through the gRPC surface documented here, so a frontend in any language with
-protobuf support is a first-class citizen. The contract is one file:
-`crates/proto/proto/kopuz.proto` (package `kopuz.v1`). Copy it, generate
-stubs for your language, connect.
+through the gRPC surface described here. The contract is one file:
+`crates/proto/proto/kopuz.proto` (package `kopuz.v1`).
 
-Current API version: `1` (reported by `Kopuz/GetStatus`).
+This is a local IPC channel between the daemon and a frontend on the same
+machine. It is never exposed to a network, and it is not a stable public
+API -- the schema changes with the app, in the same commit.
 
 ## Running the daemon
 
@@ -16,45 +16,39 @@ Two deployment shapes serve the same API:
   the configured source, scan/sync jobs, scrobbling, and OS media
   integration (MPRIS/SMTC/Now Playing). No window, no webview. Build it with
   `cargo build --release -p kopuz-daemon --features kopuzd --bin kopuzd`.
-  A systemd user unit ships in `packaging/systemd/kopuzd.service`.
 - **Embedded**: the desktop app can serve the identical API from its own
-  process (Settings, General, "Remote Control API"). This exists because
-  SQLite is single-writer: `kopuzd` and the GUI must never run against the
-  same library at once, so a frontend that wants to attach while the GUI is
-  open attaches to the GUI itself.
+  process. This exists because SQLite is single-writer: `kopuzd` and the GUI
+  must never run against the same library at once, so a frontend that wants
+  to attach while the GUI is open attaches to the GUI itself.
 
-`kopuzd` flags: `--bind 127.0.0.1:0` (default: loopback, ephemeral port),
-`--token <hex>` (default: random), `--db-path <file>`.
+`kopuzd` flags: `--socket <path>`, `--db-path <file>`.
 
-## Discovery and auth
+## Connecting
 
-Whichever process serves the API writes a discovery file with `0600`
-permissions:
+The daemon listens on a Unix domain socket, created `0600`:
 
-- Linux: `$XDG_RUNTIME_DIR/kopuz/daemon.json`
-- macOS: the user cache dir, `~/Library/Caches/kopuz/daemon.json` (the
+- Linux: `$XDG_RUNTIME_DIR/kopuz/kopuzd.sock`
+- macOS: the user cache dir, `~/Library/Caches/kopuz/kopuzd.sock` (the
   exact path is logged at startup)
 
-```json
-{ "port": 49312, "token": "6f2c…", "pid": 74211 }
-```
+The path is the whole rendezvous -- there is no discovery file, no port and
+no token. **There is no authentication.** The socket's file mode is the
+access control: the kernel admits your own processes and refuses everyone
+else, which is the same boundary a token over loopback was reconstructing
+in userspace, minus the secret.
 
-Every RPC needs the token as metadata, constant-time checked:
+A leftover socket from a crashed daemon has no listener behind it, so a
+failed connect is what marks it stale; `kopuzd` clears it and takes the
+path. A socket that *is* being served makes a second `kopuzd` exit with
+`AddrInUse` rather than stealing the channel.
 
-```
-authorization: Bearer <token>
-```
-
-The connection is plaintext HTTP/2, so the daemon refuses to start on
-anything but a loopback address: a non-loopback `--bind` fails with
-`PermissionDenied` rather than putting your library and bearer token on
-the wire in the clear. Reach it from another machine over an SSH tunnel. Server reflection (v1 and v1alpha) is served without
-auth so `grpcurl` can list the schema:
+Server reflection (v1 and v1alpha) is registered, so `grpcurl` works out of
+the box:
 
 ```sh
-grpcurl -plaintext 127.0.0.1:<port> list kopuz.v1.Kopuz
-grpcurl -plaintext -H "authorization: Bearer $TOKEN" \
-  127.0.0.1:<port> kopuz.v1.Kopuz/GetPlayerState
+SOCK=$XDG_RUNTIME_DIR/kopuz/kopuzd.sock
+grpcurl -unix -plaintext $SOCK list kopuz.v1.Kopuz
+grpcurl -unix -plaintext $SOCK kopuz.v1.Kopuz/GetPlayerState
 ```
 
 ## Errors
@@ -66,8 +60,7 @@ nothing rides alongside it in metadata:
 | gRPC code | `ErrorCode` | meaning |
 |---|---|---|
 | INVALID_ARGUMENT | `invalid_input` | malformed request or out-of-range position |
-| UNAUTHENTICATED | `unauthorized` | missing/invalid bearer token — re-read the discovery file |
-| FAILED_PRECONDITION | `source_auth_expired` | the media server needs a re-login; your token is fine |
+| FAILED_PRECONDITION | `source_auth_expired` | the media server needs a re-login |
 | NOT_FOUND | `not_found` | unknown key/id |
 | ALREADY_EXISTS | `conflict` | a single-flight job of that kind is already running |
 | UNIMPLEMENTED | `unsupported` | this daemon runs without that service |
@@ -163,23 +156,19 @@ python -m grpc_tools.protoc -I proto --python_out=. --grpc_python_out=. proto/ko
 ```
 
 ```python
-import json, os, pathlib
+import os, pathlib
 import grpc
 import kopuz_pb2 as pb
 import kopuz_pb2_grpc as rpc
 
-disc = json.loads((pathlib.Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "kopuz/daemon.json").read_text())
-channel = grpc.insecure_channel(f"127.0.0.1:{disc['port']}")
+sock = pathlib.Path(os.environ["XDG_RUNTIME_DIR"]) / "kopuz/kopuzd.sock"
+channel = grpc.insecure_channel(f"unix:{sock}")
 stub = rpc.KopuzStub(channel)
-auth = (("authorization", f"Bearer {disc['token']}"),)
 
-state = stub.GetPlayerState(pb.GetPlayerStateRequest(), metadata=auth)
+state = stub.GetPlayerState(pb.GetPlayerStateRequest())
 print(state.track.title if state.HasField("track") else "nothing playing")
 
-print("toggled at rev", stub.Toggle(pb.ToggleRequest(), metadata=auth).rev)
-
-for envelope in stub.Subscribe(pb.SubscribeRequest(after_sequence=0), metadata=auth):
-    print(envelope.sequence, envelope.event.WhichOneof("kind"))
+print("toggled at rev", stub.Toggle(pb.ToggleRequest()).rev)
 ```
 
 ## Capability caveats

@@ -130,22 +130,18 @@ async fn spawn_pair() -> Pair {
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
     };
-    let token = "contract-token".to_string();
     let state = Arc::new(daemon::grpc::GrpcState {
         api: Arc::new(build_api(session.clone())),
         artwork: None,
         session: session.clone(),
-        token: token.clone(),
         started: Instant::now(),
     });
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind");
-    let addr = listener.local_addr().expect("addr");
+    let socket = dir.path().join("kopuzd.sock");
+    let listener = daemon::grpc::bind_socket(&socket).expect("bind socket");
     tokio::spawn(daemon::grpc::serve(listener, state));
     Pair {
         local: build_api(session.clone()),
-        wire: client::GrpcApi::new(addr.to_string(), token).expect("wire client"),
+        wire: client::GrpcApi::new(&socket).expect("wire client"),
         jobs,
         session,
         _dir: dir,
@@ -499,15 +495,4 @@ async fn folders_and_stats_agree_across_transports() {
     let local_stats = pair.local.stats().await.expect("stats locally");
     let wire_stats = pair.wire.stats().await.expect("stats over the wire");
     assert_eq!(local_stats, wire_stats);
-}
-
-#[tokio::test]
-async fn wrong_token_is_rejected() {
-    let pair = spawn_pair().await;
-    let probe = pair.wire.player_state().await;
-    assert!(probe.is_ok(), "control: correct token works");
-    let bad =
-        client::GrpcApi::new(pair.wire.addr().to_string(), "wrong-token").expect("client builds");
-    let err = bad.player_state().await.expect_err("rejected");
-    assert_eq!(err.code, ErrorCode::Unauthorized);
 }

@@ -4,16 +4,17 @@
 //! and serves the gRPC API from `daemon::grpc` (see `proto/kopuz.proto`).
 //! Queue contexts resolve from the library (albums, artists, genres,
 //! playlists, filters, radio) with a fallback probe for ad-hoc local file
-//! paths. Reflection is on, so with the token from the discovery file:
+//! paths. Reflection is on, so:
 //!
 //! ```sh
 //! kopuzd
-//! grpcurl -plaintext -H "authorization: Bearer $TOKEN" \
-//!   127.0.0.1:<port> kopuz.v1.Kopuz/GetPlayerState
+//! grpcurl -unix -plaintext \
+//!   $XDG_RUNTIME_DIR/kopuz/kopuzd.sock kopuz.v1.Kopuz/GetPlayerState
 //! ```
 //!
-//! The discovery file (path is logged at startup) carries `{port, token, pid}`
-//! with 0600 permissions, so local frontends can attach without configuration.
+//! The socket path (logged at startup) is the whole rendezvous: a frontend
+//! opens it or it does not exist. Its 0600 mode is the access control, so
+//! the channel carries no credentials.
 //!
 //! Interim caveat: the daemon expects exclusive database access. Running it
 //! alongside the GUI app against the same `KOPUZ_DB_PATH` means two writers
@@ -50,34 +51,28 @@ async fn terminate_signal() {
 }
 
 struct Args {
-    bind: String,
-    token: Option<String>,
+    socket: Option<PathBuf>,
     db_path: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args {
-        bind: "127.0.0.1:0".to_string(),
-        token: None,
+        socket: None,
         db_path: None,
     };
     let mut iter = std::env::args().skip(1);
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--bind" => {
-                args.bind = iter.next().ok_or("--bind requires an address")?;
-            }
-            "--token" => {
-                args.token = Some(iter.next().ok_or("--token requires a value")?);
+            "--socket" => {
+                args.socket = Some(PathBuf::from(
+                    iter.next().ok_or("--socket requires a path")?,
+                ));
             }
             "--db-path" => {
                 args.db_path = Some(iter.next().ok_or("--db-path requires a path")?);
             }
             "--help" | "-h" => {
-                return Err(
-                    "usage: kopuzd [--bind 127.0.0.1:0] [--token <hex>] [--db-path <file>]"
-                        .to_string(),
-                );
+                return Err("usage: kopuzd [--socket <path>] [--db-path <file>]".to_string());
             }
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -85,49 +80,13 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
-fn random_token() -> String {
-    use rand::RngExt;
-    let token: u128 = rand::rng().random();
-    format!("{token:032x}")
-}
-
-fn discovery_path() -> Option<PathBuf> {
+fn default_socket_path() -> Option<PathBuf> {
     let base = directories::BaseDirs::new()?;
     let dir = base
         .runtime_dir()
         .map(|runtime| runtime.join("kopuz"))
         .unwrap_or_else(|| base.cache_dir().join("kopuz"));
-    Some(dir.join("daemon.json"))
-}
-
-fn write_discovery(path: &Path, port: u16, token: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let body = serde_json::json!({
-        "port": port,
-        "token": token,
-        "pid": std::process::id(),
-    });
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    // Created 0600 so the token is never world-readable, not even between
-    // create and chmod; the explicit set below repairs a pre-existing file
-    // left behind with wider permissions.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
-    file.write_all(body.to_string().as_bytes())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
+    Some(dir.join("kopuzd.sock"))
 }
 
 fn main() -> ExitCode {
@@ -284,22 +243,17 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         ),
         artwork: Some(artwork),
         session,
-        token: args.token.unwrap_or_else(random_token),
         started: Instant::now(),
     });
 
-    let listener = tokio::net::TcpListener::bind(&args.bind).await?;
-    let addr = listener.local_addr()?;
-
-    let discovery = discovery_path();
-    match discovery.as_deref() {
-        Some(path) => match write_discovery(path, addr.port(), &state.token) {
-            Ok(()) => tracing::info!(path = %path.display(), "discovery file written"),
-            Err(error) => tracing::warn!(%error, "could not write the discovery file"),
-        },
-        None => tracing::warn!("no usable directory for the discovery file"),
-    }
-    tracing::info!(%addr, "kopuzd listening (bearer token in the discovery file)");
+    let socket = match args.socket.or_else(default_socket_path) {
+        Some(path) => path,
+        None => {
+            return Err("no usable runtime directory for the daemon socket".into());
+        }
+    };
+    let listener = daemon::grpc::bind_socket(&socket)?;
+    tracing::info!(path = %socket.display(), "kopuzd listening");
 
     let result = tokio::select! {
         served = daemon::grpc::serve(listener, state) => served.map_err(Into::into),
@@ -316,8 +270,6 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 
     flush_session.persist_now().await;
 
-    if let Some(path) = discovery {
-        let _ = std::fs::remove_file(path);
-    }
+    let _ = std::fs::remove_file(&socket);
     result
 }

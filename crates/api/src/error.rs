@@ -4,7 +4,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorCode {
     InvalidInput,
-    Unauthorized,
     NotFound,
     Conflict,
     SourceAuthExpired,

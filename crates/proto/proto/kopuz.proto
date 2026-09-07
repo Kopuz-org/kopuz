@@ -1,8 +1,8 @@
 // The Kopuz daemon wire contract, v1.
 //
-// One gRPC endpoint on loopback, discovered through the {port, token, pid}
-// discovery file. The bearer token travels as metadata
-// (authorization: Bearer <token>) and is checked constant-time.
+// One gRPC endpoint on a Unix domain socket in the user's runtime dir.
+// Access control is the socket's file mode: the OS decides who may connect,
+// so the channel carries no credentials of its own.
 //
 // Reads and mutations are unary RPCs. Event delivery is a server-streaming
 // subscription with an explicit replay cursor. A client MUST ignore an Event
@@ -512,7 +512,7 @@ message ErrorBody {
 enum ErrorCode {
   ERROR_CODE_UNSPECIFIED = 0;
   ERROR_CODE_INVALID_INPUT = 1;
-  ERROR_CODE_UNAUTHORIZED = 2;
+  reserved 2; // was ERROR_CODE_UNAUTHORIZED
   ERROR_CODE_NOT_FOUND = 3;
   ERROR_CODE_CONFLICT = 4;
   ERROR_CODE_SOURCE_AUTH_EXPIRED = 5;

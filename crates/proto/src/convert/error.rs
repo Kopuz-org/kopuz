@@ -3,7 +3,6 @@ use crate::*;
 pub fn error_code_to_proto(value: api::ErrorCode) -> ErrorCode {
     match value {
         api::ErrorCode::InvalidInput => ErrorCode::InvalidInput,
-        api::ErrorCode::Unauthorized => ErrorCode::Unauthorized,
         api::ErrorCode::NotFound => ErrorCode::NotFound,
         api::ErrorCode::Conflict => ErrorCode::Conflict,
         api::ErrorCode::SourceAuthExpired => ErrorCode::SourceAuthExpired,
@@ -16,7 +15,6 @@ pub fn error_code_to_proto(value: api::ErrorCode) -> ErrorCode {
 pub fn error_code_from_proto(value: i32) -> api::ErrorCode {
     match ErrorCode::try_from(value).unwrap_or(ErrorCode::Unspecified) {
         ErrorCode::InvalidInput => api::ErrorCode::InvalidInput,
-        ErrorCode::Unauthorized => api::ErrorCode::Unauthorized,
         ErrorCode::NotFound => api::ErrorCode::NotFound,
         ErrorCode::Conflict => api::ErrorCode::Conflict,
         ErrorCode::SourceAuthExpired => api::ErrorCode::SourceAuthExpired,

@@ -7,7 +7,6 @@ use tonic::{Code, Status};
 pub fn to_status(error: api::ApiError) -> Status {
     let grpc_code = match error.code {
         api::ErrorCode::InvalidInput => Code::InvalidArgument,
-        api::ErrorCode::Unauthorized => Code::Unauthenticated,
         // Not UNAUTHENTICATED: that says the caller's own token failed,
         // and a client answers it by re-reading the discovery file. An
         // expired source login is a precondition the user must fix.
@@ -24,7 +23,6 @@ pub fn to_status(error: api::ApiError) -> Status {
 pub fn from_status(status: &Status) -> api::ApiError {
     let code = match status.code() {
         Code::InvalidArgument => api::ErrorCode::InvalidInput,
-        Code::Unauthenticated => api::ErrorCode::Unauthorized,
         Code::FailedPrecondition => api::ErrorCode::SourceAuthExpired,
         Code::NotFound => api::ErrorCode::NotFound,
         Code::AlreadyExists => api::ErrorCode::Conflict,
@@ -46,7 +44,6 @@ mod tests {
     fn every_code_survives_the_status_round_trip() {
         let codes = [
             api::ErrorCode::InvalidInput,
-            api::ErrorCode::Unauthorized,
             api::ErrorCode::NotFound,
             api::ErrorCode::Conflict,
             api::ErrorCode::SourceAuthExpired,

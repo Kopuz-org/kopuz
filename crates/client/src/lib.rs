@@ -1,43 +1,36 @@
 //! `GrpcApi`: the wire twin of the daemon's in-process `LocalApi`.
 //!
 //! Implements [`api::KopuzApi`] over the daemon's gRPC surface, so a Rust
-//! frontend can swap between embedding the daemon and attaching to a remote
-//! one without touching its data layer. The contract tests in the daemon
-//! crate run the same assertions through both implementations.
+//! frontend can swap between embedding the daemon and attaching to one over
+//! the socket without touching its data layer. The contract tests in the
+//! daemon crate run the same assertions through both implementations.
+//!
+//! The transport is a Unix domain socket in the user's runtime dir. There
+//! are no credentials: the socket's file mode is the access control, so the
+//! kernel decides who may connect.
 //!
 //! Playback mutations use typed unary RPCs. `events()` owns a reconnecting
 //! server-streaming subscription and resumes with the last sequence it
 //! applied, surfacing a ring overrun as [`api::ApiEvent::Resync`].
 
+use std::path::{Path, PathBuf};
+
 use api::{
     ApiError, CommandAck, ConfigView, FavoritesView, JobKind, JobRef, JobStatus, KopuzApi, Page,
     PlayerCommand, PlayerState, QueueEdit, QueueWindow, SetQueueRequest, TrackFilter, TrackPage,
 };
+use hyper_util::rt::TokioIo;
 use proto::convert;
 use proto::kopuz_client::KopuzClient;
+use tokio::net::UnixStream;
 use tonic::Request;
-use tonic::metadata::MetadataValue;
-use tonic::service::interceptor::InterceptedService;
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::{Channel, Endpoint, Uri};
+use tower::service_fn;
 
-type Client = KopuzClient<InterceptedService<Channel, AuthInterceptor>>;
-
-#[derive(Clone)]
-pub struct AuthInterceptor {
-    header: MetadataValue<tonic::metadata::Ascii>,
-}
-
-impl tonic::service::Interceptor for AuthInterceptor {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, tonic::Status> {
-        request
-            .metadata_mut()
-            .insert("authorization", self.header.clone());
-        Ok(request)
-    }
-}
+type Client = KopuzClient<Channel>;
 
 pub struct GrpcApi {
-    addr: String,
+    path: PathBuf,
     client: Client,
 }
 
@@ -46,26 +39,28 @@ fn wire_error(status: tonic::Status) -> ApiError {
 }
 
 impl GrpcApi {
-    pub fn addr(&self) -> &str {
-        &self.addr
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
-    /// `addr` is `host:port` (or a full `http://` URL); the channel connects
-    /// lazily on the first call, so construction never blocks.
-    pub fn new(addr: impl Into<String>, token: impl Into<String>) -> Result<Self, ApiError> {
-        let mut addr = addr.into();
-        if !addr.starts_with("http://") && !addr.starts_with("https://") {
-            addr = format!("http://{addr}");
-        }
-        let header: MetadataValue<tonic::metadata::Ascii> = format!("Bearer {}", token.into())
-            .parse()
-            .map_err(|_| ApiError::invalid_input("token is not valid header material"))?;
-        let channel = Endpoint::from_shared(addr.clone())
-            .map_err(|error| ApiError::invalid_input(format!("bad daemon address: {error}")))?
-            .connect_lazy();
+    /// `path` is the daemon's socket. The connector dials it lazily, so
+    /// construction never blocks and never fails on a daemon that has not
+    /// started yet -- the first call reports that instead.
+    pub fn new(path: impl Into<PathBuf>) -> Result<Self, ApiError> {
+        let path = path.into();
+        let dial = path.clone();
+        // tonic still needs a syntactically valid URI to fill the HTTP/2
+        // :authority header. The connector below ignores it; nothing
+        // resolves this name.
+        let channel = Endpoint::from_static("http://kopuz.invalid").connect_with_connector_lazy(
+            service_fn(move |_: Uri| {
+                let dial = dial.clone();
+                async move { UnixStream::connect(dial).await.map(TokioIo::new) }
+            }),
+        );
         Ok(Self {
-            addr,
-            client: KopuzClient::with_interceptor(channel, AuthInterceptor { header }),
+            path,
+            client: KopuzClient::new(channel),
         })
     }
 

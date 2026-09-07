@@ -4398,11 +4398,13 @@ version = "0.16.1"
 dependencies = [
  "async-trait",
  "futures-util",
+ "hyper-util",
  "kopuz-api",
  "kopuz-proto",
  "serde_json",
  "tokio",
  "tonic",
+ "tower 0.5.3",
  "tracing",
 ]
 
