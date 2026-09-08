@@ -142,7 +142,7 @@ message QueueChanged {
 
 message LibraryInvalidated {
   Table table = 1;
-  uint64 generation = 2;
+  reserved 2; // was generation: independent writers, never a shared counter
 }
 
 message JobProgress {

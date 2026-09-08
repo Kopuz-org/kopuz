@@ -51,9 +51,8 @@ impl FavoritesService {
     }
 
     fn bump(&self, table: Table) {
-        let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
-        self.session
-            .emit_event(ApiEvent::LibraryInvalidated { table, generation });
+        self.generation.fetch_add(1, Ordering::Relaxed);
+        self.session.invalidate(table);
     }
 
     pub async fn list(&self) -> Result<FavoritesView, ApiError> {

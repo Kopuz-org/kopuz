@@ -26,10 +26,9 @@ pub fn event_to_proto(value: &api::ApiEvent) -> Event {
                 index: *index,
             })
         }
-        api::ApiEvent::LibraryInvalidated { table, generation } => {
+        api::ApiEvent::LibraryInvalidated { table } => {
             event::Kind::LibraryInvalidated(LibraryInvalidated {
                 table: table_to_proto(*table) as i32,
-                generation: *generation,
             })
         }
         api::ApiEvent::JobProgress(progress) => event::Kind::JobProgress(JobProgress {
@@ -96,7 +95,6 @@ pub fn event_from_proto(value: &Event) -> Option<api::ApiEvent> {
         },
         event::Kind::LibraryInvalidated(invalidated) => api::ApiEvent::LibraryInvalidated {
             table: table_from_proto(invalidated.table),
-            generation: invalidated.generation,
         },
         event::Kind::JobProgress(progress) => api::ApiEvent::JobProgress(api::JobProgress {
             id: progress.id.clone(),
@@ -158,7 +156,6 @@ mod tests {
             },
             api::ApiEvent::LibraryInvalidated {
                 table: api::Table::Favorites,
-                generation: 4,
             },
             api::ApiEvent::JobProgress(api::JobProgress {
                 id: "j".into(),

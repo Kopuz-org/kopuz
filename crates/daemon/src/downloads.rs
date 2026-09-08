@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use api::{ApiError, ApiEvent, JobKind, JobRef, Table};
+use api::{ApiError, JobKind, JobRef, Table};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use utils::playback_ref::PlaybackItemRef;
@@ -114,10 +114,7 @@ impl DownloadsService {
         let updated = self.config.set_offline_track(item_id, path).await?;
         self.session
             .set_config(updated, vec!["offline_tracks".to_string()]);
-        self.session.emit_event(ApiEvent::LibraryInvalidated {
-            table: Table::Tracks,
-            generation: 0,
-        });
+        self.session.invalidate(Table::Tracks);
         Ok(())
     }
 

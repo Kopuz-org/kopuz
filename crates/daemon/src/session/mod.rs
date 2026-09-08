@@ -320,6 +320,12 @@ impl SessionHandle {
         let _ = self.cmd_tx.send(SessionCmd::Emit(Box::new(event)));
     }
 
+    /// Tell clients a table changed. Every service that writes the library
+    /// goes through here, so there is one place to look for who dirties what.
+    pub fn invalidate(&self, table: api::Table) {
+        self.emit_event(ApiEvent::LibraryInvalidated { table });
+    }
+
     /// Swap the radio station registry after a registry import completes, so
     /// radio contexts resolve against live manifests.
     pub fn set_station_registry(&self, registry: Arc<radio::registry::StationRegistry>) {
@@ -1277,7 +1283,6 @@ impl Session {
             });
             self.emit(ApiEvent::LibraryInvalidated {
                 table: api::Table::Recents,
-                generation: self.rev,
             });
         }
     }
@@ -1303,7 +1308,6 @@ impl Session {
         });
         self.emit(ApiEvent::LibraryInvalidated {
             table: api::Table::Recents,
-            generation: self.rev,
         });
     }
 
