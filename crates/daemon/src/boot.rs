@@ -233,6 +233,7 @@ pub async fn assemble(args: &BootArgs) -> Result<Core, Box<dyn std::error::Error
     );
     let favorites = FavoritesService::new(database.clone(), session.clone());
     favorites.spawn_reconciler();
+    spawn_volume_persistence(&session, config_service.clone());
     crate::os_media::spawn(&session);
     crate::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
     crate::integrations::spawn_discord_presence(&session, session.config_watch());
@@ -273,6 +274,32 @@ pub async fn assemble(args: &BootArgs) -> Result<Core, Box<dyn std::error::Error
         started: Instant::now(),
         _lease: lease,
     })
+}
+
+/// Persist volume changes the engine made. Volume arrives as a player
+/// command from whichever frontend is attached, so the daemon has to be the
+/// one that remembers it; the debounce keeps a drag off the database.
+fn spawn_volume_persistence(session: &SessionHandle, config: Arc<ConfigService>) {
+    let mut events = session.subscribe();
+    let mut last = session.state().volume;
+    tokio::spawn(async move {
+        loop {
+            let volume = match events.recv().await {
+                Ok(api::ApiEvent::PlayerState(state)) => state.volume,
+                Ok(_) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            };
+            if (volume - last).abs() < f32::EPSILON {
+                continue;
+            }
+            last = volume;
+            tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+            if let Err(error) = config.set_volume(last).await {
+                tracing::warn!(%error, "volume persist failed");
+            }
+        }
+    });
 }
 
 /// Bind the socket and serve the core on it until the server stops.

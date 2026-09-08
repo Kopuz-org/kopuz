@@ -123,6 +123,24 @@ impl ConfigService {
         let view = self.view().await?;
         Ok((view, updated, changed))
     }
+
+    /// Persist the engine's own volume. It is not a caller-set key -- the
+    /// session owns it and every frontend just reports what the user did --
+    /// so it skips the locked-key and secret machinery of [`Self::set`].
+    pub async fn set_volume(&self, volume: f32) -> Result<(), ApiError> {
+        let mut current = self.current.write().await;
+        let volume = volume.clamp(0.0, 1.0);
+        if (current.volume - volume).abs() < f32::EPSILON {
+            return Ok(());
+        }
+        current.volume = volume;
+        let snapshot = current.clone();
+        drop(current);
+        self.db
+            .save_config(&snapshot)
+            .await
+            .map_err(|error| ApiError::internal(format!("volume save failed: {error}")))
+    }
 }
 
 /// The keys the daemon owns: credentials, and path state that only means
@@ -260,5 +278,34 @@ mod tests {
         let (_, updated, changed) = service.set(other).await.expect("untouched locked key");
         assert_eq!(updated.crossfade_seconds, 6);
         assert_eq!(changed, vec!["crossfade_seconds".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn set_volume_persists_without_touching_the_rest_of_the_config() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vol.db");
+        let database = db::init(&path).await.expect("db");
+        let seeded = config::AppConfig {
+            lastfm_session_key: "secret".into(),
+            crossfade_seconds: 7,
+            ..Default::default()
+        };
+        let service = ConfigService::new(
+            database.clone(),
+            dir.path().join("settings.toml"),
+            seeded.clone(),
+        );
+
+        service.set_volume(0.42).await.expect("set volume");
+
+        let stored = database
+            .load_config()
+            .await
+            .expect("load")
+            .expect("stored config");
+        assert_eq!(stored.volume, 0.42);
+        assert_eq!(stored.crossfade_seconds, 7);
+        assert_eq!(stored.lastfm_session_key, "secret");
+        assert_eq!(service.view().await.expect("view").config.volume, 0.42);
     }
 }
