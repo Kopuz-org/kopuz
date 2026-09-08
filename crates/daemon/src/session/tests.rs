@@ -6,7 +6,8 @@ use std::io::Cursor;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 
-use api::{ErrorCode, KopuzApi, LoopMode};
+use api::prelude::*;
+use api::{ErrorCode, LoopMode};
 use futures_util::StreamExt;
 use player::engine::{AudioSink, DataCallback, DataCallbackFactory, SinkConfig};
 
