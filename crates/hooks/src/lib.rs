@@ -6,6 +6,7 @@ pub mod artist_images;
 pub mod db_reactivity;
 pub mod debug_db;
 pub mod favorites;
+pub mod jobs;
 pub mod playlist_actions;
 pub mod scrobble_scheduler;
 mod session_projector;
@@ -26,7 +27,7 @@ pub use debug_db::debug_db_section;
 
 // The query types the UI composes, re-exported here (the query layer) so
 // `pages`/`components` depend on `hooks`, not on the wire crate directly.
-pub use ::api::{Page, TrackFilter, TrackSort};
+pub use ::api::{JobKind, Page, TrackFilter, TrackSort};
 // Still storage-shaped: playlists and artist images have no API surface yet,
 // so their hooks read the database and their callers name these.
 pub use db::ReadDb;
