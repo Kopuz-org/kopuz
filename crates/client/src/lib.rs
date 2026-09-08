@@ -400,6 +400,17 @@ impl api::ConfigApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(convert::config_view_from_proto(view.get_ref()))
     }
+
+    async fn switch_source(&self, source: config::Source) -> Result<bool, ApiError> {
+        let switched = self
+            .client()
+            .switch_source(Request::new(proto::SwitchSourceRequest {
+                source: Some(convert::source_ref_to_proto(&source)),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(switched.get_ref().usable)
+    }
 }
 
 #[async_trait::async_trait]

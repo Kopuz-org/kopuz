@@ -741,6 +741,15 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::config_view_to_proto(&view)))
     }
 
+    async fn switch_source(
+        &self,
+        request: Request<proto::SwitchSourceRequest>,
+    ) -> Result<Response<proto::SwitchSourceResponse>, Status> {
+        let source = convert::source_ref_from_proto(request.get_ref().source.as_ref());
+        let usable = self.0.api.switch_source(source).await.map_err(failed)?;
+        Ok(Response::new(proto::SwitchSourceResponse { usable }))
+    }
+
     #[allow(clippy::result_large_err)]
     async fn get_artwork(
         &self,

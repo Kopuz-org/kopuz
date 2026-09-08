@@ -191,24 +191,83 @@ impl PlaylistService {
         Ok(())
     }
 
+    /// Pull one playlist's contents again, a page at a time.
+    ///
+    /// Each page is written and announced before the next is fetched, so a
+    /// long playlist fills in as it arrives rather than appearing all at once
+    /// at the end -- and it does so for every frontend watching, not just the
+    /// one that asked. A staleness gate keeps revisiting a playlist free.
     pub async fn refresh(&self, id: &str) -> Result<(), ApiError> {
-        let entries = self
-            .active_source()
-            .fetch_playlist_entries(id)
-            .await
-            .map_err(source_error)?;
-        let keys: Vec<String> = entries
-            .iter()
-            .map(|track| track.id.key().to_string())
-            .collect();
         let source = self.active_source();
-        source.upsert_tracks(&entries).await.map_err(source_error)?;
-        source
-            .set_playlist_tracks(id, &keys)
+        if source.capabilities().playlists == server::source::PlaylistOps::None {
+            return Ok(());
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default();
+        let last: u64 = self
+            .db
+            .meta_get("pl_pull", id)
             .await
-            .map_err(source_error)?;
-        self.session.invalidate(Table::Playlists);
-        self.session.invalidate(Table::Tracks);
+            .ok()
+            .flatten()
+            .and_then(|raw| raw.parse().ok())
+            .unwrap_or(0);
+        if last <= now && now - last < 15 * 60 {
+            return Ok(());
+        }
+
+        // One epoch for the walk: pages stamp their rows with it and the
+        // closing sweep drops whatever the remote no longer lists.
+        let epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis() as i64)
+            .unwrap_or_default();
+        let mut cursor: Option<String> = None;
+        let mut position: i64 = 0;
+        let mut completed = true;
+
+        loop {
+            let page = match source.fetch_playlist_entries_page(id, cursor.clone()).await {
+                Ok(page) => page,
+                Err(error) => {
+                    tracing::warn!(%error, playlist = id, "playlist page fetch failed");
+                    completed = false;
+                    break;
+                }
+            };
+            let next = page.next.clone();
+            if page.tracks.is_empty() {
+                break;
+            }
+            let page_refs: Vec<String> = page
+                .tracks
+                .iter()
+                .map(|track| track.id.key().to_string())
+                .filter(|key| !key.is_empty())
+                .collect();
+            for chunk in page.tracks.chunks(100) {
+                let _ = source.upsert_tracks(chunk).await;
+            }
+            let _ = source
+                .upsert_playlist_tracks_page(id, &page_refs, position, epoch)
+                .await;
+            position += page_refs.len() as i64;
+            self.session.invalidate(Table::Tracks);
+            self.session.invalidate(Table::Playlists);
+            match next {
+                Some(next) => cursor = Some(next),
+                None => break,
+            }
+        }
+
+        if completed {
+            let _ = source.sweep_playlist_tracks(id, epoch).await;
+            let _ = source.set_meta("pl_pull", id, &now.to_string()).await;
+            self.session.invalidate(Table::Playlists);
+            self.session.invalidate(Table::Tracks);
+        }
         Ok(())
     }
 

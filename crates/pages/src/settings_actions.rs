@@ -1,7 +1,6 @@
 use ::server::provider::ProviderClient;
 use config::{AppConfig, Browser, MusicService};
 use dioxus::prelude::*;
-use hooks::ReadDb;
 use tracing::Instrument;
 
 pub(crate) async fn ensure_host_access(mut host_access: Signal<bool>) -> Option<()> {
@@ -561,7 +560,6 @@ pub fn add_server(
 
 pub fn switch_server(
     config: Signal<AppConfig>,
-    db: ReadDb,
     id: String,
     yt_browser: Signal<Browser>,
     error: Signal<Option<String>>,
@@ -574,7 +572,7 @@ pub fn switch_server(
         };
 
         let usable =
-            hooks::source_switch::apply_source_switch(config, db, config::Source::Server(id)).await;
+            hooks::source_switch::apply_source_switch(config, config::Source::Server(id)).await;
         if usable {
             return;
         }
