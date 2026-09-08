@@ -2278,22 +2278,17 @@ fn App() -> Element {
                 QuickSearch {
                     show: show_quick_search,
                     on_play: move |(track, fallback): (reader::Track, Vec<reader::Track>)| {
-                        let read_db = consume_context::<hooks::ReadDb>();
+                        let api = hooks::consume_api();
+                        let _ = quick_search_source();
                         let filter = hooks::TrackFilter {
-                            source: quick_search_source(),
                             sort: hooks::TrackSort::Fields(config.peek().library_sort.clone()),
                             ..Default::default()
                         };
                         spawn(async move {
-                            let all = read_db
-                                .tracks_page(
-                                    &filter,
-                                    hooks::Page {
-                                        offset: 0,
-                                        limit: u32::MAX,
-                                    },
-                                )
+                            let all = api
+                                .tracks(filter, hooks::use_db_queries::all())
                                 .await
+                                .map(|page| hooks::wire::tracks_from_api(page.items))
                                 .unwrap_or_default();
                             if let Some(idx) = all.iter().position(|t| t.id == track.id) {
                                 queue.set(all);

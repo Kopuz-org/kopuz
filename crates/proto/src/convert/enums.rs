@@ -1,3 +1,4 @@
+use super::{track_sort_field_from_proto, track_sort_field_to_proto};
 use crate::*;
 
 pub fn phase_to_proto(value: api::Phase) -> Phase {
@@ -166,7 +167,7 @@ pub fn notice_level_from_proto(value: i32) -> api::NoticeLevel {
     }
 }
 
-pub fn track_sort_to_proto(value: api::TrackSort) -> TrackSort {
+pub fn track_sort_to_proto(value: &api::TrackSort) -> TrackSort {
     match value {
         api::TrackSort::Default => TrackSort::Unspecified,
         api::TrackSort::Title => TrackSort::Title,
@@ -174,10 +175,14 @@ pub fn track_sort_to_proto(value: api::TrackSort) -> TrackSort {
         api::TrackSort::Album => TrackSort::Album,
         api::TrackSort::DateAdded => TrackSort::DateAdded,
         api::TrackSort::PlayCount => TrackSort::PlayCount,
+        // The criteria themselves ride TrackFilter.sort_fields.
+        api::TrackSort::Fields(_) => TrackSort::Fields,
     }
 }
 
-pub fn track_sort_from_proto(value: i32) -> api::TrackSort {
+/// `fields` comes from `TrackFilter.sort_fields`; an empty list with the
+/// Fields tag means the caller asked for no ordering in particular.
+pub fn track_sort_from_proto(value: i32, fields: &[SortCriterion]) -> api::TrackSort {
     match TrackSort::try_from(value).unwrap_or(TrackSort::Unspecified) {
         TrackSort::Unspecified => api::TrackSort::Default,
         TrackSort::Title => api::TrackSort::Title,
@@ -185,7 +190,33 @@ pub fn track_sort_from_proto(value: i32) -> api::TrackSort {
         TrackSort::Album => api::TrackSort::Album,
         TrackSort::DateAdded => api::TrackSort::DateAdded,
         TrackSort::PlayCount => api::TrackSort::PlayCount,
+        TrackSort::Fields => api::TrackSort::Fields(
+            fields
+                .iter()
+                .map(|criterion| config::SortCriterion {
+                    field: track_sort_field_from_proto(criterion.field),
+                    direction: if criterion.descending {
+                        config::SortDirection::Desc
+                    } else {
+                        config::SortDirection::Asc
+                    },
+                })
+                .collect(),
+        ),
     }
+}
+
+pub fn sort_criteria_to_proto(value: &api::TrackSort) -> Vec<SortCriterion> {
+    let api::TrackSort::Fields(fields) = value else {
+        return Vec::new();
+    };
+    fields
+        .iter()
+        .map(|criterion| SortCriterion {
+            field: track_sort_field_to_proto(criterion.field) as i32,
+            descending: criterion.direction == config::SortDirection::Desc,
+        })
+        .collect()
 }
 
 #[cfg(test)]

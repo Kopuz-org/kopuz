@@ -82,16 +82,54 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
     tokio::spawn(
         async move {
             let query = uri.query().unwrap_or_default();
+            let decode = |encoded: &str| {
+                percent_encoding::percent_decode_str(encoded)
+                    .decode_utf8_lossy()
+                    .into_owned()
+            };
             let file_path = query
                 .split('&')
                 .find_map(|part| part.strip_prefix("p="))
-                .map(|encoded| {
-                    percent_encoding::percent_decode_str(encoded)
-                        .decode_utf8_lossy()
-                        .into_owned()
-                })
+                .map(&decode)
                 .unwrap_or_default();
             let high_quality = query.split('&').any(|part| part == "hq=1");
+
+            // A library entity: the daemon resolves it, because a server cover
+            // is signed with credentials that never leave it.
+            if let Some(target) = query.split('&').find_map(|part| {
+                let (kind, id) = part.split_once('=')?;
+                let id = decode(id);
+                match kind {
+                    "track" => Some(api::ArtworkTarget::Track(id)),
+                    "album" => Some(api::ArtworkTarget::Album(id)),
+                    "artist" => Some(api::ArtworkTarget::Artist(id)),
+                    _ => None,
+                }
+            }) {
+                let Some(core) = crate::backend::core() else {
+                    responder.respond(resp(503, &[], Vec::new()));
+                    return;
+                };
+                let request = api::ArtworkRequest {
+                    target,
+                    hq: high_quality,
+                };
+                match api::ArtworkApi::artwork(core.api.as_ref(), request).await {
+                    Ok(data) => responder.respond(resp(
+                        200,
+                        &[
+                            ("Content-Type", data.content_type.as_str()),
+                            ("Cache-Control", "public, max-age=31536000, immutable"),
+                        ],
+                        data.bytes,
+                    )),
+                    Err(error) => {
+                        tracing::debug!(%error, "no artwork for entity");
+                        responder.respond(resp(404, &[], Vec::new()));
+                    }
+                }
+                return;
+            }
 
             if file_path.is_empty() {
                 responder.respond(resp(400, &[], Vec::new()));

@@ -157,6 +157,37 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
     }
 }
 
+/// The cover URL for a library entity the daemon resolves, as opposed to a
+/// local file this process can read. `kind` is `track`/`album`/`artist` and
+/// `id` the entity's key; the app's `artwork` protocol handler turns it back
+/// into an API call. Server covers are signed with credentials a frontend
+/// never sees, so this is the only way to show one.
+pub fn format_entity_artwork_url(kind: &str, id: &str, hq: bool) -> CoverUrl {
+    const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'#')
+        .add(b'%')
+        .add(b'&')
+        .add(b'+')
+        .add(b'=')
+        .add(b'?')
+        .add(b'<')
+        .add(b'>')
+        .add(b'`')
+        .add(b'\\')
+        .add(b':');
+
+    let id = percent_encoding::utf8_percent_encode(id, QUERY_VAL);
+    let quality = if hq { "&hq=1" } else { "" };
+    let url = if cfg!(target_os = "windows") {
+        format!("http://artwork.dioxus.localhost/api?{kind}={id}{quality}&v=thumb400-hq1920")
+    } else {
+        format!("artwork://api?{kind}={id}{quality}&v=thumb400-hq1920")
+    };
+    cover_url_from_string(url)
+}
+
 pub const DEFAULT_COVER_SVG: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%231e1b2e'/%3E%3Ccircle cx='200' cy='180' r='70' fill='none' stroke='%233d3466' stroke-width='6'/%3E%3Cpath d='M155 280 Q200 240 245 280' fill='none' stroke='%233d3466' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E";
 
 pub fn default_cover_url() -> CoverUrl {

@@ -8,7 +8,8 @@ pub fn track_filter_to_proto(value: &api::TrackFilter) -> TrackFilter {
         album: value.album.clone(),
         genre: value.genre.clone(),
         favorite: value.favorite,
-        sort: track_sort_to_proto(value.sort) as i32,
+        sort: track_sort_to_proto(&value.sort) as i32,
+        sort_fields: sort_criteria_to_proto(&value.sort),
     }
 }
 
@@ -19,7 +20,7 @@ pub fn track_filter_from_proto(value: &TrackFilter) -> api::TrackFilter {
         album: value.album.clone(),
         genre: value.genre.clone(),
         favorite: value.favorite,
-        sort: track_sort_from_proto(value.sort),
+        sort: track_sort_from_proto(value.sort, &value.sort_fields),
     }
 }
 
