@@ -13,12 +13,14 @@ build: tailwind
     @echo "Build complete!"
 
 # Frontend plus a supervised daemon child of the same binary; both exit together.
-run: tailwind
-    cargo run -p kopuz -- --daemon
+# Extra flags reach cargo, so `just run --release` builds and runs both released.
+# Release opens the real kopuz.db, not kopuz-debug.db, and the daemon is a second writer.
+run *FLAGS: tailwind
+    cargo run {{FLAGS}} -p kopuz -- --daemon
 
 # The daemon on its own, for attaching to or poking with grpcurl.
-daemon:
-    cargo run -p kopuz-daemon --features kopuzd --bin kopuzd
+daemon *FLAGS:
+    cargo run {{FLAGS}} -p kopuz-daemon --features kopuzd --bin kopuzd
 
 run-release: build
     target/dx/kopuz/release/linux/app/kopuz
