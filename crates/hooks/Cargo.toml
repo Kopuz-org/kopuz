@@ -16,6 +16,7 @@ name = "hooks"
 workspace = true
 
 [dependencies]
+futures-util = { workspace = true }
 tracing = { workspace = true }
 dioxus = { workspace = true }
 api = { workspace = true }

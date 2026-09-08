@@ -12,6 +12,8 @@ use tokio::sync::Notify;
 use crate::jobs::JobRunner;
 use crate::session::SessionHandle;
 
+mod pull;
+
 const NUDGE_DEBOUNCE: Duration = Duration::from_secs(2);
 const BACKOFF_CAP_SECS: u64 = 30 * 60;
 
@@ -129,11 +131,18 @@ impl FavoritesService {
         self.nudge.notify_one();
     }
 
+    /// Push what is pending, then import what the remote holds. Both halves
+    /// are one job because a caller only ever wants "make these agree", and
+    /// pushing after importing would fight the epoch sweep.
     pub fn spawn_sync(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
         let service = self.clone();
         runner.start(JobKind::FavoritesSync, move |ctx| async move {
             ctx.progress("reconciling", None, None, None);
-            service.reconcile(SyncReason::Manual).await
+            let reconciled = service.reconcile(SyncReason::Manual).await;
+            // An explicit sync imports even when the staleness gate would
+            // have skipped it; that is what the user asked for.
+            service.pull(Some(&ctx), true).await?;
+            reconciled
         })
     }
 
@@ -209,7 +218,15 @@ impl FavoritesService {
                     SyncReason::Interval
                 };
                 match service.reconcile(reason).await {
-                    Ok(()) => consecutive_failures = 0,
+                    Ok(()) => {
+                        consecutive_failures = 0;
+                        // Import what the remote holds, if that has not
+                        // happened yet: a fresh sign-in should fill the
+                        // favorites page without anyone asking it to.
+                        if let Err(error) = service.pull_unattended().await {
+                            tracing::debug!(%error, "favorites import skipped");
+                        }
+                    }
                     Err(error) if error.code == ErrorCode::SourceAuthExpired => {
                         consecutive_failures = consecutive_failures.saturating_add(1);
                         tracing::warn!("favorites sync: credentials expired");
