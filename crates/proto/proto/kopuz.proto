@@ -45,6 +45,19 @@ service Kopuz {
   rpc GetGenreTracks(GenreTracksRequest) returns (TrackPage);
   rpc GetRecentTracks(Page) returns (TrackPage);
   rpc Search(SearchRequest) returns (SearchResults);
+
+  rpc GetPlaylists(GetPlaylistsRequest) returns (PlaylistCatalog);
+  rpc CreatePlaylist(CreatePlaylistRequest) returns (PlaylistId);
+  rpc RenamePlaylist(RenamePlaylistRequest) returns (Unit);
+  rpc DeletePlaylist(PlaylistId) returns (Unit);
+  rpc AddPlaylistTracks(AddPlaylistTracksRequest) returns (Unit);
+  rpc RemovePlaylistTrack(RemovePlaylistTrackRequest) returns (Unit);
+  rpc ReorderPlaylist(ReorderPlaylistRequest) returns (Unit);
+  rpc RefreshPlaylist(PlaylistId) returns (Unit);
+  rpc CreatePlaylistFolder(CreatePlaylistFolderRequest) returns (PlaylistFolderId);
+  rpc RenamePlaylistFolder(RenamePlaylistFolderRequest) returns (Unit);
+  rpc DeletePlaylistFolder(PlaylistFolderId) returns (Unit);
+  rpc MovePlaylist(MovePlaylistRequest) returns (Unit);
   rpc GetStats(GetStatsRequest) returns (Stats);
   rpc GetLyrics(TrackRef) returns (Lyrics);
   rpc GetFavorites(GetFavoritesRequest) returns (Favorites);
@@ -462,6 +475,79 @@ message SearchRequest {
 message SearchResults {
   repeated TrackInfo tracks = 1;
   repeated AlbumInfo albums = 2;
+}
+
+// ---------------- playlists ----------------
+
+message GetPlaylistsRequest {}
+
+message PlaylistInfo {
+  string id = 1;
+  string name = 2;
+  // Library refs, in playlist order; resolve with GetTracksByKeys.
+  repeated string track_keys = 3;
+  optional ArtworkTarget artwork = 4;
+}
+
+message PlaylistFolderInfo {
+  string id = 1;
+  string name = 2;
+  repeated string playlist_ids = 3;
+}
+
+message PlaylistCatalog {
+  repeated PlaylistInfo playlists = 1;
+  repeated PlaylistFolderInfo folders = 2;
+}
+
+message PlaylistId {
+  string id = 1;
+}
+
+message PlaylistFolderId {
+  string id = 1;
+}
+
+message CreatePlaylistRequest {
+  string name = 1;
+  repeated string keys = 2;
+}
+
+message RenamePlaylistRequest {
+  string id = 1;
+  string name = 2;
+}
+
+message AddPlaylistTracksRequest {
+  string id = 1;
+  repeated string keys = 2;
+}
+
+message RemovePlaylistTrackRequest {
+  string id = 1;
+  // Position, not key: a playlist may hold the same track twice.
+  uint32 index = 2;
+}
+
+message ReorderPlaylistRequest {
+  string id = 1;
+  uint32 from = 2;
+  uint32 to = 3;
+}
+
+message CreatePlaylistFolderRequest {
+  string name = 1;
+}
+
+message RenamePlaylistFolderRequest {
+  string id = 1;
+  string name = 2;
+}
+
+message MovePlaylistRequest {
+  string playlist_id = 1;
+  // Absent takes the playlist out of every folder.
+  optional string folder_id = 2;
 }
 
 message TrackInfo {

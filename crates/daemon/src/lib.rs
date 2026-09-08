@@ -16,6 +16,7 @@ pub mod os_media;
 pub mod ownership;
 pub mod persistence;
 mod playback;
+pub mod playlists;
 pub mod queue_model;
 pub mod scrobbler;
 pub mod session;
@@ -31,6 +32,7 @@ pub use jobs::JobRunner;
 pub use library::LibraryService;
 pub use ownership::DatabaseLease;
 pub use persistence::{DbQueueStore, QueueStore};
+pub use playlists::PlaylistService;
 pub use queue_model::{NextOutcome, QueueModel};
 pub use scrobbler::Scrobbler;
 pub use session::{

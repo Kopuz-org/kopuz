@@ -434,6 +434,161 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::search_results_to_proto(&results)))
     }
 
+    async fn get_playlists(
+        &self,
+        _request: Request<proto::GetPlaylistsRequest>,
+    ) -> Result<Response<proto::PlaylistCatalog>, Status> {
+        let catalog = self.0.api.playlists().await.map_err(failed)?;
+        Ok(Response::new(convert::playlist_catalog_to_proto(&catalog)))
+    }
+
+    async fn create_playlist(
+        &self,
+        request: Request<proto::CreatePlaylistRequest>,
+    ) -> Result<Response<proto::PlaylistId>, Status> {
+        let request = request.into_inner();
+        let id = self
+            .0
+            .api
+            .create_playlist(request.name, request.keys)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::PlaylistId { id }))
+    }
+
+    async fn rename_playlist(
+        &self,
+        request: Request<proto::RenamePlaylistRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .rename_playlist(request.id, request.name)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn delete_playlist(
+        &self,
+        request: Request<proto::PlaylistId>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .delete_playlist(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn add_playlist_tracks(
+        &self,
+        request: Request<proto::AddPlaylistTracksRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .add_playlist_tracks(request.id, request.keys)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn remove_playlist_track(
+        &self,
+        request: Request<proto::RemovePlaylistTrackRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .remove_playlist_track(request.id, request.index)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn reorder_playlist(
+        &self,
+        request: Request<proto::ReorderPlaylistRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .reorder_playlist(
+                request.id,
+                api::PlaylistReorder {
+                    from: request.from,
+                    to: request.to,
+                },
+            )
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn refresh_playlist(
+        &self,
+        request: Request<proto::PlaylistId>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .refresh_playlist(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn create_playlist_folder(
+        &self,
+        request: Request<proto::CreatePlaylistFolderRequest>,
+    ) -> Result<Response<proto::PlaylistFolderId>, Status> {
+        let id = self
+            .0
+            .api
+            .create_playlist_folder(request.into_inner().name)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::PlaylistFolderId { id }))
+    }
+
+    async fn rename_playlist_folder(
+        &self,
+        request: Request<proto::RenamePlaylistFolderRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .rename_playlist_folder(request.id, request.name)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn delete_playlist_folder(
+        &self,
+        request: Request<proto::PlaylistFolderId>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .delete_playlist_folder(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn move_playlist(
+        &self,
+        request: Request<proto::MovePlaylistRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .move_playlist(request.playlist_id, request.folder_id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     async fn get_stats(
         &self,
         _request: Request<proto::GetStatsRequest>,

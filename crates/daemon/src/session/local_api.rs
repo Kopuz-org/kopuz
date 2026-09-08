@@ -11,6 +11,7 @@ pub struct LocalApi {
     pub(super) downloads: Option<Arc<crate::downloads::DownloadsService>>,
     pub(super) favorites: Option<Arc<crate::favorites::FavoritesService>>,
     pub(super) artwork: Option<Arc<crate::artwork::ArtworkService>>,
+    pub(super) playlists: Option<Arc<crate::playlists::PlaylistService>>,
 }
 
 impl LocalApi {
@@ -23,6 +24,7 @@ impl LocalApi {
             downloads: None,
             favorites: None,
             artwork: None,
+            playlists: None,
         }
     }
 
@@ -56,10 +58,82 @@ impl LocalApi {
         self
     }
 
+    pub fn with_playlists(mut self, playlists: Arc<crate::playlists::PlaylistService>) -> Self {
+        self.playlists = Some(playlists);
+        self
+    }
+
     fn library(&self) -> Result<&crate::library::LibraryService, ApiError> {
         self.library
             .as_deref()
             .ok_or_else(|| ApiError::unsupported("this daemon runs without a library service"))
+    }
+
+    fn playlists(&self) -> Result<&crate::playlists::PlaylistService, ApiError> {
+        self.playlists
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without a playlist service"))
+    }
+}
+
+#[async_trait::async_trait]
+impl api::PlaylistApi for LocalApi {
+    async fn playlists(&self) -> Result<api::PlaylistCatalog, ApiError> {
+        self.playlists()?.catalog().await
+    }
+
+    async fn create_playlist(&self, name: String, keys: Vec<String>) -> Result<String, ApiError> {
+        self.playlists()?.create(&name, &keys).await
+    }
+
+    async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError> {
+        self.playlists()?.rename(&id, &name).await
+    }
+
+    async fn delete_playlist(&self, id: String) -> Result<(), ApiError> {
+        self.playlists()?.delete(&id).await
+    }
+
+    async fn add_playlist_tracks(&self, id: String, keys: Vec<String>) -> Result<(), ApiError> {
+        self.playlists()?.add_tracks(&id, &keys).await
+    }
+
+    async fn remove_playlist_track(&self, id: String, index: u32) -> Result<(), ApiError> {
+        self.playlists()?.remove_track(&id, index).await
+    }
+
+    async fn reorder_playlist(
+        &self,
+        id: String,
+        reorder: api::PlaylistReorder,
+    ) -> Result<(), ApiError> {
+        self.playlists()?.reorder(&id, reorder).await
+    }
+
+    async fn refresh_playlist(&self, id: String) -> Result<(), ApiError> {
+        self.playlists()?.refresh(&id).await
+    }
+
+    async fn create_playlist_folder(&self, name: String) -> Result<String, ApiError> {
+        self.playlists()?.create_folder(&name).await
+    }
+
+    async fn rename_playlist_folder(&self, id: String, name: String) -> Result<(), ApiError> {
+        self.playlists()?.rename_folder(&id, &name).await
+    }
+
+    async fn delete_playlist_folder(&self, id: String) -> Result<(), ApiError> {
+        self.playlists()?.delete_folder(&id).await
+    }
+
+    async fn move_playlist(
+        &self,
+        playlist_id: String,
+        folder_id: Option<String>,
+    ) -> Result<(), ApiError> {
+        self.playlists()?
+            .move_playlist(&playlist_id, folder_id.as_deref())
+            .await
     }
 }
 
