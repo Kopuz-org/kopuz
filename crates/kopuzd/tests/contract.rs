@@ -137,7 +137,7 @@ async fn spawn_pair() -> Pair {
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
     };
-    let state = Arc::new(daemon::grpc::GrpcState {
+    let state = Arc::new(kopuzd::GrpcState {
         api: Arc::new(build_api(session.clone())),
         artwork: None,
         session: session.clone(),
@@ -145,8 +145,8 @@ async fn spawn_pair() -> Pair {
         supervisor: None,
     });
     let socket = dir.path().join("kopuzd.sock");
-    let listener = daemon::grpc::bind_socket(&socket).expect("bind socket");
-    tokio::spawn(daemon::grpc::serve(listener, state));
+    let listener = kopuzd::bind_socket(&socket).expect("bind socket");
+    tokio::spawn(kopuzd::serve(listener, state));
     Pair {
         local: build_api(session.clone()),
         wire: client::GrpcApi::new(&socket).expect("wire client"),
@@ -532,19 +532,19 @@ async fn a_supervised_daemon_exits_when_its_frontend_detaches() {
     use futures_util::StreamExt;
 
     let pair = spawn_pair().await;
-    let supervisor = std::sync::Arc::new(daemon::grpc::Supervisor::default());
+    let supervisor = std::sync::Arc::new(kopuzd::Supervisor::default());
 
     let dir = tempfile::tempdir().expect("tempdir");
     let socket = dir.path().join("supervised.sock");
-    let state = std::sync::Arc::new(daemon::grpc::GrpcState {
+    let state = std::sync::Arc::new(kopuzd::GrpcState {
         api: std::sync::Arc::new(daemon::LocalApi::new(pair.session.clone())),
         artwork: None,
         session: pair.session.clone(),
         started: Instant::now(),
         supervisor: Some(supervisor.clone()),
     });
-    let listener = daemon::grpc::bind_socket(&socket).expect("bind");
-    tokio::spawn(daemon::grpc::serve(listener, state));
+    let listener = kopuzd::bind_socket(&socket).expect("bind");
+    tokio::spawn(kopuzd::serve(listener, state));
 
     // Nothing has attached yet, so an idle daemon must not consider itself
     // orphaned while it is still starting up.

@@ -129,6 +129,7 @@ db = { package = "kopuz-db", version = "0.16.1", path = "./crates/db" }
 api = { package = "kopuz-api", version = "0.16.1", path = "./crates/api" }
 proto = { package = "kopuz-proto", version = "0.16.1", path = "./crates/proto" }
 daemon = { package = "kopuz-daemon", version = "0.16.1", path = "./crates/daemon" }
+kopuzd = { package = "kopuz-kopuzd", version = "0.16.1", path = "./crates/kopuzd" }
 client = { package = "kopuz-client", version = "0.16.1", path = "./crates/client" }
 kopuz = { version = "0.16.1", path = "./crates/kopuz" }
 server = { package = "kopuz-server", version = "0.16.1", path = "./crates/server" }

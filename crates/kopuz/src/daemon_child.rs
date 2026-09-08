@@ -52,8 +52,8 @@ pub fn is_daemon_process() -> bool {
 
 /// Run the daemon in this process, having been spawned with [`RUN_DAEMON`].
 pub fn run_as_daemon() -> std::process::ExitCode {
-    let _log_guard = daemon::boot::init_logging();
-    let mut boot = daemon::boot::BootArgs {
+    let _log_guard = kopuzd::init_logging();
+    let mut boot = kopuzd::ServeArgs {
         supervised: true,
         ..Default::default()
     };
@@ -65,7 +65,7 @@ pub fn run_as_daemon() -> std::process::ExitCode {
             _ => {}
         }
     }
-    let code = match daemon::boot::block_on_run(boot) {
+    let code = match kopuzd::block_on_run(boot) {
         Ok(()) => 0,
         Err(error) => {
             tracing::error!(%error, "the daemon child exited with an error");
@@ -77,7 +77,7 @@ pub fn run_as_daemon() -> std::process::ExitCode {
     // once the runtime is gone; give it a moment to drain instead.
     std::thread::sleep(std::time::Duration::from_millis(150));
     std::mem::forget(_log_guard);
-    daemon::boot::exit_now(code)
+    kopuzd::exit_now(code)
 }
 
 /// Spawn the daemon as a child of this executable and wait for its socket.
@@ -89,7 +89,7 @@ pub fn run_as_daemon() -> std::process::ExitCode {
 pub fn spawn() -> Result<(std::process::Child, PathBuf), String> {
     let exe =
         std::env::current_exe().map_err(|error| format!("no path to this binary: {error}"))?;
-    let socket = daemon::boot::default_socket_path()
+    let socket = kopuzd::default_socket_path()
         .ok_or_else(|| "no usable runtime directory for the daemon socket".to_string())?;
 
     let child = std::process::Command::new(&exe)

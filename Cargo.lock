@@ -4353,6 +4353,7 @@ dependencies = [
  "kopuz-db",
  "kopuz-hooks",
  "kopuz-i18n",
+ "kopuz-kopuzd",
  "kopuz-pages",
  "kopuz-player",
  "kopuz-radio",
@@ -4459,19 +4460,15 @@ dependencies = [
  "futures-util",
  "image",
  "kopuz-api",
- "kopuz-client",
  "kopuz-config",
- "kopuz-daemon",
  "kopuz-db",
  "kopuz-discord-presence",
  "kopuz-player",
- "kopuz-proto",
  "kopuz-radio",
  "kopuz-reader",
  "kopuz-scrobble",
  "kopuz-server",
  "kopuz-utils",
- "libc",
  "percent-encoding",
  "rand 0.10.2",
  "reqwest 0.13.4",
@@ -4480,12 +4477,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "tokio",
- "tokio-stream",
- "tonic",
- "tonic-reflection",
  "tracing",
- "tracing-appender",
- "tracing-subscriber",
  "uuid 1.23.5",
 ]
 
@@ -4553,6 +4545,34 @@ version = "0.16.1"
 dependencies = [
  "fluent-bundle",
  "unic-langid",
+]
+
+[[package]]
+name = "kopuz-kopuzd"
+version = "0.16.1"
+dependencies = [
+ "async-trait",
+ "directories",
+ "futures-util",
+ "kopuz-api",
+ "kopuz-client",
+ "kopuz-config",
+ "kopuz-daemon",
+ "kopuz-db",
+ "kopuz-player",
+ "kopuz-proto",
+ "kopuz-radio",
+ "kopuz-reader",
+ "kopuz-utils",
+ "libc",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-reflection",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]

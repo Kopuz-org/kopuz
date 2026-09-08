@@ -1,17 +1,14 @@
-//! The Kopuz daemon core: playback session, queue state, and (as they land)
-//! library, config, and job services. Pure tokio, no Dioxus, no wire; the
-//! `grpc` feature adds the tonic shell.
-
-#[cfg(feature = "kopuzd")]
-pub mod boot;
+//! The Kopuz daemon core: playback session, queue state, library, config, and
+//! job services, with a [`LocalApi`] over them. Pure tokio -- no Dioxus, no
+//! wire, no socket. Whoever hosts it decides how (or whether) to serve it:
+//! `kopuz-kopuzd` puts it behind gRPC, the app calls it in-process.
 
 pub mod artwork;
+pub mod boot;
 pub mod config_service;
 pub mod downloads;
 pub mod external;
 pub mod favorites;
-#[cfg(feature = "grpc")]
-pub mod grpc;
 pub mod integrations;
 pub mod jobs;
 pub mod library;
