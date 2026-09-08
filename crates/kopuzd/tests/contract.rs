@@ -135,6 +135,7 @@ async fn spawn_pair() -> Pair {
         session.clone(),
         dir.path().join("artwork"),
     );
+    let playlists = daemon::PlaylistService::new(database.clone(), session.clone());
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)
             .with_config(config_service.clone())
@@ -142,6 +143,7 @@ async fn spawn_pair() -> Pair {
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
             .with_artwork(artwork.clone())
+            .with_playlists(playlists.clone())
     };
     let state = Arc::new(kopuzd::GrpcState {
         api: Arc::new(build_api(session.clone())),
@@ -715,4 +717,88 @@ async fn library_reads_agree_across_transports() {
         .await
         .expect("local empty");
     assert!(local_tracks.is_empty());
+}
+
+#[tokio::test]
+async fn playlists_round_trip_across_transports() {
+    let pair = spawn_pair().await;
+
+    let id = pair
+        .wire
+        .create_playlist("Over the wire".into(), vec!["/lib/seed-0.flac".into()])
+        .await
+        .expect("create over the wire");
+
+    // Both sides see the same catalog, and the wire's write is visible locally.
+    let local = pair.local.playlists().await.expect("local catalog");
+    let wire = pair.wire.playlists().await.expect("wire catalog");
+    assert_eq!(local, wire);
+    let created = local
+        .playlists
+        .iter()
+        .find(|playlist| playlist.id == id)
+        .expect("the created playlist is in the catalog");
+    assert_eq!(created.name, "Over the wire");
+    assert_eq!(created.track_keys, vec!["/lib/seed-0.flac".to_string()]);
+
+    pair.wire
+        .add_playlist_tracks(id.clone(), vec!["/lib/seed-1.flac".into()])
+        .await
+        .expect("add over the wire");
+    pair.local
+        .rename_playlist(id.clone(), "Renamed locally".into())
+        .await
+        .expect("rename locally");
+
+    let catalog = pair.wire.playlists().await.expect("catalog");
+    let playlist = catalog
+        .playlists
+        .iter()
+        .find(|playlist| playlist.id == id)
+        .expect("still there");
+    assert_eq!(playlist.name, "Renamed locally");
+    assert_eq!(playlist.track_keys.len(), 2);
+
+    pair.wire
+        .remove_playlist_track(id.clone(), 0)
+        .await
+        .expect("remove over the wire");
+    let catalog = pair.local.playlists().await.expect("catalog");
+    let playlist = catalog
+        .playlists
+        .iter()
+        .find(|playlist| playlist.id == id)
+        .expect("still there");
+    assert_eq!(
+        playlist.track_keys,
+        vec!["/lib/seed-1.flac".to_string()],
+        "position-addressed removal took the first entry"
+    );
+
+    // Folders are local organisation; a playlist moves in and back out.
+    let folder = pair
+        .wire
+        .create_playlist_folder("Shelf".into())
+        .await
+        .expect("create folder");
+    pair.wire
+        .move_playlist(id.clone(), Some(folder.clone()))
+        .await
+        .expect("move in");
+    let catalog = pair.local.playlists().await.expect("catalog");
+    assert!(
+        catalog
+            .folders
+            .iter()
+            .any(|entry| entry.id == folder && entry.playlist_ids.contains(&id)),
+        "the folder holds the playlist: {:?}",
+        catalog.folders
+    );
+
+    pair.local
+        .delete_playlist(id.clone())
+        .await
+        .expect("delete locally");
+    let catalog = pair.wire.playlists().await.expect("catalog");
+    assert!(!catalog.playlists.iter().any(|playlist| playlist.id == id));
 }

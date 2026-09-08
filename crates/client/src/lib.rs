@@ -543,3 +543,126 @@ async fn stream_once(
         }
     }
 }
+
+#[async_trait::async_trait]
+impl api::PlaylistApi for GrpcApi {
+    async fn playlists(&self) -> Result<api::PlaylistCatalog, ApiError> {
+        let catalog = self
+            .client()
+            .get_playlists(Request::new(proto::GetPlaylistsRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::playlist_catalog_from_proto(catalog.get_ref()))
+    }
+
+    async fn create_playlist(&self, name: String, keys: Vec<String>) -> Result<String, ApiError> {
+        let id = self
+            .client()
+            .create_playlist(Request::new(proto::CreatePlaylistRequest { name, keys }))
+            .await
+            .map_err(wire_error)?;
+        Ok(id.into_inner().id)
+    }
+
+    async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError> {
+        self.client()
+            .rename_playlist(Request::new(proto::RenamePlaylistRequest { id, name }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn delete_playlist(&self, id: String) -> Result<(), ApiError> {
+        self.client()
+            .delete_playlist(Request::new(proto::PlaylistId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn add_playlist_tracks(&self, id: String, keys: Vec<String>) -> Result<(), ApiError> {
+        self.client()
+            .add_playlist_tracks(Request::new(proto::AddPlaylistTracksRequest { id, keys }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn remove_playlist_track(&self, id: String, index: u32) -> Result<(), ApiError> {
+        self.client()
+            .remove_playlist_track(Request::new(proto::RemovePlaylistTrackRequest {
+                id,
+                index,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn reorder_playlist(
+        &self,
+        id: String,
+        reorder: api::PlaylistReorder,
+    ) -> Result<(), ApiError> {
+        self.client()
+            .reorder_playlist(Request::new(proto::ReorderPlaylistRequest {
+                id,
+                from: reorder.from,
+                to: reorder.to,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn refresh_playlist(&self, id: String) -> Result<(), ApiError> {
+        self.client()
+            .refresh_playlist(Request::new(proto::PlaylistId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn create_playlist_folder(&self, name: String) -> Result<String, ApiError> {
+        let id = self
+            .client()
+            .create_playlist_folder(Request::new(proto::CreatePlaylistFolderRequest { name }))
+            .await
+            .map_err(wire_error)?;
+        Ok(id.into_inner().id)
+    }
+
+    async fn rename_playlist_folder(&self, id: String, name: String) -> Result<(), ApiError> {
+        self.client()
+            .rename_playlist_folder(Request::new(proto::RenamePlaylistFolderRequest {
+                id,
+                name,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn delete_playlist_folder(&self, id: String) -> Result<(), ApiError> {
+        self.client()
+            .delete_playlist_folder(Request::new(proto::PlaylistFolderId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn move_playlist(
+        &self,
+        playlist_id: String,
+        folder_id: Option<String>,
+    ) -> Result<(), ApiError> {
+        self.client()
+            .move_playlist(Request::new(proto::MovePlaylistRequest {
+                playlist_id,
+                folder_id,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+}

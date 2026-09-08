@@ -155,6 +155,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     );
     let favorites = FavoritesService::new(database.clone(), session.clone());
     favorites.spawn_reconciler();
+    let playlists = crate::PlaylistService::new(database.clone(), session.clone());
     spawn_volume_persistence(&session, config_service.clone());
     crate::os_media::spawn(&session);
     crate::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
@@ -182,7 +183,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
             .with_downloads(downloads)
-            .with_artwork(artwork.clone()),
+            .with_artwork(artwork.clone())
+            .with_playlists(playlists),
     );
 
     Ok(Core {

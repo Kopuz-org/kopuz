@@ -13,6 +13,7 @@ mod error;
 mod events;
 mod library;
 mod player;
+mod playlists;
 mod queue;
 
 pub use artwork::{ArtworkData, ArtworkRequest, ArtworkTarget};
@@ -27,6 +28,7 @@ pub use player::{
     BufferedRange, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying, Phase,
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
 };
+pub use playlists::{PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder};
 pub use queue::{QueueContext, QueueEdit, QueueItem, QueueMode, QueueWindow, SetQueueRequest};
 
 /// The config view: the layered config with credential keys
@@ -145,6 +147,48 @@ pub trait LibraryApi: Send + Sync {
     async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError>;
 }
 
+/// Playlists and the folders they sit in.
+///
+/// Every mutation goes through the active source, so a server playlist is
+/// pushed to the server and a local one is not, without the caller knowing
+/// which it holds. The daemon reports the change as a `Playlists` (or
+/// `Folders`) invalidation.
+#[async_trait::async_trait]
+pub trait PlaylistApi: Send + Sync {
+    async fn playlists(&self) -> Result<PlaylistCatalog, ApiError>;
+
+    /// Create a playlist and return its id.
+    async fn create_playlist(&self, name: String, keys: Vec<String>) -> Result<String, ApiError>;
+
+    async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError>;
+
+    async fn delete_playlist(&self, id: String) -> Result<(), ApiError>;
+
+    async fn add_playlist_tracks(&self, id: String, keys: Vec<String>) -> Result<(), ApiError>;
+
+    /// Remove one entry by position. Position rather than key, because a
+    /// playlist may hold the same track twice.
+    async fn remove_playlist_track(&self, id: String, index: u32) -> Result<(), ApiError>;
+
+    async fn reorder_playlist(&self, id: String, reorder: PlaylistReorder) -> Result<(), ApiError>;
+
+    /// Pull a server playlist's contents again. A no-op for a local one.
+    async fn refresh_playlist(&self, id: String) -> Result<(), ApiError>;
+
+    async fn create_playlist_folder(&self, name: String) -> Result<String, ApiError>;
+
+    async fn rename_playlist_folder(&self, id: String, name: String) -> Result<(), ApiError>;
+
+    async fn delete_playlist_folder(&self, id: String) -> Result<(), ApiError>;
+
+    /// Move a playlist into a folder, or out of every folder with `None`.
+    async fn move_playlist(
+        &self,
+        playlist_id: String,
+        folder_id: Option<String>,
+    ) -> Result<(), ApiError>;
+}
+
 /// Cover bytes for a library entity. Clients ask by id rather than resolving
 /// a URL themselves: the daemon holds the credentials that sign server cover
 /// URLs, and they never reach the wire.
@@ -199,17 +243,28 @@ pub trait EventApi: Send + Sync {
 /// instead of one that grows without bound; consumers still hold a single
 /// `Arc<dyn KopuzApi>` and call any method on it.
 pub trait KopuzApi:
-    PlayerApi + LibraryApi + ArtworkApi + JobApi + ConfigApi + EventApi + Send + Sync
+    PlayerApi + LibraryApi + PlaylistApi + ArtworkApi + JobApi + ConfigApi + EventApi + Send + Sync
 {
 }
 
 impl<T> KopuzApi for T where
-    T: PlayerApi + LibraryApi + ArtworkApi + JobApi + ConfigApi + EventApi + Send + Sync + ?Sized
+    T: PlayerApi
+        + LibraryApi
+        + PlaylistApi
+        + ArtworkApi
+        + JobApi
+        + ConfigApi
+        + EventApi
+        + Send
+        + Sync
+        + ?Sized
 {
 }
 
 /// The sub-traits, for code holding a concrete implementor rather than a
 /// `dyn KopuzApi` -- a method is only callable with its own trait in scope.
 pub mod prelude {
-    pub use super::{ArtworkApi, ConfigApi, EventApi, JobApi, KopuzApi, LibraryApi, PlayerApi};
+    pub use super::{
+        ArtworkApi, ConfigApi, EventApi, JobApi, KopuzApi, LibraryApi, PlayerApi, PlaylistApi,
+    };
 }

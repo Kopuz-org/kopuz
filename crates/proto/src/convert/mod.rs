@@ -11,6 +11,7 @@ mod error;
 mod events;
 mod library;
 mod player;
+mod playlists;
 mod queue;
 mod service;
 
@@ -23,5 +24,6 @@ pub use error::*;
 pub use events::*;
 pub use library::*;
 pub use player::*;
+pub use playlists::*;
 pub use queue::*;
 pub use service::*;
