@@ -135,6 +135,7 @@ async fn spawn_pair() -> Pair {
         artwork: None,
         session: session.clone(),
         started: Instant::now(),
+        supervisor: None,
     });
     let socket = dir.path().join("kopuzd.sock");
     let listener = daemon::grpc::bind_socket(&socket).expect("bind socket");
@@ -513,4 +514,68 @@ async fn a_missing_daemon_is_not_reported_as_a_dead_media_server() {
         ErrorCode::DaemonGone,
         "a socket with no daemon behind it is DaemonGone, not SourceUnreachable"
     );
+}
+
+/// A supervised daemon exists to serve the frontend that launched it, so it
+/// exits when that frontend's stream ends -- however it ended. The socket
+/// closing is the signal, which is why this needs no process parentage and
+/// works for a frontend that was SIGKILLed.
+#[tokio::test]
+async fn a_supervised_daemon_exits_when_its_frontend_detaches() {
+    use futures_util::StreamExt;
+
+    let pair = spawn_pair().await;
+    let supervisor = std::sync::Arc::new(daemon::grpc::Supervisor::default());
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let socket = dir.path().join("supervised.sock");
+    let state = std::sync::Arc::new(daemon::grpc::GrpcState {
+        api: std::sync::Arc::new(daemon::LocalApi::new(pair.session.clone())),
+        artwork: None,
+        session: pair.session.clone(),
+        started: Instant::now(),
+        supervisor: Some(supervisor.clone()),
+    });
+    let listener = daemon::grpc::bind_socket(&socket).expect("bind");
+    tokio::spawn(daemon::grpc::serve(listener, state));
+
+    // Nothing has attached yet, so an idle daemon must not consider itself
+    // orphaned while it is still starting up.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), supervisor.orphaned())
+            .await
+            .is_err(),
+        "a daemon with no frontend yet is not orphaned"
+    );
+
+    let frontend = client::GrpcApi::new(&socket).expect("frontend");
+    let mut events = frontend.events();
+    // The subscription is established asynchronously and nothing is
+    // replayed, so an event emitted before it lands is gone. Poke the
+    // session until one actually arrives -- that is the moment the daemon
+    // counts this frontend as attached.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let _ = pair.session.player_command(PlayerCommand::Toggle).await;
+            tokio::select! {
+                event = events.next() => {
+                    if event.is_some() {
+                        return;
+                    }
+                }
+                () = tokio::time::sleep(Duration::from_millis(50)) => {}
+            }
+        }
+    })
+    .await
+    .expect("the frontend attached");
+
+    let orphaned = tokio::spawn(async move { supervisor.orphaned().await });
+    drop(events);
+    drop(frontend);
+
+    tokio::time::timeout(Duration::from_secs(2), orphaned)
+        .await
+        .expect("the daemon noticed the frontend go")
+        .expect("join");
 }

@@ -358,7 +358,15 @@ async fn stream_once(
         .map_err(wire_error)?
         .into_inner();
     loop {
-        match inbound.message().await {
+        // Watch for the consumer going away as well as for events: parked in
+        // message() alone, this task would never notice its receiver was
+        // dropped, and the daemon would keep counting a frontend that is no
+        // longer listening.
+        let message = tokio::select! {
+            message = inbound.message() => message,
+            () = tx.closed() => return Ok(()),
+        };
+        match message {
             Ok(Some(proto::EventEnvelope { event })) => {
                 if let Some(event) = event.and_then(|event| convert::event_from_proto(&event))
                     && tx.send(event).is_err()

@@ -53,12 +53,15 @@ async fn terminate_signal() {
 struct Args {
     socket: Option<PathBuf>,
     db_path: Option<String>,
+    /// Launched by a frontend: exit when that frontend goes away.
+    supervised: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args {
         socket: None,
         db_path: None,
+        supervised: false,
     };
     let mut iter = std::env::args().skip(1);
     while let Some(arg) = iter.next() {
@@ -67,6 +70,9 @@ fn parse_args() -> Result<Args, String> {
                 args.socket = Some(PathBuf::from(
                     iter.next().ok_or("--socket requires a path")?,
                 ));
+            }
+            "--supervised" => {
+                args.supervised = true;
             }
             "--db-path" => {
                 args.db_path = Some(iter.next().ok_or("--db-path requires a path")?);
@@ -80,6 +86,58 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
+/// The daemon's own log, next to the frontend's in the same directory.
+/// Returns the appender guard, which must outlive `main`.
+fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    let filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+    };
+    let console = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
+
+    let Some(dir) = log_dir() else {
+        tracing_subscriber::registry()
+            .with(console.with_filter(filter()))
+            .init();
+        return None;
+    };
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        tracing_subscriber::registry()
+            .with(console.with_filter(filter()))
+            .init();
+        tracing::warn!(%error, path = %dir.display(), "no daemon log directory");
+        return None;
+    }
+    utils::logs::rotate_session_log_named(
+        &dir,
+        utils::logs::DAEMON_LATEST,
+        utils::logs::DAEMON_SESSION_PREFIX,
+    );
+    let (writer, guard) = tracing_appender::non_blocking(tracing_appender::rolling::never(
+        &dir,
+        utils::logs::DAEMON_LATEST,
+    ));
+    tracing_subscriber::registry()
+        .with(console.with_filter(filter()))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(writer)
+                .with_filter(filter()),
+        )
+        .init();
+    tracing::info!(path = %dir.join(utils::logs::DAEMON_LATEST).display(), "daemon log");
+    Some(guard)
+}
+
+fn log_dir() -> Option<PathBuf> {
+    Some(directories::BaseDirs::new()?.cache_dir().join("kopuz/logs"))
+}
+
 fn default_socket_path() -> Option<PathBuf> {
     let base = directories::BaseDirs::new()?;
     let dir = base
@@ -90,12 +148,11 @@ fn default_socket_path() -> Option<PathBuf> {
 }
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // Kept out of the frontend's file on purpose: two processes with two
+    // lifetimes interleaved into one log make either side's history
+    // unreadable, and a supervised daemon's exit is exactly what you want to
+    // read after the GUI is gone.
+    let _log_guard = init_logging();
 
     let args = match parse_args() {
         Ok(args) => args,
@@ -244,6 +301,9 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         artwork: Some(artwork),
         session,
         started: Instant::now(),
+        supervisor: args
+            .supervised
+            .then(|| Arc::new(daemon::grpc::Supervisor::default())),
     });
 
     let socket = match args.socket.or_else(default_socket_path) {
@@ -255,8 +315,23 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let listener = daemon::grpc::bind_socket(&socket)?;
     tracing::info!(path = %socket.display(), "kopuzd listening");
 
+    let supervisor = state.supervisor.clone();
+    let orphaned = async {
+        match supervisor {
+            // A supervised daemon exists to serve the frontend that started
+            // it, so losing that frontend is a reason to exit, not an idle
+            // state to sit in.
+            Some(supervisor) => supervisor.orphaned().await,
+            None => std::future::pending().await,
+        }
+    };
+
     let result = tokio::select! {
         served = daemon::grpc::serve(listener, state) => served.map_err(Into::into),
+        () = orphaned => {
+            tracing::info!("frontend detached; supervised daemon exiting");
+            Ok(())
+        }
         signal = tokio::signal::ctrl_c() => {
             signal?;
             tracing::info!("shutting down");

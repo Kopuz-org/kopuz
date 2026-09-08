@@ -4479,6 +4479,7 @@ dependencies = [
  "tonic",
  "tonic-reflection",
  "tracing",
+ "tracing-appender",
  "tracing-subscriber",
  "uuid 1.23.5",
 ]
