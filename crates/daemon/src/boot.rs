@@ -1,8 +1,10 @@
 //! Daemon startup: logging, socket, services, and the shutdown path.
 //!
-//! Lives in the library rather than the `kopuzd` binary so a frontend can
-//! host the same daemon in a child process of its own executable, which is
-//! what lets one `cargo run` produce both halves.
+//! Lives in the library rather than the `kopuzd` binary because the app hosts
+//! the very same core in its own process: [`assemble`] builds every service
+//! and the [`crate::LocalApi`] over them, [`listen`] adds the socket, and
+//! [`shutdown`] flushes. `kopuzd` is those three in a row; the app calls
+//! `assemble` + `listen` and hands the api to its UI.
 //!
 //! Owns the real audio engine, the Kopuz database, and the configured source,
 //! and serves the gRPC API from `crate::grpc` (see `proto/kopuz.proto`).
@@ -121,7 +123,33 @@ pub fn default_socket_path() -> Option<PathBuf> {
     Some(dir.join("kopuzd.sock"))
 }
 
-pub async fn run(args: BootArgs) -> Result<(), Box<dyn std::error::Error>> {
+/// Everything a running daemon owns. Built by [`assemble`] whether or not a
+/// socket is ever bound, so the app can host it in-process.
+pub struct Core {
+    pub api: Arc<LocalApi>,
+    pub session: SessionHandle,
+    pub artwork: Arc<crate::ArtworkService>,
+    pub db: db::Db,
+    pub config: config::AppConfig,
+    pub supervisor: Option<Arc<crate::grpc::Supervisor>>,
+    started: Instant,
+}
+
+impl Core {
+    fn grpc_state(&self) -> Arc<crate::grpc::GrpcState> {
+        Arc::new(crate::grpc::GrpcState {
+            api: self.api.clone(),
+            artwork: Some(self.artwork.clone()),
+            session: self.session.clone(),
+            started: self.started,
+            supervisor: self.supervisor.clone(),
+        })
+    }
+}
+
+/// Open the library, start the audio engine, and wire every service onto it.
+/// No socket: a frontend that hosts the core in its own process stops here.
+pub async fn assemble(args: &BootArgs) -> Result<Core, Box<dyn std::error::Error>> {
     let using_default_database =
         args.db_path.is_none() && std::env::var_os("KOPUZ_DB_PATH").is_none();
     if using_default_database {
@@ -132,6 +160,7 @@ pub async fn run(args: BootArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
     let db_path = args
         .db_path
+        .clone()
         .map(PathBuf::from)
         .unwrap_or_else(db::default_db_path);
     tracing::info!(path = %db_path.display(), "opening library database (expects exclusive access)");
@@ -166,7 +195,7 @@ pub async fn run(args: BootArgs) -> Result<(), Box<dyn std::error::Error>> {
     let queue_store: Arc<dyn QueueStore> = Arc::new(DbQueueStore::new(database.clone()));
     let scrobbler = crate::Scrobbler::new(database.clone());
     let services = PlaybackServices {
-        config,
+        config: config.clone(),
         active_source: Some(active_source.clone()),
         station_registry,
         queue_store: Some(queue_store.clone()),
@@ -208,7 +237,6 @@ pub async fn run(args: BootArgs) -> Result<(), Box<dyn std::error::Error>> {
             Err(error) => tracing::warn!(%error, "queue restore failed"),
         }
     }
-    let flush_session = session.clone();
     let artwork = crate::ArtworkService::new(
         database.clone(),
         session.clone(),
@@ -216,33 +244,54 @@ pub async fn run(args: BootArgs) -> Result<(), Box<dyn std::error::Error>> {
             .map(|dirs| dirs.cache_dir().join("artwork"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork")),
     );
-    let state = Arc::new(crate::grpc::GrpcState {
-        api: Arc::new(
-            LocalApi::new(session.clone())
-                .with_library(library)
-                .with_config(config_service)
-                .with_jobs(jobs)
-                .with_favorites(favorites)
-                .with_downloads(downloads),
-        ),
-        artwork: Some(artwork),
+    let api = Arc::new(
+        LocalApi::new(session.clone())
+            .with_library(library)
+            .with_config(config_service)
+            .with_jobs(jobs)
+            .with_favorites(favorites)
+            .with_downloads(downloads),
+    );
+
+    Ok(Core {
+        api,
         session,
-        started: Instant::now(),
+        artwork,
+        db: database,
+        config,
         supervisor: args
             .supervised
             .then(|| Arc::new(crate::grpc::Supervisor::default())),
-    });
+        started: Instant::now(),
+    })
+}
 
-    let socket = match args.socket.or_else(default_socket_path) {
+/// Bind the socket and serve the core on it until the server stops.
+pub async fn listen(core: &Core, socket: &Path) -> std::io::Result<()> {
+    let listener = crate::grpc::bind_socket(socket)?;
+    tracing::info!(path = %socket.display(), "kopuzd listening");
+    crate::grpc::serve(listener, core.grpc_state()).await
+}
+
+/// Flush what the core owns and release the socket.
+pub async fn shutdown(core: Core, socket: Option<&Path>) {
+    core.session.persist_now().await;
+    if let Some(socket) = socket {
+        let _ = std::fs::remove_file(socket);
+    }
+}
+
+pub async fn run(args: BootArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let core = assemble(&args).await?;
+
+    let socket = match args.socket.clone().or_else(default_socket_path) {
         Some(path) => path,
         None => {
             return Err("no usable runtime directory for the daemon socket".into());
         }
     };
-    let listener = crate::grpc::bind_socket(&socket)?;
-    tracing::info!(path = %socket.display(), "kopuzd listening");
 
-    let supervisor = state.supervisor.clone();
+    let supervisor = core.supervisor.clone();
     let orphaned = async {
         match supervisor {
             // A supervised daemon exists to serve the frontend that started
@@ -254,7 +303,7 @@ pub async fn run(args: BootArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let result = tokio::select! {
-        served = crate::grpc::serve(listener, state) => served.map_err(Into::into),
+        served = listen(&core, &socket) => served.map_err(Into::into),
         () = orphaned => {
             tracing::info!("frontend detached; supervised daemon exiting");
             Ok(())
@@ -270,8 +319,7 @@ pub async fn run(args: BootArgs) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    flush_session.persist_now().await;
-    let _ = std::fs::remove_file(&socket);
+    shutdown(core, Some(&socket)).await;
     result
 }
 
