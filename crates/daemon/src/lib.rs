@@ -8,6 +8,7 @@ pub mod boot;
 pub mod artwork;
 pub mod config_service;
 pub mod downloads;
+pub mod external;
 pub mod favorites;
 #[cfg(feature = "grpc")]
 pub mod grpc;
@@ -26,6 +27,7 @@ mod wire;
 pub use artwork::ArtworkService;
 pub use config_service::ConfigService;
 pub use downloads::DownloadsService;
+pub use external::{ExternalPlayer, ExternalReport};
 pub use favorites::FavoritesService;
 pub use integrations::SourceRecorder;
 pub use jobs::JobRunner;

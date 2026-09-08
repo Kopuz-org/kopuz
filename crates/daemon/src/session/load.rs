@@ -404,9 +404,9 @@ impl Session {
 }
 
 /// Download a cover to a temp file named by its URL hash, so repeated plays
-/// of the same album reuse the file instead of growing the temp dir.
-#[cfg(target_os = "macos")]
-async fn fetch_cover_to_temp(url: &str) -> Option<String> {
+/// of the same album reuse the file instead of growing the temp dir. MPRIS
+/// `mpris:artUrl` wants a file too, not just macOS Now Playing.
+pub(super) async fn fetch_cover_to_temp(url: &str) -> Option<String> {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(url.as_bytes());
