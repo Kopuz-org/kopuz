@@ -22,9 +22,9 @@
 //! opens it or it does not exist. Its 0600 mode is the access control, so
 //! the channel carries no credentials.
 //!
-//! Interim caveat: the daemon expects exclusive database access. Running it
-//! alongside the GUI app against the same `KOPUZ_DB_PATH` means two writers
-//! on one SQLite file; safe for reads, but not the supported end state.
+//! Exclusive database access is enforced by [`crate::DatabaseLease`]: a
+//! second process pointed at the same `KOPUZ_DB_PATH` fails to start rather
+//! than becoming a second writer.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -133,6 +133,7 @@ pub struct Core {
     pub config: config::AppConfig,
     pub supervisor: Option<Arc<crate::grpc::Supervisor>>,
     started: Instant,
+    _lease: crate::DatabaseLease,
 }
 
 impl Core {
@@ -163,7 +164,14 @@ pub async fn assemble(args: &BootArgs) -> Result<Core, Box<dyn std::error::Error
         .clone()
         .map(PathBuf::from)
         .unwrap_or_else(db::default_db_path);
-    tracing::info!(path = %db_path.display(), "opening library database (expects exclusive access)");
+    let Some(lease) = crate::DatabaseLease::claim_with_retry(&db_path).await? else {
+        return Err(format!(
+            "another kopuz process already owns {}; close it first",
+            db_path.display()
+        )
+        .into());
+    };
+    tracing::info!(path = %db_path.display(), "opening library database");
     let database = db::init(&db_path).await?;
     if using_default_database {
         db::legacy::migrate_json_store(&database, &db::config_dir()).await;
@@ -263,6 +271,7 @@ pub async fn assemble(args: &BootArgs) -> Result<Core, Box<dyn std::error::Error
             .supervised
             .then(|| Arc::new(crate::grpc::Supervisor::default())),
         started: Instant::now(),
+        _lease: lease,
     })
 }
 
