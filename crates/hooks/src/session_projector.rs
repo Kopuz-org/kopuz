@@ -111,20 +111,21 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
                 &mut ctrl.current_song_duration,
                 now.duration_ms.map(|ms| ms / 1000).unwrap_or(u64::MAX),
             );
-            // The wire key is the track's uid (service-prefixed for server
-            // tracks); matching by the bare id here missed every server
-            // track, leaving the cover and snapshot stale.
+            // Match on uid, not key: key is the bare library ref, which is
+            // the same string as the uid for local tracks but not for server
+            // ones, so matching on it missed every server track and left the
+            // cover and snapshot stale.
             let key_changed = ctrl
                 .current_track_snapshot
                 .peek()
                 .as_ref()
-                .is_none_or(|snapshot| snapshot.id.uid() != now.key);
+                .is_none_or(|snapshot| snapshot.id.uid() != now.uid);
             if key_changed {
                 let track = ctrl
                     .queue
                     .peek()
                     .iter()
-                    .find(|track| track.id.uid() == now.key)
+                    .find(|track| track.id.uid() == now.uid)
                     .cloned();
                 if let Some(track) = track {
                     ctrl.current_song_cover_url
