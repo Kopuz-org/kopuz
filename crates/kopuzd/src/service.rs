@@ -18,12 +18,12 @@ use proto::kopuz_server::{Kopuz, KopuzServer};
 use tokio::sync::broadcast;
 use tonic::{Request, Response, Status};
 
-use crate::session::SessionHandle;
+use daemon::SessionHandle;
 
 pub struct GrpcState {
     pub api: Arc<dyn KopuzApi>,
     /// Entity-addressed artwork; `None` makes GetArtwork answer unsupported.
-    pub artwork: Option<Arc<crate::artwork::ArtworkService>>,
+    pub artwork: Option<Arc<daemon::ArtworkService>>,
     pub session: SessionHandle,
     pub started: Instant,
     /// Set when this daemon was launched by a frontend and should not
@@ -446,7 +446,7 @@ impl Kopuz for KopuzGrpc {
         &self,
         request: Request<proto::ArtworkRequest>,
     ) -> Result<Response<Self::GetArtworkStream>, Status> {
-        use crate::artwork::ArtworkEntity;
+        use daemon::artwork::ArtworkEntity;
         let Some(service) = &self.0.artwork else {
             return Err(failed(ApiError::unsupported(
                 "this daemon runs without artwork",

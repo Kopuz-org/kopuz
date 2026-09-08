@@ -1,14 +1,12 @@
-//! Headless Kopuz daemon. The startup path lives in `daemon::boot` so the
-//! desktop app can host the same daemon in a child process of its own
-//! executable; this binary is the standalone entry point.
+//! Headless Kopuz daemon: a core from `daemon::boot`, served on a socket.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use daemon::boot::BootArgs;
+use kopuzd::ServeArgs;
 
-fn parse_args() -> Result<BootArgs, String> {
-    let mut args = BootArgs::default();
+fn parse_args() -> Result<ServeArgs, String> {
+    let mut args = ServeArgs::default();
     let mut iter = std::env::args().skip(1);
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -33,7 +31,7 @@ fn parse_args() -> Result<BootArgs, String> {
 }
 
 fn main() -> ExitCode {
-    let _log_guard = daemon::boot::init_logging();
+    let _log_guard = kopuzd::init_logging();
 
     let args = match parse_args() {
         Ok(args) => args,
@@ -42,7 +40,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match daemon::boot::block_on_run(args) {
+    match kopuzd::block_on_run(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!(%error, "kopuzd exited with an error");
