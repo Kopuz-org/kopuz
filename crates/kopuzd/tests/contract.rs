@@ -129,17 +129,23 @@ async fn spawn_pair() -> Pair {
     );
     library.attach_session(session.clone());
     let jobs = Arc::new(JobRunner::new(session.clone()));
-    let favorites = FavoritesService::new(database, session.clone());
+    let favorites = FavoritesService::new(database.clone(), session.clone());
+    let artwork = daemon::ArtworkService::new(
+        database.clone(),
+        session.clone(),
+        dir.path().join("artwork"),
+    );
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)
             .with_config(config_service.clone())
             .with_library(library.clone())
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
+            .with_artwork(artwork.clone())
     };
     let state = Arc::new(kopuzd::GrpcState {
         api: Arc::new(build_api(session.clone())),
-        artwork: None,
+        artwork: Some(artwork.clone()),
         session: session.clone(),
         started: Instant::now(),
         supervisor: None,
@@ -585,4 +591,37 @@ async fn a_supervised_daemon_exits_when_its_frontend_detaches() {
         .await
         .expect("the daemon noticed the frontend go")
         .expect("join");
+}
+
+#[tokio::test]
+async fn artwork_agrees_across_transports() {
+    let pair = spawn_pair().await;
+
+    // The seeded rows have no cover on disk, so both sides have to agree on
+    // the failure -- that is the whole request/stream/error path.
+    let missing = api::ArtworkRequest {
+        target: api::ArtworkTarget::Track("/lib/seed-0.flac".into()),
+        hq: false,
+    };
+    let local = pair.local.artwork(missing.clone()).await;
+    let wire = pair.wire.artwork(missing).await;
+    assert_eq!(
+        local.as_ref().err().map(|error| error.code),
+        wire.as_ref().err().map(|error| error.code),
+        "local {local:?} vs wire {wire:?}"
+    );
+    assert!(local.is_err(), "a track with no cover has no artwork");
+
+    let unknown = api::ArtworkRequest {
+        target: api::ArtworkTarget::Album("no-such-album".into()),
+        hq: true,
+    };
+    assert_eq!(
+        pair.local
+            .artwork(unknown.clone())
+            .await
+            .err()
+            .map(|e| e.code),
+        pair.wire.artwork(unknown).await.err().map(|e| e.code),
+    );
 }

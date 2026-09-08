@@ -159,3 +159,29 @@ pub fn stats_from_proto(value: &Stats) -> api::StatsView {
         listen_counts: value.listen_counts.clone().into_iter().collect(),
     }
 }
+
+pub fn artwork_request_to_proto(value: &api::ArtworkRequest) -> ArtworkRequest {
+    use artwork_request::Entity;
+    let entity = match &value.target {
+        api::ArtworkTarget::Track(key) => Entity::Track(key.clone()),
+        api::ArtworkTarget::Album(id) => Entity::Album(id.clone()),
+        api::ArtworkTarget::Artist(name) => Entity::Artist(name.clone()),
+    };
+    ArtworkRequest {
+        entity: Some(entity),
+        hq: value.hq,
+    }
+}
+
+pub fn artwork_request_from_proto(value: &ArtworkRequest) -> Option<api::ArtworkRequest> {
+    use artwork_request::Entity;
+    let target = match value.entity.as_ref()? {
+        Entity::Track(key) => api::ArtworkTarget::Track(key.clone()),
+        Entity::Album(id) => api::ArtworkTarget::Album(id.clone()),
+        Entity::Artist(name) => api::ArtworkTarget::Artist(name.clone()),
+    };
+    Some(api::ArtworkRequest {
+        target,
+        hq: value.hq,
+    })
+}

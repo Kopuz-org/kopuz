@@ -181,7 +181,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_config(config_service)
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
-            .with_downloads(downloads),
+            .with_downloads(downloads)
+            .with_artwork(artwork.clone()),
     );
 
     Ok(Core {

@@ -261,6 +261,24 @@ impl KopuzApi for GrpcApi {
         Ok(convert::stats_from_proto(stats.get_ref()))
     }
 
+    async fn artwork(&self, request: api::ArtworkRequest) -> Result<api::ArtworkData, ApiError> {
+        let mut stream = self
+            .client()
+            .get_artwork(Request::new(convert::artwork_request_to_proto(&request)))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        let mut data = api::ArtworkData::default();
+        // The content type rides the first chunk only; the rest is body.
+        while let Some(chunk) = stream.message().await.map_err(wire_error)? {
+            if !chunk.content_type.is_empty() {
+                data.content_type = chunk.content_type;
+            }
+            data.bytes.extend_from_slice(&chunk.data);
+        }
+        Ok(data)
+    }
+
     async fn download(&self, keys: Vec<String>) -> Result<JobRef, ApiError> {
         let job = self
             .client()
