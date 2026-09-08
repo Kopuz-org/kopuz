@@ -10,6 +10,7 @@ pub struct LocalApi {
     pub(super) jobs: Option<Arc<crate::jobs::JobRunner>>,
     pub(super) downloads: Option<Arc<crate::downloads::DownloadsService>>,
     pub(super) favorites: Option<Arc<crate::favorites::FavoritesService>>,
+    pub(super) artwork: Option<Arc<crate::artwork::ArtworkService>>,
 }
 
 impl LocalApi {
@@ -21,6 +22,7 @@ impl LocalApi {
             jobs: None,
             downloads: None,
             favorites: None,
+            artwork: None,
         }
     }
 
@@ -46,6 +48,11 @@ impl LocalApi {
 
     pub fn with_downloads(mut self, downloads: Arc<crate::downloads::DownloadsService>) -> Self {
         self.downloads = Some(downloads);
+        self
+    }
+
+    pub fn with_artwork(mut self, artwork: Arc<crate::artwork::ArtworkService>) -> Self {
+        self.artwork = Some(artwork);
         self
     }
 }
@@ -83,6 +90,24 @@ impl api::KopuzApi for LocalApi {
                 "this daemon runs without a library service",
             )),
         }
+    }
+
+    async fn artwork(&self, request: api::ArtworkRequest) -> Result<api::ArtworkData, ApiError> {
+        let Some(artwork) = self.artwork.as_ref() else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without an artwork service",
+            ));
+        };
+        let entity = match &request.target {
+            api::ArtworkTarget::Track(key) => crate::artwork::ArtworkEntity::Track(key),
+            api::ArtworkTarget::Album(id) => crate::artwork::ArtworkEntity::Album(id),
+            api::ArtworkTarget::Artist(name) => crate::artwork::ArtworkEntity::Artist(name),
+        };
+        let payload = artwork.fetch(entity, request.hq).await?;
+        Ok(api::ArtworkData {
+            content_type: payload.content_type.to_string(),
+            bytes: payload.bytes,
+        })
     }
 
     async fn config(&self) -> Result<api::ConfigView, ApiError> {

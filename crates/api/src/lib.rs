@@ -8,12 +8,14 @@
 //! The trait starts with the playback core and grows one resource group at a
 //! time as the daemon services land.
 
+mod artwork;
 mod error;
 mod events;
 mod library;
 mod player;
 mod queue;
 
+pub use artwork::{ArtworkData, ArtworkRequest, ArtworkTarget};
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
 pub use library::{
@@ -129,6 +131,11 @@ pub trait KopuzApi: Send + Sync {
     async fn lyrics(&self, key: String) -> Result<LyricsView, ApiError>;
 
     async fn stats(&self) -> Result<StatsView, ApiError>;
+
+    /// Cover bytes for a library entity. Clients ask by id rather than
+    /// resolving a URL themselves: the daemon holds the credentials that sign
+    /// server cover URLs, and they never reach the wire.
+    async fn artwork(&self, request: ArtworkRequest) -> Result<ArtworkData, ApiError>;
 
     /// Subscribe to the state stream. Every subscriber gets every event from
     /// the moment of subscription; a snapshot fetch plus this stream is the
