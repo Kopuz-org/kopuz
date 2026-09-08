@@ -338,6 +338,12 @@ async fn run_event_loop(client: Client, tx: tokio::sync::mpsc::UnboundedSender<a
         }
         match stream_once(client.clone(), &tx).await {
             Ok(()) => return,
+            // Nothing is listening on the socket, so there is no daemon to
+            // reattach to: end the stream and let the consumer decide.
+            Err(error) if error.code == api::ErrorCode::DaemonGone => {
+                tracing::info!(%error, "the daemon is gone; ending the event stream");
+                return;
+            }
             Err(error) => tracing::debug!(%error, "daemon event stream ended; reattaching"),
         }
         attached = true;

@@ -261,9 +261,18 @@ pub async fn run(args: BootArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     flush_session.persist_now().await;
-
     let _ = std::fs::remove_file(&socket);
     result
+}
+
+/// Exit now, skipping the C-library atexit handlers.
+///
+/// Returning from `main` leaves the process parked in `sigsuspend` inside an
+/// exit handler registered by one of the audio/JS dependencies, so a daemon
+/// that has finished its own shutdown would never actually terminate. Every
+/// piece of state we own is already flushed by the time this is called.
+pub fn exit_now(code: i32) -> ! {
+    unsafe { libc::_exit(code) }
 }
 
 /// Build a runtime and run the daemon to completion.
@@ -294,5 +303,12 @@ pub fn block_on_run(args: BootArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     #[cfg(not(target_os = "macos"))]
-    runtime.block_on(run(args))
+    {
+        let result = runtime.block_on(run(args));
+        // Dropping the runtime waits for every blocking task, and the audio
+        // engine owns threads that never finish, so a daemon that has
+        // decided to exit would hang in teardown instead of exiting.
+        runtime.shutdown_background();
+        result
+    }
 }

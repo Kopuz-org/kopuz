@@ -12,6 +12,14 @@ build: tailwind
     @echo ""
     @echo "Build complete!"
 
+# Frontend plus a supervised daemon child of the same binary; both exit together.
+run: tailwind
+    cargo run -p kopuz -- --daemon
+
+# The daemon on its own, for attaching to or poking with grpcurl.
+daemon:
+    cargo run -p kopuz-daemon --features kopuzd --bin kopuzd
+
 run-release: build
     target/dx/kopuz/release/linux/app/kopuz
 

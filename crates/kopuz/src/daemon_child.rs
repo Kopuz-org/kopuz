@@ -33,9 +33,13 @@ pub fn mode_from_args() -> Mode {
         if arg != "--daemon" {
             continue;
         }
+        // Only a bare value is a socket; a following flag belongs to
+        // whoever else parses it, not to --daemon.
         return match args.next().as_deref() {
-            None | Some("spawn") => Mode::Spawn,
-            Some(path) => Mode::Attach(PathBuf::from(path.trim_start_matches("unix:"))),
+            Some(path) if path != "spawn" && !path.starts_with('-') => {
+                Mode::Attach(PathBuf::from(path.trim_start_matches("unix:")))
+            }
+            _ => Mode::Spawn,
         };
     }
     Mode::None
@@ -61,13 +65,19 @@ pub fn run_as_daemon() -> std::process::ExitCode {
             _ => {}
         }
     }
-    match daemon::boot::block_on_run(boot) {
-        Ok(()) => std::process::ExitCode::SUCCESS,
+    let code = match daemon::boot::block_on_run(boot) {
+        Ok(()) => 0,
         Err(error) => {
             tracing::error!(%error, "the daemon child exited with an error");
-            std::process::ExitCode::FAILURE
+            1
         }
-    }
+    };
+    tracing::info!("daemon exiting");
+    // Dropping the appender guard joins its worker, which does not finish
+    // once the runtime is gone; give it a moment to drain instead.
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    std::mem::forget(_log_guard);
+    daemon::boot::exit_now(code)
 }
 
 /// Spawn the daemon as a child of this executable and wait for its socket.
@@ -76,13 +86,13 @@ pub fn run_as_daemon() -> std::process::ExitCode {
 /// reaps it, and the daemon needs neither. `--supervised` makes the
 /// frontend's disconnect its exit signal, which fires however this process
 /// died.
-pub fn spawn() -> Result<PathBuf, String> {
+pub fn spawn() -> Result<(std::process::Child, PathBuf), String> {
     let exe =
         std::env::current_exe().map_err(|error| format!("no path to this binary: {error}"))?;
     let socket = daemon::boot::default_socket_path()
         .ok_or_else(|| "no usable runtime directory for the daemon socket".to_string())?;
 
-    std::process::Command::new(&exe)
+    let child = std::process::Command::new(&exe)
         .arg(RUN_DAEMON)
         .arg("--socket")
         .arg(&socket)
@@ -90,7 +100,25 @@ pub fn spawn() -> Result<PathBuf, String> {
         .map_err(|error| format!("could not start the daemon: {error}"))?;
 
     wait_for_socket(&socket)?;
-    Ok(socket)
+    Ok((child, socket))
+}
+
+/// Exit when the daemon does.
+///
+/// A blocking wait on the child is the reliable signal here: the kernel
+/// reports its death exactly once, however it died. The event stream cannot
+/// stand in for this -- an idle Subscribe does not surface the peer going
+/// away -- so the socket covers the frontend's death and this covers the
+/// daemon's.
+fn follow_child(mut child: std::process::Child) {
+    std::thread::spawn(move || {
+        let status = child.wait();
+        tracing::error!(
+            ?status,
+            "the daemon exited; shutting the frontend down with it"
+        );
+        std::process::exit(1);
+    });
 }
 
 /// The daemon binds before it serves, so the socket appearing and accepting
@@ -114,8 +142,9 @@ fn wait_for_socket(path: &std::path::Path) -> Result<(), String> {
 pub fn attach(mode: Mode) -> Result<(), String> {
     let socket = match mode {
         Mode::Spawn => {
-            let socket = spawn()?;
+            let (child, socket) = spawn()?;
             tracing::info!(path = %socket.display(), "spawned a supervised daemon");
+            follow_child(child);
             socket
         }
         Mode::Attach(socket) => {
@@ -126,43 +155,67 @@ pub fn attach(mode: Mode) -> Result<(), String> {
         }
         Mode::None => unreachable!("attach is only called for a daemon mode"),
     };
-    probe(&socket)?;
-    watch_for_exit(&socket);
+    hold_attachment(&socket)?;
     Ok(())
 }
 
-/// One real RPC before the window opens. A socket that accepts but does not
-/// serve would otherwise only surface later, as a puzzling empty UI.
-fn probe(socket: &std::path::Path) -> Result<(), String> {
+/// Hold an event subscription for the life of the process.
+///
+/// This is what makes the daemon count a frontend as attached: supervision
+/// keys off the Subscribe stream, so a connection that only makes unary
+/// calls leaves a `--supervised` daemon believing it was never adopted, and
+/// it outlives the frontend it was spawned for. The first `player_state`
+/// also doubles as readiness -- a socket that accepts but does not serve
+/// would otherwise only surface later as a puzzling empty UI.
+fn hold_attachment(socket: &std::path::Path) -> Result<(), String> {
     use api::KopuzApi;
+    use futures_util::StreamExt;
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("no runtime to reach the daemon: {error}"))?;
-    let api = client::GrpcApi::new(socket).map_err(|error| error.to_string())?;
-    let state = runtime
-        .block_on(api.player_state())
-        .map_err(|error| format!("the daemon is not answering: {error}"))?;
-    tracing::info!(phase = ?state.phase, "daemon ready");
-    Ok(())
-}
-
-/// Exit when the daemon does. The socket closing is the signal, so this
-/// covers a clean shutdown, a panic, and a kill alike -- the frontend has no
-/// backend to draw once it is gone.
-fn watch_for_exit(socket: &std::path::Path) {
     let socket = socket.to_path_buf();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        use std::io::Read;
-        let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&socket) else {
-            return;
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = ready_tx.send(Err(format!("no runtime to reach the daemon: {error}")));
+                return;
+            }
         };
-        // Never written to by the daemon, so this blocks until the peer
-        // closes and then returns 0 bytes.
-        let mut byte = [0u8; 1];
-        let _ = stream.read(&mut byte);
-        tracing::error!("the daemon exited; shutting the frontend down with it");
-        std::process::exit(1);
+        runtime.block_on(async move {
+            let api = match client::GrpcApi::new(&socket) {
+                Ok(api) => api,
+                Err(error) => {
+                    let _ = ready_tx.send(Err(error.to_string()));
+                    return;
+                }
+            };
+            if let Err(error) = api.player_state().await {
+                let _ = ready_tx.send(Err(format!("the daemon is not answering: {error}")));
+                return;
+            }
+
+            // Ready means attached, not merely answering: Subscribe greets
+            // with one event, and only once the daemon has that stream does
+            // it count this frontend as one to outlive.
+            let mut events = api.events();
+            if events.next().await.is_none() {
+                let _ = ready_tx.send(Err("the daemon closed the event stream".to_string()));
+                return;
+            }
+            tracing::info!("attached to the daemon");
+            let _ = ready_tx.send(Ok(()));
+
+            while events.next().await.is_some() {}
+            tracing::error!("the daemon exited; shutting the frontend down with it");
+            std::process::exit(1);
+        });
     });
+
+    match ready_rx.recv_timeout(std::time::Duration::from_secs(15)) {
+        Ok(result) => result,
+        Err(_) => Err("the daemon did not answer in time".to_string()),
+    }
 }

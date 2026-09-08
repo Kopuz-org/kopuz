@@ -42,6 +42,7 @@ prost = "0.13"
 tonic-build = "0.12"
 protox = "0.7"
 tokio-stream = "0.1"
+libc = "0.2"
 tower = { version = "0.5", features = ["util"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 uuid = { version = "1.20.0", features = [

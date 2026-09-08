@@ -217,13 +217,16 @@ impl api::KopuzApi for LocalApi {
     fn events(&self) -> api::EventStream {
         use futures_util::StreamExt;
         let rx = self.session.subscribe();
-        futures_util::stream::unfold(rx, |mut rx| async move {
+        // Greets with Resync like the wire implementation, so a consumer
+        // sees the same first message whichever it is talking to.
+        let greeting = futures_util::stream::once(async { ApiEvent::Resync });
+        let live = futures_util::stream::unfold(rx, |mut rx| async move {
             match rx.recv().await {
                 Ok(event) => Some((event, rx)),
                 Err(broadcast::error::RecvError::Lagged(_)) => Some((ApiEvent::Resync, rx)),
                 Err(broadcast::error::RecvError::Closed) => None,
             }
-        })
-        .boxed()
+        });
+        greeting.chain(live).boxed()
     }
 }

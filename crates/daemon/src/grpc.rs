@@ -51,12 +51,14 @@ impl Supervisor {
     fn attach(&self) {
         use std::sync::atomic::Ordering;
         self.seen.store(true, Ordering::Release);
-        self.attached.fetch_add(1, Ordering::AcqRel);
+        let count = self.attached.fetch_add(1, Ordering::AcqRel) + 1;
+        tracing::info!(frontends = count, "frontend attached");
     }
 
     fn detach(&self) {
         use std::sync::atomic::Ordering;
         let remaining = self.attached.fetch_sub(1, Ordering::AcqRel) - 1;
+        tracing::info!(frontends = remaining, "frontend detached");
         if remaining == 0 && self.seen.load(Ordering::Acquire) {
             self.orphaned.notify_waiters();
         }
@@ -114,12 +116,19 @@ impl KopuzGrpc {
 /// told to resync; there is no backlog to replay, because a peer that lost
 /// this stream lost the process that owns it.
 struct EventSubscription {
+    /// Sent before anything else, so a subscriber knows the stream is live.
+    /// Closes the window where the daemon answers a unary call but has not
+    /// yet counted the frontend as one to outlive.
+    greeting: Option<proto::EventEnvelope>,
     live: broadcast::Receiver<ApiEvent>,
     _attached: AttachGuard,
 }
 
 impl EventSubscription {
     async fn next(mut self) -> Option<(Result<proto::EventEnvelope, Status>, Self)> {
+        if let Some(greeting) = self.greeting.take() {
+            return Some((Ok(greeting), self));
+        }
         match self.live.recv().await {
             Ok(event) => Some((Ok(event_message(&event)), self)),
             Err(broadcast::error::RecvError::Lagged(_)) => Some((Ok(resync_message()), self)),
@@ -142,6 +151,7 @@ impl Kopuz for KopuzGrpc {
             supervisor.attach();
         }
         let subscription = EventSubscription {
+            greeting: Some(resync_message()),
             live,
             _attached: AttachGuard(self.0.supervisor.clone()),
         };

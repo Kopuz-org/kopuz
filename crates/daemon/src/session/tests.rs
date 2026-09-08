@@ -429,6 +429,10 @@ async fn replacing_with_an_empty_queue_stops_playback() {
 async fn set_mode_and_events_flow_through() {
     let harness = harness(|_| {});
     let mut events = harness.api.events();
+    // The stream greets with Resync, same as Subscribe does over the wire,
+    // so a consumer knows it is attached and its mirror is empty.
+    assert!(matches!(events.next().await, Some(ApiEvent::Resync)));
+
     harness
         .api
         .set_queue(replace(&["track-0", "track-1"]))
