@@ -2,7 +2,6 @@ use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::metadata_modal::MetadataModal;
 use crate::playlist_modal::PlaylistModal;
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_player_controller::PlayerController;
 use reader::Track;
 use server::source::PlaylistOps;
@@ -11,7 +10,6 @@ use server::source::PlaylistOps;
 pub(crate) fn TrackActions(track: Track) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let generations = hooks::db_reactivity::use_generations();
     let mut is_open = use_signal(|| false);
     let mut show_playlist_modal = use_signal(|| false);
     let mut show_metadata = use_signal(|| false);
@@ -98,28 +96,20 @@ pub(crate) fn TrackActions(track: Track) -> Element {
                 on_add_to_playlist: {
                     let playlist_track = track.clone();
                     move |playlist_id: String| {
-                        let item_ref = playlist_track.id.key().into_owned();
-                        let source = active_source.peek().clone();
-                        spawn(async move {
-                            match source.add_to_playlist(&playlist_id, &[item_ref]).await {
-                                Ok(_) => generations.bump(Table::Playlists),
-                                Err(error) => tracing::warn!(%error, "failed to add fullscreen track to playlist"),
-                            }
-                        });
+                        hooks::playlist_actions::add_tracks(
+                            playlist_id,
+                            vec![playlist_track.id.key().into_owned()],
+                        );
                         show_playlist_modal.set(false);
                     }
                 },
                 on_create_playlist: {
                     let playlist_track = track.clone();
                     move |name: String| {
-                        let item_ref = playlist_track.id.key().into_owned();
-                        let source = active_source.peek().clone();
-                        spawn(async move {
-                            match source.create_playlist(&name, &[item_ref]).await {
-                                Ok(_) => generations.bump(Table::Playlists),
-                                Err(error) => tracing::warn!(%error, "failed to create playlist from fullscreen track"),
-                            }
-                        });
+                        hooks::playlist_actions::create_with(
+                            name,
+                            vec![playlist_track.id.key().into_owned()],
+                        );
                         show_playlist_modal.set(false);
                     }
                 },

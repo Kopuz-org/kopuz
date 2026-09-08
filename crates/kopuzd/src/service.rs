@@ -757,9 +757,12 @@ impl Kopuz for KopuzGrpc {
             Some(proto::artwork_request::Entity::Track(track)) => ArtworkEntity::Track(track),
             Some(proto::artwork_request::Entity::Album(album)) => ArtworkEntity::Album(album),
             Some(proto::artwork_request::Entity::Artist(artist)) => ArtworkEntity::Artist(artist),
+            Some(proto::artwork_request::Entity::Playlist(playlist)) => {
+                ArtworkEntity::Playlist(playlist)
+            }
             None => {
                 return Err(Status::invalid_argument(
-                    "pass one of track, album, or artist",
+                    "pass one of track, album, artist, or playlist",
                 ));
             }
         };

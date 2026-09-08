@@ -19,6 +19,7 @@ pub fn artwork_url(target: Option<&ArtworkTarget>) -> Option<String> {
         ArtworkTarget::Track(key) => ("track", key),
         ArtworkTarget::Album(id) => ("album", id),
         ArtworkTarget::Artist(name) => ("artist", name),
+        ArtworkTarget::Playlist(id) => ("playlist", id),
     };
     Some(
         utils::format_entity_artwork_url(kind, id, false)
@@ -72,4 +73,39 @@ pub fn album_from_api(info: AlbumInfo) -> Album {
 
 pub fn albums_from_api(items: Vec<AlbumInfo>) -> Vec<Album> {
     items.into_iter().map(album_from_api).collect()
+}
+
+/// The playlist catalog as the views render it. `cover_path` and `image_tag`
+/// stay empty on purpose: a playlist's cover is resolved by the daemon (an
+/// explicit cover, then the server's tag, then the first track's), so the
+/// artwork ref is the whole answer and the fallback chain does not have to be
+/// repeated here.
+pub fn playlist_store_from_api(catalog: api::PlaylistCatalog) -> reader::PlaylistStore {
+    reader::PlaylistStore {
+        playlists: catalog
+            .playlists
+            .into_iter()
+            .map(|playlist| reader::models::Playlist {
+                cover_path: None,
+                image_tag: None,
+                id: playlist.id,
+                name: playlist.name,
+                tracks: playlist.track_keys,
+            })
+            .collect(),
+        folders: catalog
+            .folders
+            .into_iter()
+            .map(|folder| reader::models::PlaylistFolder {
+                id: folder.id,
+                name: folder.name,
+                playlist_ids: folder.playlist_ids,
+            })
+            .collect(),
+    }
+}
+
+/// The cover for a playlist, which the daemon resolves by id.
+pub fn playlist_cover_url(id: &str) -> utils::CoverUrl {
+    utils::format_entity_artwork_url("playlist", id, false)
 }

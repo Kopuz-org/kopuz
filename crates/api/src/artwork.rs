@@ -5,12 +5,13 @@ pub enum ArtworkTarget {
     Track(String),
     Album(String),
     Artist(String),
+    Playlist(String),
 }
 
 impl ArtworkTarget {
     pub fn id(&self) -> &str {
         match self {
-            Self::Track(id) | Self::Album(id) | Self::Artist(id) => id,
+            Self::Track(id) | Self::Album(id) | Self::Artist(id) | Self::Playlist(id) => id,
         }
     }
 }

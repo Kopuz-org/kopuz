@@ -278,18 +278,9 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                         } else if let Some(path) = selected_track_for_playlist.read().clone() {
                             paths.push(path);
                         }
-                        if !paths.is_empty() {
-                            let refs: Vec<String> = paths
-                                .iter()
-                                .map(|p| p.key().into_owned())
-                                .collect();
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            spawn(async move {
-                                if source.add_to_playlist(&playlist_id, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
-                        }
+                        let refs: Vec<String> =
+                            paths.iter().map(|p| p.key().into_owned()).collect();
+                        hooks::playlist_actions::add_tracks(playlist_id, refs);
                         show_playlist_modal.set(false);
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();
@@ -301,18 +292,9 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                         } else if let Some(path) = selected_track_for_playlist.read().clone() {
                             paths.push(path);
                         }
-                        if !paths.is_empty() {
-                            let refs: Vec<String> = paths
-                                .iter()
-                                .map(|p| p.key().into_owned())
-                                .collect();
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            spawn(async move {
-                                if source.create_playlist(&name, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
-                        }
+                        let refs: Vec<String> =
+                            paths.iter().map(|p| p.key().into_owned()).collect();
+                        hooks::playlist_actions::create_with(name, refs);
                         show_playlist_modal.set(false);
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();

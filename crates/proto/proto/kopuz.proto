@@ -978,6 +978,7 @@ message ArtworkTarget {
     string track = 1;
     string album = 2;
     string artist = 3;
+    string playlist = 4;
   }
 }
 
@@ -986,6 +987,7 @@ message ArtworkRequest {
     string track = 1;
     string album = 2;
     string artist = 3;
+    string playlist = 5;
   }
   bool hq = 4;
 }

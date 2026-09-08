@@ -315,19 +315,15 @@ pub fn PlaylistDetail(
                 }
             },
             on_remove_from_playlist: move |idx: usize| {
-                if let Some(t) = tracks.read().get(idx).cloned() {
-                    let pid = pid_for_remove.clone();
-                    let source = active_source.peek().clone();
-                    spawn(async move {
-                        if source.remove_from_playlist(&pid, &t, idx).await.is_ok() {
-                            let mut tw = tracks.write();
-                            if idx < tw.len() {
-                                tw.remove(idx);
-                            }
-                            gens.bump(Table::Playlists);
-                        }
-                    });
+                // The row leaves the list straight away; the daemon's
+                // invalidation refills it from the durable order.
+                {
+                    let mut rows = tracks.write();
+                    if idx < rows.len() {
+                        rows.remove(idx);
+                    }
                 }
+                hooks::playlist_actions::remove_track(pid_for_remove.clone(), idx);
             },
             is_reorderable: can_reorder,
             on_move_up: move |idx: usize| {
@@ -335,34 +331,7 @@ pub fn PlaylistDetail(
                     return;
                 }
                 tracks.write().swap(idx - 1, idx);
-                let mut refs = {
-                    let store = playlists_res.read();
-                    let Some(pl) = store
-                        .as_ref()
-                        .and_then(|s| s.playlists.iter().find(|p| p.id == pid_for_move_up))
-                    else {
-                        return;
-                    };
-                    if idx >= pl.tracks.len() {
-                        return;
-                    }
-                    pl.tracks.clone()
-                };
-                refs.swap(idx - 1, idx);
-                let Some(moved) = tracks.read().get(idx - 1).cloned() else {
-                    return;
-                };
-                let pid = pid_for_move_up.clone();
-                let source = active_source.peek().clone();
-                spawn(async move {
-                    if source
-                        .reorder_playlist(&pid, &refs, &moved, idx - 1)
-                        .await
-                        .is_ok()
-                    {
-                        gens.bump(Table::Playlists);
-                    }
-                });
+                hooks::playlist_actions::reorder(pid_for_move_up.clone(), idx, idx - 1);
             },
             on_move_down: move |idx: usize| {
                 let len = tracks.read().len();
@@ -370,34 +339,7 @@ pub fn PlaylistDetail(
                     return;
                 }
                 tracks.write().swap(idx, idx + 1);
-                let mut refs = {
-                    let store = playlists_res.read();
-                    let Some(pl) = store
-                        .as_ref()
-                        .and_then(|s| s.playlists.iter().find(|p| p.id == pid_for_move_down))
-                    else {
-                        return;
-                    };
-                    if idx + 1 >= pl.tracks.len() {
-                        return;
-                    }
-                    pl.tracks.clone()
-                };
-                refs.swap(idx, idx + 1);
-                let Some(moved) = tracks.read().get(idx + 1).cloned() else {
-                    return;
-                };
-                let pid = pid_for_move_down.clone();
-                let source = active_source.peek().clone();
-                spawn(async move {
-                    if source
-                        .reorder_playlist(&pid, &refs, &moved, idx + 1)
-                        .await
-                        .is_ok()
-                    {
-                        gens.bump(Table::Playlists);
-                    }
-                });
+                hooks::playlist_actions::reorder(pid_for_move_down.clone(), idx, idx + 1);
             },
             on_download_all: if caps.downloads { on_download_all } else { None },
             on_download_track: if caps.downloads { on_download_track } else { None },

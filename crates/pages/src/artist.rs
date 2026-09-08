@@ -472,15 +472,10 @@ pub fn Artist(
                                     } else {
                                         selected_track_for_playlist.read().iter().cloned().collect()
                                     };
-                                    let refs = refs_for(&paths);
-                                    if !refs.is_empty() {
-                                        let s = active_source.peek().clone();
-                                        spawn(async move {
-                                            if s.add_to_playlist(&playlist_id, &refs).await.is_ok() {
-                                                gens.bump(Table::Playlists);
-                                            }
-                                        });
-                                    }
+                                    hooks::playlist_actions::add_tracks(
+                                        playlist_id,
+                                        refs_for(&paths),
+                                    );
                                     show_playlist_modal.set(false);
                                     active_menu_track.set(None);
                                     is_selection_mode.set(false);
@@ -492,15 +487,7 @@ pub fn Artist(
                                     } else {
                                         selected_track_for_playlist.read().iter().cloned().collect()
                                     };
-                                    let refs = refs_for(&paths);
-                                    if !refs.is_empty() {
-                                        let s = active_source.peek().clone();
-                                        spawn(async move {
-                                            if s.create_playlist(&name, &refs).await.is_ok() {
-                                                gens.bump(Table::Playlists);
-                                            }
-                                        });
-                                    }
+                                    hooks::playlist_actions::create_with(name, refs_for(&paths));
                                     show_playlist_modal.set(false);
                                     active_menu_track.set(None);
                                     is_selection_mode.set(false);
