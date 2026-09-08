@@ -1,1 +1,1 @@
-pub use db::legacy::{migrate_identity, migrate_locations, remap_identity_path};
+pub use db::legacy::remap_identity_path;
