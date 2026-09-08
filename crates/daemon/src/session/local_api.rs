@@ -55,6 +55,12 @@ impl LocalApi {
         self.artwork = Some(artwork);
         self
     }
+
+    fn library(&self) -> Result<&crate::library::LibraryService, ApiError> {
+        self.library
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without a library service"))
+    }
 }
 
 #[async_trait::async_trait]
@@ -93,6 +99,54 @@ impl api::LibraryApi for LocalApi {
                 "this daemon runs without a library service",
             )),
         }
+    }
+
+    async fn tracks_by_keys(&self, keys: Vec<String>) -> Result<Vec<api::TrackInfo>, ApiError> {
+        self.library()?.tracks_by_keys(&keys).await
+    }
+
+    async fn albums(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
+        self.library()?.albums(page).await
+    }
+
+    async fn album(&self, id: String) -> Result<Option<api::AlbumInfo>, ApiError> {
+        self.library()?.album(&id).await
+    }
+
+    async fn album_tracks(&self, id: String, page: Page) -> Result<api::TrackPage, ApiError> {
+        self.library()?.album_tracks(&id, page).await
+    }
+
+    async fn artists(&self, page: Page) -> Result<api::ArtistPage, ApiError> {
+        self.library()?.artists(page).await
+    }
+
+    async fn artist_tracks(&self, artist: String, page: Page) -> Result<api::TrackPage, ApiError> {
+        self.library()?.artist_tracks(&artist, page).await
+    }
+
+    async fn artist_sample_tracks(&self, page: Page) -> Result<api::TrackPage, ApiError> {
+        self.library()?.artist_sample_tracks(page).await
+    }
+
+    async fn genres(&self) -> Result<Vec<String>, ApiError> {
+        self.library()?.genres().await
+    }
+
+    async fn top_genre(&self) -> Result<Option<String>, ApiError> {
+        self.library()?.top_genre().await
+    }
+
+    async fn genre_tracks(&self, genre: String, page: Page) -> Result<api::TrackPage, ApiError> {
+        self.library()?.genre_tracks(&genre, page).await
+    }
+
+    async fn recent_tracks(&self, page: Page) -> Result<api::TrackPage, ApiError> {
+        self.library()?.recent_tracks(page).await
+    }
+
+    async fn search(&self, query: String) -> Result<api::SearchResults, ApiError> {
+        self.library()?.search(&query).await
     }
 
     async fn favorites(&self) -> Result<api::FavoritesView, ApiError> {

@@ -289,6 +289,151 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::track_page_to_proto(&tracks)))
     }
 
+    async fn get_tracks_by_keys(
+        &self,
+        request: Request<proto::TracksByKeysRequest>,
+    ) -> Result<Response<proto::TrackList>, Status> {
+        let tracks = self
+            .0
+            .api
+            .tracks_by_keys(request.into_inner().keys)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::TrackList {
+            items: tracks.iter().map(convert::track_info_to_proto).collect(),
+        }))
+    }
+
+    async fn get_albums(
+        &self,
+        request: Request<proto::Page>,
+    ) -> Result<Response<proto::AlbumPage>, Status> {
+        let page = convert::page_from_proto(Some(request.get_ref()));
+        let albums = self.0.api.albums(page).await.map_err(failed)?;
+        Ok(Response::new(convert::album_page_to_proto(&albums)))
+    }
+
+    async fn get_album(
+        &self,
+        request: Request<proto::AlbumRef>,
+    ) -> Result<Response<proto::AlbumResponse>, Status> {
+        let album = self
+            .0
+            .api
+            .album(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::AlbumResponse {
+            album: album.as_ref().map(convert::album_info_to_proto),
+        }))
+    }
+
+    async fn get_album_tracks(
+        &self,
+        request: Request<proto::AlbumTracksRequest>,
+    ) -> Result<Response<proto::TrackPage>, Status> {
+        let request = request.get_ref();
+        let page = convert::page_from_proto(request.page.as_ref());
+        let tracks = self
+            .0
+            .api
+            .album_tracks(request.id.clone(), page)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::track_page_to_proto(&tracks)))
+    }
+
+    async fn get_artists(
+        &self,
+        request: Request<proto::Page>,
+    ) -> Result<Response<proto::ArtistPage>, Status> {
+        let page = convert::page_from_proto(Some(request.get_ref()));
+        let artists = self.0.api.artists(page).await.map_err(failed)?;
+        Ok(Response::new(convert::artist_page_to_proto(&artists)))
+    }
+
+    async fn get_artist_tracks(
+        &self,
+        request: Request<proto::ArtistTracksRequest>,
+    ) -> Result<Response<proto::TrackPage>, Status> {
+        let request = request.get_ref();
+        let page = convert::page_from_proto(request.page.as_ref());
+        let tracks = self
+            .0
+            .api
+            .artist_tracks(request.artist.clone(), page)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::track_page_to_proto(&tracks)))
+    }
+
+    async fn get_artist_sample_tracks(
+        &self,
+        request: Request<proto::Page>,
+    ) -> Result<Response<proto::TrackPage>, Status> {
+        let page = convert::page_from_proto(Some(request.get_ref()));
+        let tracks = self
+            .0
+            .api
+            .artist_sample_tracks(page)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::track_page_to_proto(&tracks)))
+    }
+
+    async fn get_genres(
+        &self,
+        _request: Request<proto::GetGenresRequest>,
+    ) -> Result<Response<proto::GenreList>, Status> {
+        let genres = self.0.api.genres().await.map_err(failed)?;
+        Ok(Response::new(proto::GenreList { genres }))
+    }
+
+    async fn get_top_genre(
+        &self,
+        _request: Request<proto::GetTopGenreRequest>,
+    ) -> Result<Response<proto::TopGenreResponse>, Status> {
+        let genre = self.0.api.top_genre().await.map_err(failed)?;
+        Ok(Response::new(proto::TopGenreResponse { genre }))
+    }
+
+    async fn get_genre_tracks(
+        &self,
+        request: Request<proto::GenreTracksRequest>,
+    ) -> Result<Response<proto::TrackPage>, Status> {
+        let request = request.get_ref();
+        let page = convert::page_from_proto(request.page.as_ref());
+        let tracks = self
+            .0
+            .api
+            .genre_tracks(request.genre.clone(), page)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::track_page_to_proto(&tracks)))
+    }
+
+    async fn get_recent_tracks(
+        &self,
+        request: Request<proto::Page>,
+    ) -> Result<Response<proto::TrackPage>, Status> {
+        let page = convert::page_from_proto(Some(request.get_ref()));
+        let tracks = self.0.api.recent_tracks(page).await.map_err(failed)?;
+        Ok(Response::new(convert::track_page_to_proto(&tracks)))
+    }
+
+    async fn search(
+        &self,
+        request: Request<proto::SearchRequest>,
+    ) -> Result<Response<proto::SearchResults>, Status> {
+        let results = self
+            .0
+            .api
+            .search(request.into_inner().query)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::search_results_to_proto(&results)))
+    }
+
     async fn get_stats(
         &self,
         _request: Request<proto::GetStatsRequest>,

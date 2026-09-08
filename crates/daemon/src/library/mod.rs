@@ -381,6 +381,7 @@ impl LibraryService {
 }
 
 mod jobs;
+mod reads;
 
 #[async_trait::async_trait]
 impl QueueMaterializer for LibraryService {

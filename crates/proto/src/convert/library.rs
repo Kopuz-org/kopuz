@@ -185,3 +185,104 @@ pub fn artwork_request_from_proto(value: &ArtworkRequest) -> Option<api::Artwork
         hq: value.hq,
     })
 }
+
+pub fn artwork_target_to_proto(value: &api::ArtworkTarget) -> ArtworkTarget {
+    use artwork_target::Entity;
+    let entity = match value {
+        api::ArtworkTarget::Track(key) => Entity::Track(key.clone()),
+        api::ArtworkTarget::Album(id) => Entity::Album(id.clone()),
+        api::ArtworkTarget::Artist(name) => Entity::Artist(name.clone()),
+    };
+    ArtworkTarget {
+        entity: Some(entity),
+    }
+}
+
+pub fn artwork_target_from_proto(value: &ArtworkTarget) -> Option<api::ArtworkTarget> {
+    use artwork_target::Entity;
+    Some(match value.entity.as_ref()? {
+        Entity::Track(key) => api::ArtworkTarget::Track(key.clone()),
+        Entity::Album(id) => api::ArtworkTarget::Album(id.clone()),
+        Entity::Artist(name) => api::ArtworkTarget::Artist(name.clone()),
+    })
+}
+
+pub fn album_info_to_proto(value: &api::AlbumInfo) -> AlbumInfo {
+    AlbumInfo {
+        id: value.id.clone(),
+        title: value.title.clone(),
+        artist: value.artist.clone(),
+        genre: value.genre.clone(),
+        year: value.year as u32,
+        artwork: value.artwork.as_ref().map(artwork_target_to_proto),
+    }
+}
+
+pub fn album_info_from_proto(value: &AlbumInfo) -> api::AlbumInfo {
+    api::AlbumInfo {
+        id: value.id.clone(),
+        title: value.title.clone(),
+        artist: value.artist.clone(),
+        genre: value.genre.clone(),
+        year: value.year as u16,
+        artwork: value.artwork.as_ref().and_then(artwork_target_from_proto),
+    }
+}
+
+pub fn album_page_to_proto(value: &api::AlbumPage) -> AlbumPage {
+    AlbumPage {
+        albums: value.albums.iter().map(album_info_to_proto).collect(),
+        total: value.total,
+    }
+}
+
+pub fn album_page_from_proto(value: &AlbumPage) -> api::AlbumPage {
+    api::AlbumPage {
+        albums: value.albums.iter().map(album_info_from_proto).collect(),
+        total: value.total,
+    }
+}
+
+pub fn artist_info_to_proto(value: &api::ArtistInfo) -> ArtistInfo {
+    ArtistInfo {
+        name: value.name.clone(),
+        track_count: value.track_count,
+        artwork: value.artwork.as_ref().map(artwork_target_to_proto),
+    }
+}
+
+pub fn artist_info_from_proto(value: &ArtistInfo) -> api::ArtistInfo {
+    api::ArtistInfo {
+        name: value.name.clone(),
+        track_count: value.track_count,
+        artwork: value.artwork.as_ref().and_then(artwork_target_from_proto),
+    }
+}
+
+pub fn artist_page_to_proto(value: &api::ArtistPage) -> ArtistPage {
+    ArtistPage {
+        artists: value.artists.iter().map(artist_info_to_proto).collect(),
+        total: value.total,
+    }
+}
+
+pub fn artist_page_from_proto(value: &ArtistPage) -> api::ArtistPage {
+    api::ArtistPage {
+        artists: value.artists.iter().map(artist_info_from_proto).collect(),
+        total: value.total,
+    }
+}
+
+pub fn search_results_to_proto(value: &api::SearchResults) -> SearchResults {
+    SearchResults {
+        tracks: value.tracks.iter().map(track_info_to_proto).collect(),
+        albums: value.albums.iter().map(album_info_to_proto).collect(),
+    }
+}
+
+pub fn search_results_from_proto(value: &SearchResults) -> api::SearchResults {
+    api::SearchResults {
+        tracks: value.tracks.iter().map(track_info_from_proto).collect(),
+        albums: value.albums.iter().map(album_info_from_proto).collect(),
+    }
+}

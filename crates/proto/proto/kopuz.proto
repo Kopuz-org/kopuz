@@ -33,6 +33,18 @@ service Kopuz {
   rpc GetQueue(Page) returns (QueueWindow);
   rpc GetTracks(TracksRequest) returns (TrackPage);
   rpc GetFolderTracks(FolderRequest) returns (TrackPage);
+  rpc GetTracksByKeys(TracksByKeysRequest) returns (TrackList);
+  rpc GetAlbums(Page) returns (AlbumPage);
+  rpc GetAlbum(AlbumRef) returns (AlbumResponse);
+  rpc GetAlbumTracks(AlbumTracksRequest) returns (TrackPage);
+  rpc GetArtists(Page) returns (ArtistPage);
+  rpc GetArtistTracks(ArtistTracksRequest) returns (TrackPage);
+  rpc GetArtistSampleTracks(Page) returns (TrackPage);
+  rpc GetGenres(GetGenresRequest) returns (GenreList);
+  rpc GetTopGenre(GetTopGenreRequest) returns (TopGenreResponse);
+  rpc GetGenreTracks(GenreTracksRequest) returns (TrackPage);
+  rpc GetRecentTracks(Page) returns (TrackPage);
+  rpc Search(SearchRequest) returns (SearchResults);
   rpc GetStats(GetStatsRequest) returns (Stats);
   rpc GetLyrics(TrackRef) returns (Lyrics);
   rpc GetFavorites(GetFavoritesRequest) returns (Favorites);
@@ -364,6 +376,84 @@ message TrackPage {
   uint32 total = 1;
   uint32 offset = 2;
   repeated TrackInfo items = 3;
+}
+
+message TrackList {
+  repeated TrackInfo items = 1;
+}
+
+message TracksByKeysRequest {
+  repeated string keys = 1;
+}
+
+message AlbumInfo {
+  string id = 1;
+  string title = 2;
+  string artist = 3;
+  string genre = 4;
+  uint32 year = 5;
+  // Absent when the daemon has no cover for the album.
+  optional ArtworkTarget artwork = 6;
+}
+
+message AlbumPage {
+  repeated AlbumInfo albums = 1;
+  uint32 total = 2;
+}
+
+message AlbumRef {
+  string id = 1;
+}
+
+message AlbumResponse {
+  optional AlbumInfo album = 1;
+}
+
+message AlbumTracksRequest {
+  string id = 1;
+  Page page = 2;
+}
+
+message ArtistInfo {
+  string name = 1;
+  uint32 track_count = 2;
+  optional ArtworkTarget artwork = 3;
+}
+
+message ArtistPage {
+  repeated ArtistInfo artists = 1;
+  uint32 total = 2;
+}
+
+message ArtistTracksRequest {
+  string artist = 1;
+  Page page = 2;
+}
+
+message GetGenresRequest {}
+
+message GenreList {
+  repeated string genres = 1;
+}
+
+message GetTopGenreRequest {}
+
+message TopGenreResponse {
+  optional string genre = 1;
+}
+
+message GenreTracksRequest {
+  string genre = 1;
+  Page page = 2;
+}
+
+message SearchRequest {
+  string query = 1;
+}
+
+message SearchResults {
+  repeated TrackInfo tracks = 1;
+  repeated AlbumInfo albums = 2;
 }
 
 message TrackInfo {
@@ -785,6 +875,16 @@ message DaemonStatus {
   string version = 1;
   reserved 2; // was api_version; the frontend ships with the daemon
   uint64 uptime_secs = 3;
+}
+
+// Which entity a cover belongs to. Carried on library rows so a client can
+// ask for the image without knowing how it is stored.
+message ArtworkTarget {
+  oneof entity {
+    string track = 1;
+    string album = 2;
+    string artist = 3;
+  }
 }
 
 message ArtworkRequest {
