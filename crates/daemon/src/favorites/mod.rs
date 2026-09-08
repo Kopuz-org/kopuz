@@ -177,6 +177,10 @@ impl FavoritesService {
         tokio::spawn(async move {
             let mut config_rx = service.session.config_watch();
             let mut consecutive_failures: u32 = 0;
+            // Switching source is the one config change worth waking for: the
+            // new source's favorites have never been imported, and waiting out
+            // an interval to notice would leave the page empty for minutes.
+            let mut last_source = config_rx.borrow().active_source.clone();
             loop {
                 let (has_server, base_secs) = {
                     let config = config_rx.borrow();
@@ -203,6 +207,20 @@ impl FavoritesService {
                 let interval = Duration::from_secs(backoff.min(BACKOFF_CAP_SECS));
                 let nudged = tokio::select! {
                     _ = service.nudge.notified() => true,
+                    changed = config_rx.changed() => {
+                        if changed.is_err() {
+                            return;
+                        }
+                        let current = config_rx.borrow().active_source.clone();
+                        let switched = current != last_source;
+                        last_source = current;
+                        // Any other config change goes back round to re-read
+                        // the interval rather than costing a network call.
+                        if !switched {
+                            continue;
+                        }
+                        true
+                    }
                     _ = tokio::time::sleep(interval) => false,
                 };
                 if nudged {
