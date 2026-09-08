@@ -329,9 +329,15 @@ impl api::JobApi for LocalApi {
                 Some(favorites) => favorites.spawn_sync(runner),
                 None => Err(ApiError::unsupported("no favorites service")),
             },
-            api::JobKind::PlaylistSync | api::JobKind::Download | api::JobKind::Unknown => Err(
-                ApiError::unsupported("this job kind has no direct starter yet"),
-            ),
+            api::JobKind::PlaylistSync => match &self.playlists {
+                Some(playlists) => playlists.spawn_sync(runner),
+                None => Err(ApiError::unsupported("no playlist service")),
+            },
+            // Downloads carry their own request, so they start through
+            // JobApi::download rather than by kind.
+            api::JobKind::Download | api::JobKind::Unknown => {
+                Err(ApiError::unsupported("this job kind has no direct starter"))
+            }
         }
     }
 

@@ -8,11 +8,9 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::folder_picker::FolderPickerModal;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
-use config::{AppConfig, MusicService, Source, UiStyle};
+use config::{AppConfig, MusicService, UiStyle};
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_active_source, use_playlists, use_tracks_by_keys};
-use tracing::Instrument;
 
 use crate::server::download_manager::{
     DownloadQueue, DownloadStatus, delete_downloads, queue_downloads,
@@ -316,8 +314,6 @@ fn PlaylistsGrid(
     mut selected_playlist_id: Signal<Option<String>>,
     refresh_trigger: Signal<u64>,
 ) -> Element {
-    let gens = hooks::db_reactivity::use_generations();
-    let source = use_active_source();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = use_memo(move || active_source.read().capabilities());
     let is_offline = use_context::<Signal<bool>>();
@@ -335,195 +331,19 @@ fn PlaylistsGrid(
     let rename_folder_id = use_signal(|| Option::<String>::None);
     let rename_folder_name = use_signal(String::new);
 
-    // Remote-sync state.
-    let mut last_fetch_key = use_signal(|| None::<String>);
-    let mut fetch_request_id = use_signal(|| 0u64);
-    let mut yt_refresh_nonce: Signal<u64> = use_signal(|| 0);
-    let mut yt_is_syncing = use_signal(|| false);
-    let mut yt_synced_so_far: Signal<usize> = use_signal(|| 0);
+    // The pull runs in the daemon, single-flight, so this only has to ask.
+    // The stamp that stops an automatic re-sync lives there too, which is why
+    // no dedup key or request id is kept here any more.
+    let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::PlaylistSync);
+    let yt_is_syncing = use_memo(move || sync_job.read().running);
+    let yt_synced_so_far = use_memo(move || sync_job.read().current.unwrap_or(0) as usize);
 
-    let active_server_id =
-        use_memo(move || source().server_id().map(String::from).unwrap_or_default());
-
-    // Remote playlist fetch — servers only (gated on `sync`). Diffs into the DB;
-    // the grid reads the DB via `use_playlists`.
     use_effect(move || {
-        if !caps().sync {
-            return;
+        if caps().sync {
+            // Naming the trigger keeps the effect subscribed to it.
+            let _ = *refresh_trigger.read();
+            hooks::jobs::start(hooks::JobKind::PlaylistSync);
         }
-        let yt_nonce = *yt_refresh_nonce.read();
-        let trigger = *refresh_trigger.read();
-        // YT auto-syncs only once (a stamp guards re-runs); other servers re-fetch
-        // on a server/identity change.
-        let is_ytmusic = caps().albums == ::server::source::AlbumType::YtMusic;
-
-        // Dedup key from the active server's identity (+ trigger), so a re-render
-        // with the same server doesn't re-fetch.
-        let (server_key, fetch_key) = {
-            let conf = config.peek();
-            match conf.server.as_ref() {
-                Some(s) => {
-                    let sk = format!(
-                        "{:?}|{}|{}",
-                        s.service,
-                        s.url,
-                        s.user_id.as_deref().unwrap_or_default()
-                    );
-                    let fk = format!(
-                        "{sk}|{}|{trigger}",
-                        s.access_token.as_deref().unwrap_or_default()
-                    );
-                    (Some(sk), Some(fk))
-                }
-                None => (None, None),
-            }
-        };
-
-        let source = active_source.peek().clone();
-        let read_db = consume_context::<hooks::ReadDb>();
-        let sid = active_server_id();
-        spawn(
-            async move {
-                if is_ytmusic && yt_nonce == 0 && trigger == 0 {
-                    let already_synced = read_db
-                        .meta_get("yt_sync", "timestamps")
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-                        .and_then(|v| v.get("last_yt_playlists_sync_at").and_then(|v| v.as_u64()))
-                        .is_some();
-                    if already_synced {
-                        return;
-                    }
-                }
-
-                let source_db = Source::Server(sid.clone());
-                let existing = read_db
-                    .load_playlists(&source_db)
-                    .await
-                    .unwrap_or_default()
-                    .playlists;
-                let has_cached = !existing.is_empty();
-                let last_key = last_fetch_key.peek().clone();
-                let last_server_key = last_key.as_ref().and_then(|k| {
-                    let parts: Vec<&str> = k.splitn(5, '|').collect();
-                    if parts.len() >= 3 {
-                        Some(parts[..3].join("|").to_string())
-                    } else {
-                        None
-                    }
-                });
-                if last_key.as_ref() == fetch_key.as_ref() {
-                    return;
-                }
-                if server_key == last_server_key && has_cached && trigger == 0 {
-                    last_fetch_key.set(fetch_key.clone());
-                    return;
-                }
-                last_fetch_key.set(fetch_key.clone());
-
-                let request_id = *fetch_request_id.peek() + 1;
-                fetch_request_id.set(request_id);
-
-                yt_is_syncing.set(true);
-                yt_synced_so_far.set(0);
-
-                // Listing first (tiles appear immediately), entries per playlist
-                // after — all through the facade, so this loop is service-agnostic.
-                let metas = match source.fetch_playlists().await {
-                    Ok(m) => m,
-                    Err(_) => {
-                        yt_is_syncing.set(false);
-                        return;
-                    }
-                };
-                if *fetch_request_id.peek() != request_id {
-                    return;
-                }
-                let total = metas.len();
-                for m in &metas {
-                    let existing_cover = existing
-                        .iter()
-                        .find(|e| e.id == m.id)
-                        .and_then(|e| e.cover_path.clone())
-                        .map(|p| p.to_string_lossy().into_owned());
-                    let _ = source
-                        .upsert_playlist_meta(
-                            &m.id,
-                            &m.name,
-                            existing_cover.as_deref(),
-                            m.image_tag.as_deref(),
-                        )
-                        .await;
-                }
-                gens.bump(Table::Playlists);
-
-                let mut seen_paths: std::collections::HashSet<reader::TrackId> =
-                    std::collections::HashSet::new();
-                for (i, m) in metas.iter().enumerate() {
-                    if *fetch_request_id.peek() != request_id {
-                        return;
-                    }
-                    yt_synced_so_far.set(i + 1);
-                    let entries = source
-                        .fetch_playlist_entries(&m.id)
-                        .await
-                        .unwrap_or_default();
-                    let track_ids: Vec<String> = entries
-                        .iter()
-                        .filter_map(|t| {
-                            let k = t.id.key();
-                            (!k.is_empty()).then(|| k.to_string())
-                        })
-                        .collect();
-                    if source.set_playlist_tracks(&m.id, &track_ids).await.is_ok() {
-                        gens.bump_coalesced(Table::Playlists);
-                    }
-                    let new_tracks: Vec<reader::models::Track> = entries
-                        .into_iter()
-                        .filter(|t| seen_paths.insert(t.id.clone()))
-                        .collect();
-                    for chunk in new_tracks.chunks(100) {
-                        let _ = source.upsert_tracks(chunk).await;
-                    }
-                    gens.bump_coalesced(Table::Tracks);
-                }
-
-                if *fetch_request_id.peek() != request_id {
-                    return;
-                }
-                // Full-replace: drop playlists no longer present remotely.
-                for stale in existing
-                    .iter()
-                    .filter(|e| !metas.iter().any(|m| m.id == e.id))
-                {
-                    let _ = source.delete_playlist(&stale.id).await;
-                }
-                if is_ytmusic {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let mut stamps: serde_json::Value = read_db
-                        .meta_get("yt_sync", "timestamps")
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|s| serde_json::from_str(&s).ok())
-                        .unwrap_or_else(|| serde_json::json!({}));
-                    stamps["last_yt_playlists_sync_at"] = serde_json::json!(now);
-                    let _ = source
-                        .set_meta("yt_sync", "timestamps", &stamps.to_string())
-                        .await;
-                }
-                gens.bump(Table::Tracks);
-                gens.bump(Table::Playlists);
-                yt_is_syncing.set(false);
-                yt_synced_so_far.set(total);
-            }
-            .instrument(tracing::info_span!("playlists.fetch")),
-        );
     });
 
     let store = playlists_res.read().clone().unwrap_or_default();
@@ -548,7 +368,6 @@ fn PlaylistsGrid(
             rename_playlist_name,
             rename_folder_id,
             rename_folder_name,
-            gens,
         });
     }
 
@@ -614,8 +433,7 @@ fn PlaylistsGrid(
                                 class: "px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 transition-colors disabled:opacity-50",
                                 disabled: syncing,
                                 onclick: move |_| {
-                                    let next = *yt_refresh_nonce.peek() + 1;
-                                    yt_refresh_nonce.set(next);
+                                    hooks::jobs::start(hooks::JobKind::PlaylistSync);
                                 },
                                 i { class: "fa-solid fa-arrows-rotate mr-1" }
                                 "Refresh"
@@ -705,12 +523,11 @@ fn PlaylistsGrid(
                                                 delete_downloads(playlist.tracks.clone(), config, download_queue);
                                             } else {
                                                 let ids = playlist.tracks.clone();
-                                                let s = source.peek().clone();
-                                                let read_db = consume_context::<hooks::ReadDb>();
+                                                let api = hooks::consume_api();
                                                 spawn(async move {
-                                                    let meta = read_db.tracks_by_keys(&s, &ids).await.unwrap_or_default();
+                                                    let meta = api.tracks_by_keys(ids.clone()).await.unwrap_or_default();
                                                     let requests: Vec<(String, String, String)> = ids.iter().map(|tid| {
-                                                        let m = meta.iter().find(|t| t.id.key().as_ref() == tid.as_str());
+                                                        let m = meta.iter().find(|track| track.key == *tid);
                                                         (tid.clone(), m.map(|t| t.title.clone()).unwrap_or_default(), m.map(|t| t.artist.clone()).unwrap_or_default())
                                                     }).collect();
                                                     queue_downloads(requests, config, download_queue);
@@ -747,7 +564,6 @@ struct FoldersCtx<'a> {
     rename_playlist_name: Signal<String>,
     rename_folder_id: Signal<Option<String>>,
     rename_folder_name: Signal<String>,
-    gens: hooks::db_reactivity::Generations,
 }
 
 fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
@@ -762,7 +578,6 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
         mut rename_playlist_name,
         mut rename_folder_id,
         mut rename_folder_name,
-        gens,
     } = ctx;
 
     let folders = store.folders.clone();
@@ -1060,17 +875,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                                                 rename_folder_id.set(Some(fid_rename.clone()));
                                                                 rename_folder_name.set(fname_rename.clone());
                                                             } else {
-                                                                let fid = fid_del.clone();
-                                                                let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                                                spawn(async move {
-                                                                    if local
-                                                                        .delete_folder(&fid)
-                                                                        .await
-                                                                        .is_ok()
-                                                                    {
-                                                                        gens.bump(Table::Folders);
-                                                                    }
-                                                                });
+                                                                hooks::playlist_actions::delete_folder(
+                                                                    fid_del.clone(),
+                                                                );
                                                             }
                                                         },
                                                     }

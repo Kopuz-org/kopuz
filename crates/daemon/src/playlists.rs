@@ -253,3 +253,131 @@ impl PlaylistService {
         Ok(())
     }
 }
+
+impl PlaylistService {
+    /// Pull the server's playlists and their contents.
+    ///
+    /// Listing first so the tiles appear, then entries per playlist, then a
+    /// full-replace: a playlist the server no longer has is dropped. Ported
+    /// from the page that used to run this in a `use_effect`, where it stopped
+    /// the moment the user navigated away.
+    pub fn spawn_sync(
+        self: &Arc<Self>,
+        runner: &crate::jobs::JobRunner,
+    ) -> Result<api::JobRef, ApiError> {
+        let service = self.clone();
+        runner.start(api::JobKind::PlaylistSync, move |ctx| async move {
+            service.sync(&ctx).await
+        })
+    }
+
+    async fn sync(&self, ctx: &crate::jobs::JobCtx) -> Result<(), ApiError> {
+        let source = self.active_source();
+        if !source.capabilities().sync {
+            return Err(ApiError::unsupported(
+                "the active source has no playlist sync",
+            ));
+        }
+        let existing = self
+            .db
+            .load_playlists(&self.config().active_source)
+            .await
+            .map_err(db_error)?
+            .playlists;
+
+        ctx.progress("fetching playlists", None, None, None);
+        let metas = source.fetch_playlists().await.map_err(source_error)?;
+        let total = metas.len() as u64;
+
+        for meta in &metas {
+            // A manually chosen cover is the user's, not the server's, so it
+            // survives the refresh.
+            let existing_cover = existing
+                .iter()
+                .find(|playlist| playlist.id == meta.id)
+                .and_then(|playlist| playlist.cover_path.clone())
+                .map(|path| path.to_string_lossy().into_owned());
+            let _ = source
+                .upsert_playlist_meta(
+                    &meta.id,
+                    &meta.name,
+                    existing_cover.as_deref(),
+                    meta.image_tag.as_deref(),
+                )
+                .await;
+        }
+        self.session.invalidate(Table::Playlists);
+
+        let mut seen: std::collections::HashSet<reader::TrackId> = std::collections::HashSet::new();
+        for (index, meta) in metas.iter().enumerate() {
+            if ctx.cancelled() {
+                return Ok(());
+            }
+            ctx.progress(
+                "fetching playlists",
+                Some(index as u64 + 1),
+                Some(total),
+                None,
+            );
+            let entries = source
+                .fetch_playlist_entries(&meta.id)
+                .await
+                .unwrap_or_default();
+            let track_keys: Vec<String> = entries
+                .iter()
+                .map(|track| track.id.key().to_string())
+                .filter(|key| !key.is_empty())
+                .collect();
+            if source
+                .set_playlist_tracks(&meta.id, &track_keys)
+                .await
+                .is_ok()
+            {
+                self.session.invalidate(Table::Playlists);
+            }
+            // Playlists overlap, so a track is only written the first time it
+            // is seen across the whole walk.
+            let fresh: Vec<reader::Track> = entries
+                .into_iter()
+                .filter(|track| seen.insert(track.id.clone()))
+                .collect();
+            for chunk in fresh.chunks(100) {
+                let _ = source.upsert_tracks(chunk).await;
+            }
+            self.session.invalidate(Table::Tracks);
+        }
+
+        if ctx.cancelled() {
+            return Ok(());
+        }
+        for stale in existing
+            .iter()
+            .filter(|playlist| !metas.iter().any(|meta| meta.id == playlist.id))
+        {
+            let _ = source.delete_playlist(&stale.id).await;
+        }
+        // The stamp is what stops the automatic sync running twice; only the
+        // source that gates on it writes one.
+        if source.capabilities().albums == server::source::AlbumType::YtMusic {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_secs())
+                .unwrap_or_default();
+            let mut stamps: serde_json::Value = self
+                .db
+                .meta_get("yt_sync", "timestamps")
+                .await
+                .ok()
+                .flatten()
+                .and_then(|raw| serde_json::from_str(&raw).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            stamps["last_yt_playlists_sync_at"] = serde_json::json!(now);
+            let _ = source
+                .set_meta("yt_sync", "timestamps", &stamps.to_string())
+                .await;
+        }
+        self.session.invalidate(Table::Tracks);
+        self.session.invalidate(Table::Playlists);
+        Ok(())
+    }
+}

@@ -1,6 +1,5 @@
 pub mod discover;
 pub mod download_manager;
-pub mod subsonic_sync;
 
 mod cache;
 
