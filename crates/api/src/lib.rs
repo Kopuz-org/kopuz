@@ -19,8 +19,9 @@ pub use artwork::{ArtworkData, ArtworkRequest, ArtworkTarget};
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
 pub use library::{
-    DEFAULT_PAGE_LIMIT, LyricChunkView, LyricLineView, LyricsView, Page, StatsView, TrackFilter,
-    TrackInfo, TrackPage, TrackSort,
+    AlbumInfo, AlbumPage, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT, LyricChunkView,
+    LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter, TrackInfo, TrackPage,
+    TrackSort,
 };
 pub use player::{
     BufferedRange, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying, Phase,
@@ -100,6 +101,37 @@ pub trait LibraryApi: Send + Sync {
 
     /// Local tracks under a directory prefix, path-ordered.
     async fn folder_tracks(&self, prefix: String, page: Page) -> Result<TrackPage, ApiError>;
+
+    /// Rows for specific keys, in the order asked for. Keys the library does
+    /// not hold are skipped rather than erroring.
+    async fn tracks_by_keys(&self, keys: Vec<String>) -> Result<Vec<TrackInfo>, ApiError>;
+
+    async fn albums(&self, page: Page) -> Result<AlbumPage, ApiError>;
+
+    async fn album(&self, id: String) -> Result<Option<AlbumInfo>, ApiError>;
+
+    async fn album_tracks(&self, id: String, page: Page) -> Result<TrackPage, ApiError>;
+
+    async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError>;
+
+    async fn artist_tracks(&self, artist: String, page: Page) -> Result<TrackPage, ApiError>;
+
+    /// One track per artist, for the artist grid's tiles.
+    async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;
+
+    async fn genres(&self) -> Result<Vec<String>, ApiError>;
+
+    /// The genre with the most tracks, for the home page's heading.
+    async fn top_genre(&self) -> Result<Option<String>, ApiError>;
+
+    async fn genre_tracks(&self, genre: String, page: Page) -> Result<TrackPage, ApiError>;
+
+    /// Most recently played first.
+    async fn recent_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;
+
+    /// Search the active source. Remote sources answer over the network, so
+    /// this is a daemon call and not a filter the caller composes.
+    async fn search(&self, query: String) -> Result<SearchResults, ApiError>;
 
     async fn lyrics(&self, key: String) -> Result<LyricsView, ApiError>;
 

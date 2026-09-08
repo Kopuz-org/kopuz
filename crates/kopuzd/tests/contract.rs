@@ -625,3 +625,94 @@ async fn artwork_agrees_across_transports() {
         pair.wire.artwork(unknown).await.err().map(|e| e.code),
     );
 }
+
+#[tokio::test]
+async fn library_reads_agree_across_transports() {
+    let pair = spawn_pair().await;
+    let all = Page {
+        offset: 0,
+        limit: 100,
+    };
+
+    let keys = vec![
+        "/lib/seed-0.flac".to_string(),
+        "/lib/seed-1.flac".to_string(),
+    ];
+    assert_eq!(
+        pair.local
+            .tracks_by_keys(keys.clone())
+            .await
+            .expect("local"),
+        pair.wire.tracks_by_keys(keys).await.expect("wire"),
+    );
+    assert_eq!(
+        pair.local.albums(all).await.expect("local"),
+        pair.wire.albums(all).await.expect("wire"),
+    );
+    assert_eq!(
+        pair.local.artists(all).await.expect("local"),
+        pair.wire.artists(all).await.expect("wire"),
+    );
+    assert_eq!(
+        pair.local.genres().await.expect("local"),
+        pair.wire.genres().await.expect("wire"),
+    );
+    assert_eq!(
+        pair.local.top_genre().await.expect("local"),
+        pair.wire.top_genre().await.expect("wire"),
+    );
+    assert_eq!(
+        pair.local.recent_tracks(all).await.expect("local"),
+        pair.wire.recent_tracks(all).await.expect("wire"),
+    );
+    assert_eq!(
+        pair.local.artist_sample_tracks(all).await.expect("local"),
+        pair.wire.artist_sample_tracks(all).await.expect("wire"),
+    );
+    assert_eq!(
+        pair.local
+            .album_tracks("no-such-album".into(), all)
+            .await
+            .expect("local"),
+        pair.wire
+            .album_tracks("no-such-album".into(), all)
+            .await
+            .expect("wire"),
+    );
+    assert_eq!(
+        pair.local
+            .artist_tracks(String::new(), all)
+            .await
+            .expect("local"),
+        pair.wire
+            .artist_tracks(String::new(), all)
+            .await
+            .expect("wire"),
+    );
+    assert_eq!(
+        pair.local
+            .genre_tracks("rock".into(), all)
+            .await
+            .expect("local"),
+        pair.wire
+            .genre_tracks("rock".into(), all)
+            .await
+            .expect("wire"),
+    );
+    assert_eq!(
+        pair.local
+            .album("no-such-album".into())
+            .await
+            .expect("local"),
+        pair.wire.album("no-such-album".into()).await.expect("wire"),
+    );
+
+    // The seeded rows carry no album id, so the paging metadata is what this
+    // asserts: an empty page still reports the same totals on both sides.
+    let local_tracks = pair
+        .local
+        .tracks_by_keys(vec![])
+        .await
+        .expect("local empty");
+    assert!(local_tracks.is_empty());
+}

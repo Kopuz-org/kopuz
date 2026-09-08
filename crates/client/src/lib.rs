@@ -184,6 +184,132 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::track_page_from_proto(tracks.get_ref()))
     }
 
+    async fn tracks_by_keys(&self, keys: Vec<String>) -> Result<Vec<api::TrackInfo>, ApiError> {
+        let tracks = self
+            .client()
+            .get_tracks_by_keys(Request::new(proto::TracksByKeysRequest { keys }))
+            .await
+            .map_err(wire_error)?;
+        Ok(tracks
+            .get_ref()
+            .items
+            .iter()
+            .map(convert::track_info_from_proto)
+            .collect())
+    }
+
+    async fn albums(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
+        let albums = self
+            .client()
+            .get_albums(Request::new(convert::page_to_proto(page)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::album_page_from_proto(albums.get_ref()))
+    }
+
+    async fn album(&self, id: String) -> Result<Option<api::AlbumInfo>, ApiError> {
+        let album = self
+            .client()
+            .get_album(Request::new(proto::AlbumRef { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(album
+            .get_ref()
+            .album
+            .as_ref()
+            .map(convert::album_info_from_proto))
+    }
+
+    async fn album_tracks(&self, id: String, page: Page) -> Result<api::TrackPage, ApiError> {
+        let tracks = self
+            .client()
+            .get_album_tracks(Request::new(proto::AlbumTracksRequest {
+                id,
+                page: Some(convert::page_to_proto(page)),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::track_page_from_proto(tracks.get_ref()))
+    }
+
+    async fn artists(&self, page: Page) -> Result<api::ArtistPage, ApiError> {
+        let artists = self
+            .client()
+            .get_artists(Request::new(convert::page_to_proto(page)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::artist_page_from_proto(artists.get_ref()))
+    }
+
+    async fn artist_tracks(&self, artist: String, page: Page) -> Result<api::TrackPage, ApiError> {
+        let tracks = self
+            .client()
+            .get_artist_tracks(Request::new(proto::ArtistTracksRequest {
+                artist,
+                page: Some(convert::page_to_proto(page)),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::track_page_from_proto(tracks.get_ref()))
+    }
+
+    async fn artist_sample_tracks(&self, page: Page) -> Result<api::TrackPage, ApiError> {
+        let tracks = self
+            .client()
+            .get_artist_sample_tracks(Request::new(convert::page_to_proto(page)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::track_page_from_proto(tracks.get_ref()))
+    }
+
+    async fn genres(&self) -> Result<Vec<String>, ApiError> {
+        let genres = self
+            .client()
+            .get_genres(Request::new(proto::GetGenresRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(genres.into_inner().genres)
+    }
+
+    async fn top_genre(&self) -> Result<Option<String>, ApiError> {
+        let genre = self
+            .client()
+            .get_top_genre(Request::new(proto::GetTopGenreRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(genre.into_inner().genre)
+    }
+
+    async fn genre_tracks(&self, genre: String, page: Page) -> Result<api::TrackPage, ApiError> {
+        let tracks = self
+            .client()
+            .get_genre_tracks(Request::new(proto::GenreTracksRequest {
+                genre,
+                page: Some(convert::page_to_proto(page)),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::track_page_from_proto(tracks.get_ref()))
+    }
+
+    async fn recent_tracks(&self, page: Page) -> Result<api::TrackPage, ApiError> {
+        let tracks = self
+            .client()
+            .get_recent_tracks(Request::new(convert::page_to_proto(page)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::track_page_from_proto(tracks.get_ref()))
+    }
+
+    async fn search(&self, query: String) -> Result<api::SearchResults, ApiError> {
+        let results = self
+            .client()
+            .search(Request::new(proto::SearchRequest { query }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::search_results_from_proto(results.get_ref()))
+    }
+
     async fn favorites(&self) -> Result<FavoritesView, ApiError> {
         let favorites = self
             .client()

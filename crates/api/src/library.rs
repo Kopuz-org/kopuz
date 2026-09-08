@@ -100,3 +100,44 @@ pub struct TrackPage {
     pub offset: u32,
     pub items: Vec<TrackInfo>,
 }
+
+/// An album row on the wire. `artwork` is present when the daemon can resolve
+/// a cover; clients fetch it through [`crate::ArtworkApi`] rather than
+/// composing a URL, since the daemon holds the credentials that sign one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlbumInfo {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub genre: String,
+    pub year: u16,
+    pub artwork: Option<crate::ArtworkTarget>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlbumPage {
+    pub albums: Vec<AlbumInfo>,
+    pub total: u32,
+}
+
+/// An artist and how many tracks the library holds for them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistInfo {
+    pub name: String,
+    pub track_count: u32,
+    pub artwork: Option<crate::ArtworkTarget>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistPage {
+    pub artists: Vec<ArtistInfo>,
+    pub total: u32,
+}
+
+/// What a search turned up. Remote sources answer over the network, so this
+/// is one call rather than a filter the caller composes.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SearchResults {
+    pub tracks: Vec<TrackInfo>,
+    pub albums: Vec<AlbumInfo>,
+}
