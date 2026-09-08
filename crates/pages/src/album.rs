@@ -56,7 +56,6 @@ pub fn Album(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = use_memo(move || active_source.read().capabilities());
@@ -122,14 +121,7 @@ pub fn Album(
                                         .iter()
                                         .map(|t| t.id.key().into_owned())
                                         .collect();
-                                    let s = active_source.peek().clone();
-                                    spawn(async move {
-                                        if !refs.is_empty()
-                                            && s.add_to_playlist(&playlist_id, &refs).await.is_ok()
-                                        {
-                                            gens.bump(Table::Playlists);
-                                        }
-                                    });
+                                    hooks::playlist_actions::add_tracks(playlist_id, refs);
                                 }
                                 show_album_playlist_modal.set(false);
                             },
@@ -142,14 +134,7 @@ pub fn Album(
                                         .iter()
                                         .map(|t| t.id.key().into_owned())
                                         .collect();
-                                    let s = active_source.peek().clone();
-                                    spawn(async move {
-                                        if !refs.is_empty()
-                                            && s.create_playlist(&name, &refs).await.is_ok()
-                                        {
-                                            gens.bump(Table::Playlists);
-                                        }
-                                    });
+                                    hooks::playlist_actions::create_with(name, refs);
                                 }
                                 show_album_playlist_modal.set(false);
                             },
@@ -814,7 +799,6 @@ fn YtAlbumDetail(
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let nav_ctrl = use_context::<components::NavigationController>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
-    let gens = hooks::db_reactivity::use_generations();
     let cover_for = hooks::use_db_queries::use_cover_resolver(80);
 
     let mut active_menu = use_signal(|| None::<reader::TrackId>);
@@ -1052,26 +1036,20 @@ fn YtAlbumDetail(
                     },
                     on_add_to_playlist: move |playlist_id: String| {
                         if let Some(id) = playlist_track.read().clone() {
-                            let refs = vec![id.key().into_owned()];
-                            let s = active_source.peek().clone();
-                            spawn(async move {
-                                if s.add_to_playlist(&playlist_id, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
+                            hooks::playlist_actions::add_tracks(
+                                playlist_id,
+                                vec![id.key().into_owned()],
+                            );
                         }
                         show_playlist_modal.set(false);
                         playlist_track.set(None);
                     },
                     on_create_playlist: move |name: String| {
                         if let Some(id) = playlist_track.read().clone() {
-                            let refs = vec![id.key().into_owned()];
-                            let s = active_source.peek().clone();
-                            spawn(async move {
-                                if s.create_playlist(&name, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
+                            hooks::playlist_actions::create_with(
+                                name,
+                                vec![id.key().into_owned()],
+                            );
                         }
                         show_playlist_modal.set(false);
                         playlist_track.set(None);

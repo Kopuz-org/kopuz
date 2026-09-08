@@ -446,15 +446,9 @@ pub fn FavoritesBody(
                         }
 
                         if !selected_paths.is_empty() {
-                            let pid = playlist_id.clone();
-                            let src = active_source.peek().clone();
                             let refs: Vec<String> =
                                 selected_paths.iter().map(|p| p.key().into_owned()).collect();
-                            spawn(async move {
-                                if !refs.is_empty() {
-                                    let _ = src.add_to_playlist(&pid, &refs).await;
-                                }
-                            });
+                            hooks::playlist_actions::add_tracks(playlist_id.clone(), refs);
                         }
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
@@ -470,15 +464,9 @@ pub fn FavoritesBody(
                         }
 
                         if !selected_paths.is_empty() {
-                            let playlist_name = name.clone();
-                            let src = active_source.peek().clone();
                             let refs: Vec<String> =
                                 selected_paths.iter().map(|p| p.key().into_owned()).collect();
-                            spawn(async move {
-                                if !refs.is_empty() {
-                                    let _ = src.create_playlist(&playlist_name, &refs).await;
-                                }
-                            });
+                            hooks::playlist_actions::create_with(name.clone(), refs);
                         }
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);

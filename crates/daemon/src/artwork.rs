@@ -38,6 +38,7 @@ pub enum ArtworkEntity<'a> {
     Track(&'a str),
     Album(&'a str),
     Artist(&'a str),
+    Playlist(&'a str),
 }
 
 /// Reverse of `utils::format_artwork_url`: the path a resolved local cover
@@ -119,6 +120,47 @@ impl ArtworkService {
                     .ok_or_else(|| ApiError::not_found("unknown album id"))?;
                 server::cover::from_path(&config, album.cover_path.as_deref(), width)
                     .map(|url| url.as_ref().to_string())
+            }
+            // Explicit cover, then the server's image tag, then the first
+            // track's. The tag URL is signed with the server credentials, so
+            // only the daemon can build it.
+            ArtworkEntity::Playlist(id) => {
+                let store = self
+                    .db
+                    .load_playlists(&config.active_source)
+                    .await
+                    .map_err(db_error)?;
+                let playlist = store
+                    .playlists
+                    .iter()
+                    .find(|playlist| playlist.id == id)
+                    .ok_or_else(|| ApiError::not_found("unknown playlist id"))?;
+                let explicit =
+                    server::cover::from_path(&config, playlist.cover_path.as_deref(), width);
+                let tagged = || {
+                    let tag = playlist.image_tag.as_ref()?;
+                    let server = config.server.as_ref()?;
+                    server::cover::resolve(
+                        &config,
+                        reader::CoverRef::remote_item(server.service, &playlist.id, Some(tag)),
+                        width,
+                    )
+                };
+                let first_track = || async {
+                    let key = playlist.tracks.first()?;
+                    let track = self
+                        .db
+                        .tracks_by_keys(&config.active_source, std::slice::from_ref(key))
+                        .await
+                        .ok()?
+                        .into_iter()
+                        .next()?;
+                    server::cover::track(&config, &track, width)
+                };
+                match explicit.or_else(tagged) {
+                    Some(url) => Some(url.as_ref().to_string()),
+                    None => first_track().await.map(|url| url.as_ref().to_string()),
+                }
             }
             ArtworkEntity::Artist(name) => {
                 let (overrides, photos) = self.db.artist_images().await.map_err(db_error)?;

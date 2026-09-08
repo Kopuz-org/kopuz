@@ -5,7 +5,6 @@ use components::search_genres::SearchGenres;
 use components::search_results::SearchResults;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_active_source, use_genre_tracks};
 use hooks::use_search_data::use_search_data;
 
@@ -35,9 +34,7 @@ pub fn Search(
     let mut show_playlist_modal = use_signal(|| false);
     let selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
 
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let selected_genre_memo = use_memo(move || selected_genre.read().clone().unwrap_or_default());
     let genre_tracks_res = use_genre_tracks(source, selected_genre_memo);
 
@@ -68,34 +65,20 @@ pub fn Search(
                     on_close: move |_| show_playlist_modal.set(false),
                     on_add_to_playlist: move |playlist_id: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
-                            let source = active_source.peek().clone();
-                            spawn(async move {
-                                let refs: Vec<String> = std::iter::once(path.key().into_owned())
-                                    .filter(|r| !r.is_empty())
-                                    .collect();
-                                if !refs.is_empty()
-                                    && source.add_to_playlist(&playlist_id, &refs).await.is_ok()
-                                {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
+                            let refs: Vec<String> = std::iter::once(path.key().into_owned())
+                                .filter(|reference| !reference.is_empty())
+                                .collect();
+                            hooks::playlist_actions::add_tracks(playlist_id, refs);
                         }
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
                     },
                     on_create_playlist: move |name: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
-                            let source = active_source.peek().clone();
-                            spawn(async move {
-                                let refs: Vec<String> = std::iter::once(path.key().into_owned())
-                                    .filter(|r| !r.is_empty())
-                                    .collect();
-                                if !refs.is_empty()
-                                    && source.create_playlist(&name, &refs).await.is_ok()
-                                {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
+                            let refs: Vec<String> = std::iter::once(path.key().into_owned())
+                                .filter(|reference| !reference.is_empty())
+                                .collect();
+                            hooks::playlist_actions::create_with(name, refs);
                         }
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);

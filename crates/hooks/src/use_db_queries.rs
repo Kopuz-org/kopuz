@@ -349,17 +349,21 @@ pub fn use_active_source() -> Memo<config::Source> {
 /// The playlist store for the active source, re-queried on a playlists/folders
 /// bump or a source switch. Resolves the in-memory active source itself.
 pub fn use_playlists() -> Resource<reader::PlaylistStore> {
-    let db = use_context::<db::ReadDb>();
+    let api = use_api();
     let gens = use_generations();
     let source = use_active_source();
     use_resource(move || {
         let _ = gens.generation(Table::Playlists);
         let _ = gens.generation(Table::Folders);
-        let (db, src) = (db.clone(), source());
+        let (api, src) = (api.clone(), source());
         let span = tracing::info_span!("query.playlists", source = %src.as_str());
-        utils::offload(
-            async move { db.load_playlists(&src).await.unwrap_or_default() }.instrument(span),
-        )
+        async move {
+            api.playlists()
+                .await
+                .map(crate::wire::playlist_store_from_api)
+                .unwrap_or_default()
+        }
+        .instrument(span)
     })
 }
 

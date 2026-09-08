@@ -64,10 +64,10 @@ impl PlaylistService {
                 .playlists
                 .into_iter()
                 .map(|playlist| PlaylistInfo {
-                    artwork: playlist
-                        .cover_path
-                        .is_some()
-                        .then(|| ArtworkTarget::Album(playlist.id.clone())),
+                    // Always set: the daemon falls back through the explicit
+                    // cover, the server's tag, and the first track's art, and
+                    // only it can sign the middle one.
+                    artwork: Some(ArtworkTarget::Playlist(playlist.id.clone())),
                     id: playlist.id,
                     name: playlist.name,
                     track_keys: playlist.tracks,

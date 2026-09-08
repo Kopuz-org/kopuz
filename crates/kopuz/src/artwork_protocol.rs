@@ -103,6 +103,7 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
                     "track" => Some(api::ArtworkTarget::Track(id)),
                     "album" => Some(api::ArtworkTarget::Album(id)),
                     "artist" => Some(api::ArtworkTarget::Artist(id)),
+                    "playlist" => Some(api::ArtworkTarget::Playlist(id)),
                     _ => None,
                 }
             }) {

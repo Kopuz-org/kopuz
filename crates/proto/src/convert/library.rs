@@ -167,6 +167,7 @@ pub fn artwork_request_to_proto(value: &api::ArtworkRequest) -> ArtworkRequest {
         api::ArtworkTarget::Track(key) => Entity::Track(key.clone()),
         api::ArtworkTarget::Album(id) => Entity::Album(id.clone()),
         api::ArtworkTarget::Artist(name) => Entity::Artist(name.clone()),
+        api::ArtworkTarget::Playlist(id) => Entity::Playlist(id.clone()),
     };
     ArtworkRequest {
         entity: Some(entity),
@@ -180,6 +181,7 @@ pub fn artwork_request_from_proto(value: &ArtworkRequest) -> Option<api::Artwork
         Entity::Track(key) => api::ArtworkTarget::Track(key.clone()),
         Entity::Album(id) => api::ArtworkTarget::Album(id.clone()),
         Entity::Artist(name) => api::ArtworkTarget::Artist(name.clone()),
+        Entity::Playlist(id) => api::ArtworkTarget::Playlist(id.clone()),
     };
     Some(api::ArtworkRequest {
         target,
@@ -193,6 +195,7 @@ pub fn artwork_target_to_proto(value: &api::ArtworkTarget) -> ArtworkTarget {
         api::ArtworkTarget::Track(key) => Entity::Track(key.clone()),
         api::ArtworkTarget::Album(id) => Entity::Album(id.clone()),
         api::ArtworkTarget::Artist(name) => Entity::Artist(name.clone()),
+        api::ArtworkTarget::Playlist(id) => Entity::Playlist(id.clone()),
     };
     ArtworkTarget {
         entity: Some(entity),
@@ -205,6 +208,7 @@ pub fn artwork_target_from_proto(value: &ArtworkTarget) -> Option<api::ArtworkTa
         Entity::Track(key) => api::ArtworkTarget::Track(key.clone()),
         Entity::Album(id) => api::ArtworkTarget::Album(id.clone()),
         Entity::Artist(name) => api::ArtworkTarget::Artist(name.clone()),
+        Entity::Playlist(id) => api::ArtworkTarget::Playlist(id.clone()),
     })
 }
 

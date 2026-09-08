@@ -275,6 +275,7 @@ impl api::ArtworkApi for LocalApi {
             api::ArtworkTarget::Track(key) => crate::artwork::ArtworkEntity::Track(key),
             api::ArtworkTarget::Album(id) => crate::artwork::ArtworkEntity::Album(id),
             api::ArtworkTarget::Artist(name) => crate::artwork::ArtworkEntity::Artist(name),
+            api::ArtworkTarget::Playlist(id) => crate::artwork::ArtworkEntity::Playlist(id),
         };
         let payload = artwork.fetch(entity, request.hq).await?;
         Ok(api::ArtworkData {

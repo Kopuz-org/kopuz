@@ -6,6 +6,7 @@ pub mod artist_images;
 pub mod db_reactivity;
 pub mod debug_db;
 pub mod favorites;
+pub mod playlist_actions;
 pub mod scrobble_scheduler;
 mod session_projector;
 pub mod source_switch;

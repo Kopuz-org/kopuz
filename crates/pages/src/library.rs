@@ -323,14 +323,7 @@ pub fn LibraryPage(
                             selected_track_for_playlist.read().iter().cloned().collect()
                         };
                         let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
-                        if !refs.is_empty() {
-                            let s = active_source.peek().clone();
-                            spawn(async move {
-                                if s.add_to_playlist(&playlist_id, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
-                        }
+                        hooks::playlist_actions::add_tracks(playlist_id, refs);
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
                         is_selection_mode.set(false);
@@ -343,14 +336,7 @@ pub fn LibraryPage(
                             selected_track_for_playlist.read().iter().cloned().collect()
                         };
                         let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
-                        if !refs.is_empty() {
-                            let s = active_source.peek().clone();
-                            spawn(async move {
-                                if s.create_playlist(&name, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
-                        }
+                        hooks::playlist_actions::create_with(name, refs);
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
                         is_selection_mode.set(false);
