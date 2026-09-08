@@ -48,6 +48,7 @@ fn map_sort(sort: api::TrackSort) -> db::TrackSort {
         api::TrackSort::Album => db::TrackSort::Album,
         api::TrackSort::DateAdded => db::TrackSort::DateAdded,
         api::TrackSort::PlayCount => db::TrackSort::PlayCount,
+        api::TrackSort::Fields(fields) => db::TrackSort::Fields(fields),
     }
 }
 

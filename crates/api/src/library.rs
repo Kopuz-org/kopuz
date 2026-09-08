@@ -2,7 +2,7 @@ use crate::player::TrackKind;
 
 /// Library ordering. `Default` is the daemon's own choice, so a caller that
 /// does not care says nothing.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum TrackSort {
     #[default]
     Default,
@@ -11,6 +11,9 @@ pub enum TrackSort {
     Album,
     DateAdded,
     PlayCount,
+    /// Stacked user criteria (the library's sort control): the first field
+    /// decides, the rest break ties. Empty means [`TrackSort::Default`].
+    Fields(Vec<config::SortCriterion<config::TrackSortField>>),
 }
 
 /// A track row on the wire. `key` is the stable library ref used everywhere

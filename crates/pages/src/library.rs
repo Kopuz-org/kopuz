@@ -48,10 +48,14 @@ pub fn LibraryPage(
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let library_sort = use_signal(|| config.peek().library_sort.clone());
-    let filter = use_memo(move || TrackFilter {
-        source: source(),
-        sort: TrackSort::Fields(library_sort.read().clone()),
-        ..Default::default()
+    let filter = use_memo(move || {
+        // The source is the daemon's; naming it here only keeps the memo
+        // re-running across a switch.
+        let _ = source();
+        TrackFilter {
+            sort: TrackSort::Fields(library_sort.read().clone()),
+            ..Default::default()
+        }
     });
     use_effect(move || {
         let curr = library_sort.read().clone();
@@ -281,12 +285,13 @@ pub fn LibraryPage(
                             })),
                             on_start_radio: components::track_row::radio_handler(track_radio.clone()),
                             on_play: move |_| {
-                                let read_db = consume_context::<hooks::ReadDb>();
+                                let api = hooks::consume_api();
                                 let f = filter();
                                 spawn(async move {
-                                    let all = read_db
-                                        .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
+                                    let all = api
+                                        .tracks(f, hooks::use_db_queries::all())
                                         .await
+                                        .map(|page| hooks::wire::tracks_from_api(page.items))
                                         .unwrap_or_default();
                                     queue.set(all);
                                     ctrl.play_track(idx);
@@ -405,13 +410,13 @@ pub fn LibraryPage(
                         if selected.is_empty() {
                             return;
                         }
-                        let read_db = consume_context::<hooks::ReadDb>();
+                        let api = hooks::consume_api();
                         let f = filter();
                         spawn(async move {
-                            let total = read_db.tracks_count(&f).await.unwrap_or(0);
-                            let tracks: Vec<_> = read_db
-                                .tracks_page(&f, Page { offset: 0, limit: total })
+                            let tracks: Vec<_> = api
+                                .tracks(f, hooks::use_db_queries::all())
                                 .await
+                                .map(|page| hooks::wire::tracks_from_api(page.items))
                                 .unwrap_or_default()
                                 .into_iter()
                                 .filter(|t| selected.contains(&t.id))
@@ -526,13 +531,13 @@ pub fn LibraryPage(
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                let read_db = consume_context::<hooks::ReadDb>();
+                                let api = hooks::consume_api();
                                 let f = filter();
                                 spawn(async move {
-                                    let total = read_db.tracks_count(&f).await.unwrap_or(0);
-                                    let tracks = read_db
-                                        .tracks_page(&f, Page { offset: 0, limit: total })
+                                    let tracks = api
+                                        .tracks(f, hooks::use_db_queries::all())
                                         .await
+                                        .map(|page| hooks::wire::tracks_from_api(page.items))
                                         .unwrap_or_default();
                                     selected_tracks
                                         .set(tracks.into_iter().map(|track| track.id).collect());
