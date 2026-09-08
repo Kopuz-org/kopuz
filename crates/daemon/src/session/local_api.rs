@@ -58,7 +58,7 @@ impl LocalApi {
 }
 
 #[async_trait::async_trait]
-impl api::KopuzApi for LocalApi {
+impl api::PlayerApi for LocalApi {
     async fn player_state(&self) -> Result<PlayerState, ApiError> {
         Ok(self.session.state())
     }
@@ -78,7 +78,10 @@ impl api::KopuzApi for LocalApi {
     async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError> {
         self.session.queue_edit(edit).await
     }
+}
 
+#[async_trait::async_trait]
+impl api::LibraryApi for LocalApi {
     async fn tracks(
         &self,
         filter: api::TrackFilter,
@@ -90,44 +93,6 @@ impl api::KopuzApi for LocalApi {
                 "this daemon runs without a library service",
             )),
         }
-    }
-
-    async fn artwork(&self, request: api::ArtworkRequest) -> Result<api::ArtworkData, ApiError> {
-        let Some(artwork) = self.artwork.as_ref() else {
-            return Err(ApiError::unsupported(
-                "this daemon runs without an artwork service",
-            ));
-        };
-        let entity = match &request.target {
-            api::ArtworkTarget::Track(key) => crate::artwork::ArtworkEntity::Track(key),
-            api::ArtworkTarget::Album(id) => crate::artwork::ArtworkEntity::Album(id),
-            api::ArtworkTarget::Artist(name) => crate::artwork::ArtworkEntity::Artist(name),
-        };
-        let payload = artwork.fetch(entity, request.hq).await?;
-        Ok(api::ArtworkData {
-            content_type: payload.content_type.to_string(),
-            bytes: payload.bytes,
-        })
-    }
-
-    async fn config(&self) -> Result<api::ConfigView, ApiError> {
-        match &self.config {
-            Some(service) => service.view().await,
-            None => Err(ApiError::unsupported(
-                "this daemon runs without a config service",
-            )),
-        }
-    }
-
-    async fn set_config(&self, config: config::AppConfig) -> Result<api::ConfigView, ApiError> {
-        let Some(service) = &self.config else {
-            return Err(ApiError::unsupported(
-                "this daemon runs without a config service",
-            ));
-        };
-        let (view, updated, changed) = service.set(config).await?;
-        self.session.set_config(updated, changed);
-        Ok(view)
     }
 
     async fn favorites(&self) -> Result<api::FavoritesView, ApiError> {
@@ -148,6 +113,74 @@ impl api::KopuzApi for LocalApi {
         }
     }
 
+    async fn folder_tracks(&self, prefix: String, page: Page) -> Result<api::TrackPage, ApiError> {
+        match &self.library {
+            Some(library) => library.folder_tracks(&prefix, page).await,
+            None => Err(ApiError::unsupported("no library service")),
+        }
+    }
+
+    async fn lyrics(&self, key: String) -> Result<api::LyricsView, ApiError> {
+        match &self.library {
+            Some(library) => library.lyrics(&key).await,
+            None => Err(ApiError::unsupported("no library service")),
+        }
+    }
+
+    async fn stats(&self) -> Result<api::StatsView, ApiError> {
+        match &self.library {
+            Some(library) => Ok(library.stats()),
+            None => Err(ApiError::unsupported("no library service")),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl api::ArtworkApi for LocalApi {
+    async fn artwork(&self, request: api::ArtworkRequest) -> Result<api::ArtworkData, ApiError> {
+        let Some(artwork) = self.artwork.as_ref() else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without an artwork service",
+            ));
+        };
+        let entity = match &request.target {
+            api::ArtworkTarget::Track(key) => crate::artwork::ArtworkEntity::Track(key),
+            api::ArtworkTarget::Album(id) => crate::artwork::ArtworkEntity::Album(id),
+            api::ArtworkTarget::Artist(name) => crate::artwork::ArtworkEntity::Artist(name),
+        };
+        let payload = artwork.fetch(entity, request.hq).await?;
+        Ok(api::ArtworkData {
+            content_type: payload.content_type.to_string(),
+            bytes: payload.bytes,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl api::ConfigApi for LocalApi {
+    async fn config(&self) -> Result<api::ConfigView, ApiError> {
+        match &self.config {
+            Some(service) => service.view().await,
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a config service",
+            )),
+        }
+    }
+
+    async fn set_config(&self, config: config::AppConfig) -> Result<api::ConfigView, ApiError> {
+        let Some(service) = &self.config else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without a config service",
+            ));
+        };
+        let (view, updated, changed) = service.set(config).await?;
+        self.session.set_config(updated, changed);
+        Ok(view)
+    }
+}
+
+#[async_trait::async_trait]
+impl api::JobApi for LocalApi {
     async fn start_job(&self, kind: api::JobKind) -> Result<api::JobRef, ApiError> {
         let Some(runner) = &self.jobs else {
             return Err(ApiError::unsupported(
@@ -170,27 +203,6 @@ impl api::KopuzApi for LocalApi {
             api::JobKind::PlaylistSync | api::JobKind::Download | api::JobKind::Unknown => Err(
                 ApiError::unsupported("this job kind has no direct starter yet"),
             ),
-        }
-    }
-
-    async fn folder_tracks(&self, prefix: String, page: Page) -> Result<api::TrackPage, ApiError> {
-        match &self.library {
-            Some(library) => library.folder_tracks(&prefix, page).await,
-            None => Err(ApiError::unsupported("no library service")),
-        }
-    }
-
-    async fn lyrics(&self, key: String) -> Result<api::LyricsView, ApiError> {
-        match &self.library {
-            Some(library) => library.lyrics(&key).await,
-            None => Err(ApiError::unsupported("no library service")),
-        }
-    }
-
-    async fn stats(&self) -> Result<api::StatsView, ApiError> {
-        match &self.library {
-            Some(library) => Ok(library.stats()),
-            None => Err(ApiError::unsupported("no library service")),
         }
     }
 
@@ -238,7 +250,9 @@ impl api::KopuzApi for LocalApi {
             )),
         }
     }
+}
 
+impl api::EventApi for LocalApi {
     fn events(&self) -> api::EventStream {
         use futures_util::StreamExt;
         let rx = self.session.subscribe();

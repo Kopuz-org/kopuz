@@ -17,7 +17,7 @@
 use std::path::{Path, PathBuf};
 
 use api::{
-    ApiError, CommandAck, ConfigView, FavoritesView, JobKind, JobRef, JobStatus, KopuzApi, Page,
+    ApiError, CommandAck, ConfigView, FavoritesView, JobKind, JobRef, JobStatus, Page,
     PlayerCommand, PlayerState, QueueEdit, QueueWindow, SetQueueRequest, TrackFilter, TrackPage,
 };
 use hyper_util::rt::TokioIo;
@@ -71,7 +71,7 @@ impl GrpcApi {
 }
 
 #[async_trait::async_trait]
-impl KopuzApi for GrpcApi {
+impl api::PlayerApi for GrpcApi {
     async fn player_state(&self) -> Result<PlayerState, ApiError> {
         let state = self
             .client()
@@ -168,7 +168,10 @@ impl KopuzApi for GrpcApi {
             rev: ack.get_ref().rev,
         })
     }
+}
 
+#[async_trait::async_trait]
+impl api::LibraryApi for GrpcApi {
     async fn tracks(&self, filter: TrackFilter, page: Page) -> Result<TrackPage, ApiError> {
         let tracks = self
             .client()
@@ -179,26 +182,6 @@ impl KopuzApi for GrpcApi {
             .await
             .map_err(wire_error)?;
         Ok(convert::track_page_from_proto(tracks.get_ref()))
-    }
-
-    async fn config(&self) -> Result<ConfigView, ApiError> {
-        let view = self
-            .client()
-            .get_config(Request::new(proto::GetConfigRequest {}))
-            .await
-            .map_err(wire_error)?;
-        Ok(convert::config_view_from_proto(view.get_ref()))
-    }
-
-    async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError> {
-        let view = self
-            .client()
-            .set_config(Request::new(proto::SetConfigRequest {
-                config: Some(convert::config_to_proto(&config)),
-            }))
-            .await
-            .map_err(wire_error)?;
-        Ok(convert::config_view_from_proto(view.get_ref()))
     }
 
     async fn favorites(&self) -> Result<FavoritesView, ApiError> {
@@ -216,19 +199,6 @@ impl KopuzApi for GrpcApi {
             .await
             .map_err(wire_error)?;
         Ok(())
-    }
-
-    async fn start_job(&self, kind: JobKind) -> Result<JobRef, ApiError> {
-        let job = self
-            .client()
-            .start_job(Request::new(proto::StartJobRequest {
-                kind: convert::job_kind_to_proto(kind) as i32,
-            }))
-            .await
-            .map_err(wire_error)?;
-        Ok(JobRef {
-            job_id: job.get_ref().job_id.clone(),
-        })
     }
 
     async fn folder_tracks(&self, prefix: String, page: Page) -> Result<api::TrackPage, ApiError> {
@@ -260,7 +230,10 @@ impl KopuzApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(convert::stats_from_proto(stats.get_ref()))
     }
+}
 
+#[async_trait::async_trait]
+impl api::ArtworkApi for GrpcApi {
     async fn artwork(&self, request: api::ArtworkRequest) -> Result<api::ArtworkData, ApiError> {
         let mut stream = self
             .client()
@@ -277,6 +250,45 @@ impl KopuzApi for GrpcApi {
             data.bytes.extend_from_slice(&chunk.data);
         }
         Ok(data)
+    }
+}
+
+#[async_trait::async_trait]
+impl api::ConfigApi for GrpcApi {
+    async fn config(&self) -> Result<ConfigView, ApiError> {
+        let view = self
+            .client()
+            .get_config(Request::new(proto::GetConfigRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::config_view_from_proto(view.get_ref()))
+    }
+
+    async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError> {
+        let view = self
+            .client()
+            .set_config(Request::new(proto::SetConfigRequest {
+                config: Some(convert::config_to_proto(&config)),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::config_view_from_proto(view.get_ref()))
+    }
+}
+
+#[async_trait::async_trait]
+impl api::JobApi for GrpcApi {
+    async fn start_job(&self, kind: JobKind) -> Result<JobRef, ApiError> {
+        let job = self
+            .client()
+            .start_job(Request::new(proto::StartJobRequest {
+                kind: convert::job_kind_to_proto(kind) as i32,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(JobRef {
+            job_id: job.get_ref().job_id.clone(),
+        })
     }
 
     async fn download(&self, keys: Vec<String>) -> Result<JobRef, ApiError> {
@@ -328,7 +340,9 @@ impl KopuzApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(())
     }
+}
 
+impl api::EventApi for GrpcApi {
     /// Holds a server-streaming subscription, reconnecting with the last seen
     /// sequence after drops. Unknown event kinds are skipped, matching the
     /// protocol's forward-compatibility rule; a gap past the daemon's replay
