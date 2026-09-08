@@ -33,7 +33,7 @@ mod artwork_protocol;
 #[cfg(not(target_os = "android"))]
 mod chrome_trace;
 #[cfg(not(target_os = "android"))]
-#[cfg(not(target_os = "android"))]
+#[cfg(unix)]
 mod daemon_child;
 mod desktop_shell;
 #[cfg(not(target_os = "android"))]
@@ -242,7 +242,7 @@ fn init_android_tls() -> Result<(), String> {
 }
 
 fn main() -> std::process::ExitCode {
-    #[cfg(not(target_os = "android"))]
+    #[cfg(unix)]
     if daemon_child::is_daemon_process() {
         return daemon_child::run_as_daemon();
     }
@@ -284,8 +284,9 @@ fn main() -> std::process::ExitCode {
         // logging::shutdown() after launch returns or on Ctrl+C.
         logging::init(&log_dir, config_tracing_enabled);
 
-        // Opt-in until the GUI reads through the daemon: both processes
-        // would otherwise open the same SQLite file as writers.
+        // Opt-in until the GUI reads through the daemon, and unix-only
+        // until the socket transport has a named-pipe counterpart.
+        #[cfg(unix)]
         if !matches!(daemon_child::mode_from_args(), daemon_child::Mode::None)
             && let Err(error) = daemon_child::attach(daemon_child::mode_from_args())
         {

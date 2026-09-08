@@ -96,6 +96,8 @@ pub fn spawn() -> Result<(std::process::Child, PathBuf), String> {
         .arg(RUN_DAEMON)
         .arg("--socket")
         .arg(&socket)
+        .arg("--db-path")
+        .arg(daemon_db_path())
         .spawn()
         .map_err(|error| format!("could not start the daemon: {error}"))?;
 
@@ -119,6 +121,21 @@ fn follow_child(mut child: std::process::Child) {
         );
         std::process::exit(1);
     });
+}
+
+/// A database of the daemon's own, beside the app's.
+///
+/// Temporary: the app still opens its library directly, and SQLite takes one
+/// writer, so a daemon on the same file would fight it -- in release that
+/// file is the real library. Nothing reads through the daemon yet, so it
+/// loses nothing by starting empty. Drop this once the app reads through the
+/// API and the daemon owns the library outright.
+fn daemon_db_path() -> PathBuf {
+    let app = db::default_db_path();
+    match app.file_name().and_then(|name| name.to_str()) {
+        Some(name) => app.with_file_name(format!("daemon-{name}")),
+        None => app,
+    }
 }
 
 /// The daemon binds before it serves, so the socket appearing and accepting
