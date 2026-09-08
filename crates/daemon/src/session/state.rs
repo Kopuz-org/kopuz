@@ -94,10 +94,13 @@ impl Session {
     }
 
     pub(super) fn build_state(&self) -> PlayerState {
-        let track = self
-            .model
-            .current_track()
-            .map(|track| now_playing_from(track, &self.config));
+        // While an integration owns playback the queue still holds whatever
+        // the engine had; the reported track is what is actually audible.
+        let shown = match self.external.as_ref() {
+            Some(external) => external.track.as_ref(),
+            None => self.model.current_track(),
+        };
+        let track = shown.map(|track| now_playing_from(track, &self.config));
         let fading = self.pending_transition.as_ref().and_then(|pending| {
             (pending.stage == TransitionStage::Fading).then(|| FadingState {
                 from_token: pending.from_token,
@@ -127,8 +130,14 @@ impl Session {
             output_latency_ms: Some(self.player.output_latency().as_millis() as u64),
             buffered: self.buffered.clone(),
             fading,
+            external: self
+                .external
+                .as_ref()
+                .map(|external| api::ExternalPlayback {
+                    kind: external.player.kind().to_string(),
+                    device: external.device.clone(),
+                }),
             error: self.error.clone(),
-            ..Default::default()
         }
     }
 }

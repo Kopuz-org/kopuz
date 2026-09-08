@@ -1358,3 +1358,167 @@ async fn radio_metadata_updates_the_displayed_track() {
         Some("Song Title")
     );
 }
+
+/// Records what the daemon asked the integration to do, standing in for a
+/// Spotify Connect device.
+#[derive(Default)]
+struct StubExternal {
+    calls: Mutex<Vec<String>>,
+}
+
+impl StubExternal {
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().expect("calls").clone()
+    }
+
+    fn record(&self, call: &str) {
+        self.calls.lock().expect("calls").push(call.to_string());
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::external::ExternalPlayer for StubExternal {
+    fn kind(&self) -> &'static str {
+        "stub"
+    }
+
+    fn service(&self) -> config::MusicService {
+        config::MusicService::Spotify
+    }
+
+    async fn play(&self) -> Result<(), ApiError> {
+        self.record("play");
+        Ok(())
+    }
+
+    async fn pause(&self) -> Result<(), ApiError> {
+        self.record("pause");
+        Ok(())
+    }
+
+    async fn next(&self) -> Result<(), ApiError> {
+        self.record("next");
+        Ok(())
+    }
+
+    async fn previous(&self) -> Result<(), ApiError> {
+        self.record("previous");
+        Ok(())
+    }
+
+    async fn seek(&self, position_ms: u64) -> Result<(), ApiError> {
+        self.record(&format!("seek:{position_ms}"));
+        Ok(())
+    }
+
+    async fn set_volume(&self, volume: f32) -> Result<(), ApiError> {
+        self.record(&format!("volume:{volume}"));
+        Ok(())
+    }
+}
+
+fn external_track(title: &str) -> Track {
+    Track {
+        id: reader::models::TrackId::Server {
+            service: config::MusicService::Spotify,
+            item_id: title.to_string(),
+        },
+        cover: None,
+        album_id: String::new(),
+        title: title.to_string(),
+        artist: "Artist".into(),
+        album: "Album".into(),
+        duration: 180,
+        khz: 44,
+        bitrate: 320,
+        track_number: None,
+        disc_number: None,
+        musicbrainz_release_id: None,
+        musicbrainz_recording_id: None,
+        musicbrainz_track_id: None,
+        playlist_item_id: None,
+        artists: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn transport_commands_reach_the_integration_that_owns_playback() {
+    let harness = harness(|_| {});
+    let stub = Arc::new(StubExternal::default());
+    harness.api.session.attach_external(stub.clone());
+    harness.api.session.report_external(crate::ExternalReport {
+        track: Some(external_track("remote")),
+        position_ms: 1000,
+        playing: true,
+        ..Default::default()
+    });
+
+    let state = wait_state(&harness.api, "external track shown", |state| {
+        state.track.as_ref().is_some_and(|t| t.title == "remote")
+    })
+    .await;
+    assert_eq!(
+        state.external.as_ref().map(|e| e.kind.as_str()),
+        Some("stub"),
+        "clients are told playback is external"
+    );
+    assert_eq!(state.phase, ApiPhase::Playing);
+
+    for command in [
+        PlayerCommand::Next,
+        PlayerCommand::Previous,
+        PlayerCommand::Seek { position_ms: 4200 },
+        PlayerCommand::Toggle,
+    ] {
+        harness
+            .api
+            .player_command(command)
+            .await
+            .expect("command accepted");
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        stub.calls(),
+        vec!["next", "previous", "seek:4200", "pause"],
+        "toggle resolves against the daemon's own phase"
+    );
+}
+
+#[tokio::test]
+async fn detaching_an_integration_returns_the_session_to_the_engine() {
+    let harness = harness(|_| {});
+    let stub = Arc::new(StubExternal::default());
+    harness.api.session.attach_external(stub.clone());
+    harness.api.session.report_external(crate::ExternalReport {
+        track: Some(external_track("remote")),
+        playing: true,
+        ..Default::default()
+    });
+    wait_state(&harness.api, "external active", |state| {
+        state.external.is_some()
+    })
+    .await;
+
+    harness.api.session.detach_external();
+    let state = wait_state(&harness.api, "external cleared", |state| {
+        state.external.is_none()
+    })
+    .await;
+    assert_eq!(state.phase, ApiPhase::Idle);
+    assert!(state.track.is_none());
+
+    harness
+        .api
+        .set_queue(replace(&["a"]))
+        .await
+        .expect("queue replaced");
+    let state = wait_state(&harness.api, "engine plays again", |state| {
+        state.track.as_ref().is_some_and(|t| t.title == "a")
+    })
+    .await;
+    assert!(state.external.is_none());
+    assert!(
+        stub.calls().iter().all(|call| call != "next"),
+        "the detached integration hears nothing further"
+    );
+}

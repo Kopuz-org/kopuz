@@ -106,6 +106,10 @@ enum SessionCmd {
         changed: Vec<String>,
     },
     Emit(Box<ApiEvent>),
+    AttachExternal(crate::external::SharedExternalPlayer),
+    DetachExternal,
+    ExternalReport(Box<crate::external::ExternalReport>),
+    ExternalArtworkFetched(String),
     SetStationRegistry(Arc<radio::registry::StationRegistry>),
     SetActiveSource(Option<server::source::ActiveSource>),
     SetQueueRaw {
@@ -202,6 +206,7 @@ impl SessionHandle {
             recorder: services.recorder,
             scrobbler: services.scrobbler,
             last_recent_key: None,
+            external: None,
             config_tx,
             config: services.config,
             active_source: services.active_source,
@@ -283,6 +288,23 @@ impl SessionHandle {
 
     pub async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError> {
         self.request(|tx| SessionCmd::Edit(edit, tx)).await
+    }
+
+    /// Hand playback to an integration the engine cannot drive. The engine is
+    /// stopped and transport commands route to it until [`Self::detach_external`].
+    pub fn attach_external(&self, player: crate::external::SharedExternalPlayer) {
+        let _ = self.cmd_tx.send(SessionCmd::AttachExternal(player));
+    }
+
+    pub fn detach_external(&self) {
+        let _ = self.cmd_tx.send(SessionCmd::DetachExternal);
+    }
+
+    /// Report what the attached integration is playing.
+    pub fn report_external(&self, report: crate::external::ExternalReport) {
+        let _ = self
+            .cmd_tx
+            .send(SessionCmd::ExternalReport(Box::new(report)));
     }
 
     /// Restore a persisted queue: paused, with a resume point at the saved
@@ -474,6 +496,8 @@ struct Session {
     recorder: Option<Arc<dyn PlaybackRecorder>>,
     scrobbler: Option<Arc<crate::scrobbler::Scrobbler>>,
     last_recent_key: Option<String>,
+    /// Set while an integration the engine cannot drive owns playback.
+    external: Option<ExternalState>,
     config_tx: watch::Sender<config::AppConfig>,
     config: config::AppConfig,
     active_source: Option<server::source::ActiveSource>,
@@ -552,6 +576,38 @@ impl Session {
                 self.apply_config(*config, changed, state_tx);
             }
             SessionCmd::Emit(event) => self.emit(*event),
+            SessionCmd::AttachExternal(player) => {
+                // Two players cannot both be playing: ours stops before the
+                // integration starts.
+                self.stop(state_tx);
+                self.external = Some(ExternalState {
+                    player,
+                    device: None,
+                    track: None,
+                    artwork: None,
+                    completed_key: None,
+                });
+                self.publish(state_tx, false);
+            }
+            SessionCmd::DetachExternal => {
+                if self.external.take().is_some() {
+                    self.last_recent_key = None;
+                    self.set_intent(PlaybackIntent::Stopped);
+                    self.phase = ApiPhase::Idle;
+                    self.position = None;
+                    self.push_external_now_playing();
+                    self.publish(state_tx, false);
+                }
+            }
+            SessionCmd::ExternalReport(report) => self.apply_external_report(*report, state_tx),
+            SessionCmd::ExternalArtworkFetched(path) => {
+                if let Some(external) = self.external.as_mut()
+                    && external.track.is_some()
+                {
+                    external.artwork = Some(path);
+                    self.push_external_now_playing();
+                }
+            }
             SessionCmd::SetStationRegistry(registry) => self.station_registry = registry,
             SessionCmd::SetActiveSource(source) => self.active_source = source,
             SessionCmd::SetQueueRaw {
@@ -614,6 +670,31 @@ impl Session {
         command: PlayerCommand,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
+        // Media keys, MPRIS and every frontend send the same commands whoever
+        // is playing; while an integration owns playback they go to it, since
+        // the engine has nothing to act on. Toggle resolves here because only
+        // the daemon knows the current phase.
+        if self.external.is_some() {
+            let command = match command {
+                PlayerCommand::Toggle if self.phase == ApiPhase::Playing => PlayerCommand::Pause,
+                PlayerCommand::Toggle => PlayerCommand::Play,
+                other => other,
+            };
+            if let PlayerCommand::SetMode { shuffle, loop_mode } = command {
+                if let Some(on) = shuffle {
+                    self.model.set_shuffle(on);
+                }
+                if let Some(mode) = loop_mode {
+                    self.model.set_loop_mode(mode);
+                }
+                return Ok(self.publish(state_tx, shuffle.is_some()));
+            }
+            if let PlayerCommand::SetVolume { volume } = command {
+                self.volume = volume.clamp(0.0, 1.0);
+            }
+            self.dispatch_external(command);
+            return Ok(self.publish(state_tx, false));
+        }
         let mut queue_changed = false;
         match command {
             PlayerCommand::Play => self.resume(state_tx),
@@ -1060,6 +1141,147 @@ impl Session {
         self.publish(state_tx, false);
     }
 
+    /// Fold an integration's report into the same state the engine would have
+    /// produced: player state, recents, listen counts, scrobbles, OS widget.
+    fn apply_external_report(
+        &mut self,
+        report: crate::external::ExternalReport,
+        state_tx: &watch::Sender<PlayerState>,
+    ) {
+        let Some(external) = self.external.as_mut() else {
+            return;
+        };
+        external.device = report.device;
+        let changed = report.track.as_ref().map(|track| track.id.uid())
+            != external.track.as_ref().map(|track| track.id.uid());
+        let mut committed = None;
+        if changed {
+            external.completed_key = None;
+            external.artwork = None;
+            external.track = report.track;
+            self.last_recent_key = None;
+            match self.external.as_ref().and_then(|it| it.track.clone()) {
+                Some(track) => {
+                    let token = self.allocate_token();
+                    self.set_intent(PlaybackIntent::Committed { token });
+                    self.record_recent_track(track.clone());
+                    committed = Some((track, token));
+                }
+                None => self.set_intent(PlaybackIntent::Stopped),
+            }
+            self.fetch_external_artwork(report.cover_url);
+        }
+
+        let playing_track = self.external.as_ref().and_then(|it| it.track.clone());
+        self.phase = match (&playing_track, report.playing) {
+            (None, _) => ApiPhase::Idle,
+            (Some(_), true) => ApiPhase::Playing,
+            (Some(_), false) => ApiPhase::Paused,
+        };
+        self.position = playing_track.as_ref().map(|_| PositionAnchor {
+            ms: report.position_ms,
+            at_ms: self.now_ms(),
+            playing: report.playing,
+        });
+        self.position_token = playing_track.as_ref().map(|_| self.current_token);
+
+        if report.completed
+            && let Some(track) = playing_track
+            && self
+                .external
+                .as_ref()
+                .is_some_and(|it| it.completed_key.as_deref() != Some(track.id.uid().as_str()))
+        {
+            if let Some(external) = self.external.as_mut() {
+                external.completed_key = Some(track.id.uid());
+            }
+            self.record_listen(track);
+        }
+        self.push_external_now_playing();
+        self.publish(state_tx, false);
+        if let (Some(scrobbler), Some((track, token))) = (self.scrobbler.clone(), committed) {
+            scrobbler.track_committed(track, token);
+        }
+    }
+
+    /// The OS widgets want a local file, not a URL, so the cover is fetched in
+    /// the background and the metadata re-pushed when it lands.
+    fn fetch_external_artwork(&self, cover_url: Option<String>) {
+        let Some(url) = cover_url.filter(|url| url.starts_with("http")) else {
+            return;
+        };
+        let tx = self.cmd_tx.clone();
+        tokio::spawn(async move {
+            if let Some(path) = load::fetch_cover_to_temp(&url).await {
+                let _ = tx.send(SessionCmd::ExternalArtworkFetched(path));
+            }
+        });
+    }
+
+    /// Drive the OS media widget for external playback. Engine playback pushes
+    /// from `Player::push_now_playing`, which is silent while the engine is
+    /// stopped, so the daemon feeds it from the report instead -- a frontend
+    /// never reaches for the system integration itself.
+    fn push_external_now_playing(&self) {
+        let Some(track) = self.external.as_ref().and_then(|it| it.track.as_ref()) else {
+            player::systemint::update_now_playing("", "", "", 0.0, 0.0, false, None);
+            return;
+        };
+        let artwork = self.external.as_ref().and_then(|it| it.artwork.clone());
+        player::systemint::update_now_playing(
+            &track.title,
+            &track.artist,
+            &track.album,
+            track.duration as f64,
+            self.position
+                .map(|anchor| anchor.ms as f64 / 1000.0)
+                .unwrap_or_default(),
+            self.phase == ApiPhase::Playing,
+            artwork.as_deref(),
+        );
+    }
+
+    /// Send a transport command to the integration that owns playback. The
+    /// call is a network round-trip, so it runs off the actor loop; the answer
+    /// comes back as the integration's next report.
+    fn dispatch_external(&self, command: PlayerCommand) {
+        let Some(player) = self.external.as_ref().map(|it| it.player.clone()) else {
+            return;
+        };
+        tokio::spawn(async move {
+            let result = match command {
+                PlayerCommand::Play => player.play().await,
+                PlayerCommand::Pause | PlayerCommand::Stop => player.pause().await,
+                PlayerCommand::Next => player.next().await,
+                PlayerCommand::Previous => player.previous().await,
+                PlayerCommand::Seek { position_ms } => player.seek(position_ms).await,
+                PlayerCommand::SetVolume { volume } => player.set_volume(volume).await,
+                PlayerCommand::Toggle | PlayerCommand::SetMode { .. } => Ok(()),
+            };
+            if let Err(error) = result {
+                tracing::warn!(%error, "external playback command failed");
+            }
+        });
+    }
+
+    /// Record an externally played track as recently played.
+    fn record_recent_track(&mut self, track: Track) {
+        let uid = track.id.uid();
+        if self.last_recent_key.as_deref() == Some(uid.as_str()) {
+            return;
+        }
+        self.last_recent_key = Some(uid);
+        if let Some(recorder) = self.recorder.clone() {
+            tokio::spawn(async move {
+                recorder.record_recent(&track).await;
+            });
+            self.emit(ApiEvent::LibraryInvalidated {
+                table: api::Table::Recents,
+                generation: self.rev,
+            });
+        }
+    }
+
     /// Record the committed track as recently played, once per session track.
     /// The invalidation event lets clients refresh recents immediately even
     /// though the durable write is fire-and-forget.
@@ -1403,6 +1625,15 @@ struct BufferProgressEvent {
     start: u64,
     end: u64,
     total: Option<u64>,
+}
+
+/// The attached integration plus what it last reported.
+struct ExternalState {
+    player: crate::external::SharedExternalPlayer,
+    device: Option<String>,
+    track: Option<Track>,
+    artwork: Option<String>,
+    completed_key: Option<String>,
 }
 
 fn merge_buffered_range(ranges: &mut Vec<BufferedRange>, incoming: BufferedRange) {
