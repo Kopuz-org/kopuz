@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-use api::{ApiError, ApiEvent, JobKind, JobRef, Page, QueueContext, Table, TrackFilter, TrackPage};
+use api::{ApiError, JobKind, JobRef, Page, QueueContext, Table, TrackFilter, TrackPage};
 use reader::Track;
 use tokio::sync::watch;
 
@@ -122,12 +122,8 @@ impl LibraryService {
     }
 
     fn invalidate(&self, table: Table) {
-        static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         if let Some(session) = self.session.get() {
-            session.emit_event(ApiEvent::LibraryInvalidated {
-                table,
-                generation: GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
-            });
+            session.invalidate(table);
         }
     }
 

@@ -75,9 +75,11 @@ pub enum ApiEvent {
         length: u32,
         index: Option<u32>,
     },
+    /// The named table changed; re-read what you hold from it. A pure dirty
+    /// signal, deliberately carrying no version: the writers are independent
+    /// services with no shared counter to report.
     LibraryInvalidated {
         table: Table,
-        generation: u64,
     },
     JobProgress(JobProgress),
     JobFinished {
