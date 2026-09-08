@@ -98,22 +98,14 @@ pub fn LibraryPage(
     });
 
     // Remote sync (servers). Local never calls this — its refresh is `on_rescan`.
-    let mut is_loading = use_signal(|| false);
+    // The daemon runs it, single-flight, so a second request while one is in
+    // flight is its business rather than a generation counter kept here.
+    let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::LibrarySync);
+    let is_loading = use_memo(move || sync_job.read().running);
     let mut has_fetched = use_signal(|| false);
-    let mut fetch_generation = use_signal(|| 0usize);
     let mut sync_server = move || {
         has_fetched.set(true);
-        is_loading.set(true);
-        fetch_generation.with_mut(|g| *g += 1);
-        let current_gen = *fetch_generation.peek();
-        spawn(async move {
-            if *fetch_generation.read() == current_gen {
-                let _ = crate::server::subsonic_sync::sync_server_library(true).await;
-                if *fetch_generation.read() == current_gen {
-                    is_loading.set(false);
-                }
-            }
-        });
+        hooks::jobs::start(hooks::JobKind::LibrarySync);
     };
     // First visit with an empty server library → auto-pull once.
     use_effect(move || {

@@ -100,9 +100,7 @@ pub fn HomeBody(
     // Servers fill an empty cache by syncing; local is populated by the scan.
     let mut fetch_remote = move || {
         has_fetched.set(true);
-        spawn(async move {
-            let _ = crate::server::subsonic_sync::sync_server_library(false).await;
-        });
+        hooks::jobs::start(hooks::JobKind::LibrarySync);
     };
 
     use_effect(move || {
