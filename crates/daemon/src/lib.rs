@@ -2,6 +2,9 @@
 //! library, config, and job services. Pure tokio, no Dioxus, no wire; the
 //! `grpc` feature adds the tonic shell.
 
+#[cfg(feature = "kopuzd")]
+pub mod boot;
+
 pub mod artwork;
 pub mod config_service;
 pub mod downloads;

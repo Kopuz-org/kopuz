@@ -21,7 +21,15 @@ Two deployment shapes serve the same API:
   must never run against the same library at once, so a frontend that wants
   to attach while the GUI is open attaches to the GUI itself.
 
-`kopuzd` flags: `--socket <path>`, `--db-path <file>`.
+`kopuzd` flags: `--socket <path>`, `--db-path <file>`, `--supervised`.
+
+`--supervised` marks a daemon that was launched by a frontend: it exits when
+that frontend's stream ends, however it ended. A daemon started by hand or by
+a service manager does not get the flag and ignores clients coming and going.
+
+The desktop app can also run the daemon as a child of its own executable,
+which is what `kopuz --daemon` does -- one binary, two processes, two logs,
+each dying with the other.
 
 ## Connecting
 

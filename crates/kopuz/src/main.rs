@@ -32,10 +32,12 @@ mod app_lifecycle;
 mod artwork_protocol;
 #[cfg(not(target_os = "android"))]
 mod chrome_trace;
+#[cfg(not(target_os = "android"))]
+#[cfg(not(target_os = "android"))]
+mod daemon_child;
 mod desktop_shell;
 #[cfg(not(target_os = "android"))]
 mod exit_flush;
-#[cfg(not(target_os = "android"))]
 mod legacy;
 mod logging;
 mod queue_state;
@@ -239,7 +241,12 @@ fn init_android_tls() -> Result<(), String> {
     .map_err(|e: ::jni::errors::Error| e.to_string())
 }
 
-fn main() {
+fn main() -> std::process::ExitCode {
+    #[cfg(not(target_os = "android"))]
+    if daemon_child::is_daemon_process() {
+        return daemon_child::run_as_daemon();
+    }
+
     #[cfg(target_os = "android")]
     if let Err(e) = init_android_tls() {
         panic!("android certificate verifier failed to initialize: {e}");
@@ -276,6 +283,15 @@ fn main() {
         // Guards live in a global inside `logging`; flushed by
         // logging::shutdown() after launch returns or on Ctrl+C.
         logging::init(&log_dir, config_tracing_enabled);
+
+        // Opt-in until the GUI reads through the daemon: both processes
+        // would otherwise open the same SQLite file as writers.
+        if !matches!(daemon_child::mode_from_args(), daemon_child::Mode::None)
+            && let Err(error) = daemon_child::attach(daemon_child::mode_from_args())
+        {
+            tracing::error!(%error, "could not reach a daemon");
+            return std::process::ExitCode::FAILURE;
+        }
 
         for line in identity_migration {
             tracing::info!("{line}");
@@ -515,6 +531,8 @@ fn main() {
 
         dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
     }
+
+    std::process::ExitCode::SUCCESS
 }
 
 #[component]

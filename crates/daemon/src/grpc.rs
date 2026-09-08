@@ -483,6 +483,19 @@ impl Kopuz for KopuzGrpc {
 /// it is stale -- clear it and take the path. The mode is the access
 /// control: 0600 means only this user can open the channel.
 pub fn bind_socket(path: &std::path::Path) -> std::io::Result<tokio::net::UnixListener> {
+    // sockaddr_un.sun_path is a fixed 108-byte field, and the kernel's error
+    // for overrunning it names a constant nobody recognises.
+    const SUN_PATH_MAX: usize = 100;
+    if path.as_os_str().len() > SUN_PATH_MAX {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "socket path is {} bytes; a unix socket cannot exceed {SUN_PATH_MAX}: {}",
+                path.as_os_str().len(),
+                path.display()
+            ),
+        ));
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -540,6 +553,17 @@ mod tests {
         let _listener = bind_socket(&path).expect("bind");
         let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "the socket mode is the access control");
+    }
+
+    #[tokio::test]
+    async fn an_overlong_socket_path_is_named_not_just_refused() {
+        let path = std::path::PathBuf::from(format!("/tmp/{}/kopuzd.sock", "x".repeat(120)));
+        let error = bind_socket(&path).expect_err("refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(
+            error.to_string().contains("unix socket cannot exceed"),
+            "the message has to say what is wrong: {error}"
+        );
     }
 
     #[tokio::test]
