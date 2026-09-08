@@ -15,7 +15,6 @@ use dioxus::desktop::wry::WebViewExtUnix;
 use dioxus::prelude::*;
 use kopuz_route::Route;
 use pages::server::download_manager::DownloadQueue;
-use queue_state::PersistedQueueState;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::Instrument;
@@ -24,21 +23,17 @@ use webkit2gtk::{SettingsExt, WebViewExt};
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 
-mod app_db;
 mod app_lifecycle;
 #[cfg(not(target_os = "android"))]
 mod artwork_protocol;
+mod backend;
 #[cfg(not(target_os = "android"))]
 mod chrome_trace;
-#[cfg(not(target_os = "android"))]
-#[cfg(unix)]
-mod daemon_child;
 mod desktop_shell;
 #[cfg(not(target_os = "android"))]
 mod exit_flush;
 mod legacy;
 mod logging;
-mod queue_state;
 #[cfg(not(target_os = "android"))]
 mod ui_profile;
 mod updates;
@@ -179,11 +174,6 @@ fn init_android_tls() -> Result<(), String> {
 }
 
 fn main() -> std::process::ExitCode {
-    #[cfg(unix)]
-    if daemon_child::is_daemon_process() {
-        return daemon_child::run_as_daemon();
-    }
-
     #[cfg(target_os = "android")]
     if let Err(e) = init_android_tls() {
         panic!("android certificate verifier failed to initialize: {e}");
@@ -195,49 +185,24 @@ fn main() -> std::process::ExitCode {
         unsafe { std::env::set_var("WEBKIT_FORCE_VBLANK_TIMER", "1") };
     }
 
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_FORCE_VBLANK_TIMER").is_none() {
-        // SAFETY: first statement of main, before any thread is spawned.
-        unsafe { std::env::set_var("WEBKIT_FORCE_VBLANK_TIMER", "1") };
-    }
-
     #[cfg(not(target_os = "android"))]
     {
-        let identity_migration = legacy::migrate_identity();
-
         let log_dir = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
             .map(|dirs| dirs.cache_dir().join("logs"))
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
-        // Read the persisted tracing toggle from the DB before the app (and its
-        // config Signal) exists — the subscriber is built once here, so the
-        // setting is applied at startup. Missing DB/blob defaults to off.
-        let config_tracing_enabled = db::peek_config(&db::default_db_path())
-            .map(|c| c.tracing_enabled)
-            .unwrap_or(false);
-
-        // Guards live in a global inside `logging`; flushed by
-        // logging::shutdown() after launch returns or on Ctrl+C.
-        logging::init(&log_dir, config_tracing_enabled);
-
-        // Opt-in until the GUI reads through the daemon, and unix-only
-        // until the socket transport has a named-pipe counterpart.
-        #[cfg(unix)]
-        if !matches!(daemon_child::mode_from_args(), daemon_child::Mode::None)
-            && let Err(error) = daemon_child::attach(daemon_child::mode_from_args())
-        {
-            tracing::error!(%error, "could not reach a daemon");
-            return std::process::ExitCode::FAILURE;
-        }
-
-        for line in identity_migration {
-            tracing::info!("{line}");
-        }
-
-        legacy::migrate_locations();
-
-        let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
+        // The core owns the library, so it is what knows whether tracing is
+        // on. The subscriber is built once, here, before the UI exists.
+        let core = match backend::start() {
+            Ok(core) => core,
+            Err(error) => {
+                logging::init(&log_dir, false);
+                tracing::error!(%error, "the daemon core failed to start");
+                return std::process::ExitCode::FAILURE;
+            }
+        };
+        logging::init(&log_dir, core.config.tracing_enabled);
 
         #[cfg(target_os = "macos")]
         {
@@ -540,10 +505,11 @@ fn App() -> Element {
         };
         config::store::FileLayers::read(&config::store::settings_path_for(&db_dir))
     });
-    let db = app_db::DB_HANDLE
-        .get()
-        .cloned()
-        .expect("db initialized in main before launch");
+    let core = backend::core().expect("core started in main before launch");
+    let db = core.db.clone();
+    // The one seam every hook and page will read through once they stop
+    // reaching for the database themselves.
+    use_context_provider(|| core.api.clone() as Arc<dyn api::KopuzApi>);
     // The UI reads through a read-only handle and operates through the cached
     // source handles below — it never gets a full `Db`, so it cannot reach a
     // write method (those live on `Storage`, not `ReadStore`). The full `Db` is
@@ -600,78 +566,13 @@ fn App() -> Element {
     let cover_cache = use_memo(move || cache_dir().join("covers"));
     let _ = std::fs::create_dir_all(cover_cache());
 
-    // The embedded daemon: the same session actor and services kopuzd runs,
-    // in-process. The UI's PlayerController is a signal mirror over the
-    // session; the scan job, scrobbler, favorites reconciler, OS media
-    // integration, and Jellyfin/Discord reporting all live behind it.
-    let embedded_services = {
-        let db_boot = db.clone();
-        use_hook(move || {
-            // Seeded with the persisted config loaded before launch, so the
-            // scan job, scrobbler, and reconciler can never observe default
-            // library roots or credentials. The async startup loader still
-            // applies the same config to the UI signals and re-pushes it
-            // through `set_config` (idempotent).
-            let seeded = app_db::BOOT_CONFIG.get().cloned().unwrap_or_default();
-            let registry = Arc::new(radio::registry::StationRegistry::default());
-            let library = Arc::new(daemon::LibraryService::new(
-                db_boot.clone(),
-                seeded.active_source.clone(),
-                registry.clone(),
-                cover_cache(),
-            ));
-            let initial_source: ::server::source::ActiveSource =
-                Arc::from(::server::source::active(db_boot.clone(), &seeded));
-            let scrobbler = daemon::Scrobbler::new(db_boot.clone());
-            let services = daemon::PlaybackServices {
-                config: seeded,
-                active_source: Some(initial_source.clone()),
-                station_registry: registry,
-                // Queue persistence stays with the app's exit-flush machinery
-                // below, which can snapshot the mirror signals synchronously
-                // on the close path — the session's own store is left off so
-                // the two never race on the same row.
-                queue_store: None,
-                recorder: Some(Arc::new(daemon::SourceRecorder::new(
-                    initial_source.clone(),
-                ))),
-                scrobbler: Some(scrobbler.clone()),
-            };
-            let session = match daemon::SessionHandle::try_spawn(library.clone(), services) {
-                Ok(session) => session,
-                Err(error) => {
-                    tracing::error!(%error, "audio engine initialization failed");
-                    return Err(format!("Audio engine initialization failed: {error}"));
-                }
-            };
-            library.attach_session(session.clone());
-            scrobbler.attach_session(session.clone());
-            let jobs = Arc::new(daemon::JobRunner::new(session.clone()));
-            let favorites = daemon::FavoritesService::new(db_boot, session.clone());
-            favorites.spawn_reconciler();
-            daemon::os_media::spawn(&session);
-            daemon::integrations::spawn_jellyfin_reporter(
-                &session,
-                initial_source,
-                session.config_watch(),
-            );
-            daemon::integrations::spawn_discord_presence(&session, session.config_watch());
-            Ok((session, library, jobs, favorites, scrobbler))
-        })
-    };
-    let (session, library_service, job_runner, favorites_service, scrobbler) =
-        match embedded_services {
-            Ok(services) => services,
-            Err(error) => {
-                return rsx! {
-                    main {
-                        role: "alert",
-                        style: "height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; text-align: center;",
-                        "{error}"
-                    }
-                };
-            }
-        };
+    // The core is already running: main built it before the window existed,
+    // because the tracing subscriber and the titlebar come out of its config.
+    let session = core.session.clone();
+    let library_service = core.library.clone();
+    let job_runner = core.jobs.clone();
+    let favorites_service = core.favorites.clone();
+    let scrobbler = core.scrobbler.clone();
 
     // A server switch or credential rotation rebuilds the shared source
     // handle; the session's loader has to follow it.
@@ -757,10 +658,6 @@ fn App() -> Element {
     // empty DB still counts). Library/playlists/favorites have no such flag
     // anymore — they're targeted per-row writes, never full-replace.
     let mut config_loaded_ok = use_signal(|| false);
-    let mut queue_loaded_ok = use_signal(|| false);
-
-    let mut pending_queue_state_snapshot = use_signal(|| None::<PersistedQueueState>);
-    let mut pending_queue_state_revision = use_signal(|| 0u64);
     #[cfg(not(target_os = "android"))]
     let close_hides_window = use_signal(|| false);
 
@@ -784,29 +681,15 @@ fn App() -> Element {
                 }
             ) && !*close_hides_window.peek();
         if shutting_down {
-            if let Some(db) = app_db::DB_HANDLE.get() {
-                let db = db.clone();
-                // None = the queue is empty (a cleared queue must persist as
-                // empty, not resurrect) — but only once the saved queue has
-                // actually been restored, else a quit during startup (or a
-                // failed load) would wipe it.
-                let queue_snap =
-                    (*initial_load_done.peek() && *queue_loaded_ok.peek()).then(|| {
-                        pending_queue_state_snapshot
-                            .peek()
-                            .clone()
-                            .map(queue_state::snapshot)
-                            .unwrap_or_default()
-                    });
+            if let Some(core) = backend::core() {
                 // Library/playlists/favorites need no flush — every mutation
-                // already committed as a targeted write when it happened.
-                let cfg = (*config_loaded_ok.peek()).then(|| {
-                    let mut cfg = config.peek().clone();
-                    cfg.volume = *volume.peek();
-                    cfg
-                });
-                exit_flush::persist_on_fresh_thread(db, queue_snap, cfg);
+                // already committed as a targeted write when it happened. The
+                // queue is the core's: it owns the store and persists on the
+                // way out, so only the config surface is ours to push.
+                let cfg = (*config_loaded_ok.peek()).then(|| config.peek().clone());
+                exit_flush::persist_on_fresh_thread(core.db.clone(), cfg);
             }
+            backend::shutdown();
             // After the persists, so they (and any failure warnings) land in
             // latest.log and the trace. Idempotent across CloseRequested/
             // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.
@@ -1319,69 +1202,6 @@ fn App() -> Element {
         });
     }
 
-    use_effect(move || {
-        if !*initial_load_done.read() || !*queue_loaded_ok.read() {
-            return;
-        }
-
-        let queue_snapshot = queue.read().clone();
-        let shuffle_order_snapshot = ctrl.shuffle_order.read().clone();
-        let shuffle_enabled_snapshot = *ctrl.shuffle.read();
-
-        let queue_state = queue_state::build_snapshot(
-            &queue_snapshot,
-            *current_queue_index.read(),
-            *current_song_progress.read(),
-            *is_playing.read(),
-            &shuffle_order_snapshot,
-            shuffle_enabled_snapshot,
-        );
-
-        if *pending_queue_state_snapshot.peek() != queue_state {
-            #[cfg(not(target_os = "android"))]
-            exit_flush::stash_queue(
-                queue_state
-                    .clone()
-                    .map(queue_state::snapshot)
-                    .unwrap_or_default(),
-            );
-            pending_queue_state_snapshot.set(queue_state);
-            pending_queue_state_revision.with_mut(|revision| *revision += 1);
-        }
-    });
-
-    let db_for_queue_save = db.clone();
-    use_future(move || {
-        let db = db_for_queue_save.clone();
-        async move {
-            let mut flushed_revision = 0u64;
-
-            loop {
-                let pending_revision = *pending_queue_state_revision.read();
-                if pending_revision == flushed_revision {
-                    utils::sleep(std::time::Duration::from_millis(250)).await;
-                    continue;
-                }
-
-                utils::sleep(std::time::Duration::from_millis(
-                    queue_state::SAVE_DEBOUNCE_MS,
-                ))
-                .await;
-
-                let latest_revision = *pending_queue_state_revision.read();
-                if latest_revision != pending_revision {
-                    continue;
-                }
-
-                let snapshot = pending_queue_state_snapshot.read().clone();
-                queue_state::persist_snapshot(db.clone(), snapshot)
-                    .instrument(tracing::info_span!("queue.persist"))
-                    .await;
-                flushed_revision = latest_revision;
-            }
-        }
-    });
-
     let _is_offline = app_lifecycle::use_connectivity_probe(config, network_banner);
 
     let db_for_load = db.clone();
@@ -1391,14 +1211,12 @@ fn App() -> Element {
     use_hook(move || {
         {
             let db = db_for_load;
-            let mut ctrl = ctrl;
 
             spawn(async move {
-                // Everything loads from the DB — the converted source of truth.
-                // The legacy JSON files are never read or written; a fresh DB
-                // with no blob yet just yields the default config.
-                // Startup loads ONLY config + queue — everything else is queried
-                // on demand by the page hooks. Config marks itself loaded ONLY
+                // The queue is restored by the core before the window exists;
+                // the config is all that is left to pull up into the signals.
+                // Everything else is queried on demand by the page hooks.
+                // Config marks itself loaded ONLY
                 // on success: its save is the one remaining whole-value write,
                 // and persisting a default born of a read failure would wipe
                 // real settings/servers.
@@ -1416,21 +1234,6 @@ fn App() -> Element {
                         None
                     }
                 };
-                let queue_loaded = match db
-                    .load_queue()
-                    .instrument(tracing::info_span!("startup.load_queue"))
-                    .await
-                {
-                    Ok(snap) => {
-                        queue_loaded_ok.set(true);
-                        Some(snap)
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "failed to load queue from db — queue saves disabled this session");
-                        None
-                    }
-                };
-
                 let cfg_loaded = cfg_loaded.unwrap_or_default();
                 {
                     let _apply = tracing::info_span!("startup.apply_config").entered();
@@ -1458,33 +1261,6 @@ fn App() -> Element {
                 // Local is the source of truth: no auto-switch to a server on
                 // startup. An unselected source stays Local (the config default);
                 // the user picks a server explicitly via the sidebar.
-
-                let queue_state = utils::offload(async move {
-                    queue_loaded.and_then(|snap| {
-                        queue_state::sanitize(PersistedQueueState {
-                            version: snap.version,
-                            queue: snap.queue,
-                            current_queue_index: snap.current_queue_index,
-                            progress_secs: snap.progress_secs,
-                            shuffle_order: snap.shuffle_order,
-                            shuffle_enabled: snap.shuffle_enabled,
-                        })
-                    })
-                })
-                .instrument(tracing::info_span!("startup.sanitize_queue"))
-                .await;
-                {
-                    let _restore = tracing::info_span!("startup.restore_queue").entered();
-                    if let Some(queue_state) = queue_state {
-                        ctrl.restore_queue_state(
-                            queue_state.queue,
-                            queue_state.current_queue_index,
-                            queue_state.progress_secs,
-                            queue_state.shuffle_order,
-                            queue_state.shuffle_enabled,
-                        );
-                    }
-                }
 
                 initial_load_done.set(true);
                 // Kick one reconcile shortly after startup so pending offline
