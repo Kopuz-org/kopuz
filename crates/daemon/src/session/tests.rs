@@ -813,6 +813,29 @@ fn radio_sentinel_becomes_wire_kind() {
     assert!(!now.seekable);
 }
 
+/// A server track's key and uid are different strings, and a consumer that
+/// matches the wrong one silently works on local tracks (where they are
+/// equal) while missing every server track.
+#[test]
+fn now_playing_carries_both_the_library_ref_and_the_source_qualified_id() {
+    let server = Track {
+        id: reader::models::TrackId::Server {
+            service: config::MusicService::YtMusic,
+            item_id: "abc123".to_string(),
+        },
+        ..test_track(&"abc123".to_string())
+    };
+    let now = now_playing_from(&server, &config::AppConfig::default());
+    assert_eq!(now.key, "abc123", "key is the bare library ref");
+    assert_eq!(now.uid, "ytmusic:abc123", "uid is source-qualified");
+    assert_ne!(now.key, now.uid, "the two must not be conflated");
+
+    // Local tracks are the case that hides the mistake: both are the path.
+    let local = test_track(&"/music/a.flac".to_string());
+    let now = now_playing_from(&local, &config::AppConfig::default());
+    assert_eq!(now.key, now.uid);
+}
+
 struct MemoryStore {
     saved: Mutex<Vec<db::QueueSnapshot>>,
 }
