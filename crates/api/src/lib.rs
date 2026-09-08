@@ -228,6 +228,16 @@ pub trait ConfigApi: Send + Sync {
     /// its own), and a locked key whose value actually differs is refused
     /// with `invalid_input`.
     async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError>;
+
+    /// Make `source` the active one. Separate from [`Self::set_config`]
+    /// because switching to a server means loading that server's stored
+    /// credentials into the active snapshot, and those are the fields
+    /// `set_config` deliberately refuses to take from a caller.
+    ///
+    /// Answers whether the new source is usable: a server with no stored
+    /// credentials still becomes active, but the caller has to prompt a
+    /// sign-in rather than showing an empty library.
+    async fn switch_source(&self, source: config::Source) -> Result<bool, ApiError>;
 }
 
 /// Subscribe to the state stream. Every subscriber gets every event from the

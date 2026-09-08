@@ -73,6 +73,7 @@ service Kopuz {
   rpc StartDownloads(DownloadRequest) returns (JobRef);
   rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
   rpc SetConfig(SetConfigRequest) returns (ConfigView);
+  rpc SwitchSource(SwitchSourceRequest) returns (SwitchSourceResponse);
 
   rpc GetArtwork(ArtworkRequest) returns (stream ArtworkChunk);
 }
@@ -659,6 +660,16 @@ message ConfigView {
 // want, send it back. A locked key whose value actually differs is refused.
 message SetConfigRequest {
   Config config = 1;
+}
+
+message SwitchSourceRequest {
+  SourceRef source = 1;
+}
+
+message SwitchSourceResponse {
+  // False when the source became active but has no usable credentials; the
+  // caller should prompt a sign-in rather than show an empty library.
+  bool usable = 1;
 }
 
 // ---------------- config ----------------

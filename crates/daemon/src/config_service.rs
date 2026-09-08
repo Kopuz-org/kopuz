@@ -124,6 +124,70 @@ impl ConfigService {
         Ok((view, updated, changed))
     }
 
+    /// Make `source` the active one.
+    ///
+    /// Not a config write a caller could make itself: switching to a server
+    /// means loading that server's stored credentials and putting them in the
+    /// active snapshot, and those are exactly the fields
+    /// [`Self::set`] refuses to take from a caller. Answers whether the new
+    /// source is actually usable -- a server whose credentials are missing
+    /// switches, but the caller needs to know it must prompt a sign-in.
+    pub async fn switch_source(
+        &self,
+        source: config::Source,
+    ) -> Result<(bool, config::AppConfig, Vec<String>), ApiError> {
+        let mut current = self.current.write().await;
+        let usable = match &source {
+            config::Source::Local | config::Source::LocalLibrary(_) => {
+                current.set_active_local_source(source.clone());
+                true
+            }
+            config::Source::Server(id) => {
+                let Some(saved) = current.find_saved_server(id).cloned() else {
+                    return Err(ApiError::not_found("no such server"));
+                };
+                let anonymous =
+                    saved.service == config::MusicService::YtMusic && saved.yt_anonymous;
+                let stored = self.db.load_server(&saved.id).await.ok().flatten();
+                let token = stored
+                    .as_ref()
+                    .and_then(|server| server.access_token.clone());
+                let has_creds = token.as_deref().is_some_and(|token| !token.is_empty());
+                current.set_active_server_snapshot(config::MusicServer {
+                    name: saved.name,
+                    url: saved.url,
+                    service: saved.service,
+                    // Anonymous YT keeps an empty but present token, so the
+                    // backend reads it as anonymous rather than signed out.
+                    access_token: if anonymous {
+                        Some(String::new())
+                    } else {
+                        token
+                    },
+                    user_id: stored.as_ref().and_then(|server| server.user_id.clone()),
+                    id: Some(saved.id.clone()),
+                    yt_browser: saved.yt_browser,
+                    yt_anonymous: anonymous,
+                    apple_music_storefront: saved.apple_music_storefront,
+                    apple_music_language: saved.apple_music_language,
+                });
+                has_creds || anonymous
+            }
+        };
+        let updated = current.clone();
+        drop(current);
+        self.db
+            .save_config(&updated)
+            .await
+            .map_err(|error| ApiError::internal(format!("config save failed: {error}")))?;
+        tracing::info!(target: "kopuz::source", source = %source.as_str(), "source switched");
+        Ok((
+            usable,
+            updated,
+            vec!["active_source".to_string(), "server".to_string()],
+        ))
+    }
+
     /// Persist the engine's own volume. It is not a caller-set key -- the
     /// session owns it and every frontend just reports what the user did --
     /// so it skips the locked-key and secret machinery of [`Self::set`].

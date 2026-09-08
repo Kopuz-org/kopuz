@@ -306,6 +306,17 @@ impl api::ConfigApi for LocalApi {
         self.session.set_config(updated, changed);
         Ok(view)
     }
+
+    async fn switch_source(&self, source: config::Source) -> Result<bool, ApiError> {
+        let Some(service) = &self.config else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without a config service",
+            ));
+        };
+        let (usable, updated, changed) = service.switch_source(source).await?;
+        self.session.set_config(updated, changed);
+        Ok(usable)
+    }
 }
 
 #[async_trait::async_trait]
