@@ -580,6 +580,20 @@ impl api::JobApi for GrpcApi {
         })
     }
 
+    async fn download_statuses(&self) -> Result<Vec<api::DownloadItemStatus>, ApiError> {
+        let list = self
+            .client()
+            .get_download_statuses(Request::new(proto::GetDownloadStatusesRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .items
+            .iter()
+            .map(convert::download_status_from_proto)
+            .collect())
+    }
+
     async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError> {
         let jobs = self
             .client()

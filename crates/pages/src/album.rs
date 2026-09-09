@@ -17,10 +17,6 @@ use hooks::use_db_queries::{
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use crate::server::download_manager::{
-    DownloadQueue, DownloadStatus, delete_downloads, queue_downloads,
-};
-
 /// Copy a link to the clipboard and flash a small toast. Used by the YT album
 /// page's share button (the `track_row` clipboard helper is crate-private to
 /// `components`, so the page carries its own tiny copy).
@@ -391,7 +387,7 @@ fn AlbumDetail(
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
-    let download_queue = use_context::<Signal<DownloadQueue>>();
+    let downloads = hooks::downloads::use_downloads();
 
     let album_id_memo = use_memo(use_reactive!(|album_id_str| album_id_str));
     let album_res = use_album(source, album_id_memo);
@@ -583,19 +579,10 @@ fn AlbumDetail(
     let tracks_download_all = tracks();
     let tracks_delete_all = tracks();
 
-    let is_downloading_all = cap.downloads && {
-        let q = download_queue.read();
-        tracks().iter().any(|t| {
-            let key = t.id.key();
-            q.items.iter().any(|i| {
-                i.id.as_str() == key.as_ref()
-                    && matches!(
-                        i.status,
-                        DownloadStatus::Queued | DownloadStatus::Downloading
-                    )
-            })
-        })
-    };
+    let is_downloading_all = cap.downloads
+        && tracks()
+            .iter()
+            .any(|track| downloads.read().is_active(&track.id.key()));
 
     // YT-Music-style album page: the whole catalog-remote (YT) side renders this,
     // from the moment the page opens — header built from the local album row so it
@@ -692,25 +679,25 @@ fn AlbumDetail(
                             .map(|p| std::path::Path::new(p).exists())
                             .unwrap_or(false);
                         if downloaded {
-                            delete_downloads(vec![key.to_string()], config, download_queue);
+                            hooks::downloads::remove(vec![key.to_string()]);
                         } else {
-                            queue_downloads(vec![(key.to_string(), t.title.clone(), t.artist.clone())], config, download_queue);
+                            hooks::downloads::start(vec![key.to_string()]);
                         }
                     }
                 })),
                 on_download_all: cap.downloads.then(|| EventHandler::new(move |_: ()| {
-                    let requests: Vec<(String, String, String)> = tracks_download_all.iter().filter_map(|t| {
+                    let requests: Vec<String> = tracks_download_all.iter().filter_map(|t| {
                         let k = t.id.key();
-                        (!k.is_empty()).then(|| (k.into_owned(), t.title.clone(), t.artist.clone()))
+                        (!k.is_empty()).then(|| k.into_owned())
                     }).collect();
-                    queue_downloads(requests, config, download_queue);
+                    hooks::downloads::start(requests);
                 })),
                 on_delete_all: cap.downloads.then(|| EventHandler::new(move |_: ()| {
                     let ids: Vec<String> = tracks_delete_all.iter().filter_map(|t| {
                         let k = t.id.key();
                         (!k.is_empty()).then(|| k.into_owned())
                     }).collect();
-                    delete_downloads(ids, config, download_queue);
+                    hooks::downloads::remove(ids);
                 })),
             }
             }
@@ -737,7 +724,7 @@ fn YtAlbumDetail(
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let nav_ctrl = use_context::<components::NavigationController>();
-    let download_queue = use_context::<Signal<DownloadQueue>>();
+    let downloads = hooks::downloads::use_downloads();
     let cover_for = hooks::use_db_queries::use_cover_resolver(80);
 
     let mut active_menu = use_signal(|| None::<reader::TrackId>);
@@ -835,20 +822,20 @@ fn YtAlbumDetail(
                         button {
                             class: "w-11 h-11 rounded-full border border-white/15 flex items-center justify-center text-slate-300 hover:text-white hover:border-white/30 transition-colors disabled:opacity-40",
                             title: if all_downloaded { "Remove download".to_string() } else { "Download".to_string() },
-                            disabled: download_queue.read().is_active(),
+                            disabled: downloads.read().running,
                             onclick: move |_| {
                                 if all_downloaded {
                                     let ids: Vec<String> = tracks_download_all.iter().filter_map(|t| {
                                         let k = t.id.key();
                                         (!k.is_empty()).then(|| k.into_owned())
                                     }).collect();
-                                    delete_downloads(ids, config, download_queue);
+                                    hooks::downloads::remove(ids);
                                 } else {
-                                    let reqs: Vec<(String, String, String)> = tracks_download_all.iter().filter_map(|t| {
+                                    let reqs: Vec<String> = tracks_download_all.iter().filter_map(|t| {
                                         let k = t.id.key();
-                                        (!k.is_empty()).then(|| (k.into_owned(), t.title.clone(), t.artist.clone()))
+                                        (!k.is_empty()).then(|| k.into_owned())
                                     }).collect();
-                                    queue_downloads(reqs, config, download_queue);
+                                    hooks::downloads::start(reqs);
                                 }
                             },
                             i { class: if all_downloaded { "fa-solid fa-trash" } else { "fa-solid fa-download" } }
@@ -955,9 +942,9 @@ fn YtAlbumDetail(
                                             .map(|p| std::path::Path::new(p).exists())
                                             .unwrap_or(false);
                                         if downloaded {
-                                            delete_downloads(vec![k.to_string()], config, download_queue);
+                                            hooks::downloads::remove(vec![k.to_string()]);
                                         } else {
-                                            queue_downloads(vec![(k.to_string(), dl_track.title.clone(), dl_track.artist.clone())], config, download_queue);
+                                            hooks::downloads::start(vec![k.to_string()]);
                                         }
                                         active_menu.set(None);
                                     })),

@@ -509,6 +509,15 @@ impl api::JobApi for LocalApi {
         }
     }
 
+    async fn download_statuses(&self) -> Result<Vec<api::DownloadItemStatus>, ApiError> {
+        match &self.downloads {
+            Some(service) => Ok(service.statuses()),
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a downloads service",
+            )),
+        }
+    }
+
     async fn remove_download(&self, key: String) -> Result<(), ApiError> {
         match &self.downloads {
             Some(service) => service.remove(&key).await,

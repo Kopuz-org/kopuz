@@ -22,11 +22,25 @@ use crate::session::SessionHandle;
 /// otherwise leave the job Running forever.
 const CHUNK_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
+/// What one requested download is doing, for a progress list.
+///
+/// Only what a batch is currently working through: finished downloads are
+/// answered by [`list`](DownloadsService::list) instead, since a file on disk
+/// outlives the job that fetched it.
+#[derive(Debug, Clone, Default)]
+struct Batch {
+    queued: Vec<String>,
+    active: Option<String>,
+    failed: Vec<String>,
+}
+
 pub struct DownloadsService {
     db: db::Db,
     session: SessionHandle,
     config: Arc<ConfigService>,
     cache_dir: PathBuf,
+    /// What the running batch is working through, for a progress list.
+    batch: std::sync::Mutex<Batch>,
 }
 
 fn safe_extension(extension: &str) -> Result<&str, ApiError> {
@@ -68,7 +82,33 @@ impl DownloadsService {
             session,
             config,
             cache_dir,
+            batch: std::sync::Mutex::new(Batch::default()),
         })
+    }
+
+    /// Per-item state for a progress list: what is queued, what is being
+    /// fetched, and what failed. A finished item leaves this and shows up in
+    /// [`Self::list`] instead.
+    pub fn statuses(&self) -> Vec<api::DownloadItemStatus> {
+        let Ok(batch) = self.batch.lock() else {
+            return Vec::new();
+        };
+        batch
+            .active
+            .iter()
+            .map(|key| api::DownloadItemStatus {
+                key: key.clone(),
+                state: api::DownloadItemState::Downloading,
+            })
+            .chain(batch.queued.iter().map(|key| api::DownloadItemStatus {
+                key: key.clone(),
+                state: api::DownloadItemState::Queued,
+            }))
+            .chain(batch.failed.iter().map(|key| api::DownloadItemStatus {
+                key: key.clone(),
+                state: api::DownloadItemState::Failed,
+            }))
+            .collect()
     }
 
     /// Item ids with a registered offline copy.
@@ -137,6 +177,12 @@ impl DownloadsService {
         let source: server::source::ActiveSource =
             Arc::from(server::source::active(self.db.clone(), &config));
         let total = keys.len() as u64;
+        if let Ok(mut batch) = self.batch.lock() {
+            *batch = Batch {
+                queued: keys.clone(),
+                ..Default::default()
+            };
+        }
         let mut failed: Vec<String> = Vec::new();
         for (index, key) in keys.iter().enumerate() {
             if ctx.cancelled() {
@@ -148,13 +194,24 @@ impl DownloadsService {
                 Some(total),
                 Some(key.clone()),
             );
+            if let Ok(mut batch) = self.batch.lock() {
+                batch.queued.retain(|queued| queued != key);
+                batch.active = Some(key.clone());
+            }
             if let Err(error) = self.download_one(ctx, &source, &config, key).await {
                 if ctx.cancelled() {
                     return Ok(());
                 }
                 tracing::warn!(%error, %key, "download failed");
                 failed.push(key.clone());
+                if let Ok(mut batch) = self.batch.lock() {
+                    batch.failed.push(key.clone());
+                }
             }
+        }
+        if let Ok(mut batch) = self.batch.lock() {
+            batch.active = None;
+            batch.queued.clear();
         }
         ctx.progress("done", Some(total), Some(total), None);
         if failed.is_empty() {

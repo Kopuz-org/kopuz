@@ -14,7 +14,6 @@ use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 use dioxus::desktop::wry::WebViewExtUnix;
 use dioxus::prelude::*;
 use kopuz_route::Route;
-use pages::server::download_manager::DownloadQueue;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::Instrument;
@@ -622,10 +621,6 @@ fn App() -> Element {
             session.set_config(snapshot, changed);
         });
     }
-    let download_queue = use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
-    let download_progress =
-        use_hook(|| Signal::new_in_scope(::server::DownloadProgress::default(), ScopeId::ROOT));
-    pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
     // Applies detached yt-dlp completions (history + rescan) in this scope —
     // the job drivers outlive the downloads page and can't write these. There is
@@ -1427,8 +1422,6 @@ fn App() -> Element {
     provide_context(pages::server::discover::DiscoverPrefetchCache(
         discover_prefetch_cache,
     ));
-    provide_context(download_queue);
-    provide_context(download_progress);
     provide_context(scroll_positions);
     provide_context(components::source_switcher::SettingsAnchor(settings_anchor));
     provide_context(fetched_artist_images);
@@ -2275,7 +2268,7 @@ fn App() -> Element {
                 persisted_volume: persisted_volume,
                 palette: palette,
             }
-            DownloadOverlay { queue: download_queue }
+            DownloadOverlay {}
             CompactPlayer {}
             if *show_quick_search.read() {
                 QuickSearch {

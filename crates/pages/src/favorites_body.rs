@@ -1,4 +1,3 @@
-use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
@@ -60,7 +59,7 @@ pub fn FavoritesBody(
     let sort_state = use_signal(|| None);
     let mut show_playlist_modal = use_signal(|| false);
     let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
-    let download_queue = use_context::<Signal<DownloadQueue>>();
+    let downloads = hooks::downloads::use_downloads();
 
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
@@ -143,10 +142,8 @@ pub fn FavoritesBody(
                     .get(&item_id)
                     .map(|p| std::path::Path::new(p).exists())
                     .unwrap_or(false);
-            let is_downloading = cap.downloads && download_queue.read().items.iter().any(|i| i.id == item_id && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading));
+            let is_downloading = cap.downloads && downloads.read().is_active(&item_id);
             let item_id_dl = item_id.clone();
-            let track_title = track.title.clone();
-            let track_artist = track.artist.clone();
 
             rsx! {
                 div { key: "{track_key}", style: "height: {ITEM_HEIGHT}px;",
@@ -209,10 +206,8 @@ pub fn FavoritesBody(
                     on_download: cap.downloads.then(|| EventHandler::new(move |_| {
                         if !is_downloaded {
                             active_menu_track.set(None);
-                            queue_downloads(
-                                vec![(item_id_dl.clone(), track_title.clone(), track_artist.clone())],
-                                config,
-                                download_queue,
+                            hooks::downloads::start(
+                                vec![item_id_dl.clone()],
                             );
                         }
                     })),

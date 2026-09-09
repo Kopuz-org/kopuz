@@ -23,8 +23,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use utils::artist::{joined_credit_primary, normalize_artist_key};
 
-use crate::server::download_manager::{DownloadQueue, delete_downloads, queue_downloads};
-
 /// One album-card menu entry, tagged so dispatch survives the entry set being
 /// built dynamically from capabilities (indices shift as entries are gated in).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -64,7 +62,7 @@ pub fn Artist(
     });
 
     let is_offline = use_context::<Signal<bool>>();
-    let download_queue = use_context::<Signal<DownloadQueue>>();
+    let downloads = hooks::downloads::use_downloads();
 
     let albums_res = use_albums(source);
     let artist_counts_res = use_artists(source);
@@ -734,13 +732,13 @@ pub fn Artist(
                                                                                         let k = t.id.key();
                                                                                         (!k.is_empty()).then(|| k.into_owned())
                                                                                     }).collect();
-                                                                                    delete_downloads(ids, config, download_queue);
+                                                                                    hooks::downloads::remove(ids);
                                                                                 } else {
-                                                                                    let requests: Vec<(String, String, String)> = tracks.iter().filter_map(|t| {
+                                                                                    let requests: Vec<String> = tracks.iter().filter_map(|t| {
                                                                                         let k = t.id.key();
-                                                                                        (!k.is_empty()).then(|| (k.into_owned(), t.title.clone(), t.artist.clone()))
+                                                                                        (!k.is_empty()).then(|| k.into_owned())
                                                                                     }).collect();
-                                                                                    queue_downloads(requests, config, download_queue);
+                                                                                    hooks::downloads::start(requests);
                                                                                 }
                                                                             });
                                                                         }
@@ -887,29 +885,29 @@ pub fn Artist(
                                                 .map(|p| std::path::Path::new(p).exists())
                                                 .unwrap_or(false);
                                             if is_downloaded {
-                                                delete_downloads(vec![item_id.to_string()], config, download_queue);
+                                                hooks::downloads::remove(vec![item_id.to_string()]);
                                             } else {
-                                                queue_downloads(vec![(item_id.to_string(), track.title.clone(), track.artist.clone())], config, download_queue);
+                                                hooks::downloads::start(vec![item_id.to_string()]);
                                             }
                                         }
                                         active_menu_track.set(None);
                                     }
                                 })),
                                 on_download_all: caps().downloads.then(|| EventHandler::new(move |_: ()| {
-                                    let requests: Vec<(String, String, String)> = artist_tracks().iter().filter_map(|t| {
+                                    let requests: Vec<String> = artist_tracks().iter().filter_map(|t| {
                                         let k = t.id.key();
-                                        (!k.is_empty()).then(|| (k.into_owned(), t.title.clone(), t.artist.clone()))
+                                        (!k.is_empty()).then(|| k.into_owned())
                                     }).collect();
-                                    queue_downloads(requests, config, download_queue);
+                                    hooks::downloads::start(requests);
                                 })),
                                 on_delete_all: caps().downloads.then(|| EventHandler::new(move |_: ()| {
                                     let ids: Vec<String> = artist_tracks().iter().filter_map(|t| {
                                         let k = t.id.key();
                                         (!k.is_empty()).then(|| k.into_owned())
                                     }).collect();
-                                    delete_downloads(ids, config, download_queue);
+                                    hooks::downloads::remove(ids);
                                 })),
-                                is_downloading_all: download_queue.read().is_active(),
+                                is_downloading_all: downloads.read().running,
                                 actions: Some(rsx! {
                                     SortOrderToggle { sort_order }
                                 }),

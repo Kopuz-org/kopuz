@@ -10,11 +10,7 @@ use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
 use config::{AppConfig, MusicService, UiStyle};
 use dioxus::prelude::*;
-use hooks::use_db_queries::{use_active_source, use_playlists, use_tracks_by_keys};
-
-use crate::server::download_manager::{
-    DownloadQueue, DownloadStatus, delete_downloads, queue_downloads,
-};
+use hooks::use_db_queries::use_playlists;
 
 #[component]
 #[tracing::instrument(name = "render.playlists_page", skip_all)]
@@ -22,7 +18,6 @@ pub fn PlaylistsPage(
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
-    let source = use_active_source();
     let nav_ctrl = use_context::<components::NavigationController>();
     let caps = hooks::sources::use_capabilities();
 
@@ -33,16 +28,6 @@ pub fn PlaylistsPage(
     let mut playlist_refresh_trigger = use_signal(|| 0u64);
 
     let playlists_res = use_playlists();
-    let sel_server_refs = use_memo(move || {
-        let store = playlists_res.read().clone().unwrap_or_default();
-        selected_playlist_id
-            .read()
-            .as_ref()
-            .and_then(|pid| store.playlists.iter().find(|p| p.id == *pid))
-            .map(|p| p.tracks.clone())
-            .unwrap_or_default()
-    });
-    let sel_server_tracks_res = use_tracks_by_keys(source, sel_server_refs);
 
     let handle_add_playlist = move |_| {
         if saving() {
@@ -78,7 +63,7 @@ pub fn PlaylistsPage(
         });
     };
 
-    let download_queue = use_context::<Signal<DownloadQueue>>();
+    let downloads = hooks::downloads::use_downloads();
 
     let mut last_source = use_signal(|| config.read().active_source.clone());
     if *last_source.read() != config.read().active_source {
@@ -95,22 +80,14 @@ pub fn PlaylistsPage(
                     let pid_for_dl = pid.clone();
                     let is_downloading_all = {
                         let store = playlists_res.read().clone().unwrap_or_default();
-                        let track_ids = store
+                        store
                             .playlists
                             .iter()
-                            .find(|p| p.id == pid)
-                            .map(|p| p.tracks.clone())
-                            .unwrap_or_default();
-                        let q = download_queue.read();
-                        track_ids.iter().any(|tid| {
-                            q.items.iter().any(|i| {
-                                &i.id == tid
-                                    && matches!(
-                                        i.status,
-                                        DownloadStatus::Queued | DownloadStatus::Downloading
-                                    )
-                            })
-                        })
+                            .find(|playlist| playlist.id == pid)
+                            .map(|playlist| playlist.tracks.clone())
+                            .unwrap_or_default()
+                            .iter()
+                            .any(|key| downloads.read().is_active(key))
                     };
                     let pid_for_del = pid.clone();
                     let pid_for_dl_track = pid.clone();
@@ -121,34 +98,18 @@ pub fn PlaylistsPage(
                             on_close: move |_| nav_ctrl.close_playlist(),
                             is_downloading_all,
                             on_download_all: move |_| {
-                                let requests: Vec<(String, String, String)> = {
-                                    let store = playlists_res.read().clone().unwrap_or_default();
-                                    let resolved = sel_server_tracks_res.read().clone().unwrap_or_default();
-                                    store
-                                        .playlists
-                                        .iter()
-                                        .find(|p| p.id == pid_for_dl)
-                                        .map(|p| {
-                                            p.tracks
-                                                .iter()
-                                                .map(|tid| {
-                                                    let meta = resolved
-                                                        .iter()
-                                                        .find(|t| t.id.key().as_ref() == tid.as_str());
-                                                    (
-                                                        tid.clone(),
-                                                        meta.map(|t| t.title.clone()).unwrap_or_default(),
-                                                        meta.map(|t| t.artist.clone()).unwrap_or_default(),
-                                                    )
-                                                })
-                                                .collect()
-                                        })
-                                        .unwrap_or_default()
-                                };
-                                if requests.is_empty() {
-                                    return;
-                                }
-                                queue_downloads(requests, config, download_queue);
+                                // The playlist already holds its track refs, and
+                                // refs are what a download takes.
+                                let keys: Vec<String> = playlists_res
+                                    .read()
+                                    .clone()
+                                    .unwrap_or_default()
+                                    .playlists
+                                    .iter()
+                                    .find(|playlist| playlist.id == pid_for_dl)
+                                    .map(|playlist| playlist.tracks.clone())
+                                    .unwrap_or_default();
+                                hooks::downloads::start(keys);
                             },
                             on_delete_all: move |_| {
                                 let ids: Vec<String> = {
@@ -161,42 +122,24 @@ pub fn PlaylistsPage(
                                         .unwrap_or_default()
                                 };
                                 if !ids.is_empty() {
-                                    delete_downloads(ids, config, download_queue);
+                                    hooks::downloads::remove(ids);
                                 }
                             },
                             on_download_track: move |idx: usize| {
                                 let store = playlists_res.read().clone().unwrap_or_default();
-                                let resolved = sel_server_tracks_res.read().clone().unwrap_or_default();
-                                let mut track_id = String::new();
-                                let mut track_title = String::new();
-                                let mut track_artist = String::new();
-                                if let Some(p) = store.playlists.iter().find(|p| p.id == pid_for_dl_track)
-                                    && let Some(tid) = p.tracks.get(idx)
-                                {
-                                    track_id = tid.clone();
-                                    if let Some(meta) =
-                                        resolved.iter().find(|t| t.id.key().as_ref() == tid.as_str())
-                                    {
-                                        track_title = meta.title.clone();
-                                        track_artist = meta.artist.clone();
-                                    }
-                                }
-                                if !track_id.is_empty() {
-                                    let is_downloaded = config
-                                        .read()
-                                        .offline_tracks
-                                        .get(&track_id)
-                                        .map(|p| std::path::Path::new(p).exists())
-                                        .unwrap_or(false);
-                                    if is_downloaded {
-                                        delete_downloads(vec![track_id], config, download_queue);
-                                    } else {
-                                        queue_downloads(
-                                            vec![(track_id, track_title, track_artist)],
-                                            config,
-                                            download_queue,
-                                        );
-                                    }
+                                let Some(key) = store
+                                    .playlists
+                                    .iter()
+                                    .find(|playlist| playlist.id == pid_for_dl_track)
+                                    .and_then(|playlist| playlist.tracks.get(idx))
+                                    .cloned()
+                                else {
+                                    return;
+                                };
+                                if downloads.read().is_stored(&key) {
+                                    hooks::downloads::remove(vec![key]);
+                                } else {
+                                    hooks::downloads::start(vec![key]);
                                 }
                             },
                         }
@@ -315,7 +258,7 @@ fn PlaylistsGrid(
 ) -> Element {
     let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
-    let download_queue = use_context::<Signal<DownloadQueue>>();
+    let downloads = hooks::downloads::use_downloads();
 
     let playlists_res = use_playlists();
     // First track of each playlist — the cover-of-last-resort for a playlist with
@@ -456,13 +399,9 @@ fn PlaylistsGrid(
                     {playlists.into_iter().map(|playlist| {
                         let cover_url = cover_for(&playlist);
                         let playlist_id_nav = playlist.id.clone();
-                        let is_dl = {
-                            let q = download_queue.read();
-                            playlist.tracks.iter().any(|tid| q.items.iter().any(|i| &i.id == tid && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading)))
-                        };
-                        let all_downloaded = !playlist.tracks.is_empty() && playlist.tracks.iter().all(|tid| {
-                            config.read().offline_tracks.get(tid).map(|p| std::path::Path::new(p).exists()).unwrap_or(false)
-                        });
+                        let is_dl = playlist.tracks.iter().any(|key| downloads.read().is_active(key));
+                        let all_downloaded = !playlist.tracks.is_empty()
+                            && playlist.tracks.iter().all(|key| downloads.read().is_stored(key));
                         rsx! {
                             div {
                                 key: "{playlist.id}",
@@ -518,18 +457,9 @@ fn PlaylistsGrid(
                                         onclick: move |evt| {
                                             evt.stop_propagation();
                                             if all_downloaded {
-                                                delete_downloads(playlist.tracks.clone(), config, download_queue);
+                                                hooks::downloads::remove(playlist.tracks.clone());
                                             } else {
-                                                let ids = playlist.tracks.clone();
-                                                let api = hooks::consume_api();
-                                                spawn(async move {
-                                                    let meta = api.tracks_by_keys(ids.clone()).await.unwrap_or_default();
-                                                    let requests: Vec<(String, String, String)> = ids.iter().map(|tid| {
-                                                        let m = meta.iter().find(|track| track.key == *tid);
-                                                        (tid.clone(), m.map(|t| t.title.clone()).unwrap_or_default(), m.map(|t| t.artist.clone()).unwrap_or_default())
-                                                    }).collect();
-                                                    queue_downloads(requests, config, download_queue);
-                                                });
+                                                hooks::downloads::start(playlist.tracks.clone());
                                             }
                                         },
                                         if is_dl {

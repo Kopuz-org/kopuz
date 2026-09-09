@@ -84,6 +84,7 @@ service Kopuz {
   rpc CancelJob(JobId) returns (CancelJobResponse);
   rpc StartDownloads(DownloadRequest) returns (JobRef);
   rpc StartYtdlp(YtdlpRequest) returns (JobRef);
+  rpc GetDownloadStatuses(GetDownloadStatusesRequest) returns (DownloadStatusList);
   rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
   rpc SetConfig(SetConfigRequest) returns (ConfigView);
 
@@ -1031,6 +1032,25 @@ message YtdlpRequest {
 
 message DownloadRequest {
   repeated string keys = 1;
+}
+
+enum DownloadItemState {
+  DOWNLOAD_ITEM_QUEUED = 0;
+  DOWNLOAD_ITEM_DOWNLOADING = 1;
+  DOWNLOAD_ITEM_FAILED = 2;
+}
+
+message GetDownloadStatusesRequest {}
+
+// Only what a batch is still working through; a finished download is
+// answered by GetDownloads, since the file outlives the job.
+message DownloadItemStatus {
+  string key = 1;
+  DownloadItemState state = 2;
+}
+
+message DownloadStatusList {
+  repeated DownloadItemStatus items = 1;
 }
 
 message DownloadList {

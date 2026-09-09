@@ -266,12 +266,18 @@ fn with_preserved_secrets(
     incoming
 }
 
-/// The same fields, blanked for a caller. Not a security boundary on a
-/// socket only this user can open -- it keeps credentials out of a surface
-/// that is written back wholesale, so a frontend cannot round-trip a stale
-/// copy over them.
+/// The credentials blanked for a caller. Not a security boundary on a socket
+/// only this user can open -- it keeps secrets out of a surface that is
+/// written back wholesale, so a frontend cannot round-trip a stale copy over
+/// them.
+///
+/// `offline_tracks` is deliberately not blanked. It is not a secret: it is
+/// which tracks have a local copy, which is exactly what a download indicator
+/// renders. Blanking it made every one of those read empty.
 fn stripped(config: &config::AppConfig) -> config::AppConfig {
-    with_preserved_secrets(config.clone(), &config::AppConfig::default())
+    let mut view = with_preserved_secrets(config.clone(), &config::AppConfig::default());
+    view.offline_tracks = config.offline_tracks.clone();
+    view
 }
 
 /// Which top-level keys differ. Serialization is an implementation detail
