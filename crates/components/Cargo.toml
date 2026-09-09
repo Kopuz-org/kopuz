@@ -21,7 +21,6 @@ directories = { workspace = true }
 tracing = { workspace = true }
 base64 = { workspace = true }
 uuid = { workspace = true }
-player = { workspace = true }
 reader = { workspace = true }
 utils = { workspace = true }
 kopuz_route = { workspace = true }
@@ -37,3 +36,6 @@ i18n = { workspace = true }
 # (which auto-detects the music dir via JNI instead).
 [target.'cfg(not(target_os = "android"))'.dependencies]
 rfd = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+player = { workspace = true }

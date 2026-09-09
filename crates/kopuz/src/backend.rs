@@ -77,6 +77,14 @@ pub fn core() -> Option<&'static Core> {
     CORE.get()
 }
 
+/// The handle every read and every mutation goes through. Panics before the
+/// core is up, which cannot happen: main builds it before the window exists.
+pub fn api() -> std::sync::Arc<dyn api::KopuzApi> {
+    CORE.get()
+        .map(|core| core.api.clone() as std::sync::Arc<dyn api::KopuzApi>)
+        .expect("the core is started before anything asks it for something")
+}
+
 /// Flush what the core owns. The socket is unlinked by the same call that
 /// bound it, so this only has to make the library durable.
 pub fn shutdown() {

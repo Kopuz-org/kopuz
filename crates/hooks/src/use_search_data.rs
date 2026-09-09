@@ -42,7 +42,7 @@ pub fn use_search_data(
                 }
                 let entry = by_genre.entry(genre.to_string()).or_default();
                 if entry.is_none() {
-                    *entry = utils::format_artwork_url(album.cover_path.as_deref());
+                    *entry = crate::artwork::for_album(album, crate::artwork::Size::Thumb);
                 }
             }
         }
