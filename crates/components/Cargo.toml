@@ -28,6 +28,7 @@ reader = { workspace = true }
 utils = { workspace = true }
 kopuz_route = { workspace = true }
 config = { workspace = true }
+api = { workspace = true }
 hooks = { workspace = true }
 rand = { workspace = true }
 server = { workspace = true }

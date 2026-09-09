@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
 #[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
@@ -20,7 +19,6 @@ pub fn PlaylistDetail(
     let cover_for = hooks::use_db_queries::use_cover_resolver(512);
     // Still needed by the cover upload and the delete-from-disk paths, which
     // write through the source until the mutation API covers them.
-    let gens = hooks::db_reactivity::use_generations();
 
     // The playlist's track refs, resolved from the library. One query, live:
     // the daemon's refresh invalidates as each page lands, so this is both the
@@ -121,64 +119,43 @@ pub fn PlaylistDetail(
                 #[cfg(not(target_os = "android"))]
                 {
                     let pid = pid_for_cover.clone();
-                    let pl_name = name_for_cover.clone();
-                    let pl_tag = tag_for_cover.clone();
-                    let source = active_source.peek().clone();
+                    // The daemon decides what "set a cover" means -- Jellyfin
+                    // pushes the image upstream, everyone else records it --
+                    // so the bytes go across and the policy stays there.
                     spawn(async move {
-                        let file = AsyncFileDialog::new()
+                        let Some(file) = AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
                             .pick_file()
-                            .await;
-                        if let Some(file) = file {
-                            let path = file.path().to_path_buf();
-                            // The source decides what "set a cover" means — Jellyfin
-                            // pushes the image upstream, everyone else just records
-                            // the local path.
-                            if source
-                                .set_playlist_cover(&pid, &pl_name, &path, pl_tag.as_deref())
-                                .await
-                                .is_ok()
-                            {
-                                gens.bump(Table::Playlists);
-                            }
-                        }
+                            .await
+                        else {
+                            return;
+                        };
+                        let path = file.path().to_path_buf();
+                        let Ok(bytes) = tokio::fs::read(&path).await else {
+                            return;
+                        };
+                        hooks::library_actions::upload_artwork(
+                            api::ArtworkTarget::Playlist(pid),
+                            hooks::library_actions::content_type_for(&path),
+                            bytes,
+                        );
                     });
                 }
             },
             on_delete_track: move |idx: usize| {
-                if caps.delete_from_disk
-                    && let Some(t) = tracks_for_delete.get(idx).cloned()
-                    && let Some(del_path) = t.id.local_path()
-                    && std::fs::remove_file(del_path).is_ok()
-                {
-                    let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                    let key = t.id.key().into_owned();
-                    spawn(async move {
-                        if source.delete_tracks(&[key]).await.is_ok() {
-                            gens.bump(Table::Tracks);
-                        }
-                    });
+                if let Some(track) = tracks_for_delete.get(idx) {
+                    hooks::library_actions::delete_tracks(
+                        vec![track.id.key().into_owned()],
+                        caps.delete_from_disk,
+                    );
                 }
             },
             on_selection_delete: move |paths: Vec<PathBuf>| {
-                if caps.delete_from_disk {
-                    {
-                        let mut keys = Vec::new();
-                        for path in &paths {
-                            if std::fs::remove_file(path).is_ok() {
-                                keys.push(path.to_string_lossy().into_owned());
-                            }
-                        }
-                        if !keys.is_empty() {
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            spawn(async move {
-                                if source.delete_tracks(&keys).await.is_ok() {
-                                    gens.bump(Table::Tracks);
-                                }
-                            });
-                        }
-                    }
-                }
+                let keys: Vec<String> = paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect();
+                hooks::library_actions::delete_tracks(keys, caps.delete_from_disk);
             },
             // No optimistic edit: the daemon invalidates as it writes, and the
             // query hook's coalescing window is shorter than the round trip
