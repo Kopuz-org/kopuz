@@ -326,8 +326,8 @@ impl CatalogService {
     pub async fn track_radio(&self, key: &str) -> Result<Vec<reader::Track>, ApiError> {
         let mut tracks = self.source().start_radio(key).await.map_err(source_error)?;
         self.library.register_transient(&tracks);
-        let seed = match tracks.iter().position(|track| track.id.key() == key) {
-            Some(index) => tracks.remove(index),
+        let seed = match take_seed(&mut tracks, key) {
+            Some(seed) => seed,
             None => self.seed_track(key).await?,
         };
         tracks.insert(0, seed);
@@ -366,5 +366,60 @@ impl CatalogService {
         self.library
             .transient_track(key)
             .ok_or_else(|| ApiError::not_found("unknown radio seed"))
+    }
+}
+
+/// Lift the seed out of a mix, if the source put it there. Removing rather
+/// than copying is what keeps it from appearing twice once it is pinned.
+fn take_seed(tracks: &mut Vec<reader::Track>, key: &str) -> Option<reader::Track> {
+    let index = tracks.iter().position(|track| track.id.key() == key)?;
+    Some(tracks.remove(index))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_seed;
+
+    fn track(key: &str) -> reader::Track {
+        reader::Track {
+            id: reader::TrackId::Local(std::path::PathBuf::from(key)),
+            cover: None,
+            album_id: String::new(),
+            title: key.to_string(),
+            artist: String::new(),
+            album: String::new(),
+            duration: 0,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_seed_leaves_the_mix_so_pinning_it_cannot_duplicate_it() {
+        let mut mix = vec![track("a"), track("seed"), track("b")];
+
+        let seed = take_seed(&mut mix, "seed").expect("the mix held the seed");
+
+        assert_eq!(seed.title, "seed");
+        assert_eq!(
+            mix.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(),
+            ["a", "b"],
+            "the rest of the mix keeps the order the source gave it"
+        );
+    }
+
+    #[test]
+    fn a_mix_without_the_seed_says_so_rather_than_picking_one() {
+        let mut mix = vec![track("a"), track("b")];
+
+        assert!(take_seed(&mut mix, "seed").is_none());
+        assert_eq!(mix.len(), 2, "nothing was taken");
     }
 }

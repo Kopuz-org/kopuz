@@ -142,6 +142,12 @@ async fn spawn_pair() -> Pair {
         session.clone(),
         dir.path().join("uploads"),
     );
+    let downloads = daemon::DownloadsService::new(
+        database.clone(),
+        session.clone(),
+        config_service.clone(),
+        dir.path().join("offline"),
+    );
     let sources =
         daemon::SourceService::new(database.clone(), session.clone(), config_service.clone());
     let integrations = daemon::IntegrationService::new(config_service.clone(), session.clone());
@@ -157,6 +163,7 @@ async fn spawn_pair() -> Pair {
             .with_mutations(mutations.clone())
             .with_sources(sources.clone())
             .with_integrations(integrations.clone())
+            .with_downloads(downloads.clone())
             .with_ytdlp(ytdlp.clone())
     };
     let state = Arc::new(kopuzd::GrpcState {
@@ -1166,5 +1173,60 @@ async fn ytdlp_reports_its_preconditions_identically() {
         local.is_ok(),
         wire.is_ok(),
         "local {local:?} vs wire {wire:?}"
+    );
+}
+
+/// The download overlay reads per-item state, so a client on the socket has to
+/// see the same list the in-process one does -- including the failures, which
+/// is what a batch against unreachable files produces.
+#[tokio::test]
+async fn download_statuses_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    assert_eq!(
+        pair.local
+            .download_statuses()
+            .await
+            .expect("local statuses"),
+        pair.wire.download_statuses().await.expect("wire statuses"),
+        "an idle daemon reports the same empty list on both transports"
+    );
+
+    // The seeded rows are local paths that do not exist, so every item fails --
+    // which is the interesting case: a failed item is still reported, and
+    // reported the same way on both sides.
+    let keys = vec![
+        "/lib/seed-0.flac".to_string(),
+        "/lib/seed-1.flac".to_string(),
+    ];
+    let job = pair.wire.download(keys).await.expect("the batch starts");
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let running =
+                pair.jobs.list().into_iter().any(|status| {
+                    status.id == job.job_id && status.state == api::JobState::Running
+                });
+            if !running {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the batch finished");
+
+    let local = pair
+        .local
+        .download_statuses()
+        .await
+        .expect("local statuses");
+    let wire = pair.wire.download_statuses().await.expect("wire statuses");
+    assert_eq!(local, wire, "local {local:?} vs wire {wire:?}");
+
+    assert_eq!(
+        pair.local.downloads().await.expect("local downloads"),
+        pair.wire.downloads().await.expect("wire downloads"),
+        "nothing landed offline, and both say so"
     );
 }
