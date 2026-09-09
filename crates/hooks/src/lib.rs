@@ -11,6 +11,7 @@ pub mod playlist_actions;
 pub mod scrobble_scheduler;
 mod session_projector;
 pub mod source_switch;
+pub mod sources;
 pub mod toast;
 pub mod use_db_queries;
 pub mod use_player_controller;

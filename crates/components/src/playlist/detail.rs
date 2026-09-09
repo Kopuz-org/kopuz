@@ -14,7 +14,6 @@ pub fn PlaylistDetail(
     on_download_track: Option<EventHandler<usize>>,
     #[props(default = false)] is_downloading_all: bool,
 ) -> Element {
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let playlists_res = use_playlists();
     let cover_for = hooks::use_db_queries::use_cover_resolver(512);
     // Still needed by the cover upload and the delete-from-disk paths, which
@@ -41,8 +40,8 @@ pub fn PlaylistDetail(
     // playlists cap (YT's InnerTube has no reorder mutation). Reading the caps is
     // also more correct than `is_server` — e.g. a creds-less offline server has
     // downloads=false.
-    let caps = active_source.read().capabilities();
-    let can_reorder = caps.playlists == ::server::source::PlaylistOps::Reorder;
+    let caps = *hooks::sources::use_capabilities().read();
+    let can_reorder = caps.playlists == api::PlaylistCapability::Reorder;
 
     // A server playlist's contents are refreshed by the daemon, a page at a
     // time, and every page invalidates -- so the list fills in as it arrives

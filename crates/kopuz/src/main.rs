@@ -561,7 +561,7 @@ fn App() -> Element {
 
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.
-    let active_caps = use_memo(move || active_source.read().capabilities());
+    let active_caps = hooks::sources::use_capabilities_provider();
     // The PoToken minter isn't armed here: it's a headless deno_core runtime that
     // self-starts on the first `mint_content_pot` (only when YT demands a pot).
     let mut initial_load_done = use_signal(|| false);
@@ -2155,7 +2155,7 @@ fn App() -> Element {
                             // Local is active, and the rich remote profile must not
                             // hijack the local artist page.
                             let remote_profile =
-                                active_caps().artist_view == ::server::source::ArtistView::Remote;
+                                active_caps().artists == api::ArtistPresentation::Remote;
                             let has_selection = !selected_artist_name.read().is_empty()
                                 || selected_artist_channel_id.read().is_some();
                             if remote_profile && has_selection {

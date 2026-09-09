@@ -56,7 +56,7 @@ pub fn Artist(
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     // Capabilities, read off the resolved source — the single seam the page gates
     // its divergent affordances on (no `is_server()` / `match service`).
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     // Diagnostic (debug): what source/caps this page is actually rendering, logged
     // whenever they change — confirms the page follows the sidebar source toggle.
     use_effect(move || {
@@ -629,7 +629,7 @@ pub fn Artist(
                                             let mut entries: Vec<(MenuAction, AlbumAction)> = vec![
                                                 (MenuAction::new(i18n::t("add_all_to_queue").as_str(), "fa-solid fa-list-ul"), AlbumAction::Queue),
                                             ];
-                                            if cap.playlists != ::server::source::PlaylistOps::None {
+                                            if cap.playlists != api::PlaylistCapability::None {
                                                 entries.push((MenuAction::new(i18n::t("add_all_to_playlist").as_str(), "fa-solid fa-plus"), AlbumAction::Playlist));
                                             }
                                             if cap.delete_from_disk {

@@ -24,8 +24,7 @@ pub fn PlaylistsPage(
 ) -> Element {
     let source = use_active_source();
     let nav_ctrl = use_context::<components::NavigationController>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
 
     let mut show_add_playlist = use_signal(|| false);
     let mut playlist_name = use_signal(String::new);
@@ -52,7 +51,7 @@ pub fn PlaylistsPage(
         let name = playlist_name();
         // A source that can't mutate playlists (a creds-less/offline server, or a
         // read-only source) gets the friendly message instead of a raw error.
-        if caps().playlists == ::server::source::PlaylistOps::None {
+        if caps().playlists == api::PlaylistCapability::None {
             error.set(Some(i18n::t("error_server_not_configured").to_string()));
             return;
         }
@@ -314,8 +313,7 @@ fn PlaylistsGrid(
     mut selected_playlist_id: Signal<Option<String>>,
     refresh_trigger: Signal<u64>,
 ) -> Element {
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
@@ -393,10 +391,10 @@ fn PlaylistsGrid(
         store.playlists.clone()
     };
     drop(conf);
-    let is_yt = caps().albums == ::server::source::AlbumType::YtMusic;
+    let is_yt = caps().albums == api::AlbumPresentation::Remote;
     // The flat remote card has no overflow menu of its own, so radio is its one
     // entry — no kind-tagged action list needed here (unlike the folder card).
-    let can_radio = caps().radio.playlist;
+    let can_radio = caps().playlist_radio;
     let radio_text = components::radio_actions::radio_label();
     let radio_actions = vec![MenuAction::new(
         radio_text.as_str(),
