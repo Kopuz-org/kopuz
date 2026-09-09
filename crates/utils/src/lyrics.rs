@@ -12,9 +12,8 @@ mod model;
 mod request;
 mod server;
 
-use cache::{
-    LyricsInflightGuard, load_persisted_lyrics, lyrics_cache, store_lyrics, try_begin_lyrics_fetch,
-};
+pub use cache::prime;
+use cache::{LyricsInflightGuard, lyrics_cache, remember_lyrics, try_begin_lyrics_fetch};
 use local::fetch_local_lrc;
 use lrc::{extract_line_timestamps, parse_enhanced_words, parse_lrc};
 pub use model::{LyricChunk, LyricLine, Lyrics};
@@ -132,62 +131,6 @@ pub async fn fetch_lyrics_for_request(request: &LyricsRequest) -> Option<Lyrics>
     fetch_lyrics_with_progress(request, true, |_| {}).await
 }
 
-pub async fn fetch_lyrics_progressive_for_request<F>(
-    request: &LyricsRequest,
-    on_progress: F,
-) -> Option<Lyrics>
-where
-    F: FnMut(Lyrics),
-{
-    fetch_lyrics_with_progress(request, true, on_progress).await
-}
-
-#[deprecated(note = "use LyricsRequest with fetch_lyrics_for_request")]
-#[allow(clippy::too_many_arguments)]
-pub async fn fetch_lyrics(
-    artist: &str,
-    title: &str,
-    album: &str,
-    duration: u64,
-    track_path: &str,
-    server_url: Option<&str>,
-    server_token: Option<&str>,
-    server_user_id: Option<&str>,
-    prefer_local: bool,
-    enable_musixmatch: bool,
-) -> Option<Lyrics> {
-    let request = LyricsRequest::new(artist, title, album, duration, track_path)
-        .with_server(server_url, server_token, server_user_id)
-        .prefer_local(prefer_local)
-        .enable_musixmatch(enable_musixmatch);
-    fetch_lyrics_for_request(&request).await
-}
-
-#[deprecated(note = "use LyricsRequest with fetch_lyrics_progressive_for_request")]
-#[allow(clippy::too_many_arguments)]
-pub async fn fetch_lyrics_progressive<F>(
-    artist: &str,
-    title: &str,
-    album: &str,
-    duration: u64,
-    track_path: &str,
-    server_url: Option<&str>,
-    server_token: Option<&str>,
-    server_user_id: Option<&str>,
-    prefer_local: bool,
-    enable_musixmatch: bool,
-    on_progress: F,
-) -> Option<Lyrics>
-where
-    F: FnMut(Lyrics),
-{
-    let request = LyricsRequest::new(artist, title, album, duration, track_path)
-        .with_server(server_url, server_token, server_user_id)
-        .prefer_local(prefer_local)
-        .enable_musixmatch(enable_musixmatch);
-    fetch_lyrics_progressive_for_request(&request, on_progress).await
-}
-
 async fn fetch_lyrics_with_progress<F>(
     request: &LyricsRequest,
     allow_lrclib: bool,
@@ -240,20 +183,6 @@ where
             lyrics_kind(cached.as_ref())
         );
         return cached;
-    }
-
-    // Persistent layer: lyrics survive restarts — a DB hit skips the whole
-    // provider chain and seeds the in-memory LRU.
-    if let Some(persisted) = load_persisted_lyrics(&cache_key).await {
-        lyrics_debug!(
-            "db hit key_hash={} kind={}",
-            cache_key_hash,
-            lyrics_kind(persisted.as_ref())
-        );
-        if let Ok(mut cache) = lyrics_cache().lock() {
-            cache.put(cache_key.clone(), persisted.clone());
-        }
-        return persisted;
     }
 
     let _inflight_guard = if try_begin_lyrics_fetch(&cache_key) {
@@ -343,7 +272,7 @@ where
         );
         if let Some(lyrics) = local {
             if has_word_timestamps(&lyrics) {
-                store_lyrics(&cache_key, &Some(lyrics.clone())).await;
+                remember_lyrics(&cache_key, &Some(lyrics.clone()));
                 tracing::info!(
                     target: "kopuz::lyrics",
                     "selected key_hash={} source=local_lrc kind={} total_ms={}",
@@ -364,7 +293,7 @@ where
     }
 
     if prefer_local && !is_server {
-        store_lyrics(&cache_key, &fallback).await;
+        remember_lyrics(&cache_key, &fallback);
         tracing::info!(
             target: "kopuz::lyrics",
             "selected key_hash={} source=prefer_local kind={} total_ms={}",
@@ -403,7 +332,7 @@ where
                 );
                 if let Some(lyrics) = server_lyrics {
                     if has_word_timestamps(&lyrics) {
-                        store_lyrics(&cache_key, &Some(lyrics.clone())).await;
+                        remember_lyrics(&cache_key, &Some(lyrics.clone()));
                         tracing::info!(
                             target: "kopuz::lyrics",
                             "selected key_hash={} source=jellyfin kind={} total_ms={}",
@@ -451,7 +380,7 @@ where
                 );
                 if let Some(lyrics) = server_lyrics {
                     if has_word_timestamps(&lyrics) {
-                        store_lyrics(&cache_key, &Some(lyrics.clone())).await;
+                        remember_lyrics(&cache_key, &Some(lyrics.clone()));
                         tracing::info!(
                             target: "kopuz::lyrics",
                             "selected key_hash={} source=subsonic kind={} total_ms={}",
@@ -492,7 +421,7 @@ where
         );
         if let Some(lyrics) = am_lyrics {
             if has_word_timestamps(&lyrics) {
-                store_lyrics(&cache_key, &Some(lyrics.clone())).await;
+                remember_lyrics(&cache_key, &Some(lyrics.clone()));
                 tracing::info!(
                     target: "kopuz::lyrics",
                     "selected key_hash={} source=apple_music kind={} total_ms={}",
@@ -682,7 +611,7 @@ where
     }
 
     let fetched = fallback;
-    store_lyrics(&cache_key, &fetched).await;
+    remember_lyrics(&cache_key, &fetched);
     tracing::info!(
         target: "kopuz::lyrics",
         "selected key_hash={} source=final kind={} total_ms={}",
@@ -697,28 +626,6 @@ where
         total_start.elapsed().as_millis()
     );
     fetched
-}
-
-pub fn cached_lyrics(
-    artist: &str,
-    title: &str,
-    album: &str,
-    duration: u64,
-    track_path: &str,
-    enable_musixmatch: bool,
-) -> Option<Option<Lyrics>> {
-    let cache_key = lyrics_cache_key(
-        artist,
-        title,
-        album,
-        duration,
-        track_path,
-        enable_musixmatch,
-    );
-    lyrics_cache()
-        .lock()
-        .ok()
-        .and_then(|mut cache| cache.get_cloned(&cache_key))
 }
 
 pub fn cached_lyrics_for_request(request: &LyricsRequest) -> Option<Option<Lyrics>> {

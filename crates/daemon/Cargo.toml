@@ -37,7 +37,7 @@ tracing = { workspace = true }
 rand = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
-utils = { workspace = true, features = ["db-cache"] }
+utils = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 directories = { workspace = true }

@@ -393,9 +393,23 @@ impl LibraryService {
             }
         }
 
+        // Three layers, cheapest first: this process's cache, the library's
+        // stored answer, then the providers -- whose answer is stored so the
+        // next open, in any frontend, skips the network.
+        let cache_key = request.cache_key();
         let lyrics = match utils::lyrics::cached_lyrics_for_request(&request) {
             Some(cached) => cached,
-            None => utils::lyrics::fetch_lyrics_for_request(&request).await,
+            None => match self.persisted_lyrics(&cache_key).await {
+                Some(persisted) => {
+                    utils::lyrics::prime(&cache_key, persisted.clone());
+                    persisted
+                }
+                None => {
+                    let fetched = utils::lyrics::fetch_lyrics_for_request(&request).await;
+                    self.persist_lyrics(&cache_key, &fetched).await;
+                    fetched
+                }
+            },
         };
         lyrics
             .map(lyrics_view)
@@ -479,6 +493,7 @@ impl LibraryService {
 
 mod artist_art;
 mod jobs;
+mod lyrics_cache;
 mod reads;
 
 #[async_trait::async_trait]

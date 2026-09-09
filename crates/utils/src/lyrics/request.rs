@@ -84,7 +84,7 @@ impl LyricsRequest {
         self
     }
 
-    pub(crate) fn cache_key(&self) -> String {
+    pub fn cache_key(&self) -> String {
         super::lyrics_cache_key(
             &self.artist,
             &self.title,

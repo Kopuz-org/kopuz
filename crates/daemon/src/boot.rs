@@ -119,7 +119,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         cover_cache,
     ));
     server::ytmusic::player::init_tier_store(database.clone());
-    utils::db_cache::init(database.clone());
+    db::cache::init(database.clone());
     let active_source: server::source::ActiveSource =
         Arc::from(server::source::active(database.clone(), &config));
     let queue_store: Arc<dyn QueueStore> = Arc::new(DbQueueStore::new(database.clone()));
