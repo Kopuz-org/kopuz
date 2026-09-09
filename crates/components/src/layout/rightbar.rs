@@ -30,7 +30,14 @@ pub fn Rightbar(
             .map(|track| track.uid.clone())
             .unwrap_or_default()
     });
-    let lyrics = hooks::lyrics::use_lyrics(track_key, i18n::t("lyrics_not_found").to_string());
+    let radio = use_memo(move || {
+        ctrl.current_track_snapshot
+            .read()
+            .as_ref()
+            .is_some_and(|track| track.kind == api::TrackKind::Radio)
+    });
+    let lyrics =
+        hooks::lyrics::use_lyrics(track_key, radio, i18n::t("lyrics_not_found").to_string());
     let mut is_resizing = use_signal(|| false);
 
     use_effect(move || {

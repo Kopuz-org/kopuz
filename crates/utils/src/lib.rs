@@ -1,21 +1,18 @@
-//! Shared utility crate for Kopuz: color helpers, artwork URLs, lyrics fetching,
-//! and terminal logging.
+//! Shared utility crate for Kopuz: color helpers, artwork URLs, the lyric data
+//! model, and terminal logging.
+//!
+//! The frontend crates link this, so nothing here may reach a media source.
 
 pub mod artist;
 pub mod artwork_image;
 pub mod build_info;
 pub mod color;
-pub mod hls_source;
-pub mod icy;
 pub mod live_theme;
 pub mod logs;
 pub mod lyrics;
 pub mod musicbrainz;
-pub mod playback_ref;
 pub mod playlist;
-pub mod range_source;
 pub mod redact;
-pub mod stream_buffer;
 pub mod themes;
 use std::path::Path;
 use std::sync::Arc;

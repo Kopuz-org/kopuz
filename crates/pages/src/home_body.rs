@@ -124,7 +124,7 @@ pub fn HomeBody(
         }
     });
 
-    let jellyfin_albums_all = use_memo(move || -> Vec<AlbumCard> {
+    let source_albums_all = use_memo(move || -> Vec<AlbumCard> {
         let mut albums = albums_res.read().clone().unwrap_or_default();
         albums.sort_by(|a, b| {
             a.title
@@ -175,8 +175,8 @@ pub fn HomeBody(
             .collect::<Vec<_>>()
     });
 
-    let jellyfin_shuffled = use_memo(move || {
-        let albums = jellyfin_albums_all();
+    let shuffled_albums = use_memo(move || {
+        let albums = source_albums_all();
         if albums.is_empty() {
             return Vec::new();
         }
@@ -325,7 +325,7 @@ pub fn HomeBody(
         (top_genre, cards)
     });
 
-    let jellyfin_artists = use_memo(move || {
+    let source_artists = use_memo(move || {
         let tracks = if caps().downloads && *is_offline.read() {
             let mut downloaded = offline_tracks_res.read().clone().unwrap_or_default();
             downloaded.sort_by_key(|a| a.artist.to_lowercase());
@@ -510,11 +510,11 @@ pub fn HomeBody(
                                     edit,
                                     is_vaxry,
                                     listen_now_style,
-                                    jellyfin_shuffled(),
+                                    shuffled_albums(),
                                     hero_cover(),
                                     continue_listening(),
                                     hero_entry(),
-                                    jellyfin_artists(),
+                                    source_artists(),
                                     new_releases(),
                                     made_for_you(),
                                     recently_added(),

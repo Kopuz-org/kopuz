@@ -16,7 +16,7 @@ use hooks::use_db_queries::{
 };
 use std::collections::HashSet;
 
-/// Copy a link to the clipboard and flash a small toast. Used by the YT album
+/// Copy a link to the clipboard and flash a small toast. Used by the catalog album
 /// page's share button (the `track_row` clipboard helper is crate-private to
 /// `components`, so the page carries its own tiny copy).
 fn copy_album_link(url: String) {
@@ -385,7 +385,7 @@ fn AlbumDetail(
     let album_res = use_album(source, album_id_memo);
     let albums_res = use_albums(source);
 
-    // Discover albums are opened by their YT browse id (MPRE…) and aren't in the
+    // Discover albums are opened by the source's own browse id and aren't in the
     // local DB until saved. When the DB has no row for the id, fetch the album
     // straight from the catalog remote by that browse id so every searched /
     // discovered album renders (header + full track list) instead of "not found".
@@ -492,12 +492,12 @@ fn AlbumDetail(
         })
     };
 
-    // Catalog remotes (YT) store albums under a title+artist hash with no
+    // Catalog sources store albums under a title+artist hash with no
     // browse id, so the library only ever holds the few tracks the user saved —
     // an album page would show 1 of 18 songs. The daemon resolves the saved
-    // album to its remote listing (header + every track), the way YT Music
+    // album to its remote listing (header + every track), the way a catalog
     // shows it. `None` for local/other sources and while offline; drives both
-    // the full track list and the YT-styled header.
+    // the full track list and the catalog-styled header.
     let remote_album_res: Resource<Option<api::CatalogDetail>> = {
         let api = api.clone();
         use_resource(move || {
@@ -599,12 +599,12 @@ fn AlbumDetail(
             .iter()
             .any(|track| downloads.read().is_active(&track.key));
 
-    // YT-Music-style album page: the whole catalog-remote (YT) side renders this,
+    // Catalog-style album page: the whole catalog-remote side renders this,
     // from the moment the page opens — header built from the local album row so it
     // shows instantly, track list filling from the locally-saved subset until the
     // remote album resolves the full listing. Local / other sources keep the
     // standard TrackListView.
-    let cover_url_yt = cover_url.clone();
+    let cover_url_remote = cover_url.clone();
     let yt_title = album.title.clone();
     let yt_artist = album.artist.clone();
     // Prefer the remote album's year once resolved; fall back to the local row.
@@ -624,7 +624,7 @@ fn AlbumDetail(
                     artist: yt_artist,
                     year: yt_year,
                     browse_id: yt_browse_id,
-                    local_cover: cover_url_yt,
+                    local_cover: cover_url_remote,
                     tracks: tracks(),
                     on_close,
                 }
@@ -716,9 +716,9 @@ fn AlbumDetail(
     }
 }
 
-/// YT-Music-style album page: a left meta column (cover, artist link, title,
+/// Catalog-style album page: a left meta column (cover, artist link, title,
 /// "Album", song count · duration · year, play / shuffle / download) beside the
-/// full track list. Shown only for the catalog remote (YT) once the album
+/// full track list. Shown only for a catalog source once the album
 /// resolved; local/other sources use [`TrackListView`]. Rows reuse [`TrackRow`]
 /// so play / queue / menu / download behave exactly as everywhere else.
 #[component]

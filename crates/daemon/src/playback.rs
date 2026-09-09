@@ -2,7 +2,7 @@
 
 use player::decoder;
 use player::engine::SourceFactory;
-use utils::playback_ref::ResolvedStreamRef;
+use server::playback_ref::ResolvedStreamRef;
 
 /// Factory for a resolved network stream (radio, YT range/sequential,
 /// SoundCloud HLS, Apple Music fMP4, or a plain buffered stream).
@@ -15,14 +15,14 @@ pub(crate) fn network_factory(
     yt_format: Option<(server::ytmusic::player::AudioFormat, bool)>,
     yt_user_agent: Option<String>,
     is_radio: bool,
-    icy_tx: Option<tokio::sync::watch::Sender<utils::icy::IcyMeta>>,
+    icy_tx: Option<tokio::sync::watch::Sender<server::stream::icy::IcyMeta>>,
     rt_handle: tokio::runtime::Handle,
-    buffer_progress: Option<utils::stream_buffer::BufferProgressCallback>,
+    buffer_progress: Option<server::stream::stream_buffer::BufferProgressCallback>,
 ) -> SourceFactory {
     Box::new(move || {
         let build = || -> std::io::Result<_> {
             if is_radio {
-                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                let stream = server::stream::stream_buffer::StreamBuffer::with_user_agent(
                     stream_url,
                     true,
                     yt_user_agent,
@@ -35,7 +35,7 @@ pub(crate) fn network_factory(
                     // YT: HTTP Range-backed source. Symphonia can seek freely
                     // (Matroska Cues at the end, scrub anywhere) and startup
                     // probes only fetch the ~512 KiB they need.
-                    let range = utils::range_source::RangeStreamSource::new_with_progress(
+                    let range = server::stream::range_source::RangeStreamSource::new_with_progress(
                         stream_url,
                         yt_user_agent,
                         buffer_progress,
@@ -48,14 +48,15 @@ pub(crate) fn network_factory(
                     // No-pot fallback: googlevideo 403s deep ranges, and the
                     // probe reads the webm tail — stream sequentially instead
                     // of failing outright (issue #386). No scrubbing.
-                    let stream = utils::stream_buffer::StreamBuffer::with_user_agent_and_progress(
-                        stream_url,
-                        false,
-                        yt_user_agent,
-                        None,
-                        rt_handle,
-                        buffer_progress,
-                    );
+                    let stream =
+                        server::stream::stream_buffer::StreamBuffer::with_user_agent_and_progress(
+                            stream_url,
+                            false,
+                            yt_user_agent,
+                            None,
+                            rt_handle,
+                            buffer_progress,
+                        );
                     stream.wait_for_response_headers();
                     let len = stream.known_total_size();
                     let (source, mut hint) = decoder::from_stream_with_len(stream, len);
@@ -67,7 +68,8 @@ pub(crate) fn network_factory(
             {
                 // SoundCloud Go+ AAC: assemble the HLS playlist's fMP4 segments
                 // into one in-memory buffer Symphonia can decode.
-                let bytes = utils::hls_source::assemble(hls_url, yt_user_agent.as_deref())?;
+                let bytes =
+                    server::stream::hls_source::assemble(hls_url, yt_user_agent.as_deref())?;
                 let len = Some(bytes.len() as u64);
                 let cursor = std::io::Cursor::new(bytes);
                 let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
@@ -133,7 +135,7 @@ pub(crate) fn network_factory(
             } else {
                 // Jellyfin and Subsonic normally support ranges. Fall back to
                 // a progressive stream when the endpoint does not.
-                match utils::range_source::RangeStreamSource::new_with_progress(
+                match server::stream::range_source::RangeStreamSource::new_with_progress(
                     stream_url.clone(),
                     yt_user_agent.clone(),
                     buffer_progress.clone(),
@@ -145,7 +147,7 @@ pub(crate) fn network_factory(
                     Err(error) => {
                         tracing::debug!(%error, "HTTP ranges unavailable; using progressive stream");
                         let stream =
-                            utils::stream_buffer::StreamBuffer::with_user_agent_and_progress(
+                            server::stream::stream_buffer::StreamBuffer::with_user_agent_and_progress(
                                 stream_url,
                                 false,
                                 yt_user_agent,

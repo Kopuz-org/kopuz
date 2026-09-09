@@ -51,7 +51,7 @@ pub fn use_connection_status() -> Memo<ConnStatus> {
 }
 
 /// Apply a source switch. Answers whether the source is usable without a
-/// sign-in (stored credentials, or anonymous YouTube Music), so the caller can
+/// sign-in (stored credentials, or a source usable anonymously), so the caller can
 /// launch a sign-in flow otherwise.
 pub async fn apply_source_switch(mut config: Signal<AppConfig>, source: Source) -> bool {
     let api = crate::api::consume_api();

@@ -71,3 +71,15 @@ pub fn use_services() -> Resource<Vec<api::ServiceInfo>> {
         async move { api.services().await.unwrap_or_default() }
     })
 }
+
+/// Answer one of a source's own options. The daemon decides where the value
+/// lives -- the server row or the settings -- so this only carries it there.
+pub fn set_source_settings(id: String, values: Vec<api::FieldValue>) {
+    let api = crate::api::consume_api();
+    spawn(async move {
+        if let Err(error) = api.set_source_settings(id, values).await {
+            tracing::warn!(%error, "saving a source setting failed");
+            crate::toast::toast_error(&error.to_string());
+        }
+    });
+}

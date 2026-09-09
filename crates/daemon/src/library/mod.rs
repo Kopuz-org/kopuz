@@ -71,14 +71,14 @@ fn map_sort(sort: api::TrackSort) -> db::TrackSort {
     }
 }
 
-fn lyrics_view(lyrics: utils::lyrics::Lyrics) -> api::LyricsView {
+fn lyrics_view(lyrics: server::lyrics::Lyrics) -> api::LyricsView {
     let to_ms = |seconds: f64| (seconds.max(0.0) * 1000.0) as u64;
     match lyrics {
-        utils::lyrics::Lyrics::Plain(text) => api::LyricsView {
+        server::lyrics::Lyrics::Plain(text) => api::LyricsView {
             plain: Some(text),
             synced: Vec::new(),
         },
-        utils::lyrics::Lyrics::Synced(lines) => api::LyricsView {
+        server::lyrics::Lyrics::Synced(lines) => api::LyricsView {
             plain: None,
             synced: lines
                 .into_iter()
@@ -359,7 +359,7 @@ impl LibraryService {
             return Err(ApiError::invalid_input("radio streams have no lyrics"));
         }
 
-        let mut request = utils::lyrics::LyricsRequest::new(
+        let mut request = server::lyrics::LyricsRequest::new(
             &track.artist,
             &track.title,
             &track.album,
@@ -383,7 +383,7 @@ impl LibraryService {
                 let bearer_token = server::applemusic::auth::get_bearer_token()
                     .await
                     .unwrap_or_default();
-                request = request.apple_music_auth(utils::lyrics::AppleMusicLyricsAuth {
+                request = request.apple_music_auth(server::lyrics::AppleMusicLyricsAuth {
                     token,
                     bearer_token,
                     storefront: server.apple_music_storefront.clone(),
@@ -397,15 +397,15 @@ impl LibraryService {
         // stored answer, then the providers -- whose answer is stored so the
         // next open, in any frontend, skips the network.
         let cache_key = request.cache_key();
-        let lyrics = match utils::lyrics::cached_lyrics_for_request(&request) {
+        let lyrics = match server::lyrics::cached_lyrics_for_request(&request) {
             Some(cached) => cached,
             None => match self.persisted_lyrics(&cache_key).await {
                 Some(persisted) => {
-                    utils::lyrics::prime(&cache_key, persisted.clone());
+                    server::lyrics::prime(&cache_key, persisted.clone());
                     persisted
                 }
                 None => {
-                    let fetched = utils::lyrics::fetch_lyrics_for_request(&request).await;
+                    let fetched = server::lyrics::fetch_lyrics_for_request(&request).await;
                     if fetched.conclusive {
                         self.persist_lyrics(&cache_key, &fetched.lyrics).await;
                     }

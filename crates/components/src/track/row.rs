@@ -11,7 +11,6 @@ use dioxus::prelude::*;
 use hooks::PlayerController;
 use hooks::consume_api;
 use hooks::toast::toast;
-use tracing::Instrument;
 
 pub(crate) fn copy_to_clipboard(text: &str) {
     let value = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string());
@@ -22,19 +21,12 @@ pub(crate) fn copy_to_clipboard(text: &str) {
 }
 
 pub(crate) fn share_to_musicbrainz(release_id: Option<String>, artist: String, title: String) {
-    spawn(
-        async move {
-            if let Some(url) =
-                utils::musicbrainz::track_page_url(release_id.as_deref(), &artist, &title).await
-            {
-                copy_to_clipboard(&url);
-                toast("Copied MusicBrainz link");
-            } else {
-                toast("Couldn't find this track on MusicBrainz");
-            }
-        }
-        .instrument(tracing::info_span!("musicbrainz.fetch")),
-    );
+    if let Some(url) = utils::musicbrainz::track_page_url(release_id.as_deref(), &artist, &title) {
+        copy_to_clipboard(&url);
+        toast("Copied MusicBrainz link");
+    } else {
+        toast("Couldn't find this track on MusicBrainz");
+    }
 }
 
 #[component]
@@ -266,21 +258,9 @@ pub fn TrackRow(
     let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let duration_str = fmt_dur(track.duration_secs().unwrap_or_default());
 
-    // File-type tag (MP3, FLAC, …) for local tracks, whose key is the path. A
-    // row that came from a service names no file, so it gets no badge.
-    let file_type = track
-        .service
-        .is_none()
-        .then(|| std::path::Path::new(&track.key).extension())
-        .flatten()
-        .and_then(|e| e.to_str())
-        .filter(|e| {
-            matches!(
-                e.to_ascii_lowercase().as_str(),
-                "mp3" | "flac" | "m4a" | "wav" | "ogg" | "opus" | "mp4" | "mka"
-            )
-        })
-        .map(|e| e.to_uppercase());
+    // The container a local file is in, which the daemon works out: a row
+    // that came from a service names no file, so it has none.
+    let file_type = track.format.clone();
 
     let columns_vaxry = if is_album {
         COLUMNS_VAXRY_ALBUM
@@ -522,7 +502,7 @@ pub fn TrackRow(
                                 if !is_selection_mode {
                                     // Mobile always plays. Desktop drills into the
                                     // album — but only if the track actually has one.
-                                    // Albumless tracks (uploads, music videos, YT
+                                    // Albumless tracks (uploads, videos, catalog
                                     // singles, Unknown Album from local) just play
                                     // on title click; otherwise we'd be navigating
                                     // into a meaningless "Singles" / "Unknown Album"

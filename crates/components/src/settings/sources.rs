@@ -201,16 +201,6 @@ pub fn ServerSettings(
     on_delete: EventHandler<String>,
     on_switch: EventHandler<String>,
     on_login: EventHandler<()>,
-    /// `(id, label)` of installed browsers that can host Spotify playback,
-    /// shown as a picker under a Spotify server's card.
-    spotify_browsers: Vec<(String, String)>,
-    /// Persisted browser choice; `None` = automatic.
-    spotify_browser: Option<String>,
-    on_spotify_browser: EventHandler<Option<String>>,
-    /// When another Connect device is already playing, adopt it (`true`) rather
-    /// than starting on this app's in-app device.
-    spotify_prefer_active_device: bool,
-    on_spotify_prefer_active_device: EventHandler<bool>,
     /// Folder picker for the active server, when it browses a folder tree. Only
     /// the active server has its creds hydrated, so only it can be browsed.
     remote_folders: Option<crate::settings_remote_folders::RemoteFolderSettings>,
@@ -232,10 +222,8 @@ pub fn ServerSettings(
                     let is_active = srv.active;
                     let id_switch = id.clone();
                     let id_delete = id.clone();
-                    let is_spotify = srv
-                        .service
-                        .as_ref()
-                        .is_some_and(|service| service.id == "spotify");
+                    let settings = srv.settings.clone();
+                    let settings_id = srv.id.clone();
                     let service_name = srv
                         .service
                         .as_ref()
@@ -246,9 +234,6 @@ pub fn ServerSettings(
                     // picker sits on the card the way it does for a local
                     // library, not behind a separate dialog.
                     let picker = is_active.then(|| remote_folders.clone()).flatten();
-                    let browsers = spotify_browsers.clone();
-                    let chosen = spotify_browser.clone();
-                    let prefer_active = spotify_prefer_active_device;
                     rsx! {
                         div { key: "{srv.id}",
                             class: "flex flex-col gap-2 bg-white/5 p-2 rounded w-full",
@@ -306,46 +291,17 @@ pub fn ServerSettings(
                                     crate::settings_remote_folders::RemoteFolderPicker { settings: picker }
                                 }
                             }
-                            if is_spotify {
-                                div { class: "flex items-center justify-between gap-4 border-t border-white/10 pt-2",
-                                    p { class: "text-xs text-white/60", "{i18n::t(\"playback_browser\")}" }
-                                    select {
-                                        class: "bg-stone-800 text-white rounded px-2 py-1 text-xs border border-white/10 focus:outline-none focus:border-indigo-500",
-                                        onchange: move |evt| {
-                                            let v = evt.value();
-                                            on_spotify_browser.call((v != "auto").then_some(v));
+                            if !settings.is_empty() {
+                                div { class: "border-t border-white/10 pt-2",
+                                    crate::forms::schema_form::SchemaForm {
+                                        fields: settings.clone(),
+                                        values: Vec::new(),
+                                        on_change: move |value: api::FieldValue| {
+                                            hooks::sources::set_source_settings(
+                                                settings_id.clone(),
+                                                vec![value],
+                                            );
                                         },
-                                        option {
-                                            value: "auto",
-                                            selected: chosen.is_none(),
-                                            "{i18n::t(\"playback_browser_auto\")}"
-                                        }
-                                        for (bid, label) in browsers.iter() {
-                                            option {
-                                                value: "{bid}",
-                                                selected: chosen.as_deref() == Some(bid.as_str()),
-                                                "{label}"
-                                            }
-                                        }
-                                    }
-                                }
-                                div { class: "flex items-center justify-between gap-4 border-t border-white/10 pt-2",
-                                    p { class: "text-xs text-white/60", "{i18n::t(\"spotify_connect_device\")}" }
-                                    select {
-                                        class: "bg-stone-800 text-white rounded px-2 py-1 text-xs border border-white/10 focus:outline-none focus:border-indigo-500",
-                                        onchange: move |evt| {
-                                            on_spotify_prefer_active_device.call(evt.value() == "other");
-                                        },
-                                        option {
-                                            value: "other",
-                                            selected: prefer_active,
-                                            "{i18n::t(\"spotify_connect_device_other\")}"
-                                        }
-                                        option {
-                                            value: "this",
-                                            selected: !prefer_active,
-                                            "{i18n::t(\"spotify_connect_device_this\")}"
-                                        }
                                     }
                                 }
                             }

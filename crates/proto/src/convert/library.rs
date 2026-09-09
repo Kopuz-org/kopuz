@@ -59,9 +59,6 @@ pub fn track_info_to_proto(value: &api::TrackInfo) -> TrackInfo {
         kind: track_kind_to_proto(value.kind) as i32,
         seekable: value.seekable,
         offline: value.offline,
-        service: value
-            .service
-            .map(|service| music_service_to_proto(service) as i32),
         format: value.format.clone(),
         artists: value.artists.clone(),
         musicbrainz_release_id: value.musicbrainz_release_id.clone(),
@@ -88,7 +85,6 @@ pub fn track_info_from_proto(value: &TrackInfo) -> api::TrackInfo {
         kind: track_kind_from_proto(value.kind),
         seekable: value.seekable,
         offline: value.offline,
-        service: value.service.and_then(music_service_from_proto),
         format: value.format.clone(),
         artists: value.artists.clone(),
         musicbrainz_release_id: value.musicbrainz_release_id.clone(),
@@ -254,35 +250,6 @@ pub fn artwork_ref_from_proto(value: &ArtworkRef) -> Option<api::ArtworkRef> {
     })
 }
 
-pub fn music_service_to_proto(value: ::config::MusicService) -> MusicService {
-    match value {
-        ::config::MusicService::Jellyfin => MusicService::Jellyfin,
-        ::config::MusicService::Subsonic => MusicService::Subsonic,
-        ::config::MusicService::Custom => MusicService::Custom,
-        ::config::MusicService::YtMusic => MusicService::YtMusic,
-        ::config::MusicService::AppleMusic => MusicService::AppleMusic,
-        ::config::MusicService::SoundCloud => MusicService::Soundcloud,
-        ::config::MusicService::Spotify => MusicService::Spotify,
-        ::config::MusicService::Nextcloud => MusicService::Nextcloud,
-    }
-}
-
-/// `None` for both the explicit unknown and any value this build predates --
-/// a service it cannot name is one it cannot branch on anyway.
-pub fn music_service_from_proto(value: i32) -> Option<::config::MusicService> {
-    Some(match MusicService::try_from(value).ok()? {
-        MusicService::Unknown => return None,
-        MusicService::Jellyfin => ::config::MusicService::Jellyfin,
-        MusicService::Subsonic => ::config::MusicService::Subsonic,
-        MusicService::Custom => ::config::MusicService::Custom,
-        MusicService::YtMusic => ::config::MusicService::YtMusic,
-        MusicService::AppleMusic => ::config::MusicService::AppleMusic,
-        MusicService::Soundcloud => ::config::MusicService::SoundCloud,
-        MusicService::Spotify => ::config::MusicService::Spotify,
-        MusicService::Nextcloud => ::config::MusicService::Nextcloud,
-    })
-}
-
 pub fn album_info_to_proto(value: &api::AlbumInfo) -> AlbumInfo {
     AlbumInfo {
         id: value.id.clone(),
@@ -386,7 +353,6 @@ mod tests {
             kind: api::TrackKind::Normal,
             seekable: true,
             offline: false,
-            service: None,
             format: Some("FLAC".into()),
             artists: vec!["a".into(), "b".into()],
             musicbrainz_release_id: Some("mbr".into()),

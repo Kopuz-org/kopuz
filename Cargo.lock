@@ -4691,6 +4691,7 @@ dependencies = [
  "kopuz-db",
  "kopuz-reader",
  "kopuz-utils",
+ "lofty",
  "m3u8-rs",
  "md5",
  "nextcloud-rs",
@@ -4725,19 +4726,13 @@ dependencies = [
  "base64",
  "color-thief",
  "directories",
- "hex",
  "image",
- "lofty",
- "md5",
  "percent-encoding",
- "quick-xml 0.37.5",
- "reqwest 0.13.4",
  "serde",
  "serde_json",
  "time",
  "tokio",
  "tracing",
- "urlencoding",
 ]
 
 [[package]]

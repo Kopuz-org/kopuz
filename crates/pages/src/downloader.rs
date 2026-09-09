@@ -57,9 +57,9 @@ pub fn DownloaderPage() -> Element {
                 div {
                     h1 { class: "text-2xl font-bold text-white mb-1",
                         i { class: "fa-solid fa-download mr-3 text-slate-400" }
-                        "{i18n::t(\"ytdlp_title\")}"
+                        "{i18n::t(\"downloader_title\")}"
                     }
-                    p { class: "text-slate-500 text-sm", "{i18n::t(\"ytdlp_subtitle\")}" }
+                    p { class: "text-slate-500 text-sm", "{i18n::t(\"downloader_subtitle\")}" }
                 }
                 button {
                     class: if *show_opts.read() {
@@ -67,7 +67,7 @@ pub fn DownloaderPage() -> Element {
                     } else {
                         "text-slate-400 hover:text-white p-2 rounded-lg hover:bg-white/5 transition-colors"
                     },
-                    title: i18n::t("ytdlp_options").to_string(),
+                    title: i18n::t("downloader_options").to_string(),
                     onclick: move |_| show_opts.set(!show_opts()),
                     i { class: "fa-solid fa-sliders" }
                 }
@@ -76,7 +76,7 @@ pub fn DownloaderPage() -> Element {
             div { class: "flex gap-2 mb-3",
                 input {
                     class: "flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-white/30 transition-colors text-sm",
-                    placeholder: "{i18n::t(\"ytdlp_url_placeholder\")}",
+                    placeholder: "{i18n::t(\"downloader_url_placeholder\")}",
                     value: "{url_input}",
                     oninput: move |e| {
                         failure.set(None);
@@ -90,7 +90,7 @@ pub fn DownloaderPage() -> Element {
                     class: "bg-white/10 hover:bg-white/20 text-white px-5 py-3 rounded-xl transition-colors font-medium text-sm shrink-0",
                     onclick: move |_| do_download(),
                     i { class: "fa-solid fa-download mr-2" }
-                    "{i18n::t(\"ytdlp_download\")}"
+                    "{i18n::t(\"downloader_download\")}"
                 }
             }
 
@@ -139,7 +139,7 @@ pub fn DownloaderPage() -> Element {
                             button {
                                 class: "text-slate-600 hover:text-slate-400 text-xs transition-colors",
                                 onclick: move |_| hooks::downloader::clear_history(reload),
-                                "{i18n::t(\"ytdlp_clear_history\")}"
+                                "{i18n::t(\"downloader_clear_history\")}"
                             }
                         }
                     }
@@ -157,7 +157,7 @@ pub fn DownloaderPage() -> Element {
             } else {
                 div { class: "text-center py-16 text-slate-600",
                     i { class: "fa-solid fa-download text-4xl mb-4 block opacity-30" }
-                    p { class: "text-sm", "{i18n::t(\"ytdlp_empty_state\")}" }
+                    p { class: "text-sm", "{i18n::t(\"downloader_empty_state\")}" }
                 }
             }
         }
@@ -189,14 +189,14 @@ fn ActiveRow(progress: Signal<hooks::jobs::JobProgress>, url: String) -> Element
     };
 
     let status_text = if processing {
-        i18n::t("ytdlp_status_processing")
+        i18n::t("downloader_status_processing")
     } else if progress.phase == "downloading" {
         i18n::t_with(
-            "ytdlp_status_downloading",
+            "downloader_status_downloading",
             &[("percent", format!("{percent:.0}"))],
         )
     } else {
-        i18n::t("ytdlp_status_waiting")
+        i18n::t("downloader_status_waiting")
     };
 
     let title = progress.message.unwrap_or_else(|| shorten(&url));
@@ -240,8 +240,8 @@ fn HistoryRow(entry: api::DownloadHistoryEntry, formats: Vec<api::ChoiceOption>)
 
     let status_text = match (failed, entry.error.clone()) {
         (true, Some(error)) => error,
-        (true, None) => i18n::t("ytdlp_status_failed"),
-        (false, _) => i18n::t("ytdlp_status_completed"),
+        (true, None) => i18n::t("downloader_status_failed"),
+        (false, _) => i18n::t("downloader_status_completed"),
     };
 
     let format = formats

@@ -322,7 +322,7 @@ pub fn FavoritesBody(
             }
 
             // Generic "Syncing with server" spinner for instant-sync sources.
-            // Paginated sources (YT) have their own progress row below with a
+            // Paginated sources have their own progress row below with a
             // track counter + refresh button — don't double-render.
             if *is_syncing.read() && caps().favorites_sync == api::FavoritesSyncMode::Instant {
                 div {
@@ -383,7 +383,7 @@ pub fn FavoritesBody(
                     }
                 } else {
                     {
-                        // Anonymous YT shows a sign-in prompt; otherwise the
+                        // An anonymous source shows a sign-in prompt; otherwise the
                         // standard empty state with a source-appropriate hint.
                         // A source usable without an account has nothing to show
                         // until someone signs in; the daemon says which it is.

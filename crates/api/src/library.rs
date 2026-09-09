@@ -38,8 +38,6 @@ pub struct TrackInfo {
     pub kind: TrackKind,
     pub seekable: bool,
     pub offline: bool,
-    /// Which service the track came from; `None` for a local file.
-    pub service: Option<config::MusicService>,
     /// The file's container, upper-cased ("FLAC"), for a local track that has
     /// one. A row from a service names no file, so it has none.
     pub format: Option<String>,

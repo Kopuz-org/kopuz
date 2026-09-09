@@ -1,3 +1,7 @@
+//! The shape of a track key: which source it came from, what it names
+//! there, and what a stream ref resolves to once a source hands one back.
+//! Daemon-side -- a frontend passes a key around as an opaque string.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackItemRef<'a> {
     Local(&'a str),
@@ -99,6 +103,18 @@ mod tests {
     use super::{PlaybackItemRef, ResolvedStreamRef};
 
     #[test]
+    fn parses_stream_markers() {
+        assert_eq!(
+            ResolvedStreamRef::parse("__PENDING:abc"),
+            ResolvedStreamRef::Pending("abc")
+        );
+        assert_eq!(
+            ResolvedStreamRef::parse("__SC_HLS:https://example.invalid/x.m3u8"),
+            ResolvedStreamRef::SoundCloudHls("https://example.invalid/x.m3u8")
+        );
+    }
+
+    #[test]
     fn parses_radio_item_refs() {
         assert_eq!(
             PlaybackItemRef::parse("radio:station:stream"),
@@ -118,18 +134,6 @@ mod tests {
                 item_id: "video_id",
                 extra: Some("extra"),
             }
-        );
-    }
-
-    #[test]
-    fn parses_stream_markers() {
-        assert_eq!(
-            ResolvedStreamRef::parse("__PENDING:abc"),
-            ResolvedStreamRef::Pending("abc")
-        );
-        assert_eq!(
-            ResolvedStreamRef::parse("__SC_HLS:https://example.invalid/x.m3u8"),
-            ResolvedStreamRef::SoundCloudHls("https://example.invalid/x.m3u8")
         );
     }
 }

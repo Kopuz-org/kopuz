@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use api::{Intent, Phase};
 use reader::Track;
-use utils::playback_ref::PlaybackItemRef;
+use server::playback_ref::PlaybackItemRef;
 
 use crate::session::SessionHandle;
 

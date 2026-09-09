@@ -129,7 +129,7 @@ impl ConfigService {
         incoming: config::AppConfig,
     ) -> Result<(ConfigView, config::AppConfig, Vec<String>), ApiError> {
         let mut current = self.current.write().await;
-        let updated = with_preserved_secrets(incoming, &current);
+        let updated = with_daemon_owned_fields(incoming, &current);
 
         let changed = changed_keys(&current, &updated)?;
         if changed.is_empty() {
@@ -249,7 +249,10 @@ impl ConfigService {
 /// The keys the daemon owns: credentials, and path state that only means
 /// something on this machine. They are absent from the wire, so a caller
 /// cannot set them and does not have to know them to write anything else.
-fn with_preserved_secrets(
+/// Keep what the daemon owns: the credentials, and the settings it publishes
+/// as field lists of its own. Both are absent from the surface a caller reads,
+/// so a caller writing that surface back must not be able to blank them.
+fn with_daemon_owned_fields(
     mut incoming: config::AppConfig,
     current: &config::AppConfig,
 ) -> config::AppConfig {
@@ -263,6 +266,14 @@ fn with_preserved_secrets(
     incoming.librefm_api_secret = current.librefm_api_secret.clone();
     incoming.librefm_session_key = current.librefm_session_key.clone();
     incoming.offline_tracks = current.offline_tracks.clone();
+    incoming.spotify_browser = current.spotify_browser.clone();
+    incoming.spotify_prefer_active_device = current.spotify_prefer_active_device;
+    incoming.discord_presence = current.discord_presence;
+    incoming.discord_presence_paused = current.discord_presence_paused;
+    incoming.discord_presence_source = current.discord_presence_source;
+    incoming.ytdlp_output_dir = current.ytdlp_output_dir.clone();
+    incoming.ytdlp_options = current.ytdlp_options.clone();
+    incoming.ytdlp_history = current.ytdlp_history.clone();
     incoming
 }
 
@@ -275,7 +286,7 @@ fn with_preserved_secrets(
 /// which tracks have a local copy, which is exactly what a download indicator
 /// renders. Blanking it made every one of those read empty.
 fn stripped(config: &config::AppConfig) -> config::AppConfig {
-    let mut view = with_preserved_secrets(config.clone(), &config::AppConfig::default());
+    let mut view = with_daemon_owned_fields(config.clone(), &config::AppConfig::default());
     view.offline_tracks = config.offline_tracks.clone();
     view
 }

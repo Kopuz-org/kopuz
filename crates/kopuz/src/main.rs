@@ -708,25 +708,20 @@ fn App() -> Element {
     // Generations handle the rescan task bumps after writing scanned tracks/albums,
     // so the DB-backed query hooks re-run and the UI refreshes.
     let gens_for_albums = hooks::db_reactivity::use_generations();
+    let active_source_row = hooks::sources::use_active_source_info();
 
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
         }
 
-        // Server identity excludes access_token: tokens rotate without making it a
-        // different account, but their rotation would otherwise reset playback.
-        let current_server_key = {
-            let conf = config.read();
-            conf.server.as_ref().map(|server| {
-                format!(
-                    "{:?}|{}|{}",
-                    server.service,
-                    server.url,
-                    server.user_id.as_deref().unwrap_or_default(),
-                )
-            })
-        };
+        // Which source is active is the identity that matters here; a token
+        // rotates without making it a different account.
+        let current_server_key = active_source_row
+            .read()
+            .as_ref()
+            .filter(|source| source.kind == api::SourceKind::Server)
+            .map(|source| source.id.clone());
 
         if !*server_playlist_key_initialized.read() {
             last_server_playlist_key.set(current_server_key);
@@ -1749,7 +1744,7 @@ fn App() -> Element {
                                     // job (the play buttons even stop_propagation to
                                     // avoid the card's open-album click). Key on the
                                     // active source, not an id-prefix sniff —
-                                    // Subsonic/Custom album ids carry their own
+                                    // a server's album ids carry their own
                                     // prefixes and Home only emits the active
                                     // source's ids anyway.
                                     // The album is played by name: the daemon
@@ -1853,12 +1848,12 @@ fn App() -> Element {
                             // YT Music gets the rich YT-backed profile (banner, top songs, albums, related) ONLY when an artist is actually selected. The Artists sidebar tab / back-to-list navigation
                             //  lands with both signals
                             // cleared — fall through to the library-driven
-                            // grid in that case (populated on YT from followed
+                            // grid in that case (populated on a catalog source from followed
                             // artists + liked-song artists by the library
-                            // sync). Local / Jellyfin / Subsonic keep the
+                            // sync). A library-backed source keeps the
                             // library-driven page in all cases.
                             // Route on the active source's capability, not the
-                            // configured server: a YT server can be configured while
+                            // configured server: a catalog server can be configured while
                             // Local is active, and the rich remote profile must not
                             // hijack the local artist page.
                             let remote_profile =

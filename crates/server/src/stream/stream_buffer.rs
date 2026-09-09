@@ -59,7 +59,7 @@ impl StreamBuffer {
         url: String,
         is_radio: bool,
         user_agent: Option<String>,
-        icy_tx: Option<tokio::sync::watch::Sender<crate::icy::IcyMeta>>,
+        icy_tx: Option<tokio::sync::watch::Sender<super::icy::IcyMeta>>,
         runtime: tokio::runtime::Handle,
     ) -> Self {
         Self::with_user_agent_and_progress(url, is_radio, user_agent, icy_tx, runtime, None)
@@ -69,7 +69,7 @@ impl StreamBuffer {
         url: String,
         is_radio: bool,
         user_agent: Option<String>,
-        icy_tx: Option<tokio::sync::watch::Sender<crate::icy::IcyMeta>>,
+        icy_tx: Option<tokio::sync::watch::Sender<super::icy::IcyMeta>>,
         runtime: tokio::runtime::Handle,
         progress: Option<BufferProgressCallback>,
     ) -> Self {
@@ -124,19 +124,19 @@ impl StreamBuffer {
                                 .headers()
                                 .get("content-type")
                                 .and_then(|v| v.to_str().ok());
-                            if !crate::playlist::is_playlist(content_type, response.url().path()) {
+                            if !utils::playlist::is_playlist(content_type, response.url().path()) {
                                 break Ok(response);
                             }
                             match response.text().await.ok().as_deref().and_then(|text| {
-                                crate::playlist::first_stream_url(text)
+                                utils::playlist::first_stream_url(text)
                                     // Playlist 2 playlist is HLS or a loop;
                                     // not decodable, so stop here.
-                                    .filter(|next| !crate::playlist::is_playlist(None, next))
+                                    .filter(|next| !utils::playlist::is_playlist(None, next))
                             }) {
                                 Some(next) => {
                                     tracing::debug!(
-                                        from = %crate::redact::redact_url(&url),
-                                        to = %crate::redact::redact_url(&next),
+                                        from = %utils::redact::redact_url(&url),
+                                        to = %utils::redact::redact_url(&next),
                                         "resolved playlist to stream URL",
                                     );
                                     url = next;
@@ -183,7 +183,7 @@ impl StreamBuffer {
                                 .and_then(|v| v.trim().parse::<usize>().ok())
                                 .filter(|m| *m > 0)?;
                             tracing::debug!(metaint, "ICY metadata enabled for radio stream");
-                            Some((crate::icy::IcyDeinterleaver::new(metaint), tx))
+                            Some((super::icy::IcyDeinterleaver::new(metaint), tx))
                         });
 
                         let mut total_buffered = 0usize;

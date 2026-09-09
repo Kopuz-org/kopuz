@@ -276,8 +276,8 @@ fn PlaylistsGrid(
     // The stamp that stops an automatic re-sync lives there too, which is why
     // no dedup key or request id is kept here any more.
     let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::PlaylistSync);
-    let yt_is_syncing = use_memo(move || sync_job.read().running);
-    let yt_synced_so_far = use_memo(move || sync_job.read().current.unwrap_or(0) as usize);
+    let is_syncing = use_memo(move || sync_job.read().running);
+    let synced_so_far = use_memo(move || sync_job.read().current.unwrap_or(0) as usize);
 
     use_effect(move || {
         if caps().sync {
@@ -334,7 +334,7 @@ fn PlaylistsGrid(
         store.playlists.clone()
     };
     drop(conf);
-    let is_yt = caps().albums == api::AlbumPresentation::Remote;
+    let remote_catalog = caps().albums == api::AlbumPresentation::Remote;
     // The flat remote card has no overflow menu of its own, so radio is its one
     // entry — no kind-tagged action list needed here (unlike the folder card).
     let can_radio = caps().playlist_radio;
@@ -354,10 +354,10 @@ fn PlaylistsGrid(
 
     rsx! {
         div {
-            if is_yt {
+            if remote_catalog {
                 {
-                    let syncing = *yt_is_syncing.read();
-                    let done = *yt_synced_so_far.read();
+                    let syncing = *is_syncing.read();
+                    let done = *synced_so_far.read();
                     let total = playlists.len();
                     let remaining = total.saturating_sub(done);
                     rsx! {

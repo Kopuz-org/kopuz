@@ -20,12 +20,12 @@ pub type LyricsState = Option<Option<Lyrics>>;
 /// The daemon's chain runs to its slowest provider, so a track skipped past
 /// seconds ago still answers, and answers after the track that replaced it.
 /// An answer is taken only while its own key is still the one playing.
-pub fn use_lyrics(key: Memo<String>, not_found: String) -> Signal<LyricsState> {
+pub fn use_lyrics(key: Memo<String>, radio: Memo<bool>, not_found: String) -> Signal<LyricsState> {
     let api = use_api();
     let mut state = use_signal(|| None as LyricsState);
     use_effect(move || {
         let asked = key();
-        if asked.is_empty() || utils::playback_ref::PlaybackItemRef::parse(&asked).is_radio() {
+        if asked.is_empty() || radio() {
             state.set(Some(None));
             return;
         }

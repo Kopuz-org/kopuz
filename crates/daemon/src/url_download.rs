@@ -82,12 +82,12 @@ impl Format {
 
     fn label(self) -> Text {
         Text::key(match self {
-            Self::BestAudio => "ytdlp_format_best_audio",
-            Self::Mp3 => "ytdlp_format_mp3",
-            Self::Flac => "ytdlp_format_flac",
-            Self::Opus => "ytdlp_format_opus",
-            Self::Wav => "ytdlp_format_wav",
-            Self::Video => "ytdlp_format_video",
+            Self::BestAudio => "downloader_format_best_audio",
+            Self::Mp3 => "downloader_format_mp3",
+            Self::Flac => "downloader_format_flac",
+            Self::Opus => "downloader_format_opus",
+            Self::Wav => "downloader_format_wav",
+            Self::Video => "downloader_format_video",
         })
     }
 
@@ -395,7 +395,7 @@ fn choice(values: &[(&str, Text)]) -> FieldKind {
 
 fn thumbnail_formats() -> FieldKind {
     choice(&[
-        ("", Text::key("ytdlp_none")),
+        ("", Text::key("downloader_none")),
         ("jpg", Text::literal("JPG")),
         ("png", Text::literal("PNG")),
         ("webp", Text::literal("WebP")),
@@ -404,7 +404,7 @@ fn thumbnail_formats() -> FieldKind {
 
 fn cookie_browsers() -> FieldKind {
     choice(&[
-        ("", Text::key("ytdlp_none")),
+        ("", Text::key("downloader_none")),
         ("chrome", Text::literal("Chrome")),
         ("firefox", Text::literal("Firefox")),
         ("chromium", Text::literal("Chromium")),
@@ -499,108 +499,108 @@ impl UrlDownloadService {
         vec![
             FieldSpec {
                 key: OUTPUT_DIR.to_string(),
-                label: Text::key("ytdlp_output_dir_placeholder"),
+                label: Text::key("downloader_output_dir_placeholder"),
                 kind: FieldKind::Directory,
                 value: Some(config.ytdlp_output_dir.clone()),
                 config_key: Some(OUTPUT_DIR_KEY.to_string()),
                 ..Default::default()
             },
             opens(
-                "ytdlp_section_embed",
+                "downloader_section_embed",
                 toggle_field(
                     "embed_metadata",
-                    "ytdlp_embed_metadata",
+                    "downloader_embed_metadata",
                     "--embed-metadata",
                     options.embed_metadata,
                 ),
             ),
             toggle_field(
                 "embed_thumbnail",
-                "ytdlp_embed_thumbnail",
+                "downloader_embed_thumbnail",
                 "--embed-thumbnail",
                 options.embed_thumbnail,
             ),
             toggle_field(
                 "embed_chapters",
-                "ytdlp_embed_chapters",
+                "downloader_embed_chapters",
                 "--embed-chapters",
                 options.embed_chapters,
             ),
             toggle_field(
                 "embed_subs",
-                "ytdlp_embed_subtitles",
+                "downloader_embed_subtitles",
                 "--embed-subs",
                 options.embed_subs,
             ),
             toggle_field(
                 "embed_info_json",
-                "ytdlp_embed_info_json",
+                "downloader_embed_info_json",
                 "--embed-info-json",
                 options.embed_info_json,
             ),
             opens(
-                "ytdlp_section_write",
+                "downloader_section_write",
                 toggle_field(
                     "write_thumbnail",
-                    "ytdlp_write_thumbnail",
+                    "downloader_write_thumbnail",
                     "--write-thumbnail",
                     options.write_thumbnail,
                 ),
             ),
             toggle_field(
                 "write_description",
-                "ytdlp_write_description",
+                "downloader_write_description",
                 "--write-description",
                 options.write_description,
             ),
             toggle_field(
                 "write_info_json",
-                "ytdlp_write_info_json",
+                "downloader_write_info_json",
                 "--write-info-json",
                 options.write_info_json,
             ),
             toggle_field(
                 "write_subs",
-                "ytdlp_write_subtitles",
+                "downloader_write_subtitles",
                 "--write-subs",
                 options.write_subs,
             ),
             toggle_field(
                 "write_auto_subs",
-                "ytdlp_write_auto_subtitles",
+                "downloader_write_auto_subtitles",
                 "--write-auto-subs",
                 options.write_auto_subs,
             ),
             toggle_field(
                 "write_comments",
-                "ytdlp_write_comments",
+                "downloader_write_comments",
                 "--write-comments",
                 options.write_comments,
             ),
             opens(
-                "ytdlp_section_postprocess",
+                "downloader_section_postprocess",
                 toggle_field(
                     "sponsorblock",
-                    "ytdlp_remove_sponsors",
+                    "downloader_remove_sponsors",
                     "--sponsorblock-remove",
                     options.sponsorblock,
                 ),
             ),
             toggle_field(
                 "sponsorblock_mark",
-                "ytdlp_mark_sponsors",
+                "downloader_mark_sponsors",
                 "--sponsorblock-mark",
                 options.sponsorblock_mark,
             ),
             toggle_field(
                 "split_chapters",
-                "ytdlp_split_chapters",
+                "downloader_split_chapters",
                 "--split-chapters",
                 options.split_chapters,
             ),
             toggle_field(
                 "postprocess_thumbnail_square",
-                "ytdlp_crop_thumbnails",
+                "downloader_crop_thumbnails",
                 "--postprocessor-args",
                 options.postprocess_thumbnail_square,
             ),
@@ -617,18 +617,28 @@ impl UrlDownloadService {
                 options.audio_quality.to_string(),
             ),
             opens(
-                "ytdlp_section_behavior",
+                "downloader_section_behavior",
                 toggle_field(
                     "no_playlist",
-                    "ytdlp_single_video",
+                    "downloader_single_video",
                     "--no-playlist",
                     options.no_playlist,
                 ),
             ),
-            toggle_field("xattrs", "ytdlp_write_xattrs", "--xattrs", options.xattrs),
-            toggle_field("no_mtime", "ytdlp_no_mtime", "--no-mtime", options.no_mtime),
+            toggle_field(
+                "xattrs",
+                "downloader_write_xattrs",
+                "--xattrs",
+                options.xattrs,
+            ),
+            toggle_field(
+                "no_mtime",
+                "downloader_no_mtime",
+                "--no-mtime",
+                options.no_mtime,
+            ),
             FieldSpec {
-                placeholder: Some(Text::key("ytdlp_unlimited")),
+                placeholder: Some(Text::key("downloader_unlimited")),
                 help: Some(Text::literal("e.g. 1M, 500K")),
                 ..flag_field(
                     "rate_limit",
@@ -645,7 +655,7 @@ impl UrlDownloadService {
             ),
             FieldSpec {
                 placeholder: Some(Text::literal("deno, node, bun or quickjs[:/path]")),
-                help: Some(Text::key("ytdlp_js_runtimes_tooltip")),
+                help: Some(Text::key("downloader_js_runtimes_tooltip")),
                 ..flag_field(
                     "js_runtimes",
                     "--js-runtimes",

@@ -1,7 +1,7 @@
 //! HTTP Range-backed seekable byte source.
 //!
 //! Used for remote media servers and YouTube Music when the URL returns
-//! `Accept-Ranges: bytes`). Unlike [`crate::stream_buffer::StreamBuffer`],
+//! `Accept-Ranges: bytes`). Unlike [`super::stream_buffer::StreamBuffer`],
 //! this never downloads the file linearly — every miss in the rolling
 //! window cache becomes a `Range: bytes=N-M` request. Symphonia can seek
 //! freely: to the end (Matroska Cues), to scrub targets, anywhere.
@@ -23,7 +23,7 @@
 use std::io::{Error as IoError, ErrorKind, Read, Result as IoResult, Seek, SeekFrom};
 use std::time::Duration;
 
-use crate::stream_buffer::BufferProgressCallback;
+use super::stream_buffer::BufferProgressCallback;
 
 const CHUNK: usize = 512 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);

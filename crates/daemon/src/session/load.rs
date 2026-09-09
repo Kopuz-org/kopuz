@@ -538,11 +538,11 @@ impl ClassifiedLoad {
                     end,
                     total,
                 }));
-            }) as utils::stream_buffer::BufferProgressCallback
+            }) as server::stream::stream_buffer::BufferProgressCallback
         });
 
         let icy_tx = if self.is_radio && self.use_icy {
-            let (tx, mut rx) = watch::channel(utils::icy::IcyMeta::default());
+            let (tx, mut rx) = watch::channel(server::stream::icy::IcyMeta::default());
             let cmd_tx = self.cmd_tx.clone();
             let token = self.token;
             tokio::spawn(async move {
@@ -551,7 +551,7 @@ impl ClassifiedLoad {
                     if meta.title.trim().is_empty() {
                         continue;
                     }
-                    let (artist, title) = utils::icy::split_artist_title(&meta.title);
+                    let (artist, title) = server::stream::icy::split_artist_title(&meta.title);
                     let _ = cmd_tx.send(SessionCmd::RadioMetadata {
                         token,
                         title,

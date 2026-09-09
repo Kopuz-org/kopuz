@@ -12,5 +12,11 @@ pub(crate) fn use_fullscreen_lyrics() -> Signal<Option<Option<utils::lyrics::Lyr
             .map(|track| track.uid.clone())
             .unwrap_or_default()
     });
-    hooks::lyrics::use_lyrics(track_key, i18n::t("lyrics_not_found").to_string())
+    let radio = use_memo(move || {
+        ctrl.current_track_snapshot
+            .read()
+            .as_ref()
+            .is_some_and(|track| track.kind == api::TrackKind::Radio)
+    });
+    hooks::lyrics::use_lyrics(track_key, radio, i18n::t("lyrics_not_found").to_string())
 }

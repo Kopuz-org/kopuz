@@ -421,27 +421,6 @@ pub fn custom_theme_from_proto(value: &CustomTheme) -> config::CustomTheme {
         vars: value.vars.clone().into_iter().collect(),
     }
 }
-
-pub fn ytdlp_history_entry_to_proto(value: &config::YtdlpHistoryEntry) -> YtdlpHistoryEntry {
-    YtdlpHistoryEntry {
-        url: value.url.clone(),
-        title: value.title.clone(),
-        format: value.format.clone(),
-        status: value.status.clone(),
-        error: value.error.clone(),
-    }
-}
-
-pub fn ytdlp_history_entry_from_proto(value: &YtdlpHistoryEntry) -> config::YtdlpHistoryEntry {
-    config::YtdlpHistoryEntry {
-        url: value.url.clone(),
-        title: value.title.clone(),
-        format: value.format.clone(),
-        status: value.status.clone(),
-        error: value.error.clone(),
-    }
-}
-
 pub fn equalizer_to_proto(value: &config::EqualizerSettings) -> EqualizerSettings {
     EqualizerSettings {
         enabled: value.enabled,
@@ -521,65 +500,6 @@ pub fn artist_sort_criterion_from_proto(
     }
 }
 
-pub fn ytdlp_options_to_proto(value: &config::YtdlpOptions) -> YtdlpOptions {
-    YtdlpOptions {
-        embed_metadata: value.embed_metadata,
-        embed_thumbnail: value.embed_thumbnail,
-        postprocess_thumbnail_square: value.postprocess_thumbnail_square,
-        embed_chapters: value.embed_chapters,
-        embed_subs: value.embed_subs,
-        embed_info_json: value.embed_info_json,
-        write_thumbnail: value.write_thumbnail,
-        write_description: value.write_description,
-        write_info_json: value.write_info_json,
-        write_subs: value.write_subs,
-        write_auto_subs: value.write_auto_subs,
-        write_comments: value.write_comments,
-        sponsorblock: value.sponsorblock,
-        sponsorblock_mark: value.sponsorblock_mark,
-        split_chapters: value.split_chapters,
-        convert_thumbnail: value.convert_thumbnail.clone(),
-        no_playlist: value.no_playlist,
-        xattrs: value.xattrs,
-        no_mtime: value.no_mtime,
-        rate_limit: value.rate_limit.clone(),
-        cookies_from_browser: value.cookies_from_browser.clone(),
-        js_runtimes: value.js_runtimes.clone(),
-        audio_quality: u32::from(value.audio_quality),
-    }
-}
-
-pub fn ytdlp_options_from_proto(value: Option<&YtdlpOptions>) -> config::YtdlpOptions {
-    let Some(value) = value else {
-        return config::YtdlpOptions::default();
-    };
-    config::YtdlpOptions {
-        embed_metadata: value.embed_metadata,
-        embed_thumbnail: value.embed_thumbnail,
-        postprocess_thumbnail_square: value.postprocess_thumbnail_square,
-        embed_chapters: value.embed_chapters,
-        embed_subs: value.embed_subs,
-        embed_info_json: value.embed_info_json,
-        write_thumbnail: value.write_thumbnail,
-        write_description: value.write_description,
-        write_info_json: value.write_info_json,
-        write_subs: value.write_subs,
-        write_auto_subs: value.write_auto_subs,
-        write_comments: value.write_comments,
-        sponsorblock: value.sponsorblock,
-        sponsorblock_mark: value.sponsorblock_mark,
-        split_chapters: value.split_chapters,
-        convert_thumbnail: value.convert_thumbnail.clone(),
-        no_playlist: value.no_playlist,
-        xattrs: value.xattrs,
-        no_mtime: value.no_mtime,
-        rate_limit: value.rate_limit.clone(),
-        cookies_from_browser: value.cookies_from_browser.clone(),
-        js_runtimes: value.js_runtimes.clone(),
-        audio_quality: value.audio_quality.min(u32::from(u8::MAX)) as u8,
-    }
-}
-
 pub fn config_to_proto(value: &config::AppConfig) -> Config {
     Config {
         local_sources: value
@@ -594,8 +514,6 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
             .iter()
             .map(|(k, v)| (k.clone(), StringList { values: v.clone() }))
             .collect(),
-        spotify_browser: value.spotify_browser.clone(),
-        spotify_prefer_active_device: value.spotify_prefer_active_device,
         music_directory: value
             .music_directory
             .iter()
@@ -604,9 +522,6 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
         theme: value.theme.clone(),
         live_theme_path: value.live_theme_path.clone(),
         device_id: value.device_id.clone(),
-        discord_presence: value.discord_presence,
-        discord_presence_paused: value.discord_presence_paused,
-        discord_presence_source: value.discord_presence_source,
         sort_order: sort_order_to_proto(&value.sort_order) as i32,
         album_sort: value
             .album_sort
@@ -662,13 +577,6 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
         device_change_behavior: device_change_behavior_to_proto(value.device_change_behavior)
             as i32,
         sample_rate_mode: sample_rate_mode_to_proto(value.sample_rate_mode) as i32,
-        ytdlp_output_dir: value.ytdlp_output_dir.clone(),
-        ytdlp_options: Some(ytdlp_options_to_proto(&value.ytdlp_options)),
-        ytdlp_history: value
-            .ytdlp_history
-            .iter()
-            .map(ytdlp_history_entry_to_proto)
-            .collect(),
         titlebar_mode: titlebar_mode_to_proto(value.titlebar_mode) as i32,
         offline_quality: offline_quality_to_proto(value.offline_quality) as i32,
         player_bar_position: player_bar_position_to_proto(value.player_bar_position) as i32,
@@ -715,8 +623,6 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
             .iter()
             .map(|(k, v)| (k.clone(), v.values.clone()))
             .collect(),
-        spotify_browser: value.spotify_browser.clone(),
-        spotify_prefer_active_device: value.spotify_prefer_active_device,
         music_directory: value
             .music_directory
             .iter()
@@ -725,9 +631,6 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
         theme: value.theme.clone(),
         live_theme_path: value.live_theme_path.clone(),
         device_id: value.device_id.clone(),
-        discord_presence: value.discord_presence,
-        discord_presence_paused: value.discord_presence_paused,
-        discord_presence_source: value.discord_presence_source,
         sort_order: sort_order_from_proto(value.sort_order),
         album_sort: value
             .album_sort
@@ -782,13 +685,6 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
         equalizer: equalizer_from_proto(value.equalizer.as_ref()),
         device_change_behavior: device_change_behavior_from_proto(value.device_change_behavior),
         sample_rate_mode: sample_rate_mode_from_proto(value.sample_rate_mode),
-        ytdlp_output_dir: value.ytdlp_output_dir.clone(),
-        ytdlp_options: ytdlp_options_from_proto(value.ytdlp_options.as_ref()),
-        ytdlp_history: value
-            .ytdlp_history
-            .iter()
-            .map(ytdlp_history_entry_from_proto)
-            .collect(),
         titlebar_mode: titlebar_mode_from_proto(value.titlebar_mode),
         offline_quality: offline_quality_from_proto(value.offline_quality),
         player_bar_position: player_bar_position_from_proto(value.player_bar_position),

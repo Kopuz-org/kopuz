@@ -116,7 +116,7 @@ pub trait MediaSource: Send + Sync {
     async fn download_track(
         &self,
         _item_id: &str,
-        _progress: Option<utils::stream_buffer::BufferProgressCallback>,
+        _progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
     ) -> Result<Vec<u8>, SourceError> {
         Err(SourceError::unsupported("track download"))
     }

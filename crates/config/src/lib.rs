@@ -889,7 +889,7 @@ pub fn default_sidebar_order() -> Vec<String> {
         "favorites".to_string(),
         "radio".to_string(),
         "activity".to_string(),
-        "ytdlp".to_string(),
+        "downloader".to_string(),
     ]
 }
 
@@ -1114,6 +1114,13 @@ impl AppConfig {
     }
 
     pub fn migrate_sidebar_order(&mut self) {
+        // The downloads entry was keyed by the tool that fetches; a stored
+        // order still names it that way.
+        for key in self.sidebar_order.iter_mut() {
+            if key == "downloader" {
+                *key = "downloader".to_string();
+            }
+        }
         let all_keys = default_sidebar_order();
         for key in &all_keys {
             if !self.sidebar_order.iter().any(|k| k == key) {

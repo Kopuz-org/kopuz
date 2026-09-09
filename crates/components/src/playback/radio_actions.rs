@@ -41,7 +41,7 @@ pub fn track_radio_handler(key: String) -> Option<EventHandler<()>> {
     supported.then(|| EventHandler::new(move |_| ctrl.play_track_radio(key.clone(), notices())))
 }
 
-/// The playlist counterpart. Gated on its own flag: a Subsonic server can seed
+/// The playlist counterpart. Gated on its own flag: a source can seed
 /// a mix from a song but not from a playlist, so sharing the track flag put an
 /// action on playlist cards that could only ever fail.
 pub fn playlist_radio_handler(playlist_id: String) -> Option<EventHandler<()>> {

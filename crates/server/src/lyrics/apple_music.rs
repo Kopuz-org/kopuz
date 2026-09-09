@@ -18,7 +18,7 @@ use quick_xml::events::Event;
 fn qname_local_eq(qn: quick_xml::name::QName, local: &[u8]) -> bool {
     qn.local_name().as_ref() == local || qn.as_ref() == local
 }
-use super::model::{LyricChunk, LyricLine, Lyrics};
+use super::{LyricChunk, LyricLine, Lyrics};
 
 /// Parse a TTML string from Apple Music into [`Lyrics`].
 ///

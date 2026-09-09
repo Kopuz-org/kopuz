@@ -1139,8 +1139,7 @@ message TrackInfo {
   TrackKind kind = 12;
   bool seekable = 13;
   bool offline = 14;
-  // Absent for a local file.
-  optional MusicService service = 15;
+  reserved 15;
   // The container, upper-cased ("FLAC"); a row from a service names no file.
   optional string format = 22;
   // Every credited artist, where the source separates them.
@@ -1352,14 +1351,6 @@ message CustomTheme {
   map<string, string> vars = 2;
 }
 
-message YtdlpHistoryEntry {
-  string url = 1;
-  string title = 2;
-  string format = 3;
-  string status = 4;
-  optional string error = 5;
-}
-
 message EqualizerSettings {
   bool enabled = 1;
   EqPreset preset = 2;
@@ -1383,32 +1374,6 @@ message ArtistSortCriterion {
   SortDirection direction = 2;
 }
 
-message YtdlpOptions {
-  bool embed_metadata = 1;
-  bool embed_thumbnail = 2;
-  bool postprocess_thumbnail_square = 3;
-  bool embed_chapters = 4;
-  bool embed_subs = 5;
-  bool embed_info_json = 6;
-  bool write_thumbnail = 7;
-  bool write_description = 8;
-  bool write_info_json = 9;
-  bool write_subs = 10;
-  bool write_auto_subs = 11;
-  bool write_comments = 12;
-  bool sponsorblock = 13;
-  bool sponsorblock_mark = 14;
-  bool split_chapters = 15;
-  string convert_thumbnail = 16;
-  bool no_playlist = 17;
-  bool xattrs = 18;
-  bool no_mtime = 19;
-  string rate_limit = 20;
-  string cookies_from_browser = 21;
-  string js_runtimes = 22;
-  uint32 audio_quality = 23;
-}
-
 // The settings surface, mirroring config::AppConfig minus the keys the
 // daemon never sends: credentials and machine-local path state.
 message Config {
@@ -1416,15 +1381,12 @@ message Config {
   SourceRef active_source = 2;
   bool source_explicitly_set = 3;
   map<string, StringList> server_folders = 4;
-  optional string spotify_browser = 5;
-  bool spotify_prefer_active_device = 6;
+  // 5, 6, 11-13, 48-50 were the settings the daemon publishes as field lists.
+  reserved 5, 6, 11, 12, 13, 48, 49, 50;
   repeated string music_directory = 7;
   string theme = 8;
   string live_theme_path = 9;
   string device_id = 10;
-  optional bool discord_presence = 11;
-  optional bool discord_presence_paused = 12;
-  optional bool discord_presence_source = 13;
   SortOrder sort_order = 14;
   repeated AlbumSortCriterion album_sort = 15;
   repeated TrackSortCriterion library_sort = 16;
@@ -1459,9 +1421,6 @@ message Config {
   EqualizerSettings equalizer = 45;
   DeviceChangeBehavior device_change_behavior = 46;
   SampleRateMode sample_rate_mode = 47;
-  string ytdlp_output_dir = 48;
-  YtdlpOptions ytdlp_options = 49;
-  repeated YtdlpHistoryEntry ytdlp_history = 50;
   TitlebarMode titlebar_mode = 51;
   OfflineQuality offline_quality = 52;
   PlayerBarPosition player_bar_position = 53;
@@ -1711,20 +1670,6 @@ enum TrackSort {
   TRACK_SORT_PLAY_COUNT = 5;
   // Ordering comes from TrackFilter.sort_fields instead.
   TRACK_SORT_FIELDS = 6;
-}
-
-// Which backend a row came from. UNKNOWN is the forward-compatibility
-// fallback; the daemon never sends it.
-enum MusicService {
-  MUSIC_SERVICE_UNKNOWN = 0;
-  MUSIC_SERVICE_JELLYFIN = 1;
-  MUSIC_SERVICE_SUBSONIC = 2;
-  MUSIC_SERVICE_CUSTOM = 3;
-  MUSIC_SERVICE_YT_MUSIC = 4;
-  MUSIC_SERVICE_APPLE_MUSIC = 5;
-  MUSIC_SERVICE_SOUNDCLOUD = 6;
-  MUSIC_SERVICE_SPOTIFY = 7;
-  MUSIC_SERVICE_NEXTCLOUD = 8;
 }
 
 enum TrackKind {

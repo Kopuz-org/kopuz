@@ -67,15 +67,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .collect()
     });
     let active_server = use_memo(move || servers().into_iter().find(|server| server.active));
-    // Every browser the daemon knows how to drive. Which of them is actually
-    // installed is the daemon's machine's business, not this one's, so the
-    // list is not filtered here and an absent one falls back there.
-    let spotify_browsers = use_hook(|| {
-        config::Browser::ALL
-            .iter()
-            .map(|browser| (browser.id().to_string(), browser.label().to_string()))
-            .collect::<Vec<_>>()
-    });
     let mut show_add_server = use_signal(|| false);
     let mut show_add_local_source = use_signal(|| false);
     let mut show_login = use_signal(|| false);
@@ -598,15 +589,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         on_delete: handle_delete_saved,
                                         on_switch: handle_switch_server,
                                         on_login: move |_| sign_in_again(),
-                                        spotify_browsers: spotify_browsers.clone(),
-                                        spotify_browser: config.read().spotify_browser.clone(),
-                                        on_spotify_browser: move |v: Option<String>| {
-                                            config.write().spotify_browser = v;
-                                        },
-                                        spotify_prefer_active_device: config.read().spotify_prefer_active_device,
-                                        on_spotify_prefer_active_device: move |v: bool| {
-                                            config.write().spotify_prefer_active_device = v;
-                                        },
                                         remote_folders: remote_folder_settings(active_server()),
                                     }
                                 }
@@ -890,11 +872,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 LoginPopup {
                     username,
                     password,
-                    service_name: config
-                        .read()
-                        .server
-                        .as_ref()
-                        .map(|server| server.service.display_name().to_string())
+                    service_name: active_server()
+                        .and_then(|server| server.service)
+                        .map(|service| components::forms::text(&service.name))
                         .unwrap_or_else(|| i18n::t("server").to_string()),
                     error: login_error,
                     loading: is_loading,

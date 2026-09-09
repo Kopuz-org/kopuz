@@ -33,7 +33,7 @@ pub fn PlaylistDetail(
 
     // Affordances are capability-driven, not source-kind-driven: tag-edit and
     // delete-from-disk are local-only, downloads server-only, reorder per the
-    // playlists cap (YT's InnerTube has no reorder mutation). Reading the caps is
+    // playlists cap, since not every source can reorder. Reading the caps is
     // also more correct than `is_server` — e.g. a creds-less offline server has
     // downloads=false.
     let caps = *hooks::sources::use_capabilities().read();
@@ -98,7 +98,7 @@ pub fn PlaylistDetail(
                 #[cfg(not(target_os = "android"))]
                 {
                     let pid = pid_for_cover.clone();
-                    // The daemon decides what "set a cover" means -- Jellyfin
+                    // The daemon decides what "set a cover" means -- a server
                     // pushes the image upstream, everyone else records it --
                     // so the bytes go across and the policy stays there.
                     spawn(async move {

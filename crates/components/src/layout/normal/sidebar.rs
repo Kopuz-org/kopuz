@@ -65,7 +65,7 @@ const TOP_MENU: &[SidebarItem] = &[
         icon: "fa-solid fa-chart-simple",
     },
     SidebarItem {
-        key: "ytdlp",
+        key: "downloader",
         route: Route::Downloader,
         icon: "fa-solid fa-download",
     },
@@ -184,7 +184,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let is_rtl = i18n::is_rtl();
     let border_side = if is_rtl { "border-l" } else { "border-r" };
 
-    // Discover is a capability of the active source (YT), not a config flag —
+    // Discover is a capability of the active source, not a config flag —
     // hide the tab when the active source has no discover surface.
     let caps = hooks::sources::use_capabilities();
     let has_discover = use_memo(move || caps().discover);

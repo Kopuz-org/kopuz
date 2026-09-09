@@ -14,9 +14,9 @@ use api::{
 use player::engine::{Event as EngineEvent, Phase as EnginePhase, SourceFactory, Transition};
 use player::player::{LoadArgs, NowPlayingMeta, Player, PlayerInitError};
 use reader::Track;
+use server::playback_ref::{PlaybackItemRef, ResolvedStreamRef};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
-use utils::playback_ref::{PlaybackItemRef, ResolvedStreamRef};
 
 use crate::playback::network_factory;
 use crate::queue_model::{NextOutcome, QueueModel};

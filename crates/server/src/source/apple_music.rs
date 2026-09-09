@@ -139,7 +139,7 @@ impl MediaSource for AppleMusicSource {
     async fn download_track(
         &self,
         item_id: &str,
-        progress: Option<utils::stream_buffer::BufferProgressCallback>,
+        progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
     ) -> Result<Vec<u8>, SourceError> {
         let token = self
             .client

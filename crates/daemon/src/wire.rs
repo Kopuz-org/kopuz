@@ -2,7 +2,7 @@
 
 use api::{TrackInfo, TrackKind};
 use reader::Track;
-use utils::playback_ref::PlaybackItemRef;
+use server::playback_ref::PlaybackItemRef;
 
 /// The wire row for a track: sentinel durations become an explicit kind, and
 /// the offline flag is derived from the config's registration map so clients
@@ -34,7 +34,6 @@ pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo
         },
         seekable: !radio,
         offline,
-        service: track.id.service(),
         format: track_format(track),
         artists: track.artists.clone(),
         musicbrainz_release_id: track.musicbrainz_release_id.clone(),

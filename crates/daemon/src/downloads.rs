@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use api::{ApiError, JobKind, JobRef, Table};
+use server::playback_ref::PlaybackItemRef;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
-use utils::playback_ref::PlaybackItemRef;
 
 use crate::config_service::ConfigService;
 use crate::jobs::{JobCtx, JobRunner};
