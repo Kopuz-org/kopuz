@@ -233,7 +233,6 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
 
             if config.read().show_source_toggle {
                 crate::source_switcher::SourceSwitcher {
-                    config,
                     collapsed,
                     on_manage: move |_| props.on_navigate.call(Route::Settings),
                 }

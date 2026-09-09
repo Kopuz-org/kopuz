@@ -284,7 +284,6 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
 
                 if !*is_collapsed.read() && config.read().show_source_toggle {
                     crate::source_switcher::SourceSwitcher {
-                        config,
                         on_manage: move |_| props.on_navigate.call(Route::Settings),
                     }
                 }

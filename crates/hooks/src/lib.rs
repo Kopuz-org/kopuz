@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod artist_images;
+pub mod config_view;
 pub mod db_reactivity;
 pub mod downloads;
 pub mod favorites;

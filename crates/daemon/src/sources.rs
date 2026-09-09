@@ -198,6 +198,31 @@ impl SourceService {
         Ok(info)
     }
 
+    /// Rebuild the media source from a config someone wrote directly. A
+    /// settings write can move where the library reads from, and nothing else
+    /// would notice: the source is built once and held.
+    pub fn refresh_active(&self, updated: &config::AppConfig) {
+        self.session
+            .set_active_source(Some(Arc::from(server::source::active(
+                self.db.clone(),
+                updated,
+            ))));
+    }
+
+    /// Whether a browser sign-in can run here at all. A sandboxed daemon with
+    /// no host access cannot spawn one, and a client should say so before
+    /// offering a source whose only sign-in is a browser one.
+    pub async fn can_open_browser(&self) -> bool {
+        #[cfg(target_os = "android")]
+        {
+            false
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            server::cookies::has_host_spawn().await
+        }
+    }
+
     /// Push a config change into the session, rebuilding the media source so
     /// later loads resolve against the new backend.
     fn publish(&self, updated: config::AppConfig, changed: Vec<String>) {

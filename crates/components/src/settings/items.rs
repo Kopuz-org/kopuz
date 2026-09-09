@@ -26,7 +26,7 @@ pub fn SettingItem(
     #[props(default)]
     stacked: bool,
 ) -> Element {
-    let locked = try_consume_context::<config::store::FileLayers>().is_some_and(|layers| {
+    let locked = try_consume_context::<hooks::config_view::LockedKeys>().is_some_and(|layers| {
         (!config_key.is_empty() && layers.is_locked(&config_key))
             || extra_config_keys.iter().any(|key| layers.is_locked(key))
     });

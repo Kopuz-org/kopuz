@@ -458,6 +458,18 @@ impl api::ConfigApi for LocalApi {
             ));
         };
         let (view, updated, changed) = service.set(config).await?;
+        // A settings write can move where the library reads from, so the
+        // source is rebuilt before anything loads against the old one.
+        if let Some(sources) = &self.sources
+            && changed.iter().any(|key| {
+                matches!(
+                    key.as_str(),
+                    "active_source" | "local_sources" | "music_directory" | "server_folders"
+                )
+            })
+        {
+            sources.refresh_active(&updated);
+        }
         self.session.set_config(updated, changed);
         Ok(view)
     }
@@ -647,6 +659,10 @@ impl api::SourceApi for LocalApi {
 
     async fn validate_source(&self, id: String) -> Result<api::SourceState, ApiError> {
         self.sources()?.validate_source(&id).await
+    }
+
+    async fn can_open_browser(&self) -> Result<bool, ApiError> {
+        Ok(self.sources()?.can_open_browser().await)
     }
 
     async fn integrations(&self) -> Result<Vec<api::IntegrationStatus>, ApiError> {

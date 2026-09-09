@@ -13,7 +13,7 @@ use components::settings_items::{
 use components::settings_popups::{
     AddLocalSourcePopup, AddRegistryPopup, AddServerPopup, LoginPopup,
 };
-use components::settings_remote_folders::{RemoteCreds, RemoteFolderSettings};
+use components::settings_remote_folders::RemoteFolderSettings;
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 
@@ -54,6 +54,19 @@ fn BuildInfoCard() -> Element {
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
+    // The servers are the daemon's: it holds their credentials, so the config
+    // this page reads never carries them.
+    let sources = hooks::sources::use_sources();
+    let servers = use_memo(move || -> Vec<api::SourceInfo> {
+        sources
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|source| source.kind == api::SourceKind::Server)
+            .collect()
+    });
+    let active_server = use_memo(move || servers().into_iter().find(|server| server.active));
     let spotify_browsers = use_hook(|| {
         ::server::spotify::host::available_browsers()
             .into_iter()
@@ -72,11 +85,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let server_url = use_signal(String::new);
     let server_service = use_signal(|| MusicService::Jellyfin);
     let yt_browser = use_signal(|| {
-        config
+        active_server
             .peek()
-            .server
             .as_ref()
-            .and_then(|s| s.yt_browser)
+            .and_then(|server| server.browser.as_deref())
+            .and_then(config::Browser::from_id)
             .unwrap_or(config::Browser::Chrome)
     });
     let yt_anonymous = use_signal(|| false);
@@ -126,22 +139,17 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         );
     };
 
-    let ytmusic_auto_login = move || {
-        crate::settings_actions::ytmusic_auto_login(config, yt_browser, error, ctrl.playback_error);
-    };
-
-    let applemusic_auto_login = move || {
-        crate::settings_actions::applemusic_auto_login(
-            config,
-            yt_browser,
-            error,
-            ctrl.playback_error,
-        );
+    // Signing in again on an active server: which flow it is belongs to the
+    // service, and the daemon runs it.
+    let mut sign_in_again = move || match active_server() {
+        Some(server) if server.service.is_some_and(|s| s.uses_browser_signin()) => {
+            crate::settings_actions::authenticate(server.id, error, ctrl.playback_error);
+        }
+        _ => show_login.set(true),
     };
 
     let handle_add_server = move |_| {
         crate::settings_actions::add_server(
-            config,
             server_name,
             server_url,
             server_service,
@@ -164,23 +172,19 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         });
     };
     let handle_switch_server = move |id: String| {
-        crate::settings_actions::switch_server(
-            config,
-            id,
-            yt_browser,
-            error,
-            show_login,
-            ctrl.playback_error,
-        );
+        crate::settings_actions::switch_server(id, error, show_login, ctrl.playback_error);
     };
 
     let handle_delete_saved = move |id: String| {
-        crate::settings_actions::delete_saved(config, id);
+        crate::settings_actions::delete_saved(id);
     };
 
     let handle_login = move |_| {
+        let Some(server) = active_server() else {
+            return;
+        };
         crate::settings_actions::login_with_password(
-            config,
+            server.id,
             username,
             password,
             login_error,
@@ -195,7 +199,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
 
-            if try_consume_context::<config::store::FileLayers>().is_some_and(|layers| !layers.locked_keys.is_empty()) {
+            if try_consume_context::<hooks::config_view::LockedKeys>().is_some_and(|layers| layers.any()) {
                 aside { class: "mb-4 rounded-xl border border-white/10 bg-white/5 px-5 py-3 flex items-center gap-3",
                     i { class: "fa-solid fa-lock text-white/40 text-sm shrink-0" }
                     p { class: "text-sm text-white/70", "{i18n::t(\"settings_managed_notice\")}" }
@@ -584,30 +588,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 title: i18n::t("media_servers").to_string(),
                                 control: rsx! {
                                     ServerSettings {
-                                        active_source_id: config
-                                            .read()
-                                            .active_source
-                                            .server_id()
-                                            .map(String::from),
-                                        servers: config.read().servers.clone(),
+                                        servers: servers(),
                                         on_add: move |_| show_add_server.set(true),
                                         on_delete: handle_delete_saved,
                                         on_switch: handle_switch_server,
-                                        on_login: move |_| {
-                                            let service =
-                                                config.read().server.as_ref().map(|s| s.service);
-                                            match service {
-                                                Some(MusicService::YtMusic) => {
-                                                    ytmusic_auto_login();
-                                                }
-                                                Some(MusicService::AppleMusic) => {
-                                                    applemusic_auto_login();
-                                                }
-                                                _ => {
-                                                    show_login.set(true);
-                                                }
-                                            }
-                                        },
+                                        on_login: move |_| sign_in_again(),
                                         spotify_browsers: spotify_browsers.clone(),
                                         spotify_browser: config.read().spotify_browser.clone(),
                                         on_spotify_browser: move |v: Option<String>| {
@@ -617,7 +602,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         on_spotify_prefer_active_device: move |v: bool| {
                                             config.write().spotify_prefer_active_device = v;
                                         },
-                                        remote_folders: remote_folder_settings(config),
+                                        remote_folders: remote_folder_settings(active_server()),
                                     }
                                 }
                             }
@@ -924,42 +909,45 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     }
 }
 
-/// The active server's folder picker, or `None` when it has no folder tree or
-/// no creds. Only the active server carries hydrated creds.
-fn remote_folder_settings(mut config: Signal<AppConfig>) -> Option<RemoteFolderSettings> {
-    let creds = {
-        let cfg = config.read();
-        let server = cfg.server.as_ref()?;
-        let active_id = cfg.active_source.server_id()?;
-        if server.id.as_deref() != Some(active_id) {
-            return None;
-        }
-        if server.service != MusicService::Nextcloud {
-            return None;
-        }
-        RemoteCreds {
-            url: server.url.clone(),
-            user_id: server.user_id.clone()?,
-            token: server.access_token.clone()?,
-        }
-    };
+/// The active server's folder picker, or `None` unless it browses a folder
+/// tree and is signed in -- the daemon lists the folders, so it needs both.
+fn remote_folder_settings(server: Option<api::SourceInfo>) -> Option<RemoteFolderSettings> {
+    let server = server?;
+    if server.service != Some(MusicService::Nextcloud) || !server.authenticated {
+        return None;
+    }
+    let folders = server.directories.clone();
+    let add_id = server.id.clone();
+    let add_folders = folders.clone();
+    let remove_id = server.id.clone();
+    let remove_folders = folders.clone();
 
     Some(RemoteFolderSettings {
-        creds,
-        folders: config.read().active_server_folders(),
+        source_id: server.id,
+        folders,
         on_add: EventHandler::new(move |path: String| {
-            config.write().edit_active_server_folders(|folders| {
-                if !folders.contains(&path) {
-                    folders.push(path);
-                }
-            });
+            let mut next = add_folders.clone();
+            if !next.contains(&path) {
+                next.push(path);
+            }
+            set_directories(add_id.clone(), next);
         }),
         on_remove: EventHandler::new(move |index: usize| {
-            config.write().edit_active_server_folders(|folders| {
-                if index < folders.len() {
-                    folders.remove(index);
-                }
-            });
+            let mut next = remove_folders.clone();
+            if index < next.len() {
+                next.remove(index);
+                set_directories(remove_id.clone(), next);
+            }
         }),
     })
+}
+
+fn set_directories(id: String, directories: Vec<String>) {
+    let api = hooks::consume_api();
+    spawn(async move {
+        if let Err(error) = api.set_source_directories(id, directories).await {
+            tracing::warn!(%error, "setting the source folders failed");
+            hooks::toast::toast_error(&error.to_string());
+        }
+    });
 }

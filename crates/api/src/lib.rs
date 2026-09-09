@@ -364,6 +364,11 @@ pub trait SourceApi: Send + Sync {
     /// Probe whether a source is reachable and still signed in.
     async fn validate_source(&self, id: String) -> Result<SourceState, ApiError>;
 
+    /// Whether this daemon can run a browser sign-in at all. A sandboxed
+    /// daemon cannot spawn one, and a client asks before offering a source
+    /// whose only sign-in is a browser one.
+    async fn can_open_browser(&self) -> Result<bool, ApiError>;
+
     async fn integrations(&self) -> Result<Vec<IntegrationStatus>, ApiError>;
 
     /// Set scrobbling credentials. Write-only, like source credentials.

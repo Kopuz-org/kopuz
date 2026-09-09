@@ -1175,6 +1175,14 @@ impl Kopuz for KopuzGrpc {
         }))
     }
 
+    async fn can_open_browser(
+        &self,
+        _request: Request<proto::CanOpenBrowserRequest>,
+    ) -> Result<Response<proto::BrowserAccess>, Status> {
+        let available = self.0.api.can_open_browser().await.map_err(failed)?;
+        Ok(Response::new(proto::BrowserAccess { available }))
+    }
+
     async fn get_integrations(
         &self,
         _: Request<proto::GetIntegrationsRequest>,
