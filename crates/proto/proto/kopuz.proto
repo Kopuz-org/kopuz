@@ -75,6 +75,11 @@ service Kopuz {
   rpc SetQueue(SetQueueRequest) returns (MutationResult);
   rpc EditQueue(QueueEditRequest) returns (MutationResult);
   rpc SetFavorite(FavoriteRequest) returns (SetFavoriteResponse);
+  rpc UpdateTrackMetadata(TrackMetadataPatch) returns (TrackInfo);
+  rpc DeleteTracks(DeleteTracksRequest) returns (Unit);
+  rpc DeleteAlbum(DeleteAlbumRequest) returns (Unit);
+  rpc UploadArtwork(ArtworkUpload) returns (Unit);
+  rpc RemoveArtwork(ArtworkTarget) returns (Unit);
   rpc StartJob(StartJobRequest) returns (JobRef);
   rpc CancelJob(JobId) returns (CancelJobResponse);
   rpc StartDownloads(DownloadRequest) returns (JobRef);
@@ -519,6 +524,47 @@ message SearchResults {
 }
 
 // ---------------- playlists ----------------
+
+// ---------------- mutations ----------------
+
+// What to do with an entity's picture. Absent means leave it alone.
+message ArtworkChange {
+  oneof change {
+    Unit remove = 1;
+    bytes set = 2;
+  }
+}
+
+// A field left unset keeps its current value; the clear_* flags remove a
+// number, since "unset" already means "unchanged".
+message TrackMetadataPatch {
+  string key = 1;
+  optional string title = 2;
+  optional string artist = 3;
+  optional string album = 4;
+  optional uint32 track_number = 5;
+  bool clear_track_number = 6;
+  optional uint32 disc_number = 7;
+  bool clear_disc_number = 8;
+  optional ArtworkChange cover = 9;
+}
+
+message DeleteTracksRequest {
+  repeated string keys = 1;
+  // Also unlink the files. Refused outside the configured library roots.
+  bool from_disk = 2;
+}
+
+message DeleteAlbumRequest {
+  string id = 1;
+  bool from_disk = 2;
+}
+
+message ArtworkUpload {
+  ArtworkTarget target = 1;
+  string content_type = 2;
+  bytes bytes = 3;
+}
 
 // ---------------- catalog ----------------
 

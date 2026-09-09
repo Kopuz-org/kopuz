@@ -382,6 +382,50 @@ impl api::LibraryApi for GrpcApi {
         Ok(())
     }
 
+    async fn update_track_metadata(
+        &self,
+        patch: api::TrackMetadataPatch,
+    ) -> Result<api::TrackInfo, ApiError> {
+        let track = self
+            .client()
+            .update_track_metadata(Request::new(convert::track_patch_to_proto(&patch)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::track_info_from_proto(track.get_ref()))
+    }
+
+    async fn delete_tracks(&self, keys: Vec<String>, from_disk: bool) -> Result<(), ApiError> {
+        self.client()
+            .delete_tracks(Request::new(proto::DeleteTracksRequest { keys, from_disk }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn delete_album(&self, id: String, from_disk: bool) -> Result<(), ApiError> {
+        self.client()
+            .delete_album(Request::new(proto::DeleteAlbumRequest { id, from_disk }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn upload_artwork(&self, upload: api::ArtworkUpload) -> Result<(), ApiError> {
+        self.client()
+            .upload_artwork(Request::new(convert::artwork_upload_to_proto(&upload)))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn remove_artwork(&self, target: api::ArtworkTarget) -> Result<(), ApiError> {
+        self.client()
+            .remove_artwork(Request::new(convert::artwork_target_to_proto(&target)))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
     async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<(), ApiError> {
         self.client()
             .refresh_artist_artwork(Request::new(proto::RefreshArtistArtworkRequest { names }))

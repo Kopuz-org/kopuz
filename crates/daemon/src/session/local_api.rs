@@ -14,6 +14,7 @@ pub struct LocalApi {
     pub(super) playlists: Option<Arc<crate::playlists::PlaylistService>>,
     pub(super) catalog: Option<Arc<crate::catalog::CatalogService>>,
     pub(super) radio: Option<Arc<crate::radio::RadioService>>,
+    pub(super) mutations: Option<Arc<crate::mutations::MutationService>>,
 }
 
 impl LocalApi {
@@ -29,6 +30,7 @@ impl LocalApi {
             playlists: None,
             catalog: None,
             radio: None,
+            mutations: None,
         }
     }
 
@@ -81,6 +83,17 @@ impl LocalApi {
         self.library
             .as_deref()
             .ok_or_else(|| ApiError::unsupported("this daemon runs without a library service"))
+    }
+
+    pub fn with_mutations(mut self, mutations: Arc<crate::mutations::MutationService>) -> Self {
+        self.mutations = Some(mutations);
+        self
+    }
+
+    fn mutations(&self) -> Result<&crate::mutations::MutationService, ApiError> {
+        self.mutations
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs read-only"))
     }
 
     fn catalog(&self) -> Result<&crate::catalog::CatalogService, ApiError> {
@@ -266,6 +279,29 @@ impl api::LibraryApi for LocalApi {
 
     async fn pin_radio_station(&self, id: String, pinned: bool) -> Result<(), ApiError> {
         self.radio()?.pin(&id, pinned).await
+    }
+
+    async fn update_track_metadata(
+        &self,
+        patch: api::TrackMetadataPatch,
+    ) -> Result<api::TrackInfo, ApiError> {
+        self.mutations()?.update_track_metadata(patch).await
+    }
+
+    async fn delete_tracks(&self, keys: Vec<String>, from_disk: bool) -> Result<(), ApiError> {
+        self.mutations()?.delete_tracks(&keys, from_disk).await
+    }
+
+    async fn delete_album(&self, id: String, from_disk: bool) -> Result<(), ApiError> {
+        self.mutations()?.delete_album(&id, from_disk).await
+    }
+
+    async fn upload_artwork(&self, upload: api::ArtworkUpload) -> Result<(), ApiError> {
+        self.mutations()?.upload_artwork(upload).await
+    }
+
+    async fn remove_artwork(&self, target: api::ArtworkTarget) -> Result<(), ApiError> {
+        self.mutations()?.remove_artwork(target).await
     }
 
     async fn artist_tracks(&self, artist: String, page: Page) -> Result<api::TrackPage, ApiError> {

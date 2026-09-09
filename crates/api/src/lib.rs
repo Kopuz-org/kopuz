@@ -13,6 +13,7 @@ mod catalog;
 mod error;
 mod events;
 mod library;
+mod mutations;
 mod player;
 mod playlists;
 mod queue;
@@ -30,6 +31,7 @@ pub use library::{
     LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter, TrackInfo, TrackPage,
     TrackSort,
 };
+pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
     BufferedRange, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying, Phase,
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
@@ -193,6 +195,23 @@ pub trait LibraryApi: Send + Sync {
     /// the remote in the background of the call; a rejected push reverts the
     /// local state and surfaces the error.
     async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError>;
+
+    /// Rewrite one track's tags, and its embedded cover with them. Only local
+    /// files have tags to edit; a server track answers `unsupported`.
+    async fn update_track_metadata(&self, patch: TrackMetadataPatch)
+    -> Result<TrackInfo, ApiError>;
+
+    /// Forget these tracks. `from_disk` also unlinks the files, which is
+    /// refused for anything outside the configured library roots.
+    async fn delete_tracks(&self, keys: Vec<String>, from_disk: bool) -> Result<(), ApiError>;
+
+    async fn delete_album(&self, id: String, from_disk: bool) -> Result<(), ApiError>;
+
+    /// Set a picture for an album, artist, playlist or track. The daemon
+    /// stores it and tells the source, so a server that hosts covers gets it.
+    async fn upload_artwork(&self, upload: ArtworkUpload) -> Result<(), ApiError>;
+
+    async fn remove_artwork(&self, target: ArtworkTarget) -> Result<(), ApiError>;
 }
 
 /// Playlists and the folders they sit in.
