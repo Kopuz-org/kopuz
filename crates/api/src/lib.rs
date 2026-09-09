@@ -27,7 +27,7 @@ pub use catalog::{
 };
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
-pub use jobs::{DownloadItemStatus, YtdlpAudioFormat, YtdlpRequest};
+pub use jobs::{DownloadItemState, DownloadItemStatus, YtdlpAudioFormat, YtdlpRequest};
 pub use library::{
     AlbumInfo, AlbumPage, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT, LyricChunkView,
     LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter, TrackInfo, TrackPage,
@@ -285,6 +285,9 @@ pub trait JobApi: Send + Sync {
     async fn downloads(&self) -> Result<Vec<String>, ApiError>;
 
     async fn remove_download(&self, key: String) -> Result<(), ApiError>;
+
+    /// Per-item state for the downloads a batch is working through.
+    async fn download_statuses(&self) -> Result<Vec<DownloadItemStatus>, ApiError>;
 
     /// Download a URL with yt-dlp. Progress arrives as job events; the
     /// finished download is recorded in the history the settings page shows.

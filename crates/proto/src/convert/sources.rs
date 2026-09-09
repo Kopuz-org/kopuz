@@ -276,6 +276,37 @@ pub fn ytdlp_request_from_proto(value: &YtdlpRequest) -> api::YtdlpRequest {
         options: ytdlp_options_from_proto(value.options.as_ref()),
     }
 }
+
+pub fn download_state_to_proto(value: api::DownloadItemState) -> DownloadItemState {
+    match value {
+        api::DownloadItemState::Queued => DownloadItemState::DownloadItemQueued,
+        api::DownloadItemState::Downloading => DownloadItemState::DownloadItemDownloading,
+        api::DownloadItemState::Failed => DownloadItemState::DownloadItemFailed,
+    }
+}
+
+pub fn download_state_from_proto(value: i32) -> api::DownloadItemState {
+    match DownloadItemState::try_from(value) {
+        Ok(DownloadItemState::DownloadItemDownloading) => api::DownloadItemState::Downloading,
+        Ok(DownloadItemState::DownloadItemFailed) => api::DownloadItemState::Failed,
+        _ => api::DownloadItemState::Queued,
+    }
+}
+
+pub fn download_status_to_proto(value: &api::DownloadItemStatus) -> DownloadItemStatus {
+    DownloadItemStatus {
+        key: value.key.clone(),
+        state: download_state_to_proto(value.state) as i32,
+    }
+}
+
+pub fn download_status_from_proto(value: &DownloadItemStatus) -> api::DownloadItemStatus {
+    api::DownloadItemStatus {
+        key: value.key.clone(),
+        state: download_state_from_proto(value.state),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

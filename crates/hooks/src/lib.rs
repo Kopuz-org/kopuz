@@ -4,6 +4,7 @@
 pub mod api;
 pub mod artist_images;
 pub mod db_reactivity;
+pub mod downloads;
 pub mod favorites;
 pub mod jobs;
 pub mod library_actions;

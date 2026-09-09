@@ -876,6 +876,19 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::JobRef { job_id: job.job_id }))
     }
 
+    async fn get_download_statuses(
+        &self,
+        _: Request<proto::GetDownloadStatusesRequest>,
+    ) -> Result<Response<proto::DownloadStatusList>, Status> {
+        let items = self.0.api.download_statuses().await.map_err(failed)?;
+        Ok(Response::new(proto::DownloadStatusList {
+            items: items
+                .iter()
+                .map(convert::download_status_to_proto)
+                .collect(),
+        }))
+    }
+
     async fn remove_download(
         &self,
         request: Request<proto::TrackRef>,

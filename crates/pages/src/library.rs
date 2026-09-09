@@ -22,8 +22,6 @@ use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
 use std::collections::HashSet;
 
-use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
-
 const ITEM_HEIGHT: f64 = 60.0; // 60px: p-2 padding (16px*2=32) + content height (~28px)
 
 #[component]
@@ -42,7 +40,7 @@ pub fn LibraryPage(
 ) -> Element {
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
-    let download_queue = use_context::<Signal<DownloadQueue>>();
+    let downloads = hooks::downloads::use_downloads();
 
     let library_sort = use_signal(|| config.peek().library_sort.clone());
     let filter = use_memo(move || {
@@ -182,17 +180,8 @@ pub fn LibraryPage(
                         .get(&item_id)
                         .map(|p| std::path::Path::new(p).exists())
                         .unwrap_or(false);
-                let is_downloading = cap.downloads
-                    && download_queue.read().items.iter().any(|i| {
-                        i.id == item_id
-                            && matches!(
-                                i.status,
-                                DownloadStatus::Queued | DownloadStatus::Downloading
-                            )
-                    });
+                let is_downloading = cap.downloads && downloads.read().is_active(&item_id);
                 let item_id_dl = item_id.clone();
-                let track_title = track.title.clone();
-                let track_artist = track.artist.clone();
 
                 rsx! {
                     div {
@@ -256,10 +245,8 @@ pub fn LibraryPage(
                             on_download: caps().downloads.then(|| EventHandler::new(move |_| {
                                 if !is_downloaded {
                                     active_menu_track.set(None);
-                                    queue_downloads(
-                                        vec![(item_id_dl.clone(), track_title.clone(), track_artist.clone())],
-                                        config,
-                                        download_queue,
+                                    hooks::downloads::start(
+                                        vec![item_id_dl.clone()],
                                     );
                                 }
                             })),

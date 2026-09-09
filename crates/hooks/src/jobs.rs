@@ -10,12 +10,15 @@ use dioxus::prelude::*;
 use crate::api::use_api;
 
 /// What a job of one kind is doing right now.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct JobProgress {
     pub running: bool,
     /// Items handled so far, when the job counts them.
     pub current: Option<u64>,
     pub total: Option<u64>,
+    /// What the job is working on -- the download job names the track it
+    /// is fetching, which is how a row knows it is the active one.
+    pub message: Option<String>,
 }
 
 /// Follow every job of `kind`. Starts from the daemon's current job list, so
@@ -35,6 +38,7 @@ pub fn use_job_progress(kind: api::JobKind) -> Signal<JobProgress> {
                 state.set(JobProgress {
                     running: true,
                     current: job.current,
+                    message: job.message.clone(),
                     total: job.total,
                 });
             }
@@ -47,6 +51,7 @@ pub fn use_job_progress(kind: api::JobKind) -> Signal<JobProgress> {
                         state.set(JobProgress {
                             running: true,
                             current: progress.current,
+                            message: progress.message.clone(),
                             total: progress.total,
                         });
                     }

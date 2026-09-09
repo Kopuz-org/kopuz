@@ -24,10 +24,18 @@ pub struct YtdlpRequest {
     pub options: config::YtdlpOptions,
 }
 
-/// One track's offline copy, as the download overlay renders it.
+/// Where one requested download has got to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DownloadItemState {
+    #[default]
+    Queued,
+    Downloading,
+    Failed,
+}
+
+/// One requested download, as the progress overlay renders it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DownloadItemStatus {
     pub key: String,
-    /// Present once the file exists.
-    pub stored: bool,
+    pub state: DownloadItemState,
 }
