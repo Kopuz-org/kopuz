@@ -32,7 +32,6 @@ mod debug_panel;
 mod desktop_shell;
 #[cfg(not(target_os = "android"))]
 mod exit_flush;
-mod legacy;
 mod logging;
 #[cfg(not(target_os = "android"))]
 mod ui_profile;
@@ -847,29 +846,29 @@ fn App() -> Element {
         snapshot.volume = *volume.peek();
         exit_flush::stash_config(snapshot);
     });
-    let db_for_cfg_save = db.clone();
-    use_future(move || {
-        let db = db_for_cfg_save.clone();
-        async move {
-            let mut flushed = 0u64;
-            loop {
-                if *config_dirty.peek() == flushed {
-                    utils::sleep(std::time::Duration::from_millis(250)).await;
-                    continue;
-                }
-                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
-                flushed = *config_dirty.peek();
-                let mut snapshot = config.peek().clone();
-                snapshot.volume = *volume.peek();
-                if let Err(e) = db
-                    .save_config(&snapshot)
-                    .instrument(tracing::info_span!("config.persist"))
-                    .await
-                {
-                    tracing::error!("Failed to save config: {}", e);
-                }
-                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
+    // Settings are written through the daemon, which owns the file and the
+    // blob: a direct database write would leave its copy stale and lose the
+    // credentials it keeps out of what this process holds.
+    use_future(move || async move {
+        let api = hooks::consume_api();
+        let mut flushed = 0u64;
+        loop {
+            if *config_dirty.peek() == flushed {
+                utils::sleep(std::time::Duration::from_millis(250)).await;
+                continue;
             }
+            utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
+            flushed = *config_dirty.peek();
+            let mut snapshot = config.peek().clone();
+            snapshot.volume = *volume.peek();
+            if let Err(error) = api
+                .set_config(snapshot)
+                .instrument(tracing::info_span!("config.persist"))
+                .await
+            {
+                tracing::error!(%error, "failed to save settings");
+            }
+            utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
         }
     });
 
@@ -1075,33 +1074,31 @@ fn App() -> Element {
 
     let _is_offline = app_lifecycle::use_connectivity_probe(config, network_banner);
 
-    let db_for_load = db.clone();
     let session_for_load = session.clone();
     let favorites_for_load = favorites_service.clone();
     let scrobbler_for_load = scrobbler.clone();
     use_hook(move || {
         {
-            let db = db_for_load;
+            let api = backend::api();
 
             spawn(async move {
                 // The queue is restored by the core before the window exists;
                 // the config is all that is left to pull up into the signals.
                 // Everything else is queried on demand by the page hooks.
-                // Config marks itself loaded ONLY
-                // on success: its save is the one remaining whole-value write,
-                // and persisting a default born of a read failure would wipe
-                // real settings/servers.
-                let cfg_loaded = match db
-                    .load_config()
+                // Config marks itself loaded ONLY on success: its save is the
+                // one remaining whole-value write, and persisting a default
+                // born of a read failure would wipe real settings.
+                let cfg_loaded = match api
+                    .config()
                     .instrument(tracing::info_span!("startup.load_config"))
                     .await
                 {
-                    Ok(c) => {
+                    Ok(view) => {
                         config_loaded_ok.set(true);
-                        c
+                        Some(view.config)
                     }
-                    Err(e) => {
-                        tracing::error!(error = %e, "failed to load config from db — config saves disabled this session");
+                    Err(error) => {
+                        tracing::error!(%error, "could not read settings; saves are off this session");
                         None
                     }
                 };
@@ -1149,7 +1146,6 @@ fn App() -> Element {
         }
     });
 
-    let db_for_play_album = db.clone();
     let library_for_scan = library_service.clone();
     let jobs_for_scan = job_runner.clone();
     use_effect(move || {
@@ -1907,23 +1903,21 @@ fn App() -> Element {
                                     // Subsonic/Custom album ids carry their own
                                     // prefixes and Home only emits the active
                                     // source's ids anyway.
-                                    let source = config.peek().active_source.clone();
-                                    let db = db_for_play_album.clone();
+                                    // The album is played by name: the daemon
+                                    // holds its tracks and their order.
+                                    let mut ctrl = ctrl;
+                                    let request = api::SetQueueRequest {
+                                        mode: api::QueueMode::Replace,
+                                        context: api::QueueContext::Album { id },
+                                        start_index: Some(0),
+                                        shuffle: None,
+                                    };
+                                    let api = hooks::consume_api();
                                     spawn(async move {
-                                        let mut tracks =
-                                            db.album_tracks(&source, &id).await.unwrap_or_default();
-                                        if !tracks.is_empty() {
-                                            tracks.sort_by(|a, b| {
-                                                let disc_cmp = a.disc_number.unwrap_or(1).cmp(&b.disc_number.unwrap_or(1));
-                                                if disc_cmp == std::cmp::Ordering::Equal {
-                                                    a.track_number.unwrap_or(0).cmp(&b.track_number.unwrap_or(0))
-                                                } else {
-                                                    disc_cmp
-                                                }
-                                            });
-                                            queue.set(tracks);
-                                            ctrl.play_track(0);
+                                        if let Err(error) = api.set_queue(request).await {
+                                            tracing::warn!(%error, "playing an album failed");
                                         }
+                                        let _ = &mut ctrl;
                                     });
                                 },
                                 on_select_playlist: move |id: String| {
