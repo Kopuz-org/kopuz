@@ -54,6 +54,14 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
 - Cover resolution lives in `cover.rs` (`locate` / `track` / `from_path`);
   dispatch on the cover ref's own shape, not the active source. What a
   frontend sees is an `ArtworkRef`, resolved to bytes by `ArtworkApi`.
+- **InnerTube headers are all-or-nothing.** Every `youtubei/v1/*` call sends
+  `User-Agent` (from the `YouTubeClient`), `X-Goog-Api-Format-Version`,
+  `X-YouTube-Client-Name`/`-Version`, `X-Origin` and `Referer`, plus
+  `Cookie` + a SAPISIDHASH `Authorization` when signed in. YouTube answers a
+  request missing them with a bare 403 while the endpoints that send them keep
+  working from the same session, so the symptom looks like an expired login and
+  is not. `discover.rs::post` is the reference; copy it rather than hand-rolling
+  a builder.
 
 ## i18n (`crates/i18n`)
 
