@@ -479,6 +479,8 @@ discover_requires_ytmusic = Η Ανακάλυψη είναι διαθέσιμη 
 discover_show_all = Εμφάνιση όλων
 yt_anon_playlists = Συνδέσου στο YouTube Music για να δεις τις λίστες αναπαραγωγής σου.
 yt_anon_favorites = Συνδέσου στο YouTube Music για να δεις τα τραγούδια που σου άρεσαν.
+yt_anon_discover = Συνδέσου στο YouTube Music για να δεις την Ανακάλυψη.
+artist_none_selected = Δεν επιλέχθηκε καλλιτέχνης
 
 # Metadata Viewer / Editor
 view_metadata = Προβολή μεταδεδομένων

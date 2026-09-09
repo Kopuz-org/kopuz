@@ -1035,6 +1035,22 @@ async fn catalog_and_radio_report_absence_identically() {
             .err()
             .map(|e| e.code),
     );
+
+    // A URL that is not a registry is refused as bad input, not reported as a
+    // registry with no stations, and says so the same way on both transports.
+    let url = "file:///nonexistent/registry.json".to_string();
+    assert_eq!(
+        pair.local
+            .validate_radio_registry(url.clone())
+            .await
+            .err()
+            .map(|e| e.code),
+        pair.wire
+            .validate_radio_registry(url)
+            .await
+            .err()
+            .map(|e| e.code),
+    );
 }
 
 /// Deleting from disk is the one API call that destroys something outside

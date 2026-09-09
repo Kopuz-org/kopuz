@@ -485,6 +485,8 @@ discover_requires_ytmusic = 発見は YouTube Music がアクティブなサー�
 discover_show_all = すべて表示
 yt_anon_playlists = ライブラリのプレイリストを表示するには YouTube Music にログインしてください。
 yt_anon_favorites = 高評価した曲を表示するには YouTube Music にログインしてください。
+yt_anon_discover = 見つけるを表示するには YouTube Music にログインしてください。
+artist_none_selected = アーティストが選択されていません
 
 # Metadata Viewer / Editor
 view_metadata = メタデータを表示

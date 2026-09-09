@@ -195,6 +195,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     artwork.attach_radio(radio_service.clone());
     // The registry starts empty and is built from config here, rather than
     // by whichever frontend happened to be open.
+    radio_service.watch_config(session.config_watch());
     let radio_boot = radio_service.clone();
     tokio::spawn(async move {
         if let Err(error) = radio_boot.reload().await {

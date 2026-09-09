@@ -479,6 +479,8 @@ discover_requires_ytmusic = Descoperă este disponibil doar când YouTube Music 
 discover_show_all = Afișează toate
 yt_anon_playlists = Conectează-te la YouTube Music pentru a vedea playlisturile din bibliotecă.
 yt_anon_favorites = Conectează-te la YouTube Music pentru a vedea melodiile apreciate.
+yt_anon_discover = Conectează-te la YouTube Music pentru a explora Descoperă.
+artist_none_selected = Niciun artist selectat
 
 # Metadata Viewer / Editor
 view_metadata = Vezi metadatele

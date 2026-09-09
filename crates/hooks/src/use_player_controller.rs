@@ -310,6 +310,35 @@ impl PlayerController {
         });
     }
 
+    /// Queue rows by key. Library tracks and the catalog rows the daemon
+    /// registered when it served them resolve the same way, so a browse tile
+    /// plays without the client shipping a track list back.
+    pub fn set_queue_keys(
+        &mut self,
+        keys: Vec<String>,
+        mode: api::QueueMode,
+        start_index: Option<u32>,
+    ) {
+        if keys.is_empty() {
+            return;
+        }
+        if mode == api::QueueMode::Replace && *self.external_active.peek() {
+            self.stop_external_playback();
+        }
+        let handle = self.handle();
+        spawn(async move {
+            let request = api::SetQueueRequest {
+                mode,
+                context: api::QueueContext::Tracks { keys },
+                start_index,
+                shuffle: None,
+            };
+            if let Err(error) = handle.set_queue(request).await {
+                tracing::warn!(%error, "queueing by key failed");
+            }
+        });
+    }
+
     pub fn add_to_queue(&mut self, tracks: impl IntoIterator<Item = Track>) {
         let tracks: Vec<Track> = tracks.into_iter().collect();
         if tracks.is_empty() {

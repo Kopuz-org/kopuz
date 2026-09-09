@@ -1,31 +1,41 @@
-use std::collections::HashMap;
+//! The source's browse catalog: shelves of albums, playlists, artists and
+//! songs that the library does not hold.
+//!
+//! Every row here comes from `LibraryApi::catalog`, so this page knows nothing
+//! about which service produced it, holds no credentials, and plays a tile by
+//! naming keys the daemon already registered. Images are artwork refs like
+//! every other picture in the app.
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use api::{CatalogDetailRequest, CatalogItem, CatalogItemKind, CatalogShelf, TrackInfo};
 use components::track_row::TrackRow;
-use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
-use reader::models::Track;
-use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArtist};
 use tracing::Instrument;
 
-/// Tracks the id (playlist_id or MPRE… album browse id) that last
-/// initiated playback through a Discover surface. Album and playlist
-/// tiles read this to decide whether to render a play or pause icon
-/// in their hover overlay, and whether the click should
-/// fetch+enqueue or just toggle the player. Cleared when a
-/// stand-alone song starts playing from a SongCard so we don't
-/// incorrectly show "playing" on the album that previously played.
+/// The id of the tile that last started playback -- a catalog id for an album
+/// or playlist, a track key for a song. Tiles read it to decide whether their
+/// overlay shows play or pause, and whether a click should fetch or toggle.
 #[derive(Clone, Copy)]
 pub struct DiscoverNowPlaying(pub Signal<Option<String>>);
 
-/// Hover-prefetched track lists keyed by the id the user would click —
-/// playlist_id or MPRE… browse id. Populated by Card's onmouseenter
-/// handler (after a short hover delay) and consumed by
-/// play_playlist_async, so when the user actually clicks Play the
-/// tracks are already in memory and playback can start without
-/// waiting on a browse roundtrip.
+/// Hover-prefetched track lists keyed by the tile's catalog id, so a click
+/// after a hover starts playing without a round trip.
 #[derive(Clone, Copy)]
-pub struct DiscoverPrefetchCache(pub Signal<HashMap<String, Vec<Track>>>);
+pub struct DiscoverPrefetchCache(pub Signal<HashMap<String, Vec<TrackInfo>>>);
+
+/// What a failure says. A source that has not been signed into is the one
+/// case worth wording ourselves; everything else is the daemon's message.
+fn failure_text(error: &api::ApiError) -> String {
+    if error.code == api::ErrorCode::SourceAuthExpired {
+        return i18n::t("yt_anon_discover");
+    }
+    i18n::t_with("discover_failed", &[("error", error.to_string())])
+}
+
+fn keys_of(tracks: &[TrackInfo]) -> Vec<String> {
+    tracks.iter().map(|track| track.key.clone()).collect()
+}
 
 #[component]
 #[tracing::instrument(name = "render.discover_home", skip_all)]
@@ -35,20 +45,18 @@ pub fn DiscoverPage(
     on_open_artist: EventHandler<(String, String)>,
     on_search_artist: EventHandler<String>,
 ) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let mut shelves = use_signal(Vec::<DiscoverShelf>::new);
+    let api = hooks::use_api();
+    let caps = hooks::sources::use_capabilities();
+    let mut shelves = use_signal(Vec::<CatalogShelf>::new);
     let mut continuation = use_signal(|| None::<String>);
     let mut loading_more = use_signal(|| false);
     let mut initial_loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    // Discover is a capability of the active source, not a hardcoded service —
-    // gate on it (and on the active source, not the configured server).
-    let discover_supported = active_source.read().capabilities().discover;
-
     use_effect(move || {
-        if !discover_supported {
+        // Read inside the effect: capabilities arrive with the source list, so
+        // the first render can say "no" and the load has to follow the answer.
+        if !caps().discover {
             initial_loading.set(false);
             return;
         }
@@ -56,26 +64,16 @@ pub fn DiscoverPage(
             return;
         }
         let home_span = tracing::info_span!("discover.load_home");
-        let signed_in = config
-            .peek()
-            .server
-            .as_ref()
-            .and_then(|s| s.access_token.as_ref())
-            .is_some();
-        if !signed_in {
-            error.set(Some("not signed in".to_string()));
-            initial_loading.set(false);
-            return;
-        }
-        let source = active_source.peek().clone();
+        let api = api.clone();
         spawn(
             async move {
-                match source.discover_home().await {
-                    Ok(home) => {
-                        apply_home(home, &mut shelves, &mut continuation);
+                match api.catalog(None).await {
+                    Ok(page) => {
+                        shelves.write().extend(page.shelves);
+                        continuation.set(page.continuation);
                         error.set(None);
                     }
-                    Err(e) => error.set(Some(e.to_string())),
+                    Err(failure) => error.set(Some(failure_text(&failure))),
                 }
                 initial_loading.set(false);
             }
@@ -83,7 +81,7 @@ pub fn DiscoverPage(
         );
     });
 
-    if !discover_supported {
+    if !caps().discover {
         return rsx! {
             div { class: "flex items-center justify-center h-full text-white/60 p-12 text-center",
                 p { "{i18n::t(\"discover_requires_ytmusic\")}" }
@@ -100,12 +98,15 @@ pub fn DiscoverPage(
         }
         loading_more.set(true);
         let more_span = tracing::info_span!("discover.load_more");
-        let source = active_source.peek().clone();
+        let api = hooks::consume_api();
         spawn(
             async move {
-                match source.discover_continuation(&token).await {
-                    Ok(home) => apply_home(home, &mut shelves, &mut continuation),
-                    Err(e) => error.set(Some(e.to_string())),
+                match api.catalog(Some(token)).await {
+                    Ok(page) => {
+                        shelves.write().extend(page.shelves);
+                        continuation.set(page.continuation);
+                    }
+                    Err(failure) => error.set(Some(failure_text(&failure))),
                 }
                 loading_more.set(false);
             }
@@ -149,9 +150,7 @@ pub fn DiscoverPage(
                     i { class: "fa-solid fa-arrows-rotate fa-spin text-2xl text-white/60" }
                 }
             } else if let Some(err) = error.read().clone() {
-                div { class: "py-12 text-rose-400 text-sm",
-                    "{i18n::t_with(\"discover_failed\", &[(\"error\", err.clone())])}"
-                }
+                div { class: "py-12 text-rose-400 text-sm", "{err}" }
             }
 
             for (idx, shelf) in shelves.read().iter().enumerate() {
@@ -178,25 +177,16 @@ pub fn DiscoverPage(
     }
 }
 
-fn apply_home(
-    home: DiscoverHome,
-    shelves: &mut Signal<Vec<DiscoverShelf>>,
-    continuation: &mut Signal<Option<String>>,
-) {
-    shelves.write().extend(home.shelves);
-    continuation.set(home.continuation);
-}
-
 #[component]
 fn ShelfRow(
-    shelf: DiscoverShelf,
+    shelf: CatalogShelf,
     scroll_id: String,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
     on_open_artist: EventHandler<(String, String)>,
     on_search_artist: EventHandler<String>,
 ) -> Element {
-    if shelf.is_song_list {
+    if shelf.list {
         return rsx! { SongListShelf {
             shelf: shelf.clone(),
             on_select_playlist: on_select_playlist,
@@ -255,29 +245,23 @@ fn ShelfRow(
     }
 }
 
-/// Vertical song-list shelf for the artist page "Top songs" section.
-/// YT only returns the first 5 rows inline and ships a `more_browse_id`
-/// (a `VL…` playlist id) that points at the full songs playlist; we
-/// expose that as a "Show all songs" button which navigates through
-/// `on_select_playlist` into the existing `DiscoverPlaylistDetail`
-/// viewer (which already paginates).
+/// A shelf a source renders as a track list rather than a carousel, which is
+/// the artist page's "top songs". Only the first few rows come inline; the
+/// shelf's `more_ref` opens the full list in the playlist viewer.
 #[component]
 fn SongListShelf(
-    shelf: DiscoverShelf,
+    shelf: CatalogShelf,
     on_select_playlist: EventHandler<(String, String)>,
 ) -> Element {
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let mut now_playing = use_context::<DiscoverNowPlaying>().0;
-    let tracks: Vec<Track> = shelf
+    let songs: Vec<TrackInfo> = shelf
         .items
         .iter()
-        .filter_map(|i| match i {
-            DiscoverItem::Song(t) => Some((**t).clone()),
-            _ => None,
-        })
+        .filter_map(|item| item.track.clone())
         .collect();
     let title_for_more = shelf.title.clone();
-    let more = shelf.more_browse_id.clone();
+    let more = shelf.more_ref.clone();
     rsx! {
         section { class: "mb-12",
             div { class: "flex items-end justify-between mb-5 gap-4",
@@ -295,60 +279,53 @@ fn SongListShelf(
             div { class: "flex flex-col",
                 {
                     // Shared menu / playing state across the rows.
-                    let mut active_menu_path = use_signal(|| None::<reader::TrackId>);
-                    let mut current_playing_path = use_signal(|| None::<reader::TrackId>);
+                    let mut active_menu_key = use_signal(|| None::<String>);
+                    let mut current_playing_key = use_signal(|| None::<String>);
+                    let keys = keys_of(&songs);
                     rsx! {
-                        for (idx, track) in tracks.iter().enumerate() {
+                        for (idx, info) in songs.iter().enumerate() {
                             {
-                                let track = track.clone();
-                                let tracks_for_play = tracks.clone();
-                                let cover_url =
-                                    server::cover::track(&ctrl.config.read(), &track, 96);
-                                let track_for_play = track.clone();
-                                let track_for_menu = track.clone();
-                                let track_path_for_match = track.id.clone();
-                                let is_current = current_playing_path.read().as_ref()
-                                    == Some(&track_path_for_match);
-                                let is_menu_open = active_menu_path.read().as_ref()
-                                    == Some(&track.id);
+                                let key = info.key.clone();
+                                let key_for_play = key.clone();
+                                let key_for_menu = key.clone();
+                                let keys = keys.clone();
+                                let cover_url = hooks::wire::artwork_url(info.artwork.as_ref());
+                                let is_current = current_playing_key.read().as_deref() == Some(key.as_str());
+                                let is_menu_open = active_menu_key.read().as_deref() == Some(key.as_str());
                                 rsx! {
                                     TrackRow {
                                         key: "{idx}",
-                                        track: track.clone(),
+                                        track: hooks::wire::track_from_api(info.clone()),
                                         cover_url,
-                                        on_start_radio: components::track_row::radio_handler(track.id.key().into_owned()),
+                                        on_start_radio: components::track_row::radio_handler(key.clone()),
                                         row_num: Some(idx + 1),
                                         is_menu_open,
                                         is_currently_playing: is_current,
                                         hide_delete: true,
                                         on_play: move |_| {
-                                            let mut queue = tracks_for_play.clone();
-                                            let start = queue
-                                                .iter()
-                                                .position(|x| x.id == track_for_play.id)
-                                                .unwrap_or(0);
-                                            queue.rotate_left(start);
-                                            current_playing_path.set(Some(track_for_play.id.clone()));
-                                            // Top Songs is a preview — clear the
-                                            // discover source so no album/playlist
-                                            // tile incorrectly shows the pause
-                                            // overlay while one of these plays.
+                                            current_playing_key.set(Some(key_for_play.clone()));
+                                            // Top songs is a preview: clear the tile
+                                            // tag so no album or playlist card claims
+                                            // the pause overlay while one of these plays.
                                             now_playing.set(None);
-                                            ctrl.play_queue_linear(queue);
+                                            ctrl.set_queue_keys(
+                                                keys.clone(),
+                                                api::QueueMode::Replace,
+                                                Some(idx as u32),
+                                            );
                                         },
                                         on_click_menu: move |_| {
-                                            let p = track_for_menu.id.clone();
-                                            if active_menu_path.read().as_ref() == Some(&p) {
-                                                active_menu_path.set(None);
+                                            if active_menu_key.read().as_deref() == Some(key_for_menu.as_str()) {
+                                                active_menu_key.set(None);
                                             } else {
-                                                active_menu_path.set(Some(p));
+                                                active_menu_key.set(Some(key_for_menu.clone()));
                                             }
                                         },
-                                        on_close_menu: move |_| active_menu_path.set(None),
+                                        on_close_menu: move |_| active_menu_key.set(None),
                                         on_add_to_playlist: move |_| {
-                                            active_menu_path.set(None);
+                                            active_menu_key.set(None);
                                         },
-                                        on_delete: move |_| active_menu_path.set(None),
+                                        on_delete: move |_| active_menu_key.set(None),
                                     }
                                 }
                             }
@@ -362,7 +339,7 @@ fn SongListShelf(
 
 #[component]
 fn DiscoverTile(
-    item: DiscoverItem,
+    item: CatalogItem,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
     on_open_artist: EventHandler<(String, String)>,
@@ -371,205 +348,147 @@ fn DiscoverTile(
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let cache = use_context::<DiscoverPrefetchCache>().0;
-    match item {
-        DiscoverItem::Song(track) => {
-            rsx! { SongCard { track: (*track).clone() } }
-        }
-        DiscoverItem::Playlist {
-            playlist_id,
-            title,
-            subtitle,
-            thumbnail,
-        } => {
-            let title_for_click = title.clone();
-            let pid_for_play = playlist_id.clone();
-            let pid_for_source = playlist_id.clone();
+    let thumbnail = hooks::wire::artwork_url(item.artwork.as_ref());
+    let subtitle = item.subtitle.clone().unwrap_or_default();
+    match item.kind {
+        CatalogItemKind::Track => match item.track.clone() {
+            Some(track) => rsx! { SongCard { item: item.clone(), track } },
+            None => rsx! {},
+        },
+        CatalogItemKind::Playlist | CatalogItemKind::Album => {
+            let kind = item.kind;
+            let id = item.id.clone();
+            let id_for_click = id.clone();
+            let id_for_play = id.clone();
+            let title_for_click = item.title.clone();
             rsx! {
                 Card {
-                    title: title,
-                    subtitle: subtitle,
-                    thumbnail: thumbnail,
+                    title: item.title.clone(),
+                    subtitle,
+                    thumbnail,
                     rounded_full: false,
                     onclick: move |_| {
-                        on_select_playlist.call((playlist_id.clone(), title_for_click.clone()))
+                        if kind == CatalogItemKind::Album {
+                            on_select_album.call(id_for_click.clone());
+                        } else {
+                            on_select_playlist.call((id_for_click.clone(), title_for_click.clone()));
+                        }
                     },
                     on_play: EventHandler::new(move |_| {
-                        play_playlist_async(pid_for_play.clone(), ctrl, now_playing, cache);
+                        play_catalog(kind, id_for_play.clone(), ctrl, now_playing, cache);
                     }),
-                    source_id: Some(pid_for_source),
+                    kind,
+                    source_id: Some(id),
                 }
             }
         }
-        DiscoverItem::Album {
-            browse_id,
-            title,
-            subtitle,
-            thumbnail,
-        } => {
-            let bid_for_click = browse_id.clone();
-            let bid_for_play = browse_id.clone();
-            let bid_for_source = browse_id.clone();
+        CatalogItemKind::Artist => {
+            let id = item.id.clone();
+            let name = item.title.clone();
             rsx! {
                 Card {
-                    title: title,
-                    subtitle: subtitle,
-                    thumbnail: thumbnail,
-                    rounded_full: false,
-                    onclick: move |_| {
-                        on_select_album.call(bid_for_click.clone())
-                    },
-                    on_play: EventHandler::new(move |_| {
-                        play_playlist_async(bid_for_play.clone(), ctrl, now_playing, cache);
-                    }),
-                    source_id: Some(bid_for_source),
-                }
-            }
-        }
-        DiscoverItem::Artist {
-            channel_id,
-            name,
-            thumbnail,
-        } => {
-            let cid = channel_id.clone();
-            let name_for_click = name.clone();
-            rsx! {
-                Card {
-                    title: name.clone(),
+                    title: item.title.clone(),
                     subtitle: String::new(),
-                    thumbnail: thumbnail,
+                    thumbnail,
                     rounded_full: true,
-                    onclick: move |_| on_open_artist.call((cid.clone(), name_for_click.clone())),
+                    onclick: move |_| on_open_artist.call((id.clone(), name.clone())),
                     on_play: None,
+                    kind: CatalogItemKind::Artist,
                     source_id: None,
                 }
             }
         }
-        DiscoverItem::Mood {
-            title, thumbnail, ..
-        } => rsx! {
+        CatalogItemKind::Mood | CatalogItemKind::Unknown => rsx! {
             Card {
-                title: title,
+                title: item.title.clone(),
                 subtitle: String::new(),
-                thumbnail: thumbnail,
+                thumbnail,
                 rounded_full: false,
                 onclick: move |_| {},
                 on_play: None,
+                kind: CatalogItemKind::Mood,
                 source_id: None,
             }
         },
     }
 }
 
-/// Shared "play whatever this id resolves to" used by both Playlist
-/// and Album tiles. MPRE… ids go through the album browse endpoint,
-/// everything else through the playlist entries endpoint.
-///
-/// Flips `is_loading` true SYNCHRONOUSLY on the calling frame so the
-/// player bar shows the spinner the instant the user clicks — the
-/// fetch + stream resolution takes a beat, and without this the click
-/// felt unresponsive. The signal gets cleared by `play_queue_linear`
-/// once playback actually begins (or by the early-return branches if
-/// the fetch fails / returns nothing).
-fn play_playlist_async(
+/// Play everything behind a catalog id. The first page starts the queue and
+/// the rest append while it plays, so a long playlist does not hold up the
+/// first song; the whole list is cached only when it paged in cleanly.
+fn play_catalog(
+    kind: CatalogItemKind,
     id: String,
     mut ctrl: hooks::use_player_controller::PlayerController,
     mut now_playing: Signal<Option<String>>,
-    cache: Signal<HashMap<String, Vec<Track>>>,
+    mut cache: Signal<HashMap<String, Vec<TrackInfo>>>,
 ) {
     ctrl.browse_loading.set(true);
     now_playing.set(Some(id.clone()));
-    // Cache hit from hover-prefetch — start playback synchronously, no
-    // network roundtrip needed. This is the path that makes Discover
-    // tiles feel like Favorites: warm data, instant playback.
     if let Some(tracks) = cache.peek().get(&id).cloned()
         && !tracks.is_empty()
     {
-        ctrl.play_queue_linear(tracks);
+        ctrl.set_queue_keys(keys_of(&tracks), api::QueueMode::Replace, None);
+        ctrl.browse_loading.set(false);
         return;
     }
-    let play_span = tracing::info_span!("discover.play_playlist", playlist_id = %id);
+    let play_span = tracing::info_span!("discover.play_catalog", id = %id);
+    let api = hooks::consume_api();
     spawn(
         async move {
-            let mut cache_writer = cache;
-            // Shared failure path: release is_loading AND let go of the
-            // now_playing tag so the tile drops out of phantom-pause state
-            // and a subsequent click can retry through the normal play path
-            // rather than landing on ctrl.toggle() against an unrelated
-            // currently-playing track.
-            let fail = |ctrl: &mut hooks::use_player_controller::PlayerController,
-                        now_playing: &mut Signal<Option<String>>| {
-                ctrl.browse_loading.set(false);
-                now_playing.set(None);
-            };
-            let source = ctrl.active_source.peek().clone();
-
-            // Albums come back in a single browse hit.
-            if id.starts_with("MPRE") {
-                match source.fetch_album_tracks(&id).await {
-                    Ok(tracks) if !tracks.is_empty() => {
-                        // Warm the cache for the next click on the same
-                        // tile — without this the MPRE branch repaid full
-                        // network roundtrip for every cold click.
-                        cache_writer.write().insert(id, tracks.clone());
-                        ctrl.play_queue_linear(tracks);
-                    }
-                    _ => fail(&mut ctrl, &mut now_playing),
-                }
-                return;
-            }
-
-            // Playlists give the first ~100 rows on the initial browse and
-            // paginate the rest via continuation cursors — pull them page by
-            // page so the first batch starts playing instantly while the tail
-            // fills in (dedup spans pages, so it's tracked here).
             let mut started = false;
-            let mut accumulated = Vec::<Track>::new();
-            let mut seen = std::collections::HashSet::<String>::new();
-            let mut cursor: Option<String> = None;
+            let mut collected = Vec::<TrackInfo>::new();
+            let mut seen = HashSet::<String>::new();
+            let mut cursor = None::<String>;
+            let mut complete = false;
             loop {
-                let (batch, next) = match source.fetch_playlist_page(&id, cursor).await {
-                    Ok(page) => page,
-                    Err(e) => {
+                let request = CatalogDetailRequest {
+                    kind,
+                    id: id.clone(),
+                    continuation: cursor.clone(),
+                };
+                let detail = match api.catalog_detail(request).await {
+                    Ok(detail) => detail,
+                    Err(error) => {
+                        tracing::warn!(%error, "catalog play failed");
                         if started {
-                            tracing::warn!(error = %e, "discover playlist errored mid-flight");
-                            ctrl.playback_error
-                                .set(Some(format!("Discover playlist failed mid-load:\n{e}")));
+                            ctrl.playback_error.set(Some(failure_text(&error)));
                         }
                         break;
                     }
                 };
-                let unique: Vec<Track> = batch
+                let fresh: Vec<TrackInfo> = detail
+                    .tracks
                     .into_iter()
-                    .filter(|t| seen.insert(t.id.key().into_owned()))
+                    .filter(|track| seen.insert(track.key.clone()))
                     .collect();
-                if !unique.is_empty() {
-                    accumulated.extend(unique.iter().cloned());
+                if !fresh.is_empty() {
+                    let keys = keys_of(&fresh);
                     if started {
-                        ctrl.add_to_queue(unique);
+                        ctrl.set_queue_keys(keys, api::QueueMode::Append, None);
                     } else {
-                        ctrl.play_queue_linear(unique);
+                        ctrl.set_queue_keys(keys, api::QueueMode::Replace, None);
+                        ctrl.browse_loading.set(false);
                         started = true;
                     }
+                    collected.extend(fresh);
                 }
-                match next {
-                    Some(token) => cursor = Some(token),
-                    // Only cache when the WHOLE playlist paged in cleanly — a
-                    // mid-stream break leaves `accumulated` truncated, and
-                    // caching that would poison every future click on this tile.
+                match detail.continuation {
+                    Some(next) => cursor = Some(next),
                     None => {
-                        cache_writer.write().insert(id.clone(), accumulated);
+                        complete = true;
                         break;
                     }
                 }
             }
+            // A run that broke mid-way leaves a truncated list; caching it
+            // would poison every later click on the same tile.
+            if complete && started {
+                cache.write().insert(id, collected);
+            }
             if !started {
-                match source.fetch_album_tracks(&id).await {
-                    Ok(tracks) if !tracks.is_empty() => {
-                        cache_writer.write().insert(id, tracks.clone());
-                        ctrl.play_queue_linear(tracks);
-                    }
-                    _ => fail(&mut ctrl, &mut now_playing),
-                }
+                ctrl.browse_loading.set(false);
+                now_playing.set(None);
             }
         }
         .instrument(play_span),
@@ -580,13 +499,14 @@ fn play_playlist_async(
 fn Card(
     title: String,
     subtitle: String,
-    thumbnail: Option<String>,
+    thumbnail: Option<utils::CoverUrl>,
     rounded_full: bool,
     onclick: EventHandler<MouseEvent>,
     on_play: Option<EventHandler<()>>,
-    /// The id (playlist_id / MPRE…) this card represents. When set
-    /// and equal to DiscoverNowPlaying, the overlay shows pause and
-    /// clicking it toggles the player instead of refetching.
+    kind: CatalogItemKind,
+    /// The catalog id this card represents. When it equals
+    /// [`DiscoverNowPlaying`] the overlay shows pause and a click toggles the
+    /// player instead of fetching again.
     source_id: Option<String>,
 ) -> Element {
     let img_class = if rounded_full {
@@ -606,20 +526,16 @@ fn Card(
     };
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut cache = use_context::<DiscoverPrefetchCache>().0;
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
-    // Per-tile hover gate that survives across renders so the spawned
-    // prefetch task can check whether the cursor is still on the tile
-    // after the debounce sleep.
+    // Per-tile hover gate that survives across renders, so the prefetch task
+    // can tell whether the cursor is still here after the debounce.
     let mut hover_armed = use_signal(|| false);
     let is_this_source = match (&source_id, now_playing.read().as_ref()) {
         (Some(sid), Some(active)) => sid == active,
         _ => false,
     };
-    // Three icon states: play (default), spinner (this tile is fetching
-    // / stream is warming up), pause (audio actually playing). The
-    // spinner kicks in synchronously because play_playlist_async flips
-    // is_loading on the same frame as the click.
+    // Three icon states: play, spinner while this tile is fetching, pause once
+    // audio is actually running.
     let is_playing = *ctrl.is_playing.read();
     let is_loading = *ctrl.is_loading.read();
     let show_loading = is_this_source && is_loading;
@@ -631,14 +547,15 @@ fn Card(
             onclick: move |e| onclick.call(e),
             onmouseenter: move |_| {
                 let Some(id) = prefetch_id.clone() else { return; };
+                if on_play.is_none() {
+                    return;
+                }
                 hover_armed.set(true);
                 let prefetch_span = tracing::info_span!("discover.prefetch", id = %id);
-                let source = active_source.peek().clone();
+                let api = hooks::consume_api();
                 spawn(async move {
-                    // Short hover delay so the cursor passing over a
-                    // shelf doesn't fire a dozen requests. If the user
-                    // moves off the tile inside the delay window,
-                    // onmouseleave disarms hover_armed and we skip.
+                    // Short delay so a cursor crossing a shelf does not fire a
+                    // dozen requests; leaving the tile disarms it.
                     tokio::time::sleep(Duration::from_millis(250)).await;
                     if !*hover_armed.peek() {
                         return;
@@ -646,16 +563,24 @@ fn Card(
                     if cache.peek().contains_key(&id) {
                         return;
                     }
-                    // Prefetch wants the whole list buffered, so a plain fetch
-                    // (no live-batch streaming) is exactly right here.
-                    let fetched = if id.starts_with("MPRE") {
-                        source.fetch_album_tracks(&id).await
-                    } else {
-                        source.fetch_playlist_entries(&id).await
-                    };
-                    if let Ok(tracks) = fetched
-                        && !tracks.is_empty()
-                    {
+                    let mut tracks = Vec::<TrackInfo>::new();
+                    let mut cursor = None::<String>;
+                    loop {
+                        let request = CatalogDetailRequest {
+                            kind,
+                            id: id.clone(),
+                            continuation: cursor.clone(),
+                        };
+                        let Ok(detail) = api.catalog_detail(request).await else {
+                            return;
+                        };
+                        tracks.extend(detail.tracks);
+                        match detail.continuation {
+                            Some(next) => cursor = Some(next),
+                            None => break,
+                        }
+                    }
+                    if !tracks.is_empty() {
                         cache.write().insert(id, tracks);
                     }
                 }.instrument(prefetch_span));
@@ -715,61 +640,28 @@ fn Card(
     }
 }
 
+/// A single song tile. Clicking it starts the source's mix seeded by that
+/// song, which the daemon builds and pins the seed to the front of.
 #[component]
-fn SongCard(track: Track) -> Element {
-    let title = track.title.clone();
-    let artist = track.artist.clone();
-    let video_id = track_video_id(&track);
-
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+fn SongCard(item: CatalogItem, track: TrackInfo) -> Element {
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
-    let thumbnail = server::cover::track(&ctrl.config.read(), &track, 320)
-        .map(|cover| cover.as_ref().to_string());
-    let now_playing = use_context::<DiscoverNowPlaying>().0;
-    let mut cache = use_context::<DiscoverPrefetchCache>().0;
+    let mut now_playing = use_context::<DiscoverNowPlaying>().0;
+    let thumbnail = hooks::wire::artwork_url(item.artwork.as_ref());
+    let subtitle = item.subtitle.clone().unwrap_or_default();
+    let key = track.key.clone();
+    let start_radio = components::track_row::radio_handler(key.clone());
 
-    let source_id = video_id.clone();
-    let is_this_source = match (&source_id, now_playing.read().as_ref()) {
-        (Some(sid), Some(active)) => sid == active,
-        _ => false,
-    };
+    let is_this_source = now_playing.read().as_deref() == Some(key.as_str());
     let is_playing = *ctrl.is_playing.read();
     let is_loading = *ctrl.is_loading.read();
     let show_loading = is_this_source && is_loading;
     let show_pause = is_this_source && is_playing && !is_loading;
 
-    let mut hover_armed = use_signal(|| false);
-    let prefetch_id = video_id.clone();
-
     rsx! {
         div {
             class: "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out hover:scale-[1.03] hover:-translate-y-0.5 group",
-            onmouseenter: move |_| {
-                let Some(id) = prefetch_id.clone() else { return; };
-                hover_armed.set(true);
-                let mix_span = tracing::info_span!("discover.prefetch_mix", id = %id);
-                let source = active_source.peek().clone();
-                spawn(async move {
-                    tokio::time::sleep(Duration::from_millis(250)).await;
-                    if !*hover_armed.peek() {
-                        return;
-                    }
-                    if cache.peek().contains_key(&id) {
-                        return;
-                    }
-                    if let Ok(mix) = source.start_radio(&id).await
-                        && !mix.is_empty()
-                    {
-                        cache.write().insert(id, mix);
-                    }
-                }.instrument(mix_span));
-            },
-            onmouseleave: move |_| {
-                hover_armed.set(false);
-            },
             onclick: {
-                let track = track.clone();
-                let video_id = video_id.clone();
+                let key = key.clone();
                 move |_| {
                     if show_loading {
                         return;
@@ -778,16 +670,14 @@ fn SongCard(track: Track) -> Element {
                         ctrl.toggle();
                         return;
                     }
-                    if let Some(vid) = video_id.clone() {
-                        play_song_with_mix(
-                            track.clone(),
-                            vid,
-                            ctrl,
-                            now_playing,
-                            cache,
-                        );
-                    } else {
-                        ctrl.play_queue_linear(vec![track.clone()]);
+                    now_playing.set(Some(key.clone()));
+                    match &start_radio {
+                        Some(radio) => radio.call(()),
+                        None => ctrl.set_queue_keys(
+                            vec![key.clone()],
+                            api::QueueMode::Replace,
+                            None,
+                        ),
                     }
                 }
             },
@@ -818,99 +708,19 @@ fn SongCard(track: Track) -> Element {
                 p {
                     class: "text-sm font-semibold text-white break-words",
                     style: "display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;",
-                    "{title}"
+                    "{item.title}"
                 }
             }
             p {
                 class: "text-xs text-white/50 truncate h-4 mt-1",
-                "{artist}"
+                "{subtitle}"
             }
         }
     }
 }
 
-/// Pull the YT videoId out of a ytmusic:VIDEOID[:thumb] path. Returns
-/// None if the track isn't a YT one (defensive — discover-feed songs
-/// should always be).
-fn track_video_id(track: &Track) -> Option<String> {
-    if track.id.service() != Some(MusicService::YtMusic) {
-        return None;
-    }
-    let id = track.id.key();
-    (!id.is_empty()).then(|| id.to_string())
-}
-
-/// Click a single Discover song → kick off the YT mix radio so "next"
-/// works, with the clicked song as the seed at queue index 0. Same
-/// cache + sync-on-hit semantics as play_playlist_async.
-fn play_song_with_mix(
-    seed: Track,
-    video_id: String,
-    mut ctrl: hooks::use_player_controller::PlayerController,
-    mut now_playing: Signal<Option<String>>,
-    cache: Signal<HashMap<String, Vec<Track>>>,
-) {
-    ctrl.browse_loading.set(true);
-    now_playing.set(Some(video_id.clone()));
-    if let Some(mix) = cache.peek().get(&video_id).cloned()
-        && !mix.is_empty()
-    {
-        let queue = build_song_queue(&seed, mix);
-        ctrl.play_queue_linear(queue);
-        return;
-    }
-    let song_span = tracing::info_span!("discover.play_song", video_id = %video_id);
-    spawn(
-        async move {
-            let source = ctrl.active_source.peek().clone();
-            match source.start_radio(&video_id).await {
-                Ok(mix) if !mix.is_empty() => {
-                    let mut cache_writer = cache;
-                    cache_writer.write().insert(video_id, mix.clone());
-                    let queue = build_song_queue(&seed, mix);
-                    ctrl.play_queue_linear(queue);
-                }
-                _ => {
-                    // Mix failed → at least play the seed alone so the user
-                    // gets the song they clicked, even if "next" won't work.
-                    // now_playing stays as the video_id so the tile shows
-                    // pause overlay for the seed song that IS now playing.
-                    ctrl.play_queue_linear(vec![seed]);
-                }
-            }
-        }
-        .instrument(song_span),
-    );
-}
-
-/// Put the seed at index 0 and append the rest of the mix. The seed
-/// passed in (from the Discover home tile) has duration=0 because the
-/// home feed shape doesn't ship one. The mix endpoint DOES ship a
-/// duration per row (lengthText), and its first entry is normally the
-/// same video as the seed — prefer that version so the player bar
-/// gets the right time. Falls back to the caller-provided seed if the
-/// mix doesn't contain it.
-fn build_song_queue(seed: &Track, mix: Vec<Track>) -> Vec<Track> {
-    let seed_vid = track_video_id(seed);
-    let (seed_in_queue, rest): (Vec<Track>, Vec<Track>) = mix
-        .into_iter()
-        .partition(|t| seed_vid.is_some() && track_video_id(t) == seed_vid);
-    let mut out = Vec::with_capacity(rest.len() + 1);
-    out.push(
-        seed_in_queue
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| seed.clone()),
-    );
-    out.extend(rest);
-    out
-}
-
-/// Standalone viewer for a YT Music playlist discovered from the home
-/// feed. Tracks are pulled directly from YT via get_playlist_entries
-/// (which handles continuationItemRenderer pagination internally) —
-/// nothing about this view touches `playlist_store`, so a discover
-/// playlist never pollutes the user's saved Library Playlists.
+/// A catalog playlist or album opened on its own page. Nothing here touches
+/// the saved playlists: a browsed list never becomes one of the user's.
 #[component]
 #[tracing::instrument(name = "render.discover_playlist", skip_all)]
 pub fn DiscoverPlaylistDetail(
@@ -918,12 +728,11 @@ pub fn DiscoverPlaylistDetail(
     selected_playlist_title: Signal<Option<String>>,
     on_back: EventHandler<()>,
 ) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let mut tracks = use_signal(Vec::<Track>::new);
+    let api = hooks::use_api();
+    let mut tracks = use_signal(Vec::<TrackInfo>::new);
+    let mut artwork = use_signal(|| None::<api::ArtworkRef>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
-    let cover_for = hooks::use_db_queries::use_cover_resolver(512);
 
     let playlist_id = selected_playlist_id.read().clone();
     let header_title = selected_playlist_title
@@ -931,60 +740,51 @@ pub fn DiscoverPlaylistDetail(
         .clone()
         .unwrap_or_else(String::new);
 
-    // Bumped on every effect re-run; spawned fetchers check it before
-    // committing their result so a slow fetch for playlist A can't
-    // overwrite B's tracks after the user has navigated B → A → B.
+    // Bumped on every effect run; a spawned fetch checks it before committing,
+    // so a slow load for A cannot overwrite B after the user navigated on.
     let mut fetch_gen = use_signal(|| 0u64);
     use_effect(move || {
-        let Some(pid) = selected_playlist_id.read().clone() else {
+        let Some(id) = selected_playlist_id.read().clone() else {
             return;
         };
-        let my_gen = fetch_gen.with_mut(|g| {
-            *g += 1;
-            *g
+        let my_gen = fetch_gen.with_mut(|generation| {
+            *generation += 1;
+            *generation
         });
         tracks.set(Vec::new());
+        artwork.set(None);
         loading.set(true);
         error.set(None);
-        // Span created on the render thread, attached to the spawned
-        // task via .instrument() so the worker-thread fetch (and its
-        // inner yt.* spans) nest under this load instead of orphaning.
-        let load_span = tracing::info_span!("playlist.load", playlist_id = %pid);
-        let source = active_source.peek().clone();
+        let load_span = tracing::info_span!("playlist.load", playlist_id = %id);
+        let api = api.clone();
         spawn(
             async move {
-                tracing::debug!("playlist load started");
-                let signed_in = config
-                    .peek()
-                    .server
-                    .as_ref()
-                    .and_then(|s| s.access_token.as_ref())
-                    .is_some();
-                if !signed_in {
-                    if *fetch_gen.peek() == my_gen {
-                        error.set(Some("not signed in".to_string()));
-                        loading.set(false);
-                    }
-                    return;
-                }
-                // Discover routes both playlists and albums through this viewer;
-                // MPRE… ids are albums and need the browse-album endpoint instead.
-                let result = if pid.starts_with("MPRE") {
-                    source.fetch_album_tracks(&pid).await
+                // Discover routes albums through this viewer too, and an album
+                // browse id is not a playlist id, so the kind follows the id.
+                let kind = if id.starts_with("MPRE") {
+                    CatalogItemKind::Album
                 } else {
-                    source.fetch_playlist_entries(&pid).await
+                    CatalogItemKind::Playlist
                 };
+                let result = api
+                    .catalog_detail(CatalogDetailRequest {
+                        kind,
+                        id,
+                        continuation: None,
+                    })
+                    .await;
                 if *fetch_gen.peek() != my_gen {
                     return;
                 }
                 match result {
-                    Ok(ts) => {
-                        tracing::debug!(tracks = ts.len(), "playlist load complete");
-                        tracks.set(ts);
+                    Ok(detail) => {
+                        tracing::debug!(tracks = detail.tracks.len(), "playlist load complete");
+                        artwork.set(detail.artwork);
+                        tracks.set(detail.tracks);
                     }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "playlist load failed");
-                        error.set(Some(e.to_string()));
+                    Err(failure) => {
+                        tracing::warn!(error = %failure, "playlist load failed");
+                        error.set(Some(failure_text(&failure)));
                     }
                 }
                 loading.set(false);
@@ -1001,9 +801,8 @@ pub fn DiscoverPlaylistDetail(
         };
     }
 
-    // Loading / error keep a lightweight header + back button; the loaded state
-    // hands off to the shared vaxry TrackListView (same look as the local
-    // playlist / album pages) so Discover playlists match everywhere else.
+    // Loading and error keep a lightweight header; the loaded state hands off
+    // to the shared track list so a catalog list looks like every other one.
     if *loading.read() {
         return rsx! {
             div { class: "p-6 md:p-10 max-w-[1600px] mx-auto",
@@ -1018,15 +817,13 @@ pub fn DiscoverPlaylistDetail(
         return rsx! {
             div { class: "p-6 md:p-10 max-w-[1600px] mx-auto",
                 BackButton { on_back }
-                div { class: "py-12 text-rose-400 text-sm",
-                    "{i18n::t_with(\"discover_failed\", &[(\"error\", err.clone())])}"
-                }
+                div { class: "py-12 text-rose-400 text-sm", "{err}" }
             }
         };
     }
 
-    let track_list = tracks.read().clone();
-    let cover_url = track_list.first().and_then(&cover_for);
+    let track_list = hooks::wire::tracks_from_api(tracks.read().clone());
+    let cover_url = hooks::wire::artwork_url(artwork.read().as_ref());
 
     rsx! {
         div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
@@ -1053,20 +850,12 @@ fn BackButton(on_back: EventHandler<()>) -> Element {
     }
 }
 
-/// YT-backed artist profile. Used wherever YT Music is the active
-/// backend — not just inside Discover. Pulls the immersive header
-/// (banner + subscribers) and every section shelf from
-/// `/browse?browseId=UC…` and hands each one off to the same
-/// `ShelfRow` component the Discover home uses, so all sections get
-/// hover-play, horizontal scroll, and the existing tile dispatch.
+/// The source's own artist profile, used wherever the active source presents
+/// artists remotely. Its sections are catalog shelves, so they get the same
+/// tiles, hover-play and scrolling as the browse home.
 ///
-/// Callers that already know the channel_id (Discover tiles, mix
-/// entries that carry a UC… browseEndpoint) write it into
-/// `selected_artist_id`. Callers that only have a name (track row's
-/// "go to artist", sidebar Artist tab, NavigationController) leave id
-/// at None — the effect kicks off a YT search filtered to artists,
-/// takes the top hit's UC… id, then loads the profile. Adds one extra
-/// roundtrip but means every artist click in the app lands here.
+/// Callers that know the artist's catalog id pass it; callers that only have a
+/// name pass that, and the daemon resolves it.
 #[component]
 pub fn DiscoverArtistPage(
     selected_artist_id: Signal<Option<String>>,
@@ -1077,88 +866,51 @@ pub fn DiscoverArtistPage(
     on_open_artist: EventHandler<(String, String)>,
     on_search_artist: EventHandler<String>,
 ) -> Element {
-    let config = use_context::<Signal<AppConfig>>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let api = hooks::use_api();
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let cache = use_context::<DiscoverPrefetchCache>().0;
-    let mut artist = use_signal(|| None::<YtArtist>);
+    let mut artist = use_signal(|| None::<api::CatalogDetail>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    // Generation guard: drop late results when the user navigates to
-    // a different artist mid-fetch (both the resolve search AND the
-    // browse hit are gated on it).
+    // Generation guard: drop a late answer when the user has moved on.
     let mut fetch_gen = use_signal(|| 0u64);
     use_effect(move || {
-        // Effect re-runs when either signal changes. Selection key is
-        // (id, name): id wins when set, name is the resolve fallback.
-        let cid_opt = selected_artist_id.read().clone();
+        // The selection is (id, name): the id wins, the name is the fallback
+        // the daemon resolves.
+        let id = selected_artist_id.read().clone();
         let name = selected_artist_name.read().clone();
-        if cid_opt.is_none() && name.trim().is_empty() {
+        let Some(reference) = id.or_else(|| {
+            let name = name.trim();
+            (!name.is_empty()).then(|| name.to_string())
+        }) else {
             return;
-        }
-        let my_gen = fetch_gen.with_mut(|g| {
-            *g += 1;
-            *g
+        };
+        let my_gen = fetch_gen.with_mut(|generation| {
+            *generation += 1;
+            *generation
         });
         artist.set(None);
         loading.set(true);
         error.set(None);
-        let artist_span = tracing::info_span!("artist.load", artist = %name);
-        let source = active_source.peek().clone();
+        let artist_span = tracing::info_span!("artist.load", artist = %reference);
+        let api = api.clone();
         spawn(
             async move {
-                let signed_in = config
-                    .peek()
-                    .server
-                    .as_ref()
-                    .and_then(|s| s.access_token.as_ref())
-                    .is_some();
-                if !signed_in {
-                    if *fetch_gen.peek() == my_gen {
-                        error.set(Some("not signed in".to_string()));
-                        loading.set(false);
-                    }
-                    return;
-                }
-                // Resolve cid from name if we didn't get one with the
-                // click. Top YT search hit for the artist filter is the
-                // first UC… browseId in the response — see
-                // search::resolve_artist_channel_id.
-                let cid = match cid_opt {
-                    Some(c) => c,
-                    None => match source.resolve_artist_channel_id(name.trim()).await {
-                        Ok(Some(c)) => c,
-                        Ok(None) => {
-                            if *fetch_gen.peek() == my_gen {
-                                error.set(Some(format!(
-                                    "No YouTube Music artist found for \"{}\"",
-                                    name.trim()
-                                )));
-                                loading.set(false);
-                            }
-                            return;
-                        }
-                        Err(e) => {
-                            if *fetch_gen.peek() == my_gen {
-                                error.set(Some(e.to_string()));
-                                loading.set(false);
-                            }
-                            return;
-                        }
-                    },
-                };
-                if *fetch_gen.peek() != my_gen {
-                    return;
-                }
-                let result = source.fetch_artist(&cid).await;
+                let result = api
+                    .catalog_detail(CatalogDetailRequest {
+                        kind: CatalogItemKind::Artist,
+                        id: reference,
+                        continuation: None,
+                    })
+                    .await;
                 if *fetch_gen.peek() != my_gen {
                     return;
                 }
                 match result {
-                    Ok(a) => artist.set(Some(a)),
-                    Err(e) => error.set(Some(e.to_string())),
+                    Ok(detail) => artist.set(Some(detail)),
+                    Err(failure) => error.set(Some(failure_text(&failure))),
                 }
                 loading.set(false);
             }
@@ -1168,7 +920,7 @@ pub fn DiscoverArtistPage(
 
     if selected_artist_id.read().is_none() && selected_artist_name.read().trim().is_empty() {
         return rsx! {
-            div { class: "p-12 text-white/60", "No artist selected" }
+            div { class: "p-12 text-white/60", "{i18n::t(\"artist_none_selected\")}" }
         };
     }
 
@@ -1185,37 +937,38 @@ pub fn DiscoverArtistPage(
                     i { class: "fa-solid fa-arrows-rotate fa-spin text-2xl text-white/60" }
                 }
             } else if let Some(err) = error.read().clone() {
-                div { class: "py-12 px-6 md:px-10 text-rose-400 text-sm",
-                    "{i18n::t_with(\"discover_failed\", &[(\"error\", err.clone())])}"
-                }
-            } else if let Some(a) = artist.read().clone() {
+                div { class: "py-12 px-6 md:px-10 text-rose-400 text-sm", "{err}" }
+            } else if let Some(detail) = artist.read().clone() {
                 {
-                    let banner = a.banner_thumbnail.clone();
-                    // Bigger hero — 360px min on desktop. Previous version
-                    // sized to content height (≈200px) which felt cramped
-                    // for a Spotify-style profile banner.
+                    let banner = hooks::wire::artwork_url(detail.artwork.as_ref());
                     let banner_style = banner
-                        .map(|u| format!("background-image: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.95) 100%), url('{u}'); background-size: cover; background-position: center; min-height: 360px;"))
+                        .map(|url| format!("background-image: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.95) 100%), url('{url}'); background-size: cover; background-position: center; min-height: 360px;"))
                         .unwrap_or_else(|| "min-height: 280px;".to_string());
-                    let shuffle_pid = a.shuffle_playlist_id.clone();
+                    let shuffle_id = detail.playback_id.clone();
                     rsx! {
                         div {
                             class: "relative overflow-hidden flex flex-col justify-end",
                             style: "{banner_style}",
                             div { class: "px-6 md:px-10 pt-16 pb-10 flex flex-col gap-4",
-                                h1 { class: "text-4xl md:text-6xl font-black text-white break-words drop-shadow-lg", "{a.name}" }
-                                if let Some(s) = a.subscribers.clone() {
-                                    p { class: "text-sm text-white/70", "{s}" }
+                                h1 { class: "text-4xl md:text-6xl font-black text-white break-words drop-shadow-lg", "{detail.title}" }
+                                if let Some(subtitle) = detail.subtitle.clone() {
+                                    p { class: "text-sm text-white/70", "{subtitle}" }
                                 }
-                                if let Some(d) = a.description.clone() {
-                                    p { class: "text-sm text-white/60 max-w-3xl line-clamp-3", "{d}" }
+                                if let Some(description) = detail.description.clone() {
+                                    p { class: "text-sm text-white/60 max-w-3xl line-clamp-3", "{description}" }
                                 }
                                 div { class: "flex gap-3 mt-2",
-                                    if let Some(pid) = shuffle_pid {
+                                    if let Some(id) = shuffle_id {
                                         button {
                                             class: "inline-flex items-center gap-2 bg-white text-black px-6 py-2.5 rounded-full font-bold hover:scale-105 active:scale-95 transition-transform cursor-pointer",
                                             onclick: move |_| {
-                                                play_playlist_async(pid.clone(), ctrl, now_playing, cache);
+                                                play_catalog(
+                                                    CatalogItemKind::Playlist,
+                                                    id.clone(),
+                                                    ctrl,
+                                                    now_playing,
+                                                    cache,
+                                                );
                                             },
                                             i { class: "fa-solid fa-shuffle text-[11px]" }
                                             span { class: "text-sm", "{i18n::t(\"shuffle\")}" }
@@ -1225,7 +978,7 @@ pub fn DiscoverArtistPage(
                             }
                         }
                         div { class: "px-6 md:px-10 pt-8",
-                            for (idx, shelf) in a.sections.iter().enumerate() {
+                            for (idx, shelf) in detail.shelves.iter().enumerate() {
                                 ShelfRow {
                                     key: "{idx}",
                                     shelf: shelf.clone(),

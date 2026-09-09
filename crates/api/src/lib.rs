@@ -181,6 +181,11 @@ pub trait LibraryApi: Send + Sync {
     /// Pin a station so it survives a registry refresh and appears first.
     async fn pin_radio_station(&self, id: String, pinned: bool) -> Result<(), ApiError>;
 
+    /// Check that a URL really is a station registry, and say how many
+    /// stations it holds. A client writes the registry list into its config;
+    /// this is how it can refuse a bad URL without fetching one itself.
+    async fn validate_radio_registry(&self, url: String) -> Result<u32, ApiError>;
+
     /// Look for photos for these artists, storing what it finds. Names already
     /// resolved, and names whose last search definitively found nothing, are
     /// skipped -- so calling it on every visit is cheap. Results arrive as a

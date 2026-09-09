@@ -382,6 +382,16 @@ impl api::LibraryApi for GrpcApi {
         Ok(())
     }
 
+    async fn validate_radio_registry(&self, url: String) -> Result<u32, ApiError> {
+        let info = self
+            .client()
+            .validate_radio_registry(Request::new(proto::ValidateRadioRegistryRequest { url }))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        Ok(info.stations)
+    }
+
     async fn update_track_metadata(
         &self,
         patch: api::TrackMetadataPatch,

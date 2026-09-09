@@ -479,6 +479,8 @@ discover_requires_ytmusic = Відкриття доступні лише кол�
 discover_show_all = Показати все
 yt_anon_playlists = Увійдіть у YouTube Music, щоб переглянути плейлисти з бібліотеки.
 yt_anon_favorites = Увійдіть у YouTube Music, щоб переглянути вподобані треки.
+yt_anon_discover = Увійдіть у YouTube Music, щоб переглянути Огляд.
+artist_none_selected = Виконавця не вибрано
 
 # Metadata Viewer / Editor
 view_metadata = Переглянути метадані

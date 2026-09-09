@@ -515,6 +515,19 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::Unit {}))
     }
 
+    async fn validate_radio_registry(
+        &self,
+        request: Request<proto::ValidateRadioRegistryRequest>,
+    ) -> Result<Response<proto::RadioRegistryInfo>, Status> {
+        let stations = self
+            .0
+            .api
+            .validate_radio_registry(request.into_inner().url)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::RadioRegistryInfo { stations }))
+    }
+
     async fn update_track_metadata(
         &self,
         request: Request<proto::TrackMetadataPatch>,

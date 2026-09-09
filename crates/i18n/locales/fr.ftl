@@ -480,6 +480,8 @@ discover_requires_ytmusic = Découvrir n'est disponible que lorsque YouTube Musi
 discover_show_all = Tout voir
 yt_anon_playlists = Connectez-vous à YouTube Music pour voir vos playlists.
 yt_anon_favorites = Connectez-vous à YouTube Music pour voir vos titres aimés.
+yt_anon_discover = Connectez-vous à YouTube Music pour parcourir Découvrir.
+artist_none_selected = Aucun artiste sélectionné
 
 # Metadata Viewer / Editor
 view_metadata = Voir les métadonnées

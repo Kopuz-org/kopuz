@@ -479,6 +479,8 @@ discover_requires_ytmusic = 仅当 YouTube Music 是当前服务器时才能使�
 discover_show_all = 显示全部
 yt_anon_playlists = 登录 YouTube Music 以查看你的媒体库播放列表。
 yt_anon_favorites = 登录 YouTube Music 以查看你喜欢的歌曲。
+yt_anon_discover = 登录 YouTube Music 以浏览发现。
+artist_none_selected = 未选择艺术家
 
 # Metadata Viewer / Editor
 view_metadata = 查看元数据

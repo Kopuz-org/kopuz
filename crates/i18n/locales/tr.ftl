@@ -479,6 +479,8 @@ discover_requires_ytmusic = Keşfet yalnızca YouTube Music aktif sunucu olduğu
 discover_show_all = Tümünü gör
 yt_anon_playlists = Kitaplık çalma listelerini görmek için YouTube Music'e giriş yap.
 yt_anon_favorites = Beğendiğin şarkıları görmek için YouTube Music'e giriş yap.
+yt_anon_discover = Keşfet'e göz atmak için YouTube Music'e giriş yap.
+artist_none_selected = Sanatçı seçilmedi
 
 # Metadata Viewer / Editor
 view_metadata = Üst verileri görüntüle

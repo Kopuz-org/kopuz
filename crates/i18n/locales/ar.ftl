@@ -485,6 +485,8 @@ discover_requires_ytmusic = الاكتشاف متاح فقط عندما تكون
 discover_show_all = عرض الكل
 yt_anon_playlists = سجّل الدخول إلى YouTube Music لعرض قوائم التشغيل في مكتبتك.
 yt_anon_favorites = سجّل الدخول إلى YouTube Music لعرض الأغاني التي أعجبتك.
+yt_anon_discover = سجّل الدخول إلى YouTube Music لتصفح قسم اكتشف.
+artist_none_selected = لم يتم اختيار فنان
 
 # Metadata Viewer / Editor
 view_metadata = عرض البيانات الوصفية

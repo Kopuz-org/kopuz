@@ -51,6 +51,7 @@ service Kopuz {
   rpc GetRadioStations(GetRadioStationsRequest) returns (RadioStationList);
   rpc SearchRadio(SearchRadioRequest) returns (RadioStationList);
   rpc PinRadioStation(PinRadioStationRequest) returns (Unit);
+  rpc ValidateRadioRegistry(ValidateRadioRegistryRequest) returns (RadioRegistryInfo);
   rpc RefreshArtistArtwork(RefreshArtistArtworkRequest) returns (Unit);
 
   rpc GetPlaylists(GetPlaylistsRequest) returns (PlaylistCatalog);
@@ -816,6 +817,8 @@ message RadioStreamInfo {
   string id = 1;
   // May be a translation key; the client owns the locale.
   string name = 2;
+  // An icon name the registry authored, for a client that draws icons.
+  optional string icon = 3;
 }
 
 message RadioStationInfo {
@@ -826,6 +829,7 @@ message RadioStationInfo {
   repeated RadioStreamInfo streams = 5;
   bool pinned = 6;
   optional ArtworkRef artwork = 7;
+  string icon = 8;
 }
 
 message GetRadioStationsRequest {}
@@ -842,6 +846,14 @@ message SearchRadioRequest {
 message PinRadioStationRequest {
   string id = 1;
   bool pinned = 2;
+}
+
+message ValidateRadioRegistryRequest {
+  string url = 1;
+}
+
+message RadioRegistryInfo {
+  uint32 stations = 1;
 }
 
 message GetPlaylistsRequest {}
