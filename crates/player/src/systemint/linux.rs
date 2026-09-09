@@ -278,6 +278,37 @@ pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
     }
 }
 
+/// Take the shared bus name, or the spec's per-instance one when another
+/// player already holds it. zbus asks with `DoNotQueue`, so a taken name never
+/// becomes ours by waiting, and a second instance is legitimate anyway.
+async fn register(
+    st: &Arc<Mutex<MprisState>>,
+    events: &UnboundedSender<SystemEvent>,
+) -> Option<Server<P>> {
+    let taken = match Server::new("kopuz", P(st.clone(), events.clone())).await {
+        Ok(server) => {
+            tracing::info!(name = "kopuz", "MPRIS registered");
+            return Some(server);
+        }
+        Err(error) => error,
+    };
+    let instance = format!("kopuz.instance{}", std::process::id());
+    match Server::new(&instance, P(st.clone(), events.clone())).await {
+        Ok(server) => {
+            tracing::info!(name = %instance, "MPRIS registered");
+            Some(server)
+        }
+        Err(error) => {
+            tracing::warn!(
+                %taken,
+                %error,
+                "MPRIS registration failed; media keys are off for this process"
+            );
+            None
+        }
+    }
+}
+
 fn setup() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
@@ -294,34 +325,37 @@ fn setup() {
                 .build()
                 .unwrap()
                 .block_on(async {
-                    if let Ok(srv) = Server::new("kopuz", P(st.clone(), events)).await {
-                        while let Some(seeked) = nrx.recv().await {
-                            if seeked {
-                                let (metadata, status, position, shuffle, repeat) = match st.lock()
-                                {
-                                    Ok(s) => (
-                                        s.metadata.clone(),
-                                        s.status,
-                                        s.position,
-                                        s.shuffle,
-                                        s.repeat.to_mpris(),
-                                    ),
-                                    Err(_) => continue,
-                                };
-                                srv.properties_changed([
-                                    Property::Metadata(metadata),
-                                    Property::PlaybackStatus(status),
-                                    Property::Shuffle(shuffle),
-                                    Property::LoopStatus(repeat),
-                                ])
+                    let Some(srv) = register(&st, &events).await else {
+                        return;
+                    };
+                    while let Some(seeked) = nrx.recv().await {
+                        if seeked {
+                            let (metadata, status, position, shuffle, repeat) = match st.lock() {
+                                Ok(s) => (
+                                    s.metadata.clone(),
+                                    s.status,
+                                    s.position,
+                                    s.shuffle,
+                                    s.repeat.to_mpris(),
+                                ),
+                                Err(_) => continue,
+                            };
+                            srv.properties_changed([
+                                Property::Metadata(metadata),
+                                Property::PlaybackStatus(status),
+                                Property::Shuffle(shuffle),
+                                Property::LoopStatus(repeat),
+                            ])
+                            .await
+                            .ok();
+                            srv.emit(mpris_server::Signal::Seeked { position })
                                 .await
                                 .ok();
-                                srv.emit(mpris_server::Signal::Seeked { position })
-                                    .await
-                                    .ok();
-                            }
                         }
                     }
+                    tracing::warn!(
+                        "MPRIS notifier stopped; this process no longer publishes state"
+                    );
                 });
         });
     });
