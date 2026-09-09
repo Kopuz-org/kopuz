@@ -732,7 +732,7 @@ fn App() -> Element {
     let mut update_banner: Signal<Option<updates::AvailableUpdate>> = use_signal(|| None);
     let mut did_check_updates = use_signal(|| false);
     let mut ctrl = hooks::use_player_controller(
-        session.clone(),
+        core.api.clone() as Arc<dyn api::KopuzApi>,
         is_playing,
         queue,
         current_queue_index,

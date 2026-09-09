@@ -35,7 +35,7 @@ const PROGRESS_STEP_SECS: u64 = 5;
 
 /// The embedded frontend's raw view of the queue model.
 #[derive(Debug, Clone, Default)]
-pub struct QueueMirrorSnapshot {
+pub(crate) struct QueueMirrorSnapshot {
     pub tracks: Vec<Track>,
     pub shuffle_order: Vec<usize>,
     pub position: usize,
@@ -115,19 +115,6 @@ enum SessionCmd {
     ExternalArtworkFetched(String),
     SetStationRegistry(Arc<radio::registry::StationRegistry>),
     SetActiveSource(Option<server::source::ActiveSource>),
-    SetQueueRaw {
-        tracks: Vec<Track>,
-        mode: QueueMode,
-        start_index: Option<usize>,
-        shuffle: Option<bool>,
-        reply: oneshot::Sender<Result<CommandAck, ApiError>>,
-    },
-    JumpPhysical(usize, oneshot::Sender<Result<CommandAck, ApiError>>),
-    InsertTracksAt {
-        position: usize,
-        tracks: Vec<Track>,
-        reply: oneshot::Sender<Result<CommandAck, ApiError>>,
-    },
     QueueMirror(oneshot::Sender<QueueMirrorSnapshot>),
     Persist(oneshot::Sender<()>),
     LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
@@ -371,51 +358,9 @@ impl SessionHandle {
         let _ = self.cmd_tx.send(SessionCmd::SetActiveSource(source));
     }
 
-    /// In-process queue replacement with literal tracks (catalog rows that
-    /// may not exist in the database yet). Wire clients use `set_queue` with
-    /// a context instead; this is the embedded frontend's path.
-    pub async fn set_queue_tracks(
-        &self,
-        tracks: Vec<Track>,
-        mode: QueueMode,
-        start_index: Option<usize>,
-        shuffle: Option<bool>,
-    ) -> Result<CommandAck, ApiError> {
-        self.request(|reply| SessionCmd::SetQueueRaw {
-            tracks,
-            mode,
-            start_index,
-            shuffle,
-            reply,
-        })
-        .await
-    }
-
-    /// Explicit jump to a physical queue index (a row click), with the
-    /// history push and shuffle re-pin semantics of the app's `play_track`.
-    pub async fn jump_physical(&self, index: usize) -> Result<CommandAck, ApiError> {
-        self.request(|reply| SessionCmd::JumpPhysical(index, reply))
-            .await
-    }
-
-    /// Insert literal tracks at a play-order position (the queue view's
-    /// drag-drop). Wire clients use `queue_edit` moves instead.
-    pub async fn insert_tracks_at(
-        &self,
-        position: usize,
-        tracks: Vec<Track>,
-    ) -> Result<CommandAck, ApiError> {
-        self.request(|reply| SessionCmd::InsertTracksAt {
-            position,
-            tracks,
-            reply,
-        })
-        .await
-    }
-
     /// The raw queue plus its permutation, for the embedded frontend's
     /// signal mirror. Wire clients use `queue_window`.
-    pub async fn queue_mirror(&self) -> QueueMirrorSnapshot {
+    pub(crate) async fn queue_mirror(&self) -> QueueMirrorSnapshot {
         let (tx, rx) = oneshot::channel();
         if self.cmd_tx.send(SessionCmd::QueueMirror(tx)).is_err() {
             return QueueMirrorSnapshot::default();
@@ -655,34 +600,6 @@ impl Session {
             }
             SessionCmd::SetStationRegistry(registry) => self.station_registry = registry,
             SessionCmd::SetActiveSource(source) => self.active_source = source,
-            SessionCmd::SetQueueRaw {
-                tracks,
-                mode,
-                start_index,
-                shuffle,
-                reply,
-            } => {
-                let result = self.apply_queue_tracks(tracks, mode, start_index, shuffle, state_tx);
-                let _ = reply.send(result);
-            }
-            SessionCmd::JumpPhysical(index, reply) => {
-                let result = if self.model.items().get(index).is_some() {
-                    let position = self.model.jump_to(index);
-                    self.start_load(position, false);
-                    Ok(self.publish(state_tx, true))
-                } else {
-                    Err(ApiError::invalid_input("no track at that queue position"))
-                };
-                let _ = reply.send(result);
-            }
-            SessionCmd::InsertTracksAt {
-                position,
-                tracks,
-                reply,
-            } => {
-                self.model.insert_at(position, tracks);
-                let _ = reply.send(Ok(self.publish(state_tx, true)));
-            }
             SessionCmd::QueueMirror(reply) => {
                 let _ = reply.send(QueueMirrorSnapshot {
                     tracks: self.model.items().to_vec(),
@@ -922,48 +839,6 @@ impl Session {
         if let Some(task) = self.radio_task.take() {
             task.abort();
         }
-    }
-
-    fn apply_queue_tracks(
-        &mut self,
-        tracks: Vec<Track>,
-        mode: QueueMode,
-        start_index: Option<usize>,
-        shuffle: Option<bool>,
-        state_tx: &watch::Sender<PlayerState>,
-    ) -> Result<CommandAck, ApiError> {
-        match mode {
-            QueueMode::Replace => {
-                self.model.replace(tracks);
-                if let Some(on) = shuffle {
-                    self.model.set_shuffle(on);
-                }
-                let len = self.model.len();
-                if len > 0 {
-                    let start = start_index.unwrap_or_else(|| {
-                        if self.model.shuffle() {
-                            use rand::RngExt;
-                            rand::rng().random_range(0..len)
-                        } else {
-                            0
-                        }
-                    });
-                    let position = self.model.jump_to(start.min(len - 1));
-                    self.start_load(position, false);
-                }
-            }
-            // Appending lands past every existing position, so a pending
-            // crossfade target needs no remap.
-            QueueMode::Append => self.model.add(tracks),
-            QueueMode::PlayNext => match self.pending_transition.as_ref() {
-                // Mid-crossfade the queue still reads as the outgoing track,
-                // but "next" means after the one already fading in, or the
-                // insertion would be skipped the moment the fade commits.
-                Some(pending) => self.model.insert_at(pending.to_position + 1, tracks),
-                None => self.model.insert_next(tracks),
-            },
-        }
-        Ok(self.publish(state_tx, true))
     }
 
     async fn handle_set_queue(

@@ -409,6 +409,11 @@ pub trait ConfigApi: Send + Sync {
     /// with `invalid_input`.
     async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError>;
 
+    /// Hear an equalizer setting without keeping it. The engine applies it
+    /// live; nothing is written, so cancelling a preview is doing nothing.
+    async fn preview_equalizer(&self, equalizer: config::EqualizerSettings)
+    -> Result<(), ApiError>;
+
     // Switching sources lives on `SourceApi`, which is where sources are.
 }
 

@@ -1,16 +1,16 @@
-//! Projects the embedded daemon session's state stream onto the
-//! `PlayerController` signals the UI renders from.
+//! Projects the daemon's state stream onto the `PlayerController` signals
+//! the UI renders from.
 //!
-//! While Spotify external playback is active the local signals are
-//! authoritative and daemon state is ignored; handing control back to the
-//! engine re-syncs through `set_queue_tracks`, after which projection
-//! resumes.
+//! Two snapshots and a stream: the queue and the player state are fetched
+//! once, then followed. A resync event means take both again.
 
 use std::time::{Duration, Instant};
 
+use std::sync::Arc;
+
 use api::{ApiEvent, Intent, Phase, PlayerState};
 use dioxus::prelude::*;
-use tokio::sync::broadcast::error::RecvError;
+use futures_util::StreamExt;
 
 use crate::use_player_controller::{BufferedRange, PlayerController};
 
@@ -173,34 +173,45 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
     clock
 }
 
-fn apply_queue(ctrl: &mut PlayerController, mirror: daemon::QueueMirrorSnapshot) {
-    set_if_changed(&mut ctrl.queue, mirror.tracks);
-    set_if_changed(&mut ctrl.shuffle_order, mirror.shuffle_order);
-    set_if_changed(&mut ctrl.shuffle, mirror.shuffle);
-    set_if_changed(&mut ctrl.current_queue_index, mirror.position);
+/// The queue as the UI mirrors it: the rows in play order, the permutation
+/// behind them, and where playback sits.
+fn apply_queue(ctrl: &mut PlayerController, snapshot: api::QueueSnapshot) {
+    set_if_changed(
+        &mut ctrl.queue,
+        crate::wire::tracks_from_api(snapshot.items),
+    );
+    set_if_changed(
+        &mut ctrl.shuffle_order,
+        snapshot
+            .shuffle_order
+            .into_iter()
+            .map(|index| index as usize)
+            .collect(),
+    );
+    set_if_changed(&mut ctrl.shuffle, snapshot.shuffle);
+    set_if_changed(
+        &mut ctrl.current_queue_index,
+        snapshot.position.unwrap_or(0) as usize,
+    );
 }
 
 pub(crate) fn use_session_projector(ctrl: PlayerController) {
     let mut ctrl = ctrl;
     use_future(move || async move {
-        let handle = ctrl.session.peek().clone();
-        let mut rx = handle.subscribe();
-        let mirror = handle.queue_mirror().await;
-        apply_queue(&mut ctrl, mirror);
-        let mut daemon_clock = apply_state(&mut ctrl, handle.state());
+        let api = ctrl.api.peek().clone();
+        let mut events = api.events();
+        let mut daemon_clock = resync(&mut ctrl, &api).await;
         loop {
             let ticking = *ctrl.is_playing.peek() && ctrl.engine_anchor.peek().is_some();
             tokio::select! {
-                event = rx.recv() => match event {
-                    Ok(event) => {
+                event = events.next() => match event {
+                    Some(event) => {
                         match event {
                             ApiEvent::PlayerState(state) => {
                                 daemon_clock = apply_state(&mut ctrl, *state);
                             }
                             ApiEvent::QueueChanged { .. } | ApiEvent::Resync => {
-                                let mirror = handle.queue_mirror().await;
-                                apply_queue(&mut ctrl, mirror);
-                                daemon_clock = apply_state(&mut ctrl, handle.state());
+                                daemon_clock = resync(&mut ctrl, &api).await;
                             }
                             ApiEvent::PlayerPosition { position_ms, at_ms, playing, .. } => {
                                 let received_at = Instant::now();
@@ -234,12 +245,9 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
                             _ => {}
                         }
                     }
-                    Err(RecvError::Lagged(_)) => {
-                        let mirror = handle.queue_mirror().await;
-                        apply_queue(&mut ctrl, mirror);
-                        daemon_clock = apply_state(&mut ctrl, handle.state());
-                    }
-                    Err(RecvError::Closed) => break,
+                    // The daemon went away: nothing more will arrive, and the
+                    // app reports that elsewhere.
+                    None => break,
                 },
                 _ = tokio::time::sleep(Duration::from_millis(1000)), if ticking => {
                     let progress = ctrl.displayed_progress_secs_f64() as u64;
@@ -248,4 +256,16 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
             }
         }
     });
+}
+
+/// Take both snapshots again. Cheap enough to do on any doubt about the
+/// mirror, which is what a resync is.
+async fn resync(ctrl: &mut PlayerController, api: &Arc<dyn api::KopuzApi>) -> DaemonClock {
+    if let Ok(snapshot) = api.queue_snapshot().await {
+        apply_queue(ctrl, snapshot);
+    }
+    match api.player_state().await {
+        Ok(state) => apply_state(ctrl, state),
+        Err(_) => DaemonClock::sample(0),
+    }
 }

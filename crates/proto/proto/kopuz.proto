@@ -92,6 +92,7 @@ service Kopuz {
   rpc GetDownloadStatuses(GetDownloadStatusesRequest) returns (DownloadStatusList);
   rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
   rpc SetConfig(SetConfigRequest) returns (ConfigView);
+  rpc PreviewEqualizer(EqualizerSettings) returns (Unit);
 
   rpc GetSources(GetSourcesRequest) returns (SourceList);
   rpc SelectSource(SourceId) returns (SourceInfo);
