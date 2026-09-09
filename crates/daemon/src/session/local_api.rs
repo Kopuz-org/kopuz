@@ -157,11 +157,26 @@ impl LocalApi {
         self
     }
 
-    /// The integration named by `kind`. Only Spotify plays itself today, so
-    /// any other name is a client asking for something that is not here.
-    fn spotify_sink(&self, kind: &str) -> Result<&Arc<crate::spotify::SpotifySink>, ApiError> {
-        if kind != "spotify" {
-            return Err(ApiError::unsupported("no such external player"));
+    /// The sink that plays for a source. Only Spotify plays itself today, so a
+    /// source that is not one is a client asking for something that is not
+    /// there -- which its capabilities already said.
+    async fn external_sink(
+        &self,
+        source_id: &str,
+    ) -> Result<&Arc<crate::spotify::SpotifySink>, ApiError> {
+        let sources = self
+            .sources
+            .as_ref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without sources"))?;
+        if !sources
+            .source_info(source_id)
+            .await?
+            .capabilities
+            .external_devices
+        {
+            return Err(ApiError::unsupported(
+                "this source plays no devices of its own",
+            ));
         }
         self.spotify
             .as_ref()
@@ -272,16 +287,22 @@ impl api::PlayerApi for LocalApi {
         self.session.queue_edit(edit).await
     }
 
-    async fn external_devices(&self, kind: String) -> Result<Vec<api::ExternalDevice>, ApiError> {
-        self.spotify_sink(&kind)?.devices().await
+    async fn external_devices(
+        &self,
+        source_id: String,
+    ) -> Result<Vec<api::ExternalDevice>, ApiError> {
+        self.external_sink(&source_id).await?.devices().await
     }
 
     async fn select_external_device(
         &self,
-        kind: String,
+        source_id: String,
         device_id: Option<String>,
     ) -> Result<(), ApiError> {
-        self.spotify_sink(&kind)?.select_device(device_id).await
+        self.external_sink(&source_id)
+            .await?
+            .select_device(device_id)
+            .await
     }
 }
 
@@ -635,6 +656,25 @@ impl api::EventApi for LocalApi {
 impl api::SourceApi for LocalApi {
     async fn sources(&self) -> Result<Vec<api::SourceInfo>, ApiError> {
         self.sources()?.sources().await
+    }
+
+    async fn services(&self) -> Result<Vec<api::ServiceInfo>, ApiError> {
+        Ok(self.sources()?.services().await)
+    }
+
+    async fn check_server_draft(
+        &self,
+        draft: api::ServerDraft,
+    ) -> Result<api::DraftCheck, ApiError> {
+        self.sources()?.check_server_draft(draft).await
+    }
+
+    async fn set_source_settings(
+        &self,
+        id: String,
+        values: Vec<api::FieldValue>,
+    ) -> Result<api::SourceInfo, ApiError> {
+        self.sources()?.set_source_settings(&id, values).await
     }
 
     async fn switch_source(&self, id: String) -> Result<api::SourceInfo, ApiError> {

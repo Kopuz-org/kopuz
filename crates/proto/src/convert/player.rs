@@ -60,6 +60,26 @@ pub fn now_playing_from_proto(value: &NowPlaying) -> api::NowPlaying {
     }
 }
 
+pub fn external_device_to_proto(value: &api::ExternalDevice) -> ExternalDevice {
+    ExternalDevice {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        kind: value.kind.clone(),
+        icon: Some(icon_to_proto(&value.icon)),
+        active: value.active,
+    }
+}
+
+pub fn external_device_from_proto(value: &ExternalDevice) -> api::ExternalDevice {
+    api::ExternalDevice {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        kind: value.kind.clone(),
+        icon: value.icon.as_ref().map(icon_from_proto).unwrap_or_default(),
+        active: value.active,
+    }
+}
+
 pub fn anchor_to_proto(value: &api::PositionAnchor) -> PositionAnchor {
     PositionAnchor {
         ms: value.ms,
@@ -180,5 +200,20 @@ mod tests {
         let state = sample_state();
         let back = player_state_from_proto(&player_state_to_proto(&state));
         assert_eq!(state, back);
+    }
+
+    #[test]
+    fn an_external_device_keeps_its_glyph() {
+        let device = api::ExternalDevice {
+            id: "d1".into(),
+            name: "Kitchen".into(),
+            kind: "Speaker".into(),
+            icon: api::Icon::Class("ph-speaker-high".into()),
+            active: true,
+        };
+        assert_eq!(
+            device,
+            external_device_from_proto(&external_device_to_proto(&device))
+        );
     }
 }

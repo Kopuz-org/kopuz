@@ -95,10 +95,13 @@ service Kopuz {
   rpc PreviewEqualizer(EqualizerSettings) returns (Unit);
 
   rpc GetSources(GetSourcesRequest) returns (SourceList);
+  rpc GetServices(GetServicesRequest) returns (ServiceList);
   rpc SelectSource(SourceId) returns (SourceInfo);
   rpc UpsertLocalSource(LocalSourceDraft) returns (SourceInfo);
   rpc DeleteLocalSource(SourceId) returns (Unit);
   rpc SetSourceDirectories(SetSourceDirectoriesRequest) returns (SourceInfo);
+  rpc SetSourceSettings(SetSourceSettingsRequest) returns (SourceInfo);
+  rpc CheckServerDraft(ServerDraft) returns (DraftCheck);
   rpc UpsertServer(ServerDraft) returns (SourceInfo);
   rpc DeleteServer(SourceId) returns (Unit);
   rpc ProvisionCredentials(CredentialProvision) returns (SourceInfo);
@@ -321,13 +324,15 @@ message ExternalPlayback {
 }
 
 message ExternalDevicesRequest {
-  string kind = 1;
+  string source_id = 1;
 }
 
 message ExternalDevice {
   string id = 1;
   string name = 2;
   string kind = 3;
+  // A glyph for that kind, so a client need not know its vocabulary.
+  Icon icon = 5;
   bool active = 4;
 }
 
@@ -337,7 +342,7 @@ message ExternalDeviceList {
 
 // Absent device_id moves playback back to this app's own player.
 message SelectExternalDeviceRequest {
-  string kind = 1;
+  string source_id = 1;
   optional string device_id = 2;
 }
 
@@ -583,6 +588,91 @@ message SearchResults {
   repeated AlbumInfo albums = 2;
 }
 
+// ---------------- settings schema ----------------
+
+// A surface the daemon publishes: FieldSpec out, FieldValue back.
+
+// A KEY is looked up in the client's own translations; a LITERAL is a brand.
+enum TextKind {
+  TEXT_KIND_UNSPECIFIED = 0;
+  TEXT_KIND_KEY = 1;
+  TEXT_KIND_LITERAL = 2;
+}
+
+message Text {
+  TextKind kind = 1;
+  string value = 2;
+}
+
+// CLASS is an icon-font class the app ships; SVG is a path, for a logo none has.
+enum IconKind {
+  ICON_KIND_UNSPECIFIED = 0;
+  ICON_KIND_CLASS = 1;
+  ICON_KIND_SVG = 2;
+}
+
+message Icon {
+  IconKind kind = 1;
+  string value = 2;
+}
+
+message ChoiceOption {
+  string value = 1;
+  Text label = 2;
+}
+
+enum FieldKindTag {
+  FIELD_KIND_TAG_UNSPECIFIED = 0;
+  FIELD_KIND_TAG_TEXT = 1;
+  // Never sent back out with a value; an empty one coming in leaves it alone.
+  FIELD_KIND_TAG_SECRET = 2;
+  FIELD_KIND_TAG_URL = 3;
+  FIELD_KIND_TAG_TOGGLE = 4;
+  FIELD_KIND_TAG_DIRECTORY = 5;
+  FIELD_KIND_TAG_CHOICE = 6;
+  FIELD_KIND_TAG_RADIO = 7;
+  // No control: a line of explanation, which show_when can hide.
+  FIELD_KIND_TAG_NOTE = 8;
+}
+
+message FieldKind {
+  FieldKindTag tag = 1;
+  // Set for CHOICE and RADIO.
+  repeated ChoiceOption options = 2;
+  // CHOICE only: a value outside the list may be typed in.
+  bool custom = 3;
+}
+
+message FieldSpec {
+  string key = 1;
+  Text label = 2;
+  // Rendered under the control.
+  optional Text help = 3;
+  optional Text placeholder = 4;
+  // Starts a titled group before this row.
+  optional Text section = 5;
+  FieldKind kind = 6;
+  bool required = 7;
+  // The current value, or the default for a new one. Never set for a secret.
+  optional string value = 8;
+  // The settings key behind this row: a pinned one renders locked.
+  optional string config_key = 9;
+  // Show this row only while another field holds a given value.
+  optional FieldValue show_when = 10;
+}
+
+// One answer. A toggle is "true" or "false".
+message FieldValue {
+  string key = 1;
+  string value = 2;
+}
+
+// Absent field means the problem is about the form as a whole.
+message Problem {
+  optional string field = 1;
+  Text label = 2;
+}
+
 // ---------------- playlists ----------------
 
 // ---------------- sources ----------------
@@ -633,22 +723,62 @@ message SourceCapabilities {
   ArtistPresentation artists = 11;
   AlbumPresentation albums = 12;
   FavoritesSyncMode favorites_sync = 13;
+  // Its library is a directory tree to be picked from, not a catalog.
+  bool browse_folders = 14;
+  // It plays on devices of its own, which a client can list and move to.
+  bool external_devices = 15;
+}
+
+// What making a source usable takes.
+enum SignInKind {
+  SIGN_IN_KIND_UNSPECIFIED = 0;
+  SIGN_IN_KIND_NONE = 1;
+  SIGN_IN_KIND_PASSWORD = 2;
+  SIGN_IN_KIND_BROWSER = 3;
+}
+
+// A service the daemon can be pointed at, and the form that adds one.
+message ServiceInfo {
+  string id = 1;
+  Text name = 2;
+  Icon icon = 3;
+  // A colour to tint its rows with.
+  string accent = 4;
+  bool experimental = 5;
+  repeated FieldSpec fields = 6;
+}
+
+// Which service a configured source speaks: what to call it, how to draw it.
+message ServiceRef {
+  string id = 1;
+  Text name = 2;
+  Icon icon = 3;
+  string accent = 4;
+}
+
+message GetServicesRequest {}
+
+message ServiceList {
+  repeated ServiceInfo services = 1;
 }
 
 message SourceInfo {
   string id = 1;
   string name = 2;
   SourceKind kind = 3;
-  optional MusicService service = 4;
+  // Absent for a local source.
+  optional ServiceRef service = 4;
   bool active = 5;
   bool authenticated = 6;
   SourceCapabilities capabilities = 7;
-  optional string url = 8;
-  optional string browser = 9;
+  reserved 8, 9, 11, 12; // were url, browser, storefront, language: now settings rows
   bool anonymous = 10;
-  optional string storefront = 11;
-  optional string language = 12;
   repeated string directories = 13;
+  // The line under its name: an address, or whatever else identifies it.
+  optional string detail = 14;
+  SignInKind sign_in = 15;
+  // Its options, with the values it currently has.
+  repeated FieldSpec settings = 16;
 }
 
 message GetSourcesRequest {}
@@ -668,20 +798,31 @@ message LocalSourceDraft {
   repeated string directories = 3;
 }
 
+// The answers to a ServiceInfo's form. Absent id creates.
 message ServerDraft {
   optional string id = 1;
   string name = 2;
-  string url = 3;
-  MusicService service = 4;
-  optional string browser = 5;
-  bool anonymous = 6;
-  optional string storefront = 7;
-  optional string language = 8;
+  reserved 3, 5, 6, 7, 8; // were url, browser, anonymous, storefront, language: now form answers
+  string service = 4;
+  repeated FieldValue values = 9;
+  // Write-only. No response carries these back.
+  repeated FieldValue secrets = 10;
+}
+
+// What a draft would do if it were saved, and what is wrong with it.
+message DraftCheck {
+  SignInKind sign_in = 1;
+  repeated Problem problems = 2;
 }
 
 message SetSourceDirectoriesRequest {
   string id = 1;
   repeated string directories = 2;
+}
+
+message SetSourceSettingsRequest {
+  string id = 1;
+  repeated FieldValue values = 2;
 }
 
 // Write-only. No response carries these values back.
@@ -992,6 +1133,8 @@ message TrackInfo {
   bool offline = 14;
   // Absent for a local file.
   optional MusicService service = 15;
+  // The container, upper-cased ("FLAC"); a row from a service names no file.
+  optional string format = 22;
   // Every credited artist, where the source separates them.
   repeated string artists = 16;
   optional string musicbrainz_release_id = 17;

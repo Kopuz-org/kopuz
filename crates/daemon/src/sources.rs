@@ -45,6 +45,8 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
         delete_from_disk: caps.delete_from_disk,
         scan_folders: caps.scan_folders,
         folders: caps.folders,
+        browse_folders: caps.browse_folders,
+        external_devices: caps.external_devices,
         sync: caps.sync,
         downloads: caps.downloads,
         discover: caps.discover,
@@ -181,17 +183,17 @@ impl SourceService {
                     .server
                     .as_ref()
                     .ok_or_else(|| ApiError::not_found("no such server"))?;
+                let view = crate::services::ServerView::from(server);
                 info.name = server.name.clone();
                 info.kind = SourceKind::Server;
-                info.service = Some(server.service);
+                info.service = Some(crate::services::service_ref(server.service));
                 // An anonymous source needs no token to be usable, which is
                 // why this is not simply "has a token".
                 info.authenticated = server.access_token.is_some() || server.yt_anonymous;
-                info.url = Some(server.url.clone());
-                info.browser = server.yt_browser.map(|browser| browser.id().to_string());
+                info.sign_in = crate::services::sign_in(&view, info.authenticated);
+                info.detail = crate::services::detail(&view);
                 info.anonymous = server.yt_anonymous;
-                info.storefront = Some(server.apple_music_storefront.clone());
-                info.language = Some(server.apple_music_language.clone());
+                info.settings = crate::services::settings(&view, &current);
                 info.directories = resolved.folders_for(server_id);
             }
         }
@@ -421,35 +423,47 @@ impl SourceService {
         self.source_info(id).await
     }
 
+    /// Which service a draft names, refused as invalid input if it is not one
+    /// this daemon has.
+    fn drafted_service(draft: &ServerDraft) -> Result<config::MusicService, ApiError> {
+        config::MusicService::from_id(&draft.service)
+            .ok_or_else(|| ApiError::invalid_input("no such service"))
+    }
+
+    pub async fn services(&self) -> Vec<api::ServiceInfo> {
+        crate::services::all()
+    }
+
+    pub async fn check_server_draft(
+        &self,
+        draft: ServerDraft,
+    ) -> Result<api::DraftCheck, ApiError> {
+        let service = Self::drafted_service(&draft)?;
+        let (sign_in, problems) = crate::services::check(service, &draft);
+        Ok(api::DraftCheck { sign_in, problems })
+    }
+
     pub async fn upsert_server(&self, draft: ServerDraft) -> Result<SourceInfo, ApiError> {
         self.config.ensure_unlocked(&["server", "servers"])?;
-        if draft.name.trim().is_empty() {
-            return Err(ApiError::invalid_input("a server needs a name"));
+        let service = Self::drafted_service(&draft)?;
+        let (_, problems) = crate::services::check(service, &draft);
+        if let Some(problem) = problems.first() {
+            return Err(ApiError::invalid_input(crate::services::problem_text(
+                problem,
+            )));
         }
-        if !draft.service.uses_browser_signin() && !draft.url.starts_with("http") {
-            return Err(ApiError::invalid_input(
-                "a server URL must be http or https",
-            ));
-        }
-        let id = draft.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let id = draft
+            .id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         Self::validate_server_id(&id)?;
-        let browser = match draft.browser.as_deref() {
-            Some(browser) => Some(
-                config::Browser::from_id(browser)
-                    .ok_or_else(|| ApiError::invalid_input("no such browser"))?,
-            ),
-            None => None,
-        };
-        let saved = config::SavedServer {
-            id: id.clone(),
-            name: draft.name.trim().to_string(),
-            url: draft.url.trim_end_matches('/').to_string(),
-            service: draft.service,
-            yt_browser: browser,
-            yt_anonymous: draft.anonymous,
-            apple_music_storefront: draft.storefront.unwrap_or_else(|| "us".to_string()),
-            apple_music_language: draft.language.unwrap_or_else(|| "en".to_string()),
-        };
+        let mut saved = config::SavedServer::new(String::new(), String::new(), service);
+        saved.id = id.clone();
+        crate::services::apply(service, &draft, &mut saved);
+        let secret = api::schema::value_of(&draft.secrets, crate::services::TOKEN)
+            .map(str::trim)
+            .filter(|secret| !secret.is_empty())
+            .map(str::to_string);
         let current = self.current().await;
         // Changing where the active server points invalidates whatever is
         // loaded from it, so playback stops rather than carrying on against
@@ -488,7 +502,69 @@ impl SourceService {
             self.session.reset_playback().await?;
         }
         self.session.invalidate(Table::Servers);
+        // A secret answered in the form is stored the same way one obtained
+        // any other way is, and never travels back out.
+        if let Some(secret) = secret {
+            return self
+                .provision_credentials(api::CredentialProvision {
+                    server_id: id,
+                    secret,
+                    user_id: Some("me".to_string()),
+                    browser: None,
+                })
+                .await;
+        }
         self.source_info(&id).await
+    }
+
+    /// Answer a source's own options. An absent key is left alone; the Spotify
+    /// ones live on the config rather than the server row, so both are written
+    /// in the one mutation.
+    pub async fn set_source_settings(
+        &self,
+        id: &str,
+        values: Vec<api::FieldValue>,
+    ) -> Result<SourceInfo, ApiError> {
+        let current = self.current().await;
+        let Some(existing) = current.servers.iter().find(|server| server.id == id) else {
+            return Err(ApiError::not_found("no such server"));
+        };
+        let mut keys = vec!["servers".to_string()];
+        keys.extend(
+            crate::services::config_keys(existing, &values)
+                .into_iter()
+                .map(str::to_string),
+        );
+        let locked: Vec<&str> = keys.iter().map(String::as_str).collect();
+        self.config.ensure_unlocked(&locked)?;
+        let target = id.to_string();
+        let updated = self
+            .config
+            .mutate_state(move |config| {
+                let Some(index) = config.servers.iter().position(|server| server.id == target)
+                else {
+                    return;
+                };
+                let mut saved = config.servers[index].clone();
+                crate::services::apply_server_settings(&values, &mut saved);
+                crate::services::apply_config_settings(saved.service, &values, config);
+                config.servers[index] = saved.clone();
+                if config.active_source.server_id() == Some(saved.id.as_str())
+                    && let Some(server) = config.server.as_mut()
+                {
+                    server.yt_browser = saved.yt_browser;
+                    server
+                        .apple_music_storefront
+                        .clone_from(&saved.apple_music_storefront);
+                    server
+                        .apple_music_language
+                        .clone_from(&saved.apple_music_language);
+                }
+            })
+            .await?;
+        self.publish(updated, keys);
+        self.session.invalidate(Table::Servers);
+        self.source_info(id).await
     }
 
     pub async fn delete_server(&self, id: &str) -> Result<(), ApiError> {
@@ -760,9 +836,10 @@ impl SourceService {
             .await
             .map_err(db_error)?
             .ok_or_else(|| ApiError::not_found("no such server"))?;
-        if server.service != config::MusicService::Nextcloud {
+        let (_, built) = self.resolve(id).await?;
+        if !built.capabilities().browse_folders {
             return Err(ApiError::unsupported(
-                "only Nextcloud sources have folders to browse",
+                "this source's library is not a folder tree",
             ));
         }
         let user = server

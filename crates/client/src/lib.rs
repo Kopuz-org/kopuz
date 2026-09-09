@@ -178,33 +178,31 @@ impl api::PlayerApi for GrpcApi {
         })
     }
 
-    async fn external_devices(&self, kind: String) -> Result<Vec<api::ExternalDevice>, ApiError> {
+    async fn external_devices(
+        &self,
+        source_id: String,
+    ) -> Result<Vec<api::ExternalDevice>, ApiError> {
         let list = self
             .client()
-            .get_external_devices(Request::new(proto::ExternalDevicesRequest { kind }))
+            .get_external_devices(Request::new(proto::ExternalDevicesRequest { source_id }))
             .await
-            .map_err(wire_error)?
-            .into_inner();
+            .map_err(wire_error)?;
         Ok(list
+            .get_ref()
             .devices
-            .into_iter()
-            .map(|device| api::ExternalDevice {
-                id: device.id,
-                name: device.name,
-                kind: device.kind,
-                active: device.active,
-            })
+            .iter()
+            .map(convert::external_device_from_proto)
             .collect())
     }
 
     async fn select_external_device(
         &self,
-        kind: String,
+        source_id: String,
         device_id: Option<String>,
     ) -> Result<(), ApiError> {
         self.client()
             .select_external_device(Request::new(proto::SelectExternalDeviceRequest {
-                kind,
+                source_id,
                 device_id,
             }))
             .await
@@ -905,6 +903,48 @@ impl api::SourceApi for GrpcApi {
             .iter()
             .map(convert::source_info_from_proto)
             .collect())
+    }
+
+    async fn services(&self) -> Result<Vec<api::ServiceInfo>, ApiError> {
+        let list = self
+            .client()
+            .get_services(Request::new(proto::GetServicesRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .services
+            .iter()
+            .map(convert::service_info_from_proto)
+            .collect())
+    }
+
+    async fn check_server_draft(
+        &self,
+        draft: api::ServerDraft,
+    ) -> Result<api::DraftCheck, ApiError> {
+        let check = self
+            .client()
+            .check_server_draft(Request::new(convert::server_draft_to_proto(&draft)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::draft_check_from_proto(check.get_ref()))
+    }
+
+    async fn set_source_settings(
+        &self,
+        id: String,
+        values: Vec<api::FieldValue>,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let info = self
+            .client()
+            .set_source_settings(Request::new(proto::SetSourceSettingsRequest {
+                id,
+                values: values.iter().map(convert::field_value_to_proto).collect(),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(info.get_ref()))
     }
 
     async fn switch_source(&self, id: String) -> Result<api::SourceInfo, ApiError> {

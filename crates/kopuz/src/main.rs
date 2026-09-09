@@ -1,7 +1,7 @@
 use components::{
     CoverArtBackground, QuickSearch, bottombar::Bottombar, compact_player::CompactPlayer,
-    download_overlay::DownloadOverlay, fullscreen::Fullscreen, rightbar::Rightbar,
-    sidebar::Sidebar, spotify_devices::SpotifyDevicesPanel, titlebar::ResizeHandles,
+    download_overlay::DownloadOverlay, external_devices::ExternalDevicesPanel,
+    fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, titlebar::ResizeHandles,
     titlebar::Titlebar,
 };
 #[cfg(not(target_os = "android"))]
@@ -1975,7 +1975,7 @@ fn App() -> Element {
                     current_song_artist: current_song_artist,
                     current_song_album: current_song_album,
                 }
-                SpotifyDevicesPanel {
+                ExternalDevicesPanel {
                     is_devices_open: is_devices_open,
                     is_rightbar_open: is_rightbar_open,
                 }

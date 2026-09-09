@@ -19,6 +19,7 @@ mod player;
 mod playlists;
 mod queue;
 mod radio;
+pub mod schema;
 mod sources;
 
 pub use artwork::{ArtworkData, ArtworkRef, ArtworkRequest, ArtworkTarget};
@@ -43,10 +44,15 @@ pub use queue::{
     QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow, SetQueueRequest,
 };
 pub use radio::{RadioStationInfo, RadioStreamInfo};
+pub use schema::{
+    ChoiceOption, FieldKind, FieldSpec, FieldValue, Icon, Problem, Text, spec_value, toggle_of,
+    value_of,
+};
 pub use sources::{
-    AlbumPresentation, ArtistPresentation, CredentialProvision, FavoritesSyncMode, IntegrationKind,
-    IntegrationProvision, IntegrationStatus, LocalSourceDraft, PlaylistCapability, ServerDraft,
-    SourceCapabilities, SourceFolderEntry, SourceInfo, SourceKind, SourceLoginRequest,
+    AlbumPresentation, ArtistPresentation, CredentialProvision, DraftCheck, FavoritesSyncMode,
+    IntegrationKind, IntegrationProvision, IntegrationStatus, LocalSourceDraft, PlaylistCapability,
+    ServerDraft, ServiceInfo, ServiceRef, SignInKind, SourceCapabilities, SourceFolderEntry,
+    SourceInfo, SourceKind, SourceLoginRequest,
 };
 
 /// The config view: the layered config with credential keys
@@ -117,15 +123,16 @@ pub trait PlayerApi: Send + Sync {
 
     async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError>;
 
-    /// Where an integration can play: the Connect devices, the phones, the
-    /// speakers. Empty when that integration is not signed in.
-    async fn external_devices(&self, kind: String) -> Result<Vec<ExternalDevice>, ApiError>;
+    /// Where a source can play on its own: the Connect devices, the phones,
+    /// the speakers. Empty unless its capabilities say it has them and it is
+    /// signed in.
+    async fn external_devices(&self, source_id: String) -> Result<Vec<ExternalDevice>, ApiError>;
 
-    /// Move an integration's playback to one of those devices, or back to
-    /// this app's own with `None`.
+    /// Move that source's playback to one of those devices, or back to this
+    /// app's own with `None`.
     async fn select_external_device(
         &self,
-        kind: String,
+        source_id: String,
         device_id: Option<String>,
     ) -> Result<(), ApiError>;
 }
@@ -328,6 +335,22 @@ pub trait JobApi: Send + Sync {
 #[async_trait::async_trait]
 pub trait SourceApi: Send + Sync {
     async fn sources(&self) -> Result<Vec<SourceInfo>, ApiError>;
+
+    /// Every service this daemon can be pointed at, each with the form that
+    /// adds one. A client renders these rather than knowing any of them.
+    async fn services(&self) -> Result<Vec<ServiceInfo>, ApiError>;
+
+    /// What a draft would do if it were saved, and what is wrong with it.
+    /// Cheap enough to call as a form is typed into.
+    async fn check_server_draft(&self, draft: ServerDraft) -> Result<DraftCheck, ApiError>;
+
+    /// Answer a source's own options. Absent keys are left alone, and an empty
+    /// secret is not a request to clear one.
+    async fn set_source_settings(
+        &self,
+        id: String,
+        values: Vec<FieldValue>,
+    ) -> Result<SourceInfo, ApiError>;
 
     /// Make one active. Returns the source as it now stands, including
     /// whether it is usable -- a server with no credentials still becomes

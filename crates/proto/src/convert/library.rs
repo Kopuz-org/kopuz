@@ -62,6 +62,7 @@ pub fn track_info_to_proto(value: &api::TrackInfo) -> TrackInfo {
         service: value
             .service
             .map(|service| music_service_to_proto(service) as i32),
+        format: value.format.clone(),
         artists: value.artists.clone(),
         musicbrainz_release_id: value.musicbrainz_release_id.clone(),
         musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
@@ -88,6 +89,7 @@ pub fn track_info_from_proto(value: &TrackInfo) -> api::TrackInfo {
         seekable: value.seekable,
         offline: value.offline,
         service: value.service.and_then(music_service_from_proto),
+        format: value.format.clone(),
         artists: value.artists.clone(),
         musicbrainz_release_id: value.musicbrainz_release_id.clone(),
         musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
@@ -358,5 +360,44 @@ pub fn search_results_from_proto(value: &SearchResults) -> api::SearchResults {
     api::SearchResults {
         tracks: value.tracks.iter().map(track_info_from_proto).collect(),
         albums: value.albums.iter().map(album_info_from_proto).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A track row is what every listing renders, down to the file details a
+    /// row shows, so all of it has to survive the wire.
+    #[test]
+    fn a_track_row_round_trips() {
+        let track = api::TrackInfo {
+            key: "k".into(),
+            uid: "local:k".into(),
+            title: "t".into(),
+            artist: "a".into(),
+            album: "al".into(),
+            album_id: "al-1".into(),
+            duration_ms: Some(223_000),
+            khz: 44,
+            bitrate: 320,
+            track_number: Some(3),
+            disc_number: Some(1),
+            kind: api::TrackKind::Normal,
+            seekable: true,
+            offline: false,
+            service: None,
+            format: Some("FLAC".into()),
+            artists: vec!["a".into(), "b".into()],
+            musicbrainz_release_id: Some("mbr".into()),
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: Some("pi-1".into()),
+            artwork: Some(api::ArtworkRef {
+                target: api::ArtworkTarget::Track("k".into()),
+                version: 9,
+            }),
+        };
+        assert_eq!(track, track_info_from_proto(&track_info_to_proto(&track)));
     }
 }

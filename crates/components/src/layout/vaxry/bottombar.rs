@@ -205,7 +205,7 @@ pub fn BottombarVaxry(
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
                     i { class: "fa-solid fa-list text-[10px]" }
                 }
-                crate::spotify_devices::SpotifyDevicesButton {
+                crate::external_devices::ExternalDevicesButton {
                     compact: true,
                     is_rightbar_open,
                     is_devices_open,

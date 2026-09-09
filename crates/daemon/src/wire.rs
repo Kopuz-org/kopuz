@@ -35,6 +35,7 @@ pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo
         seekable: !radio,
         offline,
         service: track.id.service(),
+        format: track_format(track),
         artists: track.artists.clone(),
         musicbrainz_release_id: track.musicbrainz_release_id.clone(),
         musicbrainz_recording_id: track.musicbrainz_recording_id.clone(),
@@ -42,4 +43,21 @@ pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo
         playlist_item_id: track.playlist_item_id.clone(),
         artwork: crate::artwork::track_ref(track),
     }
+}
+
+/// The container a local file is in, for the badge a row shows. Only the
+/// formats the player actually decodes are named; anything else, and every
+/// track that came from a service, has none.
+fn track_format(track: &Track) -> Option<String> {
+    let extension = track
+        .id
+        .local_path()?
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    matches!(
+        extension.as_str(),
+        "mp3" | "flac" | "m4a" | "wav" | "ogg" | "opus" | "mp4" | "mka"
+    )
+    .then(|| extension.to_uppercase())
 }

@@ -1,18 +1,23 @@
-//! Spotify Connect device picker: routes kopuz's Spotify playback to any of
-//! the account's devices (phone, desktop app, speakers) or back to the in-app
-//! player. The `SpotifyDevicesButton` in the bottombar toggles a docked
-//! `SpotifyDevicesPanel` that slides in on the right like the queue rightbar,
-//! mirroring Spotify's own "Connect to a device" panel. Both render nothing
-//! unless Spotify is the signed-in active source.
+//! Device picker for a source that plays somewhere other than this app: routes
+//! playback to any of the account's devices (phone, desktop app, speakers) or
+//! back to the in-app player. The `ExternalDevicesButton` in the bottombar
+//! toggles a docked `ExternalDevicesPanel` that slides in on the right like the
+//! queue rightbar. Both render nothing unless the active source says it has
+//! devices and is signed in.
 //!
 //! The devices are the daemon's answer: it holds the token, it moves playback
-//! between them, and it is what notices one that started playing on its own.
+//! between them, it is what notices one that started playing on its own, and it
+//! picks the glyph for each, so no vocabulary of any one service reaches here.
 
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
-/// The integration these devices belong to; the daemon takes it by name.
-const KIND: &str = "spotify";
+/// Whether the active source plays devices of its own, and which one to ask.
+fn device_source(source: &Memo<Option<api::SourceInfo>>) -> Option<String> {
+    let source = source.read();
+    let source = source.as_ref()?;
+    (source.capabilities.external_devices && source.authenticated).then(|| source.id.clone())
+}
 
 /// One selectable target in the device panel, styled like the rightbar's queue
 /// rows: a thumbnail-sized icon square, a two-line name/subtitle stack, and —
@@ -20,7 +25,7 @@ const KIND: &str = "spotify";
 /// indicator when it's the current playback target.
 #[component]
 fn DeviceRow(
-    icon: &'static str,
+    icon: api::Icon,
     name: String,
     subtitle: Option<String>,
     chosen: bool,
@@ -47,7 +52,7 @@ fn DeviceRow(
                 } else {
                     "background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.6);"
                 },
-                i { class: "{icon} text-sm" }
+                crate::forms::Glyph { icon, class: "text-sm".to_string() }
             }
 
             div { class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
@@ -79,21 +84,18 @@ fn DeviceRow(
     }
 }
 
-/// Bottombar toggle that opens the docked device panel. Renders only when
-/// Spotify is the signed-in active source; opening the panel closes the queue
+/// Bottombar toggle that opens the docked device panel. Renders only when the
+/// active source has devices to offer; opening the panel closes the queue
 /// rightbar so the two never fight over the right edge.
 #[component]
-pub fn SpotifyDevicesButton(
+pub fn ExternalDevicesButton(
     #[props(default = false)] compact: bool,
     mut is_rightbar_open: Signal<bool>,
     mut is_devices_open: Signal<bool>,
 ) -> Element {
     let ctrl = use_context::<PlayerController>();
     let source = hooks::sources::use_active_source_info();
-    let is_spotify = source.read().as_ref().is_some_and(|source| {
-        source.service == Some(config::MusicService::Spotify) && source.authenticated
-    });
-    if !is_spotify {
+    if device_source(&source).is_none() {
         return rsx! {};
     }
 
@@ -107,7 +109,7 @@ pub fn SpotifyDevicesButton(
                 (false, true) => "text-indigo-400 hover:text-white",
                 (false, false) => "text-slate-400 hover:text-white",
             },
-            title: i18n::t("spotify_play_on").to_string(),
+            title: i18n::t("external_play_on").to_string(),
             onclick: move |_| {
                 let now = !*is_devices_open.peek();
                 if now {
@@ -124,15 +126,13 @@ pub fn SpotifyDevicesButton(
 /// styled to match it. Asks the daemon for the account's devices each time it
 /// opens.
 #[component]
-pub fn SpotifyDevicesPanel(
+pub fn ExternalDevicesPanel(
     mut is_devices_open: Signal<bool>,
     is_rightbar_open: Signal<bool>,
 ) -> Element {
     let api = hooks::use_api();
     let source = hooks::sources::use_active_source_info();
-    let is_spotify = source.read().as_ref().is_some_and(|source| {
-        source.service == Some(config::MusicService::Spotify) && source.authenticated
-    });
+    let playing_source = device_source(&source);
 
     // The rightbar and this panel are mutually exclusive; opening the rightbar
     // dismisses us.
@@ -146,17 +146,16 @@ pub fn SpotifyDevicesPanel(
     let mut devices = use_resource(move || {
         let api = api.clone();
         let open = is_devices_open();
+        let asked = device_source(&source);
         async move {
-            if !open {
+            let Some(asked) = asked.filter(|_| open) else {
                 return Vec::new();
-            }
-            api.external_devices(KIND.to_string())
-                .await
-                .unwrap_or_default()
+            };
+            api.external_devices(asked).await.unwrap_or_default()
         }
     });
 
-    if !*is_devices_open.read() || !is_spotify {
+    if playing_source.is_none() || !*is_devices_open.read() {
         return rsx! {};
     }
 
@@ -168,12 +167,13 @@ pub fn SpotifyDevicesPanel(
 
     let select = move |device_id: Option<String>| {
         let api = hooks::consume_api();
+        let asked = device_source(&source);
         spawn(async move {
-            if let Err(error) = api
-                .select_external_device(KIND.to_string(), device_id)
-                .await
-            {
-                tracing::warn!(%error, "moving Spotify playback failed");
+            let Some(asked) = asked else {
+                return;
+            };
+            if let Err(error) = api.select_external_device(asked, device_id).await {
+                tracing::warn!(%error, "moving playback to another device failed");
                 hooks::toast::toast_error(&error.to_string());
             }
             devices.restart();
@@ -182,7 +182,7 @@ pub fn SpotifyDevicesPanel(
 
     rsx! {
         div {
-            id: "spotify-devices-root",
+            id: "external-devices-root",
             class: "bg-black/40 border-l border-white/5 flex flex-col h-full flex-shrink-0 z-10",
             style: "width: 320px; min-width: 320px;",
 
@@ -190,7 +190,7 @@ pub fn SpotifyDevicesPanel(
                 class: "flex items-center justify-between px-4 py-4 border-b border-white/10",
                 span {
                     class: "text-[10px] font-medium uppercase tracking-wider text-white",
-                    "{i18n::t(\"spotify_play_on\")}"
+                    "{i18n::t(\"external_play_on\")}"
                 }
                 button {
                     class: "text-white/40 hover:text-white",
@@ -201,8 +201,8 @@ pub fn SpotifyDevicesPanel(
 
             div { class: "flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-0.5",
                 DeviceRow {
-                    icon: "fa-solid fa-music",
-                    name: i18n::t("spotify_this_app").to_string(),
+                    icon: api::Icon::Class("fa-solid fa-music".to_string()),
+                    name: i18n::t("external_this_app").to_string(),
                     subtitle: None,
                     chosen: selected.is_none(),
                     onclick: move |_| select(None),
@@ -211,15 +211,10 @@ pub fn SpotifyDevicesPanel(
                     {
                         let id = device.id.clone();
                         let chosen = selected.as_deref() == Some(device.id.as_str());
-                        let icon = match device.kind.as_str() {
-                            "Smartphone" => "fa-solid fa-mobile-screen",
-                            "Speaker" => "fa-solid fa-volume-high",
-                            _ => "fa-solid fa-computer",
-                        };
                         rsx! {
                             DeviceRow {
                                 key: "{device.id}",
-                                icon,
+                                icon: device.icon.clone(),
                                 name: device.name.clone(),
                                 subtitle: (!device.kind.is_empty()).then(|| device.kind.clone()),
                                 chosen,

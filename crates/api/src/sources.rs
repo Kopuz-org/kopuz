@@ -1,10 +1,13 @@
 //! Sources as a frontend sees them: what is configured, which one is active,
 //! and what each can do.
 //!
-//! A frontend never constructs a media source. It reads these rows to decide
-//! which affordances to render -- a delete button, a tag editor, a discover
-//! tab -- and calls the mutating methods to change what is configured. No
-//! credential ever appears here; the daemon holds them.
+//! A frontend never constructs a media source, and never names one. It reads
+//! these rows to decide which affordances to render -- a delete button, a tag
+//! editor, a discover tab -- renders the field lists the daemon publishes to
+//! configure them, and calls the mutating methods to change what is
+//! configured. No credential ever appears here; the daemon holds them.
+
+use crate::schema::{FieldSpec, FieldValue, Icon, Problem, Text};
 
 /// What kind of thing a source is, for grouping in a settings list.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -61,16 +64,55 @@ pub struct SourceCapabilities {
     pub edit_tags: bool,
     pub delete_from_disk: bool,
     pub scan_folders: bool,
+    /// Playlists live in folders.
     pub folders: bool,
+    /// Its library is a directory tree to be picked from, not a catalog.
+    pub browse_folders: bool,
     pub sync: bool,
     pub downloads: bool,
     pub discover: bool,
     pub track_radio: bool,
     pub playlist_radio: bool,
+    /// It plays on devices of its own, which a client can list and move to.
+    pub external_devices: bool,
     pub playlists: PlaylistCapability,
     pub artists: ArtistPresentation,
     pub albums: AlbumPresentation,
     pub favorites_sync: FavoritesSyncMode,
+}
+
+/// What making a source usable takes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SignInKind {
+    /// Nothing: a local library, or one already signed in.
+    #[default]
+    None,
+    /// A username and a password, which the client collects.
+    Password,
+    /// A browser the daemon drives; the client only asks for it.
+    Browser,
+}
+
+/// A service the daemon can be pointed at, and the form for adding one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServiceInfo {
+    pub id: String,
+    pub name: Text,
+    pub icon: Icon,
+    /// A colour to tint its rows with.
+    pub accent: String,
+    pub experimental: bool,
+    pub fields: Vec<FieldSpec>,
+}
+
+/// Which service a configured source speaks, as much as a client needs: what
+/// to call it and how to draw it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServiceRef {
+    pub id: String,
+    pub name: Text,
+    pub icon: Icon,
+    pub accent: String,
 }
 
 /// One configured source.
@@ -80,17 +122,19 @@ pub struct SourceInfo {
     pub name: String,
     pub kind: SourceKind,
     /// `None` for a local source.
-    pub service: Option<config::MusicService>,
+    pub service: Option<ServiceRef>,
     pub active: bool,
     /// Whether the daemon holds usable credentials for it.
     pub authenticated: bool,
+    /// What signing it in would take, where it is not signed in already.
+    pub sign_in: SignInKind,
     pub capabilities: SourceCapabilities,
-    pub url: Option<String>,
-    /// Which browser its sign-in flow uses, where it has one.
-    pub browser: Option<String>,
+    /// The line under its name: an address, or whatever else identifies it.
+    pub detail: Option<String>,
+    /// Usable without an account.
     pub anonymous: bool,
-    pub storefront: Option<String>,
-    pub language: Option<String>,
+    /// Its options, with the values it currently has.
+    pub settings: Vec<FieldSpec>,
     /// Scan roots, for a local source.
     pub directories: Vec<String>,
 }
@@ -103,18 +147,37 @@ pub struct LocalSourceDraft {
     pub directories: Vec<String>,
 }
 
-/// A server to create or update. Credentials are provisioned separately, so
-/// this carries none.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// A server to create or update, as the answers to a [`ServiceInfo`]'s form.
+/// `secrets` are write-only and never come back.
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct ServerDraft {
     pub id: Option<String>,
     pub name: String,
-    pub url: String,
-    pub service: config::MusicService,
-    pub browser: Option<String>,
-    pub anonymous: bool,
-    pub storefront: Option<String>,
-    pub language: Option<String>,
+    pub service: String,
+    pub values: Vec<FieldValue>,
+    pub secrets: Vec<FieldValue>,
+}
+
+impl std::fmt::Debug for ServerDraft {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerDraft")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("service", &self.service)
+            .field("values", &self.values)
+            .field(
+                "secrets",
+                &format_args!("<{} redacted>", self.secrets.len()),
+            )
+            .finish()
+    }
+}
+
+/// What a draft would do if it were saved.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DraftCheck {
+    pub sign_in: SignInKind,
+    pub problems: Vec<Problem>,
 }
 
 /// Write-only: a secret a client obtained out of band. No response ever

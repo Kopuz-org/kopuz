@@ -22,6 +22,7 @@ pub mod playlists;
 pub mod queue_model;
 pub mod radio;
 pub mod scrobbler;
+pub mod services;
 pub mod session;
 pub mod sources;
 pub mod spotify;

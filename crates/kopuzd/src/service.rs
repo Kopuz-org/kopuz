@@ -801,18 +801,13 @@ impl Kopuz for KopuzGrpc {
         let devices = self
             .0
             .api
-            .external_devices(request.into_inner().kind)
+            .external_devices(request.into_inner().source_id)
             .await
             .map_err(failed)?;
         Ok(Response::new(proto::ExternalDeviceList {
             devices: devices
-                .into_iter()
-                .map(|device| proto::ExternalDevice {
-                    id: device.id,
-                    name: device.name,
-                    kind: device.kind,
-                    active: device.active,
-                })
+                .iter()
+                .map(convert::external_device_to_proto)
                 .collect(),
         }))
     }
@@ -824,7 +819,7 @@ impl Kopuz for KopuzGrpc {
         let request = request.into_inner();
         self.0
             .api
-            .select_external_device(request.kind, request.device_id)
+            .select_external_device(request.source_id, request.device_id)
             .await
             .map_err(failed)?;
         Ok(Response::new(proto::Unit {}))
@@ -993,6 +988,19 @@ impl Kopuz for KopuzGrpc {
         }))
     }
 
+    async fn get_services(
+        &self,
+        _: Request<proto::GetServicesRequest>,
+    ) -> Result<Response<proto::ServiceList>, Status> {
+        let services = self.0.api.services().await.map_err(failed)?;
+        Ok(Response::new(proto::ServiceList {
+            services: services
+                .iter()
+                .map(convert::service_info_to_proto)
+                .collect(),
+        }))
+    }
+
     async fn select_source(
         &self,
         request: Request<proto::SourceId>,
@@ -1043,6 +1051,38 @@ impl Kopuz for KopuzGrpc {
             .await
             .map_err(failed)?;
         Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
+    async fn set_source_settings(
+        &self,
+        request: Request<proto::SetSourceSettingsRequest>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let request = request.into_inner();
+        let values = request
+            .values
+            .iter()
+            .map(convert::field_value_from_proto)
+            .collect();
+        let info = self
+            .0
+            .api
+            .set_source_settings(request.id, values)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
+    async fn check_server_draft(
+        &self,
+        request: Request<proto::ServerDraft>,
+    ) -> Result<Response<proto::DraftCheck>, Status> {
+        let check = self
+            .0
+            .api
+            .check_server_draft(convert::server_draft_from_proto(request.get_ref()))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::draft_check_to_proto(&check)))
     }
 
     async fn upsert_server(

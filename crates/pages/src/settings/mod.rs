@@ -91,7 +91,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         active_server
             .peek()
             .as_ref()
-            .and_then(|server| server.browser.as_deref())
+            .and_then(|server| api::spec_value(&server.settings, "browser"))
             .and_then(config::Browser::from_id)
             .unwrap_or(config::Browser::Chrome)
     });
@@ -145,7 +145,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     // Signing in again on an active server: which flow it is belongs to the
     // service, and the daemon runs it.
     let mut sign_in_again = move || match active_server() {
-        Some(server) if server.service.is_some_and(|s| s.uses_browser_signin()) => {
+        Some(server) if server.sign_in == api::SignInKind::Browser => {
             crate::settings_actions::authenticate(server.id, error, ctrl.playback_error);
         }
         _ => show_login.set(true),
@@ -916,7 +916,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 /// tree and is signed in -- the daemon lists the folders, so it needs both.
 fn remote_folder_settings(server: Option<api::SourceInfo>) -> Option<RemoteFolderSettings> {
     let server = server?;
-    if server.service != Some(MusicService::Nextcloud) || !server.authenticated {
+    if !server.capabilities.browse_folders || !server.authenticated {
         return None;
     }
     let folders = server.directories.clone();

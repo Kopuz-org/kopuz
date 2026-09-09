@@ -125,6 +125,7 @@ impl SpotifySink {
                 active: selected.as_deref() == Some(device.id.as_str()) || device.is_active,
                 id: device.id,
                 name: device.name,
+                icon: device_icon(&device.kind),
                 kind: device.kind,
             })
             .collect())
@@ -625,4 +626,18 @@ impl ExternalPlayer for SpotifySink {
         });
         self.pause().await
     }
+}
+
+/// A glyph for one of Spotify's device kinds, so a client renders the picker
+/// without knowing that vocabulary.
+fn device_icon(kind: &str) -> api::schema::Icon {
+    api::schema::Icon::Class(
+        match kind {
+            "Smartphone" | "Tablet" => "fa-solid fa-mobile-screen",
+            "Speaker" | "AVR" | "STB" | "AudioDongle" => "fa-solid fa-volume-high",
+            "TV" | "CastVideo" => "fa-solid fa-tv",
+            _ => "fa-solid fa-computer",
+        }
+        .to_string(),
+    )
 }

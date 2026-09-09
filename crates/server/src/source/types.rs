@@ -125,7 +125,12 @@ pub struct Capabilities {
     pub edit_tags: bool,
     pub delete_from_disk: bool,
     pub scan_folders: bool,
+    /// Playlists can be filed in folders.
     pub folders: bool,
+    /// Its library is a directory tree to pick roots from, not a catalog.
+    pub browse_folders: bool,
+    /// It plays on devices of its own, which a client can list and move to.
+    pub external_devices: bool,
     pub sync: bool,
     pub downloads: bool,
     pub discover: bool,

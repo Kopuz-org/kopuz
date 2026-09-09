@@ -1,6 +1,6 @@
 //! Local-library and remote-server settings controls.
 
-use config::{MusicService, SavedLocalSource};
+use config::SavedLocalSource;
 use dioxus::prelude::*;
 #[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
@@ -232,12 +232,16 @@ pub fn ServerSettings(
                     let is_active = srv.active;
                     let id_switch = id.clone();
                     let id_delete = id.clone();
-                    let is_spotify = srv.service == Some(MusicService::Spotify);
+                    let is_spotify = srv
+                        .service
+                        .as_ref()
+                        .is_some_and(|service| service.id == "spotify");
                     let service_name = srv
                         .service
-                        .map(|service| service.display_name().to_string())
+                        .as_ref()
+                        .map(|service| crate::forms::text(&service.name))
                         .unwrap_or_default();
-                    let url = srv.url.clone().unwrap_or_default();
+                    let url = srv.detail.clone().unwrap_or_default();
                     // Folders are the whole library definition here, so the
                     // picker sits on the card the way it does for a local
                     // library, not behind a separate dialog.
@@ -304,7 +308,7 @@ pub fn ServerSettings(
                             }
                             if is_spotify {
                                 div { class: "flex items-center justify-between gap-4 border-t border-white/10 pt-2",
-                                    p { class: "text-xs text-white/60", "{i18n::t(\"spotify_browser\")}" }
+                                    p { class: "text-xs text-white/60", "{i18n::t(\"playback_browser\")}" }
                                     select {
                                         class: "bg-stone-800 text-white rounded px-2 py-1 text-xs border border-white/10 focus:outline-none focus:border-indigo-500",
                                         onchange: move |evt| {
@@ -314,7 +318,7 @@ pub fn ServerSettings(
                                         option {
                                             value: "auto",
                                             selected: chosen.is_none(),
-                                            "{i18n::t(\"spotify_browser_auto\")}"
+                                            "{i18n::t(\"playback_browser_auto\")}"
                                         }
                                         for (bid, label) in browsers.iter() {
                                             option {

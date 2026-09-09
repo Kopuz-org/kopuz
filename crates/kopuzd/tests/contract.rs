@@ -1077,18 +1077,24 @@ async fn sources_agree_across_transports_and_carry_no_secret() {
     assert!(local[0].active, "the default library is active");
     assert!(local[0].authenticated, "a local library needs no sign-in");
     assert_eq!(local[0].service, None);
+    assert_eq!(local[0].sign_in, api::SignInKind::None);
 
     // Adding a server is visible to both, and provisioning a credential
     // reports authentication without echoing the secret.
     let draft = api::ServerDraft {
         name: "Home".into(),
-        url: "https://jelly.example".into(),
-        service: config::MusicService::Jellyfin,
+        service: "jellyfin".into(),
+        values: vec![api::FieldValue::new("url", "https://jelly.example")],
         ..Default::default()
     };
     let added = pair.wire.upsert_server(draft).await.expect("add server");
     assert!(!added.authenticated, "a new server has no credentials yet");
-    assert_eq!(added.url.as_deref(), Some("https://jelly.example"));
+    assert_eq!(added.detail.as_deref(), Some("https://jelly.example"));
+    assert_eq!(
+        added.sign_in,
+        api::SignInKind::Password,
+        "a Jellyfin server signs in with a username and a password"
+    );
 
     pair.local
         .provision_credentials(api::CredentialProvision {
@@ -1106,6 +1112,7 @@ async fn sources_agree_across_transports_and_carry_no_secret() {
         .find(|source| source.id == added.id)
         .expect("the server is listed");
     assert!(server.authenticated, "it is signed in now");
+    assert_eq!(server.sign_in, api::SignInKind::None, "nothing left to do");
     let rendered = format!("{sources:?}");
     assert!(
         !rendered.contains("a-token-nobody-should-see"),
@@ -1115,8 +1122,8 @@ async fn sources_agree_across_transports_and_carry_no_secret() {
     // A bad draft is refused identically.
     let bad = api::ServerDraft {
         name: "No URL".into(),
-        url: "not-a-url".into(),
-        service: config::MusicService::Jellyfin,
+        service: "jellyfin".into(),
+        values: vec![api::FieldValue::new("url", "not-a-url")],
         ..Default::default()
     };
     assert_eq!(
@@ -1133,6 +1140,149 @@ async fn sources_agree_across_transports_and_carry_no_secret() {
         .await
         .expect("delete");
     assert_eq!(pair.local.sources().await.expect("sources").len(), 1);
+}
+
+/// The services a daemon offers, and the forms that add them, are its answer
+/// rather than a list a client keeps in step by hand.
+#[tokio::test]
+async fn services_and_their_forms_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    let local = pair.local.services().await.expect("local services");
+    let wire = pair.wire.services().await.expect("wire services");
+    assert_eq!(local, wire);
+    assert!(
+        local.iter().any(|service| service.id == "jellyfin"),
+        "the services are named by their stable ids: {local:?}"
+    );
+    let youtube = local
+        .iter()
+        .find(|service| service.id == "ytmusic")
+        .expect("youtube music is offered");
+    assert!(
+        youtube
+            .fields
+            .iter()
+            .any(|field| matches!(field.kind, api::FieldKind::Radio { .. })),
+        "its form asks how to sign in: {:?}",
+        youtube.fields
+    );
+    assert!(
+        youtube.fields.iter().any(|field| field.show_when.is_some()),
+        "and hides the browser picker unless it is signing in"
+    );
+}
+
+/// Checking a draft is what tells a client whether it may be saved, so both
+/// transports must give the same verdict.
+#[tokio::test]
+async fn a_draft_is_checked_identically_across_transports() {
+    let pair = spawn_pair().await;
+
+    let missing = api::ServerDraft {
+        name: String::new(),
+        service: "spotify".into(),
+        ..Default::default()
+    };
+    let local = pair
+        .local
+        .check_server_draft(missing.clone())
+        .await
+        .expect("local check");
+    let wire = pair
+        .wire
+        .check_server_draft(missing)
+        .await
+        .expect("wire check");
+    assert_eq!(local, wire);
+    assert_eq!(local.sign_in, api::SignInKind::Browser);
+    assert!(
+        local
+            .problems
+            .iter()
+            .any(|problem| problem.field.as_deref() == Some("client_id")),
+        "a Spotify server needs its client id: {local:?}"
+    );
+
+    let good = api::ServerDraft {
+        name: "Home".into(),
+        service: "jellyfin".into(),
+        values: vec![api::FieldValue::new("url", "https://jelly.example")],
+        ..Default::default()
+    };
+    let check = pair.wire.check_server_draft(good).await.expect("check");
+    assert!(
+        check.problems.is_empty(),
+        "nothing wrong with it: {check:?}"
+    );
+    assert_eq!(check.sign_in, api::SignInKind::Password);
+
+    // A service this daemon does not have is invalid input, not a panic.
+    let unknown = api::ServerDraft {
+        name: "Home".into(),
+        service: "not-a-service".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        pair.local
+            .check_server_draft(unknown.clone())
+            .await
+            .err()
+            .map(|error| error.code),
+        pair.wire
+            .check_server_draft(unknown)
+            .await
+            .err()
+            .map(|error| error.code),
+    );
+}
+
+/// A source's own options round-trip, and answering one key leaves the others
+/// alone.
+#[tokio::test]
+async fn source_settings_round_trip_without_touching_what_was_not_answered() {
+    let pair = spawn_pair().await;
+
+    let added = pair
+        .wire
+        .upsert_server(api::ServerDraft {
+            name: "Music".into(),
+            service: "applemusic".into(),
+            values: vec![
+                api::FieldValue::new("storefront", "gb"),
+                api::FieldValue::new("language", "en"),
+                api::FieldValue::new("browser", "chrome"),
+            ],
+            ..Default::default()
+        })
+        .await
+        .expect("add server");
+    assert_eq!(
+        api::spec_value(&added.settings, "storefront"),
+        Some("gb"),
+        "the form's answers come back as its settings: {:?}",
+        added.settings
+    );
+
+    let updated = pair
+        .local
+        .set_source_settings(
+            added.id.clone(),
+            vec![api::FieldValue::new("storefront", "jp")],
+        )
+        .await
+        .expect("set settings");
+    assert_eq!(api::spec_value(&updated.settings, "storefront"), Some("jp"));
+    assert_eq!(
+        api::spec_value(&updated.settings, "language"),
+        Some("en"),
+        "a key nobody answered is left alone: {:?}",
+        updated.settings
+    );
+    assert_eq!(
+        pair.wire.sources().await.expect("wire sources"),
+        pair.local.sources().await.expect("local sources"),
+    );
 }
 
 /// yt-dlp is a subprocess the daemon owns. Whether it is installed is a

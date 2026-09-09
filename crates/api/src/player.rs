@@ -108,6 +108,9 @@ pub struct ExternalDevice {
     pub name: String,
     /// What the service calls it: "Smartphone", "Speaker", "Computer".
     pub kind: String,
+    /// A glyph for that kind, chosen by the daemon so a client need not know
+    /// one service's device vocabulary.
+    pub icon: crate::schema::Icon,
     pub active: bool,
 }
 

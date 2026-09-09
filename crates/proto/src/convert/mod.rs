@@ -14,6 +14,7 @@ mod library;
 mod player;
 mod playlists;
 mod queue;
+mod schema;
 mod service;
 mod sources;
 
@@ -29,5 +30,6 @@ pub use library::*;
 pub use player::*;
 pub use playlists::*;
 pub use queue::*;
+pub use schema::*;
 pub use service::*;
 pub use sources::*;

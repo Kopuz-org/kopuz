@@ -61,6 +61,8 @@ impl MediaSource for SpotifySource {
             delete_from_disk: false,
             scan_folders: false,
             folders: false,
+            browse_folders: false,
+            external_devices: true,
             sync: true,
             downloads: false,
             discover: true,

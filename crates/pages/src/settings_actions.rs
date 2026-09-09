@@ -119,14 +119,12 @@ async fn activate(
             return;
         }
     };
-    if source.authenticated {
-        return;
-    }
-    match source.service {
-        Some(service) if service.uses_browser_signin() => {
-            authenticate_with(api, source.id, error, playback_error).await
-        }
-        _ => show_login.set(true),
+    // Which sign-in a source takes belongs to the service, and the daemon runs
+    // it -- this only asks for whichever it named.
+    match source.sign_in {
+        api::SignInKind::None => (),
+        api::SignInKind::Browser => authenticate_with(api, source.id, error, playback_error).await,
+        api::SignInKind::Password => show_login.set(true),
     }
 }
 
@@ -149,54 +147,60 @@ pub fn add_server(
     let selected_service = server_service();
     let is_ytmusic = selected_service == MusicService::YtMusic;
     let is_apple = selected_service == MusicService::AppleMusic;
-    let is_browser_signin = selected_service.uses_browser_signin();
-    let storefront = apple_music_storefront().trim().to_string();
     let anonymous = is_ytmusic && yt_anonymous();
     let manual_token = is_apple && *apple_music_use_manual.peek();
 
-    if server_name().trim().is_empty() {
-        error.set(Some(i18n::t("server_name_required").to_string()));
-        return;
+    let mut values = vec![
+        api::FieldValue::new("url", server_url().trim()),
+        api::FieldValue::new("client_id", server_url().trim()),
+        api::FieldValue::new("browser", yt_browser().id()),
+    ];
+    if anonymous {
+        values.push(api::FieldValue::new("auth_method", "anonymous"));
+    } else if manual_token {
+        values.push(api::FieldValue::new("auth_method", "manual"));
+    } else {
+        values.push(api::FieldValue::new("auth_method", "browser"));
     }
-
-    if !is_browser_signin && !server_url().starts_with("http") {
-        error.set(Some(i18n::t("invalid_server_url").to_string()));
-        return;
+    if is_apple {
+        values.push(api::FieldValue::new(
+            "storefront",
+            apple_music_storefront().trim(),
+        ));
+        values.push(api::FieldValue::new("language", apple_music_language()));
     }
-
-    if selected_service == MusicService::Spotify && server_url().trim().is_empty() {
-        error.set(Some(i18n::t("spotify_client_id_required").to_string()));
-        return;
-    }
-
-    // Manual mode is the one path that never opens a browser, so an empty
-    // field here is not "sign in later" -- it saves a server with no
-    // credential and no way to acquire one.
-    if manual_token && apple_music_manual_token().trim().is_empty() {
-        error.set(Some(i18n::t("apple_music_token_required").to_string()));
-        return;
-    }
-
-    if is_apple && storefront.is_empty() {
-        error.set(Some(i18n::t("apple_music_storefront_required").to_string()));
-        return;
-    }
-
     let draft = api::ServerDraft {
         id: None,
         name: server_name().trim().to_string(),
-        url: server_url().trim().to_string(),
-        service: selected_service,
-        browser: (is_browser_signin && !anonymous).then(|| yt_browser().id().to_string()),
-        anonymous,
-        storefront: is_apple.then_some(storefront),
-        language: is_apple.then(|| apple_music_language.cloned()),
+        service: selected_service.id().to_string(),
+        values,
+        secrets: if manual_token {
+            vec![api::FieldValue::new(
+                "token",
+                apple_music_manual_token().trim(),
+            )]
+        } else {
+            Vec::new()
+        },
     };
-    let secret = manual_token.then(|| apple_music_manual_token().trim().to_string());
     let api = hooks::consume_api();
 
     spawn(
         async move {
+            // The daemon owns what each service's form needs, so it is what
+            // says whether these answers are enough.
+            match api.check_server_draft(draft.clone()).await {
+                Ok(check) => {
+                    if let Some(problem) = check.problems.first() {
+                        error.set(Some(components::forms::text(&problem.label)));
+                        return;
+                    }
+                }
+                Err(failure) => {
+                    error.set(Some(failure.to_string()));
+                    return;
+                }
+            }
             let saved = match api.upsert_server(draft).await {
                 Ok(saved) => saved,
                 Err(failure) => {
@@ -214,20 +218,6 @@ pub fn add_server(
             apple_music_manual_token.set(String::new());
             error.set(None);
             show_add_server.set(false);
-
-            if let Some(secret) = secret
-                && let Err(failure) = api
-                    .provision_credentials(api::CredentialProvision {
-                        server_id: saved.id.clone(),
-                        secret,
-                        user_id: Some("me".to_string()),
-                        browser: None,
-                    })
-                    .await
-            {
-                error.set(Some(failure.to_string()));
-                return;
-            }
 
             // A server is added to be used, so it becomes the active source
             // and picks up whichever sign-in it still needs.

@@ -48,6 +48,8 @@ const CAPABILITIES: Capabilities = Capabilities {
     delete_from_disk: false,
     scan_folders: false,
     folders: false,
+    browse_folders: true,
+    external_devices: false,
     sync: true,
     downloads: true,
     discover: false,
