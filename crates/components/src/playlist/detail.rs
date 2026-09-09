@@ -2,7 +2,6 @@ use dioxus::prelude::*;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
 #[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
-use std::path::PathBuf;
 #[component]
 #[tracing::instrument(name = "render.playlist_detail", skip_all)]
 pub fn PlaylistDetail(
@@ -15,9 +14,6 @@ pub fn PlaylistDetail(
     #[props(default = false)] is_downloading_all: bool,
 ) -> Element {
     let playlists_res = use_playlists();
-    let cover_for = hooks::use_db_queries::use_cover_resolver(512);
-    // Still needed by the cover upload and the delete-from-disk paths, which
-    // write through the source until the mutation API covers them.
 
     // The playlist's track refs, resolved from the library. One query, live:
     // the daemon's refresh invalidates as each page lands, so this is both the
@@ -29,7 +25,7 @@ pub fn PlaylistDetail(
             .playlists
             .iter()
             .find(|playlist| playlist.id == pid_for_refs)
-            .map(|playlist| playlist.tracks.clone())
+            .map(|playlist| playlist.track_keys.clone())
             .unwrap_or_default()
     });
     let active_partition = use_memo(move || config.read().active_source.clone());
@@ -63,9 +59,14 @@ pub fn PlaylistDetail(
 
     let store_loading = playlists_res.read().is_none();
     let store = playlists_res.read().clone().unwrap_or_default();
-    let (playlist_name, playlist_custom_cover, playlist_image_tag) =
+    // The daemon already walked the picked cover, the server's image tag and
+    // the first track's art, so the ref it hands back is the whole answer.
+    let (playlist_name, playlist_cover) =
         if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
-            (p.name.clone(), p.cover_path.clone(), p.image_tag.clone())
+            (
+                p.name.clone(),
+                hooks::artwork::url(p.artwork.as_ref(), hooks::artwork::Size::Full),
+            )
         } else if store_loading {
             return rsx! { div {} };
         } else {
@@ -76,21 +77,12 @@ pub fn PlaylistDetail(
     let track_count = tracks_val.len();
     let tracks_for_delete = tracks_val.clone();
 
-    // A custom (locally-picked) cover wins; then a server playlist's remote image
-    // tag; then the first track's cover via the source-agnostic seam.
-    let playlist_cover = playlist_custom_cover
-        .as_ref()
-        .and_then(|p| hooks::artwork::stored(p.to_str(), hooks::artwork::Size::Full))
-        .or_else(|| tracks_val.first().and_then(&cover_for));
-
     let start_radio = crate::radio_actions::playlist_radio_handler(playlist_id.clone());
 
     let pid_for_remove = playlist_id.clone();
     let pid_for_move_up = playlist_id.clone();
     let pid_for_move_down = playlist_id.clone();
     let pid_for_cover = playlist_id.clone();
-    let name_for_cover = playlist_name.clone();
-    let tag_for_cover = playlist_image_tag.clone();
 
     rsx! {
         crate::track_list_view::TrackListView {
@@ -103,8 +95,6 @@ pub fn PlaylistDetail(
             enable_metadata: caps.edit_tags,
             on_cover_click: move |_| {
                 let _ = &pid_for_cover;
-                let _ = &name_for_cover;
-                let _ = &tag_for_cover;
                 #[cfg(not(target_os = "android"))]
                 {
                     let pid = pid_for_cover.clone();
@@ -134,16 +124,12 @@ pub fn PlaylistDetail(
             on_delete_track: move |idx: usize| {
                 if let Some(track) = tracks_for_delete.get(idx) {
                     hooks::library_actions::delete_tracks(
-                        vec![track.id.key().into_owned()],
+                        vec![track.key.clone()],
                         caps.delete_from_disk,
                     );
                 }
             },
-            on_selection_delete: move |paths: Vec<PathBuf>| {
-                let keys: Vec<String> = paths
-                    .iter()
-                    .map(|path| path.to_string_lossy().into_owned())
-                    .collect();
+            on_selection_delete: move |keys: Vec<String>| {
                 hooks::library_actions::delete_tracks(keys, caps.delete_from_disk);
             },
             // No optimistic edit: the daemon invalidates as it writes, and the

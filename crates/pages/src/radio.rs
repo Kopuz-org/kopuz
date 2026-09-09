@@ -59,7 +59,7 @@ fn first_stream(station: &RadioStationInfo) -> &str {
 
 /// The station's own picture, where it has one.
 fn station_art(station: &RadioStationInfo) -> Option<utils::CoverUrl> {
-    hooks::wire::artwork_url(station.artwork.as_ref())
+    hooks::artwork::url(station.artwork.as_ref(), hooks::artwork::Size::Thumb)
 }
 
 fn matches_query(station: &RadioStationInfo, query: &str) -> bool {

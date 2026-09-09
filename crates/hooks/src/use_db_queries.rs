@@ -21,7 +21,6 @@ use tracing::Instrument;
 
 use crate::api::use_api;
 use crate::db_reactivity::{Table, use_generations};
-use crate::wire::{albums_from_api, tracks_from_api};
 
 /// One resolved window: the rows together with the offset they were queried
 /// at. The pairing matters — a `Resource` keeps its previous value while
@@ -30,7 +29,7 @@ use crate::wire::{albums_from_api, tracks_from_api};
 #[derive(Clone, Default, PartialEq)]
 pub struct WindowRows {
     pub offset: u32,
-    pub rows: Vec<reader::Track>,
+    pub rows: Vec<api::TrackInfo>,
 }
 
 /// A windowed track listing: the visible `rows` plus the `total` match count
@@ -72,7 +71,7 @@ pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksW
                 let rows = api
                     .tracks(f, p)
                     .await
-                    .map(|page| tracks_from_api(page.items))
+                    .map(|page| page.items)
                     .unwrap_or_default();
                 tracing::Span::current().record("rows", rows.len());
                 WindowRows {
@@ -119,7 +118,7 @@ pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksW
 pub fn use_album_tracks(
     source: Memo<Source>,
     album_id: Memo<String>,
-) -> Resource<Vec<reader::Track>> {
+) -> Resource<Vec<api::TrackInfo>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
@@ -139,7 +138,7 @@ pub fn use_album_tracks(
             let rows = api
                 .album_tracks(id, all())
                 .await
-                .map(|page| tracks_from_api(page.items))
+                .map(|page| page.items)
                 .unwrap_or_default();
             tracing::Span::current().record("rows", rows.len());
             rows
@@ -152,7 +151,7 @@ pub fn use_album_tracks(
 pub fn use_artist_tracks(
     source: Memo<Source>,
     artist: Memo<String>,
-) -> Resource<Vec<reader::Track>> {
+) -> Resource<Vec<api::TrackInfo>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
@@ -168,7 +167,7 @@ pub fn use_artist_tracks(
             let rows = api
                 .artist_tracks(name, all())
                 .await
-                .map(|page| tracks_from_api(page.items))
+                .map(|page| page.items)
                 .unwrap_or_default();
             tracing::Span::current().record("rows", rows.len());
             rows
@@ -178,7 +177,10 @@ pub fn use_artist_tracks(
 }
 
 /// Every track in a genre. An empty genre resolves to empty without asking.
-pub fn use_genre_tracks(source: Memo<Source>, genre: Memo<String>) -> Resource<Vec<reader::Track>> {
+pub fn use_genre_tracks(
+    source: Memo<Source>,
+    genre: Memo<String>,
+) -> Resource<Vec<api::TrackInfo>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
@@ -198,7 +200,7 @@ pub fn use_genre_tracks(source: Memo<Source>, genre: Memo<String>) -> Resource<V
             let rows = api
                 .genre_tracks(name, all())
                 .await
-                .map(|page| tracks_from_api(page.items))
+                .map(|page| page.items)
                 .unwrap_or_default();
             tracing::Span::current().record("rows", rows.len());
             rows
@@ -208,7 +210,7 @@ pub fn use_genre_tracks(source: Memo<Source>, genre: Memo<String>) -> Resource<V
 }
 
 /// One track per artist, for the artist grid's tiles.
-pub fn use_artist_sample_tracks(source: Memo<Source>, limit: u32) -> Resource<Vec<reader::Track>> {
+pub fn use_artist_sample_tracks(source: Memo<Source>, limit: u32) -> Resource<Vec<api::TrackInfo>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
@@ -218,7 +220,7 @@ pub fn use_artist_sample_tracks(source: Memo<Source>, limit: u32) -> Resource<Ve
         async move {
             api.artist_sample_tracks(Page { offset: 0, limit })
                 .await
-                .map(|page| tracks_from_api(page.items))
+                .map(|page| page.items)
                 .unwrap_or_default()
         }
         .instrument(span)
@@ -241,7 +243,7 @@ pub fn use_top_genre(source: Memo<Source>) -> Resource<Option<String>> {
 pub fn use_tracks_by_keys(
     source: Memo<Source>,
     keys: Memo<Vec<String>>,
-) -> Resource<Vec<reader::Track>> {
+) -> Resource<Vec<api::TrackInfo>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
@@ -258,11 +260,7 @@ pub fn use_tracks_by_keys(
                 tracing::Span::current().record("rows", 0);
                 return Vec::new();
             }
-            let rows = api
-                .tracks_by_keys(k)
-                .await
-                .map(tracks_from_api)
-                .unwrap_or_default();
+            let rows = api.tracks_by_keys(k).await.unwrap_or_default();
             tracing::Span::current().record("rows", rows.len());
             rows
         }
@@ -271,7 +269,7 @@ pub fn use_tracks_by_keys(
 }
 
 /// This source's recently-played tracks, newest first.
-pub fn use_recently_played(source: Memo<Source>) -> Resource<Vec<reader::Track>> {
+pub fn use_recently_played(source: Memo<Source>) -> Resource<Vec<api::TrackInfo>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
@@ -284,7 +282,7 @@ pub fn use_recently_played(source: Memo<Source>) -> Resource<Vec<reader::Track>>
                 limit: 50,
             })
             .await
-            .map(|page| tracks_from_api(page.items))
+            .map(|page| page.items)
             .unwrap_or_default()
         }
         .instrument(span)
@@ -292,20 +290,14 @@ pub fn use_recently_played(source: Memo<Source>) -> Resource<Vec<reader::Track>>
 }
 
 /// One album by id.
-pub fn use_album(source: Memo<Source>, album_id: Memo<String>) -> Resource<Option<reader::Album>> {
+pub fn use_album(source: Memo<Source>, album_id: Memo<String>) -> Resource<Option<api::AlbumInfo>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Albums);
         let (api, s, id) = (api.clone(), source(), album_id());
         let span = tracing::info_span!("query.album", source = s.as_str(), album_id = %id);
-        async move {
-            api.album(id)
-                .await
-                .unwrap_or_default()
-                .map(crate::wire::album_from_api)
-        }
-        .instrument(span)
+        async move { api.album(id).await.unwrap_or_default() }.instrument(span)
     })
 }
 
@@ -341,9 +333,9 @@ pub fn use_active_source() -> Memo<config::Source> {
     use_memo(move || config.read().active_source.clone())
 }
 
-/// The playlist store for the active source, re-queried on a playlists/folders
-/// bump or a source switch. Resolves the in-memory active source itself.
-pub fn use_playlists() -> Resource<reader::PlaylistStore> {
+/// The playlist catalog for the active source, re-queried on a
+/// playlists/folders bump or a source switch.
+pub fn use_playlists() -> Resource<api::PlaylistCatalog> {
     let api = use_api();
     let gens = use_generations();
     let source = use_active_source();
@@ -352,55 +344,12 @@ pub fn use_playlists() -> Resource<reader::PlaylistStore> {
         let _ = gens.generation(Table::Folders);
         let (api, src) = (api.clone(), source());
         let span = tracing::info_span!("query.playlists", source = %src.as_str());
-        async move {
-            api.playlists()
-                .await
-                .map(crate::wire::playlist_store_from_api)
-                .unwrap_or_default()
-        }
-        .instrument(span)
-    })
-}
-
-/// The cover for one artist, which the daemon resolves: a custom override,
-/// then the source's photo, then -- for a library source -- one of the
-/// artist's album covers. A frontend never sees which of those it got.
-pub fn artist_cover_url(artist: &api::ArtistInfo) -> Option<utils::CoverUrl> {
-    crate::wire::artwork_url(artist.artwork.as_ref())
-}
-
-/// The `limit` most recently added albums for a source. Tracked against the
-/// tracks table as well as the albums one: the order comes from each album's
-/// newest track, so a scan that only adds tracks to a known album still moves
-/// it up.
-pub fn use_recently_added_albums(source: Memo<Source>, limit: u32) -> Resource<Vec<reader::Album>> {
-    let db = use_context::<ReadDb>();
-    let gens = use_generations();
-    use_resource(move || {
-        let _ = gens.generation(Table::Albums);
-        let _ = gens.generation(Table::Tracks);
-        let (db, s) = (db.clone(), source());
-        let span = tracing::info_span!(
-            "query.albums_recently_added",
-            source = s.as_str(),
-            rows = tracing::field::Empty
-        );
-        offload(
-            async move {
-                let rows = db
-                    .albums_recently_added(&s, limit)
-                    .await
-                    .unwrap_or_default();
-                tracing::Span::current().record("rows", rows.len());
-                rows
-            }
-            .instrument(span),
-        )
+        async move { api.playlists().await.unwrap_or_default() }.instrument(span)
     })
 }
 
 /// All albums for a source, re-queried when the albums table changes.
-pub fn use_albums(source: Memo<Source>) -> Resource<Vec<reader::Album>> {
+pub fn use_albums(source: Memo<Source>) -> Resource<Vec<api::AlbumInfo>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
@@ -415,24 +364,13 @@ pub fn use_albums(source: Memo<Source>) -> Resource<Vec<reader::Album>> {
             let rows = api
                 .albums(all())
                 .await
-                .map(|page| albums_from_api(page.albums))
+                .map(|page| page.albums)
                 .unwrap_or_default();
             tracing::Span::current().record("rows", rows.len());
             rows
         }
         .instrument(span)
     })
-}
-
-/// A per-track display-cover resolver: call it for any track and get its
-/// cover. Every row carries its own artwork reference, so a mixed-source
-/// list resolves without a source decision at the call site.
-pub fn use_cover_resolver(max_width: u32) -> impl Fn(&reader::Track) -> Option<utils::CoverUrl> {
-    let size = match max_width > 512 {
-        true => crate::artwork::Size::Full,
-        false => crate::artwork::Size::Thumb,
-    };
-    move |track: &reader::Track| crate::artwork::for_track(track, size)
 }
 
 /// The active source's favorite refs, re-queried on a favorites bump or a
@@ -457,7 +395,7 @@ pub fn use_favorites() -> Resource<Vec<String>> {
 /// collapses to `false` (hollow heart until known) here, once, so call sites
 /// just read the bool. Use this for single-item checks; a list view should load
 /// [`use_favorites`] once and test membership instead.
-pub fn use_track_is_favorite(track: Memo<Option<reader::Track>>) -> Memo<bool> {
+pub fn use_track_is_favorite(track: Memo<Option<api::TrackInfo>>) -> Memo<bool> {
     let api = use_api();
     let gens = use_generations();
     let res = use_resource(move || {
@@ -468,13 +406,13 @@ pub fn use_track_is_favorite(track: Memo<Option<reader::Track>>) -> Memo<bool> {
             let Some(track) = track else {
                 return false;
             };
-            let key = track.id.key();
+            let key = track.key;
             if key.trim().is_empty() {
                 return false;
             }
             api.favorites()
                 .await
-                .map(|view| view.refs.iter().any(|entry| entry == key.as_ref()))
+                .map(|view| view.refs.iter().any(|entry| entry == &key))
                 .unwrap_or(false)
         }
     });

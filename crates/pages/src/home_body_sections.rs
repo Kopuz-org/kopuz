@@ -241,10 +241,10 @@ fn ServerHeroBanner(
                                     .unwrap_or_default()
                                     .into_iter()
                                     .collect();
-                                !tracks.is_empty() && tracks.iter().all(|t| {
-                                    let id = t.id.key();
-                                    !id.is_empty() && favs.contains(id.as_ref())
-                                })
+                                !tracks.is_empty()
+                                    && tracks
+                                        .iter()
+                                        .all(|t| !t.key.is_empty() && favs.contains(&t.key))
                             };
                             let hero_heart_class = if jelly_hero_fav {
                                 "w-11 h-11 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-red-400 hover:bg-white/20 transition-all"
@@ -264,7 +264,7 @@ fn ServerHeroBanner(
                                                 .clone()
                                                 .unwrap_or_default()
                                                 .iter()
-                                                .map(|track| track.id.key().into_owned())
+                                                .map(|track| track.key.clone())
                                                 .collect()
                                         };
                                         hooks::favorites::set_favorite_many(keys, !jelly_hero_fav);
@@ -384,13 +384,13 @@ fn render_continue_listening(
                         let album_id_opt = album_opt.as_ref().map(|a| a.id.clone());
                         let album_id_click = album_id_opt.clone();
                         let album_id_play = album_id_opt.clone();
-                        let key = track.id.uid();
+                        let key = track.uid.clone();
                         let actions = song_actions.clone();
                         let action_kinds = song_action_kinds.clone();
                         // Resolved during render, not in the click closure: the
                         // handler reads context, which a closure cannot do.
                         let start_radio = components::radio_actions::track_radio_handler(
-                            track.id.key().into_owned(),
+                            track.key.clone(),
                         );
                         let open_key = key.clone();
                         let is_menu_open = active_card_menu.read().as_deref() == Some(key.as_str());

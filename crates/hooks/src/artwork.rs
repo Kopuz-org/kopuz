@@ -33,8 +33,8 @@ pub fn url(artwork: Option<&ArtworkRef>, size: Size) -> Option<CoverUrl> {
     ))
 }
 
-/// The picture a row already carries, as the row models still hold it: the
-/// same reference, spelled as the URL this frontend renders.
+/// A picture named by a path or a URL rather than a ref, which is what the
+/// user's own custom background and a playlist's picked cover still are.
 pub fn stored(value: Option<&str>, size: Size) -> Option<CoverUrl> {
     let stored = value.map(str::trim).filter(|value| !value.is_empty())?;
     Some(utils::cover_url_from_string(match size {
@@ -43,15 +43,12 @@ pub fn stored(value: Option<&str>, size: Size) -> Option<CoverUrl> {
     }))
 }
 
-pub fn for_track(track: &reader::Track, size: Size) -> Option<CoverUrl> {
-    stored(track.cover.as_deref(), size)
+pub fn for_track(track: &api::TrackInfo, size: Size) -> Option<CoverUrl> {
+    url(track.artwork.as_ref(), size)
 }
 
-pub fn for_album(album: &reader::Album, size: Size) -> Option<CoverUrl> {
-    stored(
-        album.cover_path.as_deref().and_then(|path| path.to_str()),
-        size,
-    )
+pub fn for_album(album: &api::AlbumInfo, size: Size) -> Option<CoverUrl> {
+    url(album.artwork.as_ref(), size)
 }
 
 /// The same picture, asked for at the size a large surface wants. Only the
@@ -87,5 +84,31 @@ pub fn size_for(max_width: u32) -> Size {
     match max_width > 512 {
         true => Size::Full,
         false => Size::Thumb,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::at_full_size;
+
+    #[test]
+    fn our_own_urls_carry_the_hq_flag() {
+        assert_eq!(
+            at_full_size("artwork://local?p=%2Fcover.jpg"),
+            "artwork://local?p=%2Fcover.jpg&hq=1"
+        );
+        assert_eq!(
+            at_full_size("http://artwork.dioxus.localhost/local?p=C%3A%5Ccover.jpg"),
+            "http://artwork.dioxus.localhost/local?p=C%3A%5Ccover.jpg&hq=1"
+        );
+    }
+
+    /// A picture that is not the daemon's to serve is left exactly as it is:
+    /// resizing a provider's URL is the daemon's business now, and guessing at
+    /// one here would produce a request nothing answers.
+    #[test]
+    fn a_url_from_elsewhere_is_left_alone() {
+        let original = "https://music.example/rest/getCoverArt.view?id=cover-1&size=80";
+        assert_eq!(at_full_size(original), original);
     }
 }

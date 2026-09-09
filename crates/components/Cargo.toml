@@ -21,7 +21,6 @@ directories = { workspace = true }
 tracing = { workspace = true }
 base64 = { workspace = true }
 uuid = { workspace = true }
-reader = { workspace = true }
 utils = { workspace = true }
 kopuz_route = { workspace = true }
 config = { workspace = true }

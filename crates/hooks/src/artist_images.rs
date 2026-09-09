@@ -15,8 +15,8 @@ use utils::artist::{joined_credit_primary, normalize_artist_key};
 
 /// Ask the daemon to fill in missing artist photos for what this grid renders.
 pub fn use_artist_photo_fetch(
-    albums: Resource<Vec<reader::Album>>,
-    sample_tracks: Resource<Vec<reader::Track>>,
+    albums: Resource<Vec<api::AlbumInfo>>,
+    sample_tracks: Resource<Vec<api::TrackInfo>>,
 ) {
     use_effect(move || {
         let albums = albums.read().clone().unwrap_or_default();
@@ -42,7 +42,7 @@ pub fn use_artist_photo_fetch(
 ///
 /// Every album and track-credit artist, minus joined collab credits whose
 /// primary artist is independently present, sorted case-insensitively.
-fn fetch_queue(albums: &[reader::Album], sample: &[reader::Track]) -> Vec<String> {
+fn fetch_queue(albums: &[api::AlbumInfo], sample: &[api::TrackInfo]) -> Vec<String> {
     let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for album in albums {
         if !album.artist.trim().is_empty() {
@@ -74,36 +74,23 @@ fn fetch_queue(albums: &[reader::Album], sample: &[reader::Track]) -> Vec<String
 mod tests {
     use super::*;
 
-    fn album(artist: &str) -> reader::Album {
-        reader::Album {
+    fn album(artist: &str) -> api::AlbumInfo {
+        api::AlbumInfo {
             id: format!("al-{artist}"),
             title: "A".into(),
             artist: artist.into(),
-            genre: String::new(),
-            year: 0,
-            cover_path: None,
-            manual_cover: false,
+            ..Default::default()
         }
     }
 
-    fn track(artists: &[&str]) -> reader::Track {
-        reader::Track {
-            id: reader::TrackId::Local("/music/x.flac".into()),
-            cover: None,
+    fn track(artists: &[&str]) -> api::TrackInfo {
+        api::TrackInfo {
+            key: "/music/x.flac".into(),
+            uid: "/music/x.flac".into(),
             album_id: "al".into(),
-            title: String::new(),
             artist: artists.first().unwrap_or(&"").to_string(),
-            album: String::new(),
-            duration: 0,
-            khz: 0,
-            bitrate: 0,
-            track_number: None,
-            disc_number: None,
-            musicbrainz_release_id: None,
-            musicbrainz_recording_id: None,
-            musicbrainz_track_id: None,
-            playlist_item_id: None,
             artists: artists.iter().map(|a| a.to_string()).collect(),
+            ..Default::default()
         }
     }
 

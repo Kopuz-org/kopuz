@@ -578,7 +578,7 @@ fn App() -> Element {
     let current_song_khz = use_signal(|| 0u32);
     let current_song_bitrate = use_signal(|| 0u16);
     let current_song_progress = use_signal(|| 0u64);
-    let current_track_snapshot = use_signal(|| None::<reader::Track>);
+    let current_track_snapshot = use_signal(|| None::<api::TrackInfo>);
     let mut volume = use_signal(|| 1.0f32);
     let mut persisted_volume = use_signal(|| 1.0f32);
     let mut configured_local_libraries = use_signal(|| configured_local_sources(&config.peek()));
@@ -703,7 +703,7 @@ fn App() -> Element {
     let mut search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
-    let mut queue = use_signal(Vec::<reader::Track>::new);
+    let queue = use_signal(Vec::<api::TrackInfo>::new);
     let current_queue_index = use_signal(|| 0usize);
 
     let mut network_banner: Signal<Option<bool>> = use_signal(|| None);
@@ -2140,7 +2140,7 @@ fn App() -> Element {
             if *show_quick_search.read() {
                 QuickSearch {
                     show: show_quick_search,
-                    on_play: move |(track, fallback): (reader::Track, Vec<reader::Track>)| {
+                    on_play: move |(track, fallback): (api::TrackInfo, Vec<api::TrackInfo>)| {
                         let api = hooks::consume_api();
                         let _ = quick_search_source();
                         let filter = hooks::TrackFilter {
@@ -2151,14 +2151,14 @@ fn App() -> Element {
                             let all = api
                                 .tracks(filter, hooks::use_db_queries::all())
                                 .await
-                                .map(|page| hooks::wire::tracks_from_api(page.items))
+                                .map(|page| page.items)
                                 .unwrap_or_default();
-                            if let Some(idx) = all.iter().position(|t| t.id == track.id) {
-                                queue.set(all);
-                                ctrl.play_track(idx);
-                            } else if let Some(idx) = fallback.iter().position(|t| t.id == track.id) {
-                                queue.set(fallback);
-                                ctrl.play_track(idx);
+                            if let Some(idx) = all.iter().position(|t| t.uid == track.uid) {
+                                ctrl.play_queue_at(all, idx);
+                            } else if let Some(idx) =
+                                fallback.iter().position(|t| t.uid == track.uid)
+                            {
+                                ctrl.play_queue_at(fallback, idx);
                             }
                         });
                     },

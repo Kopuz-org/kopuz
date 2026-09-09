@@ -20,12 +20,12 @@ const ITEM_HEIGHT: f64 = 60.0;
 #[component]
 pub fn FavoritesBody(
     config: Signal<AppConfig>,
-    mut queue: Signal<Vec<reader::models::Track>>,
+    mut queue: Signal<Vec<api::TrackInfo>>,
     search_query: Signal<String>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
-    let mut metadata_track = use_signal(|| None::<reader::models::Track>);
+    let mut active_menu_track = use_signal(|| None::<String>);
+    let mut metadata_track = use_signal(|| None::<api::TrackInfo>);
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()
@@ -55,10 +55,10 @@ pub fn FavoritesBody(
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
+    let mut selected_tracks = use_signal(HashSet::<String>::new);
     let sort_state = use_signal(|| None);
     let mut show_playlist_modal = use_signal(|| false);
-    let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
+    let mut selected_track_for_playlist = use_signal(|| None::<String>);
     let downloads = hooks::downloads::use_downloads();
 
     let source = use_active_source();
@@ -70,7 +70,7 @@ pub fn FavoritesBody(
     let search_query_normalized = search_query.read().trim().to_lowercase();
     let loaded_tracks = fav_tracks_res.read().clone().unwrap_or_default();
     let has_favorites = !loaded_tracks.is_empty();
-    let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
+    let displayed_tracks: Vec<(api::TrackInfo, Option<utils::CoverUrl>)> = {
         loaded_tracks
             .into_iter()
             .filter(|track| track_matches_filter(track, &search_query_normalized))
@@ -86,7 +86,7 @@ pub fn FavoritesBody(
 
     // Rc, not a Vec clone per row: the play handler needs the whole sorted
     // list as the queue, and cloning 800+ tracks × 800+ rows was quadratic.
-    let queue_tracks: Rc<Vec<reader::models::Track>> = Rc::new(
+    let queue_tracks: Rc<Vec<api::TrackInfo>> = Rc::new(
         sorted_displayed_tracks
             .iter()
             .map(|(t, _)| t.clone())
@@ -95,7 +95,7 @@ pub fn FavoritesBody(
 
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.clone())
+        ctrl.get_track_at(idx).map(|track| track.uid.clone())
     };
 
     let displayed_tracks_for_selection = sorted_displayed_tracks.clone();
@@ -121,19 +121,19 @@ pub fn FavoritesBody(
         .map(|(idx, (track, cover_url))| {
             let cap = caps();
             let track_menu = track.clone();
-            let track_path = track.id.clone();
-            let track_select = track.id.clone();
+            let track_path = track.key.clone();
+            let track_select = track.key.clone();
             let track_add = track.clone();
             let track_queue = track.clone();
             let track_meta = track.clone();
             let track_delete = track.clone();
             let queue_source = queue_tracks.clone();
-            let track_key = track.id.uid();
-            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id);
+            let track_key = track.uid.clone();
+            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.uid);
             let is_selected = selected_tracks.read().contains(&track_path);
-            let matches_current_path = currently_playing_path.as_ref() == Some(&track.id);
+            let matches_current_path = currently_playing_path.as_ref() == Some(&track.uid);
 
-            let item_id: String = track.id.key().to_string();
+            let item_id: String = track.key.clone();
             let is_downloaded = cap.downloads
                 && config
                     .read()
@@ -149,7 +149,7 @@ pub fn FavoritesBody(
                 TrackRow {
                     track: track.clone(),
                     cover_url: cover_url.clone(),
-                    on_start_radio: components::track_row::radio_handler(track.id.key().into_owned()),
+                    on_start_radio: components::track_row::radio_handler(track.key.clone()),
                     row_num: Some(idx + 1),
                     is_menu_open,
                     is_album: false,
@@ -174,14 +174,14 @@ pub fn FavoritesBody(
                         }
                     },
                     on_click_menu: move |_| {
-                        if active_menu_track.read().as_ref() == Some(&track_menu.id) {
+                        if active_menu_track.read().as_ref() == Some(&track_menu.uid) {
                             active_menu_track.set(None);
                         } else {
-                            active_menu_track.set(Some(track_menu.id.clone()));
+                            active_menu_track.set(Some(track_menu.uid.clone()));
                         }
                     },
                     on_add_to_playlist: move |_| {
-                        selected_track_for_playlist.set(Some(track_add.id.clone()));
+                        selected_track_for_playlist.set(Some(track_add.key.clone()));
                         show_playlist_modal.set(true);
                         active_menu_track.set(None);
                     },
@@ -198,7 +198,7 @@ pub fn FavoritesBody(
                     on_delete: move |_| {
                         active_menu_track.set(None);
                         hooks::library_actions::delete_tracks(
-                            vec![track_delete.id.key().into_owned()],
+                            vec![track_delete.key.clone()],
                             cap.delete_from_disk,
                         );
                     },
@@ -211,8 +211,7 @@ pub fn FavoritesBody(
                         }
                     })),
                     on_play: move |_| {
-                        queue.set((*queue_source).clone());
-                        ctrl.play_track(idx);
+                        ctrl.play_queue_at((*queue_source).clone(), idx);
                     },
                 }
                 }
@@ -241,7 +240,7 @@ pub fn FavoritesBody(
 
                         if !selected_paths.is_empty() {
                             let refs: Vec<String> =
-                                selected_paths.iter().map(|p| p.key().into_owned()).collect();
+                                selected_paths.clone();
                             hooks::playlist_actions::add_tracks(playlist_id.clone(), refs);
                         }
                         show_playlist_modal.set(false);
@@ -259,7 +258,7 @@ pub fn FavoritesBody(
 
                         if !selected_paths.is_empty() {
                             let refs: Vec<String> =
-                                selected_paths.iter().map(|p| p.key().into_owned()).collect();
+                                selected_paths.clone();
                             hooks::playlist_actions::create_with(name.clone(), refs);
                         }
                         show_playlist_modal.set(false);
@@ -274,13 +273,8 @@ pub fn FavoritesBody(
                 MetadataModal {
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
-                    on_save: move |edits: reader::models::TrackEdits| {
-                        hooks::library_actions::edit_track(
-                            hooks::library_actions::patch_from_edits(
-                                track.id.key().into_owned(),
-                                edits,
-                            ),
-                        );
+                    on_save: move |patch: api::TrackMetadataPatch| {
+                        hooks::library_actions::edit_track(patch);
                         metadata_track.set(None);
                     },
                 }
@@ -297,7 +291,7 @@ pub fn FavoritesBody(
                         }
                         let tracks: Vec<_> = displayed_tracks_for_selection
                             .iter()
-                            .filter(|(t, _)| selected.contains(&t.id))
+                            .filter(|(t, _)| selected.contains(&t.key))
                             .map(|(track, _)| track.clone())
                             .collect();
                         if !tracks.is_empty() {
@@ -313,7 +307,7 @@ pub fn FavoritesBody(
                         let keys: Vec<String> = selected_tracks
                             .read()
                             .iter()
-                            .map(|id| id.key().into_owned())
+                            .cloned()
                             .collect();
                         hooks::library_actions::delete_tracks(keys, caps().delete_from_disk);
                         is_selection_mode.set(false);
@@ -427,23 +421,23 @@ pub fn FavoritesBody(
                 div {
                     class: "flex items-center gap-3 mb-4 px-2 text-sm font-medium text-slate-500",
                     button {
-                        class: if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id)) {
+                        class: if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.key)) {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
                         } else {
                             "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
                         },
                         aria_label: i18n::t("select_all_tracks"),
                         onclick: move |_| {
-                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id));
+                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.key));
                             if all_selected {
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.id.clone()).collect());
+                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.key.clone()).collect());
                                 is_selection_mode.set(true);
                             }
                         },
-                        if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id)) {
+                        if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.key)) {
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }
                     }
@@ -506,7 +500,7 @@ pub fn FavoritesBody(
     }
 }
 
-fn track_matches_filter(track: &reader::models::Track, query: &str) -> bool {
+fn track_matches_filter(track: &api::TrackInfo, query: &str) -> bool {
     query.is_empty()
         || track.title.to_lowercase().contains(query)
         || track.artist.to_lowercase().contains(query)
@@ -520,27 +514,21 @@ fn track_matches_filter(track: &reader::models::Track, query: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::track_matches_filter;
-    use reader::models::{Track, TrackId};
-    use std::path::PathBuf;
 
-    fn track() -> Track {
-        Track {
-            id: TrackId::Local(PathBuf::from("test.flac")),
-            cover: None,
+    fn track() -> api::TrackInfo {
+        api::TrackInfo {
+            key: "test.flac".to_string(),
+            uid: "test.flac".to_string(),
             album_id: "album-id".to_string(),
             title: "Midnight City".to_string(),
             artist: "M83".to_string(),
             album: "Hurry Up, We're Dreaming".to_string(),
-            duration: 244,
+            duration_ms: Some(244_000),
             khz: 44_100,
-            bitrate: 0,
             track_number: Some(11),
             disc_number: Some(1),
-            musicbrainz_release_id: None,
-            musicbrainz_recording_id: None,
-            musicbrainz_track_id: None,
-            playlist_item_id: None,
             artists: vec!["Anthony Gonzalez".to_string()],
+            ..Default::default()
         }
     }
 

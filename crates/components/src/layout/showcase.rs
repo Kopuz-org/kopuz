@@ -1,6 +1,6 @@
+use api::TrackInfo as Track;
 use config::AppConfig;
 use dioxus::prelude::*;
-use reader::Track;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
@@ -72,6 +72,13 @@ pub fn sorted_track_pairs<T: Clone>(
         .collect()
 }
 
+pub fn sorted_tracks(tracks: &[Track], sort_state: SortState) -> Vec<Track> {
+    sorted_track_indices(tracks, sort_state)
+        .into_iter()
+        .map(|idx| tracks[idx].clone())
+        .collect()
+}
+
 pub fn sorted_track_indices(tracks: &[Track], sort_state: SortState) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..tracks.len()).collect();
 
@@ -84,7 +91,7 @@ pub fn sorted_track_indices(tracks: &[Track], sort_state: SortState) -> Vec<usiz
                 SortField::Title => compare_text(&left.title, &right.title),
                 SortField::Artist => compare_text(&left.artist, &right.artist),
                 SortField::Album => compare_text(&left.album, &right.album),
-                SortField::Duration => left.duration.cmp(&right.duration),
+                SortField::Duration => left.duration_ms.cmp(&right.duration_ms),
             };
             let directional = match direction {
                 SortDirection::Asc => primary,
@@ -132,7 +139,7 @@ pub struct ShowcaseProps {
     pub on_remove_from_playlist: Option<EventHandler<usize>>,
     pub on_view_metadata: Option<EventHandler<usize>>,
     pub on_download_track: Option<EventHandler<usize>>,
-    pub active_track: Option<reader::TrackId>,
+    pub active_track: Option<String>,
     pub on_click_menu: Option<EventHandler<usize>>,
     pub on_close_menu: Option<EventHandler<()>>,
     pub actions: Option<Element>,
@@ -151,7 +158,7 @@ pub struct ShowcaseProps {
     #[props(default = false)]
     pub is_selection_mode: bool,
     #[props(default = HashSet::new())]
-    pub selected_tracks: HashSet<reader::TrackId>,
+    pub selected_tracks: HashSet<String>,
     pub on_select: Option<EventHandler<(usize, bool)>>,
     pub on_select_all: Option<EventHandler<bool>>,
     #[props(default = false)]

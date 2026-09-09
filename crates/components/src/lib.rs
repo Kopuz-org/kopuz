@@ -21,7 +21,7 @@ pub use layout::{
 pub use navigation::controller::{NavSnapshot, NavigationController};
 pub use navigation::{back_button, controller as navigation_controller, source_switcher};
 pub use playback::compact::{CompactMode, CompactPlayer};
-pub use playback::cover_background::{CoverArtBackground, high_quality_artwork_url};
+pub use playback::cover_background::CoverArtBackground;
 pub use playback::{
     album_play_button, compact as compact_player, controls as player_controls, cover_background,
     lyrics as lyrics_view, radio_actions, spotify_devices,

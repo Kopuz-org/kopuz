@@ -1,6 +1,6 @@
+use api::TrackInfo as Track;
 use dioxus::document::eval;
 use dioxus::prelude::*;
-use reader::models::Track;
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};

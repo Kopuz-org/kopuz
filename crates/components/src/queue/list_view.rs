@@ -20,7 +20,7 @@ pub use crate::shared::LayoutMode;
 #[component]
 pub fn QueueRow(
     queue_idx: usize,
-    track: reader::Track,
+    track: api::TrackInfo,
     cover_url: Option<utils::CoverUrl>,
     layout: LayoutMode,
     can_move_up: bool,
@@ -151,7 +151,7 @@ pub fn QueueSummary(
     let is_radio = if let Some(track) = ctrl.get_track_at(*current_queue_index.read()) {
         // As of today, radio tracks have a duration of u64::MAX, if this
         // invariant ever changes, this logic must be updated as well
-        track.duration == u64::MAX
+        track.is_radio()
     } else {
         false
     };
@@ -208,7 +208,7 @@ const FULLSCREEN_ITEM_HEIGHT: f64 = 76.0;
 
 #[component]
 pub fn QueueListView(
-    items: Vec<reader::Track>,
+    items: Vec<api::TrackInfo>,
     config: Signal<AppConfig>,
     current_queue_index: Signal<usize>,
     layout: LayoutMode,
@@ -357,7 +357,7 @@ pub fn QueueListView(
         LayoutMode::Rightbar => 80,
     };
 
-    let get_track_cover = |track: &reader::Track| -> Option<utils::CoverUrl> {
+    let get_track_cover = |track: &api::TrackInfo| -> Option<utils::CoverUrl> {
         // The row carries its own reference; the width only says whether
         // this surface wants the large one.
         hooks::artwork::for_track(track, hooks::artwork::size_for(cover_max_width))
@@ -371,14 +371,14 @@ pub fn QueueListView(
         ctrl.move_queue_item(from, to);
     };
 
-    let mut insert_queue_tracks = move |insert_at: usize, tracks: Vec<reader::Track>| {
+    let mut insert_queue_tracks = move |insert_at: usize, tracks: Vec<api::TrackInfo>| {
         ctrl.insert_queue_tracks(insert_at, tracks);
     };
 
     let queue_count = items.len();
     let queue_duration: u64 = items
         .iter()
-        .filter_map(|t| (t.duration != u64::MAX).then_some(t.duration))
+        .filter_map(|t| t.duration_secs())
         .fold(0, |acc, d| acc.saturating_add(d));
 
     let scroll_info = use_virtual_scroll(

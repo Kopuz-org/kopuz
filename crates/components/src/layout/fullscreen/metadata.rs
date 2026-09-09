@@ -39,7 +39,7 @@ pub(crate) fn TrackMetadata(
                         }
                     }
                 } else {
-                    let cover = crate::cover_background::high_quality_artwork_url(cover);
+                    let cover = hooks::artwork::at_full_size(&cover);
                     rsx! {
                         img {
                             src: "{cover}",

@@ -1,8 +1,8 @@
 //! Source-agnostic Artists page (issue #35). One component renders any source:
-//! the data path is source-scoped query hooks, covers/images resolve through the
-//! source layer (`server::cover`), and the few divergent affordances (tag edit,
-//! delete-from-disk, downloads, playlist mutation) gate on the resolved source's
-//! [`Capabilities`](server::source::Capabilities) — never on `is_server()`.
+//! the data path is source-scoped query hooks, every picture is a reference the
+//! daemon resolves, and the few divergent affordances (tag edit,
+//! delete-from-disk, downloads, playlist mutation) gate on
+//! [`api::SourceCapabilities`] — never on `is_server()`.
 
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::metadata_modal::MetadataModal;
@@ -19,7 +19,6 @@ use hooks::use_db_queries::{
     use_tracks_by_keys,
 };
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use utils::artist::{joined_credit_primary, normalize_artist_key};
 
 /// One album-card menu entry, tagged so dispatch survives the entry set being
@@ -44,7 +43,7 @@ pub fn Artist(
     mut current_song_artist: Signal<String>,
     mut current_song_duration: Signal<u64>,
     mut current_song_progress: Signal<u64>,
-    mut queue: Signal<Vec<reader::models::Track>>,
+    mut queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
     let source = use_active_source();
@@ -72,7 +71,8 @@ pub fn Artist(
             .unwrap_or_default()
             .iter()
             .filter_map(|artist| {
-                let cover = hooks::use_db_queries::artist_cover_url(artist)?;
+                let cover =
+                    hooks::artwork::url(artist.artwork.as_ref(), hooks::artwork::Size::Thumb)?;
                 Some((normalize_artist_key(&artist.name), cover))
             })
             .collect::<HashMap<String, utils::CoverUrl>>()
@@ -143,12 +143,12 @@ pub fn Artist(
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
 
     let mut show_playlist_modal = use_signal(|| false);
-    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
-    let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
-    let mut metadata_track = use_signal(|| None::<reader::models::Track>);
+    let mut active_menu_track = use_signal(|| None::<String>);
+    let mut selected_track_for_playlist = use_signal(|| None::<String>);
+    let mut metadata_track = use_signal(|| None::<api::TrackInfo>);
 
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
+    let mut selected_tracks = use_signal(HashSet::<String>::new);
 
     let mut open_album_menu = use_signal(|| None::<String>);
     let mut show_album_playlist_modal = use_signal(|| false);
@@ -162,25 +162,20 @@ pub fn Artist(
         let sample = sample_tracks_res.read().clone().unwrap_or_default();
         let offline = caps().downloads && *is_offline.read();
 
-        // norm → (display name, album-art candidate: the artist's first album,
-        // else their track's album). Only Library tiles ever render it — on a
-        // Remote catalog the seam resolves photo-or-placeholder, so a shared
-        // track cover can't dupe across credited artists there.
-        let mut artist_map: HashMap<String, (String, Option<PathBuf>)> = HashMap::new();
+        // norm → display name. The picture is the daemon's answer alone: it
+        // already falls back to one of the artist's album covers, so a tile
+        // never has to pick a candidate here.
+        let mut artist_map: HashMap<String, String> = HashMap::new();
         for album in &albums {
             artist_map
                 .entry(normalize_artist_key(&album.artist))
-                .or_insert_with(|| (album.artist.clone(), album.cover_path.clone()));
+                .or_insert_with(|| album.artist.clone());
         }
         for track in &sample {
-            let cover = albums
-                .iter()
-                .find(|a| a.id == track.album_id)
-                .and_then(|a| a.cover_path.clone());
             for artist in &track.artists {
                 artist_map
                     .entry(normalize_artist_key(artist))
-                    .or_insert_with(|| (artist.clone(), cover.clone()));
+                    .or_insert_with(|| artist.clone());
             }
         }
         // Drop joined collab credits whose primary artist has their own tile.
@@ -222,8 +217,8 @@ pub fn Artist(
 
         let out: Vec<(String, Option<utils::CoverUrl>)> = artist_map
             .into_iter()
-            .filter(|(_, (display, _))| !offline || downloaded.contains(&display.to_lowercase()))
-            .map(|(norm, (display, _album_cover))| {
+            .filter(|(_, display)| !offline || downloaded.contains(&display.to_lowercase()))
+            .map(|(norm, display)| {
                 let cover = artist_covers.read().get(&norm).cloned();
                 (display, cover)
             })
@@ -293,9 +288,8 @@ pub fn Artist(
         tracks
             .into_iter()
             .filter(|t| {
-                let id = t.id.key();
                 conf.offline_tracks
-                    .get(id.as_ref())
+                    .get(&t.key)
                     .map(|p| std::path::Path::new(p).exists())
                     .unwrap_or(false)
             })
@@ -335,7 +329,7 @@ pub fn Artist(
             .filter(|a| !offline || downloaded_ids.contains(&a.id))
             .cloned()
             .collect();
-        reader::sort::sort_albums(&mut albums, &album_sort.read());
+        hooks::sort::sort_albums(&mut albums, &album_sort.read());
         let mut seen = HashSet::new();
         albums.retain(|album| seen.insert(album.title.trim().to_lowercase()));
         albums
@@ -343,7 +337,7 @@ pub fn Artist(
 
     // Every album here shares the artist, so that field would never break a tie.
     let album_sort_fields = use_memo(move || {
-        let mut fields = reader::sort::available_album_fields(&artist_albums.read());
+        let mut fields = hooks::sort::available_album_fields(&artist_albums.read());
         fields.retain(|f| *f != AlbumSortField::Artist);
         fields
     });
@@ -353,11 +347,11 @@ pub fn Artist(
 
     // The refs (item ids / local paths) of the currently-selected tracks — derived
     // from the in-hand `Track`s via the typed id, so it's source-uniform.
-    let refs_for = move |paths: &HashSet<reader::TrackId>| -> Vec<String> {
+    let refs_for = move |paths: &HashSet<String>| -> Vec<String> {
         artist_tracks()
             .iter()
-            .filter(|t| paths.contains(&t.id))
-            .map(|t| t.id.key().into_owned())
+            .filter(|t| paths.contains(&t.key))
+            .map(|t| t.key.clone())
             .collect()
     };
 
@@ -443,7 +437,7 @@ pub fn Artist(
                                     selected_tracks.write().clear();
                                 },
                                 on_add_to_playlist: move |playlist_id: String| {
-                                    let paths: HashSet<reader::TrackId> = if is_selection_mode() {
+                                    let paths: HashSet<String> = if is_selection_mode() {
                                         selected_tracks.read().clone()
                                     } else {
                                         selected_track_for_playlist.read().iter().cloned().collect()
@@ -458,7 +452,7 @@ pub fn Artist(
                                     selected_tracks.write().clear();
                                 },
                                 on_create_playlist: move |name: String| {
-                                    let paths: HashSet<reader::TrackId> = if is_selection_mode() {
+                                    let paths: HashSet<String> = if is_selection_mode() {
                                         selected_tracks.read().clone()
                                     } else {
                                         selected_track_for_playlist.read().iter().cloned().collect()
@@ -476,13 +470,8 @@ pub fn Artist(
                             MetadataModal {
                                 track: track.clone(),
                                 on_close: move |_| metadata_track.set(None),
-                                on_save: move |edits: reader::models::TrackEdits| {
-                                    hooks::library_actions::edit_track(
-                                        hooks::library_actions::patch_from_edits(
-                                            track.id.key().into_owned(),
-                                            edits,
-                                        ),
-                                    );
+                                on_save: move |patch: api::TrackMetadataPatch| {
+                                    hooks::library_actions::edit_track(patch);
                                     metadata_track.set(None);
                                 },
                             }
@@ -497,7 +486,7 @@ pub fn Artist(
                                     let selected = selected_tracks.read().clone();
                                     let tracks: Vec<_> = artist_tracks()
                                         .iter()
-                                        .filter(|t| selected.contains(&t.id))
+                                        .filter(|t| selected.contains(&t.key))
                                         .cloned()
                                         .collect();
                                     if !tracks.is_empty() {
@@ -511,7 +500,7 @@ pub fn Artist(
                                     let keys: Vec<String> = selected_tracks
                                         .read()
                                         .iter()
-                                        .map(|id| id.key().into_owned())
+                                        .cloned()
                                         .collect();
                                     hooks::library_actions::delete_tracks(
                                         keys,
@@ -581,8 +570,7 @@ pub fn Artist(
                                                 let aid = album.id.clone();
                                                 let tracks: Vec<_> = all.iter().filter(|t| t.album_id == aid).collect();
                                                 !tracks.is_empty() && tracks.iter().all(|t| {
-                                                    let tid = t.id.key();
-                                                    conf.offline_tracks.get(tid.as_ref())
+                                                    conf.offline_tracks.get(&t.key)
                                                         .map(|p| std::path::Path::new(p).exists())
                                                         .unwrap_or(false)
                                                 })
@@ -744,10 +732,10 @@ pub fn Artist(
                                 active_track: active_menu_track.read().clone(),
                                 is_selection_mode: is_selection_mode(),
                                 selected_tracks: selected_tracks.read().clone(),
-                                all_selected: !artist_tracks().is_empty() && artist_tracks().iter().all(|track| selected_tracks.read().contains(&track.id)),
+                                all_selected: !artist_tracks().is_empty() && artist_tracks().iter().all(|track| selected_tracks.read().contains(&track.key)),
                                 on_select_all: move |selected: bool| {
                                     if selected {
-                                        selected_tracks.set(artist_tracks().into_iter().map(|track| track.id).collect());
+                                        selected_tracks.set(artist_tracks().into_iter().map(|track| track.key).collect());
                                         is_selection_mode.set(true);
                                     } else {
                                         selected_tracks.write().clear();
@@ -757,16 +745,16 @@ pub fn Artist(
                                 on_long_press: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         is_selection_mode.set(true);
-                                        selected_tracks.write().insert(track.id.clone());
+                                        selected_tracks.write().insert(track.key.clone());
                                     }
                                 },
                                 on_select: move |(idx, selected): (usize, bool)| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         if selected {
                                             is_selection_mode.set(true);
-                                            selected_tracks.write().insert(track.id.clone());
+                                            selected_tracks.write().insert(track.key.clone());
                                         } else {
-                                            selected_tracks.write().remove(&track.id);
+                                            selected_tracks.write().remove(&track.key);
                                             if selected_tracks.read().is_empty() {
                                                 is_selection_mode.set(false);
                                             }
@@ -782,14 +770,11 @@ pub fn Artist(
                                     }
                                 },
                                 on_play: move |idx: usize| {
-                                    let tracks = artist_tracks();
-                                    queue.set(tracks.clone());
-                                    current_queue_index.set(idx);
-                                    ctrl.play_track(idx);
+                                    ctrl.play_queue_at(artist_tracks(), idx);
                                 },
                                 on_click_menu: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        let path = track.id.clone();
+                                        let path = track.uid.clone();
                                         let already_open = active_menu_track.read().as_ref() == Some(&path);
                                         active_menu_track.set((!already_open).then(|| path.clone()));
                                     }
@@ -797,7 +782,7 @@ pub fn Artist(
                                 on_close_menu: move |_| active_menu_track.set(None),
                                 on_add_to_playlist: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        selected_track_for_playlist.set(Some(track.id.clone()));
+                                        selected_track_for_playlist.set(Some(track.key.clone()));
                                         show_playlist_modal.set(true);
                                         active_menu_track.set(None);
                                     }
@@ -817,7 +802,7 @@ pub fn Artist(
                                 on_delete_track: EventHandler::new(move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         hooks::library_actions::delete_tracks(
-                                            vec![track.id.key().into_owned()],
+                                            vec![track.key.clone()],
                                             caps().delete_from_disk,
                                         );
                                     }
@@ -825,9 +810,9 @@ pub fn Artist(
                                 }),
                                 on_download_track: caps().downloads.then(|| EventHandler::new(move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        let item_id = track.id.key();
+                                        let item_id = &track.key;
                                         if !item_id.is_empty() {
-                                            let item_id = item_id.as_ref();
+
                                             let is_downloaded = config.read().offline_tracks.get(item_id)
                                                 .map(|p| std::path::Path::new(p).exists())
                                                 .unwrap_or(false);
@@ -842,15 +827,15 @@ pub fn Artist(
                                 })),
                                 on_download_all: caps().downloads.then(|| EventHandler::new(move |_: ()| {
                                     let requests: Vec<String> = artist_tracks().iter().filter_map(|t| {
-                                        let k = t.id.key();
-                                        (!k.is_empty()).then(|| k.into_owned())
+                                        let k = t.key.clone();
+                                        (!k.is_empty()).then_some(k)
                                     }).collect();
                                     hooks::downloads::start(requests);
                                 })),
                                 on_delete_all: caps().downloads.then(|| EventHandler::new(move |_: ()| {
                                     let ids: Vec<String> = artist_tracks().iter().filter_map(|t| {
-                                        let k = t.id.key();
-                                        (!k.is_empty()).then(|| k.into_owned())
+                                        let k = t.key.clone();
+                                        (!k.is_empty()).then_some(k)
                                     }).collect();
                                     hooks::downloads::remove(ids);
                                 })),

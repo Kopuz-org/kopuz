@@ -95,27 +95,15 @@ pub fn content_type_for(path: &std::path::Path) -> String {
     .to_string()
 }
 
-/// The metadata editor's edits as a patch.
-///
-/// The editor always sends the whole desired state, so an absent number means
-/// "remove it" rather than "leave it": that is what the explicit clear flags
-/// are for, since a patch's `None` means unchanged.
-pub fn patch_from_edits(key: String, edits: reader::models::TrackEdits) -> api::TrackMetadataPatch {
-    api::TrackMetadataPatch {
-        key,
-        title: Some(edits.title),
-        artist: Some(edits.artist),
-        album: Some(edits.album),
-        clear_track_number: edits.track_number.is_none(),
-        track_number: edits.track_number,
-        clear_disc_number: edits.disc_number.is_none(),
-        disc_number: edits.disc_number,
-        cover: match edits.cover {
-            reader::models::CoverChange::Keep => api::ArtworkChange::Keep,
-            reader::models::CoverChange::Remove => api::ArtworkChange::Remove,
-            reader::models::CoverChange::Set(bytes) => api::ArtworkChange::Set(bytes),
-        },
-    }
+/// The library keys of the rows a view has picked out. Selections are tracked
+/// by uid, which is what tells two rows apart; a key is what names a row to the
+/// daemon, and only the row itself knows both.
+pub fn keys_for_uids(tracks: &[api::TrackInfo], uids: &[String]) -> Vec<String> {
+    uids.iter()
+        .filter_map(|uid| tracks.iter().find(|track| &track.uid == uid))
+        .map(|track| track.key.clone())
+        .filter(|key| !key.is_empty())
+        .collect()
 }
 
 /// Every track key of an album, in album order, then whatever the caller

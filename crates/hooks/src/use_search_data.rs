@@ -9,13 +9,10 @@
 use dioxus::prelude::*;
 use tracing::Instrument;
 
-type TrackRes = Vec<(reader::Track, Option<utils::CoverUrl>)>;
-type AlbumRes = Vec<(reader::Album, Option<utils::CoverUrl>)>;
-
 #[derive(Clone, Copy)]
 pub struct SearchData {
     pub genres: Memo<Vec<(String, Option<utils::CoverUrl>)>>,
-    pub search_results: Resource<Option<(TrackRes, AlbumRes)>>,
+    pub search_results: Resource<Option<(Vec<api::TrackInfo>, Vec<api::AlbumInfo>)>>,
     pub search_query: Signal<String>,
 }
 
@@ -42,7 +39,8 @@ pub fn use_search_data(
                 }
                 let entry = by_genre.entry(genre.to_string()).or_default();
                 if entry.is_none() {
-                    *entry = crate::artwork::for_album(album, crate::artwork::Size::Thumb);
+                    *entry =
+                        crate::artwork::url(album.artwork.as_ref(), crate::artwork::Size::Thumb);
                 }
             }
         }
@@ -62,23 +60,7 @@ pub fn use_search_data(
             }
             let span = tracing::info_span!("query.search");
             let results = api.search(query).instrument(span).await.ok()?;
-            let tracks: TrackRes = results
-                .tracks
-                .into_iter()
-                .map(|track| {
-                    let cover = crate::wire::artwork_url(track.artwork.as_ref());
-                    (crate::wire::track_from_api(track), cover)
-                })
-                .collect();
-            let albums: AlbumRes = results
-                .albums
-                .into_iter()
-                .map(|album| {
-                    let cover = crate::wire::artwork_url(album.artwork.as_ref());
-                    (crate::wire::album_from_api(album), cover)
-                })
-                .collect();
-            Some((tracks, albums))
+            Some((results.tracks, results.albums))
         }
     });
 

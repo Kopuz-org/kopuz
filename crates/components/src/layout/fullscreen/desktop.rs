@@ -18,7 +18,7 @@ pub(crate) fn FullscreenDesktop(
     current_song_bitrate: Signal<u16>,
     current_song_cover_url: Signal<String>,
     current_queue_index: Signal<usize>,
-    items: Vec<reader::Track>,
+    items: Vec<api::TrackInfo>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
     volume: Signal<f32>,
     persisted_volume: Signal<f32>,

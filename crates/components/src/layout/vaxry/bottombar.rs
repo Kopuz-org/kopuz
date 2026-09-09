@@ -15,7 +15,7 @@ pub fn BottombarVaxry(
     mut is_fullscreen: Signal<bool>,
     mut current_song_duration: Signal<u64>,
     mut current_song_progress: Signal<u64>,
-    queue: Signal<Vec<reader::models::Track>>,
+    queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,

@@ -1,13 +1,13 @@
+use api::{AlbumInfo as Album, TrackInfo as Track};
 use components::dots_menu::{DotsMenu, MenuAction};
 use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
     use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_artists,
-    use_favorites, use_playlists, use_recently_added_albums, use_top_genre, use_tracks_by_keys,
+    use_favorites, use_playlists, use_top_genre, use_tracks_by_keys,
 };
 use rand::rng;
 use rand::seq::SliceRandom;
-use reader::{Album, Track};
 use std::collections::HashMap;
 use utils::artist::normalize_artist_key;
 
@@ -48,11 +48,6 @@ fn track_cover_url(track: &Track) -> Option<String> {
     hooks::artwork::for_track(track, hooks::artwork::Size::Thumb).map(|cover| cover.to_string())
 }
 
-/// How many newest albums the Recently Added query pulls. The row shows 12, but
-/// untitled albums and same-title duplicates are dropped afterwards, so the
-/// window has to be wide enough to still fill it.
-const RECENTLY_ADDED_WINDOW: u32 = 64;
-
 /// The source-agnostic Home body (sections + hero). Rendered for local and any
 /// server; the active source decides the data, covers (via the source seam), the
 /// recently-played list, and offline/sync gating.
@@ -75,7 +70,6 @@ pub fn HomeBody(
     let active_card_menu = use_signal(|| None::<String>);
 
     let albums_res = use_albums(source);
-    let recently_added_res = use_recently_added_albums(source, RECENTLY_ADDED_WINDOW);
     let artists_res = use_artists(source);
     // Photos by normalized name, so the Top Artists row renders exactly the
     // ones the daemon actually holds a picture for.
@@ -86,7 +80,8 @@ pub fn HomeBody(
             .unwrap_or_default()
             .iter()
             .filter_map(|artist| {
-                let cover = hooks::use_db_queries::artist_cover_url(artist)?;
+                let cover =
+                    hooks::artwork::url(artist.artwork.as_ref(), hooks::artwork::Size::Thumb)?;
                 Some((normalize_artist_key(&artist.name), cover))
             })
             .collect::<HashMap<String, utils::CoverUrl>>()
@@ -222,10 +217,10 @@ pub fn HomeBody(
     });
 
     let recently_added = use_memo(move || -> Vec<AlbumCard> {
-        let all_albums = recently_added_res.read().clone().unwrap_or_default();
+        let all_albums = albums_res.read().clone().unwrap_or_default();
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for album in all_albums.iter() {
+        for album in all_albums.iter().rev() {
             if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
                 continue;
             }
@@ -363,19 +358,8 @@ pub fn HomeBody(
         artist_list
     });
 
-    let playlist_cover_keys = use_memo(move || -> Vec<String> {
-        let store = playlists_res.read().clone().unwrap_or_default();
-        store
-            .playlists
-            .iter()
-            .filter_map(|p| p.tracks.first().cloned())
-            .collect()
-    });
-    let playlist_cover_tracks_res = use_tracks_by_keys(source, playlist_cover_keys);
-
     let recent_playlists = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
-        let cover_tracks = playlist_cover_tracks_res.read().clone().unwrap_or_default();
         let conf = config.read();
         let offline = caps().downloads && *is_offline.read();
         store
@@ -385,8 +369,8 @@ pub fn HomeBody(
                 if !offline {
                     return true;
                 }
-                !p.tracks.is_empty()
-                    && p.tracks.iter().all(|tid| {
+                !p.track_keys.is_empty()
+                    && p.track_keys.iter().all(|tid| {
                         if let Some(path_str) = conf.offline_tracks.get(tid) {
                             std::path::Path::new(path_str).exists()
                         } else {
@@ -398,26 +382,12 @@ pub fn HomeBody(
             .take(10)
             .cloned()
             .map(|p| {
-                // The daemon already walked the playlist's own cover and its
-                // server's, so the row's reference is the whole answer; only
-                // the first-track fallback is left to do here.
-                let cover_url = hooks::artwork::stored(
-                    p.cover_path.as_deref().and_then(|path| path.to_str()),
-                    hooks::artwork::Size::Thumb,
-                )
-                .map(|cover| cover.to_string())
-                .or_else(|| {
-                    p.tracks.first().and_then(|tid| {
-                        cover_tracks
-                            .iter()
-                            .find(|t| {
-                                let id = t.id.key();
-                                !id.is_empty() && id.as_ref() == tid.as_str()
-                            })
-                            .and_then(track_cover_url)
-                    })
-                });
-                (p.id, p.name, p.tracks.len(), cover_url)
+                // The daemon walked the playlist's own cover, its server's and
+                // the first track's, so the row's reference is the whole answer.
+                let cover_url =
+                    hooks::artwork::url(p.artwork.as_ref(), hooks::artwork::Size::Thumb)
+                        .map(|cover| cover.to_string());
+                (p.id, p.name, p.track_keys.len(), cover_url)
             })
             .collect::<Vec<_>>()
     });

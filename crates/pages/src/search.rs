@@ -23,35 +23,22 @@ pub fn Search(
     current_song_artist: Signal<String>,
     current_song_duration: Signal<u64>,
     current_song_progress: Signal<u64>,
-    queue: Signal<Vec<reader::models::Track>>,
+    queue: Signal<Vec<api::TrackInfo>>,
     current_queue_index: Signal<usize>,
     on_select_album: EventHandler<String>,
 ) -> Element {
     let data = use_search_data(search_query, config);
     let mut selected_genre = use_signal(|| None::<String>);
 
-    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
+    let mut active_menu_track = use_signal(|| None::<String>);
     let mut show_playlist_modal = use_signal(|| false);
-    let selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
+    let selected_track_for_playlist = use_signal(|| None::<String>);
 
     let source = use_active_source();
     let selected_genre_memo = use_memo(move || selected_genre.read().clone().unwrap_or_default());
     let genre_tracks_res = use_genre_tracks(source, selected_genre_memo);
 
-    let genre_tracks = use_memo(move || {
-        let tracks = genre_tracks_res.read().clone().unwrap_or_default();
-        if tracks.is_empty() {
-            return Vec::new();
-        }
-        tracks
-            .iter()
-            .map(|track| {
-                // Source-agnostic via the cover seam — the track self-describes.
-                let cover = hooks::artwork::for_track(track, hooks::artwork::Size::Thumb);
-                (track.clone(), cover)
-            })
-            .collect()
-    });
+    let genre_tracks = use_memo(move || genre_tracks_res.read().clone().unwrap_or_default());
 
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
 
@@ -64,7 +51,7 @@ pub fn Search(
                     on_close: move |_| show_playlist_modal.set(false),
                     on_add_to_playlist: move |playlist_id: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
-                            let refs: Vec<String> = std::iter::once(path.key().into_owned())
+                            let refs: Vec<String> = std::iter::once(path)
                                 .filter(|reference| !reference.is_empty())
                                 .collect();
                             hooks::playlist_actions::add_tracks(playlist_id, refs);
@@ -74,7 +61,7 @@ pub fn Search(
                     },
                     on_create_playlist: move |name: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
-                            let refs: Vec<String> = std::iter::once(path.key().into_owned())
+                            let refs: Vec<String> = std::iter::once(path)
                                 .filter(|reference| !reference.is_empty())
                                 .collect();
                             hooks::playlist_actions::create_with(name, refs);

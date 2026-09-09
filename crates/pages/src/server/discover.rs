@@ -289,13 +289,13 @@ fn SongListShelf(
                                 let key_for_play = key.clone();
                                 let key_for_menu = key.clone();
                                 let keys = keys.clone();
-                                let cover_url = hooks::wire::artwork_url(info.artwork.as_ref());
+                                let cover_url = hooks::artwork::url(info.artwork.as_ref(), hooks::artwork::Size::Thumb);
                                 let is_current = current_playing_key.read().as_deref() == Some(key.as_str());
                                 let is_menu_open = active_menu_key.read().as_deref() == Some(key.as_str());
                                 rsx! {
                                     TrackRow {
                                         key: "{idx}",
-                                        track: hooks::wire::track_from_api(info.clone()),
+                                        track: info.clone(),
                                         cover_url,
                                         on_start_radio: components::track_row::radio_handler(key.clone()),
                                         row_num: Some(idx + 1),
@@ -348,7 +348,7 @@ fn DiscoverTile(
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let cache = use_context::<DiscoverPrefetchCache>().0;
-    let thumbnail = hooks::wire::artwork_url(item.artwork.as_ref());
+    let thumbnail = hooks::artwork::url(item.artwork.as_ref(), hooks::artwork::Size::Thumb);
     let subtitle = item.subtitle.clone().unwrap_or_default();
     match item.kind {
         CatalogItemKind::Track => match item.track.clone() {
@@ -646,7 +646,7 @@ fn Card(
 fn SongCard(item: CatalogItem, track: TrackInfo) -> Element {
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let mut now_playing = use_context::<DiscoverNowPlaying>().0;
-    let thumbnail = hooks::wire::artwork_url(item.artwork.as_ref());
+    let thumbnail = hooks::artwork::url(item.artwork.as_ref(), hooks::artwork::Size::Thumb);
     let subtitle = item.subtitle.clone().unwrap_or_default();
     let key = track.key.clone();
     let start_radio = components::track_row::radio_handler(key.clone());
@@ -822,8 +822,8 @@ pub fn DiscoverPlaylistDetail(
         };
     }
 
-    let track_list = hooks::wire::tracks_from_api(tracks.read().clone());
-    let cover_url = hooks::wire::artwork_url(artwork.read().as_ref());
+    let track_list = tracks.read().clone();
+    let cover_url = hooks::artwork::url(artwork.read().as_ref(), hooks::artwork::Size::Thumb);
 
     rsx! {
         div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
@@ -940,7 +940,7 @@ pub fn DiscoverArtistPage(
                 div { class: "py-12 px-6 md:px-10 text-rose-400 text-sm", "{err}" }
             } else if let Some(detail) = artist.read().clone() {
                 {
-                    let banner = hooks::wire::artwork_url(detail.artwork.as_ref());
+                    let banner = hooks::artwork::url(detail.artwork.as_ref(), hooks::artwork::Size::Thumb);
                     let banner_style = banner
                         .map(|url| format!("background-image: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.95) 100%), url('{url}'); background-size: cover; background-position: center; min-height: 360px;"))
                         .unwrap_or_else(|| "min-height: 280px;".to_string());

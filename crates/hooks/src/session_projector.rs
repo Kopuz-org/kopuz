@@ -137,13 +137,13 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
                 .current_track_snapshot
                 .peek()
                 .as_ref()
-                .is_none_or(|snapshot| snapshot.id.uid() != now.uid);
+                .is_none_or(|snapshot| snapshot.uid != now.uid);
             if key_changed {
                 let track = ctrl
                     .queue
                     .peek()
                     .iter()
-                    .find(|track| track.id.uid() == now.uid)
+                    .find(|track| track.uid == now.uid)
                     .cloned();
                 if let Some(track) = track {
                     ctrl.current_track_snapshot.set(Some(track));
@@ -183,10 +183,7 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
 /// The queue as the UI mirrors it: the rows in play order, the permutation
 /// behind them, and where playback sits.
 fn apply_queue(ctrl: &mut PlayerController, snapshot: api::QueueSnapshot) {
-    set_if_changed(
-        &mut ctrl.queue,
-        crate::wire::tracks_from_api(snapshot.items),
-    );
+    set_if_changed(&mut ctrl.queue, snapshot.items);
     set_if_changed(
         &mut ctrl.shuffle_order,
         snapshot
