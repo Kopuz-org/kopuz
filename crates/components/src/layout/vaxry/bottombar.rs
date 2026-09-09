@@ -84,7 +84,7 @@ pub fn BottombarVaxry(
                 div { class: "flex items-center gap-0.5 pr-1", dir: "ltr",
                     button {
                         class: if fav { "w-10 h-10 flex items-center justify-center text-red-400 active:scale-90 transition-transform" } else { "w-10 h-10 flex items-center justify-center text-slate-400 active:scale-90 transition-transform" },
-                        onclick: move |evt| { evt.stop_propagation(); toggle_favorite(ctrl.current_track_snapshot.read().clone()); },
+                        onclick: move |evt| { evt.stop_propagation(); { let (key, service) = hooks::favorites::current(&ctrl); toggle_favorite(key, service) }; },
                         i { class: if fav { "fa-solid fa-heart text-sm" } else { "fa-regular fa-heart text-sm" } }
                     }
                     button {
@@ -193,7 +193,7 @@ pub fn BottombarVaxry(
                 button {
                     class: "{heart_class} w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
-                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone()),
+                    onclick: move |_| { let (key, service) = hooks::favorites::current(&ctrl); toggle_favorite(key, service) },
                     i { class: "{heart_icon} text-xs" }
                 }
                 VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Bar }
