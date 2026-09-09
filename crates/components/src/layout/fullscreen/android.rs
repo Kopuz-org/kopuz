@@ -16,7 +16,6 @@ pub(crate) fn FullscreenAndroid(
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
     current_song_bitrate: Signal<u16>,
-    current_song_cover_url: Signal<String>,
     current_queue_index: Signal<usize>,
     items: Vec<api::TrackInfo>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
@@ -139,7 +138,6 @@ pub(crate) fn FullscreenAndroid(
                         class: "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]",
                         TrackMetadata {
                             is_fullscreen,
-                            current_song_cover_url,
                             current_song_title,
                             current_song_artist,
                             current_song_album,

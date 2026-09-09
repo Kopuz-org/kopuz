@@ -14,7 +14,6 @@ pub fn SearchGenreDetail(
     genres: Vec<(String, Option<utils::CoverUrl>)>,
     on_back: EventHandler<()>,
     mut is_playing: Signal<bool>,
-    mut current_song_cover_url: Signal<String>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
     mut current_song_duration: Signal<u64>,

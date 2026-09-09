@@ -7,7 +7,6 @@ use hooks::use_player_controller::PlayerController;
 #[component]
 pub(crate) fn TrackMetadata(
     mut is_fullscreen: Signal<bool>,
-    current_song_cover_url: Signal<String>,
     current_song_title: Signal<String>,
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
@@ -29,7 +28,9 @@ pub(crate) fn TrackMetadata(
         div {
             class: "flex-1 min-h-0 w-full flex items-center justify-center mb-6",
             {
-                let cover = current_song_cover_url.read().clone();
+                let cover = ctrl
+                    .current_cover_url(hooks::artwork::Size::Full)
+                    .unwrap_or_default();
                 if cover.is_empty() {
                     rsx! {
                         div {
@@ -39,7 +40,6 @@ pub(crate) fn TrackMetadata(
                         }
                     }
                 } else {
-                    let cover = hooks::artwork::at_full_size(&cover);
                     rsx! {
                         img {
                             src: "{cover}",

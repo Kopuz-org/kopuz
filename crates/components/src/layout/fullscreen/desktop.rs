@@ -16,7 +16,6 @@ pub(crate) fn FullscreenDesktop(
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
     current_song_bitrate: Signal<u16>,
-    current_song_cover_url: Signal<String>,
     current_queue_index: Signal<usize>,
     items: Vec<api::TrackInfo>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
@@ -64,7 +63,6 @@ pub(crate) fn FullscreenDesktop(
 
                     TrackMetadata {
                         is_fullscreen,
-                        current_song_cover_url,
                         current_song_title,
                         current_song_artist,
                         current_song_album,
