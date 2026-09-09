@@ -5,6 +5,7 @@ pub mod artist;
 pub mod artwork_image;
 pub mod build_info;
 pub mod color;
+#[cfg(feature = "db-cache")]
 pub mod db_cache;
 pub mod hls_source;
 pub mod icy;

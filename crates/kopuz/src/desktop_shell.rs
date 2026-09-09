@@ -57,10 +57,3 @@ pub fn show_tray_missing_popup() {
     );
     let _ = dioxus::document::eval(&js);
 }
-
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-pub fn read_titlebar_mode_from_disk() -> config::TitlebarMode {
-    db::peek_config(&db::default_db_path())
-        .map(|c| c.titlebar_mode)
-        .unwrap_or_default()
-}

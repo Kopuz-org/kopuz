@@ -4356,8 +4356,6 @@ dependencies = [
  "kopuz-kopuzd",
  "kopuz-pages",
  "kopuz-player",
- "kopuz-radio",
- "kopuz-reader",
  "kopuz-route",
  "kopuz-server",
  "kopuz-utils",
@@ -4725,6 +4723,7 @@ version = "0.16.2"
 dependencies = [
  "base64",
  "color-thief",
+ "directories",
  "hex",
  "image",
  "kopuz-db",

@@ -26,60 +26,6 @@ pub struct GrpcState {
     pub artwork: Option<Arc<daemon::ArtworkService>>,
     pub session: SessionHandle,
     pub started: Instant,
-    /// Set when this daemon was launched by a frontend and should not
-    /// outlive it. `None` for a standalone daemon, which ignores clients
-    /// coming and going.
-    pub supervisor: Option<Arc<Supervisor>>,
-}
-
-/// Tracks attached frontends for a supervised daemon.
-///
-/// A frontend is "attached" for as long as it holds a Subscribe stream. The
-/// socket closes however the frontend died -- clean exit, panic, SIGKILL --
-/// so the stream ending is a portable death signal that needs no process
-/// parentage, no PR_SET_PDEATHSIG, and no kill-on-drop.
-#[derive(Default)]
-pub struct Supervisor {
-    attached: std::sync::atomic::AtomicUsize,
-    /// Until the first frontend arrives there is nothing to outlive, so a
-    /// daemon that is still starting up does not exit at zero.
-    seen: std::sync::atomic::AtomicBool,
-    orphaned: tokio::sync::Notify,
-}
-
-impl Supervisor {
-    fn attach(&self) {
-        use std::sync::atomic::Ordering;
-        self.seen.store(true, Ordering::Release);
-        let count = self.attached.fetch_add(1, Ordering::AcqRel) + 1;
-        tracing::info!(frontends = count, "frontend attached");
-    }
-
-    fn detach(&self) {
-        use std::sync::atomic::Ordering;
-        let remaining = self.attached.fetch_sub(1, Ordering::AcqRel) - 1;
-        tracing::info!(frontends = remaining, "frontend detached");
-        if remaining == 0 && self.seen.load(Ordering::Acquire) {
-            self.orphaned.notify_waiters();
-        }
-    }
-
-    /// Resolves when the last frontend has gone.
-    pub async fn orphaned(&self) {
-        self.orphaned.notified().await;
-    }
-}
-
-/// Decrements on drop, so a frontend that dies mid-stream still counts as
-/// detached -- the stream is dropped by tonic either way.
-struct AttachGuard(Option<Arc<Supervisor>>);
-
-impl Drop for AttachGuard {
-    fn drop(&mut self) {
-        if let Some(supervisor) = &self.0 {
-            supervisor.detach();
-        }
-    }
 }
 
 pub struct KopuzGrpc(Arc<GrpcState>);
@@ -117,11 +63,8 @@ impl KopuzGrpc {
 /// this stream lost the process that owns it.
 struct EventSubscription {
     /// Sent before anything else, so a subscriber knows the stream is live.
-    /// Closes the window where the daemon answers a unary call but has not
-    /// yet counted the frontend as one to outlive.
     greeting: Option<proto::EventEnvelope>,
     live: broadcast::Receiver<ApiEvent>,
-    _attached: AttachGuard,
 }
 
 impl EventSubscription {
@@ -147,13 +90,9 @@ impl Kopuz for KopuzGrpc {
         _request: Request<proto::SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let live = self.0.session.subscribe();
-        if let Some(supervisor) = &self.0.supervisor {
-            supervisor.attach();
-        }
         let subscription = EventSubscription {
             greeting: Some(resync_message()),
             live,
-            _attached: AttachGuard(self.0.supervisor.clone()),
         };
         let stream = futures_util::stream::unfold(subscription, |subscription| subscription.next());
         Ok(Response::new(Box::pin(stream)))
