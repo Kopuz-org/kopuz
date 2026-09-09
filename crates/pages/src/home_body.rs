@@ -66,8 +66,7 @@ pub fn HomeBody(
     let is_offline = use_context::<Signal<bool>>();
     let mut config = use_context::<Signal<AppConfig>>();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     let mut has_fetched = use_signal(|| false);
     // Which card has its overflow menu open, keyed by track uid / playlist id.
     // Owned here because the section renderers are plain functions, so they

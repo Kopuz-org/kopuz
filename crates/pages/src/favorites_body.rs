@@ -1,5 +1,4 @@
 use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
-use ::server::source::FavoritesSync;
 use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
@@ -64,8 +63,7 @@ pub fn FavoritesBody(
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     let favorites_res = use_favorites();
     let fav_keys = use_memo(move || favorites_res.read().clone().unwrap_or_default());
     let fav_tracks_res = use_tracks_by_keys(source, fav_keys);
@@ -337,7 +335,7 @@ pub fn FavoritesBody(
             // Generic "Syncing with server" spinner for instant-sync sources.
             // Paginated sources (YT) have their own progress row below with a
             // track counter + refresh button — don't double-render.
-            if *is_syncing.read() && caps().favorites_sync == FavoritesSync::Instant {
+            if *is_syncing.read() && caps().favorites_sync == api::FavoritesSyncMode::Instant {
                 div {
                     class: "flex items-center gap-2 text-slate-400 text-sm mb-4",
                     i { class: "fa-solid fa-circle-notch fa-spin" }
@@ -351,7 +349,7 @@ pub fn FavoritesBody(
             // out of the way.
             {
                 let is_paginated_sync =
-                    caps().favorites_sync == ::server::source::FavoritesSync::Paginated;
+                    caps().favorites_sync == api::FavoritesSyncMode::Paginated;
                 let synced = *synced_so_far.read();
                 let syncing = *is_syncing.read();
                 let total = displayed_tracks.len();
@@ -398,7 +396,7 @@ pub fn FavoritesBody(
                     {
                         // Anonymous YT shows a sign-in prompt; otherwise the
                         // standard empty state with a source-appropriate hint.
-                        let yt_anon = caps().albums == ::server::source::AlbumType::YtMusic
+                        let yt_anon = caps().albums == api::AlbumPresentation::Remote
                             && config
                                 .read()
                                 .server

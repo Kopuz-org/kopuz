@@ -41,8 +41,7 @@ pub fn LibraryPage(
     mut current_queue_index: Signal<usize>,
 ) -> Element {
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let library_sort = use_signal(|| config.peek().library_sort.clone());

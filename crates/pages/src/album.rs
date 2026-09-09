@@ -57,8 +57,7 @@ pub fn Album(
     mut current_queue_index: Signal<usize>,
 ) -> Element {
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     let nav_ctrl = use_context::<components::NavigationController>();
 
     let open_album_menu = use_signal(|| None::<String>);
@@ -162,7 +161,7 @@ fn AlbumGrid(
 ) -> Element {
     let source = use_active_source();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let albums_res = use_albums(source);
@@ -390,7 +389,7 @@ fn AlbumDetail(
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
@@ -494,7 +493,7 @@ fn AlbumDetail(
     // offline; drives both the full track list and the YT-styled header.
     let remote_album_res: Resource<Option<::server::source::RemoteAlbum>> = {
         use_resource(move || {
-            let want = caps().albums == ::server::source::AlbumType::YtMusic && !*is_offline.read();
+            let want = caps().albums == api::AlbumPresentation::Remote && !*is_offline.read();
             let album = album_res.read().clone().flatten();
             let src = active_source.peek().clone();
             utils::offload(async move {
@@ -616,7 +615,7 @@ fn AlbumDetail(
 
     rsx! {
         div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
-            if cap.albums == ::server::source::AlbumType::YtMusic {
+            if cap.albums == api::AlbumPresentation::Remote {
                 YtAlbumDetail {
                     config,
                     title: yt_title,
@@ -735,8 +734,8 @@ fn YtAlbumDetail(
     tracks: Vec<reader::models::Track>,
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let nav_ctrl = use_context::<components::NavigationController>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
     let cover_for = hooks::use_db_queries::use_cover_resolver(80);
