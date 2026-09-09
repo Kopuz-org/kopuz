@@ -284,13 +284,17 @@ fn setup() {
         let (ntx, mut nrx) = tokio::sync::mpsc::unbounded_channel();
         NOTIFY.set(ntx).ok();
         let st = state();
+        // Before the thread, not inside it: the caller reads RX the moment
+        // this returns, and a reader that finds it missing takes that for
+        // "the channel is closed" and stops listening for good.
+        let events = tx();
         std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap()
                 .block_on(async {
-                    if let Ok(srv) = Server::new("kopuz", P(st.clone(), tx())).await {
+                    if let Ok(srv) = Server::new("kopuz", P(st.clone(), events)).await {
                         while let Some(seeked) = nrx.recv().await {
                             if seeked {
                                 let (metadata, status, position, shuffle, repeat) = match st.lock()

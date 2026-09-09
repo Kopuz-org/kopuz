@@ -65,7 +65,13 @@ pub fn spawn(session: &SessionHandle) {
                 // Cancel-safe: if the state branch wins, the dropped recv
                 // leaves the event queued for the next turn of the loop.
                 event = player::systemint::wait_event() => {
-                    let Some(event) = event else { return };
+                    // Unreachable while the sender lives in a static; if it
+                    // ever fires, say so, because a silent exit here is what
+                    // made dead media keys look like a healthy interface.
+                    let Some(event) = event else {
+                        tracing::warn!("media key channel closed; media keys are off for this process");
+                        return;
+                    };
                     let mapped = match event {
                         SystemEvent::Play => PlayerCommand::Play,
                         SystemEvent::Pause => PlayerCommand::Pause,
