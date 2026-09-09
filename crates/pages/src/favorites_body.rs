@@ -8,7 +8,6 @@ use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_active_source, use_favorites, use_tracks_by_keys};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
@@ -64,7 +63,6 @@ pub fn FavoritesBody(
     let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = use_memo(move || active_source.read().capabilities());
@@ -205,19 +203,10 @@ pub fn FavoritesBody(
                     })),
                     on_delete: move |_| {
                         active_menu_track.set(None);
-                        if cap.delete_from_disk
-                            && let Some(p) = track_delete.id.local_path()
-                            && crate::local_files::remove(&config.read(), &source(), p)
-                                .is_ok_and(|removed| removed)
-                        {
-                            let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            let key = track_delete.id.key().into_owned();
-                            spawn(async move {
-                                if s.delete_tracks(&[key]).await.is_ok() {
-                                    gens.bump(Table::Tracks);
-                                }
-                            });
-                        }
+                        hooks::library_actions::delete_tracks(
+                            vec![track_delete.id.key().into_owned()],
+                            cap.delete_from_disk,
+                        );
                     },
                     on_download: cap.downloads.then(|| EventHandler::new(move |_| {
                         if !is_downloaded {
@@ -294,39 +283,13 @@ pub fn FavoritesBody(
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
                     on_save: move |edits: reader::models::TrackEdits| {
-                        let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
-                            return;
-                        };
-                        match reader::write_tags(&path, &edits) {
-                            Ok(()) => {
-                                let mut t = track.clone();
-                                t.title = edits.title.trim().to_string();
-                                t.artist = edits.artist.trim().to_string();
-                                t.artists = edits
-                                    .artist
-                                    .split([';', ','])
-                                    .map(|a| a.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-                                t.album = edits.album.trim().to_string();
-                                t.track_number = edits.track_number;
-                                t.disc_number = edits.disc_number;
-                                t.album_id = reader::metadata::make_album_id(
-                                    edits.album.trim(),
-                                    edits.artist.trim(),
-                                );
-                                let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                spawn(async move {
-                                    if s.upsert_tracks(&[t]).await.is_ok() {
-                                        gens.bump(Table::Tracks);
-                                    }
-                                });
-                                metadata_track.set(None);
-                            }
-                            Err(e) => {
-                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
-                            }
-                        }
+                        hooks::library_actions::edit_track(
+                            hooks::library_actions::patch_from_edits(
+                                track.id.key().into_owned(),
+                                edits,
+                            ),
+                        );
+                        metadata_track.set(None);
                     },
                 }
             }
@@ -355,28 +318,12 @@ pub fn FavoritesBody(
                         show_playlist_modal.set(true);
                     },
                     on_delete: move |_| {
-                        if caps().delete_from_disk {
-                            let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
-                            let mut keys = Vec::new();
-                            for id in paths {
-                                let Some(path) = id.local_path() else {
-                                    continue;
-                                };
-                                if crate::local_files::remove(&config.read(), &source(), path)
-                                    .is_ok_and(|removed| removed)
-                                {
-                                    keys.push(id.key().into_owned());
-                                }
-                            }
-                            if !keys.is_empty() {
-                                let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                spawn(async move {
-                                    if s.delete_tracks(&keys).await.is_ok() {
-                                        gens.bump(Table::Tracks);
-                                    }
-                                });
-                            }
-                        }
+                        let keys: Vec<String> = selected_tracks
+                            .read()
+                            .iter()
+                            .map(|id| id.key().into_owned())
+                            .collect();
+                        hooks::library_actions::delete_tracks(keys, caps().delete_from_disk);
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();
                     },

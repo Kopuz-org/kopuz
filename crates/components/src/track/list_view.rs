@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_player_controller::PlayerController;
 use reader::Track;
 use std::collections::HashSet;
@@ -51,7 +50,6 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
     let mut metadata_track = use_signal(|| None::<Track>);
-    let gens = hooks::db_reactivity::use_generations();
 
     let view_metadata_handler = if props.enable_metadata {
         let tracks_meta = props.tracks.clone();
@@ -225,39 +223,13 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
                     on_save: move |edits: reader::models::TrackEdits| {
-                        let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
-                            return;
-                        };
-                        match reader::write_tags(&path, &edits) {
-                            Ok(()) => {
-                                let mut t = track.clone();
-                                t.title = edits.title.trim().to_string();
-                                t.artist = edits.artist.trim().to_string();
-                                t.artists = edits
-                                    .artist
-                                    .split([';', ','])
-                                    .map(|a| a.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-                                t.album = edits.album.trim().to_string();
-                                t.track_number = edits.track_number;
-                                t.disc_number = edits.disc_number;
-                                t.album_id = reader::metadata::make_album_id(
-                                    edits.album.trim(),
-                                    edits.artist.trim(),
-                                );
-                                let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                spawn(async move {
-                                    if source.upsert_tracks(&[t]).await.is_ok() {
-                                        gens.bump(Table::Tracks);
-                                    }
-                                });
-                                metadata_track.set(None);
-                            }
-                            Err(e) => {
-                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
-                            }
-                        }
+                        hooks::library_actions::edit_track(
+                            hooks::library_actions::patch_from_edits(
+                                track.id.key().into_owned(),
+                                edits,
+                            ),
+                        );
+                        metadata_track.set(None);
                     },
                 }
             }

@@ -482,39 +482,13 @@ pub fn Artist(
                                 track: track.clone(),
                                 on_close: move |_| metadata_track.set(None),
                                 on_save: move |edits: reader::models::TrackEdits| {
-                                    let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
-                                        return;
-                                    };
-                                    match reader::write_tags(&path, &edits) {
-                                        Ok(()) => {
-                                            let mut t = track.clone();
-                                            t.title = edits.title.trim().to_string();
-                                            t.artist = edits.artist.trim().to_string();
-                                            t.artists = edits
-                                                .artist
-                                                .split([';', ','])
-                                                .map(|a| a.trim().to_string())
-                                                .filter(|s| !s.is_empty())
-                                                .collect();
-                                            t.album = edits.album.trim().to_string();
-                                            t.track_number = edits.track_number;
-                                            t.disc_number = edits.disc_number;
-                                            t.album_id = reader::metadata::make_album_id(
-                                                edits.album.trim(),
-                                                edits.artist.trim(),
-                                            );
-                                            let s = active_source.peek().clone();
-                                            spawn(async move {
-                                                if s.upsert_tracks(&[t]).await.is_ok() {
-                                                    gens.bump(Table::Tracks);
-                                                }
-                                            });
-                                            metadata_track.set(None);
-                                        }
-                                        Err(e) => {
-                                            tracing::error!("failed to write tags for {}: {}", path.display(), e);
-                                        }
-                                    }
+                                    hooks::library_actions::edit_track(
+                                        hooks::library_actions::patch_from_edits(
+                                            track.id.key().into_owned(),
+                                            edits,
+                                        ),
+                                    );
+                                    metadata_track.set(None);
                                 },
                             }
                         }
@@ -539,32 +513,15 @@ pub fn Artist(
                                 },
                                 on_add_to_playlist: move |_| show_playlist_modal.set(true),
                                 on_delete: move |_| {
-                                    if caps().delete_from_disk {
-                                        let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
-                                        let mut keys = Vec::new();
-                                        for id in &paths {
-                                            let Some(path) = id.local_path() else {
-                                                continue;
-                                            };
-                                            if crate::local_files::remove(
-                                                &config.read(),
-                                                &source(),
-                                                path,
-                                            )
-                                            .is_ok_and(|removed| removed)
-                                            {
-                                                keys.push(id.key().into_owned());
-                                            }
-                                        }
-                                        if !keys.is_empty() {
-                                            let s = active_source.peek().clone();
-                                            spawn(async move {
-                                                if s.delete_tracks(&keys).await.is_ok() {
-                                                    gens.bump(Table::Tracks);
-                                                }
-                                            });
-                                        }
-                                    }
+                                    let keys: Vec<String> = selected_tracks
+                                        .read()
+                                        .iter()
+                                        .map(|id| id.key().into_owned())
+                                        .collect();
+                                    hooks::library_actions::delete_tracks(
+                                        keys,
+                                        caps().delete_from_disk,
+                                    );
                                     is_selection_mode.set(false);
                                     selected_tracks.write().clear();
                                 },
@@ -762,22 +719,10 @@ pub fn Artist(
                                                                             show_album_playlist_modal.set(true);
                                                                         }
                                                                         AlbumAction::DeleteAlbum => {
-                                                                            let s = active_source.peek().clone();
-                                                                            let album_id = id.clone();
-                                                                            let delete_config = config.read().clone();
-                                                                            let delete_source = source();
-                                                                            spawn(async move {
-                                                                                let to_delete = s.album_tracks(&album_id).await.unwrap_or_default();
-                                                                                for track in &to_delete {
-                                                                                    if let Some(path) = track.id.local_path() {
-                                                                                        let _ = crate::local_files::remove(&delete_config, &delete_source, path);
-                                                                                    }
-                                                                                }
-                                                                                if s.delete_album(&album_id).await.is_ok() {
-                                                                                    gens.bump(Table::Tracks);
-                                                                                    gens.bump(Table::Albums);
-                                                                                }
-                                                                            });
+                                                                            hooks::library_actions::delete_album(
+                                                                                id.clone(),
+                                                                                caps().delete_from_disk,
+                                                                            );
                                                                         }
                                                                         AlbumAction::Download { downloaded } => {
                                                                             let album_src = active_source.peek().clone();
@@ -821,6 +766,9 @@ pub fn Artist(
                                 description: String::new(),
                                 cover_url: artist_cover(),
                                 tracks: artist_tracks(),
+                                // The picture is stored by the daemon, so the
+                                // bytes go across rather than a path only this
+                                // process could read.
                                 on_cover_click: move |_| {
                                     #[cfg(not(target_os = "android"))]
                                     {
@@ -828,23 +776,23 @@ pub fn Artist(
                                         if artist.is_empty() {
                                             return;
                                         }
-                                        let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                         spawn(async move {
-                                            let file = rfd::AsyncFileDialog::new()
+                                            let Some(file) = rfd::AsyncFileDialog::new()
                                                 .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
                                                 .pick_file()
-                                                .await;
-                                            if let Some(file) = file {
-                                                let path = file.path().to_path_buf();
-                                                let key = normalize_artist_key(&artist);
-                                                if local
-                                                    .set_artist_image(&key, "custom", Some(&path.to_string_lossy()))
-                                                    .await
-                                                    .is_ok()
-                                                {
-                                                    gens.bump(Table::Tracks);
-                                                }
-                                            }
+                                                .await
+                                            else {
+                                                return;
+                                            };
+                                            let path = file.path().to_path_buf();
+                                            let Ok(bytes) = tokio::fs::read(&path).await else {
+                                                return;
+                                            };
+                                            hooks::library_actions::upload_artwork(
+                                                api::ArtworkTarget::Artist(artist),
+                                                hooks::library_actions::content_type_for(&path),
+                                                bytes,
+                                            );
                                         });
                                     }
                                 },
@@ -922,19 +870,11 @@ pub fn Artist(
                                     }
                                 })),
                                 on_delete_track: EventHandler::new(move |idx: usize| {
-                                    if caps().delete_from_disk
-                                        && let Some(track) = artist_tracks().get(idx)
-                                        && let Some(p) = track.id.local_path()
-                                        && crate::local_files::remove(&config.read(), &source(), p)
-                                            .is_ok_and(|removed| removed)
-                                    {
-                                        let s = active_source.peek().clone();
-                                        let key = track.id.key().into_owned();
-                                        spawn(async move {
-                                            if s.delete_tracks(&[key]).await.is_ok() {
-                                                gens.bump(Table::Tracks);
-                                            }
-                                        });
+                                    if let Some(track) = artist_tracks().get(idx) {
+                                        hooks::library_actions::delete_tracks(
+                                            vec![track.id.key().into_owned()],
+                                            caps().delete_from_disk,
+                                        );
                                     }
                                     active_menu_track.set(None);
                                 }),

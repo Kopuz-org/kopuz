@@ -160,7 +160,6 @@ fn AlbumGrid(
     mut show_album_playlist_modal: Signal<bool>,
     mut pending_album_id_for_playlist: Signal<Option<String>>,
 ) -> Element {
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = use_memo(move || active_source.read().capabilities());
@@ -352,34 +351,15 @@ fn AlbumGrid(
                                                         }
                                                         AlbumAction::Remove => {
                                                             if cap.delete_from_disk {
-                                                                let album_src = active_source.peek().clone();
-                                                                let album_id = id.clone();
-                                                                let delete_config = config.read().clone();
-                                                                let delete_source = source();
-                                                                spawn(async move {
-                                                                    let to_delete = album_src.album_tracks(&album_id).await.unwrap_or_default();
-                                                                    for track in &to_delete {
-                                                                        if let Some(path) = track.id.local_path() {
-                                                                            let _ = crate::local_files::remove(&delete_config, &delete_source, path);
-                                                                        }
-                                                                    }
-                                                                    if album_src.delete_album(&album_id).await.is_ok() {
-                                                                        gens.bump(Table::Tracks);
-                                                                        gens.bump(Table::Albums);
-                                                                    }
-                                                                });
+                                                                hooks::library_actions::delete_album(id.clone(), true);
                                                             } else {
-                                                                // Server: drop every same-titled album's cache.
-                                                                let album_src = active_source.peek().clone();
+                                                                // A server splits one release across
+                                                                // same-titled albums, so dropping the
+                                                                // cache means dropping all of them.
                                                                 let all = albums_res.read().clone().unwrap_or_default();
-                                                                let ids: Vec<String> = all.iter().filter(|a| a.title == title).map(|a| a.id.clone()).collect();
-                                                                spawn(async move {
-                                                                    for aid in &ids {
-                                                                        let _ = album_src.delete_album(aid).await;
-                                                                    }
-                                                                    gens.bump(Table::Tracks);
-                                                                    gens.bump(Table::Albums);
-                                                                });
+                                                                for album in all.iter().filter(|album| album.title == title) {
+                                                                    hooks::library_actions::delete_album(album.id.clone(), false);
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -406,8 +386,8 @@ fn AlbumDetail(
     current_queue_index: Signal<usize>,
     on_close: EventHandler<()>,
 ) -> Element {
-    let gens = hooks::db_reactivity::use_generations();
     let nav_ctrl = use_context::<components::NavigationController>();
+    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = use_memo(move || active_source.read().capabilities());
@@ -578,15 +558,10 @@ fn AlbumDetail(
     let cap = caps();
     let aid = album.id.clone();
 
-    let cover_cache = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
-        .map(|d| d.cache_dir().join("covers"))
-        .unwrap_or_else(|| PathBuf::from("./cache/covers"));
-
-    // Local-only custom cover reset.
+    // The daemon removes the stored picture and forgets the file it saved,
+    // so this only has to say which album.
     let cover_reset_action = if cap.edit_tags && album.cover_path.is_some() {
         let aid = aid.clone();
-        let delete_cover = album.cover_path.clone();
-        let cover_cache = cover_cache.clone();
         Some(rsx! {
             button {
                 class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10",
@@ -594,20 +569,7 @@ fn AlbumDetail(
                 aria_label: i18n::t("remove_cover").to_string(),
                 title: i18n::t("remove_cover").to_string(),
                 onclick: move |_| {
-                    let aid = aid.clone();
-                    let delete_cover = delete_cover.clone();
-                    let cover_cache = cover_cache.clone();
-                    let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                    spawn(async move {
-                        if local.update_album_cover(&aid, None, false).await.is_ok() {
-                            gens.bump(Table::Albums);
-                        }
-                        if let Some(path) = delete_cover
-                            && path.starts_with(&cover_cache)
-                        {
-                            let _ = tokio::fs::remove_file(&path).await;
-                        }
-                    });
+                    hooks::library_actions::remove_artwork(api::ArtworkTarget::Album(aid.clone()));
                 },
                 i { class: "fa-solid fa-trash text-xs" }
             }
@@ -680,65 +642,45 @@ fn AlbumDetail(
                 enable_metadata: cap.edit_tags,
                 show_delete_in_selection: cap.delete_from_disk,
                 is_downloading_all,
+                // Picking the file is the UI's; storing it is not.
                 on_cover_click: cap.edit_tags.then(|| EventHandler::new(move |_| {
                     let aid = aid_cover.clone();
                     let _ = &aid;
                     #[cfg(not(target_os = "android"))]
-                    let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                    #[cfg(not(target_os = "android"))]
                     spawn(async move {
-                        let file = rfd::AsyncFileDialog::new()
+                        let Some(file) = rfd::AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
                             .pick_file()
-                            .await;
-                        if let Some(file) = file {
-                            let path = file.path().to_path_buf();
-                            let Ok(data) = tokio::fs::read(&path).await else { return };
-                            let cover_cache = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
-                                .map(|d| d.cache_dir().join("covers"))
-                                .unwrap_or_else(|| PathBuf::from("./cache/covers"));
-                            if let Ok(saved) = reader::utils::save_cover(&aid, &data, path.extension().and_then(|e| e.to_str()), &cover_cache) {
-                                let saved_str = saved.to_string_lossy().into_owned();
-                                if local.update_album_cover(&aid, Some(&saved_str), true).await.is_ok() {
-                                    gens.bump(Table::Albums);
-                                }
-                            }
-                        }
+                            .await
+                        else {
+                            return;
+                        };
+                        let path = file.path().to_path_buf();
+                        let Ok(bytes) = tokio::fs::read(&path).await else {
+                            return;
+                        };
+                        hooks::library_actions::upload_artwork(
+                            api::ArtworkTarget::Album(aid),
+                            hooks::library_actions::content_type_for(&path),
+                            bytes,
+                        );
                     });
                 })),
                 actions: cover_reset_action,
                 on_delete_track: cap.delete_from_disk.then(|| EventHandler::new(move |idx: usize| {
-                    if let Some(t) = tracks_delete.get(idx)
-                        && let Some(track_path) = t.id.local_path()
-                        && crate::local_files::remove(&config.read(), &source(), track_path)
-                            .is_ok_and(|removed| removed)
-                    {
-                        let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                        let key = t.id.key().into_owned();
-                        spawn(async move {
-                            if s.delete_tracks(&[key]).await.is_ok() {
-                                gens.bump(Table::Tracks);
-                            }
-                        });
+                    if let Some(track) = tracks_delete.get(idx) {
+                        hooks::library_actions::delete_tracks(
+                            vec![track.id.key().into_owned()],
+                            true,
+                        );
                     }
                 })),
                 on_selection_delete: cap.delete_from_disk.then(|| EventHandler::new(move |paths: Vec<PathBuf>| {
-                    let mut keys = Vec::new();
-                    for path in &paths {
-                        if crate::local_files::remove(&config.read(), &source(), path)
-                            .is_ok_and(|removed| removed)
-                        {
-                            keys.push(path.to_string_lossy().into_owned());
-                        }
-                    }
-                    if !keys.is_empty() {
-                        let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                        spawn(async move {
-                            if s.delete_tracks(&keys).await.is_ok() {
-                                gens.bump(Table::Tracks);
-                            }
-                        });
-                    }
+                    let keys: Vec<String> = paths
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect();
+                    hooks::library_actions::delete_tracks(keys, true);
                 })),
                 on_download_track: cap.downloads.then(|| EventHandler::new(move |idx: usize| {
                     if let Some(t) = tracks_download.get(idx) {

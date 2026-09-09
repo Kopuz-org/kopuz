@@ -10,7 +10,6 @@ pub mod home;
 pub mod home_body;
 pub mod layout;
 pub mod library;
-mod local_files;
 pub mod playlists;
 pub mod radio;
 pub mod scroll_persist;

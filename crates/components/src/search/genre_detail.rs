@@ -27,7 +27,6 @@ pub fn SearchGenreDetail(
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
-    let gens = hooks::db_reactivity::use_generations();
     let offline_tracks = config.read().offline_tracks.clone();
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let sort_state = use_signal(|| None);
@@ -244,21 +243,10 @@ pub fn SearchGenreDetail(
                                      on_close_menu: move |_| active_menu_track.set(None),
                                      on_delete: move |_| {
                                          active_menu_track.set(None);
-                                         if let Some(del_path) = track_delete.id.local_path()
-                                             && std::fs::remove_file(del_path).is_ok()
-                                         {
-                                             let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                             let key = track_delete.id.key().into_owned();
-                                             spawn(async move {
-                                                 if local
-                                                     .delete_tracks(&[key])
-                                                     .await
-                                                     .is_ok()
-                                                 {
-                                                     gens.bump(hooks::db_reactivity::Table::Tracks);
-                                                 }
-                                             });
-                                         }
+                                         hooks::library_actions::delete_tracks(
+                                             vec![track_delete.id.key().into_owned()],
+                                             true,
+                                         );
                                      },
                                      on_play: move |_| {
                                          queue.set(queue_source.clone());
