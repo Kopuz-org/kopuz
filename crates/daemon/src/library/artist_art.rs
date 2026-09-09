@@ -84,23 +84,33 @@ impl LibraryService {
         }
 
         let queue = Arc::new(Mutex::new(pending.into_iter()));
-        let found = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Announce as they land rather than once at the end: a grid of a few
+        // hundred artists takes a while to search, and holding every photo
+        // until the last one resolves is a page of placeholders for all of it.
+        // The frontend coalesces these, so announcing often is cheap.
+        let found = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let workers: Vec<_> = (0..WORKERS)
             .map(|_| {
                 let source = source.clone();
                 let queue = queue.clone();
                 let found = found.clone();
+                let session = self.session.get().cloned();
                 async move {
                     while let Some(name) = queue.lock().ok().and_then(|mut names| names.next()) {
                         if resolve_one(&source, &name).await {
-                            found.store(true, std::sync::atomic::Ordering::Relaxed);
+                            found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            if let Some(session) = &session {
+                                session.invalidate(Table::Tracks);
+                            }
                         }
                     }
                 }
             })
             .collect();
         futures_util::future::join_all(workers).await;
-        if found.load(std::sync::atomic::Ordering::Relaxed) {
+        // A last one, in case the tail of the batch landed inside a window the
+        // frontend had already coalesced away.
+        if found.load(std::sync::atomic::Ordering::Relaxed) > 0 {
             self.invalidate(Table::Tracks);
         }
         Ok(())
