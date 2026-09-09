@@ -14,7 +14,7 @@ use components::settings_popups::{
     AddLocalSourcePopup, AddRegistryPopup, AddServerPopup, LoginPopup,
 };
 use components::settings_remote_folders::RemoteFolderSettings;
-use config::{AppConfig, MusicService};
+use config::AppConfig;
 use dioxus::prelude::*;
 
 use crate::DebugPanel;
@@ -84,22 +84,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut local_source_directories = use_signal(Vec::<std::path::PathBuf>::new);
     let mut local_source_error = use_signal(|| Option::<String>::None);
 
+    let services = hooks::sources::use_services();
     let server_name = use_signal(String::new);
-    let server_url = use_signal(String::new);
-    let server_service = use_signal(|| MusicService::Jellyfin);
-    let yt_browser = use_signal(|| {
-        active_server
-            .peek()
-            .as_ref()
-            .and_then(|server| api::spec_value(&server.settings, "browser"))
-            .and_then(config::Browser::from_id)
-            .unwrap_or(config::Browser::Chrome)
-    });
-    let yt_anonymous = use_signal(|| false);
-    let apple_music_storefront = use_signal(|| "us".to_string());
-    let apple_music_language = use_signal(|| "en".to_string());
-    let apple_music_manual_token = use_signal(String::new);
-    let apple_music_use_manual = use_signal(|| false);
+    let server_service = use_signal(String::new);
+    let draft_values = use_signal(Vec::<api::FieldValue>::new);
+    let draft_secrets = use_signal(Vec::<api::FieldValue>::new);
+    let draft_check = use_signal(|| Option::<api::DraftCheck>::None);
 
     let mut username = use_signal(String::new);
     let mut password = use_signal(String::new);
@@ -151,21 +141,33 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         _ => show_login.set(true),
     };
 
+    // The daemon checks the draft as it is typed, so the form knows what is
+    // wrong with it and which sign-in saving it will start.
+    use_effect(move || {
+        let draft = crate::settings_actions::draft(
+            server_name,
+            server_service,
+            draft_values,
+            draft_secrets,
+        );
+        crate::settings_actions::check_draft(draft, draft_check);
+    });
+
     let handle_add_server = move |_| {
         crate::settings_actions::add_server(
+            crate::settings_actions::draft(
+                server_name,
+                server_service,
+                draft_values,
+                draft_secrets,
+            ),
             server_name,
-            server_url,
-            server_service,
-            yt_browser,
-            yt_anonymous,
+            draft_values,
+            draft_secrets,
             error,
             show_add_server,
             show_login,
             ctrl.playback_error,
-            apple_music_storefront,
-            apple_music_language,
-            apple_music_manual_token,
-            apple_music_use_manual,
         );
     };
 
@@ -824,16 +826,13 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
             if show_add_server() {
                 AddServerPopup {
-                    server_name,
-                    server_url,
-                    server_service,
-                    yt_browser,
-                    yt_anonymous,
-                    apple_music_storefront,
-                    apple_music_language,
-                    apple_music_manual_token,
-                    apple_music_use_manual,
-                    host_access,
+                    services: services.read().clone().unwrap_or_default(),
+                    service: server_service,
+                    name: server_name,
+                    values: draft_values,
+                    secrets: draft_secrets,
+                    check: draft_check(),
+                    host_access: host_access(),
                     error,
                     on_close: move |_| show_add_server.set(false),
                     on_save: handle_add_server

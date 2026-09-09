@@ -162,6 +162,9 @@ create_new_playlist = إنشاء قائمة تشغيل جديدة
 playlist_name_placeholder = اسم قائمة التشغيل
 playlist_name_input = اسم قائمة التشغيل
 add_media_server = إضافة خادم وسائط
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = خادم الوسائط
 media_servers = خوادم الوسائط
 saved_servers = الخوادم المحفوظة
@@ -503,11 +506,11 @@ download_quality = جودة التنزيل
 saving = جارٍ الحفظ...
 discover_more_loading = جارٍ تحميل المزيد…
 discover_failed = تعذّر تحميل قسم الاكتشاف: { $error }
-discover_requires_ytmusic = الاكتشاف متاح فقط عندما تكون YouTube Music هي الخادم النشط.
+discover_unsupported = الاكتشاف متاح فقط عندما تكون YouTube Music هي الخادم النشط.
 discover_show_all = عرض الكل
-yt_anon_playlists = سجّل الدخول إلى YouTube Music لعرض قوائم التشغيل في مكتبتك.
-yt_anon_favorites = سجّل الدخول إلى YouTube Music لعرض الأغاني التي أعجبتك.
-yt_anon_discover = سجّل الدخول إلى YouTube Music لتصفح قسم اكتشف.
+source_anon_playlists = سجّل الدخول إلى YouTube Music لعرض قوائم التشغيل في مكتبتك.
+source_anon_favorites = سجّل الدخول إلى YouTube Music لعرض الأغاني التي أعجبتك.
+source_anon_discover = سجّل الدخول إلى YouTube Music لتصفح قسم اكتشف.
 artist_none_selected = لم يتم اختيار فنان
 
 # Metadata Viewer / Editor

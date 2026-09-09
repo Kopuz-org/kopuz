@@ -162,6 +162,9 @@ create_new_playlist = יצירת רשימת השמעה חדשה
 playlist_name_placeholder = שם רשימת ההשמעה
 playlist_name_input = שם רשימת השמעה
 add_media_server = הוספת שרת מדיה
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = שרת מדיה
 media_servers = שרתי מדיה
 saved_servers = שרתים שמורים
@@ -497,11 +500,11 @@ download_quality = איכות הורדה
 saving = שומר...
 discover_more_loading = טוען עוד…
 discover_failed = לא ניתן לטעון את גילוי: { $error }
-discover_requires_ytmusic = גילוי זמין רק כאשר YouTube Music הוא השרת הפעיל.
+discover_unsupported = גילוי זמין רק כאשר YouTube Music הוא השרת הפעיל.
 discover_show_all = הצג הכל
-yt_anon_playlists = היכנס ל-YouTube Music כדי לראות את רשימות ההשמעה בספרייה שלך.
-yt_anon_favorites = היכנס ל-YouTube Music כדי לראות את השירים שאהבת.
-yt_anon_discover = היכנס ל-YouTube Music כדי לעיין בגלה.
+source_anon_playlists = היכנס ל-YouTube Music כדי לראות את רשימות ההשמעה בספרייה שלך.
+source_anon_favorites = היכנס ל-YouTube Music כדי לראות את השירים שאהבת.
+source_anon_discover = היכנס ל-YouTube Music כדי לעיין בגלה.
 artist_none_selected = לא נבחר אמן
 
 # Metadata Viewer / Editor

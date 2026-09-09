@@ -1,4 +1,3 @@
-use config::AppConfig;
 use dioxus::prelude::*;
 use tracing::Instrument;
 
@@ -43,13 +42,12 @@ pub fn use_webview_decipher_engine() {
     });
 }
 
-pub fn use_connectivity_probe(
-    config: Signal<AppConfig>,
-    mut network_banner: Signal<Option<bool>>,
-) -> Signal<bool> {
+pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signal<bool> {
     let mut is_offline = use_signal(|| false);
     use_context_provider(|| is_offline);
-
+    // Only a remote source makes reachability a thing worth watching, and
+    // which is active is the daemon's answer.
+    let active = hooks::sources::use_active_source_info();
     use_future(move || async move {
         let Ok(client) = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
@@ -59,7 +57,11 @@ pub fn use_connectivity_probe(
         };
         let mut misses: u8 = 0;
         loop {
-            if config.peek().server.is_none() {
+            if !active
+                .peek()
+                .as_ref()
+                .is_some_and(|source| source.kind == api::SourceKind::Server)
+            {
                 if *is_offline.peek() {
                     is_offline.set(false);
                 }

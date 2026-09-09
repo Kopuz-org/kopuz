@@ -162,6 +162,9 @@ create_new_playlist = Új lejátszási lista létrehozása
 playlist_name_placeholder = Lejátszási lista neve
 playlist_name_input = Lejátszási lista neve
 add_media_server = Médiaszerver hozzáadása
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = Médiaszerver
 media_servers = Médiaszerverek
 saved_servers = Mentett szerverek
@@ -497,11 +500,11 @@ download_quality = Letöltés minősége
 saving = Mentés...
 discover_more_loading = További betöltése…
 discover_failed = Nem sikerült betölteni a Felfedezést: { $error }
-discover_requires_ytmusic = A Felfedezés csak akkor érhető el, ha a YouTube Music az aktív szerver.
+discover_unsupported = A Felfedezés csak akkor érhető el, ha a YouTube Music az aktív szerver.
 discover_show_all = Összes megjelenítése
-yt_anon_playlists = Jelentkezz be a YouTube Musicba a könyvtárad lejátszási listáinak megtekintéséhez.
-yt_anon_favorites = Jelentkezz be a YouTube Musicba a kedvelt dalaid megtekintéséhez.
-yt_anon_discover = Jelentkezz be a YouTube Musicba a Felfedezés böngészéséhez.
+source_anon_playlists = Jelentkezz be a YouTube Musicba a könyvtárad lejátszási listáinak megtekintéséhez.
+source_anon_favorites = Jelentkezz be a YouTube Musicba a kedvelt dalaid megtekintéséhez.
+source_anon_discover = Jelentkezz be a YouTube Musicba a Felfedezés böngészéséhez.
 artist_none_selected = Nincs kiválasztott előadó
 
 # Metadata Viewer / Editor

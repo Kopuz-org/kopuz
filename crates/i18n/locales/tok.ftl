@@ -162,6 +162,9 @@ create_new_playlist = o pali e kulupu kalama sin
 playlist_name_placeholder = nimi pi kulupu kalama
 playlist_name_input = nimi pi kulupu kalama
 add_media_server = o namako e pana
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = pana
 media_servers = pana mute
 saved_servers = pana pi awen sona
@@ -497,11 +500,11 @@ download_quality = pona pi ijo tawa ilo
 saving = awen...
 discover_more_loading = mi alasa e ijo sin…
 discover_failed = pakala — mi ken ala alasa: { $error }
-discover_requires_ytmusic = sona sin li lon taso lon tenpo pi YouTube Music.
+discover_unsupported = sona sin li lon taso lon tenpo pi YouTube Music.
 discover_show_all = lukin e ale
-yt_anon_playlists = o kama lon YouTube Music la sina ken lukin e kulupu kalama sina.
-yt_anon_favorites = o kama lon YouTube Music la sina ken lukin e kalama pi olin sina.
-yt_anon_discover = o kama lon YouTube Music la sina ken lukin sin.
+source_anon_playlists = o kama lon YouTube Music la sina ken lukin e kulupu kalama sina.
+source_anon_favorites = o kama lon YouTube Music la sina ken lukin e kalama pi olin sina.
+source_anon_discover = o kama lon YouTube Music la sina ken lukin sin.
 artist_none_selected = jan kalama ala li lon
 
 # Metadata Viewer / Editor

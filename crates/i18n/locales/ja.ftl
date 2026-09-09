@@ -162,6 +162,9 @@ create_new_playlist = 新しいプレイリストを作成
 playlist_name_placeholder = プレイリスト名
 playlist_name_input = プレイリスト名
 add_media_server = メディアサーバーを追加
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = メディアサーバー
 media_servers = メディアサーバー
 saved_servers = 保存されたサーバー
@@ -503,11 +506,11 @@ download_quality = ダウンロード品質
 saving = 保存中...
 discover_more_loading = さらに読み込み中…
 discover_failed = 発見を読み込めません: { $error }
-discover_requires_ytmusic = 発見は YouTube Music がアクティブなサーバーの場合にのみ利用できます。
+discover_unsupported = 発見は YouTube Music がアクティブなサーバーの場合にのみ利用できます。
 discover_show_all = すべて表示
-yt_anon_playlists = ライブラリのプレイリストを表示するには YouTube Music にログインしてください。
-yt_anon_favorites = 高評価した曲を表示するには YouTube Music にログインしてください。
-yt_anon_discover = 見つけるを表示するには YouTube Music にログインしてください。
+source_anon_playlists = ライブラリのプレイリストを表示するには YouTube Music にログインしてください。
+source_anon_favorites = 高評価した曲を表示するには YouTube Music にログインしてください。
+source_anon_discover = 見つけるを表示するには YouTube Music にログインしてください。
 artist_none_selected = アーティストが選択されていません
 
 # Metadata Viewer / Editor

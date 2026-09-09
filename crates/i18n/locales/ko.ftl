@@ -162,6 +162,9 @@ create_new_playlist = 새 재생목록 만들기
 playlist_name_placeholder = 재생목록 이름
 playlist_name_input = 재생목록 이름
 add_media_server = 미디어 서버 추가
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = 미디어 서버
 media_servers = 미디어 서버
 saved_servers = 저장된 서버
@@ -497,11 +500,11 @@ download_quality = 다운로드 품질
 saving = 저장 중...
 discover_more_loading = 더 불러오는 중…
 discover_failed = 탐색을 불러올 수 없음: { $error }
-discover_requires_ytmusic = 탐색은 YouTube Music이 활성 서버일 때만 사용할 수 있습니다.
+discover_unsupported = 탐색은 YouTube Music이 활성 서버일 때만 사용할 수 있습니다.
 discover_show_all = 모두 보기
-yt_anon_playlists = 라이브러리 재생목록을 보려면 YouTube Music에 로그인하세요.
-yt_anon_favorites = 좋아요 표시한 곡을 보려면 YouTube Music에 로그인하세요.
-yt_anon_discover = 발견을 둘러보려면 YouTube Music에 로그인하세요.
+source_anon_playlists = 라이브러리 재생목록을 보려면 YouTube Music에 로그인하세요.
+source_anon_favorites = 좋아요 표시한 곡을 보려면 YouTube Music에 로그인하세요.
+source_anon_discover = 발견을 둘러보려면 YouTube Music에 로그인하세요.
 artist_none_selected = 선택된 아티스트가 없습니다
 
 # Metadata Viewer / Editor

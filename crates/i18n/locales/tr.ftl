@@ -162,6 +162,9 @@ create_new_playlist = Yeni Çalma Listesi Oluştur
 playlist_name_placeholder = Çalma listesi adı
 playlist_name_input = Çalma Listesi Adı
 add_media_server = Medya Sunucusu Ekle
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = Medya Sunucusu
 media_servers = Medya Sunucuları
 saved_servers = Kayıtlı Sunucular
@@ -497,11 +500,11 @@ download_quality = İndirme Kalitesi
 saving = Kaydediliyor...
 discover_more_loading = Daha fazlası yükleniyor…
 discover_failed = Keşfet yüklenemedi: { $error }
-discover_requires_ytmusic = Keşfet yalnızca YouTube Music aktif sunucu olduğunda kullanılabilir.
+discover_unsupported = Keşfet yalnızca YouTube Music aktif sunucu olduğunda kullanılabilir.
 discover_show_all = Tümünü gör
-yt_anon_playlists = Kitaplık çalma listelerini görmek için YouTube Music'e giriş yap.
-yt_anon_favorites = Beğendiğin şarkıları görmek için YouTube Music'e giriş yap.
-yt_anon_discover = Keşfet'e göz atmak için YouTube Music'e giriş yap.
+source_anon_playlists = Kitaplık çalma listelerini görmek için YouTube Music'e giriş yap.
+source_anon_favorites = Beğendiğin şarkıları görmek için YouTube Music'e giriş yap.
+source_anon_discover = Keşfet'e göz atmak için YouTube Music'e giriş yap.
 artist_none_selected = Sanatçı seçilmedi
 
 # Metadata Viewer / Editor

@@ -28,7 +28,7 @@ pub struct DiscoverPrefetchCache(pub Signal<HashMap<String, Vec<TrackInfo>>>);
 /// case worth wording ourselves; everything else is the daemon's message.
 fn failure_text(error: &api::ApiError) -> String {
     if error.code == api::ErrorCode::SourceAuthExpired {
-        return i18n::t("yt_anon_discover");
+        return i18n::t("source_anon_discover");
     }
     i18n::t_with("discover_failed", &[("error", error.to_string())])
 }
@@ -84,7 +84,7 @@ pub fn DiscoverPage(
     if !caps().discover {
         return rsx! {
             div { class: "flex items-center justify-center h-full text-white/60 p-12 text-center",
-                p { "{i18n::t(\"discover_requires_ytmusic\")}" }
+                p { "{i18n::t(\"discover_unsupported\")}" }
             }
         };
     }

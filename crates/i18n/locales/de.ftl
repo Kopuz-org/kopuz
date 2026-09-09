@@ -162,6 +162,9 @@ create_new_playlist = Neue Playlist erstellen
 playlist_name_placeholder = Playlist-Name
 playlist_name_input = Playlist-Name
 add_media_server = Medienserver hinzufügen
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = Medienserver
 media_servers = Medienserver
 saved_servers = Gespeicherte Server
@@ -497,11 +500,11 @@ download_quality = Download-Qualität
 saving = Speichern...
 discover_more_loading = Lade weitere…
 discover_failed = Entdecken konnte nicht geladen werden: { $error }
-discover_requires_ytmusic = Entdecken ist nur verfügbar, wenn YouTube Music der aktive Server ist.
+discover_unsupported = Entdecken ist nur verfügbar, wenn YouTube Music der aktive Server ist.
 discover_show_all = Alle anzeigen
-yt_anon_playlists = Melde dich bei YouTube Music an, um deine Bibliotheks-Playlists zu sehen.
-yt_anon_favorites = Melde dich bei YouTube Music an, um deine markierten Songs zu sehen.
-yt_anon_discover = Melde dich bei YouTube Music an, um Entdecken zu durchstöbern.
+source_anon_playlists = Melde dich bei YouTube Music an, um deine Bibliotheks-Playlists zu sehen.
+source_anon_favorites = Melde dich bei YouTube Music an, um deine markierten Songs zu sehen.
+source_anon_discover = Melde dich bei YouTube Music an, um Entdecken zu durchstöbern.
 artist_none_selected = Kein Künstler ausgewählt
 
 # Metadata Viewer / Editor

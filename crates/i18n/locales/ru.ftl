@@ -163,6 +163,9 @@ create_new_playlist = Создать новый плейлист
 playlist_name_placeholder = Название плейлиста
 playlist_name_input = Название плейлиста
 add_media_server = Добавить медиасервер
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = Медиасервер
 media_servers = Медиасерверы
 saved_servers = Сохранённые серверы
@@ -498,11 +501,11 @@ download_quality = Качество загрузки
 saving = Сохранение...
 discover_more_loading = Загрузка…
 discover_failed = Не удалось загрузить раздел Открытий: { $error }
-discover_requires_ytmusic = Открытия доступны только когда YouTube Music — активный сервер.
+discover_unsupported = Открытия доступны только когда YouTube Music — активный сервер.
 discover_show_all = Показать все
-yt_anon_playlists = Войдите в YouTube Music, чтобы увидеть плейлисты из библиотеки.
-yt_anon_favorites = Войдите в YouTube Music, чтобы увидеть понравившиеся треки.
-yt_anon_discover = Войдите в YouTube Music, чтобы открыть Обзор.
+source_anon_playlists = Войдите в YouTube Music, чтобы увидеть плейлисты из библиотеки.
+source_anon_favorites = Войдите в YouTube Music, чтобы увидеть понравившиеся треки.
+source_anon_discover = Войдите в YouTube Music, чтобы открыть Обзор.
 artist_none_selected = Исполнитель не выбран
 
 # Metadata Viewer / Editor

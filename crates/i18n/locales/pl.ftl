@@ -162,6 +162,9 @@ create_new_playlist = Stwórz nową Playlistę
 playlist_name_placeholder = Nazwa Playlisty
 playlist_name_input = Nazwa Playlisty
 add_media_server = Dodaj serwer mediów
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = Serwer Mediów
 media_servers = Serwery Mediów
 saved_servers = Zapisane serwery
@@ -497,11 +500,11 @@ download_quality = Jakość pobierania
 saving = Zapisywanie...
 discover_more_loading = Ładowanie więcej…
 discover_failed = Nie można załadować Odkrywaj: { $error }
-discover_requires_ytmusic = Odkrywaj jest dostępne tylko wtedy, gdy YouTube Music jest aktywnym serwerem.
+discover_unsupported = Odkrywaj jest dostępne tylko wtedy, gdy YouTube Music jest aktywnym serwerem.
 discover_show_all = Pokaż wszystko
-yt_anon_playlists = Zaloguj się do YouTube Music, aby zobaczyć playlisty z biblioteki.
-yt_anon_favorites = Zaloguj się do YouTube Music, aby zobaczyć polubione utwory.
-yt_anon_discover = Zaloguj się do YouTube Music, aby przeglądać Odkrywaj.
+source_anon_playlists = Zaloguj się do YouTube Music, aby zobaczyć playlisty z biblioteki.
+source_anon_favorites = Zaloguj się do YouTube Music, aby zobaczyć polubione utwory.
+source_anon_discover = Zaloguj się do YouTube Music, aby przeglądać Odkrywaj.
 artist_none_selected = Nie wybrano wykonawcy
 
 # Metadata Viewer / Editor

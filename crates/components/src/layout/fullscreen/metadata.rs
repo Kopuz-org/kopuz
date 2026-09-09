@@ -99,7 +99,7 @@ pub(crate) fn TrackMetadata(
                     },
                     title: "{favorite_label}",
                     "aria-label": "{favorite_label}",
-                    onclick: move |_| { let (key, service) = hooks::favorites::current(&ctrl); toggle_favorite(key, service) },
+                    onclick: move |_| { toggle_favorite(hooks::favorites::current(&ctrl)) },
                     i {
                         class: if is_favorite { "fa-solid fa-heart" } else { "fa-regular fa-heart" },
                         "aria-hidden": "true",

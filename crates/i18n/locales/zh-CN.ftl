@@ -162,6 +162,9 @@ create_new_playlist = 创建新播放列表
 playlist_name_placeholder = 播放列表名称
 playlist_name_input = 播放列表名称
 add_media_server = 添加媒体服务器
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = 媒体服务器
 media_servers = 媒体服务器
 saved_servers = 已保存的服务器
@@ -497,11 +500,11 @@ download_quality = 下载质量
 saving = 保存中...
 discover_more_loading = 加载更多…
 discover_failed = 无法加载发现: { $error }
-discover_requires_ytmusic = 仅当 YouTube Music 是当前服务器时才能使用发现。
+discover_unsupported = 仅当 YouTube Music 是当前服务器时才能使用发现。
 discover_show_all = 显示全部
-yt_anon_playlists = 登录 YouTube Music 以查看你的媒体库播放列表。
-yt_anon_favorites = 登录 YouTube Music 以查看你喜欢的歌曲。
-yt_anon_discover = 登录 YouTube Music 以浏览发现。
+source_anon_playlists = 登录 YouTube Music 以查看你的媒体库播放列表。
+source_anon_favorites = 登录 YouTube Music 以查看你喜欢的歌曲。
+source_anon_discover = 登录 YouTube Music 以浏览发现。
 artist_none_selected = 未选择艺术家
 
 # Metadata Viewer / Editor

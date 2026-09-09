@@ -162,6 +162,9 @@ create_new_playlist = Δημιουργία Νέας Λίστας Αναπαρα�
 playlist_name_placeholder = Όνομα λίστας αναπαραγωγής
 playlist_name_input = Όνομα Λίστας Αναπαραγωγής
 add_media_server = Προσθήκη Διακομιστή Μέσων
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = Διακομιστής Μέσων
 media_servers = Διακομιστές Μέσων
 saved_servers = Αποθηκευμένοι Διακομιστές
@@ -497,11 +500,11 @@ download_quality = Ποιότητα λήψης
 saving = Αποθήκευση...
 discover_more_loading = Φόρτωση περισσότερων…
 discover_failed = Αδυναμία φόρτωσης Ανακάλυψης: { $error }
-discover_requires_ytmusic = Η Ανακάλυψη είναι διαθέσιμη μόνο όταν το YouTube Music είναι ο ενεργός διακομιστής.
+discover_unsupported = Η Ανακάλυψη είναι διαθέσιμη μόνο όταν το YouTube Music είναι ο ενεργός διακομιστής.
 discover_show_all = Εμφάνιση όλων
-yt_anon_playlists = Συνδέσου στο YouTube Music για να δεις τις λίστες αναπαραγωγής σου.
-yt_anon_favorites = Συνδέσου στο YouTube Music για να δεις τα τραγούδια που σου άρεσαν.
-yt_anon_discover = Συνδέσου στο YouTube Music για να δεις την Ανακάλυψη.
+source_anon_playlists = Συνδέσου στο YouTube Music για να δεις τις λίστες αναπαραγωγής σου.
+source_anon_favorites = Συνδέσου στο YouTube Music για να δεις τα τραγούδια που σου άρεσαν.
+source_anon_discover = Συνδέσου στο YouTube Music για να δεις την Ανακάλυψη.
 artist_none_selected = Δεν επιλέχθηκε καλλιτέχνης
 
 # Metadata Viewer / Editor

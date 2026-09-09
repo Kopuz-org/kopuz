@@ -954,7 +954,7 @@ fn App() -> Element {
         });
     }
 
-    let _is_offline = app_lifecycle::use_connectivity_probe(config, network_banner);
+    let _is_offline = app_lifecycle::use_connectivity_probe(network_banner);
 
     let favorites_for_load = favorites_service.clone();
     let scrobbler_for_load = scrobbler.clone();
@@ -1527,24 +1527,9 @@ fn App() -> Element {
                 }
             }
 
-            // Only show playback errors when the active server is YouTube
-            // Music — other backends (Jellyfin/Subsonic/Custom) surface
-            // their own errors via the settings popup, and a lingering YT
-            // error from a previous session shouldn't haunt a switched-to
-            // server.
-            if config
-                .read()
-                .server
-                .as_ref()
-                .map(|s| {
-                    matches!(
-                        s.service,
-                        config::MusicService::YtMusic | config::MusicService::Spotify
-                    )
-                })
-                .unwrap_or(false)
-            {
-                if let Some(msg) = ctrl.playback_error.read().clone() {
+            // Switching source clears the error it belonged to, so whatever is
+            // here now is about the source that is playing.
+            if let Some(msg) = ctrl.playback_error.read().clone() {
                     div {
                         class: "flex-shrink-0",
                         div {
@@ -1562,7 +1547,6 @@ fn App() -> Element {
                         }
                     }
                 }
-            }
 
             if let Some(is_offline) = *network_banner.read() {
                 div {

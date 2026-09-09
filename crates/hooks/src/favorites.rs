@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 use crate::api::consume_api;
 
 /// Toggle one track's favourite state. A no-op for an empty key.
-pub fn toggle_favorite(key: String, service: Option<config::MusicService>) {
+pub fn toggle_favorite(key: String) {
     if key.trim().is_empty() {
         return;
     }
@@ -24,14 +24,9 @@ pub fn toggle_favorite(key: String, service: Option<config::MusicService>) {
             }
         };
         if let Err(error) = api.set_favorite(key.clone(), favorite).await {
-            tracing::warn!(%error, key = %key, "favorite rejected");
-            // Name the service, so a heart that snaps back does not read as a
-            // broken button.
-            let message = match service {
-                Some(service) => format!("Couldn't update favorite on {}", service.display_name()),
-                None => "Couldn't update favorite".to_string(),
-            };
-            crate::toast::toast_error(&message);
+            // The daemon says what refused it, so a heart that snaps back
+            // does not read as a broken button.
+            crate::toast::toast_error(&error.to_string());
         }
     });
 }
@@ -70,11 +65,9 @@ pub fn set_favorite_many(keys: Vec<String>, on: bool) {
 }
 
 /// The heart's argument, from whatever the player is currently showing.
-pub fn current(
-    ctrl: &crate::use_player_controller::PlayerController,
-) -> (String, Option<config::MusicService>) {
+pub fn current(ctrl: &crate::use_player_controller::PlayerController) -> String {
     match ctrl.current_track_snapshot.read().as_ref() {
-        Some(track) => (track.key.clone(), track.service),
-        None => (String::new(), None),
+        Some(track) => track.key.clone(),
+        None => String::new(),
     }
 }

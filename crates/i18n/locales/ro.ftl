@@ -162,6 +162,9 @@ create_new_playlist = Creează Listă Nouă
 playlist_name_placeholder = Nume listă de redare
 playlist_name_input = Nume Listă de Redare
 add_media_server = Adaugă Server Media
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = Server Media
 media_servers = Servere Media
 saved_servers = Servere Salvate
@@ -497,11 +500,11 @@ download_quality = Calitatea descărcării
 saving = Se salvează...
 discover_more_loading = Se încarcă mai mult…
 discover_failed = Nu s-a putut încărca Descoperă: { $error }
-discover_requires_ytmusic = Descoperă este disponibil doar când YouTube Music este serverul activ.
+discover_unsupported = Descoperă este disponibil doar când YouTube Music este serverul activ.
 discover_show_all = Afișează toate
-yt_anon_playlists = Conectează-te la YouTube Music pentru a vedea playlisturile din bibliotecă.
-yt_anon_favorites = Conectează-te la YouTube Music pentru a vedea melodiile apreciate.
-yt_anon_discover = Conectează-te la YouTube Music pentru a explora Descoperă.
+source_anon_playlists = Conectează-te la YouTube Music pentru a vedea playlisturile din bibliotecă.
+source_anon_favorites = Conectează-te la YouTube Music pentru a vedea melodiile apreciate.
+source_anon_discover = Conectează-te la YouTube Music pentru a explora Descoperă.
 artist_none_selected = Niciun artist selectat
 
 # Metadata Viewer / Editor

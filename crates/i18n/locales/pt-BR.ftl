@@ -212,6 +212,9 @@ create_new_playlist = Criar nova playlist
 playlist_name_placeholder = Nome da playlist
 playlist_name_input = Nome da playlist
 add_media_server = Adicionar servidor de mídia
+browser_sign_in_needs_host = Browser sign-in needs access to the host. Run the command below and restart kopuz.
+experimental = experimental
+copy = Copy
 media_server = Servidor de mídia
 media_servers = Servidores de mídia
 saved_servers = Servidores salvos
@@ -496,11 +499,11 @@ download_quality = Qualidade do Download
 saving = Salvando...
 discover_more_loading = Carregando mais…
 discover_failed = Não foi possível carregar Descobrir: { $error }
-discover_requires_ytmusic = Descobrir só está disponível quando o YouTube Music é o servidor ativo.
+discover_unsupported = Descobrir só está disponível quando o YouTube Music é o servidor ativo.
 discover_show_all = Mostrar tudo
-yt_anon_playlists = Entre no YouTube Music para ver suas playlists.
-yt_anon_favorites = Entre no YouTube Music para ver suas músicas curtidas.
-yt_anon_discover = Entre no YouTube Music para explorar o Descobrir.
+source_anon_playlists = Entre no YouTube Music para ver suas playlists.
+source_anon_favorites = Entre no YouTube Music para ver suas músicas curtidas.
+source_anon_discover = Entre no YouTube Music para explorar o Descobrir.
 artist_none_selected = Nenhum artista selecionado
 
 # Metadata Viewer / Editor

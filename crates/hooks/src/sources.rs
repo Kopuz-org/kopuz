@@ -62,3 +62,12 @@ pub fn use_active_source_info() -> Memo<Option<api::SourceInfo>> {
             .find(|source| source.active)
     })
 }
+
+/// Every service this daemon can be pointed at, and the form that adds one.
+pub fn use_services() -> Resource<Vec<api::ServiceInfo>> {
+    let api = use_api();
+    use_resource(move || {
+        let api = api.clone();
+        async move { api.services().await.unwrap_or_default() }
+    })
+}

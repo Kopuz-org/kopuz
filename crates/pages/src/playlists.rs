@@ -8,7 +8,7 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::folder_picker::FolderPickerModal;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
-use config::{AppConfig, MusicService, UiStyle};
+use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::use_playlists;
 
@@ -344,12 +344,13 @@ fn PlaylistsGrid(
         components::radio_actions::RADIO_ICON,
     )];
     let mut active_menu = active_menu;
-    let yt_anon = config
+    // A source usable without an account has nothing to show until someone
+    // signs in, which is the daemon's answer, not a service name.
+    let anonymous = hooks::sources::use_active_source_info();
+    let anonymous = anonymous
         .read()
-        .server
         .as_ref()
-        .map(|s| s.service == MusicService::YtMusic && s.yt_anonymous)
-        .unwrap_or(false);
+        .is_some_and(|source| source.anonymous);
 
     rsx! {
         div {
@@ -386,9 +387,9 @@ fn PlaylistsGrid(
 
             if playlists.is_empty() {
                 div { class: "flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6",
-                    if yt_anon {
+                    if anonymous {
                         i { class: "fa-solid fa-right-to-bracket text-4xl mb-4 opacity-50" }
-                        p { "{i18n::t(\"yt_anon_playlists\")}" }
+                        p { "{i18n::t(\"source_anon_playlists\")}" }
                     } else {
                         i { class: "fa-regular fa-folder-open text-4xl mb-4 opacity-50" }
                         p { "{i18n::t(\"no_playlists_found\")}" }

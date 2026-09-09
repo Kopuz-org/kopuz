@@ -63,6 +63,7 @@ pub fn FavoritesBody(
 
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
+    let active_source_info = hooks::sources::use_active_source_info();
     let favorites_res = use_favorites();
     let fav_keys = use_memo(move || favorites_res.read().clone().unwrap_or_default());
     let fav_tracks_res = use_tracks_by_keys(source, fav_keys);
@@ -384,13 +385,12 @@ pub fn FavoritesBody(
                     {
                         // Anonymous YT shows a sign-in prompt; otherwise the
                         // standard empty state with a source-appropriate hint.
-                        let yt_anon = caps().albums == api::AlbumPresentation::Remote
-                            && config
-                                .read()
-                                .server
-                                .as_ref()
-                                .map(|s| s.yt_anonymous)
-                                .unwrap_or(false);
+                        // A source usable without an account has nothing to show
+                        // until someone signs in; the daemon says which it is.
+                        let anonymous = active_source_info
+                            .read()
+                            .as_ref()
+                            .is_some_and(|source| source.anonymous);
                         let add_hint = i18n::t("heart_track_to_add");
                         let no_results = i18n::t_with(
                             "no_results_found",
@@ -405,9 +405,9 @@ pub fn FavoritesBody(
                                         class: "text-base",
                                         "{no_results}"
                                     }
-                                } else if yt_anon {
+                                } else if anonymous {
                                     i { class: "fa-solid fa-right-to-bracket text-4xl mb-4 opacity-50" }
-                                    p { class: "text-base", "{i18n::t(\"yt_anon_favorites\")}" }
+                                    p { class: "text-base", "{i18n::t(\"source_anon_favorites\")}" }
                                 } else {
                                     i { class: "fa-regular fa-heart text-4xl mb-4 opacity-30" }
                                     p { class: "text-base", "{i18n::t(\"no_favorites\")}" }

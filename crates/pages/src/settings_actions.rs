@@ -6,7 +6,7 @@
 //! near this process: a form is filled in here, and what comes back is
 //! whether the source ended up authenticated.
 
-use config::{AppConfig, Browser, MusicService};
+use config::AppConfig;
 use dioxus::prelude::*;
 use tracing::Instrument;
 
@@ -128,63 +128,42 @@ async fn activate(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The draft as the form currently stands.
+pub fn draft(
+    name: Signal<String>,
+    service: Signal<String>,
+    values: Signal<Vec<api::FieldValue>>,
+    secrets: Signal<Vec<api::FieldValue>>,
+) -> api::ServerDraft {
+    api::ServerDraft {
+        id: None,
+        name: name(),
+        service: service(),
+        values: values(),
+        secrets: secrets(),
+    }
+}
+
+/// Ask the daemon what is wrong with a draft. A service it does not have is
+/// simply nothing to say yet -- the form has not been filled in.
+pub fn check_draft(draft: api::ServerDraft, mut check: Signal<Option<api::DraftCheck>>) {
+    let api = hooks::consume_api();
+    spawn(async move {
+        check.set(api.check_server_draft(draft).await.ok());
+    });
+}
+
 pub fn add_server(
+    draft: api::ServerDraft,
     mut server_name: Signal<String>,
-    mut server_url: Signal<String>,
-    mut server_service: Signal<MusicService>,
-    yt_browser: Signal<Browser>,
-    yt_anonymous: Signal<bool>,
+    mut values: Signal<Vec<api::FieldValue>>,
+    mut secrets: Signal<Vec<api::FieldValue>>,
     mut error: Signal<Option<String>>,
     mut show_add_server: Signal<bool>,
     show_login: Signal<bool>,
     playback_error: Signal<Option<String>>,
-    apple_music_storefront: Signal<String>,
-    apple_music_language: Signal<String>,
-    mut apple_music_manual_token: Signal<String>,
-    apple_music_use_manual: Signal<bool>,
 ) {
-    let selected_service = server_service();
-    let is_ytmusic = selected_service == MusicService::YtMusic;
-    let is_apple = selected_service == MusicService::AppleMusic;
-    let anonymous = is_ytmusic && yt_anonymous();
-    let manual_token = is_apple && *apple_music_use_manual.peek();
-
-    let mut values = vec![
-        api::FieldValue::new("url", server_url().trim()),
-        api::FieldValue::new("client_id", server_url().trim()),
-        api::FieldValue::new("browser", yt_browser().id()),
-    ];
-    if anonymous {
-        values.push(api::FieldValue::new("auth_method", "anonymous"));
-    } else if manual_token {
-        values.push(api::FieldValue::new("auth_method", "manual"));
-    } else {
-        values.push(api::FieldValue::new("auth_method", "browser"));
-    }
-    if is_apple {
-        values.push(api::FieldValue::new(
-            "storefront",
-            apple_music_storefront().trim(),
-        ));
-        values.push(api::FieldValue::new("language", apple_music_language()));
-    }
-    let draft = api::ServerDraft {
-        id: None,
-        name: server_name().trim().to_string(),
-        service: selected_service.id().to_string(),
-        values,
-        secrets: if manual_token {
-            vec![api::FieldValue::new(
-                "token",
-                apple_music_manual_token().trim(),
-            )]
-        } else {
-            Vec::new()
-        },
-    };
     let api = hooks::consume_api();
-
     spawn(
         async move {
             // The daemon owns what each service's form needs, so it is what
@@ -210,12 +189,11 @@ pub fn add_server(
             };
 
             server_name.set(String::new());
-            server_url.set(String::new());
-            server_service.set(MusicService::Jellyfin);
+            values.set(Vec::new());
             // Cleared with the rest of the form: it has been handed over, and
             // a credential left in a live signal is one the next server can
             // pick up.
-            apple_music_manual_token.set(String::new());
+            secrets.set(Vec::new());
             error.set(None);
             show_add_server.set(false);
 
