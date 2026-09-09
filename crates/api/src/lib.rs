@@ -135,6 +135,12 @@ pub trait LibraryApi: Send + Sync {
     /// this is a daemon call and not a filter the caller composes.
     async fn search(&self, query: String) -> Result<SearchResults, ApiError>;
 
+    /// Look for photos for these artists, storing what it finds. Names already
+    /// resolved, and names whose last search definitively found nothing, are
+    /// skipped -- so calling it on every visit is cheap. Results arrive as a
+    /// `Tracks` invalidation, not in the answer.
+    async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<(), ApiError>;
+
     async fn lyrics(&self, key: String) -> Result<LyricsView, ApiError>;
 
     async fn stats(&self) -> Result<StatsView, ApiError>;

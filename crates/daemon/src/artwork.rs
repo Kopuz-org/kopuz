@@ -162,28 +162,60 @@ impl ArtworkService {
                     None => first_track().await.map(|url| url.as_ref().to_string()),
                 }
             }
+            // The whole artist-image policy: a custom override, then the
+            // source's own photo, then -- for a library source only -- one of
+            // the artist's album covers. That last resort is what keeps a
+            // local grid from being a wall of placeholders; a remote catalog
+            // never uses it, because a liked track's album cover is not a
+            // picture of the artist.
             ArtworkEntity::Artist(name) => {
                 let (overrides, photos) = self.db.artist_images().await.map_err(db_error)?;
                 let normalized = name.trim().to_lowercase();
-                if let Some(path) = overrides.get(&normalized) {
-                    Some(format!(
+                let local_url = |path: &std::path::Path| {
+                    format!(
                         "artwork://local?p={}",
                         percent_encoding::utf8_percent_encode(
                             &path.to_string_lossy(),
                             percent_encoding::NON_ALPHANUMERIC,
                         )
-                    ))
-                } else {
-                    photos.get(&normalized).map(|photo| match photo {
-                        reader::ArtistImageRef::Local(path) => format!(
-                            "artwork://local?p={}",
-                            percent_encoding::utf8_percent_encode(
-                                &path.to_string_lossy(),
-                                percent_encoding::NON_ALPHANUMERIC,
-                            )
-                        ),
-                        reader::ArtistImageRef::Remote(url) => url.clone(),
-                    })
+                    )
+                };
+                let stored = overrides
+                    .get(&normalized)
+                    .map(|path| local_url(path))
+                    .or_else(|| {
+                        photos.get(&normalized).map(|photo| match photo {
+                            reader::ArtistImageRef::Local(path) => local_url(path),
+                            reader::ArtistImageRef::Remote(url) => url.clone(),
+                        })
+                    });
+                match stored {
+                    Some(url) => Some(url),
+                    None => {
+                        let source = server::source::active(self.db.clone(), &config);
+                        if source.capabilities().artist_view != server::source::ArtistView::Library
+                        {
+                            None
+                        } else {
+                            self.db
+                                .albums(&config.active_source)
+                                .await
+                                .map_err(db_error)?
+                                .into_iter()
+                                .find(|album| {
+                                    album.cover_path.is_some()
+                                        && album.artist.trim().to_lowercase() == normalized
+                                })
+                                .and_then(|album| {
+                                    server::cover::from_path(
+                                        &config,
+                                        album.cover_path.as_deref(),
+                                        width,
+                                    )
+                                })
+                                .map(|url| url.as_ref().to_string())
+                        }
+                    }
                 }
             }
         };

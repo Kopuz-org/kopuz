@@ -16,8 +16,8 @@ use config::{
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
-    use_active_source, use_albums, use_artist_images, use_artist_sample_tracks, use_artist_tracks,
-    use_artists, use_tracks_by_keys,
+    use_active_source, use_albums, use_artist_sample_tracks, use_artist_tracks, use_artists,
+    use_tracks_by_keys,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -65,18 +65,15 @@ pub fn Artist(
 
     let is_offline = use_context::<Signal<bool>>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
-    let fetched_artist_images = use_context::<Signal<::server::cover::FetchedArtistImages>>();
 
     let albums_res = use_albums(source);
     let artist_counts_res = use_artists(source);
     let sample_tracks_res = use_artist_sample_tracks(source, u32::MAX);
     let artist_memo = use_memo(move || artist_name.read().clone());
     let artist_tracks_res = use_artist_tracks(source, artist_memo);
-    let artist_images_res = use_artist_images();
-
-    // The photo-fetch pipeline (bulk for library servers, per-artist for remote
-    // catalogs) that fills `fetched_artist_images`.
-    hooks::artist_images::use_artist_photo_fetch(albums_res, sample_tracks_res, artist_images_res);
+    // Ask the daemon to fill in photos for the artists this grid shows; it
+    // stores what it finds and announces it, so the tiles resolve on re-read.
+    hooks::artist_images::use_artist_photo_fetch(albums_res, sample_tracks_res);
 
     // Server + offline: keys of tracks downloaded for offline, used to restrict the
     // artist/album listing to what's actually available. Empty otherwise (cheap).
@@ -154,9 +151,6 @@ pub fn Artist(
     let artists = use_memo(move || -> Vec<(String, Option<utils::CoverUrl>)> {
         let albums = albums_res.read().clone().unwrap_or_default();
         let sample = sample_tracks_res.read().clone().unwrap_or_default();
-        let images = artist_images_res.read().clone().unwrap_or_default();
-        let fetched = fetched_artist_images.read();
-        let conf = config.read();
         let offline = caps().downloads && *is_offline.read();
 
         // norm → (display name, album-art candidate: the artist's first album,
@@ -218,16 +212,8 @@ pub fn Artist(
         let out: Vec<(String, Option<utils::CoverUrl>)> = artist_map
             .into_iter()
             .filter(|(_, (display, _))| !offline || downloaded.contains(&display.to_lowercase()))
-            .map(|(norm, (display, album_cover))| {
-                let art = ::server::cover::ArtistArt::from_caches(
-                    &images,
-                    &fetched,
-                    &norm,
-                    &display,
-                    album_cover.as_deref(),
-                    caps().artist_view,
-                );
-                let cover = ::server::cover::artist(&conf, art, 320);
+            .map(|(_norm, (display, _album_cover))| {
+                let cover = Some(hooks::use_db_queries::artist_cover_url(&display));
                 (display, cover)
             })
             .collect();
@@ -307,31 +293,7 @@ pub fn Artist(
 
     let artist_cover = use_memo(move || {
         let artist = artist_name.read();
-        if artist.is_empty() {
-            return None;
-        }
-        let norm = normalize_artist_key(&artist);
-        let images = artist_images_res.read().clone().unwrap_or_default();
-        let fetched = fetched_artist_images.read();
-        let conf = config.read();
-        // Own album only — the album-artist match keeps a shared collab
-        // track's cover off the header, same as the grid.
-        let album_cover = albums_res
-            .read()
-            .clone()
-            .unwrap_or_default()
-            .iter()
-            .find(|a| a.artist.to_lowercase() == artist.to_lowercase())
-            .and_then(|a| a.cover_path.clone());
-        let art = ::server::cover::ArtistArt::from_caches(
-            &images,
-            &fetched,
-            &norm,
-            &artist,
-            album_cover.as_deref(),
-            caps().artist_view,
-        );
-        ::server::cover::artist(&conf, art, 512)
+        (!artist.is_empty()).then(|| hooks::use_db_queries::artist_cover_url(&artist))
     });
 
     let artist_albums = use_memo(move || {

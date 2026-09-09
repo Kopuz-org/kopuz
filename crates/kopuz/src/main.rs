@@ -29,6 +29,7 @@ mod artwork_protocol;
 mod backend;
 #[cfg(not(target_os = "android"))]
 mod chrome_trace;
+mod debug_panel;
 mod desktop_shell;
 #[cfg(not(target_os = "android"))]
 mod exit_flush;
@@ -507,9 +508,11 @@ fn App() -> Element {
     });
     let core = backend::core().expect("core started in main before launch");
     let db = core.db.clone();
-    // The one seam every hook and page will read through once they stop
-    // reaching for the database themselves.
+    // The one seam every hook and page reads through.
     use_context_provider(|| core.api.clone() as Arc<dyn api::KopuzApi>);
+    // The settings page renders this; only the app can supply it, since only
+    // the app holds the core's write-capable database handle.
+    use_context_provider(|| pages::DebugPanel(debug_panel::debug_db_section));
     // The UI reads through a read-only handle and operates through the cached
     // source handles below — it never gets a full `Db`, so it cannot reach a
     // write method (those live on `Storage`, not `ReadStore`). The full `Db` is

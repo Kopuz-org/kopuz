@@ -1,19 +1,23 @@
-//! The debug-only "Database (debug)" settings panel. Lives here (the query
-//! layer, which already depends on `db`) rather than in `pages`, so `pages` can
-//! drop its `db` dependency entirely and lose the ability to name the
-//! write-capable `db::Db`. Compiled to an empty element off the native debug
+//! The debug-only "Database (debug)" settings panel.
+//!
+//! Lives in the app because the app is what hosts the daemon core, so it is
+//! the only place that still holds a write-capable `db::Db`. The settings page
+//! renders it through a slot in context, which keeps `pages` and `hooks` free
+//! of the database entirely. Compiled to an empty element off the native debug
 //! build.
 
 use dioxus::prelude::*;
 
 #[cfg(all(debug_assertions, not(target_os = "android")))]
 pub fn debug_db_section() -> Element {
-    let db = use_context::<db::Db>();
-    let gens = crate::db_reactivity::use_generations();
+    let db = crate::backend::core()
+        .map(|core| core.db.clone())
+        .expect("the core is started before the UI mounts");
+    let gens = hooks::db_reactivity::use_generations();
     let mut status = use_signal(String::new);
 
     let bump_all = move || {
-        use crate::db_reactivity::Table;
+        use hooks::db_reactivity::Table;
         for t in [
             Table::Tracks,
             Table::Albums,

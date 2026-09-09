@@ -310,6 +310,14 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::search_results_from_proto(results.get_ref()))
     }
 
+    async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<(), ApiError> {
+        self.client()
+            .refresh_artist_artwork(Request::new(proto::RefreshArtistArtworkRequest { names }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
     async fn favorites(&self) -> Result<FavoritesView, ApiError> {
         let favorites = self
             .client()
