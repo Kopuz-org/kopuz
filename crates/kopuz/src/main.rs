@@ -227,7 +227,7 @@ fn main() -> std::process::ExitCode {
 
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
-            let initial_titlebar_mode = desktop_shell::read_titlebar_mode_from_disk();
+            let initial_titlebar_mode = core.config.titlebar_mode;
             window = window.with_decorations(initial_titlebar_mode == config::TitlebarMode::System);
         }
 
@@ -297,8 +297,6 @@ fn main() -> std::process::ExitCode {
         // JNI media session + classloader cache. Player::new() also calls this (idempotent
         // OnceLock), but doing it up front means the session exists before first playback.
         player::systemint::init();
-
-        let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
 
         /// Dioxus gates all task polling on the webview acknowledging the previous
         /// edit batch, and the stock interpreter only sends that ack from a
@@ -494,20 +492,13 @@ fn App() -> Element {
     // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
     let mut config = use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
     let core = backend::core().expect("core started in main before launch");
-    let db = core.db.clone();
     // The one seam every hook and page reads through.
     use_context_provider(|| core.api.clone() as Arc<dyn api::KopuzApi>);
     // The settings page renders this; only the app can supply it, since only
     // the app holds the core's write-capable database handle.
     use_context_provider(|| pages::DebugPanel(debug_panel::debug_db_section));
-    // The UI reads through a read-only handle and operates through the cached
-    // source handles below — it never gets a full `Db`, so it cannot reach a
-    // write method (those live on `Storage`, not `ReadStore`). The full `Db` is
-    // provided to the UI tree ONLY in debug builds, where the debug DB panel
-    // needs it.
-    use_context_provider(|| db.reads());
     #[cfg(debug_assertions)]
-    use_context_provider(|| db.clone());
+    use_context_provider(|| core.db.clone());
     hooks::db_reactivity::use_generations_provider();
     // Which settings a managed file pins, so those rows render locked. The
     // daemon reads those layers; nothing here opens the file.
@@ -619,13 +610,13 @@ fn App() -> Element {
                 }
             ) && !*close_hides_window.peek();
         if shutting_down {
-            if let Some(core) = backend::core() {
+            if backend::core().is_some() {
                 // Library/playlists/favorites need no flush — every mutation
                 // already committed as a targeted write when it happened. The
                 // queue is the core's: it owns the store and persists on the
                 // way out, so only the config surface is ours to push.
                 let cfg = (*config_loaded_ok.peek()).then(|| config.peek().clone());
-                exit_flush::persist_on_fresh_thread(core.db.clone(), cfg);
+                exit_flush::persist_on_fresh_thread(cfg);
             }
             backend::shutdown();
             // After the persists, so they (and any failure warnings) land in
@@ -698,8 +689,6 @@ fn App() -> Element {
     // search at render time.
     let mut selected_artist_channel_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
-    let fetched_artist_images: Signal<::server::cover::FetchedArtistImages> =
-        use_signal(Default::default);
     let mut search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
@@ -870,82 +859,6 @@ fn App() -> Element {
             }
             utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
         }
-    });
-
-    // Keepalive is rearm-on-account-change, not rearm-on-every-config-
-    // write. Re-running the effect on every config save would spawn
-    // a fresh loop that immediately fires run_rotation, spamming
-    // /verify_session a dozen times a minute on any settings churn.
-    //
-    // The signal stores the YT identity (a stable hash of the SAPISID
-    // cookie) we currently have a loop running against. The effect
-    // re-runs cheap, but only spawns a new loop when the identity
-    // changes (sign-in, account switch). Sign-out clears the
-    // identity and the running loop exits on its next tick.
-    let mut yt_keepalive_identity = use_signal(|| None::<String>);
-    use_effect(move || {
-        if !*initial_load_done.read() {
-            return;
-        }
-        let yt_cookies: Option<String> = config.read().server.as_ref().and_then(|s| {
-            (s.service == config::MusicService::YtMusic)
-                .then(|| s.access_token.clone())
-                .flatten()
-                .filter(|t| !t.is_empty())
-        });
-        let live_identity = yt_cookies
-            .as_deref()
-            .and_then(server::ytmusic::derive_user_id);
-        if live_identity == *yt_keepalive_identity.peek() {
-            return;
-        }
-        // Identity changed (fresh sign-in, account switch, or
-        // sign-out): the previously-running loop (if any) will read
-        // the new identity on its next tick and exit. Update the
-        // tracked identity; spawn a fresh loop only if we still have
-        // valid auth.
-        yt_keepalive_identity.set(live_identity.clone());
-        let Some(my_identity) = live_identity else {
-            return;
-        };
-        spawn(async move {
-            updates::run_rotation(config).await;
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-                if yt_keepalive_identity.peek().as_deref() != Some(my_identity.as_str()) {
-                    return;
-                }
-                updates::run_rotation(config).await;
-            }
-        });
-    });
-
-    let mut spotify_refresh_identity = use_signal(|| None::<String>);
-    use_effect(move || {
-        if !*initial_load_done.read() {
-            return;
-        }
-        let identity: Option<String> = config.read().server.as_ref().and_then(|s| {
-            (s.service == config::MusicService::Spotify && s.access_token.is_some())
-                .then(|| s.id.clone().unwrap_or_else(|| s.url.clone()))
-        });
-        if identity == *spotify_refresh_identity.peek() {
-            return;
-        }
-        spotify_refresh_identity.set(identity.clone());
-        let Some(my_identity) = identity else {
-            return;
-        };
-        spawn(async move {
-            updates::run_spotify_refresh(config).await;
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
-                if spotify_refresh_identity.peek().as_deref() != Some(my_identity.as_str()) {
-                    return;
-                }
-                updates::run_spotify_refresh(config).await;
-            }
-        });
     });
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -1293,7 +1206,6 @@ fn App() -> Element {
     ));
     provide_context(scroll_positions);
     provide_context(components::source_switcher::SettingsAnchor(settings_anchor));
-    provide_context(fetched_artist_images);
     let mut nav_history = use_signal(Vec::<components::NavSnapshot>::new);
     let mut nav_restoring = use_signal(|| false);
     let mut nav_last = use_signal(|| None::<components::NavSnapshot>);

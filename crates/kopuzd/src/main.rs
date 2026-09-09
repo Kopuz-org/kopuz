@@ -15,14 +15,11 @@ fn parse_args() -> Result<ServeArgs, String> {
                     iter.next().ok_or("--socket requires a path")?,
                 ));
             }
-            "--supervised" => args.supervised = true,
             "--db-path" => {
                 args.db_path = Some(iter.next().ok_or("--db-path requires a path")?);
             }
             "--help" | "-h" => {
-                return Err(
-                    "usage: kopuzd [--socket <path>] [--db-path <file>] [--supervised]".to_string(),
-                );
+                return Err("usage: kopuzd [--socket <path>] [--db-path <file>]".to_string());
             }
             other => return Err(format!("unknown argument: {other}")),
         }

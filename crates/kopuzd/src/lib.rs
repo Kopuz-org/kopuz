@@ -22,15 +22,13 @@ use daemon::boot::{Core, CoreArgs};
 
 pub mod service;
 
-pub use service::{GrpcState, Supervisor, bind_socket, serve};
+pub use service::{GrpcState, bind_socket, serve};
 
 /// What the daemon binary needs on top of a core.
 #[derive(Debug, Default)]
 pub struct ServeArgs {
     pub socket: Option<PathBuf>,
     pub db_path: Option<String>,
-    /// Launched by a frontend: exit when that frontend goes away.
-    pub supervised: bool,
 }
 
 impl ServeArgs {
@@ -50,13 +48,12 @@ pub fn default_socket_path() -> Option<PathBuf> {
     Some(dir.join("kopuzd.sock"))
 }
 
-fn state(core: &Core, supervisor: Option<Arc<Supervisor>>) -> Arc<GrpcState> {
+fn state(core: &Core) -> Arc<GrpcState> {
     Arc::new(GrpcState {
         api: core.api.clone(),
         artwork: Some(core.artwork.clone()),
         session: core.session.clone(),
         started: Instant::now(),
-        supervisor,
     })
 }
 
@@ -64,7 +61,7 @@ fn state(core: &Core, supervisor: Option<Arc<Supervisor>>) -> Arc<GrpcState> {
 pub async fn listen(core: &Core, socket: &Path) -> std::io::Result<()> {
     let listener = bind_socket(socket)?;
     tracing::info!(path = %socket.display(), "kopuzd listening");
-    serve(listener, state(core, None)).await
+    serve(listener, state(core)).await
 }
 
 /// Release the socket. The core's own flush is [`daemon::boot::shutdown`].
@@ -99,28 +96,10 @@ pub async fn run(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
         return Err("no usable runtime directory for the daemon socket".into());
     };
 
-    let supervisor = args.supervised.then(|| Arc::new(Supervisor::default()));
-    let orphaned = {
-        let supervisor = supervisor.clone();
-        async move {
-            match supervisor {
-                // A supervised daemon exists to serve the frontend that
-                // started it, so losing that frontend is a reason to exit, not
-                // an idle state to sit in.
-                Some(supervisor) => supervisor.orphaned().await,
-                None => std::future::pending().await,
-            }
-        }
-    };
-
     let listener = bind_socket(&socket)?;
     tracing::info!(path = %socket.display(), "kopuzd listening");
     let result = tokio::select! {
-        served = serve(listener, state(&core, supervisor)) => served.map_err(Into::into),
-        () = orphaned => {
-            tracing::info!("frontend detached; supervised daemon exiting");
-            Ok(())
-        }
+        served = serve(listener, state(&core)) => served.map_err(Into::into),
         signal = tokio::signal::ctrl_c() => {
             signal?;
             tracing::info!("shutting down");

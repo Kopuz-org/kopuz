@@ -1,5 +1,3 @@
-use dioxus::prelude::*;
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AvailableUpdate {
     pub version: String,
@@ -73,67 +71,5 @@ pub async fn fetch_available() -> Option<AvailableUpdate> {
         })
     } else {
         None
-    }
-}
-
-pub async fn run_rotation(mut config: Signal<config::AppConfig>) {
-    let cookies = match config.peek().server.as_ref() {
-        Some(s) if s.service == config::MusicService::YtMusic => s.access_token.clone(),
-        _ => return,
-    };
-    let Some(cookies) = cookies else { return };
-    if cookies.is_empty() {
-        return;
-    }
-    let started = std::time::Instant::now();
-    let from_len = cookies.len();
-    let outcome =
-        utils::offload(
-            async move { server::ytmusic::verify_session_keepalive::tick(&cookies).await },
-        )
-        .await;
-    match outcome {
-        Ok(Some(updated)) => {
-            tracing::debug!(
-                secs = started.elapsed().as_secs_f32(),
-                from = from_len,
-                to = updated.len(),
-                "verify_session OK - jar rotated",
-            );
-            if let Some(srv) = config.write().server.as_mut() {
-                srv.access_token = Some(updated);
-            }
-        }
-        Ok(None) => {}
-        Err(e) => tracing::warn!(error = %e, "verify_session failed"),
-    }
-}
-
-/// Refresh the active Spotify server's OAuth access token from its refresh token
-/// (access tokens expire ~hourly) and write the re-packed pair back to config.
-pub async fn run_spotify_refresh(mut config: Signal<config::AppConfig>) {
-    let (packed, client_id) = match config.peek().server.as_ref() {
-        Some(s) if s.service == config::MusicService::Spotify => {
-            (s.access_token.clone(), s.url.clone())
-        }
-        _ => return,
-    };
-    let Some(packed) = packed else { return };
-    if client_id.trim().is_empty() {
-        return;
-    }
-    match server::spotify::auth::refresh_packed(&packed, client_id.clone()).await {
-        Ok(new_packed) => {
-            let mut cfg = config.write();
-            if let Some(srv) = cfg.server.as_mut()
-                && srv.service == config::MusicService::Spotify
-                && srv.url == client_id
-                && srv.access_token.as_deref() == Some(packed.as_str())
-            {
-                srv.access_token = Some(new_packed);
-                tracing::debug!("spotify token refreshed");
-            }
-        }
-        Err(e) => tracing::warn!(error = %e, "spotify token refresh failed"),
     }
 }
