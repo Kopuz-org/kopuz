@@ -536,7 +536,14 @@ impl QueueMaterializer for LibraryService {
             QueueContext::Radio {
                 station_id,
                 stream_id,
-            } => Ok(vec![self.radio_track(station_id, stream_id)]),
+            } => {
+                // A station that came from the public directory gets its play
+                // reported back to it, which is how that directory ranks.
+                if stream_id == radio::browser::BROWSER_STREAM_ID {
+                    radio::browser::count_click(station_id);
+                }
+                Ok(vec![self.radio_track(station_id, stream_id)])
+            }
             QueueContext::TrackRadio { key } => self.catalog_service()?.track_radio(key).await,
             QueueContext::PlaylistRadio { id } => self.catalog_service()?.playlist_radio(id).await,
         }

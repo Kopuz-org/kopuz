@@ -479,6 +479,8 @@ discover_requires_ytmusic = A Felfedezés csak akkor érhető el, ha a YouTube M
 discover_show_all = Összes megjelenítése
 yt_anon_playlists = Jelentkezz be a YouTube Musicba a könyvtárad lejátszási listáinak megtekintéséhez.
 yt_anon_favorites = Jelentkezz be a YouTube Musicba a kedvelt dalaid megtekintéséhez.
+yt_anon_discover = Jelentkezz be a YouTube Musicba a Felfedezés böngészéséhez.
+artist_none_selected = Nincs kiválasztott előadó
 
 # Metadata Viewer / Editor
 view_metadata = Metaadatok megtekintése

@@ -479,6 +479,8 @@ discover_requires_ytmusic = 탐색은 YouTube Music이 활성 서버일 때만 �
 discover_show_all = 모두 보기
 yt_anon_playlists = 라이브러리 재생목록을 보려면 YouTube Music에 로그인하세요.
 yt_anon_favorites = 좋아요 표시한 곡을 보려면 YouTube Music에 로그인하세요.
+yt_anon_discover = 발견을 둘러보려면 YouTube Music에 로그인하세요.
+artist_none_selected = 선택된 아티스트가 없습니다
 
 # Metadata Viewer / Editor
 view_metadata = 메타데이터 보기

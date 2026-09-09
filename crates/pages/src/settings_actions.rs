@@ -148,10 +148,10 @@ pub fn add_registry(
     registry_loading.set(true);
     registry_error.set(None);
 
+    let api = hooks::consume_api();
     spawn(
         async move {
-            let mut temp_registry = radio::registry::StationRegistry::new();
-            match temp_registry.import_registry(&url).await {
+            match api.validate_radio_registry(url.clone()).await {
                 Ok(_) => {
                     let mut current_config = config.write();
                     if !current_config.radio_registries.iter().any(|r| r.url == url) {

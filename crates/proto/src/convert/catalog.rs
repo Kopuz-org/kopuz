@@ -141,10 +141,12 @@ pub fn radio_station_to_proto(value: &api::RadioStationInfo) -> RadioStationInfo
             .map(|stream| RadioStreamInfo {
                 id: stream.id.clone(),
                 name: stream.name.clone(),
+                icon: stream.icon.clone(),
             })
             .collect(),
         pinned: value.pinned,
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
+        icon: value.icon.clone(),
     }
 }
 
@@ -160,10 +162,12 @@ pub fn radio_station_from_proto(value: &RadioStationInfo) -> api::RadioStationIn
             .map(|stream| api::RadioStreamInfo {
                 id: stream.id.clone(),
                 name: stream.name.clone(),
+                icon: stream.icon.clone(),
             })
             .collect(),
         pinned: value.pinned,
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
+        icon: value.icon.clone(),
     }
 }
 
@@ -265,9 +269,11 @@ mod tests {
             streams: vec![api::RadioStreamInfo {
                 id: "hi".into(),
                 name: "High".into(),
+                icon: Some("fa-solid fa-tower-broadcast".into()),
             }],
             pinned: true,
             artwork: None,
+            icon: "fa-solid fa-radio".into(),
         };
         assert_eq!(
             station,

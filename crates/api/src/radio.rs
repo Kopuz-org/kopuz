@@ -13,6 +13,8 @@
 pub struct RadioStreamInfo {
     pub id: String,
     pub name: String,
+    /// An icon name the registry authored, for a client that draws icons.
+    pub icon: Option<String>,
 }
 
 /// A station as a browser renders it. `name` and `description` may be
@@ -24,6 +26,10 @@ pub struct RadioStationInfo {
     pub description: String,
     pub tags: Vec<String>,
     pub streams: Vec<RadioStreamInfo>,
+    /// Whether the station shows in the client's own selected list, which is
+    /// what [`crate::LibraryApi::pin_radio_station`] toggles.
     pub pinned: bool,
     pub artwork: Option<crate::ArtworkRef>,
+    /// An icon name the registry authored, for a client that draws icons.
+    pub icon: String,
 }

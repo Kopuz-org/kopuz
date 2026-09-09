@@ -479,6 +479,8 @@ discover_requires_ytmusic = גילוי זמין רק כאשר YouTube Music הו
 discover_show_all = הצג הכל
 yt_anon_playlists = היכנס ל-YouTube Music כדי לראות את רשימות ההשמעה בספרייה שלך.
 yt_anon_favorites = היכנס ל-YouTube Music כדי לראות את השירים שאהבת.
+yt_anon_discover = היכנס ל-YouTube Music כדי לעיין בגלה.
+artist_none_selected = לא נבחר אמן
 
 # Metadata Viewer / Editor
 view_metadata = הצג מטא-נתונים

@@ -317,6 +317,10 @@ impl api::LibraryApi for LocalApi {
         self.radio()?.pin(&id, pinned).await
     }
 
+    async fn validate_radio_registry(&self, url: String) -> Result<u32, ApiError> {
+        self.radio()?.validate_registry(&url).await
+    }
+
     async fn update_track_metadata(
         &self,
         patch: api::TrackMetadataPatch,

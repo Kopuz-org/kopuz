@@ -541,9 +541,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
                                 if is_enabling && !url.is_empty() {
                                     registry_toggle_error.set(None);
+                                    let api = hooks::consume_api();
                                     spawn(async move {
-                                        let mut temp_registry = radio::registry::StationRegistry::new();
-                                        match temp_registry.import_registry(&url).await {
+                                        match api.validate_radio_registry(url.clone()).await {
                                             Ok(_) => {
                                                 let mut cfg = config.write();
                                                 if let Some(entry) = cfg
