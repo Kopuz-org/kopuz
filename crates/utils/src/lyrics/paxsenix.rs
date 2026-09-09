@@ -3,8 +3,8 @@ use std::time::Duration;
 use super::{
     ItunesSearchResponse, ItunesSong, LyricChunk, LyricLine, Lyrics, PaxsenixAppleLyricLine,
     PaxsenixAppleLyricPart, PaxsenixAppleLyricsResponse, PaxsenixYoutubeSearchResult,
-    has_usable_line_timing, lrc_has_usable_timing, lyrics_kind, lyrics_match_score, parse_lrc,
-    timed_line_count, timed_part_count,
+    ProviderReach, has_usable_line_timing, lrc_has_usable_timing, lyrics_kind, lyrics_match_score,
+    parse_lrc, timed_line_count, timed_part_count,
 };
 
 const PAXSENIX_ROOT_URL: &str = "https://lyrics.paxsenix.org";
@@ -18,6 +18,7 @@ pub(super) async fn fetch_from_paxsenix_youtube(
     title: &str,
     duration: u64,
     track_path: &str,
+    reach: &ProviderReach,
 ) -> Option<Lyrics> {
     let client = reqwest::Client::new();
     let video_id = if let Some(video_id) = extract_youtube_video_id(track_path) {
@@ -40,6 +41,7 @@ pub(super) async fn fetch_from_paxsenix_youtube(
                     target: "kopuz::lyrics",
                     "paxsenix_youtube search failed={error}"
                 );
+                reach.unreachable();
             })
             .ok()?
             .json::<Vec<PaxsenixYoutubeSearchResult>>()
@@ -74,6 +76,7 @@ pub(super) async fn fetch_from_paxsenix_youtube(
                 target: "kopuz::lyrics",
                 "paxsenix_youtube lyrics failed={error}"
             );
+            reach.unreachable();
         })
         .ok()?
         .text()
@@ -153,6 +156,7 @@ pub(super) async fn fetch_from_paxsenix_apple_music(
     artist: &str,
     title: &str,
     duration: u64,
+    reach: &ProviderReach,
 ) -> Option<Lyrics> {
     let query = format!("{title} {artist}");
     let query = query.trim();
@@ -177,6 +181,7 @@ pub(super) async fn fetch_from_paxsenix_apple_music(
                 target: "kopuz::lyrics",
                 "paxsenix_apple itunes_search failed={error}"
             );
+            reach.unreachable();
         })
         .ok()?
         .json::<ItunesSearchResponse>()
@@ -221,6 +226,7 @@ pub(super) async fn fetch_from_paxsenix_apple_music(
                 target: "kopuz::lyrics",
                 "paxsenix_apple lyrics failed={error}"
             );
+            reach.unreachable();
         })
         .ok()?
         .json::<PaxsenixAppleLyricsResponse>()

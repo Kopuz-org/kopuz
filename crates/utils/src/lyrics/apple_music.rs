@@ -40,6 +40,7 @@ pub fn parse_ttml(ttml: &str) -> Option<Lyrics> {
 /// to avoid depending on the server crate.
 pub(super) async fn fetch_apple_music_lyrics(
     auth: &super::request::AppleMusicLyricsAuth,
+    reach: &super::ProviderReach,
 ) -> Option<Lyrics> {
     const AM_BASE: &str = "https://amp-api.music.apple.com";
     const AM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -48,7 +49,7 @@ pub(super) async fn fetch_apple_music_lyrics(
     let client = reqwest::Client::new();
 
     // Resolve library ID to catalog ID if needed.
-    let catalog_id = resolve_catalog_id(&client, auth).await;
+    let catalog_id = resolve_catalog_id(&client, auth, reach).await;
     let catalog_id = match catalog_id {
         Some(id) => id,
         None => {
@@ -77,6 +78,7 @@ pub(super) async fn fetch_apple_music_lyrics(
             .timeout(AM_TIMEOUT)
             .send()
             .await
+            .map_err(|_| reach.unreachable())
             .ok();
 
         let resp = match resp {
@@ -145,6 +147,7 @@ pub(super) async fn fetch_apple_music_lyrics(
 async fn resolve_catalog_id(
     client: &reqwest::Client,
     auth: &super::request::AppleMusicLyricsAuth,
+    reach: &super::ProviderReach,
 ) -> Option<String> {
     if auth.catalog_id.chars().all(|c| c.is_ascii_digit()) {
         return Some(auth.catalog_id.clone());
@@ -165,6 +168,7 @@ async fn resolve_catalog_id(
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
+        .map_err(|_| reach.unreachable())
         .ok()?;
 
     if !resp.status().is_success() {

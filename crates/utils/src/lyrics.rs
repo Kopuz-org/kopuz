@@ -25,6 +25,35 @@ const SERVER_LYRICS_TIMEOUT: Duration = Duration::from_secs(5);
 const LYRICS_INFLIGHT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const LYRICS_INFLIGHT_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Whether every provider in a run got as far as an answer.
+///
+/// A request that never left the machine has said nothing about the track, so
+/// it must not read as one. Only a failure to *send* counts: a reply that
+/// arrives and will not parse is the provider answering badly, and the rest of
+/// the chain still had its say.
+#[derive(Default)]
+struct ProviderReach(std::sync::atomic::AtomicBool);
+
+impl ProviderReach {
+    fn unreachable(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn every_provider_answered(&self) -> bool {
+        !self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// A finished lookup.
+pub struct LyricsFetch {
+    pub lyrics: Option<Lyrics>,
+    /// Whether an absence is the answer. False when a provider could not be
+    /// reached, and then the caller must not store the miss: a track silenced
+    /// by one dropped request would stay silent for as long as the entry
+    /// lives, long after the network came back.
+    pub conclusive: bool,
+}
+
 macro_rules! lyrics_debug {
     ($($arg:tt)*) => {
         if $crate::lyrics::lyrics_terminal_debug_enabled() {
@@ -127,13 +156,19 @@ struct PaxsenixYoutubeSearchResult {
 // as a span field, which would leak server_token (and url/user_id) into the
 // trace + log. Record only artist/title, explicitly.
 #[tracing::instrument(name = "lyrics.fetch", skip_all, fields(artist = %request.artist, title = %request.title))]
-pub async fn fetch_lyrics_for_request(request: &LyricsRequest) -> Option<Lyrics> {
-    fetch_lyrics_with_progress(request, true, |_| {}).await
+pub async fn fetch_lyrics_for_request(request: &LyricsRequest) -> LyricsFetch {
+    let reach = ProviderReach::default();
+    let lyrics = fetch_lyrics_with_progress(request, true, &reach, |_| {}).await;
+    LyricsFetch {
+        conclusive: lyrics.is_some() || reach.every_provider_answered(),
+        lyrics,
+    }
 }
 
 async fn fetch_lyrics_with_progress<F>(
     request: &LyricsRequest,
     allow_lrclib: bool,
+    reach: &ProviderReach,
     mut on_progress: F,
 ) -> Option<Lyrics>
 where
@@ -241,6 +276,7 @@ where
                 cache_key_hash,
                 wait_start.elapsed().as_millis()
             );
+            reach.unreachable();
             return None;
         }
     };
@@ -317,7 +353,7 @@ where
                 (extract_server_id(track_path, "jellyfin:"), server_token)
             {
                 let started = Instant::now();
-                let server_lyrics = fetch_jellyfin_lyrics(&item_id, server_url, token).await;
+                let server_lyrics = fetch_jellyfin_lyrics(&item_id, server_url, token, reach).await;
                 tracing::info!(
                     target: "kopuz::lyrics",
                     "server_jellyfin key_hash={} elapsed_ms={} kind={}",
@@ -363,9 +399,10 @@ where
                 server_token,
             ) {
                 let started = Instant::now();
-                let server_lyrics =
-                    fetch_subsonic_lyrics(&song_id, server_url, username, password, artist, title)
-                        .await;
+                let server_lyrics = fetch_subsonic_lyrics(
+                    &song_id, server_url, username, password, artist, title, reach,
+                )
+                .await;
                 tracing::info!(
                     target: "kopuz::lyrics",
                     "server_subsonic key_hash={} elapsed_ms={} kind={}",
@@ -406,7 +443,7 @@ where
         && track_path.starts_with("applemusic:")
     {
         let started = Instant::now();
-        let am_lyrics = apple_music::fetch_apple_music_lyrics(am_auth).await;
+        let am_lyrics = apple_music::fetch_apple_music_lyrics(am_auth, reach).await;
         tracing::info!(
             target: "kopuz::lyrics",
             "apple_music key_hash={} elapsed_ms={} kind={}",
@@ -448,10 +485,10 @@ where
     let youtube_started = Instant::now();
     let musixmatch_started = Instant::now();
     let lrclib_started = Instant::now();
-    let apple = fetch_from_paxsenix_apple_music(artist, title, duration);
-    let youtube = fetch_from_paxsenix_youtube(artist, title, duration, track_path);
-    let musixmatch = fetch_from_musixmatch_enhanced(artist, title);
-    let lrclib = fetch_from_lrclib(artist, title, album, duration);
+    let apple = fetch_from_paxsenix_apple_music(artist, title, duration, reach);
+    let youtube = fetch_from_paxsenix_youtube(artist, title, duration, track_path, reach);
+    let musixmatch = fetch_from_musixmatch_enhanced(artist, title, reach);
+    let lrclib = fetch_from_lrclib(artist, title, album, duration, reach);
     tokio::pin!(apple);
     tokio::pin!(youtube);
     tokio::pin!(musixmatch);
@@ -611,7 +648,9 @@ where
     }
 
     let fetched = fallback;
-    remember_lyrics(&cache_key, &fetched);
+    if fetched.is_some() || reach.every_provider_answered() {
+        remember_lyrics(&cache_key, &fetched);
+    }
     tracing::info!(
         target: "kopuz::lyrics",
         "selected key_hash={} source=final kind={} total_ms={}",
@@ -778,6 +817,7 @@ async fn fetch_from_lrclib(
     title: &str,
     album: &str,
     duration: u64,
+    reach: &ProviderReach,
 ) -> Option<Lyrics> {
     let mut url = format!(
         "https://lrclib.net/api/get?artist_name={}&track_name={}",
@@ -809,6 +849,7 @@ async fn fetch_from_lrclib(
                 target: "kopuz::lyrics",
                 "lrclib get failed={error}"
             );
+            reach.unreachable();
             return None;
         }
     };
@@ -843,6 +884,7 @@ async fn fetch_from_lrclib(
                 target: "kopuz::lyrics",
                 "lrclib search failed={error}"
             );
+            reach.unreachable();
             return fallback;
         }
     };
@@ -886,6 +928,16 @@ mod tests {
         paxsenix_apple_to_lyrics,
     };
     use super::*;
+
+    #[test]
+    fn a_run_is_conclusive_until_a_provider_cannot_be_reached() {
+        let reach = ProviderReach::default();
+        assert!(reach.every_provider_answered());
+
+        reach.unreachable();
+
+        assert!(!reach.every_provider_answered());
+    }
 
     #[test]
     fn parses_regular_lrc_lines() {

@@ -2,8 +2,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::{
-    Lyrics, has_usable_line_timing, lrc_has_usable_timing, lyrics_match_score, parse_lrc,
-    timed_line_count, timed_part_count,
+    Lyrics, ProviderReach, has_usable_line_timing, lrc_has_usable_timing, lyrics_match_score,
+    parse_lrc, timed_line_count, timed_part_count,
 };
 
 const MUSIXMATCH_ROOT_URL: &str = "https://apic-desktop.musixmatch.com/ws/1.1/";
@@ -16,7 +16,11 @@ struct MusixmatchToken {
     expires_at_ms: u128,
 }
 
-pub(super) async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyrics> {
+pub(super) async fn fetch_from_musixmatch_enhanced(
+    artist: &str,
+    title: &str,
+    reach: &ProviderReach,
+) -> Option<Lyrics> {
     let query = format!("{title} {artist}");
     let query = query.trim();
     if query.is_empty() {
@@ -34,6 +38,7 @@ pub(super) async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) ->
             ("page", "1".to_string()),
         ],
         true,
+        reach,
     )
     .await?;
     tracing::info!(
@@ -77,6 +82,7 @@ pub(super) async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) ->
         "track.richsync.get",
         vec![("track_id", track_id)],
         true,
+        reach,
     )
     .await?;
     tracing::info!(
@@ -123,9 +129,10 @@ async fn musixmatch_get(
     action: &str,
     mut query: Vec<(&str, String)>,
     needs_token: bool,
+    reach: &ProviderReach,
 ) -> Option<serde_json::Value> {
     if needs_token {
-        let token = musixmatch_token(client).await?;
+        let token = musixmatch_token(client, reach).await?;
         query.push(("usertoken", token));
     }
 
@@ -143,6 +150,7 @@ async fn musixmatch_get(
                 target: "kopuz::lyrics",
                 "musixmatch request action={action} failed={error}"
             );
+            reach.unreachable();
         })
         .ok()?
         .json::<serde_json::Value>()
@@ -156,7 +164,7 @@ async fn musixmatch_get(
         .ok()
 }
 
-async fn musixmatch_token(client: &reqwest::Client) -> Option<String> {
+async fn musixmatch_token(client: &reqwest::Client, reach: &ProviderReach) -> Option<String> {
     let now = now_ms();
     if let Some(token) = musixmatch_token_cache().lock().ok().and_then(|cache| {
         cache
@@ -182,6 +190,7 @@ async fn musixmatch_token(client: &reqwest::Client) -> Option<String> {
                 target: "kopuz::lyrics",
                 "musixmatch token request failed={error}"
             );
+            reach.unreachable();
         })
         .ok()?
         .json::<serde_json::Value>()
