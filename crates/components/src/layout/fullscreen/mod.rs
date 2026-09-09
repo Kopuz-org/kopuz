@@ -41,7 +41,6 @@ pub fn Fullscreen(
     current_song_title: Signal<String>,
     current_song_artist: Signal<String>,
     current_song_bitrate: Signal<u16>,
-    current_song_cover_url: Signal<String>,
     current_song_album: Signal<String>,
     volume: Signal<f32>,
     persisted_volume: Signal<f32>,
@@ -55,8 +54,7 @@ pub fn Fullscreen(
     let config = use_context::<Signal<AppConfig>>();
 
     let lyrics = use_fullscreen_lyrics();
-    let (background_style, cover_background) =
-        use_fullscreen_background(palette, current_song_cover_url);
+    let (background_style, cover_background) = use_fullscreen_background(palette);
     let items = display_order_items(&ctrl, &queue);
 
     if cfg!(target_os = "android") {
@@ -71,7 +69,6 @@ pub fn Fullscreen(
                 current_song_artist,
                 current_song_album,
                 current_song_bitrate,
-                current_song_cover_url,
                 current_queue_index,
                 items,
                 lyrics,
@@ -93,7 +90,6 @@ pub fn Fullscreen(
                 current_song_artist,
                 current_song_album,
                 current_song_bitrate,
-                current_song_cover_url,
                 current_queue_index,
                 items,
                 lyrics,

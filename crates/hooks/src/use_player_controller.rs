@@ -35,7 +35,6 @@ pub struct PlayerController {
     pub current_song_duration: Signal<u64>,
     pub current_song_progress: Signal<u64>,
     pub buffered_ranges: Signal<Vec<BufferedRange>>,
-    pub current_song_cover_url: Signal<String>,
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
     pub config: Signal<AppConfig>,
@@ -454,6 +453,13 @@ impl PlayerController {
         *self.current_song_progress.peek() as f64
     }
 
+    /// The picture for what is playing, at the size the calling surface draws
+    /// it. Read reactively, so a memo built on it follows the track.
+    pub fn current_cover_url(&self, size: crate::artwork::Size) -> Option<String> {
+        crate::artwork::url(self.current_artwork.read().as_ref(), size)
+            .map(|cover| cover.as_ref().to_string())
+    }
+
     pub(crate) fn clear_current_track_metadata(&mut self) {
         self.current_song_title.set(String::new());
         self.current_song_artist.set(String::new());
@@ -463,7 +469,6 @@ impl PlayerController {
         self.current_song_duration.set(0);
         self.current_song_progress.set(0);
         self.buffered_ranges.set(Vec::new());
-        self.current_song_cover_url.set(String::new());
         self.current_track_snapshot.set(None);
     }
 }
@@ -481,7 +486,6 @@ pub fn use_player_controller(
     current_song_bitrate: Signal<u16>,
     current_song_duration: Signal<u64>,
     current_song_progress: Signal<u64>,
-    current_song_cover_url: Signal<String>,
     current_track_snapshot: Signal<Option<Track>>,
     volume: Signal<f32>,
     config: Signal<AppConfig>,
@@ -522,7 +526,6 @@ pub fn use_player_controller(
         current_song_duration,
         current_song_progress,
         buffered_ranges,
-        current_song_cover_url,
         current_track_snapshot,
         volume,
         config,

@@ -19,7 +19,6 @@ pub fn BottombarVaxry(
     mut current_queue_index: Signal<usize>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
-    mut current_song_cover_url: Signal<String>,
     mut volume: Signal<f32>,
     mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
@@ -51,7 +50,9 @@ pub fn BottombarVaxry(
         } else {
             0.0
         };
-        let cover = current_song_cover_url.read().clone();
+        let cover = ctrl
+            .current_cover_url(hooks::artwork::Size::Thumb)
+            .unwrap_or_default();
         let fav = is_fav();
         return rsx! {
             div {
@@ -102,6 +103,9 @@ pub fn BottombarVaxry(
     }
 
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+    let cover = ctrl
+        .current_cover_url(hooks::artwork::Size::Thumb)
+        .unwrap_or_default();
     let is_favorite = is_fav();
     let heart_class = if is_favorite {
         "text-red-400 hover:text-red-300 transition-colors"
@@ -147,10 +151,10 @@ pub fn BottombarVaxry(
             if !bar_as_fullscreen {
                 div {
                     class: "w-11 h-11 rounded overflow-hidden bg-white/5 shrink-0 flex items-center justify-center",
-                    if current_song_cover_url.read().is_empty() {
+                    if cover.is_empty() {
                         i { class: "fa-solid fa-music text-white/20 text-xs" }
                     } else {
-                        img { src: "{current_song_cover_url}", class: "w-full h-full object-cover" }
+                        img { src: "{cover}", class: "w-full h-full object-cover" }
                     }
                 }
             }

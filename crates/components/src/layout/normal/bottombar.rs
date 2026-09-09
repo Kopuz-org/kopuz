@@ -19,7 +19,6 @@ pub fn BottombarNormal(
     mut current_queue_index: Signal<usize>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
-    mut current_song_cover_url: Signal<String>,
     mut volume: Signal<f32>,
     mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
@@ -51,7 +50,9 @@ pub fn BottombarNormal(
         } else {
             0.0
         };
-        let cover = current_song_cover_url.read().clone();
+        let cover = ctrl
+            .current_cover_url(hooks::artwork::Size::Thumb)
+            .unwrap_or_default();
         return rsx! {
             div {
                 class: "shrink-0 mx-2 mb-[env(safe-area-inset-bottom)] h-[68px] bg-[#121212]/95 backdrop-blur-3xl border border-white/10 rounded-[24px] flex items-center px-3 gap-3 relative overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.8)]",
@@ -96,6 +97,9 @@ pub fn BottombarNormal(
     }
 
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+    let cover = ctrl
+        .current_cover_url(hooks::artwork::Size::Thumb)
+        .unwrap_or_default();
     let is_favorite = is_fav();
     let heart_class = if is_favorite {
         "ml-2 w-9 h-9 rounded-full flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-white/10 transition-colors active:scale-95"
@@ -136,14 +140,14 @@ pub fn BottombarNormal(
                 if !bar_as_fullscreen {
                     div {
                         class: "w-14 h-14 bg-white/5 rounded-md flex-shrink-0 overflow-hidden",
-                        if current_song_cover_url.read().is_empty() {
+                        if cover.is_empty() {
                             div {
                                 class: "w-full h-full flex items-center justify-center",
                                 style: "font-size: 1.5em;",
                                 i { class: "fa-solid fa-music text-white/20" }
                             }
                         } else {
-                            img { src: "{current_song_cover_url}", class: "w-full h-full object-cover" }
+                            img { src: "{cover}", class: "w-full h-full object-cover" }
                         }
                     }
                     div {

@@ -561,7 +561,6 @@ fn App() -> Element {
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
-    let current_song_cover_url = use_signal(String::new);
     let current_song_title = use_signal(String::new);
     let current_song_artist = use_signal(String::new);
     let current_song_album = use_signal(String::new);
@@ -710,7 +709,6 @@ fn App() -> Element {
         current_song_bitrate,
         current_song_duration,
         current_song_progress,
-        current_song_cover_url,
         current_track_snapshot,
         volume,
         config,
@@ -1441,8 +1439,7 @@ fn App() -> Element {
             return utils::format_artwork_url(Some(&path)).map(|url| url.as_ref().to_string());
         }
         if conf.cover_art_background {
-            let url = current_song_cover_url.read().clone();
-            return (!url.is_empty()).then_some(url);
+            return ctrl.current_cover_url(hooks::artwork::Size::Full);
         }
         None
     });
@@ -1692,7 +1689,6 @@ fn App() -> Element {
             if config.read().player_bar_position == config::PlayerBarPosition::Top {
                 Bottombar {
                     config,
-                    current_song_cover_url: current_song_cover_url,
                     current_song_title: current_song_title,
                     current_song_artist: current_song_artist,
                     is_playing: is_playing,
@@ -1878,7 +1874,6 @@ fn App() -> Element {
                                 search_query: search_query,
                                             is_playing: is_playing,
                                 current_playing: current_playing,
-                                current_song_cover_url: current_song_cover_url,
                                 current_song_title: current_song_title,
                                 current_song_artist: current_song_artist,
                                 current_song_duration: current_song_duration,
@@ -1897,7 +1892,6 @@ fn App() -> Element {
                                 on_rescan: move |_| *trigger_rescan.write() += 1,
                                             is_playing: is_playing,
                                 current_playing: current_playing,
-                                current_song_cover_url: current_song_cover_url,
                                 current_song_title: current_song_title,
                                 current_song_artist: current_song_artist,
                                 current_song_duration: current_song_duration,
@@ -1966,7 +1960,6 @@ fn App() -> Element {
                                         },
                                         is_playing: is_playing,
                                         current_playing: current_playing,
-                                        current_song_cover_url: current_song_cover_url,
                                         current_song_title: current_song_title,
                                         current_song_artist: current_song_artist,
                                         current_song_duration: current_song_duration,
@@ -1982,7 +1975,6 @@ fn App() -> Element {
                                 config,
                                 is_playing,
                                 current_playing,
-                                current_song_cover_url,
                                 current_song_title,
                                 current_song_artist,
                                 current_song_duration,
@@ -2042,7 +2034,6 @@ fn App() -> Element {
                 current_song_title: current_song_title,
                 current_song_bitrate: current_song_bitrate,
                 current_song_artist: current_song_artist,
-                current_song_cover_url: current_song_cover_url,
                 volume: volume,
                 persisted_volume: persisted_volume,
                 palette: palette,
@@ -2079,7 +2070,6 @@ fn App() -> Element {
             if config.read().player_bar_position == config::PlayerBarPosition::Bottom {
                 Bottombar {
                     config,
-                    current_song_cover_url: current_song_cover_url,
                     current_song_title: current_song_title,
                     current_song_artist: current_song_artist,
                     is_playing: is_playing,

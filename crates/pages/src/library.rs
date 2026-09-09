@@ -30,7 +30,6 @@ pub fn LibraryPage(
     on_rescan: EventHandler,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
-    mut current_song_cover_url: Signal<String>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
     mut current_song_duration: Signal<u64>,
