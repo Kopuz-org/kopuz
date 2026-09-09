@@ -81,6 +81,8 @@ sample_rate_mode_system = Ikuti sistem
 sample_rate_mode_source = Samakan dengan trek
 discord_presence = Discord Presence
 connectivity = Konektivitas
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Tampilkan status Discord saat dijeda
 discord_presence_source = Tampilkan sumber media di status Discord
 reduce_animations = Kurangi Animasi
@@ -157,6 +159,7 @@ ytdlp_format_video = Video (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = Memproses…
 ytdlp_status_completed = Selesai
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Silahkan tunggu…
 update_available = Pembaruan tersedia
 update_banner_message = { $version } dari kopuz sudah tersedia.
@@ -258,7 +261,9 @@ quick_search_placeholder = Ketik untuk mencari, Enter untuk memutar…
 no_results_found = Tidak ada hasil yang ditemukan untuk "{ $query }"
 listenbrainz_token_placeholder = Masukkan token ListenBrainz anda
 lastfm_api_key_placeholder = Masukkan Last.fm API Key anda
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Masukkan Last.fm API Secret anda
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album tidak ditemukan

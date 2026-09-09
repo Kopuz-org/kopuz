@@ -81,6 +81,8 @@ sample_rate_mode_system = Följ systemet
 sample_rate_mode_source = Matcha låten
 discord_presence = Discord-närvaro
 connectivity = Uppkoppling
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Visa pausad status i Discord
 discord_presence_source = Visa mediekälla i Discord-status
 reduce_animations = Minska animationer
@@ -157,6 +159,7 @@ ytdlp_format_video = Video (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = Bearbetar…
 ytdlp_status_completed = Slutförd
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Väntar…
 update_available = Uppdatering tillgänglig
 update_banner_message = Kopuz { $version } är tillgänglig.
@@ -258,7 +261,9 @@ quick_search_placeholder = Skriv för att söka, Enter för att spela…
 no_results_found = Inga resultat hittades för "{ $query }"
 listenbrainz_token_placeholder = Ange din ListenBrainz-token
 lastfm_api_key_placeholder = Ange din Last.fm API-nyckel
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Ange din Last.fm API-hemlighet
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album hittades inte

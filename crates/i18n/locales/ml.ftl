@@ -81,6 +81,8 @@ sample_rate_mode_system = സിസ്റ്റം പിന്തുടരു�
 sample_rate_mode_source = ട്രാക്കിന് അനുസരിച്ച്
 discord_presence = Discord സാന്നിധ്യം
 connectivity = കണക്റ്റിവിറ്റി
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = നിർത്തിയ Discord നില കാണിക്കുക
 discord_presence_source = Discord നിലയിൽ മീഡിയ ഉറവിടം കാണിക്കുക
 reduce_animations = ആനിമേഷനുകൾ കുറയ്ക്കുക
@@ -157,6 +159,7 @@ ytdlp_format_video = വീഡിയോ (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = പ്രോസസ് ചെയ്യുന്നു…
 ytdlp_status_completed = പൂർത്തിയായി
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = കാത്തിരിക്കുന്നു…
 update_available = അപ്‌ഡേറ്റ് ലഭ്യമാണ്
 update_banner_message = Kopuz { $version } ലഭ്യമാണ്.
@@ -258,7 +261,9 @@ quick_search_placeholder = തിരയാൻ ടൈപ്പ് ചെയ്യ
 no_results_found = "{ $query }" എന്നതിന് ഫലങ്ങളൊന്നും കണ്ടെത്തിയില്ല
 listenbrainz_token_placeholder = നിങ്ങളുടെ ListenBrainz ടോക്കൺ നൽകുക
 lastfm_api_key_placeholder = നിങ്ങളുടെ Last.fm API കീ നൽകുക
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = നിങ്ങളുടെ Last.fm API സീക്രട്ട് നൽകുക
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = ആൽബം കണ്ടെത്തിയില്ല

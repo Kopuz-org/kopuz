@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = nasin pi ilo lawa kalama
 discord_presence = lon pi ilo Siko
 connectivity = tawa lon ma
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = o lukin e lon pi ilo Siko lon tenpo awen
 discord_presence_source = o lukin e ilo pi kalama lon lon pi ilo Siko
 reduce_animations = o lili e tawa
@@ -189,7 +191,9 @@ quick_search_placeholder = o sitelen tawa alasa, o luka e Enter tawa kalama musi
 no_results_found = "{ $query }" li lon ala
 listenbrainz_token_placeholder = o pana e "token ListenBrainz"
 lastfm_api_key_placeholder = o pana e Last.fm API key sina
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = o pana e Last.fm API secret sina
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = kulupu pi kalama sama li lon ala
@@ -384,6 +388,7 @@ ytdlp_format_video = tawa sitelen (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = ilo pali la...
 ytdlp_status_completed = pini
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = o awen...
 
 channel_mode = nasin kalama

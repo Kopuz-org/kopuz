@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = Setări Player
 discord_presence = Prezență Discord
 connectivity = Conectivitate
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Afișează statusul Discord în pauză
 discord_presence_source = Afișează sursa media în statusul Discord
 reduce_animations = Reducere Animații
@@ -189,7 +191,9 @@ quick_search_placeholder = Tastați pentru a căuta, Enter pentru redare…
 no_results_found = Niciun rezultat pentru "{ $query }"
 listenbrainz_token_placeholder = Introdu token-ul ListenBrainz
 lastfm_api_key_placeholder = Introdu cheia API Last.fm
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Introdu secretul API Last.fm
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Albumul nu a fost găsit
@@ -384,6 +388,7 @@ ytdlp_format_video = Video (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = Procesare…
 ytdlp_status_completed = Finalizat
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Se Așteaptă…
 
 channel_mode = Mod canal

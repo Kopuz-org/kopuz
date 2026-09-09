@@ -6,6 +6,7 @@ pub mod artist_images;
 pub mod artwork;
 pub mod config_view;
 pub mod db_reactivity;
+pub mod downloader;
 pub mod downloads;
 pub mod favorites;
 pub mod integrations;
@@ -22,7 +23,6 @@ pub mod use_db_queries;
 pub mod use_player_controller;
 pub mod use_player_task;
 pub mod use_search_data;
-pub mod ytdlp;
 
 pub use api::{consume_api, use_api};
 pub use use_player_controller::*;

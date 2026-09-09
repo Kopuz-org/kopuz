@@ -798,7 +798,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     {theme_editor_section(config)}
                 }
                 if active_category() == SettingsCategory::Connectivity {
-                    ConnectivitySection { config }
+                    ConnectivitySection {}
                 }
                 if active_category() == SettingsCategory::Downloads {
                     DownloadsSection { config }

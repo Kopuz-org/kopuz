@@ -1,6 +1,8 @@
 //! Rendering what the daemon publishes: the text, the glyphs, and the field
 //! lists that stand in for every form a service used to need its own code for.
 
+pub mod schema_form;
+
 use dioxus::prelude::*;
 
 /// Resolve published text: a key through this client's own translations, a

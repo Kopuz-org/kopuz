@@ -98,7 +98,7 @@ pub fn job_kind_to_proto(value: api::JobKind) -> JobKind {
         api::JobKind::FavoritesSync => JobKind::FavoritesSync,
         api::JobKind::PlaylistSync => JobKind::PlaylistSync,
         api::JobKind::Download => JobKind::Download,
-        api::JobKind::Ytdlp => JobKind::Ytdlp,
+        api::JobKind::UrlDownload => JobKind::UrlDownload,
         api::JobKind::Unknown => JobKind::Unspecified,
     }
 }
@@ -110,7 +110,7 @@ pub fn job_kind_from_proto(value: i32) -> api::JobKind {
         JobKind::FavoritesSync => api::JobKind::FavoritesSync,
         JobKind::PlaylistSync => api::JobKind::PlaylistSync,
         JobKind::Download => api::JobKind::Download,
-        JobKind::Ytdlp => api::JobKind::Ytdlp,
+        JobKind::UrlDownload => api::JobKind::UrlDownload,
         JobKind::Unspecified => api::JobKind::Unknown,
     }
 }
@@ -229,5 +229,21 @@ mod tests {
     fn unspecified_status_values_are_unknown() {
         assert_eq!(job_state_from_proto(0), api::JobState::Unknown);
         assert_eq!(notice_level_from_proto(0), api::NoticeLevel::Unknown);
+    }
+
+    #[test]
+    fn every_job_kind_round_trips() {
+        for kind in [
+            api::JobKind::Scan,
+            api::JobKind::LibrarySync,
+            api::JobKind::FavoritesSync,
+            api::JobKind::PlaylistSync,
+            api::JobKind::Download,
+            api::JobKind::UrlDownload,
+            api::JobKind::Unknown,
+        ] {
+            assert_eq!(kind, job_kind_from_proto(job_kind_to_proto(kind) as i32));
+        }
+        assert_eq!(job_kind_from_proto(404), api::JobKind::Unknown);
     }
 }

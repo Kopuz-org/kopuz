@@ -215,8 +215,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             tracing::warn!(%error, "radio registry could not be loaded");
         }
     });
-    let ytdlp = crate::YtdlpService::new(session.clone());
-    ytdlp.attach_rescan(library.clone(), jobs.clone());
+    let downloader = crate::UrlDownloadService::new(session.clone(), config_service.clone());
+    downloader.attach_rescan(library.clone(), jobs.clone());
     // Spotify plays itself, so the session is told where to send a track it
     // cannot decode. Nothing starts until one is actually queued.
     let spotify = crate::SpotifySink::new(session.clone(), config_service.clone());
@@ -235,7 +235,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_radio(radio_service)
             .with_mutations(mutations)
             .with_sources(sources.clone())
-            .with_ytdlp(ytdlp)
+            .with_downloader(downloader)
             .with_spotify(spotify)
             .with_integrations(crate::IntegrationService::new(
                 config_service_for_api,

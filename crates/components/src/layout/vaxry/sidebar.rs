@@ -79,7 +79,7 @@ const SECTIONS: &[(&str, &[NavItem])] = &[
 const TOOL_ITEMS: &[NavItem] = &[
     NavItem {
         key: "ytdlp",
-        route: Route::Ytdlp,
+        route: Route::Downloader,
         icon: "fa-solid fa-download",
     },
     NavItem {

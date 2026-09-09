@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = 플레이어 설정
 discord_presence = Discord 상태 표시
 connectivity = 연결
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = 일시정지한 Discord 상태 표시
 discord_presence_source = Discord 상태에 미디어 소스 표시
 reduce_animations = 애니메이션 줄이기
@@ -189,7 +191,9 @@ quick_search_placeholder = 입력하여 검색, Enter로 재생…
 no_results_found = "{ $query }"에 대한 결과가 없습니다
 listenbrainz_token_placeholder = ListenBrainz 토큰 입력
 lastfm_api_key_placeholder = Last.fm API 키를 입력하세요
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Last.fm API 비밀 키를 입력하세요
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = 앨범을 찾을 수 없습니다
@@ -384,6 +388,7 @@ ytdlp_format_video = 비디오 (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = 처리 중…
 ytdlp_status_completed = 완료됨
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = 대기 중…
 
 channel_mode = 채널 모드

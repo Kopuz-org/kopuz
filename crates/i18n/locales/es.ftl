@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = Configuración del reproductor
 discord_presence = Presencia de Discord
 connectivity = Conectividad
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Mostrar estado de Discord en pausa
 discord_presence_source = Mostrar la fuente multimedia en el estado de Discord
 reduce_animations = Reducir animaciones
@@ -190,7 +192,9 @@ quick_search_placeholder = Escribe para buscar, Enter para reproducir…
 no_results_found = No se encontraron resultados para "{ $query }"
 listenbrainz_token_placeholder = Introduce tu token de ListenBrainz
 lastfm_api_key_placeholder = Ingresa tu clave API de Last.fm
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Ingresa tu secreto API de Last.fm
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Álbum no encontrado
@@ -385,6 +389,7 @@ ytdlp_format_video = Video (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = Procesando…
 ytdlp_status_completed = Completado
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Esperando…
 
 channel_mode = Modo de canal

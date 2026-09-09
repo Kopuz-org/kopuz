@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = 󱤿󱥍󱤎󱤤󱤕
 discord_presence = 󱤬󱥍󱤎󱦐󱥛󱦜󱤜󱦝󱦑
 connectivity = 󱥩󱤬󱥭
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = 󱥄󱤮󱤉 󱤬󱥍󱤎󱦐󱥛 󱥫
 discord_presence_source = 󱥄󱤮󱤉 󱤎 󱤬 󱤬󱥍󱤎󱦐󱥛󱦜󱤜󱦝󱦑
 reduce_animations = 󱥄󱤨󱤉󱥩
@@ -185,7 +187,9 @@ quick_search_placeholder = 󱥄󱤃, 󱥄󱤕󱤻󱦜󱦜󱦜
 no_results_found = "{ $query }"󱤧󱤬󱤂
 listenbrainz_token_placeholder = 󱥄󱥌󱤉"token ListenBrainz"
 lastfm_api_key_placeholder = o pana e Last.fm API key sina
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = o pana e Last.fm API secret sina
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = 󱤟󱥍󱦗󱤕󱥖󱦘󱤧󱤬󱤂
@@ -354,6 +358,7 @@ ytdlp_format_video = 󱥵 󱥫 (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = 󱤏 󱥔 󱤦...
 ytdlp_status_completed = 󱥛
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = 󱥎 󱤈...
 
 featured_album = 󱥯 󱤶 󱥬

@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = プレイヤー設定
 discord_presence = Discordプレゼンス
 connectivity = 接続
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = 一時停止中のDiscordステータスを表示
 discord_presence_source = Discordステータスにメディアソースを表示
 reduce_animations = アニメーションを減らす
@@ -189,7 +191,9 @@ quick_search_placeholder = 入力して検索、Enterで再生…
 no_results_found = "{ $query }" の結果が見つかりません
 listenbrainz_token_placeholder = ListenBrainzトークンを入力
 lastfm_api_key_placeholder = Last.fm の API キーを入力
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Last.fm の API シークレットを入力
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = アルバムが見つかりません
@@ -390,6 +394,7 @@ ytdlp_format_video = ビデオ (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = 処理中…
 ytdlp_status_completed = 完了
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = 待機中…
 
 channel_mode = チャンネルモード

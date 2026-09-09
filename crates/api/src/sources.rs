@@ -205,30 +205,25 @@ pub struct SourceFolderEntry {
     pub name: String,
 }
 
-/// A scrobbling or metadata service, which is configured per-account rather
-/// than per-source.
+/// How an integration is connected, once its fields are filled in.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum IntegrationKind {
-    ListenBrainz,
-    LastFm,
-    LibreFm,
+pub enum ConnectKind {
+    /// Nothing to press: filling the fields in is the whole of it.
     #[default]
-    Unknown,
+    None,
+    /// The daemon opens a sign-in page and keeps what it returns.
+    WebSignIn,
 }
 
-/// Whether an integration is set up. Deliberately not the credentials.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct IntegrationStatus {
-    pub kind: IntegrationKind,
-    pub configured: bool,
-}
-
-/// Write-only integration credentials. No response contains these values.
+/// Something configured per account rather than per source: a scrobbler, a
+/// metadata service, a presence integration. Same shape as a service, so the
+/// same renderer draws it; the credentials are never in it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct IntegrationProvision {
-    pub kind: IntegrationKind,
-    pub token: Option<String>,
-    pub api_key: Option<String>,
-    pub api_secret: Option<String>,
-    pub session_key: Option<String>,
+pub struct IntegrationInfo {
+    pub id: String,
+    pub name: Text,
+    pub icon: Icon,
+    pub configured: bool,
+    pub connect: ConnectKind,
+    pub fields: Vec<FieldSpec>,
 }

@@ -81,6 +81,8 @@ sample_rate_mode_system = Sundin ang sistema
 sample_rate_mode_source = Itugma sa track
 discord_presence = Discord Presence
 connectivity = Koneksyon
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Ipakita ang Naka-pause na Discord status
 discord_presence_source = Ipakita ang media source sa Discord status
 reduce_animations = Bawasan ang mga Animation
@@ -157,6 +159,7 @@ ytdlp_format_video = Video (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = Pinoproseso…
 ytdlp_status_completed = Tapos na
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Naghihintay…
 update_available = May available na update
 update_banner_message = Available na ang Kopuz { $version }.
@@ -258,7 +261,9 @@ quick_search_placeholder = Mag-type para maghanap, Enter para tumugtog…
 no_results_found = Walang nahanap na resulta para sa "{ $query }"
 listenbrainz_token_placeholder = Ilagay ang iyong ListenBrainz token
 lastfm_api_key_placeholder = Ilagay ang iyong Last.fm API Key
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Ilagay ang iyong Last.fm API Secret
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Hindi natagpuan ang album

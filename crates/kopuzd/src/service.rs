@@ -872,17 +872,87 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::JobRef { job_id: job.job_id }))
     }
 
-    async fn start_ytdlp(
+    async fn download_url(
         &self,
-        request: Request<proto::YtdlpRequest>,
+        request: Request<proto::DownloadUrlRequest>,
     ) -> Result<Response<proto::JobRef>, Status> {
+        let request = request.into_inner();
         let job = self
             .0
             .api
-            .start_ytdlp(convert::ytdlp_request_from_proto(request.get_ref()))
+            .download_url(request.url, request.format)
             .await
             .map_err(failed)?;
         Ok(Response::new(proto::JobRef { job_id: job.job_id }))
+    }
+
+    async fn get_download_formats(
+        &self,
+        _: Request<proto::GetDownloadFormatsRequest>,
+    ) -> Result<Response<proto::DownloadFormats>, Status> {
+        let formats = self.0.api.download_formats().await.map_err(failed)?;
+        Ok(Response::new(proto::DownloadFormats {
+            formats: formats
+                .iter()
+                .map(convert::choice_option_to_proto)
+                .collect(),
+        }))
+    }
+
+    async fn get_downloader_settings(
+        &self,
+        _: Request<proto::GetDownloaderSettingsRequest>,
+    ) -> Result<Response<proto::DownloaderSettings>, Status> {
+        let fields = self.0.api.downloader_settings().await.map_err(failed)?;
+        Ok(Response::new(proto::DownloaderSettings {
+            fields: fields.iter().map(convert::field_spec_to_proto).collect(),
+        }))
+    }
+
+    async fn set_downloader_settings(
+        &self,
+        request: Request<proto::SetDownloaderSettingsRequest>,
+    ) -> Result<Response<proto::DownloaderSettings>, Status> {
+        let values = request
+            .into_inner()
+            .values
+            .iter()
+            .map(convert::field_value_from_proto)
+            .collect();
+        let fields = self
+            .0
+            .api
+            .set_downloader_settings(values)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::DownloaderSettings {
+            fields: fields.iter().map(convert::field_spec_to_proto).collect(),
+        }))
+    }
+
+    async fn get_downloader_history(
+        &self,
+        _: Request<proto::GetDownloaderHistoryRequest>,
+    ) -> Result<Response<proto::DownloadHistory>, Status> {
+        let entries = self.0.api.downloader_history().await.map_err(failed)?;
+        Ok(Response::new(proto::DownloadHistory {
+            entries: entries
+                .iter()
+                .map(convert::download_history_entry_to_proto)
+                .collect(),
+        }))
+    }
+
+    async fn clear_downloader_history(
+        &self,
+        _: Request<proto::ClearDownloaderHistoryRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .clear_downloader_history()
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
     }
 
     async fn get_download_statuses(
@@ -1219,31 +1289,37 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::IntegrationList {
             integrations: integrations
                 .iter()
-                .map(convert::integration_status_to_proto)
+                .map(convert::integration_info_to_proto)
                 .collect(),
         }))
     }
 
-    async fn provision_integration(
+    async fn set_integration_settings(
         &self,
-        request: Request<proto::IntegrationProvision>,
-    ) -> Result<Response<proto::IntegrationStatus>, Status> {
-        let status = self
+        request: Request<proto::SetIntegrationSettingsRequest>,
+    ) -> Result<Response<proto::IntegrationInfo>, Status> {
+        let request = request.into_inner();
+        let values = request
+            .values
+            .iter()
+            .map(convert::field_value_from_proto)
+            .collect();
+        let info = self
             .0
             .api
-            .provision_integration(convert::integration_provision_from_proto(request.get_ref()))
+            .set_integration_settings(request.id, values)
             .await
             .map_err(failed)?;
-        Ok(Response::new(convert::integration_status_to_proto(&status)))
+        Ok(Response::new(convert::integration_info_to_proto(&info)))
     }
 
     async fn clear_integration(
         &self,
-        request: Request<proto::IntegrationRef>,
+        request: Request<proto::IntegrationId>,
     ) -> Result<Response<proto::Unit>, Status> {
         self.0
             .api
-            .clear_integration(convert::integration_kind_from_proto(request.get_ref().kind))
+            .clear_integration(request.into_inner().id)
             .await
             .map_err(failed)?;
         Ok(Response::new(proto::Unit {}))
@@ -1251,15 +1327,15 @@ impl Kopuz for KopuzGrpc {
 
     async fn authenticate_integration(
         &self,
-        request: Request<proto::IntegrationRef>,
-    ) -> Result<Response<proto::IntegrationStatus>, Status> {
-        let status = self
+        request: Request<proto::IntegrationId>,
+    ) -> Result<Response<proto::IntegrationInfo>, Status> {
+        let info = self
             .0
             .api
-            .authenticate_integration(convert::integration_kind_from_proto(request.get_ref().kind))
+            .authenticate_integration(request.into_inner().id)
             .await
             .map_err(failed)?;
-        Ok(Response::new(convert::integration_status_to_proto(&status)))
+        Ok(Response::new(convert::integration_info_to_proto(&info)))
     }
 }
 

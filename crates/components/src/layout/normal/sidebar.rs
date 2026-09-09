@@ -66,7 +66,7 @@ const TOP_MENU: &[SidebarItem] = &[
     },
     SidebarItem {
         key: "ytdlp",
-        route: Route::Ytdlp,
+        route: Route::Downloader,
         icon: "fa-solid fa-download",
     },
 ];

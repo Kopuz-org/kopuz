@@ -642,17 +642,6 @@ impl api::JobApi for GrpcApi {
         Ok(())
     }
 
-    async fn start_ytdlp(&self, request: api::YtdlpRequest) -> Result<JobRef, ApiError> {
-        let job = self
-            .client()
-            .start_ytdlp(Request::new(convert::ytdlp_request_to_proto(&request)))
-            .await
-            .map_err(wire_error)?;
-        Ok(JobRef {
-            job_id: job.get_ref().job_id.clone(),
-        })
-    }
-
     async fn download_statuses(&self) -> Result<Vec<api::DownloadItemStatus>, ApiError> {
         let list = self
             .client()
@@ -665,6 +654,86 @@ impl api::JobApi for GrpcApi {
             .iter()
             .map(convert::download_status_from_proto)
             .collect())
+    }
+
+    async fn download_url(&self, url: String, format: String) -> Result<JobRef, ApiError> {
+        let job = self
+            .client()
+            .download_url(Request::new(proto::DownloadUrlRequest { url, format }))
+            .await
+            .map_err(wire_error)?;
+        Ok(JobRef {
+            job_id: job.get_ref().job_id.clone(),
+        })
+    }
+
+    async fn download_formats(&self) -> Result<Vec<api::ChoiceOption>, ApiError> {
+        let formats = self
+            .client()
+            .get_download_formats(Request::new(proto::GetDownloadFormatsRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(formats
+            .get_ref()
+            .formats
+            .iter()
+            .map(convert::choice_option_from_proto)
+            .collect())
+    }
+
+    async fn downloader_settings(&self) -> Result<Vec<api::FieldSpec>, ApiError> {
+        let settings = self
+            .client()
+            .get_downloader_settings(Request::new(proto::GetDownloaderSettingsRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(settings
+            .get_ref()
+            .fields
+            .iter()
+            .map(convert::field_spec_from_proto)
+            .collect())
+    }
+
+    async fn set_downloader_settings(
+        &self,
+        values: Vec<api::FieldValue>,
+    ) -> Result<Vec<api::FieldSpec>, ApiError> {
+        let settings = self
+            .client()
+            .set_downloader_settings(Request::new(proto::SetDownloaderSettingsRequest {
+                values: values.iter().map(convert::field_value_to_proto).collect(),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(settings
+            .get_ref()
+            .fields
+            .iter()
+            .map(convert::field_spec_from_proto)
+            .collect())
+    }
+
+    async fn downloader_history(&self) -> Result<Vec<api::DownloadHistoryEntry>, ApiError> {
+        let history = self
+            .client()
+            .get_downloader_history(Request::new(proto::GetDownloaderHistoryRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(history
+            .get_ref()
+            .entries
+            .iter()
+            .map(convert::download_history_entry_from_proto)
+            .collect())
+    }
+
+    async fn clear_downloader_history(&self) -> Result<(), ApiError> {
+        self.client()
+            .clear_downloader_history(Request::new(proto::ClearDownloaderHistoryRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
     }
 
     async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError> {
@@ -1095,7 +1164,7 @@ impl api::SourceApi for GrpcApi {
         Ok(access.get_ref().available)
     }
 
-    async fn integrations(&self) -> Result<Vec<api::IntegrationStatus>, ApiError> {
+    async fn integrations(&self) -> Result<Vec<api::IntegrationInfo>, ApiError> {
         let list = self
             .client()
             .get_integrations(Request::new(proto::GetIntegrationsRequest {}))
@@ -1105,45 +1174,40 @@ impl api::SourceApi for GrpcApi {
             .get_ref()
             .integrations
             .iter()
-            .map(convert::integration_status_from_proto)
+            .map(convert::integration_info_from_proto)
             .collect())
     }
 
-    async fn provision_integration(
+    async fn set_integration_settings(
         &self,
-        provision: api::IntegrationProvision,
-    ) -> Result<api::IntegrationStatus, ApiError> {
-        let status = self
+        id: String,
+        values: Vec<api::FieldValue>,
+    ) -> Result<api::IntegrationInfo, ApiError> {
+        let info = self
             .client()
-            .provision_integration(Request::new(convert::integration_provision_to_proto(
-                &provision,
-            )))
+            .set_integration_settings(Request::new(proto::SetIntegrationSettingsRequest {
+                id,
+                values: values.iter().map(convert::field_value_to_proto).collect(),
+            }))
             .await
             .map_err(wire_error)?;
-        Ok(convert::integration_status_from_proto(status.get_ref()))
+        Ok(convert::integration_info_from_proto(info.get_ref()))
     }
 
-    async fn clear_integration(&self, kind: api::IntegrationKind) -> Result<(), ApiError> {
+    async fn clear_integration(&self, id: String) -> Result<(), ApiError> {
         self.client()
-            .clear_integration(Request::new(proto::IntegrationRef {
-                kind: convert::integration_kind_to_proto(kind) as i32,
-            }))
+            .clear_integration(Request::new(proto::IntegrationId { id }))
             .await
             .map_err(wire_error)?;
         Ok(())
     }
 
-    async fn authenticate_integration(
-        &self,
-        kind: api::IntegrationKind,
-    ) -> Result<api::IntegrationStatus, ApiError> {
-        let status = self
+    async fn authenticate_integration(&self, id: String) -> Result<api::IntegrationInfo, ApiError> {
+        let info = self
             .client()
-            .authenticate_integration(Request::new(proto::IntegrationRef {
-                kind: convert::integration_kind_to_proto(kind) as i32,
-            }))
+            .authenticate_integration(Request::new(proto::IntegrationId { id }))
             .await
             .map_err(wire_error)?;
-        Ok(convert::integration_status_from_proto(status.get_ref()))
+        Ok(convert::integration_info_from_proto(info.get_ref()))
     }
 }

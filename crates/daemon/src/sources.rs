@@ -245,6 +245,7 @@ impl SourceService {
     ) -> Result<(), ApiError> {
         self.publish(updated, changed);
         self.session.reset_playback().await?;
+        self.session.clear_error();
         for table in [
             Table::Servers,
             Table::Tracks,

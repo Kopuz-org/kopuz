@@ -17,7 +17,7 @@ pub struct LocalApi {
     pub(super) mutations: Option<Arc<crate::mutations::MutationService>>,
     pub(super) sources: Option<Arc<crate::sources::SourceService>>,
     pub(super) integrations: Option<Arc<crate::integrations::IntegrationService>>,
-    pub(super) ytdlp: Option<Arc<crate::ytdlp::YtdlpService>>,
+    pub(super) downloader: Option<Arc<crate::url_download::UrlDownloadService>>,
     pub(super) spotify: Option<Arc<crate::spotify::SpotifySink>>,
 }
 
@@ -37,7 +37,7 @@ impl LocalApi {
             mutations: None,
             sources: None,
             integrations: None,
-            ytdlp: None,
+            downloader: None,
             spotify: None,
         }
     }
@@ -147,9 +147,18 @@ impl LocalApi {
             .ok_or_else(|| ApiError::unsupported("this daemon manages no integrations"))
     }
 
-    pub fn with_ytdlp(mut self, ytdlp: Arc<crate::ytdlp::YtdlpService>) -> Self {
-        self.ytdlp = Some(ytdlp);
+    pub fn with_downloader(
+        mut self,
+        downloader: Arc<crate::url_download::UrlDownloadService>,
+    ) -> Self {
+        self.downloader = Some(downloader);
         self
+    }
+
+    fn downloader(&self) -> Result<&crate::url_download::UrlDownloadService, ApiError> {
+        self.downloader
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without a downloader"))
     }
 
     pub fn with_spotify(mut self, spotify: Arc<crate::spotify::SpotifySink>) -> Self {
@@ -566,17 +575,42 @@ impl api::JobApi for LocalApi {
             },
             // These carry their own request, so they start through their own
             // method rather than by kind.
-            api::JobKind::Download | api::JobKind::Ytdlp | api::JobKind::Unknown => {
+            api::JobKind::Download | api::JobKind::UrlDownload | api::JobKind::Unknown => {
                 Err(ApiError::unsupported("this job kind has no direct starter"))
             }
         }
     }
 
-    async fn start_ytdlp(&self, request: api::YtdlpRequest) -> Result<api::JobRef, ApiError> {
-        let (Some(service), Some(runner)) = (&self.ytdlp, &self.jobs) else {
-            return Err(ApiError::unsupported("this daemon runs without yt-dlp"));
+    async fn download_url(&self, url: String, format: String) -> Result<api::JobRef, ApiError> {
+        let (Some(service), Some(runner)) = (&self.downloader, &self.jobs) else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without a downloader",
+            ));
         };
-        service.start(runner, request)
+        service.start(runner, url, format).await
+    }
+
+    async fn download_formats(&self) -> Result<Vec<api::ChoiceOption>, ApiError> {
+        Ok(self.downloader()?.formats())
+    }
+
+    async fn downloader_settings(&self) -> Result<Vec<api::FieldSpec>, ApiError> {
+        Ok(self.downloader()?.settings().await)
+    }
+
+    async fn set_downloader_settings(
+        &self,
+        values: Vec<api::FieldValue>,
+    ) -> Result<Vec<api::FieldSpec>, ApiError> {
+        self.downloader()?.set_settings(values).await
+    }
+
+    async fn downloader_history(&self) -> Result<Vec<api::DownloadHistoryEntry>, ApiError> {
+        Ok(self.downloader()?.history().await)
+    }
+
+    async fn clear_downloader_history(&self) -> Result<(), ApiError> {
+        self.downloader()?.clear_history().await
     }
 
     async fn download(&self, keys: Vec<String>) -> Result<api::JobRef, ApiError> {
@@ -748,25 +782,23 @@ impl api::SourceApi for LocalApi {
         Ok(self.sources()?.can_open_browser().await)
     }
 
-    async fn integrations(&self) -> Result<Vec<api::IntegrationStatus>, ApiError> {
-        Ok(self.integrations()?.statuses().await)
+    async fn integrations(&self) -> Result<Vec<api::IntegrationInfo>, ApiError> {
+        Ok(self.integrations()?.list().await)
     }
 
-    async fn provision_integration(
+    async fn set_integration_settings(
         &self,
-        provision: api::IntegrationProvision,
-    ) -> Result<api::IntegrationStatus, ApiError> {
-        self.integrations()?.provision(provision).await
+        id: String,
+        values: Vec<api::FieldValue>,
+    ) -> Result<api::IntegrationInfo, ApiError> {
+        self.integrations()?.set_settings(&id, values).await
     }
 
-    async fn clear_integration(&self, kind: api::IntegrationKind) -> Result<(), ApiError> {
-        self.integrations()?.clear(kind).await
+    async fn clear_integration(&self, id: String) -> Result<(), ApiError> {
+        self.integrations()?.clear(&id).await
     }
 
-    async fn authenticate_integration(
-        &self,
-        kind: api::IntegrationKind,
-    ) -> Result<api::IntegrationStatus, ApiError> {
-        self.integrations()?.authenticate(kind).await
+    async fn authenticate_integration(&self, id: String) -> Result<api::IntegrationInfo, ApiError> {
+        self.integrations()?.authenticate(&id).await
     }
 }

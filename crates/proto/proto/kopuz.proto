@@ -88,7 +88,12 @@ service Kopuz {
   rpc StartJob(StartJobRequest) returns (JobRef);
   rpc CancelJob(JobId) returns (CancelJobResponse);
   rpc StartDownloads(DownloadRequest) returns (JobRef);
-  rpc StartYtdlp(YtdlpRequest) returns (JobRef);
+  rpc DownloadUrl(DownloadUrlRequest) returns (JobRef);
+  rpc GetDownloadFormats(GetDownloadFormatsRequest) returns (DownloadFormats);
+  rpc GetDownloaderSettings(GetDownloaderSettingsRequest) returns (DownloaderSettings);
+  rpc SetDownloaderSettings(SetDownloaderSettingsRequest) returns (DownloaderSettings);
+  rpc GetDownloaderHistory(GetDownloaderHistoryRequest) returns (DownloadHistory);
+  rpc ClearDownloaderHistory(ClearDownloaderHistoryRequest) returns (Unit);
   rpc GetDownloadStatuses(GetDownloadStatusesRequest) returns (DownloadStatusList);
   rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
   rpc SetConfig(SetConfigRequest) returns (ConfigView);
@@ -112,9 +117,9 @@ service Kopuz {
   rpc ValidateSource(SourceId) returns (SourceStateResponse);
   rpc CanOpenBrowser(CanOpenBrowserRequest) returns (BrowserAccess);
   rpc GetIntegrations(GetIntegrationsRequest) returns (IntegrationList);
-  rpc ProvisionIntegration(IntegrationProvision) returns (IntegrationStatus);
-  rpc ClearIntegration(IntegrationRef) returns (Unit);
-  rpc AuthenticateIntegration(IntegrationRef) returns (IntegrationStatus);
+  rpc SetIntegrationSettings(SetIntegrationSettingsRequest) returns (IntegrationInfo);
+  rpc ClearIntegration(IntegrationId) returns (Unit);
+  rpc AuthenticateIntegration(IntegrationId) returns (IntegrationInfo);
 
   rpc GetArtwork(ArtworkRequest) returns (stream ArtworkChunk);
 }
@@ -864,35 +869,38 @@ message BrowserAccess {
   bool available = 1;
 }
 
-enum IntegrationKind {
-  INTEGRATION_UNKNOWN = 0;
-  INTEGRATION_LISTENBRAINZ = 1;
-  INTEGRATION_LASTFM = 2;
-  INTEGRATION_LIBREFM = 3;
-}
-
-message IntegrationRef {
-  IntegrationKind kind = 1;
+// How an integration is connected, once its fields are filled in.
+enum ConnectKind {
+  CONNECT_KIND_UNSPECIFIED = 0;
+  // Nothing to press: filling the fields in is the whole of it.
+  CONNECT_KIND_NONE = 1;
+  CONNECT_KIND_WEB_SIGN_IN = 2;
 }
 
 message GetIntegrationsRequest {}
 
-message IntegrationStatus {
-  IntegrationKind kind = 1;
-  bool configured = 2;
+// Configured per account rather than per source, and shaped like a service so
+// the same renderer draws it. No credential is ever in it.
+message IntegrationInfo {
+  string id = 1;
+  Text name = 2;
+  Icon icon = 3;
+  bool configured = 4;
+  ConnectKind connect = 5;
+  repeated FieldSpec fields = 6;
 }
 
 message IntegrationList {
-  repeated IntegrationStatus integrations = 1;
+  repeated IntegrationInfo integrations = 1;
 }
 
-// Write-only scrobbling credentials.
-message IntegrationProvision {
-  IntegrationKind kind = 1;
-  optional string token = 2;
-  optional string api_key = 3;
-  optional string api_secret = 4;
-  optional string session_key = 5;
+message IntegrationId {
+  string id = 1;
+}
+
+message SetIntegrationSettingsRequest {
+  string id = 1;
+  repeated FieldValue values = 2;
 }
 
 // ---------------- mutations ----------------
@@ -1213,24 +1221,51 @@ message JobStatus {
   optional ErrorBody error = 8;
 }
 
-// Options are the typed settings struct: the daemon builds the command
-// line, so it has to understand them rather than forward opaque JSON.
-enum YtdlpAudioFormat {
-  YTDLP_FORMAT_BEST_AUDIO = 0;
-  YTDLP_FORMAT_MP3 = 1;
-  YTDLP_FORMAT_FLAC = 2;
-  YTDLP_FORMAT_OPUS = 3;
-  YTDLP_FORMAT_WAV = 4;
-  YTDLP_FORMAT_VIDEO = 5;
+// What tool fetches the URL, and every option beyond the format, is the
+// daemon's; the client picks a published format id and nothing else.
+message DownloadUrlRequest {
+  string url = 1;
+  // One of GetDownloadFormats' option values.
+  string format = 2;
 }
 
-message YtdlpRequest {
-  string url = 1;
-  // Empty means the daemon default.
-  string output_dir = 2;
-  YtdlpAudioFormat format = 3;
-  YtdlpOptions options = 4;
+message GetDownloadFormatsRequest {}
+
+message DownloadFormats {
+  repeated ChoiceOption formats = 1;
 }
+
+message GetDownloaderSettingsRequest {}
+
+message DownloaderSettings {
+  repeated FieldSpec fields = 1;
+}
+
+message SetDownloaderSettingsRequest {
+  repeated FieldValue values = 1;
+}
+
+enum DownloadState {
+  DOWNLOAD_STATE_UNSPECIFIED = 0;
+  DOWNLOAD_STATE_FINISHED = 1;
+  DOWNLOAD_STATE_FAILED = 2;
+}
+
+message DownloadHistoryEntry {
+  string url = 1;
+  string title = 2;
+  string format = 3;
+  DownloadState state = 4;
+  optional string error = 5;
+}
+
+message GetDownloaderHistoryRequest {}
+
+message DownloadHistory {
+  repeated DownloadHistoryEntry entries = 1;
+}
+
+message ClearDownloaderHistoryRequest {}
 
 message DownloadRequest {
   repeated string keys = 1;
@@ -1723,7 +1758,7 @@ enum JobKind {
   JOB_KIND_FAVORITES_SYNC = 3;
   JOB_KIND_PLAYLIST_SYNC = 4;
   JOB_KIND_DOWNLOAD = 5;
-  JOB_KIND_YTDLP = 6;
+  JOB_KIND_URL_DOWNLOAD = 6;
 }
 
 enum JobState {

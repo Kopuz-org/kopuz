@@ -26,7 +26,7 @@ pub enum JobKind {
     FavoritesSync,
     PlaylistSync,
     Download,
-    Ytdlp,
+    UrlDownload,
     Unknown,
 }
 

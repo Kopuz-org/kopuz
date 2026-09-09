@@ -81,6 +81,8 @@ sample_rate_mode_system = Systeem volgen
 sample_rate_mode_source = Aanpassen aan nummer
 discord_presence = Discord-status
 connectivity = Connectiviteit
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Gepauzeerde Discord-status tonen
 discord_presence_source = Mediabron tonen in Discord-status
 reduce_animations = Animaties verminderen
@@ -157,6 +159,7 @@ ytdlp_format_video = Video (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = Verwerken…
 ytdlp_status_completed = Voltooid
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Wachten…
 update_available = Update beschikbaar
 update_banner_message = Kopuz { $version } is beschikbaar.
@@ -258,7 +261,9 @@ quick_search_placeholder = Typ om te zoeken, Enter om af te spelen…
 no_results_found = Geen resultaten gevonden voor "{ $query }"
 listenbrainz_token_placeholder = Voer je ListenBrainz-token in
 lastfm_api_key_placeholder = Voer je Last.fm-API-sleutel in
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Voer je Last.fm-API-geheim in
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album niet gevonden

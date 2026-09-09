@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = Oynatıcı Ayarları
 discord_presence = Discord Durumu
 connectivity = Bağlantı
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Discord durumu duraklatıldığında göster
 discord_presence_source = Medya kaynağını Discord durumunda göster
 reduce_animations = Animasyonları Azalt
@@ -189,7 +191,9 @@ quick_search_placeholder = Aramak için yazın, çalmak için Enter…
 no_results_found = "{ $query }" için sonuç bulunamadı
 listenbrainz_token_placeholder = ListenBrainz token'ınızı girin
 lastfm_api_key_placeholder = Last.fm API anahtarınızı girin
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Last.fm API gizli anahtarınızı girin
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Albüm bulunamadı
@@ -384,6 +388,7 @@ ytdlp_format_video = Video (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = İşleniyor…
 ytdlp_status_completed = Tamamlandı
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Bekleniyor…
 
 channel_mode = Kanal Modu

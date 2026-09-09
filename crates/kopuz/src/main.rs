@@ -1957,7 +1957,7 @@ fn App() -> Element {
                             }
                         },
                         #[cfg(not(target_os = "android"))]
-                        Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config } },
+                        Route::Downloader => rsx! { pages::downloader::DownloaderPage {} },
                         Route::Settings => rsx! { pages::settings::Settings { config } },
                         #[cfg(not(target_os = "android"))]
                         Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { config } },

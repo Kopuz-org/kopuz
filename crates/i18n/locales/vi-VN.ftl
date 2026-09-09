@@ -81,6 +81,8 @@ sample_rate_mode_system = Theo hệ thống
 sample_rate_mode_source = Theo bài hát
 discord_presence = Trạng thái Discord
 connectivity = Kết nối
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Hiển thị trạng thái Discord khi tạm dừng
 discord_presence_source = Hiển thị nguồn phát trong trạng thái Discord
 reduce_animations = Giảm hiệu ứng động
@@ -157,6 +159,7 @@ ytdlp_format_video = Video (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = Đang xử lý...
 ytdlp_status_completed = Hoàn tất
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Đang chờ...
 update_available = Có bản cập nhật
 update_banner_message = Kopuz { $version } đã có sẵn.
@@ -258,7 +261,9 @@ quick_search_placeholder = Gõ để tìm, Enter để phát…
 no_results_found = Không tìm thấy kết quả cho "{ $query }"
 listenbrainz_token_placeholder = Nhập token ListenBrainz của bạn
 lastfm_api_key_placeholder = Nhập API Key Last.fm của bạn
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Nhập API Secret Last.fm của bạn
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Không tìm thấy album

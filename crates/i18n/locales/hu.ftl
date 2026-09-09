@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = Lejátszó beállításai
 discord_presence = Discord jelenlét
 connectivity = Kapcsolódás
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Szüneteltetett Discord állapot megjelenítése
 discord_presence_source = Médiaforrás megjelenítése a Discord állapotban
 reduce_animations = Animációk csökkentése
@@ -189,7 +191,9 @@ quick_search_placeholder = Írjon a kereséshez, Enter a lejátszáshoz…
 no_results_found = Nincs találat a következőre: "{ $query }"
 listenbrainz_token_placeholder = Add meg a ListenBrainz tokent
 lastfm_api_key_placeholder = Add meg a Last.fm API-kulcsodat
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Add meg a Last.fm API-titkodat
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album nem található
@@ -384,6 +388,7 @@ ytdlp_format_video = Videó (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = Feldolgozás…
 ytdlp_status_completed = Befejezve
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Várakozás…
 
 channel_mode = Csatorna mód

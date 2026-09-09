@@ -16,7 +16,7 @@ pub enum Route {
     Radio,
     // yt-dlp downloads + the custom theme editor are desktop/web only — excluded on Android.
     #[cfg(not(target_os = "android"))]
-    Ytdlp,
+    Downloader,
     Settings,
     #[cfg(not(target_os = "android"))]
     ThemeEditor,

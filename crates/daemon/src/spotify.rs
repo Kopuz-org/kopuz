@@ -153,10 +153,17 @@ impl SpotifySink {
     }
 
     /// Adopt a device that is already playing on its own, which is how a
-    /// session started from the phone becomes the one this app shows.
+    /// session started from the phone becomes the one this app shows. The
+    /// setting that turns this off is read here rather than at the poll, so
+    /// changing it takes effect on the next device seen.
     fn adopt(self: &Arc<Self>, device_id: String) {
+        let wanted = self
+            .session
+            .config_watch()
+            .borrow()
+            .spotify_prefer_active_device;
         let adopt = self.with_state(|state| {
-            let prefer = !state.chosen && state.selected.is_none();
+            let prefer = wanted && !state.chosen && state.selected.is_none();
             if prefer {
                 state.selected = Some(device_id.clone());
             }

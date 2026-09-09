@@ -249,125 +249,39 @@ pub fn credential_provision_from_proto(value: &CredentialProvision) -> api::Cred
     }
 }
 
-pub fn integration_kind_to_proto(value: api::IntegrationKind) -> IntegrationKind {
+pub fn connect_kind_to_proto(value: api::ConnectKind) -> ConnectKind {
     match value {
-        api::IntegrationKind::ListenBrainz => IntegrationKind::IntegrationListenbrainz,
-        api::IntegrationKind::LastFm => IntegrationKind::IntegrationLastfm,
-        api::IntegrationKind::LibreFm => IntegrationKind::IntegrationLibrefm,
-        api::IntegrationKind::Unknown => IntegrationKind::IntegrationUnknown,
+        api::ConnectKind::None => ConnectKind::None,
+        api::ConnectKind::WebSignIn => ConnectKind::WebSignIn,
     }
 }
 
-pub fn integration_kind_from_proto(value: i32) -> api::IntegrationKind {
-    match IntegrationKind::try_from(value) {
-        Ok(IntegrationKind::IntegrationListenbrainz) => api::IntegrationKind::ListenBrainz,
-        Ok(IntegrationKind::IntegrationLastfm) => api::IntegrationKind::LastFm,
-        Ok(IntegrationKind::IntegrationLibrefm) => api::IntegrationKind::LibreFm,
-        Ok(IntegrationKind::IntegrationUnknown) | Err(_) => api::IntegrationKind::Unknown,
+pub fn connect_kind_from_proto(value: i32) -> api::ConnectKind {
+    match ConnectKind::try_from(value) {
+        Ok(ConnectKind::WebSignIn) => api::ConnectKind::WebSignIn,
+        Ok(ConnectKind::None) | Ok(ConnectKind::Unspecified) | Err(_) => api::ConnectKind::None,
     }
 }
 
-pub fn integration_status_to_proto(value: &api::IntegrationStatus) -> IntegrationStatus {
-    IntegrationStatus {
-        kind: integration_kind_to_proto(value.kind) as i32,
+pub fn integration_info_to_proto(value: &api::IntegrationInfo) -> IntegrationInfo {
+    IntegrationInfo {
+        id: value.id.clone(),
+        name: Some(text_to_proto(&value.name)),
+        icon: Some(icon_to_proto(&value.icon)),
         configured: value.configured,
+        connect: connect_kind_to_proto(value.connect) as i32,
+        fields: value.fields.iter().map(field_spec_to_proto).collect(),
     }
 }
 
-pub fn integration_status_from_proto(value: &IntegrationStatus) -> api::IntegrationStatus {
-    api::IntegrationStatus {
-        kind: integration_kind_from_proto(value.kind),
+pub fn integration_info_from_proto(value: &IntegrationInfo) -> api::IntegrationInfo {
+    api::IntegrationInfo {
+        id: value.id.clone(),
+        name: value.name.as_ref().map(text_from_proto).unwrap_or_default(),
+        icon: value.icon.as_ref().map(icon_from_proto).unwrap_or_default(),
         configured: value.configured,
-    }
-}
-
-pub fn integration_provision_to_proto(value: &api::IntegrationProvision) -> IntegrationProvision {
-    IntegrationProvision {
-        kind: integration_kind_to_proto(value.kind) as i32,
-        token: value.token.clone(),
-        api_key: value.api_key.clone(),
-        api_secret: value.api_secret.clone(),
-        session_key: value.session_key.clone(),
-    }
-}
-
-pub fn integration_provision_from_proto(value: &IntegrationProvision) -> api::IntegrationProvision {
-    api::IntegrationProvision {
-        kind: integration_kind_from_proto(value.kind),
-        token: value.token.clone(),
-        api_key: value.api_key.clone(),
-        api_secret: value.api_secret.clone(),
-        session_key: value.session_key.clone(),
-    }
-}
-
-pub fn ytdlp_format_to_proto(value: api::YtdlpAudioFormat) -> YtdlpAudioFormat {
-    match value {
-        api::YtdlpAudioFormat::BestAudio => YtdlpAudioFormat::YtdlpFormatBestAudio,
-        api::YtdlpAudioFormat::Mp3 => YtdlpAudioFormat::YtdlpFormatMp3,
-        api::YtdlpAudioFormat::Flac => YtdlpAudioFormat::YtdlpFormatFlac,
-        api::YtdlpAudioFormat::Opus => YtdlpAudioFormat::YtdlpFormatOpus,
-        api::YtdlpAudioFormat::Wav => YtdlpAudioFormat::YtdlpFormatWav,
-        api::YtdlpAudioFormat::Video => YtdlpAudioFormat::YtdlpFormatVideo,
-    }
-}
-
-pub fn ytdlp_format_from_proto(value: i32) -> api::YtdlpAudioFormat {
-    match YtdlpAudioFormat::try_from(value) {
-        Ok(YtdlpAudioFormat::YtdlpFormatMp3) => api::YtdlpAudioFormat::Mp3,
-        Ok(YtdlpAudioFormat::YtdlpFormatFlac) => api::YtdlpAudioFormat::Flac,
-        Ok(YtdlpAudioFormat::YtdlpFormatOpus) => api::YtdlpAudioFormat::Opus,
-        Ok(YtdlpAudioFormat::YtdlpFormatWav) => api::YtdlpAudioFormat::Wav,
-        Ok(YtdlpAudioFormat::YtdlpFormatVideo) => api::YtdlpAudioFormat::Video,
-        _ => api::YtdlpAudioFormat::BestAudio,
-    }
-}
-
-pub fn ytdlp_request_to_proto(value: &api::YtdlpRequest) -> YtdlpRequest {
-    YtdlpRequest {
-        url: value.url.clone(),
-        output_dir: value.output_dir.clone(),
-        format: ytdlp_format_to_proto(value.format) as i32,
-        options: Some(ytdlp_options_to_proto(&value.options)),
-    }
-}
-
-pub fn ytdlp_request_from_proto(value: &YtdlpRequest) -> api::YtdlpRequest {
-    api::YtdlpRequest {
-        url: value.url.clone(),
-        output_dir: value.output_dir.clone(),
-        format: ytdlp_format_from_proto(value.format),
-        options: ytdlp_options_from_proto(value.options.as_ref()),
-    }
-}
-
-pub fn download_state_to_proto(value: api::DownloadItemState) -> DownloadItemState {
-    match value {
-        api::DownloadItemState::Queued => DownloadItemState::DownloadItemQueued,
-        api::DownloadItemState::Downloading => DownloadItemState::DownloadItemDownloading,
-        api::DownloadItemState::Failed => DownloadItemState::DownloadItemFailed,
-    }
-}
-
-pub fn download_state_from_proto(value: i32) -> api::DownloadItemState {
-    match DownloadItemState::try_from(value) {
-        Ok(DownloadItemState::DownloadItemDownloading) => api::DownloadItemState::Downloading,
-        Ok(DownloadItemState::DownloadItemFailed) => api::DownloadItemState::Failed,
-        _ => api::DownloadItemState::Queued,
-    }
-}
-
-pub fn download_status_to_proto(value: &api::DownloadItemStatus) -> DownloadItemStatus {
-    DownloadItemStatus {
-        key: value.key.clone(),
-        state: download_state_to_proto(value.state) as i32,
-    }
-}
-
-pub fn download_status_from_proto(value: &DownloadItemStatus) -> api::DownloadItemStatus {
-    api::DownloadItemStatus {
-        key: value.key.clone(),
-        state: download_state_from_proto(value.state),
+        connect: connect_kind_from_proto(value.connect),
+        fields: value.fields.iter().map(field_spec_from_proto).collect(),
     }
 }
 
@@ -478,5 +392,41 @@ mod tests {
     fn an_unknown_sign_in_kind_is_none() {
         assert_eq!(sign_in_kind_from_proto(0), api::SignInKind::None);
         assert_eq!(sign_in_kind_from_proto(404), api::SignInKind::None);
+    }
+
+    /// An integration row is rendered by the same code as a service, so it
+    /// carries the same field list -- and, like a source, never a credential.
+    #[test]
+    fn an_integration_row_round_trips_for_every_connect_kind() {
+        for connect in [api::ConnectKind::None, api::ConnectKind::WebSignIn] {
+            let info = api::IntegrationInfo {
+                id: "listenbrainz".into(),
+                name: api::Text::literal("ListenBrainz"),
+                icon: api::Icon::Class("ph-broadcast".into()),
+                configured: true,
+                connect,
+                fields: vec![
+                    url_field(),
+                    api::FieldSpec {
+                        key: "token".into(),
+                        label: api::Text::key("settings-token"),
+                        kind: api::FieldKind::Secret,
+                        ..Default::default()
+                    },
+                ],
+            };
+            assert_eq!(
+                info,
+                integration_info_from_proto(&integration_info_to_proto(&info))
+            );
+        }
+    }
+
+    /// A connect flow this build cannot name is one it cannot run: offer no
+    /// button rather than guessing at one.
+    #[test]
+    fn an_unknown_connect_kind_is_none() {
+        assert_eq!(connect_kind_from_proto(0), api::ConnectKind::None);
+        assert_eq!(connect_kind_from_proto(404), api::ConnectKind::None);
     }
 }

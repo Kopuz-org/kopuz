@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = Ρυθμίσεις Αναπαραγωγής
 discord_presence = Κατάσταση Discord
 connectivity = Συνδεσιμότητα
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Εμφάνιση κατάστασης Discord σε παύση
 discord_presence_source = Εμφάνιση πηγής πολυμέσων στην κατάσταση Discord
 reduce_animations = Μείωση κινήσεων
@@ -189,7 +191,9 @@ quick_search_placeholder = Πληκτρολογήστε για αναζήτησ�
 no_results_found = Δεν βρέθηκαν αποτελέσματα για "{ $query }"
 listenbrainz_token_placeholder = Εισάγετε το token σας στο ListenBrainz
 lastfm_api_key_placeholder = Εισαγάγετε το κλειδί API του Last.fm
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Εισαγάγετε το μυστικό API του Last.fm
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Το άλμπουμ δεν βρέθηκε
@@ -384,6 +388,7 @@ ytdlp_format_video = Βίντεο (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = Επεξεργασία…
 ytdlp_status_completed = Ολοκληρώθηκε
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Αναμονή…
 
 channel_mode = Λειτουργία καναλιού

@@ -115,6 +115,7 @@ enum SessionCmd {
     ExternalArtworkFetched(String),
     SetStationRegistry(Arc<radio::registry::StationRegistry>),
     SetActiveSource(Option<server::source::ActiveSource>),
+    ClearError,
     QueueMirror(oneshot::Sender<QueueMirrorSnapshot>),
     Persist(oneshot::Sender<()>),
     LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
@@ -330,6 +331,13 @@ impl SessionHandle {
             source: source.to_string(),
             state,
         });
+    }
+
+    /// Forget the last playback failure. A failure belongs to the source that
+    /// produced it, so switching away is what makes it stale rather than
+    /// something a frontend has to decide by looking at the message.
+    pub fn clear_error(&self) {
+        let _ = self.cmd_tx.send(SessionCmd::ClearError);
     }
 
     /// Stop and empty the queue. What is loaded belongs to the source that
@@ -600,6 +608,10 @@ impl Session {
             }
             SessionCmd::SetStationRegistry(registry) => self.station_registry = registry,
             SessionCmd::SetActiveSource(source) => self.active_source = source,
+            SessionCmd::ClearError => {
+                self.error = None;
+                self.publish(state_tx, false);
+            }
             SessionCmd::QueueMirror(reply) => {
                 let _ = reply.send(QueueMirrorSnapshot {
                     tracks: self.model.items().to_vec(),

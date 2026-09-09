@@ -4,6 +4,8 @@
 pub mod activity;
 pub mod album;
 pub mod artist;
+#[cfg(not(target_os = "android"))]
+pub mod downloader;
 pub mod favorites;
 pub mod favorites_body;
 pub mod home;
@@ -19,8 +21,6 @@ pub mod settings;
 pub mod settings_actions;
 #[cfg(not(target_os = "android"))]
 pub mod theme_editor;
-#[cfg(not(target_os = "android"))]
-pub mod ytdlp;
 
 /// A panel the app supplies through context, for surfaces that need something
 /// `pages` deliberately cannot reach. The debug database tools are the only

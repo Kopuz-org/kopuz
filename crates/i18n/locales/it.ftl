@@ -81,6 +81,8 @@ sample_rate_mode_system = Segui il sistema
 sample_rate_mode_source = Adatta alla traccia
 discord_presence = Presenza su Discord
 connectivity = Connettività
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = Mostra lo status in pausa su Discord
 discord_presence_source = Mostra la sorgente multimediale nello status di Discord
 reduce_animations = Animazioni ridotte
@@ -157,6 +159,7 @@ ytdlp_format_video = Video (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = Processando…
 ytdlp_status_completed = Completato
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = Attendendo…
 update_available = Aggiornamento disponibile 
 update_banner_message = Kopuz { $version } è disponibile.
@@ -258,7 +261,9 @@ quick_search_placeholder = Digita per cercare, Invio per riprodurre…
 no_results_found = Nessun risultato per "{ $query }"
 listenbrainz_token_placeholder = Inserisci il tuo token di ListenBrainz
 lastfm_api_key_placeholder = Inserisci la tua chiave API per Last.fm
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = Inserisci il tuo segreto per l'API di Last.fm
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album non trovato

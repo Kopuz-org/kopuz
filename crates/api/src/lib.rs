@@ -28,7 +28,7 @@ pub use catalog::{
 };
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
-pub use jobs::{DownloadItemState, DownloadItemStatus, YtdlpAudioFormat, YtdlpRequest};
+pub use jobs::{DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState};
 pub use library::{
     AlbumInfo, AlbumPage, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT, LyricChunkView,
     LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter, TrackInfo, TrackPage,
@@ -49,10 +49,10 @@ pub use schema::{
     value_of,
 };
 pub use sources::{
-    AlbumPresentation, ArtistPresentation, CredentialProvision, DraftCheck, FavoritesSyncMode,
-    IntegrationKind, IntegrationProvision, IntegrationStatus, LocalSourceDraft, PlaylistCapability,
-    ServerDraft, ServiceInfo, ServiceRef, SignInKind, SourceCapabilities, SourceFolderEntry,
-    SourceInfo, SourceKind, SourceLoginRequest,
+    AlbumPresentation, ArtistPresentation, ConnectKind, CredentialProvision, DraftCheck,
+    FavoritesSyncMode, IntegrationInfo, LocalSourceDraft, PlaylistCapability, ServerDraft,
+    ServiceInfo, ServiceRef, SignInKind, SourceCapabilities, SourceFolderEntry, SourceInfo,
+    SourceKind, SourceLoginRequest,
 };
 
 /// The config view: the layered config with credential keys
@@ -321,9 +321,26 @@ pub trait JobApi: Send + Sync {
     /// Per-item state for the downloads a batch is working through.
     async fn download_statuses(&self) -> Result<Vec<DownloadItemStatus>, ApiError>;
 
-    /// Download a URL with yt-dlp. Progress arrives as job events; the
-    /// finished download is recorded in the history the settings page shows.
-    async fn start_ytdlp(&self, request: YtdlpRequest) -> Result<JobRef, ApiError>;
+    /// Fetch a URL to a file. What tool does it, and every option it is given
+    /// beyond the format, is the daemon's; progress arrives as job events and
+    /// the outcome joins [`Self::downloader_history`].
+    async fn download_url(&self, url: String, format: String) -> Result<JobRef, ApiError>;
+
+    /// The formats a download can be asked for, picked per download rather
+    /// than kept in the settings.
+    async fn download_formats(&self) -> Result<Vec<ChoiceOption>, ApiError>;
+
+    /// The downloader's own options, with the values it currently has.
+    async fn downloader_settings(&self) -> Result<Vec<FieldSpec>, ApiError>;
+
+    async fn set_downloader_settings(
+        &self,
+        values: Vec<FieldValue>,
+    ) -> Result<Vec<FieldSpec>, ApiError>;
+
+    async fn downloader_history(&self) -> Result<Vec<DownloadHistoryEntry>, ApiError>;
+
+    async fn clear_downloader_history(&self) -> Result<(), ApiError>;
 }
 
 /// What is configured to play from, and what is signed into.
@@ -404,21 +421,22 @@ pub trait SourceApi: Send + Sync {
     /// whose only sign-in is a browser one.
     async fn can_open_browser(&self) -> Result<bool, ApiError>;
 
-    async fn integrations(&self) -> Result<Vec<IntegrationStatus>, ApiError>;
+    /// Everything configured per account rather than per source, each with the
+    /// fields that configure it.
+    async fn integrations(&self) -> Result<Vec<IntegrationInfo>, ApiError>;
 
-    /// Set scrobbling credentials. Write-only, like source credentials.
-    async fn provision_integration(
+    /// Answer an integration's fields. A secret is write-only, and an empty
+    /// one leaves what is stored alone.
+    async fn set_integration_settings(
         &self,
-        provision: IntegrationProvision,
-    ) -> Result<IntegrationStatus, ApiError>;
+        id: String,
+        values: Vec<FieldValue>,
+    ) -> Result<IntegrationInfo, ApiError>;
 
-    async fn clear_integration(&self, kind: IntegrationKind) -> Result<(), ApiError>;
+    async fn clear_integration(&self, id: String) -> Result<(), ApiError>;
 
     /// Run a service's web sign-in and keep the session key it returns.
-    async fn authenticate_integration(
-        &self,
-        kind: IntegrationKind,
-    ) -> Result<IntegrationStatus, ApiError>;
+    async fn authenticate_integration(&self, id: String) -> Result<IntegrationInfo, ApiError>;
 }
 
 /// The settings surface.

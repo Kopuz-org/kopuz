@@ -151,7 +151,7 @@ async fn spawn_pair() -> Pair {
     let sources =
         daemon::SourceService::new(database.clone(), session.clone(), config_service.clone());
     let integrations = daemon::IntegrationService::new(config_service.clone(), session.clone());
-    let ytdlp = daemon::YtdlpService::new(session.clone());
+    let downloader = daemon::UrlDownloadService::new(session.clone(), config_service.clone());
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)
             .with_config(config_service.clone())
@@ -164,7 +164,7 @@ async fn spawn_pair() -> Pair {
             .with_sources(sources.clone())
             .with_integrations(integrations.clone())
             .with_downloads(downloads.clone())
-            .with_ytdlp(ytdlp.clone())
+            .with_downloader(downloader.clone())
     };
     let state = Arc::new(kopuzd::GrpcState {
         api: Arc::new(build_api(session.clone())),
@@ -1285,17 +1285,23 @@ async fn source_settings_round_trip_without_touching_what_was_not_answered() {
     );
 }
 
-/// yt-dlp is a subprocess the daemon owns. Whether it is installed is a
-/// daemon fact, so both transports report its absence the same way rather
+/// The downloader is a subprocess the daemon owns. Whether it is installed is
+/// a daemon fact, so both transports report its absence the same way rather
 /// than one of them guessing.
 #[tokio::test]
-async fn ytdlp_reports_its_preconditions_identically() {
+async fn the_downloader_reports_its_preconditions_identically() {
     let pair = spawn_pair().await;
 
-    let empty = api::YtdlpRequest::default();
+    let formats = pair.local.download_formats().await.expect("formats");
+    assert_eq!(
+        formats,
+        pair.wire.download_formats().await.expect("wire formats"),
+    );
+    let first = formats.first().expect("at least one format").value.clone();
+
     assert_eq!(
         pair.local
-            .start_ytdlp(empty.clone())
+            .download_url(String::new(), first.clone())
             .await
             .err()
             .map(|error| error.code),
@@ -1304,25 +1310,141 @@ async fn ytdlp_reports_its_preconditions_identically() {
     );
     assert_eq!(
         pair.local
-            .start_ytdlp(empty.clone())
+            .download_url(String::new(), first.clone())
             .await
             .err()
             .map(|e| e.code),
-        pair.wire.start_ytdlp(empty).await.err().map(|e| e.code),
+        pair.wire
+            .download_url(String::new(), first.clone())
+            .await
+            .err()
+            .map(|e| e.code),
+    );
+    assert_eq!(
+        pair.local
+            .download_url("https://example.com/watch".into(), "not-a-format".into())
+            .await
+            .err()
+            .map(|error| error.code),
+        Some(ErrorCode::InvalidInput),
+        "a format the daemon does not offer is refused"
     );
 
     // With a URL, the answer depends on whether the tools are installed --
     // whatever it is, it must be the same on both sides.
-    let request = api::YtdlpRequest {
-        url: "https://example.com/watch".into(),
-        ..Default::default()
-    };
-    let local = pair.local.start_ytdlp(request.clone()).await;
-    let wire = pair.wire.start_ytdlp(request).await;
+    let local = pair
+        .local
+        .download_url("https://example.com/watch".into(), first.clone())
+        .await;
+    let wire = pair
+        .wire
+        .download_url("https://example.com/watch".into(), first)
+        .await;
     assert_eq!(
         local.is_ok(),
         wire.is_ok(),
         "local {local:?} vs wire {wire:?}"
+    );
+}
+
+/// The downloader's options are published rather than known by a client, so
+/// both transports must describe them the same way and a write must stick.
+#[tokio::test]
+async fn downloader_settings_round_trip_across_transports() {
+    let pair = spawn_pair().await;
+
+    let local = pair.local.downloader_settings().await.expect("settings");
+    assert_eq!(
+        local,
+        pair.wire
+            .downloader_settings()
+            .await
+            .expect("wire settings"),
+    );
+    assert!(
+        api::spec_value(&local, "output_dir").is_some(),
+        "the download location is one of them: {local:?}"
+    );
+
+    let updated = pair
+        .wire
+        .set_downloader_settings(vec![api::FieldValue::new("embed_thumbnail", "false")])
+        .await
+        .expect("set settings");
+    assert_eq!(api::spec_value(&updated, "embed_thumbnail"), Some("false"));
+    assert_eq!(
+        api::spec_value(&updated, "embed_metadata"),
+        api::spec_value(&local, "embed_metadata"),
+        "a key nobody answered is left alone",
+    );
+    assert_eq!(
+        pair.local.downloader_settings().await.expect("settings"),
+        updated,
+        "and the write is what both sides now read",
+    );
+
+    assert_eq!(
+        pair.local.downloader_history().await.expect("history"),
+        pair.wire.downloader_history().await.expect("wire history"),
+    );
+    pair.wire
+        .clear_downloader_history()
+        .await
+        .expect("clear history");
+}
+
+/// What is configured per account is published the same way a service is, and
+/// answering a field never echoes the secret back.
+#[tokio::test]
+async fn integrations_agree_across_transports_and_carry_no_secret() {
+    let pair = spawn_pair().await;
+
+    let local = pair.local.integrations().await.expect("local integrations");
+    assert_eq!(local, pair.wire.integrations().await.expect("wire"));
+    let lastfm = local
+        .iter()
+        .find(|integration| integration.id == "lastfm")
+        .expect("last.fm is offered");
+    assert!(
+        !lastfm.configured,
+        "nothing is connected in a fresh library"
+    );
+    assert_eq!(lastfm.connect, api::ConnectKind::WebSignIn);
+    assert!(
+        lastfm
+            .fields
+            .iter()
+            .all(|field| matches!(field.kind, api::FieldKind::Secret) && field.value.is_none()),
+        "its fields are secrets, and a secret is never sent out: {:?}",
+        lastfm.fields
+    );
+
+    let updated = pair
+        .wire
+        .set_integration_settings(
+            "lastfm".to_string(),
+            vec![api::FieldValue::new("api_key", "a-key-nobody-should-see")],
+        )
+        .await
+        .expect("set settings");
+    let rendered = format!("{updated:?}");
+    assert!(
+        !rendered.contains("a-key-nobody-should-see"),
+        "no response may carry the secret: {rendered}"
+    );
+
+    assert_eq!(
+        pair.local
+            .set_integration_settings("nope".to_string(), Vec::new())
+            .await
+            .err()
+            .map(|error| error.code),
+        pair.wire
+            .set_integration_settings("nope".to_string(), Vec::new())
+            .await
+            .err()
+            .map(|error| error.code),
+        "an integration this daemon does not have is refused the same way",
     );
 }
 

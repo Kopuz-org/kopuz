@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = 播放器设置
 discord_presence = Discord 状态
 connectivity = 连接
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = 显示暂停时的 Discord 状态
 discord_presence_source = 在 Discord 状态中显示媒体来源
 reduce_animations = 减少动画
@@ -189,7 +191,9 @@ quick_search_placeholder = 输入以搜索，回车播放…
 no_results_found = 没有找到“{ $query }”的结果
 listenbrainz_token_placeholder = 输入你的 ListenBrainz 令牌
 lastfm_api_key_placeholder = 输入你的 Last.fm API 密钥
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = 输入你的 Last.fm API 密钥（Secret）
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = 未找到专辑
@@ -384,6 +388,7 @@ ytdlp_format_video = 视频 (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = 正在处理…
 ytdlp_status_completed = 已完成
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = 等待中…
 
 channel_mode = 声道模式

@@ -1,27 +1,21 @@
 //! Long-running work a client starts and watches on the event stream.
 
-/// What yt-dlp should produce. `Video` keeps the picture; the rest extract
-/// audio.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum YtdlpAudioFormat {
-    #[default]
-    BestAudio,
-    Mp3,
-    Flac,
-    Opus,
-    Wav,
-    Video,
+/// One finished or failed URL download, as the downloader page lists them.
+/// `format` is the id of one of [`crate::JobApi::download_formats`]'s options.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DownloadHistoryEntry {
+    pub url: String,
+    pub title: String,
+    pub format: String,
+    pub state: DownloadState,
+    pub error: Option<String>,
 }
 
-/// A yt-dlp download. The options are the typed settings struct, not a bag of
-/// JSON: the daemon builds the command line, so it has to understand them.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct YtdlpRequest {
-    pub url: String,
-    /// Empty means the daemon's default download location.
-    pub output_dir: String,
-    pub format: YtdlpAudioFormat,
-    pub options: config::YtdlpOptions,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DownloadState {
+    #[default]
+    Finished,
+    Failed,
 }
 
 /// Where one requested download has got to.

@@ -1,126 +1,66 @@
 use components::settings_items::{
-    ChannelModeSelector, DeviceChangeBehaviorSelector, DiscordPresencePausedSettings,
-    DiscordPresenceSettings, EqualizerPanel, LastFmSettings, LibreFmSettings, MusicBrainzSettings,
-    SampleRateModeSelector, SettingItem, SettingsSection, ToggleSetting,
+    ChannelModeSelector, DeviceChangeBehaviorSelector, EqualizerPanel, SampleRateModeSelector,
+    SettingItem, SettingsSection, ToggleSetting,
 };
 use config::{AppConfig, FetchStrategy, LYRICS_OFFSET_LIMIT_MS, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
 #[component]
-pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
-    // Whether a scrobbling service is connected is the daemon's answer, and
+pub(super) fn ConnectivitySection() -> Element {
+    // What is offered, and whether each is connected, is the daemon's answer;
     // this counter is what asks it again after a change.
-    let integrations_changed = use_signal(|| 0u64);
+    let changed = use_signal(|| 0u64);
     let mut integrations = hooks::integrations::use_integrations();
     use_effect(move || {
-        let _ = integrations_changed();
+        let _ = changed();
         integrations.restart();
     });
+    let listed = integrations.read().clone().unwrap_or_default();
     rsx! {
         SettingsSection { title: i18n::t("connectivity").to_string(),
-            if !cfg!(target_os = "android") {
-                SettingItem {
-                    title: i18n::t("discord_presence").to_string(),
-                    config_key: "discord_presence",
-                    control: rsx! {
-                        DiscordPresenceSettings {
-                            enabled: config.read().discord_presence.unwrap_or(true),
-                            on_change: move |val| config.write().discord_presence = Some(val),
+            for integration in listed.into_iter() {
+                IntegrationRows { key: "{integration.id}", integration, changed }
+            }
+        }
+    }
+}
+
+/// One integration: its fields, and the button that connects it where
+/// filling the fields in is not the whole of it.
+#[component]
+fn IntegrationRows(integration: api::IntegrationInfo, changed: Signal<u64>) -> Element {
+    let name = components::forms::text(&integration.name);
+    let id = integration.id.clone();
+    let connect_id = integration.id.clone();
+    rsx! {
+        components::forms::schema_form::SchemaForm {
+            fields: integration.fields.clone(),
+            values: Vec::new(),
+            on_change: move |value: api::FieldValue| {
+                hooks::integrations::set_settings(id.clone(), vec![value], changed);
+            },
+        }
+        if integration.connect == api::ConnectKind::WebSignIn {
+            SettingItem {
+                title: name.clone(),
+                control: rsx! {
+                    button {
+                        class: if integration.configured {
+                            "bg-green-500/20 text-green-300 px-3 py-2 rounded-xl text-sm transition-colors"
+                        } else {
+                            "bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-xl text-sm transition-colors"
+                        },
+                        onclick: move |_| {
+                            hooks::integrations::authenticate(connect_id.clone(), changed);
+                        },
+                        if integration.configured {
+                            "{i18n::t_with(\"integration_connected\", &[(\"name\", name.clone())])}"
+                        } else {
+                            "{i18n::t_with(\"integration_connect\", &[(\"name\", name.clone())])}"
                         }
                     }
-                }
-                if config.read().discord_presence.unwrap_or(true) {
-                    SettingItem {
-                        title: i18n::t("discord_presence_paused").to_string(),
-                        config_key: "discord_presence_paused",
-                        control: rsx! {
-                            DiscordPresencePausedSettings {
-                                enabled: config.read().discord_presence_paused.unwrap_or(true),
-                                on_change: move |val| config.write().discord_presence_paused = Some(val),
-                            }
-                        }
-                    }
-                    SettingItem {
-                        title: i18n::t("discord_presence_source").to_string(),
-                        config_key: "discord_presence_source",
-                        control: rsx! {
-                            ToggleSetting {
-                                enabled: config.read().discord_presence_source.unwrap_or(true),
-                                on_change: move |val| config.write().discord_presence_source = Some(val),
-                            }
-                        }
-                    }
-                }
-            }
-            SettingItem {
-                title: i18n::t("listenbrainz").to_string(),
-                config_key: "musicbrainz_token",
-                control: rsx! {
-                    MusicBrainzSettings {
-                        on_save: move |token: String| {
-                            hooks::integrations::provision(
-                                api::IntegrationProvision {
-                                    kind: api::IntegrationKind::ListenBrainz,
-                                    token: Some(token),
-                                    ..Default::default()
-                                },
-                                integrations_changed,
-                            );
-                        },
-                    }
-                }
-            }
-            SettingItem {
-                title: i18n::t("lastfm").to_string(),
-                config_key: "lastfm_api_key",
-                extra_config_keys: vec!["lastfm_api_secret", "lastfm_session_key"],
-                control: rsx! {
-                    LastFmSettings {
-                        connected: hooks::integrations::is_configured(&integrations, api::IntegrationKind::LastFm),
-                        on_api_key_save: move |value: String| {
-                            hooks::integrations::provision(
-                                api::IntegrationProvision {
-                                    kind: api::IntegrationKind::LastFm,
-                                    api_key: Some(value),
-                                    ..Default::default()
-                                },
-                                integrations_changed,
-                            );
-                        },
-                        on_api_secret_save: move |value: String| {
-                            hooks::integrations::provision(
-                                api::IntegrationProvision {
-                                    kind: api::IntegrationKind::LastFm,
-                                    api_secret: Some(value),
-                                    ..Default::default()
-                                },
-                                integrations_changed,
-                            );
-                        },
-                        on_connect: move |_| {
-                            hooks::integrations::authenticate(
-                                api::IntegrationKind::LastFm,
-                                integrations_changed,
-                            );
-                        },
-                    }
-                }
-            }
-            SettingItem {
-                title: i18n::t("librefm").to_string(),
-                config_key: "librefm_session_key",
-                control: rsx! {
-                    LibreFmSettings {
-                        connected: hooks::integrations::is_configured(&integrations, api::IntegrationKind::LibreFm),
-                        on_connect: move |_| {
-                            hooks::integrations::authenticate(
-                                api::IntegrationKind::LibreFm,
-                                integrations_changed,
-                            );
-                        },
-                    }
-                }
+                },
             }
         }
     }

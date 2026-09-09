@@ -66,6 +66,8 @@ soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only th
 player_settings = הגדרות נגן
 discord_presence = נוכחות דיסקורד
 connectivity = קישוריות
+integration_connect = Connect to { $name }
+integration_connected = { $name } connected
 discord_presence_paused = הצגת סטטוס Discord במצב מושהה
 discord_presence_source = הצגת מקור המדיה בסטטוס Discord
 reduce_animations = הפחתת אנימציות
@@ -189,7 +191,9 @@ quick_search_placeholder = הקלידו לחיפוש, Enter לניגון…
 no_results_found = לא נמצאו תוצאות עבור "{ $query }"
 listenbrainz_token_placeholder = הזנת טוקן ListenBrainz
 lastfm_api_key_placeholder = הזן את מפתח ה-API של Last.fm
+lastfm_api_key_label = API key
 lastfm_api_secret_placeholder = הזן את סוד ה-API של Last.fm
+lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = האלבום לא נמצא
@@ -384,6 +388,7 @@ ytdlp_format_video = וידאו (MP4)
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = מעבד…
 ytdlp_status_completed = הושלם
+ytdlp_status_failed = Failed
 ytdlp_status_waiting = ממתין…
 
 channel_mode = מצב ערוץ
