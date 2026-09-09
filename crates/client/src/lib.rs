@@ -319,6 +319,69 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::search_results_from_proto(results.get_ref()))
     }
 
+    async fn catalog(&self, continuation: Option<String>) -> Result<api::CatalogPage, ApiError> {
+        let page = self
+            .client()
+            .get_catalog(Request::new(proto::CatalogRequest { continuation }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::catalog_page_from_proto(page.get_ref()))
+    }
+
+    async fn catalog_detail(
+        &self,
+        request: api::CatalogDetailRequest,
+    ) -> Result<api::CatalogDetail, ApiError> {
+        let detail = self
+            .client()
+            .get_catalog_detail(Request::new(convert::catalog_detail_request_to_proto(
+                &request,
+            )))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::catalog_detail_from_proto(detail.get_ref()))
+    }
+
+    async fn radio_stations(&self) -> Result<Vec<api::RadioStationInfo>, ApiError> {
+        let list = self
+            .client()
+            .get_radio_stations(Request::new(proto::GetRadioStationsRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .stations
+            .iter()
+            .map(convert::radio_station_from_proto)
+            .collect())
+    }
+
+    async fn search_radio(
+        &self,
+        query: String,
+        limit: u32,
+    ) -> Result<Vec<api::RadioStationInfo>, ApiError> {
+        let list = self
+            .client()
+            .search_radio(Request::new(proto::SearchRadioRequest { query, limit }))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .stations
+            .iter()
+            .map(convert::radio_station_from_proto)
+            .collect())
+    }
+
+    async fn pin_radio_station(&self, id: String, pinned: bool) -> Result<(), ApiError> {
+        self.client()
+            .pin_radio_station(Request::new(proto::PinRadioStationRequest { id, pinned }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
     async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<(), ApiError> {
         self.client()
             .refresh_artist_artwork(Request::new(proto::RefreshArtistArtworkRequest { names }))

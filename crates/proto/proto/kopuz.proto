@@ -46,6 +46,11 @@ service Kopuz {
   rpc GetGenreTracks(GenreTracksRequest) returns (TrackPage);
   rpc GetRecentTracks(Page) returns (TrackPage);
   rpc Search(SearchRequest) returns (SearchResults);
+  rpc GetCatalog(CatalogRequest) returns (CatalogPage);
+  rpc GetCatalogDetail(CatalogDetailRequest) returns (CatalogDetail);
+  rpc GetRadioStations(GetRadioStationsRequest) returns (RadioStationList);
+  rpc SearchRadio(SearchRadioRequest) returns (RadioStationList);
+  rpc PinRadioStation(PinRadioStationRequest) returns (Unit);
   rpc RefreshArtistArtwork(RefreshArtistArtworkRequest) returns (Unit);
 
   rpc GetPlaylists(GetPlaylistsRequest) returns (PlaylistCatalog);
@@ -514,6 +519,103 @@ message SearchResults {
 }
 
 // ---------------- playlists ----------------
+
+// ---------------- catalog ----------------
+
+// The source's own browse feed. Songs arrive as ordinary TrackInfo, and the
+// daemon remembers them, so queueing a browse row is the same call as
+// queueing a library track.
+enum CatalogItemKind {
+  CATALOG_ITEM_UNKNOWN = 0;
+  CATALOG_ITEM_TRACK = 1;
+  CATALOG_ITEM_ALBUM = 2;
+  CATALOG_ITEM_PLAYLIST = 3;
+  CATALOG_ITEM_ARTIST = 4;
+  CATALOG_ITEM_MOOD = 5;
+}
+
+message CatalogItem {
+  CatalogItemKind kind = 1;
+  string id = 2;
+  string title = 3;
+  optional string subtitle = 4;
+  optional ArtworkRef artwork = 5;
+  // Set for tracks, so a shelf of songs is playable without a second call.
+  optional TrackInfo track = 6;
+}
+
+message CatalogShelf {
+  string title = 1;
+  optional string strapline = 2;
+  repeated CatalogItem items = 3;
+  optional string more_ref = 4;
+  bool list = 5;
+}
+
+message CatalogRequest {
+  optional string continuation = 1;
+}
+
+message CatalogPage {
+  repeated CatalogShelf shelves = 1;
+  optional string continuation = 2;
+}
+
+message CatalogDetailRequest {
+  CatalogItemKind kind = 1;
+  string id = 2;
+  optional string continuation = 3;
+}
+
+message CatalogDetail {
+  CatalogItemKind kind = 1;
+  string id = 2;
+  string title = 3;
+  optional string subtitle = 4;
+  optional string description = 5;
+  optional ArtworkRef artwork = 6;
+  optional string playback_id = 7;
+  optional string year = 8;
+  repeated TrackInfo tracks = 9;
+  repeated CatalogShelf shelves = 10;
+  optional string continuation = 11;
+}
+
+// ---------------- radio ----------------
+
+// Stream URLs never appear here: a client names a station and one of its
+// streams, and the daemon resolves the rest.
+message RadioStreamInfo {
+  string id = 1;
+  // May be a translation key; the client owns the locale.
+  string name = 2;
+}
+
+message RadioStationInfo {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated string tags = 4;
+  repeated RadioStreamInfo streams = 5;
+  bool pinned = 6;
+  optional ArtworkRef artwork = 7;
+}
+
+message GetRadioStationsRequest {}
+
+message RadioStationList {
+  repeated RadioStationInfo stations = 1;
+}
+
+message SearchRadioRequest {
+  string query = 1;
+  uint32 limit = 2;
+}
+
+message PinRadioStationRequest {
+  string id = 1;
+  bool pinned = 2;
+}
 
 message GetPlaylistsRequest {}
 

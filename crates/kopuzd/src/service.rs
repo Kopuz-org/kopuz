@@ -442,6 +442,79 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::search_results_to_proto(&results)))
     }
 
+    async fn get_catalog(
+        &self,
+        request: Request<proto::CatalogRequest>,
+    ) -> Result<Response<proto::CatalogPage>, Status> {
+        let page = self
+            .0
+            .api
+            .catalog(request.into_inner().continuation)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::catalog_page_to_proto(&page)))
+    }
+
+    async fn get_catalog_detail(
+        &self,
+        request: Request<proto::CatalogDetailRequest>,
+    ) -> Result<Response<proto::CatalogDetail>, Status> {
+        let detail = self
+            .0
+            .api
+            .catalog_detail(convert::catalog_detail_request_from_proto(
+                request.get_ref(),
+            ))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::catalog_detail_to_proto(&detail)))
+    }
+
+    async fn get_radio_stations(
+        &self,
+        _: Request<proto::GetRadioStationsRequest>,
+    ) -> Result<Response<proto::RadioStationList>, Status> {
+        let stations = self.0.api.radio_stations().await.map_err(failed)?;
+        Ok(Response::new(proto::RadioStationList {
+            stations: stations
+                .iter()
+                .map(convert::radio_station_to_proto)
+                .collect(),
+        }))
+    }
+
+    async fn search_radio(
+        &self,
+        request: Request<proto::SearchRadioRequest>,
+    ) -> Result<Response<proto::RadioStationList>, Status> {
+        let request = request.into_inner();
+        let stations = self
+            .0
+            .api
+            .search_radio(request.query, request.limit)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::RadioStationList {
+            stations: stations
+                .iter()
+                .map(convert::radio_station_to_proto)
+                .collect(),
+        }))
+    }
+
+    async fn pin_radio_station(
+        &self,
+        request: Request<proto::PinRadioStationRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .pin_radio_station(request.id, request.pinned)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     async fn refresh_artist_artwork(
         &self,
         request: Request<proto::RefreshArtistArtworkRequest>,

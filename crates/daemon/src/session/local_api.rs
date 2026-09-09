@@ -12,6 +12,8 @@ pub struct LocalApi {
     pub(super) favorites: Option<Arc<crate::favorites::FavoritesService>>,
     pub(super) artwork: Option<Arc<crate::artwork::ArtworkService>>,
     pub(super) playlists: Option<Arc<crate::playlists::PlaylistService>>,
+    pub(super) catalog: Option<Arc<crate::catalog::CatalogService>>,
+    pub(super) radio: Option<Arc<crate::radio::RadioService>>,
 }
 
 impl LocalApi {
@@ -25,6 +27,8 @@ impl LocalApi {
             favorites: None,
             artwork: None,
             playlists: None,
+            catalog: None,
+            radio: None,
         }
     }
 
@@ -63,10 +67,32 @@ impl LocalApi {
         self
     }
 
+    pub fn with_catalog(mut self, catalog: Arc<crate::catalog::CatalogService>) -> Self {
+        self.catalog = Some(catalog);
+        self
+    }
+
+    pub fn with_radio(mut self, radio: Arc<crate::radio::RadioService>) -> Self {
+        self.radio = Some(radio);
+        self
+    }
+
     fn library(&self) -> Result<&crate::library::LibraryService, ApiError> {
         self.library
             .as_deref()
             .ok_or_else(|| ApiError::unsupported("this daemon runs without a library service"))
+    }
+
+    fn catalog(&self) -> Result<&crate::catalog::CatalogService, ApiError> {
+        self.catalog
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without a catalog service"))
+    }
+
+    fn radio(&self) -> Result<&crate::radio::RadioService, ApiError> {
+        self.radio
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without a radio service"))
     }
 
     fn playlists(&self) -> Result<&crate::playlists::PlaylistService, ApiError> {
@@ -213,6 +239,33 @@ impl api::LibraryApi for LocalApi {
 
     async fn artists(&self, page: Page) -> Result<api::ArtistPage, ApiError> {
         self.library()?.artists(page).await
+    }
+
+    async fn catalog(&self, continuation: Option<String>) -> Result<api::CatalogPage, ApiError> {
+        self.catalog()?.catalog(continuation.as_deref()).await
+    }
+
+    async fn catalog_detail(
+        &self,
+        request: api::CatalogDetailRequest,
+    ) -> Result<api::CatalogDetail, ApiError> {
+        self.catalog()?.detail(request).await
+    }
+
+    async fn radio_stations(&self) -> Result<Vec<api::RadioStationInfo>, ApiError> {
+        Ok(self.radio()?.stations().await)
+    }
+
+    async fn search_radio(
+        &self,
+        query: String,
+        limit: u32,
+    ) -> Result<Vec<api::RadioStationInfo>, ApiError> {
+        self.radio()?.search(&query, limit).await
+    }
+
+    async fn pin_radio_station(&self, id: String, pinned: bool) -> Result<(), ApiError> {
+        self.radio()?.pin(&id, pinned).await
     }
 
     async fn artist_tracks(&self, artist: String, page: Page) -> Result<api::TrackPage, ApiError> {

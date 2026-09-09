@@ -176,7 +176,20 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .map(|dirs| dirs.cache_dir().join("artwork"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork")),
     );
+    let catalog = crate::CatalogService::new(database.clone(), session.clone(), library.clone());
+    let radio_service = crate::RadioService::new(config_service.clone(), library.clone());
+    library.attach_catalog(catalog.clone());
     artwork.attach_library(library.clone());
+    artwork.attach_catalog(catalog.clone());
+    artwork.attach_radio(radio_service.clone());
+    // The registry starts empty and is built from config here, rather than
+    // by whichever frontend happened to be open.
+    let radio_boot = radio_service.clone();
+    tokio::spawn(async move {
+        if let Err(error) = radio_boot.reload().await {
+            tracing::warn!(%error, "radio registry could not be loaded");
+        }
+    });
     let api = Arc::new(
         LocalApi::new(session.clone())
             .with_library(library.clone())
@@ -185,7 +198,9 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_favorites(favorites.clone())
             .with_downloads(downloads)
             .with_artwork(artwork.clone())
-            .with_playlists(playlists),
+            .with_playlists(playlists)
+            .with_catalog(catalog)
+            .with_radio(radio_service),
     );
 
     Ok(Core {

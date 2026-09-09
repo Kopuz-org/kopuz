@@ -975,3 +975,51 @@ async fn queue_snapshot_and_edits_agree_across_transports() {
             .map(|error| error.code),
     );
 }
+
+/// Neither service is configured in this harness, so both transports must
+/// agree on saying so rather than one erroring and the other answering
+/// empty -- the failure mode a second implementation would inherit.
+#[tokio::test]
+async fn catalog_and_radio_report_absence_identically() {
+    let pair = spawn_pair().await;
+
+    assert_eq!(
+        pair.local.catalog(None).await.err().map(|e| e.code),
+        pair.wire.catalog(None).await.err().map(|e| e.code),
+    );
+
+    let request = api::CatalogDetailRequest {
+        kind: api::CatalogItemKind::Album,
+        id: "MPRE1".into(),
+        continuation: None,
+    };
+    assert_eq!(
+        pair.local
+            .catalog_detail(request.clone())
+            .await
+            .err()
+            .map(|e| e.code),
+        pair.wire
+            .catalog_detail(request)
+            .await
+            .err()
+            .map(|e| e.code),
+    );
+
+    assert_eq!(
+        pair.local.radio_stations().await.err().map(|e| e.code),
+        pair.wire.radio_stations().await.err().map(|e| e.code),
+    );
+    assert_eq!(
+        pair.local
+            .pin_radio_station("st-1".into(), true)
+            .await
+            .err()
+            .map(|e| e.code),
+        pair.wire
+            .pin_radio_station("st-1".into(), true)
+            .await
+            .err()
+            .map(|e| e.code),
+    );
+}

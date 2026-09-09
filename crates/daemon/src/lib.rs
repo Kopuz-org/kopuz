@@ -5,6 +5,7 @@
 
 pub mod artwork;
 pub mod boot;
+pub mod catalog;
 pub mod config_service;
 pub mod downloads;
 pub mod external;
@@ -18,11 +19,13 @@ pub mod persistence;
 mod playback;
 pub mod playlists;
 pub mod queue_model;
+pub mod radio;
 pub mod scrobbler;
 pub mod session;
 mod wire;
 
 pub use artwork::ArtworkService;
+pub use catalog::CatalogService;
 pub use config_service::ConfigService;
 pub use downloads::DownloadsService;
 pub use external::{ExternalPlayer, ExternalReport};
@@ -34,6 +37,7 @@ pub use ownership::DatabaseLease;
 pub use persistence::{DbQueueStore, QueueStore};
 pub use playlists::PlaylistService;
 pub use queue_model::{NextOutcome, QueueModel};
+pub use radio::RadioService;
 pub use scrobbler::Scrobbler;
 pub use session::{
     LocalApi, PlaybackServices, QueueMaterializer, QueueMirrorSnapshot, SessionHandle,

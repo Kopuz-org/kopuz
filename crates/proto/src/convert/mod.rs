@@ -5,6 +5,7 @@
 //!
 //! The functions are re-exported flat, so callers stay on `convert::name`.
 
+mod catalog;
 mod config;
 mod enums;
 mod error;
@@ -18,6 +19,7 @@ mod service;
 #[cfg(test)]
 mod fixtures;
 
+pub use catalog::*;
 pub use config::*;
 pub use enums::*;
 pub use error::*;
