@@ -229,6 +229,15 @@ impl ReadStore for Native {
         cfg_store::load_server(&self.pool(), id).await
     }
 
+    async fn set_server_credentials(
+        &self,
+        id: &str,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<(), DbError> {
+        cfg_store::set_server_credentials(&self.pool(), id, access_token, user_id).await
+    }
+
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError> {
         writes::meta_get(&self.pool(), cache_key, kind).await
     }

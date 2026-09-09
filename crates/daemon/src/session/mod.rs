@@ -326,6 +326,29 @@ impl SessionHandle {
         self.emit_event(ApiEvent::LibraryInvalidated { table });
     }
 
+    /// Announce whether a source is reachable, so every client shows the same
+    /// connection state rather than each probing on its own.
+    pub fn publish_source_status(&self, source: &str, state: api::SourceState) {
+        self.emit_event(ApiEvent::SourceStatus {
+            source: source.to_string(),
+            state,
+        });
+    }
+
+    /// Stop and empty the queue. What is loaded belongs to the source that
+    /// was active, so switching away has to leave nothing playing from it.
+    pub async fn reset_playback(&self) -> Result<(), ApiError> {
+        self.player_command(PlayerCommand::Stop).await?;
+        self.set_queue(SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: QueueContext::Tracks { keys: Vec::new() },
+            start_index: None,
+            shuffle: None,
+        })
+        .await?;
+        Ok(())
+    }
+
     /// Swap the radio station registry after a registry import completes, so
     /// radio contexts resolve against live manifests.
     pub fn set_station_registry(&self, registry: Arc<radio::registry::StationRegistry>) {

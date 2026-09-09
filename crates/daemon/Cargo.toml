@@ -20,6 +20,7 @@ api = { workspace = true }
 db = { workspace = true }
 discord-presence = { workspace = true }
 scrobble = { workspace = true }
+webbrowser = { workspace = true }
 reqwest = { workspace = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }

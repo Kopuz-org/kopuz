@@ -265,6 +265,15 @@ pub trait ReadStore: Send + Sync {
     /// by server switching so stored creds are reused instead of re-prompting.
     async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
 
+    /// Store one server's credentials on their own. `save_config` writes
+    /// only the active server's, so signing into another one needs this.
+    async fn set_server_credentials(
+        &self,
+        id: &str,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<(), DbError>;
+
     /// Generic metadata-cache read (`metadata_cache` table): the `payload` for
     /// `(cache_key, kind)`, if cached.
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;

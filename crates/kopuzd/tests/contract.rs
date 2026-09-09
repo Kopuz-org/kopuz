@@ -142,6 +142,9 @@ async fn spawn_pair() -> Pair {
         session.clone(),
         dir.path().join("uploads"),
     );
+    let sources =
+        daemon::SourceService::new(database.clone(), session.clone(), config_service.clone());
+    let integrations = daemon::IntegrationService::new(config_service.clone(), session.clone());
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)
             .with_config(config_service.clone())
@@ -151,6 +154,8 @@ async fn spawn_pair() -> Pair {
             .with_artwork(artwork.clone())
             .with_playlists(playlists.clone())
             .with_mutations(mutations.clone())
+            .with_sources(sources.clone())
+            .with_integrations(integrations.clone())
     };
     let state = Arc::new(kopuzd::GrpcState {
         api: Arc::new(build_api(session.clone())),
@@ -1097,4 +1102,75 @@ async fn mutations_agree_across_transports() {
             .err()
             .map(|error| error.code),
     );
+}
+
+/// A source row is what a settings page renders. Both transports must agree
+/// on it, and neither may carry a credential back out.
+#[tokio::test]
+async fn sources_agree_across_transports_and_carry_no_secret() {
+    let pair = spawn_pair().await;
+
+    let local = pair.local.sources().await.expect("local sources");
+    let wire = pair.wire.sources().await.expect("wire sources");
+    assert_eq!(local, wire);
+    assert_eq!(local.len(), 1, "just the default local library: {local:?}");
+    assert!(local[0].active, "the default library is active");
+    assert!(local[0].authenticated, "a local library needs no sign-in");
+    assert_eq!(local[0].service, None);
+
+    // Adding a server is visible to both, and provisioning a credential
+    // reports authentication without echoing the secret.
+    let draft = api::ServerDraft {
+        name: "Home".into(),
+        url: "https://jelly.example".into(),
+        service: config::MusicService::Jellyfin,
+        ..Default::default()
+    };
+    let added = pair.wire.upsert_server(draft).await.expect("add server");
+    assert!(!added.authenticated, "a new server has no credentials yet");
+    assert_eq!(added.url.as_deref(), Some("https://jelly.example"));
+
+    pair.local
+        .provision_credentials(api::CredentialProvision {
+            server_id: added.id.clone(),
+            secret: "a-token-nobody-should-see".into(),
+            user_id: Some("alice".into()),
+            browser: None,
+        })
+        .await
+        .expect("provision");
+
+    let sources = pair.wire.sources().await.expect("wire sources");
+    let server = sources
+        .iter()
+        .find(|source| source.id == added.id)
+        .expect("the server is listed");
+    assert!(server.authenticated, "it is signed in now");
+    let rendered = format!("{sources:?}");
+    assert!(
+        !rendered.contains("a-token-nobody-should-see"),
+        "no response may carry the secret: {rendered}"
+    );
+
+    // A bad draft is refused identically.
+    let bad = api::ServerDraft {
+        name: "No URL".into(),
+        url: "not-a-url".into(),
+        service: config::MusicService::Jellyfin,
+        ..Default::default()
+    };
+    assert_eq!(
+        pair.local
+            .upsert_server(bad.clone())
+            .await
+            .err()
+            .map(|error| error.code),
+        pair.wire.upsert_server(bad).await.err().map(|e| e.code),
+    );
+
+    pair.wire
+        .delete_server(added.id.clone())
+        .await
+        .expect("delete");
+    assert_eq!(pair.local.sources().await.expect("sources").len(), 1);
 }
