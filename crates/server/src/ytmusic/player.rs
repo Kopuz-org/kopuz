@@ -91,6 +91,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
     // be minted (e.g. minter not running / unported platform), this still plays
     // from the start — only deep seeks 403 — which beats total failure.
     let mut decipher_fallback: Option<YtStreamInfo> = None;
+    let mut decipher_err: Option<String> = None;
     if let Some(c) = cookies {
         let uid = super::derive_user_id(c);
         if let Some(u) = &uid {
@@ -116,7 +117,13 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
                     tracing::debug!(itag = ?info.itag, "signed-in but non-Premium — needs a content pot, trying ANDROID_VR");
                     decipher_fallback = Some(info);
                 }
-                Err(e) => tracing::debug!(error = %e, "premium decipher failed — falling back"),
+                Err(e) => {
+                    // Warn, not debug: for a signed-in account this is the
+                    // path that was supposed to work, and every path after it
+                    // is an anonymous one YouTube is entitled to refuse.
+                    tracing::warn!(error = %e, "signed-in stream path failed — falling back");
+                    decipher_err = Some(e);
+                }
             }
         }
     }
@@ -155,6 +162,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         }
     };
     tracing::debug!(%last_err, "ANDROID_VR+pot failed — trying bare clients");
+    let pot_err = last_err.clone();
 
     for client in STREAM_FALLBACK_CLIENTS {
         let cookies_for = if client.login_supported {
@@ -190,7 +198,27 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         info.range_safe = false;
         return Ok(info);
     }
-    Err(format!("all stream paths failed; last error: {last_err}"))
+    Err(all_paths_failed(
+        decipher_err.as_deref(),
+        &pot_err,
+        &last_err,
+    ))
+}
+
+/// Why every path failed, not only the last one.
+///
+/// The bare clients are tried anonymously, so their `LOGIN_REQUIRED` is the
+/// expected ending for any track YouTube gates -- reporting that alone said
+/// "sign in" to someone who already was, and hid the signed-in path's actual
+/// error behind a debug line nobody runs with.
+fn all_paths_failed(decipher: Option<&str>, pot: &str, bare: &str) -> String {
+    let mut message = String::from("all stream paths failed");
+    match decipher {
+        Some(error) => message.push_str(&format!("; signed-in: {error}")),
+        None => message.push_str("; signed-in: not attempted"),
+    }
+    message.push_str(&format!("; anonymous+pot: {pot}; bare clients: {bare}"));
+    message
 }
 
 /// A Premium *subscription* yields 774-class Opus and is PO-token-exempt. Any
@@ -533,6 +561,30 @@ async fn try_native_decipher(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The bare clients end on LOGIN_REQUIRED for anything YouTube gates, so
+    /// that line alone told a signed-in user to sign in. The reason their own
+    /// path failed has to travel with it.
+    #[test]
+    fn the_failure_names_the_signed_in_reason_not_just_the_last_client() {
+        let message = all_paths_failed(
+            Some("WEB_REMIX playability UNPLAYABLE: try again later"),
+            "ANDROID_VR+pot playability LOGIN_REQUIRED: Sign in to confirm you're not a bot",
+            "ANDROID_VR playability LOGIN_REQUIRED: Sign in to confirm you're not a bot",
+        );
+
+        assert!(
+            message.contains("signed-in: WEB_REMIX playability UNPLAYABLE: try again later"),
+            "{message}"
+        );
+        assert!(message.contains("anonymous+pot: "), "{message}");
+    }
+
+    #[test]
+    fn a_skipped_signed_in_path_says_so_rather_than_looking_like_a_success() {
+        let message = all_paths_failed(None, "PO mint: minter unavailable", "bare: nope");
+        assert!(message.contains("signed-in: not attempted"), "{message}");
+    }
 
     #[test]
     fn pick_plain_format_carries_bitrate_and_itag() {
