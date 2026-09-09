@@ -46,6 +46,8 @@ service Kopuz {
   rpc GetGenreTracks(GenreTracksRequest) returns (TrackPage);
   rpc GetRecentTracks(Page) returns (TrackPage);
   rpc Search(SearchRequest) returns (SearchResults);
+  rpc GetTrackWebUrl(TrackWebUrlRequest) returns (WebUrl);
+  rpc GetAlbumWebUrl(AlbumWebUrlRequest) returns (WebUrl);
   rpc GetCatalog(CatalogRequest) returns (CatalogPage);
   rpc GetCatalogDetail(CatalogDetailRequest) returns (CatalogDetail);
   rpc GetRadioStations(GetRadioStationsRequest) returns (RadioStationList);
@@ -532,6 +534,19 @@ message GenreTracksRequest {
 
 message SearchRequest {
   string query = 1;
+}
+
+message TrackWebUrlRequest {
+  string key = 1;
+}
+
+message AlbumWebUrlRequest {
+  string id = 1;
+}
+
+// Absent when the source has no page for the row.
+message WebUrl {
+  optional string url = 1;
 }
 
 message RefreshArtistArtworkRequest {

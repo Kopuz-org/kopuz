@@ -156,10 +156,9 @@ fn AlbumGrid(
     mut pending_album_id_for_playlist: Signal<Option<String>>,
 ) -> Element {
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
-    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let albums_res = use_albums(source);
 
     let album_sort = use_signal(|| config.peek().album_sort.clone());
@@ -329,15 +328,9 @@ fn AlbumGrid(
                                                     let Some(tag) = tags.get(idx).copied() else { return };
                                                     match tag {
                                                         AlbumAction::Queue => {
-                                                            let album_src = active_source.peek().clone();
-                                                            let album_id = id.clone();
-                                                            spawn(async move {
-                                                                let mut tracks = album_src.album_tracks(&album_id).await.unwrap_or_default();
-                                                                tracks.sort_by(|a, b| {
-                                                                    a.track_number.cmp(&b.track_number)
-                                                                        .then_with(|| a.title.cmp(&b.title))
-                                                                });
-                                                                ctrl.add_to_queue(tracks);
+                                                            hooks::library_actions::with_album_keys(id.clone(), move |keys| {
+                                                                let mut ctrl = ctrl;
+                                                                ctrl.set_queue_keys(keys, api::QueueMode::Append, None);
                                                             });
                                                         }
                                                         AlbumAction::Playlist => {
@@ -384,7 +377,7 @@ fn AlbumDetail(
     let nav_ctrl = use_context::<components::NavigationController>();
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let api = hooks::use_api();
     let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
     let downloads = hooks::downloads::use_downloads();
@@ -397,18 +390,25 @@ fn AlbumDetail(
     // local DB until saved. When the DB has no row for the id, fetch the album
     // straight from the catalog remote by that browse id so every searched /
     // discovered album renders (header + full track list) instead of "not found".
-    let direct_remote_res: Resource<Option<::server::source::RemoteAlbum>> = {
+    let direct_remote_res: Resource<Option<api::CatalogDetail>> = {
+        let api = api.clone();
         use_resource(move || {
             let want = !*is_offline.read();
             let db_has = album_res.read().clone().flatten().is_some();
             let id = album_id_memo();
-            let src = active_source.peek().clone();
-            utils::offload(async move {
+            let api = api.clone();
+            async move {
                 if !want || db_has || id.trim().is_empty() {
                     return None;
                 }
-                src.fetch_album_by_ref(&id).await.ok().flatten()
-            })
+                api.catalog_detail(api::CatalogDetailRequest {
+                    kind: api::CatalogItemKind::Album,
+                    id,
+                    continuation: None,
+                })
+                .await
+                .ok()
+            }
         })
     };
 
@@ -418,7 +418,7 @@ fn AlbumDetail(
         None => {
             // Not saved locally — render the remote album directly if it resolved.
             if let Some(remote) = direct_remote_res.read().clone().flatten() {
-                let mut tracks = remote.tracks;
+                let mut tracks = hooks::wire::tracks_from_api(remote.tracks);
                 tracks.sort_by(|a, b| {
                     a.disc_number
                         .unwrap_or(1)
@@ -434,10 +434,10 @@ fn AlbumDetail(
                         YtAlbumDetail {
                             config,
                             title: remote.title,
-                            artist: remote.artist.unwrap_or_default(),
+                            artist: remote.subtitle.unwrap_or_default(),
                             year: remote.year,
-                            browse_id: Some(remote.browse_id),
-                            local_cover: remote.thumbnail.map(utils::cover_url_from_string),
+                            browse_id: Some(remote.id),
+                            local_cover: hooks::wire::artwork_url(remote.artwork.as_ref()),
                             tracks,
                             on_close,
                         }
@@ -468,40 +468,56 @@ fn AlbumDetail(
         ids
     });
     let tracks_res = {
+        let api = api.clone();
         use_resource(move || {
             let _ = gens.generation(Table::Tracks);
-            let (src, ids) = (active_source(), matching_ids());
-            utils::offload(async move {
+            let ids = matching_ids();
+            let api = api.clone();
+            async move {
                 let mut out = Vec::new();
-                for id in &ids {
-                    out.extend(src.album_tracks(id).await.unwrap_or_default());
+                for id in ids {
+                    let page = api
+                        .album_tracks(
+                            id,
+                            api::Page {
+                                offset: 0,
+                                limit: u32::MAX,
+                            },
+                        )
+                        .await
+                        .unwrap_or_default();
+                    out.extend(hooks::wire::tracks_from_api(page.items));
                 }
                 out
-            })
+            }
         })
     };
 
     // Catalog remotes (YT) store albums under a title+artist hash with no
     // browse id, so the library only ever holds the few tracks the user saved —
-    // an album page would show 1 of 18 songs. Resolve the album's browse id on
-    // demand and fetch the full album (header + every track), the way YT Music
-    // shows it. `None` for local/other sources (gated on `discover`) and while
-    // offline; drives both the full track list and the YT-styled header.
-    let remote_album_res: Resource<Option<::server::source::RemoteAlbum>> = {
+    // an album page would show 1 of 18 songs. The daemon resolves the saved
+    // album to its remote listing (header + every track), the way YT Music
+    // shows it. `None` for local/other sources and while offline; drives both
+    // the full track list and the YT-styled header.
+    let remote_album_res: Resource<Option<api::CatalogDetail>> = {
+        let api = api.clone();
         use_resource(move || {
             let want = caps().albums == api::AlbumPresentation::Remote && !*is_offline.read();
             let album = album_res.read().clone().flatten();
-            let src = active_source.peek().clone();
-            utils::offload(async move {
+            let api = api.clone();
+            async move {
                 let album = album?;
                 if !want || album.title.trim().is_empty() {
                     return None;
                 }
-                src.fetch_album_by_meta(&album.title, &album.artist)
-                    .await
-                    .ok()
-                    .flatten()
-            })
+                api.catalog_detail(api::CatalogDetailRequest {
+                    kind: api::CatalogItemKind::Album,
+                    id: album.id,
+                    continuation: None,
+                })
+                .await
+                .ok()
+            }
         })
     };
 
@@ -512,7 +528,7 @@ fn AlbumDetail(
         // Full album from the catalog remote (already in album order). Used
         // whenever it resolved; the locally-saved subset is the fallback.
         if !offline && let Some(remote) = remote_album_res.read().clone().flatten() {
-            let mut remote = remote.tracks;
+            let mut remote = hooks::wire::tracks_from_api(remote.tracks);
             remote.sort_by(|a, b| {
                 a.disc_number
                     .unwrap_or(1)
@@ -598,7 +614,7 @@ fn AlbumDetail(
         .as_ref()
         .and_then(|a| a.year.clone())
         .or_else(|| (album.year > 0).then(|| album.year.to_string()));
-    let yt_browse_id = yt_remote.as_ref().map(|a| a.browse_id.clone());
+    let yt_browse_id = yt_remote.as_ref().map(|a| a.id.clone());
 
     rsx! {
         div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
@@ -721,7 +737,6 @@ fn YtAlbumDetail(
     tracks: Vec<reader::models::Track>,
     on_close: EventHandler<()>,
 ) -> Element {
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let nav_ctrl = use_context::<components::NavigationController>();
     let downloads = hooks::downloads::use_downloads();
@@ -761,18 +776,27 @@ fn YtAlbumDetail(
     let tracks_download_all = tracks.clone();
     let artist_for_nav_btn = artist_name.clone();
     // Prefer the provider's album page; fall back to its first track page.
-    let share_url = browse_id
-        .as_ref()
-        .and_then(|id| match tracks.first().and_then(|t| t.id.service()) {
-            Some(config::MusicService::Spotify) => {
-                Some(format!("https://open.spotify.com/album/{id}"))
+    // The daemon knows which sources have web pages and how they spell them;
+    // an id and a key are all that leave here.
+    let share_api = hooks::use_api();
+    let share_id = browse_id.clone();
+    let share_key = tracks.first().map(|track| track.id.key().into_owned());
+    let share_url = use_resource(move || {
+        let api = share_api.clone();
+        let (id, key) = (share_id.clone(), share_key.clone());
+        async move {
+            if let Some(id) = id
+                && let Ok(Some(url)) = api.album_web_url(id).await
+            {
+                return Some(url);
             }
-            Some(config::MusicService::YtMusic) => {
-                Some(format!("https://music.youtube.com/browse/{id}"))
+            match key {
+                Some(key) => api.track_web_url(key).await.ok().flatten(),
+                None => None,
             }
-            _ => None,
-        })
-        .or_else(|| tracks.first().and_then(|t| active_source.peek().web_url(t)));
+        }
+    });
+    let share_url = share_url.read().clone().flatten();
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",

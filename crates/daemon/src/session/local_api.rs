@@ -372,6 +372,14 @@ impl api::LibraryApi for LocalApi {
         self.library()?.search(&query).await
     }
 
+    async fn track_web_url(&self, key: String) -> Result<Option<String>, ApiError> {
+        self.library()?.track_web_url(&key).await
+    }
+
+    async fn album_web_url(&self, id: String) -> Result<Option<String>, ApiError> {
+        self.library()?.album_web_url(&id).await
+    }
+
     async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<(), ApiError> {
         self.library()?.refresh_artist_artwork(names).await
     }

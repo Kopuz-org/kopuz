@@ -442,6 +442,32 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::search_results_to_proto(&results)))
     }
 
+    async fn get_track_web_url(
+        &self,
+        request: Request<proto::TrackWebUrlRequest>,
+    ) -> Result<Response<proto::WebUrl>, Status> {
+        let url = self
+            .0
+            .api
+            .track_web_url(request.into_inner().key)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::WebUrl { url }))
+    }
+
+    async fn get_album_web_url(
+        &self,
+        request: Request<proto::AlbumWebUrlRequest>,
+    ) -> Result<Response<proto::WebUrl>, Status> {
+        let url = self
+            .0
+            .api
+            .album_web_url(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::WebUrl { url }))
+    }
+
     async fn get_catalog(
         &self,
         request: Request<proto::CatalogRequest>,

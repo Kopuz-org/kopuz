@@ -54,6 +54,46 @@ impl LibraryService {
             .collect())
     }
 
+    /// The source's public page for a track. A row the library has never
+    /// stored still answers, because a catalog hit is exactly the row someone
+    /// wants to share.
+    pub async fn track_web_url(&self, key: &str) -> Result<Option<String>, ApiError> {
+        let config = self.current_config();
+        let track = match self
+            .db
+            .tracks_by_keys(&self.query_source(), &[key.to_string()])
+            .await
+            .map_err(db_error)?
+            .into_iter()
+            .next()
+        {
+            Some(track) => track,
+            None => match self.transient_track(key) {
+                Some(track) => track,
+                None => return Ok(None),
+            },
+        };
+        Ok(server::source::active(self.db.clone(), &config).web_url(&track))
+    }
+
+    /// The source's page for an album, falling back to its first track's page
+    /// for a source that has albums but no album pages.
+    pub async fn album_web_url(&self, id: &str) -> Result<Option<String>, ApiError> {
+        let config = self.current_config();
+        let source = server::source::active(self.db.clone(), &config);
+        if let Some(url) = source.album_web_url(id) {
+            return Ok(Some(url));
+        }
+        let track = self
+            .db
+            .album_tracks(&self.query_source(), id)
+            .await
+            .map_err(db_error)?
+            .into_iter()
+            .next();
+        Ok(track.and_then(|track| source.web_url(&track)))
+    }
+
     pub async fn albums(&self, page: Page) -> Result<AlbumPage, ApiError> {
         let rows = self
             .db

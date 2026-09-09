@@ -537,11 +537,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
     let delete_folder_text = i18n::t("delete_folder").to_string();
 
     let radio_text = components::radio_actions::radio_label();
-    let can_radio = consume_context::<Signal<::server::source::ActiveSource>>()
+    let can_radio = consume_context::<Signal<api::SourceCapabilities>>()
         .read()
-        .capabilities()
-        .radio
-        .playlist;
+        .playlist_radio;
 
     let build_playlist_actions = |in_folder: bool| -> (Vec<MenuAction>, Vec<PlaylistCardAction>) {
         let mut entries = vec![(

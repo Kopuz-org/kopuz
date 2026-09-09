@@ -117,3 +117,36 @@ pub fn patch_from_edits(key: String, edits: reader::models::TrackEdits) -> api::
         },
     }
 }
+
+/// Every track key of an album, in album order, then whatever the caller
+/// wanted with them. The album's own tracks are a daemon read, so an action
+/// menu does not need the list on screen to act on it.
+pub fn with_album_keys(album_id: String, then: impl FnOnce(Vec<String>) + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        let page = match api
+            .album_tracks(
+                album_id,
+                api::Page {
+                    offset: 0,
+                    limit: u32::MAX,
+                },
+            )
+            .await
+        {
+            Ok(page) => page,
+            Err(error) => {
+                tracing::warn!(%error, "reading an album's tracks failed");
+                toast_error(&error.to_string());
+                return;
+            }
+        };
+        let mut tracks = page.items;
+        tracks.sort_by(|left, right| {
+            left.track_number
+                .cmp(&right.track_number)
+                .then_with(|| left.title.cmp(&right.title))
+        });
+        then(tracks.into_iter().map(|track| track.key).collect());
+    });
+}

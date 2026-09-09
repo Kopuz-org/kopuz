@@ -208,18 +208,30 @@ impl CatalogService {
         let source = self.source();
         match request.kind {
             CatalogItemKind::Album => {
-                // An album reached by its own browse id resolves directly;
-                // one reached by a library ref needs the lookup first.
+                // An album reached by its own browse id resolves directly; one
+                // reached by a library ref needs the lookup first; and a saved
+                // album from a source that stores no browse id is found by what
+                // it is called, which is why the id alone is enough here.
                 let album = match source
                     .fetch_album_by_ref(&request.id)
                     .await
                     .map_err(source_error)?
                 {
                     Some(album) => album,
-                    None => source
-                        .fetch_album(&request.id)
-                        .await
-                        .map_err(source_error)?,
+                    None => match self.saved_album(&request.id).await {
+                        Some((title, artist)) => match source
+                            .fetch_album_by_meta(&title, &artist)
+                            .await
+                            .map_err(source_error)?
+                        {
+                            Some(album) => album,
+                            None => return Err(ApiError::not_found("no such catalog album")),
+                        },
+                        None => source
+                            .fetch_album(&request.id)
+                            .await
+                            .map_err(source_error)?,
+                    },
                 };
                 self.library.register_transient(&album.tracks);
                 let artwork = self.remember_thumbnail(&album.browse_id, album.thumbnail.as_deref());
@@ -330,6 +342,13 @@ impl CatalogService {
             .map_err(source_error)?;
         self.library.register_transient(&tracks);
         Ok(tracks)
+    }
+
+    /// The title and artist of a saved album, for a source whose albums are
+    /// stored without a browse id and can only be looked up by name.
+    async fn saved_album(&self, id: &str) -> Option<(String, String)> {
+        let album = self.library.album(id).await.ok().flatten()?;
+        (!album.title.trim().is_empty()).then_some((album.title, album.artist))
     }
 
     /// The seed itself, when the mix did not include it.
