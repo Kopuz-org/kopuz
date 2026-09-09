@@ -14,7 +14,7 @@ pub fn FavoritesPage(
     mut current_song_artist: Signal<String>,
     mut current_song_duration: Signal<u64>,
     mut current_song_progress: Signal<u64>,
-    mut queue: Signal<Vec<reader::models::Track>>,
+    mut queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;

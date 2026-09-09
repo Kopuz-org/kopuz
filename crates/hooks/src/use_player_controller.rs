@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use api::KopuzApi;
+use api::TrackInfo as Track;
 use config::AppConfig;
 use dioxus::prelude::*;
-use reader::Track;
 
 pub use api::LoopMode;
 
@@ -153,13 +153,20 @@ impl PlayerController {
     fn keys_of(tracks: &[Track]) -> Vec<String> {
         tracks
             .iter()
-            .map(|track| track.id.key().into_owned())
+            .map(|track| track.key.clone())
             .filter(|key| !key.is_empty())
             .collect()
     }
 
     pub fn play_queue_linear(&mut self, tracks: Vec<Track>) {
         self.play_replacement(tracks, None, None);
+    }
+
+    /// Play one row of a list, with the rest of the list behind it. The index
+    /// travels with the rows, so the daemon never has to be told a position in
+    /// a queue it has not been given yet.
+    pub fn play_queue_at(&mut self, tracks: Vec<Track>, index: usize) {
+        self.play_replacement(tracks, Some(index), None);
     }
 
     /// Historical shuffle-play semantics: a random starting track, with the

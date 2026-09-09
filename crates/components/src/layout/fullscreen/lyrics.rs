@@ -9,7 +9,7 @@ pub(crate) fn use_fullscreen_lyrics() -> Signal<Option<Option<utils::lyrics::Lyr
         ctrl.current_track_snapshot
             .read()
             .as_ref()
-            .map(|track| track.id.uid())
+            .map(|track| track.uid.clone())
             .unwrap_or_default()
     });
     hooks::lyrics::use_lyrics(track_key, i18n::t("lyrics_not_found").to_string())

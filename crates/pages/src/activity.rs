@@ -1,10 +1,10 @@
+use api::TrackInfo as Track;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_active_source, use_albums, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
 use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
-use reader::Track;
 use std::collections::HashMap;
 use utils::CoverUrl;
 
@@ -97,7 +97,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             .into_iter()
             .enumerate()
             .map(|(i, track)| {
-                let count_key = active_source.listen_count_key(&track.id.uid());
+                let count_key = active_source.listen_count_key(&track.uid);
                 let plays = conf.listen_counts.get(&count_key).copied().unwrap_or(0);
                 let genre = albums.get(&track.album_id).cloned().unwrap_or_default();
                 let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
@@ -171,7 +171,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                     } else {
                         for (idx, track, plays, genre, cover_url) in visible_tracks {
                             {
-                                let track_id = track.id.uid();
+                                let track_id = track.uid.clone();
                                 rsx! {
                                     div { key: "{track_id}", style: "height: {ITEM_HEIGHT}px;",
                                         div {
@@ -183,10 +183,9 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                                     let all = api
                                                         .tracks(f, hooks::use_db_queries::all())
                                                         .await
-                                                        .map(|page| hooks::wire::tracks_from_api(page.items))
+                                                        .map(|page| page.items)
                                                         .unwrap_or_default();
-                                                    ctrl.queue.set(all);
-                                                    ctrl.play_track(idx);
+                                                    ctrl.play_queue_at(all, idx);
                                                 });
                                             },
                                             div { class: "w-12 shrink-0 flex items-center justify-center tabular-nums text-white/50 font-medium group-hover:text-white transition-colors relative",
@@ -228,7 +227,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                             }
 
                                             div { class: "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors",
-                                                "{format_duration(track.duration)}"
+                                                "{format_duration(track.duration_secs().unwrap_or_default())}"
                                             }
 
                                             div { class: "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors flex items-center justify-end gap-2",

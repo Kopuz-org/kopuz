@@ -5,12 +5,12 @@ use crate::queue_drag::{
     clear_dragged_queue_track, handle_select_click, is_queue_drag_enabled, set_dragged_queue_track,
     set_dragged_queue_tracks,
 };
+use api::TrackInfo as Track;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
 use hooks::consume_api;
 use hooks::toast::toast;
-use reader::models::Track;
 use tracing::Instrument;
 
 pub(crate) fn copy_to_clipboard(text: &str) {
@@ -264,14 +264,15 @@ pub fn TrackRow(
     };
 
     let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
-    let duration_str = fmt_dur(track.duration);
+    let duration_str = fmt_dur(track.duration_secs().unwrap_or_default());
 
-    // File-type tag (MP3, FLAC, …) for local tracks. Server tracks have a
-    // `TrackId::Server` id with no filesystem path, so they get no badge.
+    // File-type tag (MP3, FLAC, …) for local tracks, whose key is the path. A
+    // row that came from a service names no file, so it gets no badge.
     let file_type = track
-        .id
-        .local_path()
-        .and_then(|p| p.extension())
+        .service
+        .is_none()
+        .then(|| std::path::Path::new(&track.key).extension())
+        .flatten()
         .and_then(|e| e.to_str())
         .filter(|e| {
             matches!(
@@ -879,7 +880,7 @@ pub use crate::radio_actions::track_radio_handler as radio_handler;
 /// the daemon's knowledge, not this component's.
 pub fn share_track(track: Track) {
     let api = consume_api();
-    let key = track.id.key().into_owned();
+    let key = track.key.clone();
     spawn(async move {
         if let Ok(Some(url)) = api.track_web_url(key).await {
             copy_to_clipboard(&url);

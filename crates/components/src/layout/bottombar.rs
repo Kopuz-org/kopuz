@@ -12,7 +12,7 @@ pub fn Bottombar(
     is_fullscreen: Signal<bool>,
     current_song_duration: Signal<u64>,
     current_song_progress: Signal<u64>,
-    queue: Signal<Vec<reader::models::Track>>,
+    queue: Signal<Vec<api::TrackInfo>>,
     current_queue_index: Signal<usize>,
     current_song_title: Signal<String>,
     current_song_artist: Signal<String>,

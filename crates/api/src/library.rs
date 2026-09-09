@@ -159,3 +159,18 @@ pub struct SearchResults {
     pub tracks: Vec<TrackInfo>,
     pub albums: Vec<AlbumInfo>,
 }
+
+impl TrackInfo {
+    /// Whole seconds, which is how a duration is shown. A radio stream has
+    /// none: it plays until it is stopped.
+    pub fn duration_secs(&self) -> Option<u64> {
+        match self.kind {
+            TrackKind::Radio => None,
+            TrackKind::Normal => Some(self.duration_ms.unwrap_or_default() / 1000),
+        }
+    }
+
+    pub fn is_radio(&self) -> bool {
+        self.kind == TrackKind::Radio
+    }
+}

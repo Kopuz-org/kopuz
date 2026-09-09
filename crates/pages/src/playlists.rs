@@ -84,7 +84,7 @@ pub fn PlaylistsPage(
                             .playlists
                             .iter()
                             .find(|playlist| playlist.id == pid)
-                            .map(|playlist| playlist.tracks.clone())
+                            .map(|playlist| playlist.track_keys.clone())
                             .unwrap_or_default()
                             .iter()
                             .any(|key| downloads.read().is_active(key))
@@ -107,7 +107,7 @@ pub fn PlaylistsPage(
                                     .playlists
                                     .iter()
                                     .find(|playlist| playlist.id == pid_for_dl)
-                                    .map(|playlist| playlist.tracks.clone())
+                                    .map(|playlist| playlist.track_keys.clone())
                                     .unwrap_or_default();
                                 hooks::downloads::start(keys);
                             },
@@ -118,7 +118,7 @@ pub fn PlaylistsPage(
                                         .playlists
                                         .iter()
                                         .find(|p| p.id == pid_for_del)
-                                        .map(|p| p.tracks.clone())
+                                        .map(|p| p.track_keys.clone())
                                         .unwrap_or_default()
                                 };
                                 if !ids.is_empty() {
@@ -131,7 +131,7 @@ pub fn PlaylistsPage(
                                     .playlists
                                     .iter()
                                     .find(|playlist| playlist.id == pid_for_dl_track)
-                                    .and_then(|playlist| playlist.tracks.get(idx))
+                                    .and_then(|playlist| playlist.track_keys.get(idx))
                                     .cloned()
                                 else {
                                     return;
@@ -293,14 +293,8 @@ fn PlaylistsGrid(
     // cover, then the server's image tag, then the first track's art. The
     // middle one is signed with credentials that never leave the daemon, so
     // the chain cannot live here.
-    let cover_for = |playlist: &reader::models::Playlist| -> Option<utils::CoverUrl> {
-        hooks::artwork::stored(
-            playlist
-                .cover_path
-                .as_deref()
-                .and_then(|path| path.to_str()),
-            hooks::artwork::Size::Thumb,
-        )
+    let cover_for = |playlist: &api::PlaylistInfo| -> Option<utils::CoverUrl> {
+        hooks::artwork::url(playlist.artwork.as_ref(), hooks::artwork::Size::Thumb)
     };
 
     if caps().folders {
@@ -321,13 +315,13 @@ fn PlaylistsGrid(
     // ---- Server (flat remote list) layout ----------------------------------
     let offline = caps().downloads && *is_offline.read();
     let conf = config.read();
-    let playlists: Vec<reader::models::Playlist> = if offline {
+    let playlists: Vec<api::PlaylistInfo> = if offline {
         store
             .playlists
             .iter()
             .filter(|p| {
-                !p.tracks.is_empty()
-                    && p.tracks.iter().all(|tid| {
+                !p.track_keys.is_empty()
+                    && p.track_keys.iter().all(|tid| {
                         conf.offline_tracks
                             .get(tid)
                             .map(|path| std::path::Path::new(path).exists())
@@ -405,9 +399,9 @@ fn PlaylistsGrid(
                     {playlists.into_iter().map(|playlist| {
                         let cover_url = cover_for(&playlist);
                         let playlist_id_nav = playlist.id.clone();
-                        let is_dl = playlist.tracks.iter().any(|key| downloads.read().is_active(key));
-                        let all_downloaded = !playlist.tracks.is_empty()
-                            && playlist.tracks.iter().all(|key| downloads.read().is_stored(key));
+                        let is_dl = playlist.track_keys.iter().any(|key| downloads.read().is_active(key));
+                        let all_downloaded = !playlist.track_keys.is_empty()
+                            && playlist.track_keys.iter().all(|key| downloads.read().is_stored(key));
                         rsx! {
                             div {
                                 key: "{playlist.id}",
@@ -427,7 +421,7 @@ fn PlaylistsGrid(
                                 div { class: "flex items-start justify-between gap-2",
                                     div { class: "min-w-0 flex-1",
                                         h3 { class: "text-xl font-bold text-white mb-1 truncate", "{playlist.name}" }
-                                        p { class: "text-sm text-slate-400", "Server • {playlist.tracks.len()} tracks" }
+                                        p { class: "text-sm text-slate-400", "Server • {playlist.track_keys.len()} tracks" }
                                     }
                                     if can_radio {
                                         {
@@ -463,9 +457,9 @@ fn PlaylistsGrid(
                                         onclick: move |evt| {
                                             evt.stop_propagation();
                                             if all_downloaded {
-                                                hooks::downloads::remove(playlist.tracks.clone());
+                                                hooks::downloads::remove(playlist.track_keys.clone());
                                             } else {
-                                                hooks::downloads::start(playlist.tracks.clone());
+                                                hooks::downloads::start(playlist.track_keys.clone());
                                             }
                                         },
                                         if is_dl {
@@ -489,8 +483,8 @@ fn PlaylistsGrid(
 /// Borrowed bundle for the folder-tree layout (keeps the function signature sane).
 struct FoldersCtx<'a> {
     selected_playlist_id: Signal<Option<String>>,
-    store: reader::PlaylistStore,
-    cover_for: &'a dyn Fn(&reader::models::Playlist) -> Option<utils::CoverUrl>,
+    store: api::PlaylistCatalog,
+    cover_for: &'a dyn Fn(&api::PlaylistInfo) -> Option<utils::CoverUrl>,
     active_menu: Signal<Option<String>>,
     open_folder_id: Signal<Option<String>>,
     move_target_id: Signal<Option<String>>,
@@ -580,7 +574,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
         MenuAction::new(delete_folder_text.as_str(), "fa-solid fa-trash").destructive(),
     ];
 
-    let render_card = |playlist: &reader::models::Playlist, in_folder: bool| {
+    let render_card = |playlist: &api::PlaylistInfo, in_folder: bool| {
         let cover_url = cover_for(playlist);
         let pid = playlist.id.clone();
         let pid_click = playlist.id.clone();
@@ -588,7 +582,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
         let pid_action = playlist.id.clone();
         let name_for_rename = playlist.name.clone();
         let name = playlist.name.clone();
-        let count = playlist.tracks.len();
+        let count = playlist.track_keys.len();
         let is_menu_open = active_menu.read().as_deref() == Some(playlist.id.as_str());
         let (actions, action_kinds) = build_playlist_actions(in_folder);
         // Resolved during render, like the track rows' radio: the handler reads

@@ -1,9 +1,9 @@
 use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::metadata_modal::MetadataModal;
 use crate::playlist_modal::PlaylistModal;
+use api::TrackInfo as Track;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
-use reader::Track;
 
 #[component]
 pub(crate) fn TrackActions(track: Track) -> Element {
@@ -78,7 +78,7 @@ pub(crate) fn TrackActions(track: Track) -> Element {
                         crate::track_row::share_track(action_track.clone());
                     } else if radio_idx == Some(idx) {
                         if let Some(start) = crate::radio_actions::track_radio_handler(
-                            action_track.id.key().into_owned(),
+                            action_track.key.clone(),
                         ) {
                             start.call(());
                         }
@@ -98,7 +98,7 @@ pub(crate) fn TrackActions(track: Track) -> Element {
                     move |playlist_id: String| {
                         hooks::playlist_actions::add_tracks(
                             playlist_id,
-                            vec![playlist_track.id.key().into_owned()],
+                            vec![playlist_track.key.clone()],
                         );
                         show_playlist_modal.set(false);
                     }
@@ -108,7 +108,7 @@ pub(crate) fn TrackActions(track: Track) -> Element {
                     move |name: String| {
                         hooks::playlist_actions::create_with(
                             name,
-                            vec![playlist_track.id.key().into_owned()],
+                            vec![playlist_track.key.clone()],
                         );
                         show_playlist_modal.set(false);
                     }

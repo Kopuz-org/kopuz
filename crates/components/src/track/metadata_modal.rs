@@ -1,13 +1,13 @@
+use api::{ArtworkChange, TrackInfo, TrackMetadataPatch};
 use dioxus::prelude::*;
-use reader::models::{CoverChange, Track, TrackEdits};
 
 #[derive(PartialEq, Clone, Props)]
 pub struct MetadataModalProps {
-    pub track: Track,
+    pub track: TrackInfo,
     pub on_close: EventHandler,
-    /// Persist edited tags. The page handler writes them to the file and
-    /// updates the library. Optional — when absent the modal is view-only.
-    pub on_save: Option<EventHandler<TrackEdits>>,
+    /// Persist edited tags. The daemon writes them to the file and updates the
+    /// library. Optional — when absent the modal is view-only.
+    pub on_save: Option<EventHandler<TrackMetadataPatch>>,
 }
 
 fn fmt_dur(s: u64) -> String {
@@ -50,21 +50,10 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
             .unwrap_or_default()
     });
 
-    let mut cover_preview = use_signal(|| None::<String>);
-    let mut cover_change = use_signal(|| CoverChange::Keep);
-
-    {
-        let path = props.track.id.local_path().map(|p| p.to_path_buf());
-        use_hook(move || {
-            spawn(async move {
-                if let Some(p) = &path
-                    && let Some((bytes, mime)) = reader::read_cover(p)
-                {
-                    cover_preview.set(Some(data_url(&bytes, &mime)));
-                }
-            });
-        });
-    }
+    let existing_cover = hooks::artwork::url(t.artwork.as_ref(), hooks::artwork::Size::Full)
+        .map(|cover| cover.as_ref().to_string());
+    let mut cover_preview = use_signal(|| existing_cover);
+    let mut cover_change = use_signal(|| ArtworkChange::Keep);
 
     let metadata_text = i18n::t("metadata").to_string();
     let edit_metadata_text = i18n::t("edit_metadata").to_string();
@@ -94,8 +83,8 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
             readonly.push((label.to_string(), value));
         }
     };
-    if t.duration > 0 {
-        push(&duration_text, fmt_dur(t.duration));
+    if let Some(seconds) = t.duration_secs().filter(|seconds| *seconds > 0) {
+        push(&duration_text, fmt_dur(seconds));
     }
     if t.khz > 0 {
         push(
@@ -118,21 +107,28 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
         &musicbrainz_track_text,
         t.musicbrainz_track_id.clone().unwrap_or_default(),
     );
-    push(&path_text, t.id.uid());
+    push(&path_text, t.uid.clone());
 
     let input_class = "w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/25";
 
+    let key = props.track.key.clone();
+    // The editor sends the whole desired state, so a blank number means remove
+    // it -- the patch's `None` already means "unchanged".
     let mut do_save = move || {
         if let Some(handler) = props.on_save {
-            let edits = TrackEdits {
-                title: title.read().clone(),
-                artist: artist.read().clone(),
-                album: album.read().clone(),
-                track_number: track_no.read().trim().parse::<u32>().ok(),
-                disc_number: disc_no.read().trim().parse::<u32>().ok(),
+            let track_number = track_no.read().trim().parse::<u32>().ok();
+            let disc_number = disc_no.read().trim().parse::<u32>().ok();
+            handler.call(TrackMetadataPatch {
+                key: key.clone(),
+                title: Some(title.read().clone()),
+                artist: Some(artist.read().clone()),
+                album: Some(album.read().clone()),
+                clear_track_number: track_number.is_none(),
+                track_number,
+                clear_disc_number: disc_number.is_none(),
+                disc_number,
                 cover: cover_change.read().clone(),
-            };
-            handler.call(edits);
+            });
         }
         editing.set(false);
     };
@@ -159,7 +155,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                 };
                 let bytes = file.read().await;
                 cover_preview.set(Some(data_url(&bytes, mime)));
-                cover_change.set(CoverChange::Set(bytes));
+                cover_change.set(ArtworkChange::Set(bytes));
             }
         });
     };
@@ -215,7 +211,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                                     class: "text-red-400 hover:text-red-300 px-3 py-2 rounded text-sm transition-colors flex items-center gap-2",
                                     onclick: move |_| {
                                         cover_preview.set(None);
-                                        cover_change.set(CoverChange::Remove);
+                                        cover_change.set(ArtworkChange::Remove);
                                     },
                                     i { class: "fa-solid fa-trash" }
                                     "{remove_photo_text}"

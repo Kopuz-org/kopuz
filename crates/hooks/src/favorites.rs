@@ -74,7 +74,7 @@ pub fn current(
     ctrl: &crate::use_player_controller::PlayerController,
 ) -> (String, Option<config::MusicService>) {
     match ctrl.current_track_snapshot.read().as_ref() {
-        Some(track) => (track.id.key().into_owned(), track.id.service()),
+        Some(track) => (track.key.clone(), track.service),
         None => (String::new(), None),
     }
 }

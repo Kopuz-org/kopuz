@@ -1,8 +1,8 @@
 //! Source-agnostic Library page (issue #35). One component for local and any
 //! server: a windowed track list with stat cards and multi-select. The refresh
 //! action (filesystem rescan vs remote sync), per-row affordances (tag edit,
-//! delete-from-disk, download) and the selection bar all gate on the resolved
-//! source's [`Capabilities`](server::source::Capabilities) — no `is_server()`.
+//! delete-from-disk, download) and the selection bar all gate on
+//! [`api::SourceCapabilities`] — no `is_server()`.
 
 use components::header::Header;
 use components::metadata_modal::MetadataModal;
@@ -35,7 +35,7 @@ pub fn LibraryPage(
     mut current_song_artist: Signal<String>,
     mut current_song_duration: Signal<u64>,
     mut current_song_progress: Signal<u64>,
-    mut queue: Signal<Vec<reader::models::Track>>,
+    mut queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
     let source = use_active_source();
@@ -119,12 +119,12 @@ pub fn LibraryPage(
     });
 
     let mut ctrl = use_context::<PlayerController>();
-    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
+    let mut active_menu_track = use_signal(|| None::<String>);
     let mut show_playlist_modal = use_signal(|| false);
-    let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
-    let mut metadata_track = use_signal(|| None::<reader::models::Track>);
+    let mut selected_track_for_playlist = use_signal(|| None::<String>);
+    let mut metadata_track = use_signal(|| None::<api::TrackInfo>);
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
+    let mut selected_tracks = use_signal(HashSet::<String>::new);
 
     let total_tracks = total_rows();
     let is_empty = total_tracks == 0;
@@ -158,22 +158,22 @@ pub fn LibraryPage(
                 let track_meta = track.clone();
                 let track_delete = track.clone();
                 let track_radio = track.clone();
-                let track_path = track.id.clone();
-                let track_select = track.id.clone();
-                let track_key = track.id.uid();
+                let track_path = track.key.clone();
+                let track_select = track.key.clone();
+                let track_key = track.uid.clone();
                 let is_currently_playing = currently_playing_idx == Some(idx)
                     && ctrl
                         .queue
                         .read()
                         .get(idx)
-                        .map(|q| q.id == track.id)
+                        .map(|q| q.uid == track.uid)
                         .unwrap_or(false);
-                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id);
+                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.uid);
                 let is_selected = selected_tracks.read().contains(&track_path);
                 let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
 
                 // Download state (servers only).
-                let item_id: String = track.id.key().to_string();
+                let item_id: String = track.key.clone();
                 let is_downloaded = cap.downloads
                     && conf
                         .offline_tracks
@@ -215,14 +215,14 @@ pub fn LibraryPage(
                                 }
                             },
                             on_click_menu: move |_| {
-                                if active_menu_track.read().as_ref() == Some(&track_menu.id) {
+                                if active_menu_track.read().as_ref() == Some(&track_menu.uid) {
                                     active_menu_track.set(None);
                                 } else {
-                                    active_menu_track.set(Some(track_menu.id.clone()));
+                                    active_menu_track.set(Some(track_menu.uid.clone()));
                                 }
                             },
                             on_add_to_playlist: move |_| {
-                                selected_track_for_playlist.set(Some(track_add.id.clone()));
+                                selected_track_for_playlist.set(Some(track_add.key.clone()));
                                 show_playlist_modal.set(true);
                                 active_menu_track.set(None);
                             },
@@ -238,7 +238,7 @@ pub fn LibraryPage(
                             on_delete: move |_| {
                                 active_menu_track.set(None);
                                 hooks::library_actions::delete_tracks(
-                                    vec![track_delete.id.key().into_owned()],
+                                    vec![track_delete.key.clone()],
                                     caps().delete_from_disk,
                                 );
                             },
@@ -250,7 +250,7 @@ pub fn LibraryPage(
                                     );
                                 }
                             })),
-                            on_start_radio: components::track_row::radio_handler(track_radio.id.key().into_owned()),
+                            on_start_radio: components::track_row::radio_handler(track_radio.key.clone()),
                             on_play: move |_| {
                                 let api = hooks::consume_api();
                                 let f = filter();
@@ -258,10 +258,9 @@ pub fn LibraryPage(
                                     let all = api
                                         .tracks(f, hooks::use_db_queries::all())
                                         .await
-                                        .map(|page| hooks::wire::tracks_from_api(page.items))
+                                        .map(|page| page.items)
                                         .unwrap_or_default();
-                                    queue.set(all);
-                                    ctrl.play_track(idx);
+                                    ctrl.play_queue_at(all, idx);
                                 });
                             },
                         }
@@ -284,12 +283,12 @@ pub fn LibraryPage(
                         selected_tracks.write().clear();
                     },
                     on_add_to_playlist: move |playlist_id: String| {
-                        let paths: Vec<reader::TrackId> = if is_selection_mode() {
+                        let paths: Vec<String> = if is_selection_mode() {
                             selected_tracks.read().iter().cloned().collect()
                         } else {
                             selected_track_for_playlist.read().iter().cloned().collect()
                         };
-                        let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
+                        let refs: Vec<String> = paths.clone();
                         hooks::playlist_actions::add_tracks(playlist_id, refs);
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
@@ -297,12 +296,12 @@ pub fn LibraryPage(
                         selected_tracks.write().clear();
                     },
                     on_create_playlist: move |name: String| {
-                        let paths: Vec<reader::TrackId> = if is_selection_mode() {
+                        let paths: Vec<String> = if is_selection_mode() {
                             selected_tracks.read().iter().cloned().collect()
                         } else {
                             selected_track_for_playlist.read().iter().cloned().collect()
                         };
-                        let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
+                        let refs: Vec<String> = paths.clone();
                         hooks::playlist_actions::create_with(name, refs);
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
@@ -316,13 +315,8 @@ pub fn LibraryPage(
                 MetadataModal {
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
-                    on_save: move |edits: reader::models::TrackEdits| {
-                        hooks::library_actions::edit_track(
-                            hooks::library_actions::patch_from_edits(
-                                track.id.key().into_owned(),
-                                edits,
-                            ),
-                        );
+                    on_save: move |patch: api::TrackMetadataPatch| {
+                        hooks::library_actions::edit_track(patch);
                         metadata_track.set(None);
                     },
                 }
@@ -343,10 +337,10 @@ pub fn LibraryPage(
                             let tracks: Vec<_> = api
                                 .tracks(f, hooks::use_db_queries::all())
                                 .await
-                                .map(|page| hooks::wire::tracks_from_api(page.items))
+                                .map(|page| page.items)
                                 .unwrap_or_default()
                                 .into_iter()
-                                .filter(|t| selected.contains(&t.id))
+                                .filter(|t| selected.contains(&t.key))
                                 .collect();
                             if !tracks.is_empty() {
                                 ctrl.add_to_queue(tracks);
@@ -360,7 +354,7 @@ pub fn LibraryPage(
                         let keys: Vec<String> = selected_tracks
                             .read()
                             .iter()
-                            .map(|id| id.key().into_owned())
+                            .cloned()
                             .collect();
                         hooks::library_actions::delete_tracks(keys, caps().delete_from_disk);
                         selected_tracks.write().clear();
@@ -448,10 +442,10 @@ pub fn LibraryPage(
                                     let tracks = api
                                         .tracks(f, hooks::use_db_queries::all())
                                         .await
-                                        .map(|page| hooks::wire::tracks_from_api(page.items))
+                                        .map(|page| page.items)
                                         .unwrap_or_default();
                                     selected_tracks
-                                        .set(tracks.into_iter().map(|track| track.id).collect());
+                                        .set(tracks.into_iter().map(|track| track.key).collect());
                                     is_selection_mode.set(true);
                                 });
                             }

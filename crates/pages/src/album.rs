@@ -1,7 +1,7 @@
 //! Source-agnostic Album page (issue #35). One grid + one detail render any
-//! source: covers resolve through the source layer, and the divergent
+//! source: every cover is a reference the daemon resolves, and the divergent
 //! affordances (tag/cover edit + delete-from-disk for local, downloads for a
-//! server) gate on the resolved source's [`Capabilities`] — no `is_server()`.
+//! server) gate on [`api::SourceCapabilities`] — no `is_server()`.
 
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
@@ -15,7 +15,6 @@ use hooks::use_db_queries::{
     use_active_source, use_album, use_album_tracks, use_albums, use_tracks_by_keys,
 };
 use std::collections::HashSet;
-use std::path::PathBuf;
 
 /// Copy a link to the clipboard and flash a small toast. Used by the YT album
 /// page's share button (the `track_row` clipboard helper is crate-private to
@@ -49,7 +48,7 @@ enum AlbumAction {
 pub fn Album(
     config: Signal<AppConfig>,
     album_id: Signal<String>,
-    mut queue: Signal<Vec<reader::models::Track>>,
+    mut queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
     let source = use_active_source();
@@ -112,7 +111,7 @@ pub fn Album(
                                         .clone()
                                         .unwrap_or_default()
                                         .iter()
-                                        .map(|t| t.id.key().into_owned())
+                                        .map(|t| t.key.clone())
                                         .collect();
                                     hooks::playlist_actions::add_tracks(playlist_id, refs);
                                 }
@@ -125,7 +124,7 @@ pub fn Album(
                                         .clone()
                                         .unwrap_or_default()
                                         .iter()
-                                        .map(|t| t.id.key().into_owned())
+                                        .map(|t| t.key.clone())
                                         .collect();
                                     hooks::playlist_actions::create_with(name, refs);
                                 }
@@ -176,7 +175,7 @@ fn AlbumGrid(
         }
     });
     let available_sort_fields = use_memo(move || {
-        reader::sort::available_album_fields(&albums_res.read().clone().unwrap_or_default())
+        hooks::sort::available_album_fields(&albums_res.read().clone().unwrap_or_default())
     });
 
     // Offline (server): only albums with downloaded tracks. Album ids come from
@@ -220,7 +219,7 @@ fn AlbumGrid(
             .filter(|a| !offline || downloaded.contains(&a.id))
             .filter(|a| seen.insert(a.title.trim().to_lowercase()))
             .collect::<Vec<_>>();
-        reader::sort::sort_albums(&mut albums, &album_sort.read());
+        hooks::sort::sort_albums(&mut albums, &album_sort.read());
         albums
     });
 
@@ -370,7 +369,7 @@ fn AlbumGrid(
 fn AlbumDetail(
     config: Signal<AppConfig>,
     album_id_str: String,
-    mut queue: Signal<Vec<reader::models::Track>>,
+    mut queue: Signal<Vec<api::TrackInfo>>,
     current_queue_index: Signal<usize>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -418,7 +417,7 @@ fn AlbumDetail(
         None => {
             // Not saved locally — render the remote album directly if it resolved.
             if let Some(remote) = direct_remote_res.read().clone().flatten() {
-                let mut tracks = hooks::wire::tracks_from_api(remote.tracks);
+                let mut tracks = remote.tracks;
                 tracks.sort_by(|a, b| {
                     a.disc_number
                         .unwrap_or(1)
@@ -437,7 +436,7 @@ fn AlbumDetail(
                             artist: remote.subtitle.unwrap_or_default(),
                             year: remote.year,
                             browse_id: Some(remote.id),
-                            local_cover: hooks::wire::artwork_url(remote.artwork.as_ref()),
+                            local_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
                             tracks,
                             on_close,
                         }
@@ -486,7 +485,7 @@ fn AlbumDetail(
                         )
                         .await
                         .unwrap_or_default();
-                    out.extend(hooks::wire::tracks_from_api(page.items));
+                    out.extend(page.items);
                 }
                 out
             }
@@ -528,7 +527,7 @@ fn AlbumDetail(
         // Full album from the catalog remote (already in album order). Used
         // whenever it resolved; the locally-saved subset is the fallback.
         if !offline && let Some(remote) = remote_album_res.read().clone().flatten() {
-            let mut remote = hooks::wire::tracks_from_api(remote.tracks);
+            let mut remote = remote.tracks;
             remote.sort_by(|a, b| {
                 a.disc_number
                     .unwrap_or(1)
@@ -542,12 +541,12 @@ fn AlbumDetail(
             return remote;
         }
 
-        let mut tracks: Vec<reader::models::Track> = tracks_res
+        let mut tracks: Vec<api::TrackInfo> = tracks_res
             .read()
             .clone()
             .unwrap_or_default()
             .into_iter()
-            .filter(|t| !offline || conf.offline_tracks.contains_key(t.id.key().as_ref()))
+            .filter(|t| !offline || conf.offline_tracks.contains_key(&t.key))
             .collect();
         tracks.sort_by(|a, b| {
             a.disc_number
@@ -571,7 +570,7 @@ fn AlbumDetail(
 
     // The daemon removes the stored picture and forgets the file it saved,
     // so this only has to say which album.
-    let cover_reset_action = if cap.edit_tags && album.cover_path.is_some() {
+    let cover_reset_action = if cap.edit_tags && album.artwork.is_some() {
         let aid = aid.clone();
         Some(rsx! {
             button {
@@ -598,7 +597,7 @@ fn AlbumDetail(
     let is_downloading_all = cap.downloads
         && tracks()
             .iter()
-            .any(|track| downloads.read().is_active(&track.id.key()));
+            .any(|track| downloads.read().is_active(&track.key));
 
     // YT-Music-style album page: the whole catalog-remote (YT) side renders this,
     // from the moment the page opens — header built from the local album row so it
@@ -672,25 +671,21 @@ fn AlbumDetail(
                 on_delete_track: cap.delete_from_disk.then(|| EventHandler::new(move |idx: usize| {
                     if let Some(track) = tracks_delete.get(idx) {
                         hooks::library_actions::delete_tracks(
-                            vec![track.id.key().into_owned()],
+                            vec![track.key.clone()],
                             true,
                         );
                     }
                 })),
-                on_selection_delete: cap.delete_from_disk.then(|| EventHandler::new(move |paths: Vec<PathBuf>| {
-                    let keys: Vec<String> = paths
-                        .iter()
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .collect();
+                on_selection_delete: cap.delete_from_disk.then(|| EventHandler::new(move |keys: Vec<String>| {
                     hooks::library_actions::delete_tracks(keys, true);
                 })),
                 on_download_track: cap.downloads.then(|| EventHandler::new(move |idx: usize| {
                     if let Some(t) = tracks_download.get(idx) {
-                        let key = t.id.key();
+                        let key = &t.key;
                         if key.is_empty() {
                             return;
                         }
-                        let key = key.as_ref();
+
                         let downloaded = config.read().offline_tracks.get(key)
                             .map(|p| std::path::Path::new(p).exists())
                             .unwrap_or(false);
@@ -703,15 +698,15 @@ fn AlbumDetail(
                 })),
                 on_download_all: cap.downloads.then(|| EventHandler::new(move |_: ()| {
                     let requests: Vec<String> = tracks_download_all.iter().filter_map(|t| {
-                        let k = t.id.key();
-                        (!k.is_empty()).then(|| k.into_owned())
+                        let k = t.key.clone();
+                        (!k.is_empty()).then_some(k)
                     }).collect();
                     hooks::downloads::start(requests);
                 })),
                 on_delete_all: cap.downloads.then(|| EventHandler::new(move |_: ()| {
                     let ids: Vec<String> = tracks_delete_all.iter().filter_map(|t| {
-                        let k = t.id.key();
-                        (!k.is_empty()).then(|| k.into_owned())
+                        let k = t.key.clone();
+                        (!k.is_empty()).then_some(k)
                     }).collect();
                     hooks::downloads::remove(ids);
                 })),
@@ -734,19 +729,18 @@ fn YtAlbumDetail(
     year: Option<String>,
     browse_id: Option<String>,
     local_cover: Option<utils::CoverUrl>,
-    tracks: Vec<reader::models::Track>,
+    tracks: Vec<api::TrackInfo>,
     on_close: EventHandler<()>,
 ) -> Element {
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let nav_ctrl = use_context::<components::NavigationController>();
     let downloads = hooks::downloads::use_downloads();
-    let cover_for = hooks::use_db_queries::use_cover_resolver(80);
 
-    let mut active_menu = use_signal(|| None::<reader::TrackId>);
+    let mut active_menu = use_signal(|| None::<String>);
     let mut show_playlist_modal = use_signal(|| false);
-    let mut playlist_track = use_signal(|| None::<reader::TrackId>);
+    let mut playlist_track = use_signal(|| None::<String>);
 
-    let total: u64 = tracks.iter().map(|t| t.duration).sum();
+    let total: u64 = tracks.iter().filter_map(|t| t.duration_secs()).sum();
     let dur_min = total / 60;
     let song_count = tracks.len();
     let artist_name = artist;
@@ -757,7 +751,7 @@ fn YtAlbumDetail(
     // skip) so the highlighted row follows next/prev.
     let current_id = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|t| t.id)
+        ctrl.get_track_at(idx).map(|t| t.uid)
     };
     let offline_tracks = config.read().offline_tracks.clone();
 
@@ -765,9 +759,8 @@ fn YtAlbumDetail(
     // button's toggle (download all ⇄ remove all).
     let all_downloaded = !tracks.is_empty()
         && tracks.iter().all(|t| {
-            let k = t.id.key();
             offline_tracks
-                .get(k.as_ref())
+                .get(&t.key)
                 .map(|p| std::path::Path::new(p).exists())
                 .unwrap_or(false)
         });
@@ -780,7 +773,7 @@ fn YtAlbumDetail(
     // an id and a key are all that leave here.
     let share_api = hooks::use_api();
     let share_id = browse_id.clone();
-    let share_key = tracks.first().map(|track| track.id.key().into_owned());
+    let share_key = tracks.first().map(|track| track.key.clone());
     let share_url = use_resource(move || {
         let api = share_api.clone();
         let (id, key) = (share_id.clone(), share_key.clone());
@@ -850,14 +843,14 @@ fn YtAlbumDetail(
                             onclick: move |_| {
                                 if all_downloaded {
                                     let ids: Vec<String> = tracks_download_all.iter().filter_map(|t| {
-                                        let k = t.id.key();
-                                        (!k.is_empty()).then(|| k.into_owned())
+                                        let k = t.key.clone();
+                                        (!k.is_empty()).then_some(k)
                                     }).collect();
                                     hooks::downloads::remove(ids);
                                 } else {
                                     let reqs: Vec<String> = tracks_download_all.iter().filter_map(|t| {
-                                        let k = t.id.key();
-                                        (!k.is_empty()).then(|| k.into_owned())
+                                        let k = t.key.clone();
+                                        (!k.is_empty()).then_some(k)
                                     }).collect();
                                     hooks::downloads::start(reqs);
                                 }
@@ -908,22 +901,22 @@ fn YtAlbumDetail(
                 div { class: "flex-1 min-h-0 overflow-y-auto pb-24",
                     for (idx, track) in tracks.iter().cloned().enumerate() {
                         {
-                            let cover_url = cover_for(&track);
-                            let is_menu_open = active_menu.read().as_ref() == Some(&track.id);
-                            let is_current = current_id.as_ref() == Some(&track.id);
-                            let key = track.id.key().into_owned();
+                            let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
+                            let is_menu_open = active_menu.read().as_ref() == Some(&track.uid);
+                            let is_current = current_id.as_ref() == Some(&track.uid);
+                            let key = track.key.clone();
                             let is_downloaded = offline_tracks
                                 .get(&key)
                                 .map(|p| std::path::Path::new(p).exists())
                                 .unwrap_or(false);
                             let row_tracks = tracks.clone();
-                            let menu_id = track.id.clone();
-                            let pl_id = track.id.clone();
+                            let menu_id = track.uid.clone();
+                            let pl_id = track.uid.clone();
                             let dl_track = track.clone();
                             let q_track = track.clone();
                             rsx! {
                                 components::track_row::TrackRow {
-                                    key: "{track.id.uid()}",
+                                    key: "{track.uid}",
                                     track: track.clone(),
                                     cover_url,
                                     is_album: true,
@@ -936,10 +929,9 @@ fn YtAlbumDetail(
                                     is_menu_open,
                                     is_currently_playing: is_current,
                                     is_downloaded,
-                                    on_start_radio: components::track_row::radio_handler(track.id.key().into_owned()),
+                                    on_start_radio: components::track_row::radio_handler(track.key.clone()),
                                     on_play: move |_| {
-                                        ctrl.queue.set(row_tracks.clone());
-                                        ctrl.play_track(idx);
+                                        ctrl.play_queue_at(row_tracks.clone(), idx);
                                     },
                                     on_queue: Some(EventHandler::new(move |_| {
                                         ctrl.add_to_queue(vec![q_track.clone()]);
@@ -957,11 +949,11 @@ fn YtAlbumDetail(
                                     },
                                     on_delete: move |_| {},
                                     on_download: Some(EventHandler::new(move |_| {
-                                        let k = dl_track.id.key();
+                                        let k = &dl_track.key;
                                         if k.is_empty() {
                                             return;
                                         }
-                                        let k = k.as_ref();
+
                                         let downloaded = config.read().offline_tracks.get(k)
                                             .map(|p| std::path::Path::new(p).exists())
                                             .unwrap_or(false);
@@ -989,7 +981,7 @@ fn YtAlbumDetail(
                         if let Some(id) = playlist_track.read().clone() {
                             hooks::playlist_actions::add_tracks(
                                 playlist_id,
-                                vec![id.key().into_owned()],
+                                vec![id],
                             );
                         }
                         show_playlist_modal.set(false);
@@ -999,7 +991,7 @@ fn YtAlbumDetail(
                         if let Some(id) = playlist_track.read().clone() {
                             hooks::playlist_actions::create_with(
                                 name,
-                                vec![id.key().into_owned()],
+                                vec![id],
                             );
                         }
                         show_playlist_modal.set(false);

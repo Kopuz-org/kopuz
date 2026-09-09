@@ -12,7 +12,7 @@ pub fn Rightbar(
     mut width: Signal<usize>,
     mut current_song_duration: Signal<u64>,
     mut current_song_progress: Signal<u64>,
-    queue: Signal<Vec<reader::Track>>,
+    queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
@@ -27,7 +27,7 @@ pub fn Rightbar(
         ctrl.current_track_snapshot
             .read()
             .as_ref()
-            .map(|track| track.id.uid())
+            .map(|track| track.uid.clone())
             .unwrap_or_default()
     });
     let lyrics = hooks::lyrics::use_lyrics(track_key, i18n::t("lyrics_not_found").to_string());

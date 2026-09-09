@@ -14,6 +14,7 @@ pub mod library_actions;
 pub mod lyrics;
 pub mod playlist_actions;
 mod session_projector;
+pub mod sort;
 pub mod source_switch;
 pub mod sources;
 pub mod toast;
@@ -21,7 +22,6 @@ pub mod use_db_queries;
 pub mod use_player_controller;
 pub mod use_player_task;
 pub mod use_search_data;
-pub mod wire;
 pub mod ytdlp;
 
 pub use api::{consume_api, use_api};
