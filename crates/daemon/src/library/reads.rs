@@ -54,9 +54,10 @@ impl LibraryService {
             .collect())
     }
 
-    /// The source's public page for a track. A row the library has never
-    /// stored still answers, because a catalog hit is exactly the row someone
-    /// wants to share.
+    /// A public page for a track: the source's own where it has one, else the
+    /// MusicBrainz page its metadata names. A row the library has never stored
+    /// still answers, because a catalog hit is exactly the row someone wants
+    /// to share.
     pub async fn track_web_url(&self, key: &str) -> Result<Option<String>, ApiError> {
         let config = self.current_config();
         let track = match self
@@ -73,7 +74,15 @@ impl LibraryService {
                 None => return Ok(None),
             },
         };
-        Ok(server::source::active(self.db.clone(), &config).web_url(&track))
+        if let Some(url) = server::source::active(self.db.clone(), &config).web_url(&track) {
+            return Ok(Some(url));
+        }
+        Ok(server::musicbrainz::track_page_url(
+            track.musicbrainz_release_id.as_deref(),
+            &track.artist,
+            &track.title,
+        )
+        .await)
     }
 
     /// The source's page for an album, falling back to its first track's page

@@ -1,10 +1,11 @@
-//! MusicBrainz lookups. The link builders a frontend needs are
-//! `utils::musicbrainz`; only the calls that leave the machine live here.
+//! MusicBrainz lookups: the page a track has there, found from what its
+//! tags name. Daemon-side, because finding one leaves the machine.
 
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use std::time::Duration;
-use utils::musicbrainz::recording_query;
 
+/// A shareable MusicBrainz page for a track: its release when the tags name
+/// one, else the recording a search resolves to.
 pub async fn track_page_url(release_id: Option<&str>, artist: &str, title: &str) -> Option<String> {
     if let Some(id) = release_id {
         let id = id.trim();
@@ -15,6 +16,20 @@ pub async fn track_page_url(release_id: Option<&str>, artist: &str, title: &str)
 
     let recording_id = search_recording_id(artist, title).await?;
     Some(format!("https://musicbrainz.org/recording/{recording_id}"))
+}
+
+/// The Lucene query naming one recording.
+fn recording_query(artist: &str, title: &str) -> String {
+    let mut query = format!("recording:\"{}\"", escape_lucene(title.trim()));
+    let artist = artist.trim();
+    if !artist.is_empty() {
+        query.push_str(&format!(" AND artist:\"{}\"", escape_lucene(artist)));
+    }
+    query
+}
+
+fn escape_lucene(input: &str) -> String {
+    input.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 pub async fn search_recording_id(artist: &str, title: &str) -> Option<String> {

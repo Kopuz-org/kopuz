@@ -19,16 +19,6 @@ pub(crate) fn copy_to_clipboard(text: &str) {
     );
     let _ = dioxus::document::eval(&js);
 }
-
-pub(crate) fn share_to_musicbrainz(release_id: Option<String>, artist: String, title: String) {
-    if let Some(url) = utils::musicbrainz::track_page_url(release_id.as_deref(), &artist, &title) {
-        copy_to_clipboard(&url);
-        toast("Copied MusicBrainz link");
-    } else {
-        toast("Couldn't find this track on MusicBrainz");
-    }
-}
-
 #[component]
 pub fn TrackRow(
     track: Track,
@@ -855,18 +845,17 @@ pub fn TrackRow(
 /// reading `track_row::radio_handler(...)`.
 pub use crate::radio_actions::track_radio_handler as radio_handler;
 
-/// Copy a shareable link for a track: the source's public page when it has
-/// one, else a MusicBrainz lookup by metadata. Which services have pages is
-/// the daemon's knowledge, not this component's.
+/// Copy a shareable link for a track. Which page a row has -- the source's
+/// own, or the one its metadata names elsewhere -- is the daemon's knowledge.
 pub fn share_track(track: Track) {
     let api = consume_api();
-    let key = track.key.clone();
     spawn(async move {
-        if let Ok(Some(url)) = api.track_web_url(key).await {
-            copy_to_clipboard(&url);
-            toast("Copied link");
-            return;
+        match api.track_web_url(track.key.clone()).await {
+            Ok(Some(url)) => {
+                copy_to_clipboard(&url);
+                toast("Copied link");
+            }
+            _ => toast("Couldn't find a page for this track"),
         }
-        share_to_musicbrainz(track.musicbrainz_release_id, track.artist, track.title);
     });
 }

@@ -10,7 +10,6 @@ pub mod color;
 pub mod live_theme;
 pub mod logs;
 pub mod lyrics;
-pub mod musicbrainz;
 pub mod playlist;
 pub mod redact;
 pub mod themes;
