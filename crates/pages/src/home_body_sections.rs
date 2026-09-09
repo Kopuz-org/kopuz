@@ -256,12 +256,18 @@ fn ServerHeroBanner(
                                 button {
                                     class: "{hero_heart_class}",
                                     onclick: move |_| {
-                                        let tracks: Vec<_> = if hero_album_id.peek().is_empty() {
+                                        let keys: Vec<String> = if hero_album_id.peek().is_empty() {
                                             Vec::new()
                                         } else {
-                                            hero_tracks_res.read().clone().unwrap_or_default()
+                                            hero_tracks_res
+                                                .read()
+                                                .clone()
+                                                .unwrap_or_default()
+                                                .iter()
+                                                .map(|track| track.id.key().into_owned())
+                                                .collect()
                                         };
-                                        hooks::favorites::set_favorite_many(tracks, !jelly_hero_fav);
+                                        hooks::favorites::set_favorite_many(keys, !jelly_hero_fav);
                                     },
                                     i { class: "{hero_heart_icon}" }
                                 }
