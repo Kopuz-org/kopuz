@@ -20,15 +20,13 @@ futures-util = { workspace = true }
 tracing = { workspace = true }
 dioxus = { workspace = true }
 api = { workspace = true }
-daemon = { workspace = true }
 reader = { workspace = true }
 utils = { workspace = true }
-player = { workspace = true }
 config = { workspace = true }
 rand = { workspace = true }
-reqwest = { workspace = true }
 serde_json = { workspace = true }
 server = { workspace = true }
-radio = { workspace = true }
-base64 = { workspace = true }
 tokio = { workspace = true, features = ["fs", "sync", "macros"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+player = { workspace = true }

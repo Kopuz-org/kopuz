@@ -4520,19 +4520,15 @@ dependencies = [
 name = "kopuz-hooks"
 version = "0.16.2"
 dependencies = [
- "base64",
  "dioxus",
  "futures-util",
  "kopuz-api",
  "kopuz-config",
- "kopuz-daemon",
  "kopuz-player",
- "kopuz-radio",
  "kopuz-reader",
  "kopuz-server",
  "kopuz-utils",
  "rand 0.10.2",
- "reqwest 0.13.4",
  "serde_json",
  "tokio",
  "tracing",
