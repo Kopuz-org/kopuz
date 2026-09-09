@@ -15,6 +15,8 @@ pub struct LocalApi {
     pub(super) catalog: Option<Arc<crate::catalog::CatalogService>>,
     pub(super) radio: Option<Arc<crate::radio::RadioService>>,
     pub(super) mutations: Option<Arc<crate::mutations::MutationService>>,
+    pub(super) sources: Option<Arc<crate::sources::SourceService>>,
+    pub(super) integrations: Option<Arc<crate::integrations::IntegrationService>>,
 }
 
 impl LocalApi {
@@ -31,6 +33,8 @@ impl LocalApi {
             catalog: None,
             radio: None,
             mutations: None,
+            sources: None,
+            integrations: None,
         }
     }
 
@@ -112,6 +116,31 @@ impl LocalApi {
         self.playlists
             .as_deref()
             .ok_or_else(|| ApiError::unsupported("this daemon runs without a playlist service"))
+    }
+
+    pub fn with_sources(mut self, sources: Arc<crate::sources::SourceService>) -> Self {
+        self.sources = Some(sources);
+        self
+    }
+
+    pub fn with_integrations(
+        mut self,
+        integrations: Arc<crate::integrations::IntegrationService>,
+    ) -> Self {
+        self.integrations = Some(integrations);
+        self
+    }
+
+    fn sources(&self) -> Result<&crate::sources::SourceService, ApiError> {
+        self.sources
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon manages no sources"))
+    }
+
+    fn integrations(&self) -> Result<&crate::integrations::IntegrationService, ApiError> {
+        self.integrations
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon manages no integrations"))
     }
 }
 
@@ -413,17 +442,6 @@ impl api::ConfigApi for LocalApi {
         self.session.set_config(updated, changed);
         Ok(view)
     }
-
-    async fn switch_source(&self, source: config::Source) -> Result<bool, ApiError> {
-        let Some(service) = &self.config else {
-            return Err(ApiError::unsupported(
-                "this daemon runs without a config service",
-            ));
-        };
-        let (usable, updated, changed) = service.switch_source(source).await?;
-        self.session.set_config(updated, changed);
-        Ok(usable)
-    }
 }
 
 #[async_trait::async_trait]
@@ -520,5 +538,101 @@ impl api::EventApi for LocalApi {
             }
         });
         greeting.chain(live).boxed()
+    }
+}
+
+#[async_trait::async_trait]
+impl api::SourceApi for LocalApi {
+    async fn sources(&self) -> Result<Vec<api::SourceInfo>, ApiError> {
+        self.sources()?.sources().await
+    }
+
+    async fn switch_source(&self, id: String) -> Result<api::SourceInfo, ApiError> {
+        self.sources()?.switch_source(&id).await
+    }
+
+    async fn upsert_local_source(
+        &self,
+        draft: api::LocalSourceDraft,
+    ) -> Result<api::SourceInfo, ApiError> {
+        self.sources()?.upsert_local_source(draft).await
+    }
+
+    async fn delete_local_source(&self, id: String) -> Result<(), ApiError> {
+        self.sources()?.delete_local_source(&id).await
+    }
+
+    async fn set_source_directories(
+        &self,
+        id: String,
+        directories: Vec<String>,
+    ) -> Result<api::SourceInfo, ApiError> {
+        self.sources()?
+            .set_source_directories(&id, directories)
+            .await
+    }
+
+    async fn upsert_server(&self, draft: api::ServerDraft) -> Result<api::SourceInfo, ApiError> {
+        self.sources()?.upsert_server(draft).await
+    }
+
+    async fn delete_server(&self, id: String) -> Result<(), ApiError> {
+        self.sources()?.delete_server(&id).await
+    }
+
+    async fn provision_credentials(
+        &self,
+        provision: api::CredentialProvision,
+    ) -> Result<api::SourceInfo, ApiError> {
+        self.sources()?.provision_credentials(provision).await
+    }
+
+    async fn login_source(
+        &self,
+        request: api::SourceLoginRequest,
+    ) -> Result<api::SourceInfo, ApiError> {
+        self.sources()?.login_source(request).await
+    }
+
+    async fn clear_credentials(&self, id: String) -> Result<(), ApiError> {
+        self.sources()?.clear_credentials(&id).await
+    }
+
+    async fn authenticate_source(&self, id: String) -> Result<api::SourceInfo, ApiError> {
+        self.sources()?.authenticate_source(&id).await
+    }
+
+    async fn browse_source(
+        &self,
+        id: String,
+        path: String,
+    ) -> Result<Vec<api::SourceFolderEntry>, ApiError> {
+        self.sources()?.browse_source(&id, &path).await
+    }
+
+    async fn validate_source(&self, id: String) -> Result<api::SourceState, ApiError> {
+        self.sources()?.validate_source(&id).await
+    }
+
+    async fn integrations(&self) -> Result<Vec<api::IntegrationStatus>, ApiError> {
+        Ok(self.integrations()?.statuses().await)
+    }
+
+    async fn provision_integration(
+        &self,
+        provision: api::IntegrationProvision,
+    ) -> Result<api::IntegrationStatus, ApiError> {
+        self.integrations()?.provision(provision).await
+    }
+
+    async fn clear_integration(&self, kind: api::IntegrationKind) -> Result<(), ApiError> {
+        self.integrations()?.clear(kind).await
+    }
+
+    async fn authenticate_integration(
+        &self,
+        kind: api::IntegrationKind,
+    ) -> Result<api::IntegrationStatus, ApiError> {
+        self.integrations()?.authenticate(kind).await
     }
 }

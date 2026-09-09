@@ -412,3 +412,33 @@ fn now_secs() -> i64 {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
+
+/// Store one server's credentials without touching the rest of its row.
+///
+/// `save_config` only persists credentials for the *active* server, because
+/// the in-memory config holds no others. Signing into a server before
+/// switching to it needs this narrower write.
+pub async fn set_server_credentials(
+    pool: &SqlitePool,
+    id: &str,
+    access_token: Option<&str>,
+    user_id: Option<&str>,
+) -> Result<(), DbError> {
+    let auth = if access_token.is_some() {
+        "active"
+    } else {
+        "unauthenticated"
+    };
+    sqlx::query(
+        "UPDATE servers SET access_token = ?2, user_id = ?3, auth_state = ?4, \
+         cred_updated_at = ?5, updated_at = ?5 WHERE id = ?1",
+    )
+    .bind(id)
+    .bind(access_token)
+    .bind(user_id)
+    .bind(auth)
+    .bind(now_secs())
+    .execute(pool)
+    .await?;
+    Ok(())
+}

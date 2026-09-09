@@ -893,15 +893,6 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::config_view_to_proto(&view)))
     }
 
-    async fn switch_source(
-        &self,
-        request: Request<proto::SwitchSourceRequest>,
-    ) -> Result<Response<proto::SwitchSourceResponse>, Status> {
-        let source = convert::source_ref_from_proto(request.get_ref().source.as_ref());
-        let usable = self.0.api.switch_source(source).await.map_err(failed)?;
-        Ok(Response::new(proto::SwitchSourceResponse { usable }))
-    }
-
     #[allow(clippy::result_large_err)]
     async fn get_artwork(
         &self,
@@ -937,6 +928,237 @@ impl Kopuz for KopuzGrpc {
             })
             .collect();
         Ok(Response::new(Box::pin(futures_util::stream::iter(chunks))))
+    }
+
+    async fn get_sources(
+        &self,
+        _: Request<proto::GetSourcesRequest>,
+    ) -> Result<Response<proto::SourceList>, Status> {
+        let sources = self.0.api.sources().await.map_err(failed)?;
+        Ok(Response::new(proto::SourceList {
+            sources: sources.iter().map(convert::source_info_to_proto).collect(),
+        }))
+    }
+
+    async fn select_source(
+        &self,
+        request: Request<proto::SourceId>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let info = self
+            .0
+            .api
+            .switch_source(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
+    async fn upsert_local_source(
+        &self,
+        request: Request<proto::LocalSourceDraft>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let info = self
+            .0
+            .api
+            .upsert_local_source(convert::local_draft_from_proto(request.get_ref()))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
+    async fn delete_local_source(
+        &self,
+        request: Request<proto::SourceId>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .delete_local_source(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn set_source_directories(
+        &self,
+        request: Request<proto::SetSourceDirectoriesRequest>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let request = request.into_inner();
+        let info = self
+            .0
+            .api
+            .set_source_directories(request.id, request.directories)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
+    async fn upsert_server(
+        &self,
+        request: Request<proto::ServerDraft>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let info = self
+            .0
+            .api
+            .upsert_server(convert::server_draft_from_proto(request.get_ref()))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
+    async fn delete_server(
+        &self,
+        request: Request<proto::SourceId>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .delete_server(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn provision_credentials(
+        &self,
+        request: Request<proto::CredentialProvision>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let info = self
+            .0
+            .api
+            .provision_credentials(convert::credential_provision_from_proto(request.get_ref()))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
+    async fn login_source(
+        &self,
+        request: Request<proto::SourceLoginRequest>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let request = request.into_inner();
+        let info = self
+            .0
+            .api
+            .login_source(api::SourceLoginRequest {
+                server_id: request.server_id,
+                username: request.username,
+                password: request.password,
+            })
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
+    async fn clear_credentials(
+        &self,
+        request: Request<proto::SourceId>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .clear_credentials(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn authenticate_source(
+        &self,
+        request: Request<proto::SourceId>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let info = self
+            .0
+            .api
+            .authenticate_source(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
+    async fn browse_source(
+        &self,
+        request: Request<proto::BrowseSourceRequest>,
+    ) -> Result<Response<proto::SourceFolderList>, Status> {
+        let request = request.into_inner();
+        let entries = self
+            .0
+            .api
+            .browse_source(request.id, request.path)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::SourceFolderList {
+            entries: entries
+                .into_iter()
+                .map(|entry| proto::SourceFolderEntry {
+                    path: entry.path,
+                    name: entry.name,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn validate_source(
+        &self,
+        request: Request<proto::SourceId>,
+    ) -> Result<Response<proto::SourceStateResponse>, Status> {
+        let state = self
+            .0
+            .api
+            .validate_source(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::SourceStateResponse {
+            state: convert::source_state_to_proto(state) as i32,
+        }))
+    }
+
+    async fn get_integrations(
+        &self,
+        _: Request<proto::GetIntegrationsRequest>,
+    ) -> Result<Response<proto::IntegrationList>, Status> {
+        let integrations = self.0.api.integrations().await.map_err(failed)?;
+        Ok(Response::new(proto::IntegrationList {
+            integrations: integrations
+                .iter()
+                .map(convert::integration_status_to_proto)
+                .collect(),
+        }))
+    }
+
+    async fn provision_integration(
+        &self,
+        request: Request<proto::IntegrationProvision>,
+    ) -> Result<Response<proto::IntegrationStatus>, Status> {
+        let status = self
+            .0
+            .api
+            .provision_integration(convert::integration_provision_from_proto(request.get_ref()))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::integration_status_to_proto(&status)))
+    }
+
+    async fn clear_integration(
+        &self,
+        request: Request<proto::IntegrationRef>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .clear_integration(convert::integration_kind_from_proto(request.get_ref().kind))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn authenticate_integration(
+        &self,
+        request: Request<proto::IntegrationRef>,
+    ) -> Result<Response<proto::IntegrationStatus>, Status> {
+        let status = self
+            .0
+            .api
+            .authenticate_integration(convert::integration_kind_from_proto(request.get_ref().kind))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::integration_status_to_proto(&status)))
     }
 }
 

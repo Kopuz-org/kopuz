@@ -40,6 +40,45 @@ impl ConfigService {
             .collect()
     }
 
+    /// Refuse a write that a managed settings file has pinned.
+    ///
+    /// A caller checks the keys it is about to change, so the refusal names
+    /// them rather than failing later with a diff nobody asked about.
+    pub fn ensure_unlocked(&self, keys: &[&str]) -> Result<(), ApiError> {
+        let locked = self.locked_keys();
+        let refused: Vec<&str> = keys
+            .iter()
+            .copied()
+            .filter(|key| locked.iter().any(|locked| locked == key))
+            .collect();
+        if refused.is_empty() {
+            Ok(())
+        } else {
+            Err(ApiError::invalid_input(format!(
+                "these settings are pinned by a managed file: {}",
+                refused.join(", ")
+            )))
+        }
+    }
+
+    /// Change config from inside the daemon, persist it, and hand back the
+    /// result.
+    ///
+    /// Unlike [`Self::set`] this touches credential fields, which is the
+    /// point: signing in writes a token no caller ever sent us.
+    pub async fn mutate_state(
+        &self,
+        mutate: impl FnOnce(&mut config::AppConfig) + Send,
+    ) -> Result<config::AppConfig, ApiError> {
+        let mut current = self.current.write().await;
+        mutate(&mut current);
+        self.db
+            .save_config(&current)
+            .await
+            .map_err(|error| ApiError::internal(format!("config save failed: {error}")))?;
+        Ok(current.clone())
+    }
+
     /// Persist one offline-track registration without rewriting the whole
     /// config, then update the in-memory snapshot used by daemon services.
     pub async fn set_offline_track(

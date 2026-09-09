@@ -55,8 +55,9 @@ pub fn use_connection_status() -> Memo<ConnStatus> {
 /// anonymous YT), so the caller can launch a sign-in flow otherwise.
 pub async fn apply_source_switch(mut config: Signal<AppConfig>, source: Source) -> bool {
     let api = crate::api::consume_api();
-    match api.switch_source(source).await {
-        Ok(usable) => {
+    match api.switch_source(source.as_str().to_string()).await {
+        Ok(info) => {
+            let usable = info.authenticated;
             // The daemon owns the config now, so pull its version back rather
             // than reconstructing the same edit locally.
             if let Ok(view) = api.config().await {

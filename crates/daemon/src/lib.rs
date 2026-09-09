@@ -23,6 +23,7 @@ pub mod queue_model;
 pub mod radio;
 pub mod scrobbler;
 pub mod session;
+pub mod sources;
 mod wire;
 
 pub use artwork::ArtworkService;
@@ -31,6 +32,7 @@ pub use config_service::ConfigService;
 pub use downloads::DownloadsService;
 pub use external::{ExternalPlayer, ExternalReport};
 pub use favorites::FavoritesService;
+pub use integrations::IntegrationService;
 pub use integrations::SourceRecorder;
 pub use jobs::JobRunner;
 pub use library::LibraryService;
@@ -44,3 +46,4 @@ pub use scrobbler::Scrobbler;
 pub use session::{
     LocalApi, PlaybackServices, QueueMaterializer, QueueMirrorSnapshot, SessionHandle,
 };
+pub use sources::SourceService;

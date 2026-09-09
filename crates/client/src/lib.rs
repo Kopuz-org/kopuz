@@ -524,17 +524,6 @@ impl api::ConfigApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(convert::config_view_from_proto(view.get_ref()))
     }
-
-    async fn switch_source(&self, source: config::Source) -> Result<bool, ApiError> {
-        let switched = self
-            .client()
-            .switch_source(Request::new(proto::SwitchSourceRequest {
-                source: Some(convert::source_ref_to_proto(&source)),
-            }))
-            .await
-            .map_err(wire_error)?;
-        Ok(switched.get_ref().usable)
-    }
 }
 
 #[async_trait::async_trait]
@@ -799,5 +788,213 @@ impl api::PlaylistApi for GrpcApi {
             .await
             .map_err(wire_error)?;
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl api::SourceApi for GrpcApi {
+    async fn sources(&self) -> Result<Vec<api::SourceInfo>, ApiError> {
+        let list = self
+            .client()
+            .get_sources(Request::new(proto::GetSourcesRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .sources
+            .iter()
+            .map(convert::source_info_from_proto)
+            .collect())
+    }
+
+    async fn switch_source(&self, id: String) -> Result<api::SourceInfo, ApiError> {
+        let info = self
+            .client()
+            .select_source(Request::new(proto::SourceId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(info.get_ref()))
+    }
+
+    async fn upsert_local_source(
+        &self,
+        draft: api::LocalSourceDraft,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let info = self
+            .client()
+            .upsert_local_source(Request::new(convert::local_draft_to_proto(&draft)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(info.get_ref()))
+    }
+
+    async fn delete_local_source(&self, id: String) -> Result<(), ApiError> {
+        self.client()
+            .delete_local_source(Request::new(proto::SourceId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn set_source_directories(
+        &self,
+        id: String,
+        directories: Vec<String>,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let info = self
+            .client()
+            .set_source_directories(Request::new(proto::SetSourceDirectoriesRequest {
+                id,
+                directories,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(info.get_ref()))
+    }
+
+    async fn upsert_server(&self, draft: api::ServerDraft) -> Result<api::SourceInfo, ApiError> {
+        let info = self
+            .client()
+            .upsert_server(Request::new(convert::server_draft_to_proto(&draft)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(info.get_ref()))
+    }
+
+    async fn delete_server(&self, id: String) -> Result<(), ApiError> {
+        self.client()
+            .delete_server(Request::new(proto::SourceId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn provision_credentials(
+        &self,
+        provision: api::CredentialProvision,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let info = self
+            .client()
+            .provision_credentials(Request::new(convert::credential_provision_to_proto(
+                &provision,
+            )))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(info.get_ref()))
+    }
+
+    async fn login_source(
+        &self,
+        request: api::SourceLoginRequest,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let info = self
+            .client()
+            .login_source(Request::new(proto::SourceLoginRequest {
+                server_id: request.server_id,
+                username: request.username,
+                password: request.password,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(info.get_ref()))
+    }
+
+    async fn clear_credentials(&self, id: String) -> Result<(), ApiError> {
+        self.client()
+            .clear_credentials(Request::new(proto::SourceId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn authenticate_source(&self, id: String) -> Result<api::SourceInfo, ApiError> {
+        let info = self
+            .client()
+            .authenticate_source(Request::new(proto::SourceId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(info.get_ref()))
+    }
+
+    async fn browse_source(
+        &self,
+        id: String,
+        path: String,
+    ) -> Result<Vec<api::SourceFolderEntry>, ApiError> {
+        let list = self
+            .client()
+            .browse_source(Request::new(proto::BrowseSourceRequest { id, path }))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .entries
+            .iter()
+            .map(|entry| api::SourceFolderEntry {
+                path: entry.path.clone(),
+                name: entry.name.clone(),
+            })
+            .collect())
+    }
+
+    async fn validate_source(&self, id: String) -> Result<api::SourceState, ApiError> {
+        let state = self
+            .client()
+            .validate_source(Request::new(proto::SourceId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_state_from_proto(state.get_ref().state))
+    }
+
+    async fn integrations(&self) -> Result<Vec<api::IntegrationStatus>, ApiError> {
+        let list = self
+            .client()
+            .get_integrations(Request::new(proto::GetIntegrationsRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .integrations
+            .iter()
+            .map(convert::integration_status_from_proto)
+            .collect())
+    }
+
+    async fn provision_integration(
+        &self,
+        provision: api::IntegrationProvision,
+    ) -> Result<api::IntegrationStatus, ApiError> {
+        let status = self
+            .client()
+            .provision_integration(Request::new(convert::integration_provision_to_proto(
+                &provision,
+            )))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::integration_status_from_proto(status.get_ref()))
+    }
+
+    async fn clear_integration(&self, kind: api::IntegrationKind) -> Result<(), ApiError> {
+        self.client()
+            .clear_integration(Request::new(proto::IntegrationRef {
+                kind: convert::integration_kind_to_proto(kind) as i32,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn authenticate_integration(
+        &self,
+        kind: api::IntegrationKind,
+    ) -> Result<api::IntegrationStatus, ApiError> {
+        let status = self
+            .client()
+            .authenticate_integration(Request::new(proto::IntegrationRef {
+                kind: convert::integration_kind_to_proto(kind) as i32,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::integration_status_from_proto(status.get_ref()))
     }
 }

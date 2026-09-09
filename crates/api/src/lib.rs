@@ -285,6 +285,80 @@ pub trait JobApi: Send + Sync {
     async fn remove_download(&self, key: String) -> Result<(), ApiError>;
 }
 
+/// What is configured to play from, and what is signed into.
+///
+/// A frontend never builds a media source or holds a credential. It reads
+/// these rows to decide what to offer, and calls these methods to change what
+/// is configured; every secret stays behind the seam. Browser sign-in belongs
+/// here for the same reason: it spawns a browser and ends holding a token.
+#[async_trait::async_trait]
+pub trait SourceApi: Send + Sync {
+    async fn sources(&self) -> Result<Vec<SourceInfo>, ApiError>;
+
+    /// Make one active. Returns the source as it now stands, including
+    /// whether it is usable -- a server with no credentials still becomes
+    /// active, so the caller prompts a sign-in rather than showing an empty
+    /// library.
+    async fn switch_source(&self, id: String) -> Result<SourceInfo, ApiError>;
+
+    /// Create or update a local library. Absent `id` creates.
+    async fn upsert_local_source(&self, draft: LocalSourceDraft) -> Result<SourceInfo, ApiError>;
+
+    async fn delete_local_source(&self, id: String) -> Result<(), ApiError>;
+
+    /// Replace a source's scan roots, or a server's selected folders.
+    async fn set_source_directories(
+        &self,
+        id: String,
+        directories: Vec<String>,
+    ) -> Result<SourceInfo, ApiError>;
+
+    async fn upsert_server(&self, draft: ServerDraft) -> Result<SourceInfo, ApiError>;
+
+    async fn delete_server(&self, id: String) -> Result<(), ApiError>;
+
+    /// Store a secret obtained elsewhere. Write-only.
+    async fn provision_credentials(
+        &self,
+        provision: CredentialProvision,
+    ) -> Result<SourceInfo, ApiError>;
+
+    /// Sign in with a username and password, for servers that take one.
+    async fn login_source(&self, request: SourceLoginRequest) -> Result<SourceInfo, ApiError>;
+
+    async fn clear_credentials(&self, id: String) -> Result<(), ApiError>;
+
+    /// Run this source's browser sign-in and keep the result. The caller
+    /// learns that the source is authenticated, never with what.
+    async fn authenticate_source(&self, id: String) -> Result<SourceInfo, ApiError>;
+
+    /// List folders on a server that has them, for a folder picker.
+    async fn browse_source(
+        &self,
+        id: String,
+        path: String,
+    ) -> Result<Vec<SourceFolderEntry>, ApiError>;
+
+    /// Probe whether a source is reachable and still signed in.
+    async fn validate_source(&self, id: String) -> Result<SourceState, ApiError>;
+
+    async fn integrations(&self) -> Result<Vec<IntegrationStatus>, ApiError>;
+
+    /// Set scrobbling credentials. Write-only, like source credentials.
+    async fn provision_integration(
+        &self,
+        provision: IntegrationProvision,
+    ) -> Result<IntegrationStatus, ApiError>;
+
+    async fn clear_integration(&self, kind: IntegrationKind) -> Result<(), ApiError>;
+
+    /// Run a service's web sign-in and keep the session key it returns.
+    async fn authenticate_integration(
+        &self,
+        kind: IntegrationKind,
+    ) -> Result<IntegrationStatus, ApiError>;
+}
+
 /// The settings surface.
 #[async_trait::async_trait]
 pub trait ConfigApi: Send + Sync {
@@ -296,15 +370,7 @@ pub trait ConfigApi: Send + Sync {
     /// with `invalid_input`.
     async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError>;
 
-    /// Make `source` the active one. Separate from [`Self::set_config`]
-    /// because switching to a server means loading that server's stored
-    /// credentials into the active snapshot, and those are the fields
-    /// `set_config` deliberately refuses to take from a caller.
-    ///
-    /// Answers whether the new source is usable: a server with no stored
-    /// credentials still becomes active, but the caller has to prompt a
-    /// sign-in rather than showing an empty library.
-    async fn switch_source(&self, source: config::Source) -> Result<bool, ApiError>;
+    // Switching sources lives on `SourceApi`, which is where sources are.
 }
 
 /// Subscribe to the state stream. Every subscriber gets every event from the
@@ -320,7 +386,16 @@ pub trait EventApi: Send + Sync {
 /// instead of one that grows without bound; consumers still hold a single
 /// `Arc<dyn KopuzApi>` and call any method on it.
 pub trait KopuzApi:
-    PlayerApi + LibraryApi + PlaylistApi + ArtworkApi + JobApi + ConfigApi + EventApi + Send + Sync
+    PlayerApi
+    + LibraryApi
+    + PlaylistApi
+    + ArtworkApi
+    + JobApi
+    + SourceApi
+    + ConfigApi
+    + EventApi
+    + Send
+    + Sync
 {
 }
 
@@ -330,6 +405,7 @@ impl<T> KopuzApi for T where
         + PlaylistApi
         + ArtworkApi
         + JobApi
+        + SourceApi
         + ConfigApi
         + EventApi
         + Send
@@ -343,5 +419,6 @@ impl<T> KopuzApi for T where
 pub mod prelude {
     pub use super::{
         ArtworkApi, ConfigApi, EventApi, JobApi, KopuzApi, LibraryApi, PlayerApi, PlaylistApi,
+        SourceApi,
     };
 }

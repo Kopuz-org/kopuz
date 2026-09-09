@@ -15,6 +15,7 @@ mod player;
 mod playlists;
 mod queue;
 mod service;
+mod sources;
 
 #[cfg(test)]
 mod fixtures;
@@ -29,3 +30,4 @@ pub use player::*;
 pub use playlists::*;
 pub use queue::*;
 pub use service::*;
+pub use sources::*;

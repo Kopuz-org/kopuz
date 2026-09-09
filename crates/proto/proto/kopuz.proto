@@ -85,7 +85,24 @@ service Kopuz {
   rpc StartDownloads(DownloadRequest) returns (JobRef);
   rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
   rpc SetConfig(SetConfigRequest) returns (ConfigView);
-  rpc SwitchSource(SwitchSourceRequest) returns (SwitchSourceResponse);
+
+  rpc GetSources(GetSourcesRequest) returns (SourceList);
+  rpc SelectSource(SourceId) returns (SourceInfo);
+  rpc UpsertLocalSource(LocalSourceDraft) returns (SourceInfo);
+  rpc DeleteLocalSource(SourceId) returns (Unit);
+  rpc SetSourceDirectories(SetSourceDirectoriesRequest) returns (SourceInfo);
+  rpc UpsertServer(ServerDraft) returns (SourceInfo);
+  rpc DeleteServer(SourceId) returns (Unit);
+  rpc ProvisionCredentials(CredentialProvision) returns (SourceInfo);
+  rpc LoginSource(SourceLoginRequest) returns (SourceInfo);
+  rpc ClearCredentials(SourceId) returns (Unit);
+  rpc AuthenticateSource(SourceId) returns (SourceInfo);
+  rpc BrowseSource(BrowseSourceRequest) returns (SourceFolderList);
+  rpc ValidateSource(SourceId) returns (SourceStateResponse);
+  rpc GetIntegrations(GetIntegrationsRequest) returns (IntegrationList);
+  rpc ProvisionIntegration(IntegrationProvision) returns (IntegrationStatus);
+  rpc ClearIntegration(IntegrationRef) returns (Unit);
+  rpc AuthenticateIntegration(IntegrationRef) returns (IntegrationStatus);
 
   rpc GetArtwork(ArtworkRequest) returns (stream ArtworkChunk);
 }
@@ -525,6 +542,168 @@ message SearchResults {
 
 // ---------------- playlists ----------------
 
+// ---------------- sources ----------------
+
+// No credential appears in any of these. A source says whether it is
+// authenticated, never with what.
+enum SourceKind {
+  SOURCE_KIND_UNKNOWN = 0;
+  SOURCE_KIND_LOCAL = 1;
+  SOURCE_KIND_LOCAL_LIBRARY = 2;
+  SOURCE_KIND_SERVER = 3;
+}
+
+enum PlaylistCapability {
+  PLAYLIST_CAPABILITY_NONE = 0;
+  PLAYLIST_CAPABILITY_ADD_REMOVE = 1;
+  PLAYLIST_CAPABILITY_REORDER = 2;
+}
+
+enum ArtistPresentation {
+  ARTIST_PRESENTATION_LIBRARY = 0;
+  ARTIST_PRESENTATION_REMOTE = 1;
+}
+
+enum AlbumPresentation {
+  ALBUM_PRESENTATION_STANDARD = 0;
+  ALBUM_PRESENTATION_REMOTE = 1;
+}
+
+enum FavoritesSyncMode {
+  FAVORITES_SYNC_INSTANT = 0;
+  FAVORITES_SYNC_PAGINATED = 1;
+}
+
+// Every "should this button exist?" question is answered from here, so no
+// frontend branches on a service name.
+message SourceCapabilities {
+  bool edit_tags = 1;
+  bool delete_from_disk = 2;
+  bool scan_folders = 3;
+  bool folders = 4;
+  bool sync = 5;
+  bool downloads = 6;
+  bool discover = 7;
+  bool track_radio = 8;
+  bool playlist_radio = 9;
+  PlaylistCapability playlists = 10;
+  ArtistPresentation artists = 11;
+  AlbumPresentation albums = 12;
+  FavoritesSyncMode favorites_sync = 13;
+}
+
+message SourceInfo {
+  string id = 1;
+  string name = 2;
+  SourceKind kind = 3;
+  optional MusicService service = 4;
+  bool active = 5;
+  bool authenticated = 6;
+  SourceCapabilities capabilities = 7;
+  optional string url = 8;
+  optional string browser = 9;
+  bool anonymous = 10;
+  optional string storefront = 11;
+  optional string language = 12;
+  repeated string directories = 13;
+}
+
+message GetSourcesRequest {}
+
+message SourceList {
+  repeated SourceInfo sources = 1;
+}
+
+message SourceId {
+  string id = 1;
+}
+
+message LocalSourceDraft {
+  // Absent creates a new local library.
+  optional string id = 1;
+  string name = 2;
+  repeated string directories = 3;
+}
+
+message ServerDraft {
+  optional string id = 1;
+  string name = 2;
+  string url = 3;
+  MusicService service = 4;
+  optional string browser = 5;
+  bool anonymous = 6;
+  optional string storefront = 7;
+  optional string language = 8;
+}
+
+message SetSourceDirectoriesRequest {
+  string id = 1;
+  repeated string directories = 2;
+}
+
+// Write-only. No response carries these values back.
+message CredentialProvision {
+  string server_id = 1;
+  string secret = 2;
+  optional string user_id = 3;
+  optional string browser = 4;
+}
+
+message SourceLoginRequest {
+  string server_id = 1;
+  string username = 2;
+  string password = 3;
+}
+
+message BrowseSourceRequest {
+  string id = 1;
+  string path = 2;
+}
+
+message SourceFolderEntry {
+  string path = 1;
+  string name = 2;
+}
+
+message SourceFolderList {
+  repeated SourceFolderEntry entries = 1;
+}
+
+message SourceStateResponse {
+  SourceState state = 1;
+}
+
+enum IntegrationKind {
+  INTEGRATION_UNKNOWN = 0;
+  INTEGRATION_LISTENBRAINZ = 1;
+  INTEGRATION_LASTFM = 2;
+  INTEGRATION_LIBREFM = 3;
+}
+
+message IntegrationRef {
+  IntegrationKind kind = 1;
+}
+
+message GetIntegrationsRequest {}
+
+message IntegrationStatus {
+  IntegrationKind kind = 1;
+  bool configured = 2;
+}
+
+message IntegrationList {
+  repeated IntegrationStatus integrations = 1;
+}
+
+// Write-only scrobbling credentials.
+message IntegrationProvision {
+  IntegrationKind kind = 1;
+  optional string token = 2;
+  optional string api_key = 3;
+  optional string api_secret = 4;
+  optional string session_key = 5;
+}
+
 // ---------------- mutations ----------------
 
 // What to do with an entity's picture. Absent means leave it alone.
@@ -855,15 +1034,7 @@ message SetConfigRequest {
   Config config = 1;
 }
 
-message SwitchSourceRequest {
-  SourceRef source = 1;
-}
 
-message SwitchSourceResponse {
-  // False when the source became active but has no usable credentials; the
-  // caller should prompt a sign-in rather than show an empty library.
-  bool usable = 1;
-}
 
 // ---------------- config ----------------
 

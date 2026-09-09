@@ -370,3 +370,196 @@ fn project(
     discord.was_playing = playing;
     discord.last_enabled = enabled;
 }
+
+/// Scrobbling and metadata accounts.
+///
+/// The credentials for these lived in the settings UI, which meant a Last.fm
+/// api secret sat in a Dioxus signal and the scrobbler that used it ran in the
+/// frontend. They are write-only here: a caller sets them and asks whether one
+/// is configured, never what it is.
+pub struct IntegrationService {
+    config: std::sync::Arc<crate::config_service::ConfigService>,
+    session: crate::session::SessionHandle,
+}
+
+impl IntegrationService {
+    pub fn new(
+        config: std::sync::Arc<crate::config_service::ConfigService>,
+        session: crate::session::SessionHandle,
+    ) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self { config, session })
+    }
+
+    pub async fn statuses(&self) -> Vec<api::IntegrationStatus> {
+        let config = self.config.snapshot().await;
+        vec![
+            api::IntegrationStatus {
+                kind: api::IntegrationKind::ListenBrainz,
+                configured: !config.musicbrainz_token.trim().is_empty(),
+            },
+            api::IntegrationStatus {
+                kind: api::IntegrationKind::LastFm,
+                // A session key is what actually scrobbles; the api key alone
+                // only gets as far as the sign-in page.
+                configured: !config.lastfm_session_key.trim().is_empty(),
+            },
+            api::IntegrationStatus {
+                kind: api::IntegrationKind::LibreFm,
+                configured: !config.librefm_session_key.trim().is_empty(),
+            },
+        ]
+    }
+
+    pub async fn provision(
+        &self,
+        provision: api::IntegrationProvision,
+    ) -> Result<api::IntegrationStatus, api::ApiError> {
+        let kind = provision.kind;
+        let updated = self
+            .config
+            .mutate_state(move |config| match kind {
+                api::IntegrationKind::ListenBrainz => {
+                    if let Some(token) = provision.token {
+                        config.musicbrainz_token = token;
+                    }
+                }
+                api::IntegrationKind::LastFm => {
+                    if let Some(key) = provision.api_key {
+                        config.lastfm_api_key = key;
+                    }
+                    if let Some(secret) = provision.api_secret {
+                        config.lastfm_api_secret = secret;
+                    }
+                    if let Some(session) = provision.session_key {
+                        config.lastfm_session_key = session;
+                    }
+                }
+                api::IntegrationKind::LibreFm => {
+                    if let Some(session) = provision.session_key {
+                        config.librefm_session_key = session;
+                    }
+                }
+                api::IntegrationKind::Unknown => {}
+            })
+            .await?;
+        self.session
+            .set_config(updated, vec!["integrations".to_string()]);
+        self.status_of(kind).await
+    }
+
+    pub async fn clear(&self, kind: api::IntegrationKind) -> Result<(), api::ApiError> {
+        let updated = self
+            .config
+            .mutate_state(move |config| match kind {
+                api::IntegrationKind::ListenBrainz => config.musicbrainz_token.clear(),
+                api::IntegrationKind::LastFm => {
+                    config.lastfm_api_key.clear();
+                    config.lastfm_api_secret.clear();
+                    config.lastfm_session_key.clear();
+                }
+                api::IntegrationKind::LibreFm => config.librefm_session_key.clear(),
+                api::IntegrationKind::Unknown => {}
+            })
+            .await?;
+        self.session
+            .set_config(updated, vec!["integrations".to_string()]);
+        Ok(())
+    }
+
+    /// Run a service's web sign-in and keep the session key it returns.
+    ///
+    /// Last.fm and Libre.fm both hand out a token, open a page for the person
+    /// to approve, then trade the token for a session key -- a browser and a
+    /// poll loop, which is why it is not a frontend's job.
+    pub async fn authenticate(
+        &self,
+        kind: api::IntegrationKind,
+    ) -> Result<api::IntegrationStatus, api::ApiError> {
+        let config = self.config.snapshot().await;
+        let (api_key, api_secret) = match kind {
+            api::IntegrationKind::LastFm => (
+                config.lastfm_api_key.clone(),
+                config.lastfm_api_secret.clone(),
+            ),
+            api::IntegrationKind::LibreFm => (
+                scrobble::librefm::API_KEY.to_string(),
+                scrobble::librefm::API_SECRET.to_string(),
+            ),
+            _ => {
+                return Err(api::ApiError::unsupported(
+                    "this integration takes a token rather than a web sign-in",
+                ));
+            }
+        };
+        if api_key.trim().is_empty() || api_secret.trim().is_empty() {
+            return Err(api::ApiError::invalid_input(
+                "set the API key and secret first",
+            ));
+        }
+        let session_key = web_sign_in(kind, &api_key, &api_secret).await?;
+        self.provision(api::IntegrationProvision {
+            kind,
+            session_key: Some(session_key),
+            ..Default::default()
+        })
+        .await
+    }
+
+    async fn status_of(
+        &self,
+        kind: api::IntegrationKind,
+    ) -> Result<api::IntegrationStatus, api::ApiError> {
+        self.statuses()
+            .await
+            .into_iter()
+            .find(|status| status.kind == kind)
+            .ok_or_else(|| api::ApiError::invalid_input("no such integration"))
+    }
+}
+
+/// Open the approval page, then poll for the session key. The person has to
+/// click through in a browser, so the wait is generous and bounded.
+#[cfg(not(target_os = "android"))]
+async fn web_sign_in(
+    kind: api::IntegrationKind,
+    api_key: &str,
+    api_secret: &str,
+) -> Result<String, api::ApiError> {
+    let token = match kind {
+        api::IntegrationKind::LibreFm => scrobble::librefm::get_auth_token(api_key).await,
+        _ => scrobble::lastfm::get_auth_token(api_key).await,
+    }
+    .map_err(|error| api::ApiError::internal(error.to_string()))?;
+    let url = match kind {
+        api::IntegrationKind::LibreFm => scrobble::librefm::auth_url(api_key, &token),
+        _ => scrobble::lastfm::auth_url(api_key, &token),
+    };
+    webbrowser::open(&url)
+        .map_err(|error| api::ApiError::internal(format!("could not open a browser: {error}")))?;
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        let session = match kind {
+            api::IntegrationKind::LibreFm => {
+                scrobble::librefm::get_session_key(api_key, api_secret, &token).await
+            }
+            _ => scrobble::lastfm::get_session_key(api_key, api_secret, &token).await,
+        };
+        if let Ok(session) = session {
+            return Ok(session);
+        }
+    }
+    Err(api::ApiError::internal(
+        "the sign-in was not approved in time",
+    ))
+}
+
+#[cfg(target_os = "android")]
+async fn web_sign_in(
+    _kind: api::IntegrationKind,
+    _api_key: &str,
+    _api_secret: &str,
+) -> Result<String, api::ApiError> {
+    Err(api::ApiError::unsupported(
+        "web sign-in runs in the app on Android",
+    ))
+}
