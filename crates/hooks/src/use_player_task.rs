@@ -2,14 +2,14 @@
 //! only this process can reach.
 //!
 //! Engine playback, the media widget, external playback and every listen it
-//! records live in the daemon. On Linux the shuffle and repeat modes the UI
-//! toggles are mirrored into MPRIS here, and on Android the media
-//! notification's taps arrive through a JNI callback with no event queue, so
-//! they are drained and dispatched through the controller.
+//! records live in the daemon, which drives the desktop media widget
+//! itself. What is left is Android: its notification has no event queue, so
+//! its taps arrive through a JNI callback and are dispatched here.
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(target_os = "android")]
 use crate::use_player_controller::LoopMode;
 use crate::use_player_controller::PlayerController;
+#[cfg(target_os = "android")]
 use dioxus::prelude::*;
 
 #[cfg(target_os = "android")]
@@ -67,9 +67,13 @@ mod android_media {
     }
 }
 
-pub fn use_player_task(ctrl: PlayerController) {
-    // Keep MPRIS / the Android notification in sync with the UI's own toggles.
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn use_player_task(
+    #[cfg_attr(not(target_os = "android"), allow(unused_variables))] ctrl: PlayerController,
+) {
+    // The Android notification is not MPRIS: the daemon pushes shuffle and
+    // repeat to the desktop widget itself, but has no Android backend, so
+    // there they are mirrored from here.
+    #[cfg(target_os = "android")]
     use_effect(move || {
         let shuffle = *ctrl.shuffle.read();
         let repeat = match *ctrl.loop_mode.read() {
