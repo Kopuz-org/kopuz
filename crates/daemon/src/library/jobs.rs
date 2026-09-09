@@ -92,7 +92,7 @@ impl LibraryService {
 
             let progress_ctx = ctx.clone();
             let progress: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |file: String| {
-                progress_ctx.progress_throttled("scanning", Some(file));
+                progress_ctx.progress_throttled("scanning", None, None, Some(file));
             });
             for dir in &scannable_dirs {
                 if ctx.cancelled() {

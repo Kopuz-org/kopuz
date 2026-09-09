@@ -22,7 +22,6 @@ rfd = { workspace = true }
 [dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
 directories = { workspace = true }
-uuid = { workspace = true }
 player = { workspace = true }
 reader = { workspace = true }
 components = { workspace = true }

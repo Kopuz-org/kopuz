@@ -1,23 +1,18 @@
-use crate::ytdlp_jobs::{
-    AudioFormat, DownloadJob, JOBS, JobStatus, clear_finished_jobs, run_preflight_checks,
-    seed_from_history, start_download,
-};
+use api::{YtdlpAudioFormat, YtdlpRequest};
 use config::AppConfig;
 use dioxus::prelude::*;
 
 #[component]
 pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
     let mut url_input = use_signal(String::new);
-    let mut format = use_signal(|| AudioFormat::BestAudio);
+    let mut format = use_signal(|| YtdlpAudioFormat::BestAudio);
     let mut out_dir = use_signal(|| config.peek().ytdlp_output_dir.clone());
     let mut show_opts = use_signal(|| false);
-    let mut preflight_error = use_signal(|| Option::<String>::None);
-
-    use_hook(move || {
-        // Seed from history only while the session list is empty — a remount
-        // must not clobber jobs that are still running.
-        seed_from_history(&config.peek().ytdlp_history);
-    });
+    let mut failure = use_signal(|| Option::<String>::None);
+    // Named before the daemon reports a title, so the row has something to say.
+    let mut active_url = use_signal(String::new);
+    let progress = hooks::ytdlp::use_progress();
+    let history = use_memo(move || config.read().ytdlp_history.clone());
 
     let mut do_download = move || {
         let url = url_input().trim().to_string();
@@ -25,17 +20,17 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
             return;
         }
 
-        preflight_error.set(None);
-
-        if let Err(error) = run_preflight_checks(&url, &out_dir()) {
-            preflight_error.set(Some(error));
-            return;
-        }
-
-        let out = out_dir();
-        let fmt = format();
-        let opts = config.peek().ytdlp_options.clone();
-        start_download(url, out, fmt, opts);
+        failure.set(None);
+        active_url.set(url.clone());
+        hooks::ytdlp::start(
+            YtdlpRequest {
+                url,
+                output_dir: out_dir(),
+                format: format(),
+                options: config.peek().ytdlp_options.clone(),
+            },
+            failure,
+        );
         url_input.set(String::new());
     };
 
@@ -68,7 +63,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
                     placeholder: "{i18n::t(\"ytdlp_url_placeholder\")}",
                     value: "{url_input}",
                     oninput: move |e| {
-                        preflight_error.set(None);
+                        failure.set(None);
                         url_input.set(e.value());
                     },
                     onkeydown: move |e| {
@@ -84,7 +79,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
             }
 
             div { class: "flex gap-2 mb-4 flex-wrap",
-                for fmt in [AudioFormat::BestAudio, AudioFormat::Mp3, AudioFormat::Flac, AudioFormat::Opus, AudioFormat::Wav, AudioFormat::Video] {
+                for fmt in [YtdlpAudioFormat::BestAudio, YtdlpAudioFormat::Mp3, YtdlpAudioFormat::Flac, YtdlpAudioFormat::Opus, YtdlpAudioFormat::Wav, YtdlpAudioFormat::Video] {
                     button {
                         class: if *format.read() == fmt {
                             "text-xs px-3 py-1.5 rounded-lg bg-white/20 text-white font-medium transition-colors"
@@ -92,12 +87,12 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
                             "text-xs px-3 py-1.5 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
                         },
                         onclick: move |_| format.set(fmt),
-                        "{fmt.label()}"
+                        "{format_label(fmt)}"
                     }
                 }
             }
 
-            if let Some(error) = preflight_error.read().clone() {
+            if let Some(error) = failure.read().clone() {
                 div { class: "mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200 whitespace-pre-wrap",
                     i { class: "fa-solid fa-triangle-exclamation mr-2 text-red-300" }
                     "{error}"
@@ -111,7 +106,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
                     placeholder: "{i18n::t(\"ytdlp_output_dir_placeholder\")}",
                     value: "{out_dir}",
                     oninput: move |e| {
-                        preflight_error.set(None);
+                        failure.set(None);
                         out_dir.set(e.value());
                         config.write().ytdlp_output_dir = e.value();
                     }
@@ -136,20 +131,22 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
                 OptionsPanel { config }
             }
 
-            if !JOBS.read().is_empty() {
+            if progress.read().running || !history().is_empty() {
                 div { class: "space-y-2 mt-2",
-                    div { class: "flex justify-end mb-1",
-                        button {
-                            class: "text-slate-600 hover:text-slate-400 text-xs transition-colors",
-                            onclick: move |_| {
-                                clear_finished_jobs();
-                                config.write().ytdlp_history.clear();
-                            },
-                            "{i18n::t(\"ytdlp_clear_history\")}"
+                    if !history().is_empty() {
+                        div { class: "flex justify-end mb-1",
+                            button {
+                                class: "text-slate-600 hover:text-slate-400 text-xs transition-colors",
+                                onclick: move |_| config.write().ytdlp_history.clear(),
+                                "{i18n::t(\"ytdlp_clear_history\")}"
+                            }
                         }
                     }
-                    for job in JOBS.read().clone().into_iter() {
-                        JobRow { job }
+                    if progress.read().running {
+                        ActiveRow { progress, url: active_url() }
+                    }
+                    for entry in history().into_iter() {
+                        HistoryRow { entry }
                     }
                 }
             } else {
@@ -160,6 +157,39 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
             }
         }
     }
+}
+
+/// The label a format shows in the picker, and the one the daemon stored in
+/// history for a finished download.
+fn format_label(format: YtdlpAudioFormat) -> String {
+    i18n::t(match format {
+        YtdlpAudioFormat::BestAudio => "ytdlp_format_best_audio",
+        YtdlpAudioFormat::Mp3 => "ytdlp_format_mp3",
+        YtdlpAudioFormat::Flac => "ytdlp_format_flac",
+        YtdlpAudioFormat::Opus => "ytdlp_format_opus",
+        YtdlpAudioFormat::Wav => "ytdlp_format_wav",
+        YtdlpAudioFormat::Video => "ytdlp_format_video",
+    })
+}
+
+fn stored_format_label(stored: &str) -> String {
+    format_label(match stored {
+        "MP3" => YtdlpAudioFormat::Mp3,
+        "FLAC" => YtdlpAudioFormat::Flac,
+        "OPUS" => YtdlpAudioFormat::Opus,
+        "WAV" => YtdlpAudioFormat::Wav,
+        "Video (MP4)" => YtdlpAudioFormat::Video,
+        _ => YtdlpAudioFormat::BestAudio,
+    })
+}
+
+/// A URL is what a row shows until yt-dlp names the file it is writing.
+fn shorten(url: &str) -> String {
+    url.trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .chars()
+        .take(60)
+        .collect()
 }
 
 #[component]
@@ -416,56 +446,33 @@ fn OptToggle(props: OptToggleProps) -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
-struct JobRowProps {
-    job: DownloadJob,
-}
-
 #[component]
-fn JobRow(props: JobRowProps) -> Element {
-    let job = &props.job;
-    let pct = job.progress;
-
-    let (icon, icon_color) = match &job.status {
-        JobStatus::Completed => ("fa-solid fa-circle-check", "text-green-400"),
-        JobStatus::Downloading => ("fa-solid fa-spinner fa-spin", "text-blue-400"),
-        JobStatus::Processing => ("fa-solid fa-gears", "text-yellow-400"),
-        JobStatus::Pending => ("fa-solid fa-clock", "text-slate-500"),
-        JobStatus::Failed(_) => ("fa-solid fa-circle-xmark", "text-red-400"),
+fn ActiveRow(progress: Signal<hooks::jobs::JobProgress>, url: String) -> Element {
+    let progress = progress.read().clone();
+    let processing = progress.phase == "processing";
+    let percent = match (progress.current, progress.total) {
+        (Some(current), Some(total)) if total > 0 => current as f64 * 100.0 / total as f64,
+        _ => 0.0,
     };
 
-    let status_text = match &job.status {
-        JobStatus::Downloading if !job.speed.is_empty() => i18n::t_with(
-            "ytdlp_status_downloading_eta",
-            &[
-                ("percent", format!("{pct:.0}")),
-                ("speed", job.speed.clone()),
-                ("eta", job.eta.clone()),
-            ],
-        ),
-        JobStatus::Downloading => i18n::t_with(
-            "ytdlp_status_downloading",
-            &[("percent", format!("{pct:.0}"))],
-        ),
-        JobStatus::Processing => i18n::t("ytdlp_status_processing"),
-        JobStatus::Completed => i18n::t("ytdlp_status_completed"),
-        JobStatus::Pending => i18n::t("ytdlp_status_waiting"),
-        JobStatus::Failed(msg) => msg.clone(),
-    };
-
-    let title = if job.title == job.url {
-        job.url
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-            .chars()
-            .take(60)
-            .collect::<String>()
+    let (icon, icon_color) = if processing {
+        ("fa-solid fa-gears", "text-yellow-400")
     } else {
-        job.title.clone()
+        ("fa-solid fa-spinner fa-spin", "text-blue-400")
     };
 
-    let show_bar =
-        matches!(job.status, JobStatus::Downloading | JobStatus::Processing) && pct > 0.0;
+    let status_text = if processing {
+        i18n::t("ytdlp_status_processing")
+    } else if progress.phase == "downloading" {
+        i18n::t_with(
+            "ytdlp_status_downloading",
+            &[("percent", format!("{percent:.0}"))],
+        )
+    } else {
+        i18n::t("ytdlp_status_waiting")
+    };
+
+    let title = progress.message.unwrap_or_else(|| shorten(&url));
 
     rsx! {
         div { class: "bg-white/5 rounded-xl px-4 py-3 border border-white/10",
@@ -474,27 +481,70 @@ fn JobRow(props: JobRowProps) -> Element {
                 div { class: "flex-1 min-w-0",
                     div { class: "flex items-start justify-between gap-2",
                         span { class: "text-white text-sm truncate flex-1", "{title}" }
-                        span { class: "text-slate-500 text-xs shrink-0", "{job.format.label()}" }
+                    }
+                    p { class: "text-slate-500 text-xs mt-0.5", "{status_text}" }
+                    if percent > 0.0 {
+                        div { class: "mt-2 w-full bg-white/10 rounded-full h-1",
+                            div {
+                                class: if processing {
+                                    "h-1 rounded-full bg-yellow-400/60 transition-all duration-300"
+                                } else {
+                                    "h-1 rounded-full bg-white/50 transition-all duration-300"
+                                },
+                                style: "width: {percent:.1}%"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+struct HistoryRowProps {
+    entry: config::YtdlpHistoryEntry,
+}
+
+#[component]
+fn HistoryRow(props: HistoryRowProps) -> Element {
+    let entry = &props.entry;
+    let failed = entry.status != "completed";
+
+    let (icon, icon_color) = if failed {
+        ("fa-solid fa-circle-xmark", "text-red-400")
+    } else {
+        ("fa-solid fa-circle-check", "text-green-400")
+    };
+
+    let status_text = match (failed, entry.error.clone()) {
+        (true, Some(error)) => error,
+        (true, None) => entry.status.clone(),
+        (false, _) => i18n::t("ytdlp_status_completed"),
+    };
+
+    let title = if entry.title == entry.url {
+        shorten(&entry.url)
+    } else {
+        entry.title.clone()
+    };
+
+    rsx! {
+        div { class: "bg-white/5 rounded-xl px-4 py-3 border border-white/10",
+            div { class: "flex items-start gap-3",
+                i { class: "{icon} {icon_color} text-sm mt-0.5 shrink-0" }
+                div { class: "flex-1 min-w-0",
+                    div { class: "flex items-start justify-between gap-2",
+                        span { class: "text-white text-sm truncate flex-1", "{title}" }
+                        span { class: "text-slate-500 text-xs shrink-0", "{stored_format_label(&entry.format)}" }
                     }
                     p {
-                        class: if matches!(&job.status, JobStatus::Failed(_)) {
+                        class: if failed {
                             "text-red-400 text-xs mt-0.5 truncate"
                         } else {
                             "text-slate-500 text-xs mt-0.5"
                         },
                         "{status_text}"
-                    }
-                    if show_bar {
-                        div { class: "mt-2 w-full bg-white/10 rounded-full h-1",
-                            div {
-                                class: if matches!(&job.status, JobStatus::Processing) {
-                                    "h-1 rounded-full bg-yellow-400/60 transition-all duration-300"
-                                } else {
-                                    "h-1 rounded-full bg-white/50 transition-all duration-300"
-                                },
-                                style: "width: {pct:.1}%"
-                            }
-                        }
                     }
                 }
             }

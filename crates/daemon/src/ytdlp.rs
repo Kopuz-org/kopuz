@@ -19,6 +19,7 @@ use crate::session::SessionHandle;
 
 pub struct YtdlpService {
     session: SessionHandle,
+    rescan: std::sync::OnceLock<(Arc<crate::library::LibraryService>, Arc<JobRunner>)>,
 }
 
 /// Where to look for `yt-dlp` and `ffmpeg`: the inherited PATH, the login
@@ -209,11 +210,7 @@ fn build_command(request: &YtdlpRequest) -> std::process::Command {
 /// What one line of yt-dlp's output means.
 #[derive(Debug)]
 enum Line {
-    Progress {
-        percent: f64,
-        speed: String,
-        eta: String,
-    },
+    Progress { percent: f64 },
     Title(String),
     Processing,
     Failed(String),
@@ -231,18 +228,7 @@ fn parse_line(line: &str) -> Option<Line> {
             .and_then(|part| part.split_whitespace().last())
             .and_then(|value| value.parse::<f64>().ok())
             .unwrap_or_default();
-        let field = |marker: &str| {
-            line.split(marker)
-                .nth(1)
-                .and_then(|rest| rest.split_whitespace().next())
-                .unwrap_or_default()
-                .to_string()
-        };
-        return Some(Line::Progress {
-            percent,
-            speed: field("at"),
-            eta: field("ETA"),
-        });
+        return Some(Line::Progress { percent });
     }
     if line.contains("Destination:") {
         let title = line
@@ -274,7 +260,20 @@ fn parse_line(line: &str) -> Option<Line> {
 
 impl YtdlpService {
     pub fn new(session: SessionHandle) -> Arc<Self> {
-        Arc::new(Self { session })
+        Arc::new(Self {
+            session,
+            rescan: std::sync::OnceLock::new(),
+        })
+    }
+
+    /// A finished download is a new file under a library root, so the daemon
+    /// picks it up itself rather than leaving that to whoever started it.
+    pub fn attach_rescan(
+        &self,
+        library: Arc<crate::library::LibraryService>,
+        jobs: Arc<JobRunner>,
+    ) {
+        let _ = self.rescan.set((library, jobs));
     }
 
     pub fn start(
@@ -352,17 +351,13 @@ impl YtdlpService {
                     title = found;
                     ctx.progress("downloading", Some(0), Some(100), Some(title.clone()));
                 }
-                Line::Progress {
-                    percent,
-                    speed,
-                    eta,
-                } => {
-                    let detail = match (speed.is_empty(), eta.is_empty()) {
-                        (true, true) => title.clone(),
-                        _ => format!("{title} ({speed}, ETA {eta})"),
-                    };
-                    ctx.progress_throttled("downloading", Some(detail));
-                    let _ = percent;
+                Line::Progress { percent, .. } => {
+                    ctx.progress_throttled(
+                        "downloading",
+                        Some(percent.round().clamp(0.0, 100.0) as u64),
+                        Some(100),
+                        Some(title.clone()),
+                    );
                 }
                 Line::Processing => {
                     ctx.progress("processing", Some(100), Some(100), Some(title.clone()));
@@ -380,6 +375,12 @@ impl YtdlpService {
         };
         self.record_history(&url, &title, format, result.as_ref().err().cloned())
             .await;
+        if result.is_ok()
+            && let Some((library, jobs)) = self.rescan.get()
+            && let Err(error) = library.spawn_scan(jobs)
+        {
+            tracing::debug!(%error, "no rescan after the download");
+        }
         result.map_err(ApiError::internal)
     }
 
@@ -430,18 +431,10 @@ mod tests {
     /// The progress line is the only structured output yt-dlp gives, and it
     /// is whitespace-formatted text -- worth pinning.
     #[test]
-    fn a_download_progress_line_yields_percent_speed_and_eta() {
+    fn a_download_progress_line_yields_a_percentage() {
         let line = "[download]  42.5% of 5.00MiB at 1.20MiB/s ETA 00:03";
         match parse_line(line).expect("a progress line") {
-            Line::Progress {
-                percent,
-                speed,
-                eta,
-            } => {
-                assert!((percent - 42.5).abs() < f64::EPSILON);
-                assert_eq!(speed, "1.20MiB/s");
-                assert_eq!(eta, "00:03");
-            }
+            Line::Progress { percent } => assert!((percent - 42.5).abs() < f64::EPSILON),
             other => panic!("expected progress, got {other:?}"),
         }
     }

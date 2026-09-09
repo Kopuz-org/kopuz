@@ -19,6 +19,7 @@ pub mod use_player_controller;
 pub mod use_player_task;
 pub mod use_search_data;
 pub mod wire;
+pub mod ytdlp;
 
 pub use api::{consume_api, use_api};
 pub use use_player_controller::*;

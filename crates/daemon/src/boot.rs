@@ -201,6 +201,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             tracing::warn!(%error, "radio registry could not be loaded");
         }
     });
+    let ytdlp = crate::YtdlpService::new(session.clone());
+    ytdlp.attach_rescan(library.clone(), jobs.clone());
     let api = Arc::new(
         LocalApi::new(session.clone())
             .with_library(library.clone())
@@ -214,7 +216,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_radio(radio_service)
             .with_mutations(mutations)
             .with_sources(sources.clone())
-            .with_ytdlp(crate::YtdlpService::new(session.clone()))
+            .with_ytdlp(ytdlp)
             .with_integrations(crate::IntegrationService::new(
                 config_service_for_api,
                 session.clone(),
