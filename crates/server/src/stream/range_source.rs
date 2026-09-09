@@ -27,6 +27,15 @@ use super::stream_buffer::BufferProgressCallback;
 
 const CHUNK: usize = 512 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How long a connection may sit unused before the pool drops it. A CDN closes
+/// an idle keep-alive well inside a minute, and a pool that outlives the peer's
+/// hands out a dead socket: the write succeeds, no response ever comes, and the
+/// request burns the whole timeout. The gap between one track finishing its
+/// last range fetch and the next starting is longer than this, so a fresh
+/// connection per track is what happens anyway.
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// An in-flight background fetch of the window at `start`, so sequential
 /// playback overlaps the next window's download with decoding the current one
@@ -95,14 +104,10 @@ impl RangeStreamSource {
         let client = shared_client(&ua)?;
 
         // One-byte probe — cheap, and the server returns the full
-        // `Content-Range: bytes 0-0/<TOTAL>` we want.
-        let resp = client
-            .get(&url)
-            .header("Range", "bytes=0-0")
-            .send()
-            // `without_url`: a stream URL can carry credentials in its userinfo,
-            // and a reqwest error prints the URL it failed on.
-            .map_err(|e| IoError::other(e.without_url()))?;
+        // `Content-Range: bytes 0-0/<TOTAL>` we want. This is the first request
+        // after the gap between tracks, so it is the one a dead pooled
+        // connection strands.
+        let resp = send_range(&client, &url, "bytes=0-0")?;
         let status = resp.status();
         if status != reqwest::StatusCode::PARTIAL_CONTENT {
             return Err(IoError::new(
@@ -231,11 +236,40 @@ fn shared_client(ua: &str) -> IoResult<reqwest::blocking::Client> {
         .tcp_nodelay(true)
         .user_agent(ua)
         .timeout(REQUEST_TIMEOUT)
-        .pool_idle_timeout(Duration::from_secs(300))
+        .connect_timeout(CONNECT_TIMEOUT)
+        .pool_idle_timeout(POOL_IDLE_TIMEOUT)
         .build()
         .map_err(IoError::other)?;
     clients.insert(ua.to_string(), client.clone());
     Ok(client)
+}
+
+/// Send a range request, once more if the connection failed before answering.
+///
+/// A pooled connection the peer has already closed fails on the send rather
+/// than with a status, and the retry opens a fresh one. Exactly one retry: a
+/// second failure is the network, not a stale socket, and the caller needs to
+/// hear about it rather than wait through another timeout.
+fn send_range(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    range: &str,
+) -> IoResult<reqwest::blocking::Response> {
+    let send = || client.get(url).header("Range", range).send();
+    // `without_url`: a stream URL can carry credentials in its userinfo, and a
+    // reqwest error prints the URL it failed on.
+    match send() {
+        Ok(response) => return Ok(response),
+        Err(error) if error.is_request() || error.is_timeout() => {
+            tracing::debug!(range, "no response on a pooled connection; retrying once")
+        }
+        Err(error) => return Err(IoError::other(error.without_url())),
+    }
+    send().map_err(|error| {
+        let error = error.without_url();
+        tracing::warn!(range, %error, "the retried range request failed too");
+        IoError::other(error)
+    })
 }
 
 fn fetch_range(
@@ -245,11 +279,7 @@ fn fetch_range(
     total_size: u64,
 ) -> IoResult<Vec<u8>> {
     let end = (start + CHUNK as u64 - 1).min(total_size - 1);
-    let resp = client
-        .get(url)
-        .header("Range", format!("bytes={start}-{end}"))
-        .send()
-        .map_err(|e| IoError::other(e.without_url()))?;
+    let resp = send_range(client, url, &format!("bytes={start}-{end}"))?;
     if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
         return Err(IoError::other(format!(
             "range fetch {start}-{end} expected HTTP 206, got {}",
