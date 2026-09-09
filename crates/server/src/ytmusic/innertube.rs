@@ -92,6 +92,24 @@ pub struct PlayerExtras<'a> {
     pub signature_timestamp: Option<u64>,
 }
 
+/// The error prefix for a request Google's abuse detection refused outright,
+/// with its "Sorry..." page instead of an API response. It is sampled and
+/// short-lived, so a caller that can afford to wait should retry rather than
+/// treat it as an answer about the track.
+pub const GOOGLE_BLOCK: &str = "google abuse block";
+
+pub fn is_google_block(error: &str) -> bool {
+    error.starts_with(GOOGLE_BLOCK)
+}
+
+/// The block page is HTML on a 403 where an API response was expected; the
+/// title is the one stable thing about it.
+fn is_google_block_page(status: reqwest::StatusCode, body: &str) -> bool {
+    status == reqwest::StatusCode::FORBIDDEN
+        && body.trim_start().starts_with("<html")
+        && body.contains("<title>Sorry...</title>")
+}
+
 /// Hits `/youtubei/v1/player`. For WEB_REMIX we go via music.youtube.com,
 /// everything else uses www.youtube.com.
 #[tracing::instrument(name = "yt.player_http", skip(cookies, extras), fields(client = client.client_name, video_id = %video_id))]
@@ -150,6 +168,10 @@ pub async fn player(
             .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
             .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
     }
+    // A browser sends the visitor id as a header as well as in the context.
+    if let Some(visitor) = extras.visitor_data {
+        req = req.header("X-Goog-Visitor-Id", visitor);
+    }
     if client.login_supported
         && let Some(c) = cookies
     {
@@ -170,6 +192,13 @@ pub async fn player(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
+        if is_google_block_page(status, &text) {
+            tracing::warn!(
+                client = client.client_name,
+                "player request hit Google's abuse block"
+            );
+            return Err(format!("{GOOGLE_BLOCK}: HTTP {status}"));
+        }
         let snippet: String = text.chars().take(300).collect();
         tracing::warn!(
             client = client.client_name,
@@ -321,4 +350,48 @@ pub async fn visitor_id(cookies: Option<&str>) -> Result<String, String> {
         .await
         .map_err(|e| format!("visitor_id JSON: {e}"))?;
     extract_visitor_data(&json).ok_or_else(|| "no visitorData in response".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SORRY_PAGE: &str = "<html><head><meta http-equiv=\"content-type\" \
+        content=\"text/html; charset=utf-8\"/><title>Sorry...</title><style> body \
+        { font-family: verdana, arial, sans-serif; }</style></head><body>...";
+
+    #[test]
+    fn the_abuse_page_is_recognised_and_nothing_else_is() {
+        let forbidden = reqwest::StatusCode::FORBIDDEN;
+        assert!(is_google_block_page(forbidden, SORRY_PAGE));
+        assert!(is_google_block_page(
+            forbidden,
+            &format!("\n  {SORRY_PAGE}")
+        ));
+
+        // A 403 with an API body is a real answer about the request.
+        assert!(!is_google_block_page(
+            forbidden,
+            r#"{"error":{"code":403,"message":"The caller does not have permission"}}"#
+        ));
+        // The page on any other status is not the block either.
+        assert!(!is_google_block_page(reqwest::StatusCode::OK, SORRY_PAGE));
+        assert!(!is_google_block_page(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            SORRY_PAGE
+        ));
+    }
+
+    #[test]
+    fn a_block_error_is_distinguishable_from_every_other_player_error() {
+        assert!(is_google_block(&format!(
+            "{GOOGLE_BLOCK}: HTTP 403 Forbidden"
+        )));
+        assert!(!is_google_block(
+            "player HTTP 403 Forbidden: {\"error\":...}"
+        ));
+        assert!(!is_google_block(
+            "WEB_REMIX playability LOGIN_REQUIRED: Sign in"
+        ));
+    }
 }
