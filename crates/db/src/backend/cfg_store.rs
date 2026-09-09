@@ -336,19 +336,18 @@ pub async fn recently_played(
 pub async fn push_recent(pool: &SqlitePool, source: &Source, key: &str) -> Result<(), DbError> {
     let src = source.as_str();
     let mut tx = pool.begin().await?;
-    let next: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(played_at), 0) + 1 FROM recently_played WHERE source = ?1",
-    )
-    .bind(src)
-    .fetch_one(&mut *tx)
-    .await?;
+    // The next position is computed inside the INSERT rather than SELECTed
+    // first: a deferred transaction that reads before it writes holds a shared
+    // lock it then cannot upgrade if anyone commits in between -- SQLite
+    // answers SQLITE_BUSY at once, busy_timeout notwithstanding.
     sqlx::query(
-        "INSERT INTO recently_played (source, track_key, played_at) VALUES (?1, ?2, ?3) \
-         ON CONFLICT(source, track_key) DO UPDATE SET played_at = ?3",
+        "INSERT INTO recently_played (source, track_key, played_at) \
+         VALUES (?1, ?2, (SELECT COALESCE(MAX(played_at), 0) + 1 \
+                          FROM recently_played WHERE source = ?1)) \
+         ON CONFLICT(source, track_key) DO UPDATE SET played_at = excluded.played_at",
     )
     .bind(src)
     .bind(key)
-    .bind(next)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
@@ -441,4 +440,113 @@ pub async fn set_server_credentials(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::QueueSnapshot;
+
+    /// A real file with the production pool settings: WAL, five connections,
+    /// a 5 s busy timeout. An in-memory pool gives every connection its own
+    /// database, which cannot contend with itself.
+    async fn file_pool() -> (tempfile::TempDir, SqlitePool) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pool = crate::backend::open_pool(&dir.path().join("t.db"))
+            .await
+            .expect("pool");
+        crate::backend::migrations::run_migrations(&pool)
+            .await
+            .expect("migrate");
+        (dir, pool)
+    }
+
+    /// The SQLite rule the fix rests on, made executable: a deferred
+    /// transaction that reads first cannot upgrade to a write once another
+    /// connection has committed, and the busy handler is not consulted.
+    #[tokio::test]
+    async fn a_deferred_read_then_write_is_refused_after_a_concurrent_commit() {
+        let (_dir, pool) = file_pool().await;
+        let source = Source::Local;
+
+        let mut reader = pool.begin().await.expect("begin");
+        let _: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(played_at), 0) FROM recently_played")
+            .fetch_one(&mut *reader)
+            .await
+            .expect("read under a shared lock");
+
+        push_recent(&pool, &source, "/other.flac")
+            .await
+            .expect("another connection commits meanwhile");
+
+        let started = std::time::Instant::now();
+        let refused = sqlx::query(
+            "INSERT INTO recently_played (source, track_key, played_at) VALUES ('local', '/a', 1)",
+        )
+        .execute(&mut *reader)
+        .await;
+
+        assert!(refused.is_err(), "the upgrade must be refused: {refused:?}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "refused at once, not after the 5 s busy timeout: {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// Eight recents landing while the queue is being saved underneath them.
+    /// Every writer is write-first now, so they queue on the busy timeout and
+    /// all of them succeed.
+    #[tokio::test]
+    async fn concurrent_recents_and_queue_saves_all_land() {
+        let (_dir, pool) = file_pool().await;
+        let source = Source::Local;
+        let snapshot = QueueSnapshot::default();
+
+        let recent = |key: &'static str| {
+            let pool = pool.clone();
+            let source = source.clone();
+            async move { push_recent(&pool, &source, key).await }
+        };
+        let saver = {
+            let pool = pool.clone();
+            async move {
+                for _ in 0..20 {
+                    crate::backend::writes::save_queue(&pool, &snapshot).await?;
+                }
+                Ok::<(), DbError>(())
+            }
+        };
+
+        let (a, b, c, d, e, f, g, h, saved) = tokio::join!(
+            recent("/1"),
+            recent("/2"),
+            recent("/3"),
+            recent("/4"),
+            recent("/5"),
+            recent("/6"),
+            recent("/7"),
+            recent("/8"),
+            saver,
+        );
+        for (name, result) in [
+            ("1", a),
+            ("2", b),
+            ("3", c),
+            ("4", d),
+            ("5", e),
+            ("6", f),
+            ("7", g),
+            ("8", h),
+        ] {
+            assert!(result.is_ok(), "recent {name} failed: {result:?}");
+        }
+        assert!(saved.is_ok(), "queue saves failed: {saved:?}");
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM recently_played")
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+        assert_eq!(count, 8);
+    }
 }
