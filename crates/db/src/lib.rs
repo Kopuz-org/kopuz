@@ -226,6 +226,13 @@ pub trait ReadStore: Send + Sync {
     /// Distinct artists for a source with their track counts, A→Z.
     async fn artists(&self, source: &Source) -> Result<Vec<(String, u32)>, DbError>;
 
+    /// One album cover per credited artist, keyed by trimmed lowercase
+    /// name -- the picture an artist with no photo of their own renders.
+    async fn artist_album_covers(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+
     /// Distinct non-empty album genres for a source, A→Z.
     async fn genres(&self, source: &Source) -> Result<Vec<String>, DbError>;
 

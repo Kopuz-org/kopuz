@@ -18,6 +18,11 @@ pub fn use_artist_photo_fetch(
     albums: Resource<Vec<api::AlbumInfo>>,
     sample_tracks: Resource<Vec<api::TrackInfo>>,
 ) {
+    // What the last request asked for. The daemon announces what it finds by
+    // dirtying tracks, which is what `sample_tracks` is keyed on -- so without
+    // remembering the ask, every success re-runs this effect and asks again,
+    // forever. A changed grid still gets a fresh request.
+    let mut asked_for = use_signal(Vec::<String>::new);
     use_effect(move || {
         let albums = albums.read().clone().unwrap_or_default();
         let sample = sample_tracks.read().clone().unwrap_or_default();
@@ -26,9 +31,10 @@ pub fn use_artist_photo_fetch(
             return;
         }
         let names = fetch_queue(&albums, &sample);
-        if names.is_empty() {
+        if names.is_empty() || *asked_for.peek() == names {
             return;
         }
+        asked_for.set(names.clone());
         let api = crate::api::consume_api();
         spawn(async move {
             if let Err(error) = api.refresh_artist_artwork(names).await {

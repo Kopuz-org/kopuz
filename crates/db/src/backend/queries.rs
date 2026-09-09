@@ -316,18 +316,73 @@ pub async fn tracks_by_keys(
     Ok(keys.iter().filter_map(|k| by_key.get(k).cloned()).collect())
 }
 
+/// Every artist the library credits, primary and secondary alike.
+///
+/// Grouping on the `artist` column alone would list "A feat. B" and never
+/// "B", while [`artist_tracks`] happily answers for "B" and the UI gives it a
+/// tile -- so the listing has to enumerate the same credits that one matches
+/// on, or the tile has no row and nothing can hang a picture on it.
 pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<(String, u32)>, DbError> {
-    let src = source.as_str();
-    let rows = sqlx::query!(
-        r#"SELECT artist, COUNT(*) AS "cnt!: i64" FROM tracks WHERE source = ?1 AND artist != ''
-         GROUP BY artist ORDER BY artist COLLATE NOCASE"#,
-        src
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT name, COUNT(*) AS cnt FROM ( \
+             SELECT t.rowid_pk AS id, TRIM(t.artist) AS name FROM tracks t \
+              WHERE t.source = ?1 AND TRIM(t.artist) != '' \
+             UNION \
+             SELECT t.rowid_pk AS id, TRIM(credit.value) AS name \
+               FROM tracks t, json_each(t.artists_json) AS credit \
+              WHERE t.source = ?1 AND TRIM(credit.value) != '' \
+             UNION \
+             SELECT t.rowid_pk AS id, TRIM(a.artist) AS name \
+               FROM tracks t JOIN albums a \
+                 ON a.source = t.source AND a.source_album_id = t.source_album_id \
+              WHERE t.source = ?1 AND TRIM(a.artist) != '' \
+         ) GROUP BY name COLLATE NOCASE ORDER BY name COLLATE NOCASE",
     )
+    .bind(source.as_str())
     .fetch_all(pool)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|r| (r.artist, r.cnt.max(0) as u32))
+        .map(|(name, count)| (name, count.max(0) as u32))
+        .collect())
+}
+
+/// One album cover per credited artist: the cover of the earliest album
+/// holding a track they are credited on, keyed by the trimmed lowercase name.
+///
+/// This is the fallback an artist with no photo renders, so the read that
+/// advertises it and the fetch that serves the bytes must agree -- a ref is
+/// versioned on the picture it names.
+pub async fn artist_album_covers(
+    pool: &SqlitePool,
+    source: &Source,
+) -> Result<std::collections::HashMap<String, String>, DbError> {
+    // MIN(id) fixes which row the bare `cover` comes from, so the answer does
+    // not drift between calls for an artist with several covered albums.
+    let rows: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT name, cover, MIN(id) FROM ( \
+             SELECT a.rowid_pk AS id, LOWER(TRIM(t.artist)) AS name, a.cover_path AS cover \
+               FROM tracks t JOIN albums a \
+                 ON a.source = t.source AND a.source_album_id = t.source_album_id \
+              WHERE t.source = ?1 AND a.cover_path IS NOT NULL AND TRIM(t.artist) != '' \
+             UNION ALL \
+             SELECT a.rowid_pk AS id, LOWER(TRIM(credit.value)) AS name, a.cover_path AS cover \
+               FROM tracks t, json_each(t.artists_json) AS credit \
+               JOIN albums a \
+                 ON a.source = t.source AND a.source_album_id = t.source_album_id \
+              WHERE t.source = ?1 AND a.cover_path IS NOT NULL AND TRIM(credit.value) != '' \
+             UNION ALL \
+             SELECT a.rowid_pk AS id, LOWER(TRIM(a.artist)) AS name, a.cover_path AS cover \
+               FROM albums a \
+              WHERE a.source = ?1 AND a.cover_path IS NOT NULL AND TRIM(a.artist) != '' \
+         ) GROUP BY name",
+    )
+    .bind(source.as_str())
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(name, cover, _)| (name, cover))
         .collect())
 }
 
@@ -392,4 +447,128 @@ pub async fn is_favorite(pool: &SqlitePool, server_id: &str, ref_: &str) -> Resu
     .fetch_one(pool)
     .await?;
     Ok(n > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn mem_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::backend::migrations::run_migrations(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    fn track(key: &str, artist: &str, credits: &[&str], album_id: &str) -> Track {
+        Track {
+            id: reader::TrackId::Local(std::path::PathBuf::from(key)),
+            cover: None,
+            album_id: album_id.to_string(),
+            title: key.to_string(),
+            artist: artist.to_string(),
+            album: "Album".into(),
+            duration: 60,
+            khz: 44,
+            bitrate: 320,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: credits.iter().map(|name| name.to_string()).collect(),
+        }
+    }
+
+    fn album(id: &str, artist: &str, cover: Option<&str>) -> Album {
+        Album {
+            id: id.to_string(),
+            title: "Album".into(),
+            artist: artist.to_string(),
+            genre: String::new(),
+            year: 0,
+            cover_path: cover.map(std::path::PathBuf::from),
+            manual_cover: false,
+        }
+    }
+
+    async fn seeded() -> (SqlitePool, Source) {
+        let pool = mem_pool().await;
+        let source = Source::Local;
+        // One collaboration: the artist column carries the joined credit, the
+        // credit list carries the two names the UI gives tiles to.
+        let tracks = [
+            track("/a.flac", "Ada feat. Boris", &["Ada", "Boris"], "al-1"),
+            track("/b.flac", "Ada", &["Ada"], "al-1"),
+            track("/c.flac", "Cyd", &["Cyd"], "al-2"),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+        let albums = [
+            album("al-1", "Ada", Some("/covers/one.jpg")),
+            album("al-2", "Various Artists", Some("/covers/two.jpg")),
+        ];
+        super::super::writes::upsert_albums(&pool, &source, &albums)
+            .await
+            .unwrap();
+        (pool, source)
+    }
+
+    /// The listing has to name every credit `artist_tracks` will answer for,
+    /// or a tile the UI draws has no row to hang its picture on.
+    #[tokio::test]
+    async fn every_credit_is_listed_not_just_the_artist_column() {
+        let (pool, source) = seeded().await;
+
+        let listed: Vec<String> = artists(&pool, &source)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+
+        for expected in ["Ada", "Boris", "Cyd", "Various Artists"] {
+            assert!(
+                listed.iter().any(|name| name == expected),
+                "{expected} missing from {listed:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_credited_artist_counts_the_tracks_they_are_on() {
+        let (pool, source) = seeded().await;
+
+        let counts: std::collections::HashMap<String, u32> =
+            artists(&pool, &source).await.unwrap().into_iter().collect();
+
+        assert_eq!(counts.get("Boris"), Some(&1), "one collaboration");
+        assert_eq!(counts.get("Ada"), Some(&2), "both album tracks");
+    }
+
+    /// A ref is versioned on the picture it names, so the fallback the listing
+    /// advertises and the one the fetch serves come from this one map.
+    #[tokio::test]
+    async fn a_credited_artist_falls_back_to_the_cover_of_an_album_they_are_on() {
+        let (pool, source) = seeded().await;
+
+        let covers = artist_album_covers(&pool, &source).await.unwrap();
+
+        assert_eq!(
+            covers.get("boris").map(String::as_str),
+            Some("/covers/one.jpg")
+        );
+        assert_eq!(
+            covers.get("ada").map(String::as_str),
+            Some("/covers/one.jpg")
+        );
+        // An album artist no track is credited to still names its own cover.
+        assert_eq!(
+            covers.get("various artists").map(String::as_str),
+            Some("/covers/two.jpg")
+        );
+    }
 }

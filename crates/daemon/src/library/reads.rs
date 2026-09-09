@@ -149,14 +149,11 @@ impl LibraryService {
             == server::source::ArtistView::Library;
         let album_covers = if library_view {
             self.db
-                .albums(&source)
+                .artist_album_covers(&source)
                 .await
                 .map_err(db_error)?
                 .into_iter()
-                .filter_map(|album| {
-                    let cover = album.cover_path?;
-                    Some((album.artist.trim().to_lowercase(), cover))
-                })
+                .map(|(name, cover)| (name, PathBuf::from(cover)))
                 .collect()
         } else {
             std::collections::HashMap::new()

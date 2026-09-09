@@ -329,22 +329,20 @@ impl ArtworkService {
             .ok_or_else(|| ApiError::not_found("unknown track key"))
     }
 
+    /// The same map the artist listing advertises from, so the bytes served
+    /// are the picture the ref was versioned on.
     async fn artist_album_cover(
         &self,
         name: &str,
         config: &config::AppConfig,
     ) -> Result<Option<PathBuf>, ApiError> {
-        let normalized = name.trim().to_lowercase();
         Ok(self
             .db
-            .albums(&config.active_source)
+            .artist_album_covers(&config.active_source)
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
-            .into_iter()
-            .find(|album| {
-                album.cover_path.is_some() && album.artist.trim().to_lowercase() == normalized
-            })
-            .and_then(|album| album.cover_path))
+            .remove(&name.trim().to_lowercase())
+            .map(PathBuf::from))
     }
 
     /// Resized by the shared policy in `utils::artwork_image`, then cached on

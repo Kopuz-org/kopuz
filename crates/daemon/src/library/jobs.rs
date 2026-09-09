@@ -245,6 +245,11 @@ impl LibraryService {
         }
         if changed {
             self.invalidate(Table::Albums);
+            // An artist with no photo of their own wears an album's cover, so
+            // indexing one changes the artist listing too. Without this the
+            // grid stays blank until something else dirties tracks -- which,
+            // on a first scan, is nothing.
+            self.invalidate(Table::Tracks);
         }
     }
 
@@ -319,8 +324,11 @@ impl LibraryService {
             ctx.progress("persisting", Some(done), Some(total), None);
             self.invalidate(Table::Tracks);
         }
+        // Normalized, because that is the key every read looks the photo up
+        // under; storing the display name here wrote rows nothing found.
         for (name, url) in &snapshot.artist_images {
-            let _ = source.set_artist_image(name, "server", Some(url)).await;
+            let key = utils::artist::normalize_artist_key(name);
+            let _ = source.set_artist_image(&key, "server", Some(url)).await;
         }
         let keep_keys: Vec<String> = snapshot
             .tracks
