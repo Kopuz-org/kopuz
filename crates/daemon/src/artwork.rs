@@ -541,3 +541,91 @@ mod tests {
         );
     }
 }
+
+/// How covers are looked up when a row has none. The providers are named
+/// here rather than in a client, so a settings page renders the choice
+/// without knowing which services exist.
+pub mod settings {
+    use api::schema::{ChoiceOption, FieldKind, FieldSpec, FieldValue, Text, value_of};
+    use config::{AppConfig, FetchStrategy};
+
+    pub const AUTO_FETCH: &str = "auto_fetch_covers";
+    pub const STRATEGY: &str = "cover_fetch_strategy";
+
+    fn strategy_id(strategy: FetchStrategy) -> &'static str {
+        match strategy {
+            FetchStrategy::MusicBrainzFirst => "musicbrainz_first",
+            FetchStrategy::LastFmFirst => "lastfm_first",
+            FetchStrategy::MusicBrainzOnly => "musicbrainz_only",
+            FetchStrategy::LastFmOnly => "lastfm_only",
+        }
+    }
+
+    fn strategy_from_id(id: &str) -> FetchStrategy {
+        match id {
+            "lastfm_first" => FetchStrategy::LastFmFirst,
+            "musicbrainz_only" => FetchStrategy::MusicBrainzOnly,
+            "lastfm_only" => FetchStrategy::LastFmOnly,
+            _ => FetchStrategy::MusicBrainzFirst,
+        }
+    }
+
+    const STRATEGIES: &[FetchStrategy] = &[
+        FetchStrategy::MusicBrainzFirst,
+        FetchStrategy::LastFmFirst,
+        FetchStrategy::MusicBrainzOnly,
+        FetchStrategy::LastFmOnly,
+    ];
+
+    pub fn fields(config: &AppConfig) -> Vec<FieldSpec> {
+        vec![
+            FieldSpec {
+                key: AUTO_FETCH.to_string(),
+                label: Text::key(AUTO_FETCH),
+                kind: FieldKind::Toggle,
+                value: Some(config.auto_fetch_covers.to_string()),
+                config_key: Some(AUTO_FETCH.to_string()),
+                ..Default::default()
+            },
+            FieldSpec {
+                key: STRATEGY.to_string(),
+                label: Text::key(STRATEGY),
+                kind: FieldKind::Choice {
+                    options: STRATEGIES
+                        .iter()
+                        .map(|strategy| ChoiceOption {
+                            value: strategy_id(*strategy).to_string(),
+                            label: Text::key(strategy_id(*strategy)),
+                        })
+                        .collect(),
+                    custom: false,
+                },
+                value: Some(strategy_id(config.cover_fetch_strategy).to_string()),
+                config_key: Some(STRATEGY.to_string()),
+                ..Default::default()
+            },
+        ]
+    }
+
+    /// The settings keys an answer list would write.
+    pub fn written_keys(values: &[FieldValue]) -> Vec<&'static str> {
+        let mut keys = Vec::new();
+        if value_of(values, AUTO_FETCH).is_some() {
+            keys.push(AUTO_FETCH);
+        }
+        if value_of(values, STRATEGY).is_some() {
+            keys.push(STRATEGY);
+        }
+        keys
+    }
+
+    /// Fold answers in. An absent key is left alone.
+    pub fn apply(values: &[FieldValue], config: &mut AppConfig) {
+        if let Some(on) = value_of(values, AUTO_FETCH) {
+            config.auto_fetch_covers = on == "true";
+        }
+        if let Some(strategy) = value_of(values, STRATEGY) {
+            config.cover_fetch_strategy = strategy_from_id(strategy);
+        }
+    }
+}

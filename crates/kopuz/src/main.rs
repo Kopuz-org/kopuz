@@ -442,7 +442,7 @@ fn App() -> Element {
     // warnings) out of latest.log and the trace.
 
     #[cfg(target_os = "android")]
-    app_lifecycle::use_webview_decipher_engine();
+    app_lifecycle::use_webview_script_engine();
 
     #[cfg(target_os = "linux")]
     use_hook(|| {

@@ -899,6 +899,37 @@ impl Kopuz for KopuzGrpc {
         }))
     }
 
+    async fn get_artwork_settings(
+        &self,
+        _: Request<proto::GetArtworkSettingsRequest>,
+    ) -> Result<Response<proto::ArtworkSettings>, Status> {
+        let fields = self.0.api.artwork_settings().await.map_err(failed)?;
+        Ok(Response::new(proto::ArtworkSettings {
+            fields: fields.iter().map(convert::field_spec_to_proto).collect(),
+        }))
+    }
+
+    async fn set_artwork_settings(
+        &self,
+        request: Request<proto::SetArtworkSettingsRequest>,
+    ) -> Result<Response<proto::ArtworkSettings>, Status> {
+        let values = request
+            .into_inner()
+            .values
+            .iter()
+            .map(convert::field_value_from_proto)
+            .collect();
+        let fields = self
+            .0
+            .api
+            .set_artwork_settings(values)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::ArtworkSettings {
+            fields: fields.iter().map(convert::field_spec_to_proto).collect(),
+        }))
+    }
+
     async fn get_downloader_settings(
         &self,
         _: Request<proto::GetDownloaderSettingsRequest>,

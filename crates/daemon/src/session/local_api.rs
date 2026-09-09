@@ -155,6 +155,12 @@ impl LocalApi {
         self
     }
 
+    fn config_service(&self) -> Result<&crate::config_service::ConfigService, ApiError> {
+        self.config
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without a config service"))
+    }
+
     fn downloader(&self) -> Result<&crate::url_download::UrlDownloadService, ApiError> {
         self.downloader
             .as_deref()
@@ -497,6 +503,28 @@ impl api::ArtworkApi for LocalApi {
             content_type: payload.content_type.to_string(),
             bytes: payload.bytes,
         })
+    }
+
+    async fn artwork_settings(&self) -> Result<Vec<api::FieldSpec>, ApiError> {
+        let config = self.config_service()?.snapshot().await;
+        Ok(crate::artwork::settings::fields(&config))
+    }
+
+    async fn set_artwork_settings(
+        &self,
+        values: Vec<api::FieldValue>,
+    ) -> Result<Vec<api::FieldSpec>, ApiError> {
+        let service = self.config_service()?;
+        let keys = crate::artwork::settings::written_keys(&values);
+        service.ensure_unlocked(&keys)?;
+        let updated = service
+            .mutate_state(move |config| crate::artwork::settings::apply(&values, config))
+            .await?;
+        self.session.set_config(
+            updated.clone(),
+            keys.iter().map(|key| key.to_string()).collect(),
+        );
+        Ok(crate::artwork::settings::fields(&updated))
     }
 }
 

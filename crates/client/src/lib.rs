@@ -563,6 +563,39 @@ impl api::ArtworkApi for GrpcApi {
         }
         Ok(data)
     }
+
+    async fn artwork_settings(&self) -> Result<Vec<api::FieldSpec>, ApiError> {
+        let settings = self
+            .client()
+            .get_artwork_settings(Request::new(proto::GetArtworkSettingsRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(settings
+            .get_ref()
+            .fields
+            .iter()
+            .map(convert::field_spec_from_proto)
+            .collect())
+    }
+
+    async fn set_artwork_settings(
+        &self,
+        values: Vec<api::FieldValue>,
+    ) -> Result<Vec<api::FieldSpec>, ApiError> {
+        let settings = self
+            .client()
+            .set_artwork_settings(Request::new(proto::SetArtworkSettingsRequest {
+                values: values.iter().map(convert::field_value_to_proto).collect(),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(settings
+            .get_ref()
+            .fields
+            .iter()
+            .map(convert::field_spec_from_proto)
+            .collect())
+    }
 }
 
 #[async_trait::async_trait]

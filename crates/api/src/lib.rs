@@ -296,6 +296,16 @@ pub trait PlaylistApi: Send + Sync {
 #[async_trait::async_trait]
 pub trait ArtworkApi: Send + Sync {
     async fn artwork(&self, request: ArtworkRequest) -> Result<ArtworkData, ApiError>;
+
+    /// How covers are looked up when a row has none. Which providers exist,
+    /// and in what order they are tried, is the daemon's -- it does the
+    /// looking up.
+    async fn artwork_settings(&self) -> Result<Vec<FieldSpec>, ApiError>;
+
+    async fn set_artwork_settings(
+        &self,
+        values: Vec<FieldValue>,
+    ) -> Result<Vec<FieldSpec>, ApiError>;
 }
 
 /// Long-running work and the offline cache.

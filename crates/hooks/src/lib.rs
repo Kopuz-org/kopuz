@@ -4,6 +4,7 @@
 pub mod api;
 pub mod artist_images;
 pub mod artwork;
+pub mod artwork_settings;
 pub mod config_view;
 pub mod db_reactivity;
 pub mod downloader;

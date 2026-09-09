@@ -16,7 +16,7 @@
 //!     analysis. Off by default → zero overhead.
 //!
 //! Filter precedence everywhere: `KOPUZ_LOG`, then `RUST_LOG`, then a
-//! sensible default. e.g. `KOPUZ_LOG="server::ytmusic=trace,kopuz=debug"`.
+//! sensible default. e.g. `KOPUZ_LOG="kopuz_server=trace,kopuz=debug"`.
 
 #[cfg(not(target_os = "android"))]
 use std::path::Path;

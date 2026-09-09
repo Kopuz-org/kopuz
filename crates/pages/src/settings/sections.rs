@@ -2,7 +2,7 @@ use components::settings_items::{
     ChannelModeSelector, DeviceChangeBehaviorSelector, EqualizerPanel, SampleRateModeSelector,
     SettingItem, SettingsSection, ToggleSetting,
 };
-use config::{AppConfig, FetchStrategy, LYRICS_OFFSET_LIMIT_MS, OfflineQuality};
+use config::{AppConfig, LYRICS_OFFSET_LIMIT_MS, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -96,6 +96,8 @@ pub(super) fn DownloadsSection(mut config: Signal<AppConfig>) -> Element {
 #[component]
 pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
+    let artwork_changed = use_signal(|| 0u64);
+    let artwork = hooks::artwork_settings::use_settings(artwork_changed);
     let lyrics_offset = config.read().lyrics_offset_ms;
     let lyrics_offset_auto = config.read().lyrics_offset_auto;
     let lyrics_offset_label = if lyrics_offset_auto {
@@ -116,15 +118,12 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
 
     rsx! {
         SettingsSection { title: i18n::t("metadata").to_string(),
-            SettingItem {
-                title: i18n::t("auto_fetch_covers").to_string(),
-                config_key: "auto_fetch_covers",
-                control: rsx! {
-                    ToggleSetting {
-                        enabled: config.read().auto_fetch_covers,
-                        on_change: move |val| config.write().auto_fetch_covers = val,
-                    }
-                }
+            components::forms::schema_form::SchemaForm {
+                fields: artwork.read().clone().unwrap_or_default(),
+                values: Vec::new(),
+                on_change: move |value: api::FieldValue| {
+                    hooks::artwork_settings::set(value, artwork_changed);
+                },
             }
             SettingItem {
                 title: i18n::t("prefer_local_lyrics").to_string(),
@@ -180,48 +179,6 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
                         span {
                             class: "text-xs font-mono text-white/80 w-20 text-right",
                             "{lyrics_offset_label}"
-                        }
-                    }
-                }
-            }
-            SettingItem {
-                title: i18n::t("cover_fetch_strategy").to_string(),
-                config_key: "cover_fetch_strategy",
-                control: rsx! {
-                    {
-                        let current = config.read().cover_fetch_strategy;
-                        rsx! {
-                            select {
-                                class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                                onchange: move |evt| {
-                                    config.write().cover_fetch_strategy = match evt.value().as_str() {
-                                        "lastfm_first" => FetchStrategy::LastFmFirst,
-                                        "musicbrainz_only" => FetchStrategy::MusicBrainzOnly,
-                                        "lastfm_only" => FetchStrategy::LastFmOnly,
-                                        _ => FetchStrategy::MusicBrainzFirst,
-                                    };
-                                },
-                                option {
-                                    value: "musicbrainz_first",
-                                    selected: current == FetchStrategy::MusicBrainzFirst,
-                                    "{i18n::t(\"musicbrainz_first\")}"
-                                }
-                                option {
-                                    value: "lastfm_first",
-                                    selected: current == FetchStrategy::LastFmFirst,
-                                    "{i18n::t(\"lastfm_first\")}"
-                                }
-                                option {
-                                    value: "musicbrainz_only",
-                                    selected: current == FetchStrategy::MusicBrainzOnly,
-                                    "{i18n::t(\"musicbrainz_only\")}"
-                                }
-                                option {
-                                    value: "lastfm_only",
-                                    selected: current == FetchStrategy::LastFmOnly,
-                                    "{i18n::t(\"lastfm_only\")}"
-                                }
-                            }
                         }
                     }
                 }

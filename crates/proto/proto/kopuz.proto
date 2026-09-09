@@ -90,6 +90,8 @@ service Kopuz {
   rpc StartDownloads(DownloadRequest) returns (JobRef);
   rpc DownloadUrl(DownloadUrlRequest) returns (JobRef);
   rpc GetDownloadFormats(GetDownloadFormatsRequest) returns (DownloadFormats);
+  rpc GetArtworkSettings(GetArtworkSettingsRequest) returns (ArtworkSettings);
+  rpc SetArtworkSettings(SetArtworkSettingsRequest) returns (ArtworkSettings);
   rpc GetDownloaderSettings(GetDownloaderSettingsRequest) returns (DownloaderSettings);
   rpc SetDownloaderSettings(SetDownloaderSettingsRequest) returns (DownloaderSettings);
   rpc GetDownloaderHistory(GetDownloaderHistoryRequest) returns (DownloadHistory);
@@ -1232,6 +1234,16 @@ message GetDownloadFormatsRequest {}
 
 message DownloadFormats {
   repeated ChoiceOption formats = 1;
+}
+
+message GetArtworkSettingsRequest {}
+
+message ArtworkSettings {
+  repeated FieldSpec fields = 1;
+}
+
+message SetArtworkSettingsRequest {
+  repeated FieldValue values = 1;
 }
 
 message GetDownloaderSettingsRequest {}
