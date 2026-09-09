@@ -4426,7 +4426,6 @@ dependencies = [
  "kopuz-player",
  "kopuz-reader",
  "kopuz-route",
- "kopuz-scrobble",
  "kopuz-server",
  "kopuz-utils",
  "rand 0.10.2",
@@ -4435,7 +4434,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid 1.23.5",
- "webbrowser",
 ]
 
 [[package]]

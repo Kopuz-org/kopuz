@@ -9,6 +9,14 @@ use hooks::use_player_controller::PlayerController;
 
 #[component]
 pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
+    // Whether a scrobbling service is connected is the daemon's answer, and
+    // this counter is what asks it again after a change.
+    let integrations_changed = use_signal(|| 0u64);
+    let mut integrations = hooks::integrations::use_integrations();
+    use_effect(move || {
+        let _ = integrations_changed();
+        integrations.restart();
+    });
     rsx! {
         SettingsSection { title: i18n::t("connectivity").to_string(),
             if !cfg!(target_os = "android") {
@@ -50,9 +58,15 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                 config_key: "musicbrainz_token",
                 control: rsx! {
                     MusicBrainzSettings {
-                        current: config.read().musicbrainz_token.clone(),
                         on_save: move |token: String| {
-                            config.write().musicbrainz_token = token;
+                            hooks::integrations::provision(
+                                api::IntegrationProvision {
+                                    kind: api::IntegrationKind::ListenBrainz,
+                                    token: Some(token),
+                                    ..Default::default()
+                                },
+                                integrations_changed,
+                            );
                         },
                     }
                 }
@@ -63,17 +77,32 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                 extra_config_keys: vec!["lastfm_api_secret", "lastfm_session_key"],
                 control: rsx! {
                     LastFmSettings {
-                        api_key: config.read().lastfm_api_key.clone(),
-                        api_secret: config.read().lastfm_api_secret.clone(),
-                        session_key: config.read().lastfm_session_key.clone(),
+                        connected: hooks::integrations::is_configured(&integrations, api::IntegrationKind::LastFm),
                         on_api_key_save: move |value: String| {
-                            config.write().lastfm_api_key = value;
+                            hooks::integrations::provision(
+                                api::IntegrationProvision {
+                                    kind: api::IntegrationKind::LastFm,
+                                    api_key: Some(value),
+                                    ..Default::default()
+                                },
+                                integrations_changed,
+                            );
                         },
                         on_api_secret_save: move |value: String| {
-                            config.write().lastfm_api_secret = value;
+                            hooks::integrations::provision(
+                                api::IntegrationProvision {
+                                    kind: api::IntegrationKind::LastFm,
+                                    api_secret: Some(value),
+                                    ..Default::default()
+                                },
+                                integrations_changed,
+                            );
                         },
-                        on_session_key_save: move |value: String| {
-                            config.write().lastfm_session_key = value;
+                        on_connect: move |_| {
+                            hooks::integrations::authenticate(
+                                api::IntegrationKind::LastFm,
+                                integrations_changed,
+                            );
                         },
                     }
                 }
@@ -83,9 +112,12 @@ pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
                 config_key: "librefm_session_key",
                 control: rsx! {
                     LibreFmSettings {
-                        session_key: config.read().librefm_session_key.clone(),
-                        on_session_key_save: move |value: String| {
-                            config.write().librefm_session_key = value;
+                        connected: hooks::integrations::is_configured(&integrations, api::IntegrationKind::LibreFm),
+                        on_connect: move |_| {
+                            hooks::integrations::authenticate(
+                                api::IntegrationKind::LibreFm,
+                                integrations_changed,
+                            );
                         },
                     }
                 }
