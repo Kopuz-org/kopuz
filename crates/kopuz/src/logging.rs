@@ -101,11 +101,22 @@ fn user_directives() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// The chrome trace's slot in the subscriber. Whether it is on lives in the
+/// library, which is not open yet when the subscriber is built, so the layer
+/// is installed later through this handle rather than decided up front.
+#[cfg(not(target_os = "android"))]
+type TraceSlot = Option<Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync>>;
+
+#[cfg(not(target_os = "android"))]
+static TRACE_RELOAD: std::sync::OnceLock<
+    tracing_subscriber::reload::Handle<TraceSlot, tracing_subscriber::Registry>,
+> = std::sync::OnceLock::new();
+
 /// Initialize the global subscriber. Guards are stashed in a process
 /// global; call [`shutdown`] on normal exit. A SIGINT handler also
 /// flushes them so Ctrl+C still yields a valid trace.
 #[cfg(not(target_os = "android"))]
-pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
+pub fn init(log_dir: &Path) {
     // Register the dir for crash reports + the export button, then archive the
     // previous session's latest.log (and prune old archives) BEFORE the
     // appender opens a fresh one — so a restart never erases a crashing run.
@@ -125,29 +136,10 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
         .with_filter(console_filter());
 
     // The chrome trace is controlled solely by the in-app settings toggle
-    // (`config_tracing_enabled`, read from config at startup) — the UI is the
-    // single source of truth, so there's no `KOPUZ_TRACE` env var. Verbosity
-    // and filters still come from `KOPUZ_LOG` / `RUST_LOG` / `KOPUZ_DEBUG`.
-    let trace_path = log_dir.join("kopuz-trace.json");
-
-    // Both optional sinks are `Option<Layer>` (no-op when `None`) so the
-    // subscriber is assembled in one chain. Open failures are logged after
-    // `init`, since tracing isn't live yet here.
-    let mut chrome_err: Option<String> = None;
-    let (chrome_layer, chrome_guard) = if config_tracing_enabled {
-        match crate::chrome_trace::ChromeTraceLayer::new(&trace_path) {
-            // Filter the chrome layer the same as the file so the trace
-            // isn't 30MB of h2/wgpu/dioxus-internal spans burying the
-            // kopuz spans you actually want to analyze.
-            Ok((layer, guard)) => (Some(layer.with_filter(file_filter())), Some(guard)),
-            Err(err) => {
-                chrome_err = Some(err.to_string());
-                (None, None)
-            }
-        }
-    } else {
-        (None, None)
-    };
+    // (read from the library, which opens after this) — the UI is the single
+    // source of truth, so there's no `KOPUZ_TRACE` env var. Verbosity and
+    // filters still come from `KOPUZ_LOG` / `RUST_LOG` / `KOPUZ_DEBUG`.
+    let (chrome_layer, chrome_reload) = tracing_subscriber::reload::Layer::new(TraceSlot::None);
 
     // Opt-in developer profiler. Its per-layer filter re-enables Dioxus's
     // trace-level render/memo spans (suppressed everywhere else via
@@ -171,19 +163,16 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
         (None, None)
     };
 
+    // The reload slot goes first so its layer type is `Layer<Registry>`, which
+    // is what a boxed layer can be named as.
     tracing_subscriber::registry()
+        .with(chrome_layer)
         .with(file_layer)
         .with(console_layer)
-        .with(chrome_layer)
         .with(ui_layer)
         .init();
+    let _ = TRACE_RELOAD.set(chrome_reload);
 
-    if chrome_guard.is_some() {
-        tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
-    }
-    if let Some(err) = chrome_err {
-        tracing::warn!(trace = %trace_path.display(), %err, "failed to open chrome trace file, tracing disabled this session");
-    }
     if ui_guard.is_some() {
         tracing::info!(trace = %ui_trace_path.display(), "UI render profiler enabled (KOPUZ_UI_PROFILE)");
     }
@@ -191,10 +180,9 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
         tracing::warn!(trace = %ui_trace_path.display(), %err, "failed to open UI profile trace file, profiler disabled this session");
     }
 
-    let trace_enabled = chrome_guard.is_some();
     *GUARDS.lock().unwrap_or_else(|e| e.into_inner()) = Some(LogGuards {
         _file: file_guard,
-        _chrome: chrome_guard,
+        _chrome: None,
         _ui_profile: ui_guard,
     });
 
@@ -209,6 +197,47 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
         std::process::exit(130);
     });
 
+    install_panic_hook();
+
+    tracing::info!(
+        version = utils::build_info::VERSION,
+        commit = utils::build_info::COMMIT,
+        log_dir = %log_dir.display(),
+        "logging initialized"
+    );
+}
+
+/// Turn the chrome span trace on, once the library has said it is wanted.
+/// Filtered like the file sink so the trace isn't 30MB of h2/wgpu/dioxus
+/// spans burying the kopuz spans worth analyzing.
+#[cfg(not(target_os = "android"))]
+pub fn enable_trace(log_dir: &Path) {
+    let trace_path = log_dir.join("kopuz-trace.json");
+    let Some(reload) = TRACE_RELOAD.get() else {
+        tracing::warn!("the chrome trace was asked for before logging started");
+        return;
+    };
+    let (layer, guard) = match crate::chrome_trace::ChromeTraceLayer::new(&trace_path) {
+        Ok(pair) => pair,
+        Err(error) => {
+            tracing::warn!(trace = %trace_path.display(), %error, "failed to open chrome trace file, tracing disabled this session");
+            return;
+        }
+    };
+    let boxed: Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync> =
+        Box::new(layer.with_filter(file_filter()));
+    if let Err(error) = reload.reload(Some(boxed)) {
+        tracing::warn!(%error, "the chrome trace layer could not be installed");
+        return;
+    }
+    match GUARDS.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        Some(guards) => guards._chrome = Some(guard),
+        None => {
+            tracing::warn!("the chrome trace was asked for before logging started");
+            return;
+        }
+    }
+
     // tracing-chrome writes through a BufWriter that only reaches disk on
     // flush or on a clean guard-drop. If the process is killed before the
     // guard drops (hard exit, or a flush race against another exit path),
@@ -218,30 +247,21 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
     // Perfetto tolerate a missing trailing `]`, they just can't recover a
     // string cut in half. The clean close (with `]`) still comes from the
     // guard drop on normal exit; this is the backstop.
-    if trace_enabled {
-        std::thread::spawn(|| {
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                match GUARDS.lock() {
-                    Ok(g) => match g.as_ref().and_then(|guards| guards._chrome.as_ref()) {
-                        Some(chrome) => chrome.flush(),
-                        // Guards were taken on shutdown — nothing left to flush.
-                        None => break,
-                    },
-                    Err(_) => break,
-                }
+    std::thread::spawn(|| {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            match GUARDS.lock() {
+                Ok(g) => match g.as_ref().and_then(|guards| guards._chrome.as_ref()) {
+                    Some(chrome) => chrome.flush(),
+                    // Guards were taken on shutdown — nothing left to flush.
+                    None => break,
+                },
+                Err(_) => break,
             }
-        });
-    }
+        }
+    });
 
-    install_panic_hook();
-
-    tracing::info!(
-        version = utils::build_info::VERSION,
-        commit = utils::build_info::COMMIT,
-        log_dir = %log_dir.display(),
-        "logging initialized"
-    );
+    tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
 }
 
 /// Chain a panic hook that writes a discrete crash report (panic message +
