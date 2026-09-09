@@ -23,7 +23,23 @@ pub struct LibraryService {
     cover_cache: PathBuf,
     config_rx: OnceLock<watch::Receiver<config::AppConfig>>,
     session: OnceLock<SessionHandle>,
+    transient: std::sync::Mutex<TransientTracks>,
 }
+
+/// Tracks that exist but the database has never seen: a browse shelf, a
+/// search hit from a remote catalog, a radio mix. Keeping them here is what
+/// lets the rest of the API stay key-addressed -- a client queues, hearts or
+/// asks for the artwork of a catalog row exactly as it would a library one.
+///
+/// Bounded and least-recently-registered-out, because the ceiling is however
+/// much browsing someone does in one session.
+#[derive(Default)]
+struct TransientTracks {
+    by_key: HashMap<String, Track>,
+    order: std::collections::VecDeque<String>,
+}
+
+const MAX_TRANSIENT_TRACKS: usize = 4096;
 
 fn normalize_album_id(id: &str) -> String {
     let parts: Vec<&str> = id.split(':').collect();
@@ -105,7 +121,31 @@ impl LibraryService {
             cover_cache,
             config_rx: OnceLock::new(),
             session: OnceLock::new(),
+            transient: std::sync::Mutex::new(TransientTracks::default()),
         }
+    }
+
+    /// Remember rows that came from the network, so a later request naming
+    /// one by key can still resolve it.
+    pub fn register_transient(&self, tracks: &[Track]) {
+        let Ok(mut cache) = self.transient.lock() else {
+            return;
+        };
+        for track in tracks {
+            let key = track.id.key().into_owned();
+            cache.order.retain(|saved| saved != &key);
+            cache.order.push_back(key.clone());
+            cache.by_key.insert(key, track.clone());
+        }
+        while cache.order.len() > MAX_TRANSIENT_TRACKS {
+            if let Some(key) = cache.order.pop_front() {
+                cache.by_key.remove(&key);
+            }
+        }
+    }
+
+    pub fn transient_track(&self, key: &str) -> Option<Track> {
+        self.transient.lock().ok()?.by_key.get(key).cloned()
     }
 
     /// Late-bound session wiring (the session needs the materializer first):
@@ -399,12 +439,23 @@ impl QueueMaterializer for LibraryService {
                     .into_iter()
                     .map(|track| (track.id.key().to_string(), track))
                     .collect();
+                // A key the database does not hold is either a row from a
+                // live listing this session saw, or a file on disk.
                 let missing: Vec<String> = keys
                     .iter()
                     .filter(|key| !by_key.contains_key(*key))
                     .cloned()
                     .collect();
-                for track in Self::probe_local_files(missing, self.cover_cache.clone()).await {
+                let mut on_disk = Vec::new();
+                for key in missing {
+                    match self.transient_track(&key) {
+                        Some(track) => {
+                            by_key.insert(key, track);
+                        }
+                        None => on_disk.push(key),
+                    }
+                }
+                for track in Self::probe_local_files(on_disk, self.cover_cache.clone()).await {
                     by_key.insert(track.id.key().to_string(), track);
                 }
                 Ok(keys.iter().filter_map(|key| by_key.remove(key)).collect())
@@ -589,5 +640,56 @@ mod tests {
             .expect("radio context");
         assert_eq!(radio[0].duration, u64::MAX);
         assert_eq!(radio[0].title, "hi");
+    }
+
+    /// A row from a live listing is not in the database and is not a file on
+    /// disk, so without the transient cache it would silently vanish from a
+    /// queue built by key -- which is every queue the API can build.
+    #[tokio::test]
+    async fn materialize_resolves_a_track_the_database_has_never_seen() {
+        let (_dir, library) = seeded_library().await;
+        let remote = Track {
+            id: reader::TrackId::Server {
+                service: config::MusicService::YtMusic,
+                item_id: "vid-1".into(),
+            },
+            cover: Some("https://example.com/art.jpg".into()),
+            album_id: String::new(),
+            title: "from the catalog".into(),
+            artist: "Someone".into(),
+            album: String::new(),
+            duration: 200,
+            khz: 44,
+            bitrate: 128,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: vec![],
+        };
+
+        assert!(
+            library
+                .materialize(&QueueContext::Tracks {
+                    keys: vec!["vid-1".into()],
+                })
+                .await
+                .expect("keys context")
+                .is_empty(),
+            "an unregistered catalog key resolves to nothing"
+        );
+
+        library.register_transient(std::slice::from_ref(&remote));
+        let tracks = library
+            .materialize(&QueueContext::Tracks {
+                keys: vec!["vid-1".into(), "/lib/0.flac".into()],
+            })
+            .await
+            .expect("keys context");
+        assert_eq!(tracks.len(), 2, "the catalog row joins the library one");
+        assert_eq!(tracks[0].title, "from the catalog");
+        assert_eq!(tracks[1].title, "song 0");
     }
 }
