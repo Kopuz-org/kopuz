@@ -54,12 +54,7 @@ pub fn Fullscreen(
     let ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
 
-    let lyrics = use_fullscreen_lyrics(
-        current_song_title,
-        current_song_artist,
-        current_song_album,
-        current_song_duration,
-    );
+    let lyrics = use_fullscreen_lyrics();
     let (background_style, cover_background) =
         use_fullscreen_background(palette, current_song_cover_url);
     let items = display_order_items(&ctrl, &queue);

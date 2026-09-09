@@ -71,12 +71,11 @@ pub fn FavoritesBody(
     let loaded_tracks = fav_tracks_res.read().clone().unwrap_or_default();
     let has_favorites = !loaded_tracks.is_empty();
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
-        let conf = config.read();
         loaded_tracks
             .into_iter()
             .filter(|track| track_matches_filter(track, &search_query_normalized))
             .map(|t| {
-                let cover_url = ::server::cover::track(&conf, &t, 80);
+                let cover_url = hooks::artwork::for_track(&t, hooks::artwork::Size::Thumb);
                 (t, cover_url)
             })
             .collect()

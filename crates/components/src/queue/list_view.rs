@@ -358,10 +358,9 @@ pub fn QueueListView(
     };
 
     let get_track_cover = |track: &reader::Track| -> Option<utils::CoverUrl> {
-        // `peek()`, not a reactive read — cover lookup shouldn't subscribe to
-        // config updates. Source-agnostic via the cover seam; the track
-        // self-describes its cover (local path projected from its album by the DB).
-        server::cover::track(&config.peek(), track, cover_max_width)
+        // The row carries its own reference; the width only says whether
+        // this surface wants the large one.
+        hooks::artwork::for_track(track, hooks::artwork::size_for(cover_max_width))
     };
 
     let mut play_song_at_index = move |index: usize| {

@@ -683,27 +683,6 @@ fn App() -> Element {
     });
 
     use_effect(move || {
-        let url = current_song_cover_url.read().clone();
-        if !url.is_empty() {
-            spawn(
-                async move {
-                    let colors =
-                        utils::offload(
-                            async move { utils::color::get_palette_from_url(&url).await },
-                        )
-                        .await;
-                    if let Some(colors) = colors {
-                        palette.set(Some(colors));
-                    }
-                }
-                .instrument(tracing::info_span!("ui.palette_fetch")),
-            );
-        } else {
-            palette.set(None);
-        }
-    });
-
-    use_effect(move || {
         let next_sources = configured_local_sources(&config.read());
         if *configured_local_libraries.peek() != next_sources {
             configured_local_libraries.set(next_sources);
@@ -749,6 +728,25 @@ fn App() -> Element {
         config,
         config_loaded_ok,
     );
+
+    // The cover's colours, for the surfaces tinted with them. The bytes come
+    // from the daemon: a server cover is signed with credentials this process
+    // does not have, so reading the URL here would find nothing.
+    use_effect(move || {
+        let Some(artwork) = ctrl.current_artwork.read().clone() else {
+            palette.set(None);
+            return;
+        };
+        let api = hooks::consume_api();
+        spawn(
+            async move {
+                if let Some(colors) = hooks::artwork::palette(&api, &artwork).await {
+                    palette.set(Some(colors));
+                }
+            }
+            .instrument(tracing::info_span!("ui.palette_fetch")),
+        );
+    });
 
     // Generations handle the rescan task bumps after writing scanned tracks/albums,
     // so the DB-backed query hooks re-run and the UI refreshes.

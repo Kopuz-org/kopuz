@@ -170,7 +170,7 @@ pub fn LibraryPage(
                         .unwrap_or(false);
                 let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id);
                 let is_selected = selected_tracks.read().contains(&track_path);
-                let cover_url = ::server::cover::track(&conf, &track, 80);
+                let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
 
                 // Download state (servers only).
                 let item_id: String = track.id.key().to_string();

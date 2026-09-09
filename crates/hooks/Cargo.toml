@@ -25,7 +25,6 @@ utils = { workspace = true }
 config = { workspace = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
-server = { workspace = true }
 tokio = { workspace = true, features = ["fs", "sync", "macros"] }
 
 [target.'cfg(target_os = "android")'.dependencies]

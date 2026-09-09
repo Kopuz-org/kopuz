@@ -340,14 +340,21 @@ impl LibraryService {
     /// process cache. Radio has no lyrics by construction.
     pub async fn lyrics(&self, key: &str) -> Result<api::LyricsView, ApiError> {
         let config = self.current_config();
-        let track = self
+        let track = match self
             .db
             .tracks_by_keys(&config.active_source, &[key.to_string()])
             .await
             .map_err(db_error)?
             .into_iter()
             .next()
-            .ok_or_else(|| ApiError::not_found("unknown track key"))?;
+        {
+            Some(track) => track,
+            // A row played straight from a browse listing has no database
+            // entry, and is exactly the one someone wants the words to.
+            None => self
+                .transient_track(key)
+                .ok_or_else(|| ApiError::not_found("unknown track key"))?,
+        };
         if track.duration == u64::MAX {
             return Err(ApiError::invalid_input("radio streams have no lyrics"));
         }
@@ -367,6 +374,23 @@ impl LibraryService {
                 server.access_token.as_deref(),
                 server.user_id.as_deref(),
             );
+            // Apple Music's own words need the account's token and a bearer
+            // fetched for the session -- both credentials, so both are here.
+            if server.service == config::MusicService::AppleMusic
+                && let Some(token) = server.access_token.clone()
+                && let Some(catalog_id) = key.strip_prefix("applemusic:")
+            {
+                let bearer_token = server::applemusic::auth::get_bearer_token()
+                    .await
+                    .unwrap_or_default();
+                request = request.apple_music_auth(utils::lyrics::AppleMusicLyricsAuth {
+                    token,
+                    bearer_token,
+                    storefront: server.apple_music_storefront.clone(),
+                    language: server.apple_music_language.clone(),
+                    catalog_id: catalog_id.to_string(),
+                });
+            }
         }
 
         let lyrics = match utils::lyrics::cached_lyrics_for_request(&request) {
