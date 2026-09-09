@@ -104,6 +104,11 @@ impl MediaSource for YtSource {
         (!vid.trim().is_empty()).then(|| format!("https://music.youtube.com/watch?v={vid}"))
     }
 
+    fn album_web_url(&self, browse_id: &str) -> Option<String> {
+        (!browse_id.trim().is_empty())
+            .then(|| format!("https://music.youtube.com/browse/{browse_id}"))
+    }
+
     async fn search(
         &self,
         query: &str,

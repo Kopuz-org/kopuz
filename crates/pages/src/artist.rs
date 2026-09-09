@@ -14,7 +14,6 @@ use config::{
     AlbumSortField, AlbumViewMode, AppConfig, ArtistSortField, ArtistViewOrder, SortDirection,
 };
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
     use_active_source, use_albums, use_artist_sample_tracks, use_artist_tracks, use_artists,
     use_tracks_by_keys,
@@ -48,10 +47,8 @@ pub fn Artist(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
     let nav_ctrl = use_context::<components::NavigationController>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     // Capabilities, read off the resolved source — the single seam the page gates
     // its divergent affordances on (no `is_server()` / `match service`).
     let caps = hooks::sources::use_capabilities();
@@ -537,51 +534,19 @@ pub fn Artist(
                                     on_close: move |_| show_album_playlist_modal.set(false),
                                     on_add_to_playlist: move |playlist_id: String| {
                                         if let Some(album_id) = pending_album_id_for_playlist.read().clone() {
-                                            let s = active_source.peek().clone();
-                                            spawn(async move {
-                                                let refs: Vec<String> = s
-                                                    .album_tracks(&album_id)
-                                                    .await
-                                                    .unwrap_or_default()
-                                                    .iter()
-                                                    .filter_map(|t| {
-                                                        let k = t.id.key();
-                                                        (!k.is_empty()).then(|| k.into_owned())
-                                                    })
-                                                    .collect();
-                                                if !refs.is_empty()
-                                                    && s.add_to_playlist(&playlist_id, &refs).await.is_ok()
-                                                {
-                                                    gens.bump(Table::Playlists);
-                                                }
+                                            hooks::library_actions::with_album_keys(album_id, move |keys| {
+                                                hooks::playlist_actions::add_tracks(playlist_id.clone(), keys);
                                             });
                                         }
                                         show_album_playlist_modal.set(false);
                                         pending_album_id_for_playlist.set(None);
                                     },
                                     on_create_playlist: move |playlist_name: String| {
-                                        let album_id = pending_album_id_for_playlist.read().clone();
-                                        let s = active_source.peek().clone();
-                                        spawn(async move {
-                                            let refs: Vec<String> = match album_id {
-                                                Some(id) => s
-                                                    .album_tracks(&id)
-                                                    .await
-                                                    .unwrap_or_default()
-                                                    .iter()
-                                                    .filter_map(|t| {
-                                                        let k = t.id.key();
-                                                        (!k.is_empty()).then(|| k.into_owned())
-                                                    })
-                                                    .collect(),
-                                                None => Vec::new(),
-                                            };
-                                            if !refs.is_empty()
-                                                && s.create_playlist(&playlist_name, &refs).await.is_ok()
-                                            {
-                                                gens.bump(Table::Playlists);
-                                            }
-                                        });
+                                        if let Some(album_id) = pending_album_id_for_playlist.read().clone() {
+                                            hooks::library_actions::with_album_keys(album_id, move |keys| {
+                                                hooks::playlist_actions::create_with(playlist_name.clone(), keys);
+                                            });
+                                        }
                                         show_album_playlist_modal.set(false);
                                         pending_album_id_for_playlist.set(None);
                                     },
@@ -700,16 +665,9 @@ pub fn Artist(
                                                                     let Some(tag) = tags.get(idx).copied() else { return };
                                                                     match tag {
                                                                         AlbumAction::Queue => {
-                                                                            let album_src = active_source.peek().clone();
-                                                                            let album_id = id.clone();
-                                                                            spawn(async move {
-                                                                                let mut tracks = album_src.album_tracks(&album_id).await.unwrap_or_default();
-                                                                                tracks.sort_by(|a, b| {
-                                                                                    a.track_number.cmp(&b.track_number)
-                                                                                        .then_with(|| a.title.cmp(&b.title))
-                                                                                });
+                                                                            hooks::library_actions::with_album_keys(id.clone(), move |keys| {
                                                                                 let mut ctrl = ctrl;
-                                                                                ctrl.add_to_queue(tracks);
+                                                                                ctrl.set_queue_keys(keys, api::QueueMode::Append, None);
                                                                             });
                                                                         }
                                                                         AlbumAction::Playlist => {
@@ -723,22 +681,11 @@ pub fn Artist(
                                                                             );
                                                                         }
                                                                         AlbumAction::Download { downloaded } => {
-                                                                            let album_src = active_source.peek().clone();
-                                                                            let album_id = id.clone();
-                                                                            spawn(async move {
-                                                                                let tracks = album_src.album_tracks(&album_id).await.unwrap_or_default();
+                                                                            hooks::library_actions::with_album_keys(id.clone(), move |keys| {
                                                                                 if downloaded {
-                                                                                    let ids: Vec<String> = tracks.iter().filter_map(|t| {
-                                                                                        let k = t.id.key();
-                                                                                        (!k.is_empty()).then(|| k.into_owned())
-                                                                                    }).collect();
-                                                                                    hooks::downloads::remove(ids);
+                                                                                    hooks::downloads::remove(keys);
                                                                                 } else {
-                                                                                    let requests: Vec<String> = tracks.iter().filter_map(|t| {
-                                                                                        let k = t.id.key();
-                                                                                        (!k.is_empty()).then(|| k.into_owned())
-                                                                                    }).collect();
-                                                                                    hooks::downloads::start(requests);
+                                                                                    hooks::downloads::start(keys);
                                                                                 }
                                                                             });
                                                                         }

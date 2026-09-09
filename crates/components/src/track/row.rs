@@ -8,6 +8,7 @@ use crate::queue_drag::{
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
+use hooks::consume_api;
 use hooks::toast::toast;
 use reader::models::Track;
 use tracing::Instrument;
@@ -64,7 +65,6 @@ pub fn TrackRow(
     #[props(default = None)] row_num: Option<usize>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
@@ -221,8 +221,7 @@ pub fn TrackRow(
                 handler.call(());
             }
         } else if idx == share_idx {
-            let src = active_source.peek().clone();
-            share_track(menu_track.clone(), src);
+            share_track(menu_track.clone());
             on_close_menu.call(());
         } else if mix_idx == Some(idx) {
             if let Some(handler) = on_start_radio {
@@ -875,14 +874,18 @@ pub fn TrackRow(
 /// reading `track_row::radio_handler(...)`.
 pub use crate::radio_actions::track_radio_handler as radio_handler;
 
-/// Copy a shareable link for a track: its source's public web URL when it has
-/// one (YT Music or Spotify), else fall back to a MusicBrainz lookup by metadata. The provider
-/// URL knowledge lives in the source impl ([`MediaSource::web_url`]), not here.
-pub fn share_track(track: Track, source: ::server::source::ActiveSource) {
-    if let Some(url) = source.web_url(&track) {
-        copy_to_clipboard(&url);
-        toast("Copied link");
-    } else {
+/// Copy a shareable link for a track: the source's public page when it has
+/// one, else a MusicBrainz lookup by metadata. Which services have pages is
+/// the daemon's knowledge, not this component's.
+pub fn share_track(track: Track) {
+    let api = consume_api();
+    let key = track.id.key().into_owned();
+    spawn(async move {
+        if let Ok(Some(url)) = api.track_web_url(key).await {
+            copy_to_clipboard(&url);
+            toast("Copied link");
+            return;
+        }
         share_to_musicbrainz(track.musicbrainz_release_id, track.artist, track.title);
-    }
+    });
 }

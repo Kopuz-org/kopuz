@@ -174,6 +174,13 @@ pub trait MediaSource: Send + Sync {
         None
     }
 
+    /// The same for an album, given the id this source browses it by. `None`
+    /// when the source has no album pages, in which case a caller shares the
+    /// first track's page instead.
+    fn album_web_url(&self, _browse_id: &str) -> Option<String> {
+        None
+    }
+
     /// Search this source for `query`, returning matching tracks and albums. The
     /// default searches the source's library corpus (the behavior local, Jellyfin
     /// and Subsonic all share); catalog-backed remotes (YT) override to query the

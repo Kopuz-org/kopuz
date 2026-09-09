@@ -157,6 +157,14 @@ pub trait LibraryApi: Send + Sync {
     /// this is a daemon call and not a filter the caller composes.
     async fn search(&self, query: String) -> Result<SearchResults, ApiError>;
 
+    /// The source's public page for a row, for a share action. `None` when the
+    /// source has no web pages, which is a client's cue to fall back to a
+    /// metadata lookup rather than to build a URL from a service name.
+    async fn track_web_url(&self, key: String) -> Result<Option<String>, ApiError>;
+
+    /// The same for an album, by the id it is browsed under.
+    async fn album_web_url(&self, id: String) -> Result<Option<String>, ApiError>;
+
     /// The source's browse feed. `continuation` pages it; `None` starts over.
     async fn catalog(&self, continuation: Option<String>) -> Result<CatalogPage, ApiError>;
 

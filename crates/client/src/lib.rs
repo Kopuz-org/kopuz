@@ -319,6 +319,26 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::search_results_from_proto(results.get_ref()))
     }
 
+    async fn track_web_url(&self, key: String) -> Result<Option<String>, ApiError> {
+        let url = self
+            .client()
+            .get_track_web_url(Request::new(proto::TrackWebUrlRequest { key }))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        Ok(url.url)
+    }
+
+    async fn album_web_url(&self, id: String) -> Result<Option<String>, ApiError> {
+        let url = self
+            .client()
+            .get_album_web_url(Request::new(proto::AlbumWebUrlRequest { id }))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        Ok(url.url)
+    }
+
     async fn catalog(&self, continuation: Option<String>) -> Result<api::CatalogPage, ApiError> {
         let page = self
             .client()

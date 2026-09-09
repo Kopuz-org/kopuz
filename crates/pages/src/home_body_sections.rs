@@ -344,8 +344,8 @@ fn render_continue_listening(
         return rsx! { div {} };
     }
     let mut ctrl = consume_context::<hooks::PlayerController>();
-    let active_source = consume_context::<Signal<::server::source::ActiveSource>>();
-    let can_radio = active_source.read().capabilities().radio.track;
+    let caps = consume_context::<Signal<api::SourceCapabilities>>();
+    let can_radio = caps.read().track_radio;
     let (song_actions, song_action_kinds) = song_card_actions(can_radio);
     rsx! {
         section { class: if is_vaxry { "mb-10" } else { "mb-12" },
@@ -444,8 +444,7 @@ fn render_continue_listening(
                                                         }
                                                     }
                                                     Some(SongCardAction::Share) => {
-                                                        let src = active_source.peek().clone();
-                                                        components::track_row::share_track(menu_track.clone(), src);
+                                                        components::track_row::share_track(menu_track.clone());
                                                     }
                                                     None => {}
                                                 }
@@ -699,11 +698,9 @@ fn render_playlists(
     }
     // Radio is the one playlist action a home card can offer without the
     // playlists page's folder/rename state, so the whole menu rides its gate.
-    let can_radio = consume_context::<Signal<::server::source::ActiveSource>>()
+    let can_radio = consume_context::<Signal<api::SourceCapabilities>>()
         .read()
-        .capabilities()
-        .radio
-        .playlist;
+        .playlist_radio;
     let radio_actions = vec![MenuAction::new(
         components::radio_actions::radio_label(),
         components::radio_actions::RADIO_ICON,

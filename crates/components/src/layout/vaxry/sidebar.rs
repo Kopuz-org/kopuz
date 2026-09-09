@@ -140,8 +140,8 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
     let onmouseup = move |_| is_resizing.set(false);
 
     // Discover is a capability of the active source (YT), not a config flag.
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let has_discover = use_memo(move || active_source.read().capabilities().discover);
+    let caps = hooks::sources::use_capabilities();
+    let has_discover = use_memo(move || caps().discover);
     let collapsed = if is_android {
         false
     } else {
