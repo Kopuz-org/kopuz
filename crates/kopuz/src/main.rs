@@ -191,17 +191,21 @@ fn main() -> std::process::ExitCode {
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
-        // The core owns the library, so it is what knows whether tracing is
-        // on. The subscriber is built once, here, before the UI exists.
+        // Before the core, so what it warns about while booting -- a source
+        // that would not load, a bus name already taken, the socket -- lands in
+        // the log instead of being lost. The chrome trace is the one part that
+        // has to wait: whether it is wanted lives in the library.
+        logging::init(&log_dir);
         let core = match backend::start() {
             Ok(core) => core,
             Err(error) => {
-                logging::init(&log_dir, false);
                 tracing::error!(%error, "the daemon core failed to start");
                 return std::process::ExitCode::FAILURE;
             }
         };
-        logging::init(&log_dir, core.config.tracing_enabled);
+        if core.config.tracing_enabled {
+            logging::enable_trace(&log_dir);
+        }
 
         #[cfg(target_os = "macos")]
         {
@@ -521,41 +525,9 @@ fn App() -> Element {
     let favorites_service = core.favorites.clone();
     let scrobbler = core.scrobbler.clone();
 
-    // Bridge config changes into the session: every change updates its
-    // config watch (crossfade, scrobble creds, Jellyfin reporting), and
-    // audio-pipeline keys apply to the engine when their slice changes.
-    {
-        let session = session.clone();
-        let mut last_audio_slice = use_signal(String::new);
-        use_effect(move || {
-            let snapshot = config.read().clone();
-            if !*initial_load_done.peek() {
-                return;
-            }
-            let audio_slice = format!(
-                "{:?}|{:?}|{:?}|{:?}",
-                snapshot.equalizer,
-                snapshot.channel_mode,
-                snapshot.sample_rate_mode,
-                snapshot.device_change_behavior,
-            );
-            let changed = if *last_audio_slice.peek() != audio_slice {
-                last_audio_slice.set(audio_slice);
-                [
-                    "equalizer",
-                    "channel_mode",
-                    "sample_rate_mode",
-                    "device_change_behavior",
-                ]
-                .iter()
-                .map(|key| key.to_string())
-                .collect()
-            } else {
-                Vec::new()
-            };
-            session.set_config(snapshot, changed);
-        });
-    }
+    // Config reaches the session through the daemon's own write path, which
+    // is the only copy that still holds the credentials this process is never
+    // shown. Pushing the view we hold would blank them until the next save.
     let mut trigger_rescan = use_signal(|| 0);
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
@@ -984,7 +956,6 @@ fn App() -> Element {
 
     let _is_offline = app_lifecycle::use_connectivity_probe(config, network_banner);
 
-    let session_for_load = session.clone();
     let favorites_for_load = favorites_service.clone();
     let scrobbler_for_load = scrobbler.clone();
     use_hook(move || {
@@ -1020,19 +991,6 @@ fn App() -> Element {
                     configured_local_libraries.set(configured_local_sources(&loaded));
                     volume.set(loaded.volume);
                     persisted_volume.set(loaded.volume);
-                    session_for_load.set_config(
-                        loaded.clone(),
-                        [
-                            "volume",
-                            "equalizer",
-                            "channel_mode",
-                            "sample_rate_mode",
-                            "device_change_behavior",
-                        ]
-                        .iter()
-                        .map(|key| key.to_string())
-                        .collect(),
-                    );
                     i18n::set_locale(&loaded.language);
                 }
 
