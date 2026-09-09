@@ -25,6 +25,7 @@ pub fn start() -> Result<&'static Core, String> {
     std::thread::Builder::new()
         .name("kopuz-core".into())
         .spawn(move || {
+            daemon::boot::prepare_thread();
             let runtime = match tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
