@@ -167,6 +167,68 @@ pub fn radio_station_from_proto(value: &RadioStationInfo) -> api::RadioStationIn
     }
 }
 
+pub fn artwork_change_to_proto(value: &api::ArtworkChange) -> Option<ArtworkChange> {
+    let change = match value {
+        api::ArtworkChange::Keep => return None,
+        api::ArtworkChange::Remove => artwork_change::Change::Remove(Unit {}),
+        api::ArtworkChange::Set(bytes) => artwork_change::Change::Set(bytes.clone()),
+    };
+    Some(ArtworkChange {
+        change: Some(change),
+    })
+}
+
+pub fn artwork_change_from_proto(value: Option<&ArtworkChange>) -> api::ArtworkChange {
+    match value.and_then(|value| value.change.as_ref()) {
+        None => api::ArtworkChange::Keep,
+        Some(artwork_change::Change::Remove(_)) => api::ArtworkChange::Remove,
+        Some(artwork_change::Change::Set(bytes)) => api::ArtworkChange::Set(bytes.clone()),
+    }
+}
+
+pub fn track_patch_to_proto(value: &api::TrackMetadataPatch) -> TrackMetadataPatch {
+    TrackMetadataPatch {
+        key: value.key.clone(),
+        title: value.title.clone(),
+        artist: value.artist.clone(),
+        album: value.album.clone(),
+        track_number: value.track_number,
+        clear_track_number: value.clear_track_number,
+        disc_number: value.disc_number,
+        clear_disc_number: value.clear_disc_number,
+        cover: artwork_change_to_proto(&value.cover),
+    }
+}
+
+pub fn track_patch_from_proto(value: &TrackMetadataPatch) -> api::TrackMetadataPatch {
+    api::TrackMetadataPatch {
+        key: value.key.clone(),
+        title: value.title.clone(),
+        artist: value.artist.clone(),
+        album: value.album.clone(),
+        track_number: value.track_number,
+        clear_track_number: value.clear_track_number,
+        disc_number: value.disc_number,
+        clear_disc_number: value.clear_disc_number,
+        cover: artwork_change_from_proto(value.cover.as_ref()),
+    }
+}
+
+pub fn artwork_upload_to_proto(value: &api::ArtworkUpload) -> ArtworkUpload {
+    ArtworkUpload {
+        target: Some(artwork_target_to_proto(&value.target)),
+        content_type: value.content_type.clone(),
+        bytes: value.bytes.clone(),
+    }
+}
+
+pub fn artwork_upload_from_proto(value: &ArtworkUpload) -> Option<api::ArtworkUpload> {
+    Some(api::ArtworkUpload {
+        target: artwork_target_from_proto(value.target.as_ref()?)?,
+        content_type: value.content_type.clone(),
+        bytes: value.bytes.clone(),
+    })
+}
 #[cfg(test)]
 mod tests {
     use super::*;

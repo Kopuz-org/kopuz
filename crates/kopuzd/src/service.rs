@@ -515,6 +515,65 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::Unit {}))
     }
 
+    async fn update_track_metadata(
+        &self,
+        request: Request<proto::TrackMetadataPatch>,
+    ) -> Result<Response<proto::TrackInfo>, Status> {
+        let track = self
+            .0
+            .api
+            .update_track_metadata(convert::track_patch_from_proto(request.get_ref()))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::track_info_to_proto(&track)))
+    }
+
+    async fn delete_tracks(
+        &self,
+        request: Request<proto::DeleteTracksRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .delete_tracks(request.keys, request.from_disk)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn delete_album(
+        &self,
+        request: Request<proto::DeleteAlbumRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .delete_album(request.id, request.from_disk)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn upload_artwork(
+        &self,
+        request: Request<proto::ArtworkUpload>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let upload = convert::artwork_upload_from_proto(request.get_ref())
+            .ok_or_else(|| Status::invalid_argument("artwork target is required"))?;
+        self.0.api.upload_artwork(upload).await.map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn remove_artwork(
+        &self,
+        request: Request<proto::ArtworkTarget>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let target = convert::artwork_target_from_proto(request.get_ref())
+            .ok_or_else(|| Status::invalid_argument("artwork target is required"))?;
+        self.0.api.remove_artwork(target).await.map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     async fn refresh_artist_artwork(
         &self,
         request: Request<proto::RefreshArtistArtworkRequest>,

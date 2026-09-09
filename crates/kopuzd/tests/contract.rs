@@ -137,6 +137,11 @@ async fn spawn_pair() -> Pair {
         dir.path().join("artwork"),
     );
     let playlists = daemon::PlaylistService::new(database.clone(), session.clone());
+    let mutations = daemon::MutationService::new(
+        database.clone(),
+        session.clone(),
+        dir.path().join("uploads"),
+    );
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)
             .with_config(config_service.clone())
@@ -145,6 +150,7 @@ async fn spawn_pair() -> Pair {
             .with_favorites(favorites.clone())
             .with_artwork(artwork.clone())
             .with_playlists(playlists.clone())
+            .with_mutations(mutations.clone())
     };
     let state = Arc::new(kopuzd::GrpcState {
         api: Arc::new(build_api(session.clone())),
@@ -1021,5 +1027,74 @@ async fn catalog_and_radio_report_absence_identically() {
             .await
             .err()
             .map(|e| e.code),
+    );
+}
+
+/// Deleting from disk is the one API call that destroys something outside
+/// the database, so its guard has to hold identically on both transports.
+#[tokio::test]
+async fn mutations_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    // The seeded tracks name paths that do not exist and are outside any
+    // configured root, so a from-disk delete is refused rather than
+    // half-applied.
+    let keys = vec!["/lib/seed-0.flac".to_string()];
+    let local = pair.local.delete_tracks(keys.clone(), true).await;
+    let wire = pair.wire.delete_tracks(keys.clone(), true).await;
+    assert!(local.is_err(), "outside the library roots: {local:?}");
+    assert_eq!(
+        local.err().map(|error| error.code),
+        wire.err().map(|error| error.code),
+    );
+    assert_eq!(
+        pair.local
+            .tracks(TrackFilter::default(), Page::default())
+            .await
+            .expect("tracks")
+            .total,
+        2,
+        "a refused delete changed nothing"
+    );
+
+    // Tags are only editable on a local file that exists; the failure is the
+    // same either way.
+    let patch = api::TrackMetadataPatch {
+        key: "/lib/seed-0.flac".into(),
+        title: Some("renamed".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        pair.local
+            .update_track_metadata(patch.clone())
+            .await
+            .err()
+            .map(|error| error.code),
+        pair.wire
+            .update_track_metadata(patch)
+            .await
+            .err()
+            .map(|error| error.code),
+    );
+
+    // Artwork has to decode before it is stored, on either transport.
+    let upload = api::ArtworkUpload {
+        target: api::ArtworkTarget::Album("album-1".into()),
+        content_type: "image/png".into(),
+        bytes: b"\x89PNG\r\n\x1a\nnot an image".to_vec(),
+    };
+    let local = pair.local.upload_artwork(upload.clone()).await;
+    assert_eq!(
+        local.as_ref().err().map(|error| error.code),
+        Some(ErrorCode::InvalidInput),
+        "got {local:?}"
+    );
+    assert_eq!(
+        local.err().map(|error| error.code),
+        pair.wire
+            .upload_artwork(upload)
+            .await
+            .err()
+            .map(|error| error.code),
     );
 }

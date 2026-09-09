@@ -176,6 +176,13 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .map(|dirs| dirs.cache_dir().join("artwork"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork")),
     );
+    let mutations = crate::MutationService::new(
+        database.clone(),
+        session.clone(),
+        directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+            .map(|dirs| dirs.data_dir().join("artwork-uploads"))
+            .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork-uploads")),
+    );
     let catalog = crate::CatalogService::new(database.clone(), session.clone(), library.clone());
     let radio_service = crate::RadioService::new(config_service.clone(), library.clone());
     library.attach_catalog(catalog.clone());
@@ -200,7 +207,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_artwork(artwork.clone())
             .with_playlists(playlists)
             .with_catalog(catalog)
-            .with_radio(radio_service),
+            .with_radio(radio_service)
+            .with_mutations(mutations),
     );
 
     Ok(Core {
