@@ -1578,3 +1578,60 @@ async fn playback_moves_between_the_engine_and_an_integration() {
         stub.calls()
     );
 }
+
+async fn play_order(api: &LocalApi) -> Vec<String> {
+    api.queue_window(Page::default())
+        .await
+        .expect("window")
+        .items
+        .into_iter()
+        .map(|item| item.track.title)
+        .collect()
+}
+
+async fn shuffled_harness() -> Harness {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&[
+            "track-0", "track-1", "track-2", "track-3", "track-4", "track-5", "track-6", "track-7",
+        ]))
+        .await
+        .expect("set queue");
+    harness
+        .api
+        .player_command(PlayerCommand::SetMode {
+            shuffle: Some(true),
+            loop_mode: None,
+        })
+        .await
+        .expect("shuffle on");
+    harness
+}
+
+#[tokio::test]
+async fn a_queue_row_plays_without_reshuffling_the_rest() {
+    let harness = shuffled_harness().await;
+    let before = play_order(&harness.api).await;
+
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 5 })
+        .await
+        .expect("jump");
+
+    assert_eq!(play_order(&harness.api).await, before);
+}
+
+#[tokio::test]
+async fn a_track_list_row_repins_the_shuffle_around_itself() {
+    let harness = shuffled_harness().await;
+
+    harness
+        .api
+        .queue_edit(QueueEdit::JumpPhysical { index: 6 })
+        .await
+        .expect("jump");
+
+    assert_eq!(play_order(&harness.api).await[0], "track-6");
+}

@@ -752,17 +752,10 @@ impl Session {
                 Ok(self.publish(state_tx, true))
             }
             QueueEdit::Jump { index } => {
-                let index = index as usize;
-                let position_exists = self.model.track_at(index).is_some();
-                if !position_exists {
-                    return Err(ApiError::invalid_input("no track at that queue position"));
-                }
-                let physical = self
-                    .model
-                    .physical_index_of(index)
-                    .ok_or_else(|| ApiError::invalid_input("no track at that queue position"))?;
                 let mut candidate = self.model.clone();
-                let position = candidate.jump_to(physical);
+                let position = candidate
+                    .jump_to_position(index as usize)
+                    .ok_or_else(|| ApiError::invalid_input("no track at that queue position"))?;
                 self.start_immediate_load(candidate, position)?;
                 Ok(self.publish(state_tx, true))
             }
