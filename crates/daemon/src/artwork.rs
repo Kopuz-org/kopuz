@@ -15,7 +15,7 @@
 use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use api::{ApiError, ArtworkRef, ArtworkTarget};
@@ -146,6 +146,7 @@ pub fn playlist_ref(
 pub struct ArtworkService {
     db: db::Db,
     session: SessionHandle,
+    library: OnceLock<Arc<crate::library::LibraryService>>,
     cache_dir: PathBuf,
     http: reqwest::Client,
 }
@@ -182,9 +183,16 @@ impl ArtworkService {
         Arc::new(Self {
             db,
             session,
+            library: OnceLock::new(),
             cache_dir,
             http: reqwest::Client::new(),
         })
+    }
+
+    /// Late-bound, because the library service is built alongside this one.
+    /// Without it, artwork for a browsed-but-unqueued row cannot resolve.
+    pub fn attach_library(&self, library: Arc<crate::library::LibraryService>) {
+        let _ = self.library.set(library);
     }
 
     pub async fn fetch(
@@ -270,14 +278,20 @@ impl ArtworkService {
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()
             .next();
-        match found {
-            Some(track) => Ok(track),
-            None => self
-                .session
-                .queued_track(key)
-                .await
-                .ok_or_else(|| ApiError::not_found("unknown track key")),
+        if let Some(track) = found {
+            return Ok(track);
         }
+        if let Some(track) = self
+            .library
+            .get()
+            .and_then(|library| library.transient_track(key))
+        {
+            return Ok(track);
+        }
+        self.session
+            .queued_track(key)
+            .await
+            .ok_or_else(|| ApiError::not_found("unknown track key"))
     }
 
     async fn artist_album_cover(

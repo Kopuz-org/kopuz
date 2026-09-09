@@ -176,6 +176,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .map(|dirs| dirs.cache_dir().join("artwork"))
             .unwrap_or_else(|| std::env::temp_dir().join("kopuz-artwork")),
     );
+    artwork.attach_library(library.clone());
     let api = Arc::new(
         LocalApi::new(session.clone())
             .with_library(library.clone())

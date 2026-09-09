@@ -247,6 +247,10 @@ impl LibraryService {
             .search(query)
             .await
             .map_err(|error| ApiError::internal(format!("search failed: {error}")))?;
+        // A remote hit may name a track the library has never stored, so
+        // remember it: the caller gets a key, and queueing or hearting that
+        // key has to resolve to something.
+        self.register_transient(&tracks);
         Ok(SearchResults {
             tracks: tracks
                 .iter()
