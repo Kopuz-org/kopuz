@@ -17,6 +17,7 @@ pub struct LocalApi {
     pub(super) mutations: Option<Arc<crate::mutations::MutationService>>,
     pub(super) sources: Option<Arc<crate::sources::SourceService>>,
     pub(super) integrations: Option<Arc<crate::integrations::IntegrationService>>,
+    pub(super) ytdlp: Option<Arc<crate::ytdlp::YtdlpService>>,
 }
 
 impl LocalApi {
@@ -35,6 +36,7 @@ impl LocalApi {
             mutations: None,
             sources: None,
             integrations: None,
+            ytdlp: None,
         }
     }
 
@@ -141,6 +143,11 @@ impl LocalApi {
         self.integrations
             .as_deref()
             .ok_or_else(|| ApiError::unsupported("this daemon manages no integrations"))
+    }
+
+    pub fn with_ytdlp(mut self, ytdlp: Arc<crate::ytdlp::YtdlpService>) -> Self {
+        self.ytdlp = Some(ytdlp);
+        self
     }
 }
 
@@ -469,12 +476,19 @@ impl api::JobApi for LocalApi {
                 Some(playlists) => playlists.spawn_sync(runner),
                 None => Err(ApiError::unsupported("no playlist service")),
             },
-            // Downloads carry their own request, so they start through
-            // JobApi::download rather than by kind.
-            api::JobKind::Download | api::JobKind::Unknown => {
+            // These carry their own request, so they start through their own
+            // method rather than by kind.
+            api::JobKind::Download | api::JobKind::Ytdlp | api::JobKind::Unknown => {
                 Err(ApiError::unsupported("this job kind has no direct starter"))
             }
         }
+    }
+
+    async fn start_ytdlp(&self, request: api::YtdlpRequest) -> Result<api::JobRef, ApiError> {
+        let (Some(service), Some(runner)) = (&self.ytdlp, &self.jobs) else {
+            return Err(ApiError::unsupported("this daemon runs without yt-dlp"));
+        };
+        service.start(runner, request)
     }
 
     async fn download(&self, keys: Vec<String>) -> Result<api::JobRef, ApiError> {

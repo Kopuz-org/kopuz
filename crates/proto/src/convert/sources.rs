@@ -237,6 +237,45 @@ pub fn integration_provision_from_proto(value: &IntegrationProvision) -> api::In
     }
 }
 
+pub fn ytdlp_format_to_proto(value: api::YtdlpAudioFormat) -> YtdlpAudioFormat {
+    match value {
+        api::YtdlpAudioFormat::BestAudio => YtdlpAudioFormat::YtdlpFormatBestAudio,
+        api::YtdlpAudioFormat::Mp3 => YtdlpAudioFormat::YtdlpFormatMp3,
+        api::YtdlpAudioFormat::Flac => YtdlpAudioFormat::YtdlpFormatFlac,
+        api::YtdlpAudioFormat::Opus => YtdlpAudioFormat::YtdlpFormatOpus,
+        api::YtdlpAudioFormat::Wav => YtdlpAudioFormat::YtdlpFormatWav,
+        api::YtdlpAudioFormat::Video => YtdlpAudioFormat::YtdlpFormatVideo,
+    }
+}
+
+pub fn ytdlp_format_from_proto(value: i32) -> api::YtdlpAudioFormat {
+    match YtdlpAudioFormat::try_from(value) {
+        Ok(YtdlpAudioFormat::YtdlpFormatMp3) => api::YtdlpAudioFormat::Mp3,
+        Ok(YtdlpAudioFormat::YtdlpFormatFlac) => api::YtdlpAudioFormat::Flac,
+        Ok(YtdlpAudioFormat::YtdlpFormatOpus) => api::YtdlpAudioFormat::Opus,
+        Ok(YtdlpAudioFormat::YtdlpFormatWav) => api::YtdlpAudioFormat::Wav,
+        Ok(YtdlpAudioFormat::YtdlpFormatVideo) => api::YtdlpAudioFormat::Video,
+        _ => api::YtdlpAudioFormat::BestAudio,
+    }
+}
+
+pub fn ytdlp_request_to_proto(value: &api::YtdlpRequest) -> YtdlpRequest {
+    YtdlpRequest {
+        url: value.url.clone(),
+        output_dir: value.output_dir.clone(),
+        format: ytdlp_format_to_proto(value.format) as i32,
+        options: Some(ytdlp_options_to_proto(&value.options)),
+    }
+}
+
+pub fn ytdlp_request_from_proto(value: &YtdlpRequest) -> api::YtdlpRequest {
+    api::YtdlpRequest {
+        url: value.url.clone(),
+        output_dir: value.output_dir.clone(),
+        format: ytdlp_format_from_proto(value.format),
+        options: ytdlp_options_from_proto(value.options.as_ref()),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

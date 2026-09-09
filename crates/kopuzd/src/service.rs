@@ -863,6 +863,19 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::JobRef { job_id: job.job_id }))
     }
 
+    async fn start_ytdlp(
+        &self,
+        request: Request<proto::YtdlpRequest>,
+    ) -> Result<Response<proto::JobRef>, Status> {
+        let job = self
+            .0
+            .api
+            .start_ytdlp(convert::ytdlp_request_from_proto(request.get_ref()))
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::JobRef { job_id: job.job_id }))
+    }
+
     async fn remove_download(
         &self,
         request: Request<proto::TrackRef>,
