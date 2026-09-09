@@ -381,6 +381,7 @@ impl LibraryService {
     }
 }
 
+mod artist_art;
 mod jobs;
 mod reads;
 

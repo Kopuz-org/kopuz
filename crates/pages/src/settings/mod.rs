@@ -16,6 +16,8 @@ use components::settings_popups::{
 use components::settings_remote_folders::{RemoteCreds, RemoteFolderSettings};
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
+
+use crate::DebugPanel;
 use hooks::use_player_controller::PlayerController;
 
 #[component]
@@ -822,7 +824,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 if active_category() == SettingsCategory::Tools {
                     div { class: "space-y-8",
                         {logs_section(config)}
-                        {hooks::debug_db_section()}
+                        // The app fills this in debug builds; it is the only
+                        // crate that still holds a write-capable database.
+                        if let Some(panel) = try_consume_context::<DebugPanel>() {
+                            {(panel.0)()}
+                        }
                     }
                 }
             }

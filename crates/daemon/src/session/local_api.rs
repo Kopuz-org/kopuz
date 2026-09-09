@@ -223,6 +223,10 @@ impl api::LibraryApi for LocalApi {
         self.library()?.search(&query).await
     }
 
+    async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<(), ApiError> {
+        self.library()?.refresh_artist_artwork(names).await
+    }
+
     async fn favorites(&self) -> Result<api::FavoritesView, ApiError> {
         match &self.favorites {
             Some(service) => service.list().await,

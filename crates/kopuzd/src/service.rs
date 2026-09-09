@@ -434,6 +434,18 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::search_results_to_proto(&results)))
     }
 
+    async fn refresh_artist_artwork(
+        &self,
+        request: Request<proto::RefreshArtistArtworkRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .refresh_artist_artwork(request.into_inner().names)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     async fn get_playlists(
         &self,
         _request: Request<proto::GetPlaylistsRequest>,

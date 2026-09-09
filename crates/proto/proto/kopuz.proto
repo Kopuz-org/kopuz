@@ -45,6 +45,7 @@ service Kopuz {
   rpc GetGenreTracks(GenreTracksRequest) returns (TrackPage);
   rpc GetRecentTracks(Page) returns (TrackPage);
   rpc Search(SearchRequest) returns (SearchResults);
+  rpc RefreshArtistArtwork(RefreshArtistArtworkRequest) returns (Unit);
 
   rpc GetPlaylists(GetPlaylistsRequest) returns (PlaylistCatalog);
   rpc CreatePlaylist(CreatePlaylistRequest) returns (PlaylistId);
@@ -471,6 +472,10 @@ message GenreTracksRequest {
 
 message SearchRequest {
   string query = 1;
+}
+
+message RefreshArtistArtworkRequest {
+  repeated string names = 1;
 }
 
 message SearchResults {

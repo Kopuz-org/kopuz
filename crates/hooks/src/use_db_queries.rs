@@ -367,16 +367,11 @@ pub fn use_playlists() -> Resource<reader::PlaylistStore> {
     })
 }
 
-/// Per-artist images: `(overrides, photos)` — see [`db::ArtistImages`].
-pub fn use_artist_images() -> Resource<db::ArtistImages> {
-    let db = use_context::<db::ReadDb>();
-    let gens = use_generations();
-    use_resource(move || {
-        let _ = gens.generation(Table::Tracks);
-        let db = db.clone();
-        let span = tracing::info_span!("query.artist_images");
-        utils::offload(async move { db.artist_images().await.unwrap_or_default() }.instrument(span))
-    })
+/// The cover for one artist, which the daemon resolves: a custom override,
+/// then the source's photo, then -- for a library source -- one of the
+/// artist's album covers. A frontend never sees which of those it got.
+pub fn artist_cover_url(name: &str) -> utils::CoverUrl {
+    utils::format_entity_artwork_url("artist", name, false)
 }
 
 /// The `limit` most recently added albums for a source. Tracked against the

@@ -655,30 +655,6 @@ impl PlayerController {
         });
     }
 
-    pub fn restore_queue_state(
-        &mut self,
-        queue: Vec<Track>,
-        current_queue_index: usize,
-        progress_secs: u64,
-        shuffle_order: Vec<usize>,
-        shuffle_enabled: bool,
-    ) {
-        let handle = self.handle();
-        spawn(async move {
-            let snapshot = db::QueueSnapshot {
-                version: 1,
-                queue,
-                current_queue_index,
-                progress_secs,
-                shuffle_order,
-                shuffle_enabled,
-            };
-            if let Err(error) = handle.restore_queue(snapshot).await {
-                tracing::warn!(%error, "queue restore failed");
-            }
-        });
-    }
-
     /// Zero for an external player: its position comes from the service, not us.
     pub fn output_latency_secs(&self) -> f64 {
         if *self.external_active.peek() {

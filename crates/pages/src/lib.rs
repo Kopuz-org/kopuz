@@ -24,3 +24,10 @@ pub mod theme_editor;
 pub mod ytdlp;
 #[cfg(not(target_os = "android"))]
 pub mod ytdlp_jobs;
+
+/// A panel the app supplies through context, for surfaces that need something
+/// `pages` deliberately cannot reach. The debug database tools are the only
+/// one: they need a write-capable handle, which lives with the daemon core
+/// the app hosts.
+#[derive(Clone, Copy)]
+pub struct DebugPanel(pub fn() -> dioxus::prelude::Element);
