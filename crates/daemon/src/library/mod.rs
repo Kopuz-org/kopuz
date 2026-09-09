@@ -406,8 +406,10 @@ impl LibraryService {
                 }
                 None => {
                     let fetched = utils::lyrics::fetch_lyrics_for_request(&request).await;
-                    self.persist_lyrics(&cache_key, &fetched).await;
-                    fetched
+                    if fetched.conclusive {
+                        self.persist_lyrics(&cache_key, &fetched.lyrics).await;
+                    }
+                    fetched.lyrics
                 }
             },
         };

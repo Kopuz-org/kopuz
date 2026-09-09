@@ -2,7 +2,8 @@ use serde::Deserialize;
 
 use super::LyricLine;
 use super::{
-    Lyrics, SERVER_LYRICS_TIMEOUT, has_usable_line_timing, lrc::parse_lrc, lrc_has_usable_timing,
+    Lyrics, ProviderReach, SERVER_LYRICS_TIMEOUT, has_usable_line_timing, lrc::parse_lrc,
+    lrc_has_usable_timing,
 };
 
 #[derive(Debug, Deserialize)]
@@ -78,6 +79,7 @@ pub(super) async fn fetch_jellyfin_lyrics(
     item_id: &str,
     server_url: &str,
     token: &str,
+    reach: &ProviderReach,
 ) -> Option<Lyrics> {
     let url = format!(
         "{}/Items/{}/Lyrics",
@@ -91,6 +93,7 @@ pub(super) async fn fetch_jellyfin_lyrics(
         .timeout(SERVER_LYRICS_TIMEOUT)
         .send()
         .await
+        .map_err(|_| reach.unreachable())
         .ok()?;
 
     if !resp.status().is_success() {
@@ -150,6 +153,7 @@ pub(super) async fn fetch_subsonic_lyrics(
     password: &str,
     artist: &str,
     title: &str,
+    reach: &ProviderReach,
 ) -> Option<Lyrics> {
     let base_url = server_url.trim_end_matches('/');
     let client = reqwest::Client::new();
@@ -157,12 +161,15 @@ pub(super) async fn fetch_subsonic_lyrics(
     let token = format!("{:x}", md5::compute(format!("{}{}", password, salt)));
 
     if let Some(lyrics) =
-        subsonic_get_by_id(&client, base_url, username, &token, salt, song_id).await
+        subsonic_get_by_id(&client, base_url, username, &token, salt, song_id, reach).await
     {
         return Some(lyrics);
     }
 
-    subsonic_get_by_title(&client, base_url, username, &token, salt, artist, title).await
+    subsonic_get_by_title(
+        &client, base_url, username, &token, salt, artist, title, reach,
+    )
+    .await
 }
 
 async fn subsonic_get_by_id(
@@ -172,6 +179,7 @@ async fn subsonic_get_by_id(
     token: &str,
     salt: &str,
     song_id: &str,
+    reach: &ProviderReach,
 ) -> Option<Lyrics> {
     let url = format!("{}/rest/getLyricsBySongId.view", base_url);
     let params = [
@@ -190,6 +198,7 @@ async fn subsonic_get_by_id(
         .timeout(SERVER_LYRICS_TIMEOUT)
         .send()
         .await
+        .map_err(|_| reach.unreachable())
         .ok()?;
     if !resp.status().is_success() {
         return None;
@@ -255,6 +264,7 @@ async fn subsonic_get_by_title(
     salt: &str,
     artist: &str,
     title: &str,
+    reach: &ProviderReach,
 ) -> Option<Lyrics> {
     let url = format!("{}/rest/getLyrics.view", base_url);
     let params = [
@@ -274,6 +284,7 @@ async fn subsonic_get_by_title(
         .timeout(SERVER_LYRICS_TIMEOUT)
         .send()
         .await
+        .map_err(|_| reach.unreachable())
         .ok()?;
     if !resp.status().is_success() {
         return None;
