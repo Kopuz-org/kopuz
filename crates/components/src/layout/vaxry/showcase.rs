@@ -315,7 +315,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                         div { class: "flex-1 min-w-0",
                                             TrackRow {
                                                 track: track.clone(),
-                                                on_start_radio: crate::track_row::radio_handler(track.clone()),
+                                                on_start_radio: crate::track_row::radio_handler(track.id.key().into_owned()),
                                                 cover_url,
                                                 is_menu_open: props.active_track.as_ref() == Some(&track.id),
                                                 is_album: props.is_album,

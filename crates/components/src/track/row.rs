@@ -873,9 +873,7 @@ pub fn TrackRow(
 /// Re-exported from [`crate::radio_actions`], where track and playlist radio
 /// share one implementation. Kept here so the existing row call sites keep
 /// reading `track_row::radio_handler(...)`.
-pub use crate::radio_actions::{
-    play_track_radio as play_radio, track_radio_handler as radio_handler,
-};
+pub use crate::radio_actions::track_radio_handler as radio_handler;
 
 /// Copy a shareable link for a track: its source's public web URL when it has
 /// one (YT Music or Spotify), else fall back to a MusicBrainz lookup by metadata. The provider

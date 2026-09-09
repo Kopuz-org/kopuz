@@ -69,6 +69,16 @@ pub struct PlayerController {
     pub external_active: Signal<bool>,
 }
 
+/// What to say while a mix is being built, and if it fails.
+///
+/// The strings come from the caller because the daemon has no locale and this
+/// crate has no string table -- the surface that offers the action knows both.
+#[derive(Clone, Debug)]
+pub struct RadioNotices {
+    pub starting: String,
+    pub failed: String,
+}
+
 /// A buffered byte range of the current stream, for the seek-bar underlay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BufferedRange {
@@ -586,6 +596,40 @@ impl PlayerController {
     pub fn toggle_loop(&mut self) {
         let next = self.loop_mode.peek().next();
         self.set_loop_mode(next);
+    }
+
+    /// Play the source's mix seeded by one track. The daemon fetches it and
+    /// pins the seed at the front, so the track that was clicked plays first.
+    pub fn play_track_radio(&mut self, key: String, notices: RadioNotices) {
+        self.play_seeded_radio(api::QueueContext::TrackRadio { key }, notices);
+    }
+
+    pub fn play_playlist_radio(&mut self, id: String, notices: RadioNotices) {
+        self.play_seeded_radio(api::QueueContext::PlaylistRadio { id }, notices);
+    }
+
+    /// Building a mix is a remote round trip that can take tens of seconds, so
+    /// a notice goes up first: without it a click looks like it did nothing.
+    /// A failure leaves the queue alone -- the music keeps playing rather than
+    /// stopping on a network hiccup.
+    fn play_seeded_radio(&mut self, context: api::QueueContext, notices: RadioNotices) {
+        if *self.external_active.peek() {
+            self.stop_external_playback();
+        }
+        let handle = self.handle();
+        spawn(async move {
+            crate::toast::toast(&notices.starting);
+            let request = api::SetQueueRequest {
+                mode: api::QueueMode::Replace,
+                context,
+                start_index: Some(0),
+                shuffle: None,
+            };
+            if let Err(error) = handle.set_queue(request).await {
+                tracing::warn!(%error, "radio start failed");
+                crate::toast::toast_error(&notices.failed);
+            }
+        });
     }
 
     pub fn play_radio(&mut self, station_id: &str, stream_id: &str) {

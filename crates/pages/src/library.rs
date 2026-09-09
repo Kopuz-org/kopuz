@@ -263,7 +263,7 @@ pub fn LibraryPage(
                                     );
                                 }
                             })),
-                            on_start_radio: components::track_row::radio_handler(track_radio.clone()),
+                            on_start_radio: components::track_row::radio_handler(track_radio.id.key().into_owned()),
                             on_play: move |_| {
                                 let api = hooks::consume_api();
                                 let f = filter();

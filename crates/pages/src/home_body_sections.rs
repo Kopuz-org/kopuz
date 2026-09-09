@@ -390,7 +390,7 @@ fn render_continue_listening(
                         // Resolved during render, not in the click closure: the
                         // handler reads context, which a closure cannot do.
                         let start_radio = components::radio_actions::track_radio_handler(
-                            track.clone(),
+                            track.id.key().into_owned(),
                         );
                         let open_key = key.clone();
                         let is_menu_open = active_card_menu.read().as_deref() == Some(key.as_str());

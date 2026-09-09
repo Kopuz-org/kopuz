@@ -925,7 +925,7 @@ fn YtAlbumDetail(
                                     is_menu_open,
                                     is_currently_playing: is_current,
                                     is_downloaded,
-                                    on_start_radio: components::track_row::radio_handler(track.clone()),
+                                    on_start_radio: components::track_row::radio_handler(track.id.key().into_owned()),
                                     on_play: move |_| {
                                         ctrl.queue.set(row_tracks.clone());
                                         ctrl.play_track(idx);

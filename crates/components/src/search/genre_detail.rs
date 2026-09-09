@@ -218,7 +218,7 @@ pub fn SearchGenreDetail(
                                      key: "{track_key}",
                                      track: track.clone(),
                                      cover_url: cover_url.clone(),
-                                     on_start_radio: crate::track_row::radio_handler(track.clone()),
+                                     on_start_radio: crate::track_row::radio_handler(track.id.key().into_owned()),
                                      row_num: Some(idx + 1),
                                      is_menu_open: is_menu_open,
                                      is_album: false,
