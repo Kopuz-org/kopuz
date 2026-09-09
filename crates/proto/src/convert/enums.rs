@@ -98,6 +98,7 @@ pub fn job_kind_to_proto(value: api::JobKind) -> JobKind {
         api::JobKind::FavoritesSync => JobKind::FavoritesSync,
         api::JobKind::PlaylistSync => JobKind::PlaylistSync,
         api::JobKind::Download => JobKind::Download,
+        api::JobKind::Ytdlp => JobKind::Ytdlp,
         api::JobKind::Unknown => JobKind::Unspecified,
     }
 }
@@ -109,6 +110,7 @@ pub fn job_kind_from_proto(value: i32) -> api::JobKind {
         JobKind::FavoritesSync => api::JobKind::FavoritesSync,
         JobKind::PlaylistSync => api::JobKind::PlaylistSync,
         JobKind::Download => api::JobKind::Download,
+        JobKind::Ytdlp => api::JobKind::Ytdlp,
         JobKind::Unspecified => api::JobKind::Unknown,
     }
 }

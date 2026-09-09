@@ -569,6 +569,17 @@ impl api::JobApi for GrpcApi {
         Ok(())
     }
 
+    async fn start_ytdlp(&self, request: api::YtdlpRequest) -> Result<JobRef, ApiError> {
+        let job = self
+            .client()
+            .start_ytdlp(Request::new(convert::ytdlp_request_to_proto(&request)))
+            .await
+            .map_err(wire_error)?;
+        Ok(JobRef {
+            job_id: job.get_ref().job_id.clone(),
+        })
+    }
+
     async fn jobs(&self) -> Result<Vec<JobStatus>, ApiError> {
         let jobs = self
             .client()

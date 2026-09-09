@@ -12,6 +12,7 @@ mod artwork;
 mod catalog;
 mod error;
 mod events;
+mod jobs;
 mod library;
 mod mutations;
 mod player;
@@ -26,6 +27,7 @@ pub use catalog::{
 };
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
+pub use jobs::{DownloadItemStatus, YtdlpAudioFormat, YtdlpRequest};
 pub use library::{
     AlbumInfo, AlbumPage, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT, LyricChunkView,
     LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter, TrackInfo, TrackPage,
@@ -283,6 +285,10 @@ pub trait JobApi: Send + Sync {
     async fn downloads(&self) -> Result<Vec<String>, ApiError>;
 
     async fn remove_download(&self, key: String) -> Result<(), ApiError>;
+
+    /// Download a URL with yt-dlp. Progress arrives as job events; the
+    /// finished download is recorded in the history the settings page shows.
+    async fn start_ytdlp(&self, request: YtdlpRequest) -> Result<JobRef, ApiError>;
 }
 
 /// What is configured to play from, and what is signed into.

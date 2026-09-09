@@ -214,6 +214,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_radio(radio_service)
             .with_mutations(mutations)
             .with_sources(sources.clone())
+            .with_ytdlp(crate::YtdlpService::new(session.clone()))
             .with_integrations(crate::IntegrationService::new(
                 config_service_for_api,
                 session.clone(),

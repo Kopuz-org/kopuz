@@ -145,6 +145,7 @@ async fn spawn_pair() -> Pair {
     let sources =
         daemon::SourceService::new(database.clone(), session.clone(), config_service.clone());
     let integrations = daemon::IntegrationService::new(config_service.clone(), session.clone());
+    let ytdlp = daemon::YtdlpService::new(session.clone());
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)
             .with_config(config_service.clone())
@@ -156,6 +157,7 @@ async fn spawn_pair() -> Pair {
             .with_mutations(mutations.clone())
             .with_sources(sources.clone())
             .with_integrations(integrations.clone())
+            .with_ytdlp(ytdlp.clone())
     };
     let state = Arc::new(kopuzd::GrpcState {
         api: Arc::new(build_api(session.clone())),
@@ -1173,4 +1175,45 @@ async fn sources_agree_across_transports_and_carry_no_secret() {
         .await
         .expect("delete");
     assert_eq!(pair.local.sources().await.expect("sources").len(), 1);
+}
+
+/// yt-dlp is a subprocess the daemon owns. Whether it is installed is a
+/// daemon fact, so both transports report its absence the same way rather
+/// than one of them guessing.
+#[tokio::test]
+async fn ytdlp_reports_its_preconditions_identically() {
+    let pair = spawn_pair().await;
+
+    let empty = api::YtdlpRequest::default();
+    assert_eq!(
+        pair.local
+            .start_ytdlp(empty.clone())
+            .await
+            .err()
+            .map(|error| error.code),
+        Some(ErrorCode::InvalidInput),
+        "a request with no URL is rejected before anything is spawned"
+    );
+    assert_eq!(
+        pair.local
+            .start_ytdlp(empty.clone())
+            .await
+            .err()
+            .map(|e| e.code),
+        pair.wire.start_ytdlp(empty).await.err().map(|e| e.code),
+    );
+
+    // With a URL, the answer depends on whether the tools are installed --
+    // whatever it is, it must be the same on both sides.
+    let request = api::YtdlpRequest {
+        url: "https://example.com/watch".into(),
+        ..Default::default()
+    };
+    let local = pair.local.start_ytdlp(request.clone()).await;
+    let wire = pair.wire.start_ytdlp(request).await;
+    assert_eq!(
+        local.is_ok(),
+        wire.is_ok(),
+        "local {local:?} vs wire {wire:?}"
+    );
 }
