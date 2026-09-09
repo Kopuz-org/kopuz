@@ -23,6 +23,10 @@ struct StoredActivity {
     state: String,
     name: Option<String>,
     timestamps: Option<(i64, Option<i64>)>,
+    /// Cover URL and the album it belongs to. Discord wants `large_text`
+    /// between 2 and 128 characters, and rejects the whole assets object over
+    /// an empty one, so a track with no album (a YouTube video, say) carries
+    /// the image alone.
     assets: Option<(String, String)>,
 }
 
@@ -48,7 +52,11 @@ impl StoredActivity {
         }
 
         if let Some((ref image, ref text)) = self.assets {
-            act = act.assets(Assets::new().large_image(image).large_text(text));
+            let mut assets = Assets::new().large_image(image);
+            if !text.is_empty() {
+                assets = assets.large_text(text);
+            }
+            act = act.assets(assets);
         }
 
         act
