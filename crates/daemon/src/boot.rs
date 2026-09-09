@@ -173,6 +173,10 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         && !snapshot.queue.is_empty()
     {
         let restored = snapshot.queue.len();
+        // A restored queue can hold rows the library never stored -- last
+        // session's radio mix, say. Register them the way a live listing is,
+        // or hearting the track that is playing answers "unknown track key".
+        library.register_transient(&snapshot.queue);
         match session.restore_queue(snapshot).await {
             Ok(_) => tracing::info!(tracks = restored, "queue restored from the last session"),
             Err(error) => tracing::warn!(%error, "queue restore failed"),
