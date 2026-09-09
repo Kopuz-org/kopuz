@@ -19,10 +19,13 @@ use crate::session::{QueueMaterializer, SessionHandle};
 pub struct LibraryService {
     db: db::Db,
     source: config::Source,
-    station_registry: Arc<radio::registry::StationRegistry>,
+    /// Swapped whole when the radio service rebuilds it from config, so a
+    /// registry toggle takes effect without a restart.
+    station_registry: std::sync::RwLock<Arc<radio::registry::StationRegistry>>,
     cover_cache: PathBuf,
     config_rx: OnceLock<watch::Receiver<config::AppConfig>>,
     session: OnceLock<SessionHandle>,
+    catalog: OnceLock<Arc<crate::catalog::CatalogService>>,
     transient: std::sync::Mutex<TransientTracks>,
 }
 
@@ -117,10 +120,11 @@ impl LibraryService {
         Self {
             db,
             source,
-            station_registry,
+            station_registry: std::sync::RwLock::new(station_registry),
             cover_cache,
             config_rx: OnceLock::new(),
             session: OnceLock::new(),
+            catalog: OnceLock::new(),
             transient: std::sync::Mutex::new(TransientTracks::default()),
         }
     }
@@ -146,6 +150,30 @@ impl LibraryService {
 
     pub fn transient_track(&self, key: &str) -> Option<Track> {
         self.transient.lock().ok()?.by_key.get(key).cloned()
+    }
+
+    fn catalog_service(&self) -> Result<&crate::catalog::CatalogService, ApiError> {
+        self.catalog
+            .get()
+            .map(Arc::as_ref)
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without a catalog service"))
+    }
+
+    /// Late-bound, because the catalog service needs this one to register
+    /// what it fetches. Without it, a mix seeded by a track cannot be built.
+    pub fn attach_catalog(&self, catalog: Arc<crate::catalog::CatalogService>) {
+        let _ = self.catalog.set(catalog);
+    }
+
+    /// Adopt a rebuilt station registry, and hand it to the session so a
+    /// stream URL resolves against the same one at load time.
+    pub fn set_station_registry(&self, registry: Arc<radio::registry::StationRegistry>) {
+        if let Ok(mut current) = self.station_registry.write() {
+            *current = registry.clone();
+        }
+        if let Some(session) = self.session.get() {
+            session.set_station_registry(registry);
+        }
     }
 
     /// Late-bound session wiring (the session needs the materializer first):
@@ -354,7 +382,11 @@ impl LibraryService {
     /// raw ids while the first metadata update is in flight. The `u64::MAX`
     /// duration sentinel is translated to `TrackKind::Radio` at the wire.
     fn radio_track(&self, station_id: &str, stream_id: &str) -> Track {
-        let station = self.station_registry.get(station_id);
+        let registry = match self.station_registry.read() {
+            Ok(registry) => registry.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
+        let station = registry.get(station_id);
         let title = station
             .map(|station| station.name.clone())
             .filter(|name| !name.trim().is_empty())
@@ -505,9 +537,8 @@ impl QueueMaterializer for LibraryService {
                 station_id,
                 stream_id,
             } => Ok(vec![self.radio_track(station_id, stream_id)]),
-            QueueContext::TrackRadio { .. } | QueueContext::PlaylistRadio { .. } => Err(
-                ApiError::unsupported("this daemon runs without a catalog service"),
-            ),
+            QueueContext::TrackRadio { key } => self.catalog_service()?.track_radio(key).await,
+            QueueContext::PlaylistRadio { id } => self.catalog_service()?.playlist_radio(id).await,
         }
     }
 }

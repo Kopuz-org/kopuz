@@ -109,6 +109,12 @@ pub fn album_cover(album: &reader::Album) -> CoverRef {
     }
 }
 
+/// A ref for a picture the daemon holds only a URL for -- a browse tile, a
+/// station icon. Versioned by the URL, so a changed image is a changed ref.
+pub fn url_ref(target: ArtworkTarget, url: &str) -> ArtworkRef {
+    ArtworkRef::new(target, version_of(&CoverRef::EmbeddedUrl(url.to_string())))
+}
+
 pub fn track_ref(track: &reader::Track) -> Option<ArtworkRef> {
     ref_for(
         ArtworkTarget::Track(track.id.key().into_owned()),
@@ -147,6 +153,8 @@ pub struct ArtworkService {
     db: db::Db,
     session: SessionHandle,
     library: OnceLock<Arc<crate::library::LibraryService>>,
+    catalog: OnceLock<Arc<crate::catalog::CatalogService>>,
+    radio: OnceLock<Arc<crate::radio::RadioService>>,
     cache_dir: PathBuf,
     http: reqwest::Client,
 }
@@ -184,15 +192,25 @@ impl ArtworkService {
             db,
             session,
             library: OnceLock::new(),
+            catalog: OnceLock::new(),
+            radio: OnceLock::new(),
             cache_dir,
             http: reqwest::Client::new(),
         })
     }
 
-    /// Late-bound, because the library service is built alongside this one.
-    /// Without it, artwork for a browsed-but-unqueued row cannot resolve.
+    /// Late-bound, because these services are built alongside this one.
+    /// Without them, a browse tile or a station icon has no picture.
     pub fn attach_library(&self, library: Arc<crate::library::LibraryService>) {
         let _ = self.library.set(library);
+    }
+
+    pub fn attach_catalog(&self, catalog: Arc<crate::catalog::CatalogService>) {
+        let _ = self.catalog.set(catalog);
+    }
+
+    pub fn attach_radio(&self, radio: Arc<crate::radio::RadioService>) {
+        let _ = self.radio.set(radio);
     }
 
     pub async fn fetch(
@@ -258,9 +276,26 @@ impl ArtworkService {
                 };
                 Ok(playlist_cover(playlist, config, first.as_ref()))
             }
-            ArtworkTarget::Catalog(_) | ArtworkTarget::Station(_) => Err(ApiError::unsupported(
-                "this daemon serves no catalog or station artwork",
-            )),
+            // Public images the daemon holds a URL for. Proxied rather than
+            // handed over, so every frontend gets pictures the same way and
+            // one that cannot fetch a URL itself still works.
+            ArtworkTarget::Catalog(id) => self
+                .catalog
+                .get()
+                .and_then(|catalog| catalog.thumbnail(id))
+                .map(CoverRef::EmbeddedUrl)
+                .ok_or_else(|| ApiError::not_found("no artwork for this catalog item")),
+            ArtworkTarget::Station(id) => {
+                let radio = self
+                    .radio
+                    .get()
+                    .ok_or_else(|| ApiError::unsupported("this daemon runs without radio"))?;
+                radio
+                    .artwork_url(id)
+                    .await
+                    .map(CoverRef::EmbeddedUrl)
+                    .ok_or_else(|| ApiError::not_found("no artwork for this station"))
+            }
         }
     }
 

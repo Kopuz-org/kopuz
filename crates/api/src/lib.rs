@@ -9,15 +9,20 @@
 //! time as the daemon services land.
 
 mod artwork;
+mod catalog;
 mod error;
 mod events;
 mod library;
 mod player;
 mod playlists;
 mod queue;
+mod radio;
 mod sources;
 
 pub use artwork::{ArtworkData, ArtworkRef, ArtworkRequest, ArtworkTarget};
+pub use catalog::{
+    CatalogDetail, CatalogDetailRequest, CatalogItem, CatalogItemKind, CatalogPage, CatalogShelf,
+};
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
 pub use library::{
@@ -33,6 +38,7 @@ pub use playlists::{PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistR
 pub use queue::{
     QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow, SetQueueRequest,
 };
+pub use radio::{RadioStationInfo, RadioStreamInfo};
 pub use sources::{
     AlbumPresentation, ArtistPresentation, CredentialProvision, FavoritesSyncMode, IntegrationKind,
     IntegrationProvision, IntegrationStatus, LocalSourceDraft, PlaylistCapability, ServerDraft,
@@ -146,6 +152,30 @@ pub trait LibraryApi: Send + Sync {
     /// Search the active source. Remote sources answer over the network, so
     /// this is a daemon call and not a filter the caller composes.
     async fn search(&self, query: String) -> Result<SearchResults, ApiError>;
+
+    /// The source's browse feed. `continuation` pages it; `None` starts over.
+    async fn catalog(&self, continuation: Option<String>) -> Result<CatalogPage, ApiError>;
+
+    /// Open one catalog entity. Tracks it returns are registered, so a client
+    /// can queue them by key like any others.
+    async fn catalog_detail(
+        &self,
+        request: CatalogDetailRequest,
+    ) -> Result<CatalogDetail, ApiError>;
+
+    /// Every station the configured registries hold, pinned ones marked.
+    async fn radio_stations(&self) -> Result<Vec<RadioStationInfo>, ApiError>;
+
+    /// Search the public station directory. Hits join the live registry, so
+    /// one can be played by id straight afterwards.
+    async fn search_radio(
+        &self,
+        query: String,
+        limit: u32,
+    ) -> Result<Vec<RadioStationInfo>, ApiError>;
+
+    /// Pin a station so it survives a registry refresh and appears first.
+    async fn pin_radio_station(&self, id: String, pinned: bool) -> Result<(), ApiError>;
 
     /// Look for photos for these artists, storing what it finds. Names already
     /// resolved, and names whose last search definitively found nothing, are
