@@ -146,7 +146,7 @@ async fn musixmatch_get(
         .send()
         .await
         .map_err(|error| {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "musixmatch request action={action} failed={error}"
             );
@@ -156,7 +156,7 @@ async fn musixmatch_get(
         .json::<serde_json::Value>()
         .await
         .map_err(|error| {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "musixmatch request action={action} json_failed={error}"
             );
@@ -186,7 +186,7 @@ async fn musixmatch_token(client: &reqwest::Client, reach: &ProviderReach) -> Op
         .send()
         .await
         .map_err(|error| {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "musixmatch token request failed={error}"
             );
@@ -196,7 +196,7 @@ async fn musixmatch_token(client: &reqwest::Client, reach: &ProviderReach) -> Op
         .json::<serde_json::Value>()
         .await
         .map_err(|error| {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "musixmatch token json_failed={error}"
             );

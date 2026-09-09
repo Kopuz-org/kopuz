@@ -845,7 +845,7 @@ async fn fetch_from_lrclib(
     {
         Ok(res) => res,
         Err(error) => {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "lrclib get failed={error}"
             );
@@ -880,7 +880,7 @@ async fn fetch_from_lrclib(
     {
         Ok(res) => res,
         Err(error) => {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "lrclib search failed={error}"
             );

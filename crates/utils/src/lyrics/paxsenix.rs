@@ -37,7 +37,7 @@ pub(super) async fn fetch_from_paxsenix_youtube(
             .send()
             .await
             .map_err(|error| {
-                tracing::info!(
+                tracing::warn!(
                     target: "kopuz::lyrics",
                     "paxsenix_youtube search failed={error}"
                 );
@@ -47,7 +47,7 @@ pub(super) async fn fetch_from_paxsenix_youtube(
             .json::<Vec<PaxsenixYoutubeSearchResult>>()
             .await
             .map_err(|error| {
-                tracing::info!(
+                tracing::warn!(
                     target: "kopuz::lyrics",
                     "paxsenix_youtube search json_failed={error}"
                 );
@@ -72,7 +72,7 @@ pub(super) async fn fetch_from_paxsenix_youtube(
         .send()
         .await
         .map_err(|error| {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "paxsenix_youtube lyrics failed={error}"
             );
@@ -82,7 +82,7 @@ pub(super) async fn fetch_from_paxsenix_youtube(
         .text()
         .await
         .map_err(|error| {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "paxsenix_youtube lyrics text_failed={error}"
             );
@@ -177,7 +177,7 @@ pub(super) async fn fetch_from_paxsenix_apple_music(
         .send()
         .await
         .map_err(|error| {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "paxsenix_apple itunes_search failed={error}"
             );
@@ -187,7 +187,7 @@ pub(super) async fn fetch_from_paxsenix_apple_music(
         .json::<ItunesSearchResponse>()
         .await
         .map_err(|error| {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "paxsenix_apple itunes_search json_failed={error}"
             );
@@ -222,7 +222,7 @@ pub(super) async fn fetch_from_paxsenix_apple_music(
         .send()
         .await
         .map_err(|error| {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "paxsenix_apple lyrics failed={error}"
             );
@@ -232,7 +232,7 @@ pub(super) async fn fetch_from_paxsenix_apple_music(
         .json::<PaxsenixAppleLyricsResponse>()
         .await
         .map_err(|error| {
-            tracing::info!(
+            tracing::warn!(
                 target: "kopuz::lyrics",
                 "paxsenix_apple lyrics json_failed={error}"
             );
