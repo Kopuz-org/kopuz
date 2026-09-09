@@ -6,6 +6,11 @@
 //! from whatever they report. A frontend sees only `PlayerState.external`,
 //! telling it what is playing and where, and sends the same transport commands
 //! it always does -- the session routes them here instead of to the engine.
+//!
+//! An integration is a sink, not a player: it holds one track. The queue, the
+//! shuffle order and what plays next stay the session's, which is why there is
+//! no `next` here -- an end-of-track report advances kopuz's queue, and the
+//! next track is loaded into whichever of the two can play it.
 
 use std::sync::Arc;
 
@@ -23,12 +28,17 @@ pub trait ExternalPlayer: Send + Sync {
     /// library, so their ids cannot be looked up.
     fn service(&self) -> config::MusicService;
 
-    async fn play(&self) -> Result<(), ApiError>;
+    /// Start one track. `artwork` is a URL the integration may show on its own
+    /// surface, which for a browser tab is its Media Session card.
+    async fn load(&self, track: &Track, artwork: Option<String>) -> Result<(), ApiError>;
+
+    async fn resume(&self) -> Result<(), ApiError>;
     async fn pause(&self) -> Result<(), ApiError>;
-    async fn next(&self) -> Result<(), ApiError>;
-    async fn previous(&self) -> Result<(), ApiError>;
     async fn seek(&self, position_ms: u64) -> Result<(), ApiError>;
     async fn set_volume(&self, volume: f32) -> Result<(), ApiError>;
+
+    /// Give up playback: the queue moved to something the engine plays.
+    async fn stop(&self) -> Result<(), ApiError>;
 }
 
 /// What the integration is playing, pushed by the integration as it learns it.
@@ -37,7 +47,8 @@ pub struct ExternalReport {
     pub track: Option<Track>,
     pub position_ms: u64,
     pub playing: bool,
-    /// The track reached its end; counts a listen exactly once.
+    /// The track reached its end; counts a listen exactly once, and advances
+    /// the queue the way the engine's own end-of-track does.
     pub completed: bool,
     pub device: Option<String>,
     /// Cover for the reported track, which the library may not hold.

@@ -35,8 +35,8 @@ pub use library::{
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
-    BufferedRange, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying, Phase,
-    PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
+    BufferedRange, ExternalDevice, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying,
+    Phase, PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
 };
 pub use playlists::{PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder};
 pub use queue::{
@@ -116,6 +116,18 @@ pub trait PlayerApi: Send + Sync {
     async fn set_queue(&self, req: SetQueueRequest) -> Result<CommandAck, ApiError>;
 
     async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError>;
+
+    /// Where an integration can play: the Connect devices, the phones, the
+    /// speakers. Empty when that integration is not signed in.
+    async fn external_devices(&self, kind: String) -> Result<Vec<ExternalDevice>, ApiError>;
+
+    /// Move an integration's playback to one of those devices, or back to
+    /// this app's own with `None`.
+    async fn select_external_device(
+        &self,
+        kind: String,
+        device_id: Option<String>,
+    ) -> Result<(), ApiError>;
 }
 
 /// Reading the library, and the per-track state that belongs to it.

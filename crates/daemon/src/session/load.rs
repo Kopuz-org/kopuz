@@ -14,6 +14,15 @@ impl Session {
         let Some(track) = self.model.track_at(idx).cloned() else {
             return false;
         };
+        // A track only an integration can play is handed to it, and one it
+        // cannot hands playback back. Both directions run through here, so
+        // every way of reaching a track -- next, previous, a jump, a new queue
+        // -- switches sides the same way.
+        match self.sink_for(&track) {
+            Some(sink) => return self.start_external_load(track, sink),
+            None if self.external.is_some() => self.release_external(),
+            None => {}
+        }
         let track_key = track.id.uid();
         let (restore_seek, clear_pending_resume) = self.pending_resume_seek(&track);
         let use_crossfade = allow_crossfade
@@ -400,6 +409,37 @@ impl Session {
                 // cancelled it; token guards reject any late completion.
             }
         }
+    }
+
+    /// The integration that plays this track, if one does. A track the engine
+    /// can decode is never handed over, even when the integration could also
+    /// play it: a local file plays locally.
+    pub(super) fn sink_for(&self, track: &Track) -> Option<crate::external::SharedExternalPlayer> {
+        let sink = self.sink.as_ref()?;
+        (track.id.service() == Some(sink.service())).then(|| sink.clone())
+    }
+
+    /// Hand a track to the integration. The engine stops, and what is playing
+    /// comes back on the report stream rather than from a load reply -- the
+    /// integration decides when it actually starts.
+    fn start_external_load(
+        &mut self,
+        track: Track,
+        sink: crate::external::SharedExternalPlayer,
+    ) -> bool {
+        self.cancel_load_task();
+        self.pending_transition = None;
+        if self.external.is_none() {
+            self.attach_external_now(sink.clone());
+        }
+        let artwork =
+            server::cover::track(&self.config, &track, 800).map(|cover| cover.as_ref().to_string());
+        tokio::spawn(async move {
+            if let Err(error) = sink.load(&track, artwork).await {
+                tracing::warn!(%error, "external playback could not start");
+            }
+        });
+        true
     }
 }
 

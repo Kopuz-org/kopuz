@@ -11,7 +11,6 @@ pub mod integrations;
 pub mod jobs;
 pub mod library_actions;
 pub mod playlist_actions;
-pub mod scrobble_scheduler;
 mod session_projector;
 pub mod source_switch;
 pub mod sources;

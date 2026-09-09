@@ -77,6 +77,8 @@ service Kopuz {
 
   rpc SetQueue(SetQueueRequest) returns (MutationResult);
   rpc EditQueue(QueueEditRequest) returns (MutationResult);
+  rpc GetExternalDevices(ExternalDevicesRequest) returns (ExternalDeviceList);
+  rpc SelectExternalDevice(SelectExternalDeviceRequest) returns (Unit);
   rpc SetFavorite(FavoriteRequest) returns (SetFavoriteResponse);
   rpc UpdateTrackMetadata(TrackMetadataPatch) returns (TrackInfo);
   rpc DeleteTracks(DeleteTracksRequest) returns (Unit);
@@ -315,6 +317,27 @@ message FadingState {
 message ExternalPlayback {
   string kind = 1;
   optional string device = 2;
+}
+
+message ExternalDevicesRequest {
+  string kind = 1;
+}
+
+message ExternalDevice {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  bool active = 4;
+}
+
+message ExternalDeviceList {
+  repeated ExternalDevice devices = 1;
+}
+
+// Absent device_id moves playback back to this app's own player.
+message SelectExternalDeviceRequest {
+  string kind = 1;
+  optional string device_id = 2;
 }
 
 message QueueSummary {

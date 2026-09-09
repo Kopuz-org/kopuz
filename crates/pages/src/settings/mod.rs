@@ -67,10 +67,13 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .collect()
     });
     let active_server = use_memo(move || servers().into_iter().find(|server| server.active));
+    // Every browser the daemon knows how to drive. Which of them is actually
+    // installed is the daemon's machine's business, not this one's, so the
+    // list is not filtered here and an absent one falls back there.
     let spotify_browsers = use_hook(|| {
-        ::server::spotify::host::available_browsers()
-            .into_iter()
-            .map(|b| (b.id.to_string(), b.label.to_string()))
+        config::Browser::ALL
+            .iter()
+            .map(|browser| (browser.id().to_string(), browser.label().to_string()))
             .collect::<Vec<_>>()
     });
     let mut show_add_server = use_signal(|| false);

@@ -82,6 +82,15 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
         &mut ctrl.playback_error,
         state.error.as_ref().map(|error| error.message.clone()),
     );
+    // Which device an integration is playing on, so a picker can mark it and
+    // the bottombar can say playback is somewhere else.
+    set_if_changed(
+        &mut ctrl.external_device,
+        state
+            .external
+            .as_ref()
+            .and_then(|external| external.device.clone()),
+    );
 
     set_if_changed(&mut ctrl.shuffle, state.queue.shuffle);
     set_if_changed(&mut ctrl.loop_mode, state.queue.loop_mode);
@@ -180,15 +189,10 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
         apply_queue(&mut ctrl, mirror);
         let mut daemon_clock = apply_state(&mut ctrl, handle.state());
         loop {
-            let ticking = !*ctrl.external_active.peek()
-                && *ctrl.is_playing.peek()
-                && ctrl.engine_anchor.peek().is_some();
+            let ticking = *ctrl.is_playing.peek() && ctrl.engine_anchor.peek().is_some();
             tokio::select! {
                 event = rx.recv() => match event {
                     Ok(event) => {
-                        if *ctrl.external_active.peek() {
-                            continue;
-                        }
                         match event {
                             ApiEvent::PlayerState(state) => {
                                 daemon_clock = apply_state(&mut ctrl, *state);
@@ -231,11 +235,9 @@ pub(crate) fn use_session_projector(ctrl: PlayerController) {
                         }
                     }
                     Err(RecvError::Lagged(_)) => {
-                        if !*ctrl.external_active.peek() {
-                            let mirror = handle.queue_mirror().await;
-                            apply_queue(&mut ctrl, mirror);
-                            daemon_clock = apply_state(&mut ctrl, handle.state());
-                        }
+                        let mirror = handle.queue_mirror().await;
+                        apply_queue(&mut ctrl, mirror);
+                        daemon_clock = apply_state(&mut ctrl, handle.state());
                     }
                     Err(RecvError::Closed) => break,
                 },

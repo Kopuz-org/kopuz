@@ -119,6 +119,11 @@ fn test_track(key: &String) -> Track {
                 service: config::MusicService::Jellyfin,
                 item_id: key.clone(),
             }
+        } else if let Some(item_id) = key.strip_prefix("spotify:") {
+            reader::models::TrackId::Server {
+                service: config::MusicService::Spotify,
+                item_id: item_id.to_string(),
+            }
         } else {
             reader::models::TrackId::Local(PathBuf::from(key))
         },
@@ -1387,23 +1392,18 @@ impl crate::external::ExternalPlayer for StubExternal {
         config::MusicService::Spotify
     }
 
-    async fn play(&self) -> Result<(), ApiError> {
-        self.record("play");
+    async fn load(&self, track: &Track, _artwork: Option<String>) -> Result<(), ApiError> {
+        self.record(&format!("load:{}", track.title));
+        Ok(())
+    }
+
+    async fn resume(&self) -> Result<(), ApiError> {
+        self.record("resume");
         Ok(())
     }
 
     async fn pause(&self) -> Result<(), ApiError> {
         self.record("pause");
-        Ok(())
-    }
-
-    async fn next(&self) -> Result<(), ApiError> {
-        self.record("next");
-        Ok(())
-    }
-
-    async fn previous(&self) -> Result<(), ApiError> {
-        self.record("previous");
         Ok(())
     }
 
@@ -1414,6 +1414,11 @@ impl crate::external::ExternalPlayer for StubExternal {
 
     async fn set_volume(&self, volume: f32) -> Result<(), ApiError> {
         self.record(&format!("volume:{volume}"));
+        Ok(())
+    }
+
+    async fn stop(&self) -> Result<(), ApiError> {
+        self.record("stop");
         Ok(())
     }
 }
@@ -1480,8 +1485,8 @@ async fn transport_commands_reach_the_integration_that_owns_playback() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(
         stub.calls(),
-        vec!["next", "previous", "seek:4200", "pause"],
-        "toggle resolves against the daemon's own phase"
+        vec!["seek:4200", "pause"],
+        "next and previous drive the queue, not the integration"
     );
 }
 
@@ -1521,5 +1526,55 @@ async fn detaching_an_integration_returns_the_session_to_the_engine() {
     assert!(
         stub.calls().iter().all(|call| call != "next"),
         "the detached integration hears nothing further"
+    );
+}
+
+/// The whole point of a sink: a track the engine cannot decode is handed to
+/// the integration, and the next one that it can comes back to the engine.
+/// Both directions go through the load path, so a jump switches sides too.
+#[tokio::test]
+async fn playback_moves_between_the_engine_and_an_integration() {
+    let harness = harness(|_| {});
+    let stub = Arc::new(StubExternal::default());
+    harness.api.session.set_external_sink(stub.clone());
+
+    harness
+        .api
+        .set_queue(replace(&["spotify:remote", "local.wav"]))
+        .await
+        .expect("queue replaced");
+
+    let state = wait_state(&harness.api, "the integration took the track", |state| {
+        state.external.is_some()
+    })
+    .await;
+    assert_eq!(
+        state.external.as_ref().map(|it| it.kind.as_str()),
+        Some("stub")
+    );
+    assert!(
+        stub.calls()
+            .iter()
+            .any(|call| call == "load:spotify:remote"),
+        "the integration was asked to play the track, got {:?}",
+        stub.calls()
+    );
+
+    // Ending the remote track advances kopuz's queue, which lands on a track
+    // the engine plays -- so the integration is told to stop.
+    harness.api.session.report_external(crate::ExternalReport {
+        track: Some(external_track("spotify:remote")),
+        playing: true,
+        completed: true,
+        ..Default::default()
+    });
+    wait_state(&harness.api, "the engine took it back", |state| {
+        state.external.is_none() && state.track.as_ref().is_some_and(|t| t.title == "local.wav")
+    })
+    .await;
+    assert!(
+        stub.calls().iter().any(|call| call == "stop"),
+        "the integration was told to give up playback, got {:?}",
+        stub.calls()
     );
 }

@@ -855,6 +855,42 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::MutationResult { rev: ack.rev }))
     }
 
+    async fn get_external_devices(
+        &self,
+        request: Request<proto::ExternalDevicesRequest>,
+    ) -> Result<Response<proto::ExternalDeviceList>, Status> {
+        let devices = self
+            .0
+            .api
+            .external_devices(request.into_inner().kind)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::ExternalDeviceList {
+            devices: devices
+                .into_iter()
+                .map(|device| proto::ExternalDevice {
+                    id: device.id,
+                    name: device.name,
+                    kind: device.kind,
+                    active: device.active,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn select_external_device(
+        &self,
+        request: Request<proto::SelectExternalDeviceRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .select_external_device(request.kind, request.device_id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     async fn set_favorite(
         &self,
         request: Request<proto::FavoriteRequest>,

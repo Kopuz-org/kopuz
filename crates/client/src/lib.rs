@@ -177,6 +177,40 @@ impl api::PlayerApi for GrpcApi {
             rev: ack.get_ref().rev,
         })
     }
+
+    async fn external_devices(&self, kind: String) -> Result<Vec<api::ExternalDevice>, ApiError> {
+        let list = self
+            .client()
+            .get_external_devices(Request::new(proto::ExternalDevicesRequest { kind }))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        Ok(list
+            .devices
+            .into_iter()
+            .map(|device| api::ExternalDevice {
+                id: device.id,
+                name: device.name,
+                kind: device.kind,
+                active: device.active,
+            })
+            .collect())
+    }
+
+    async fn select_external_device(
+        &self,
+        kind: String,
+        device_id: Option<String>,
+    ) -> Result<(), ApiError> {
+        self.client()
+            .select_external_device(Request::new(proto::SelectExternalDeviceRequest {
+                kind,
+                device_id,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]

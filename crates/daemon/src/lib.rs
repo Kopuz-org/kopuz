@@ -24,6 +24,7 @@ pub mod radio;
 pub mod scrobbler;
 pub mod session;
 pub mod sources;
+pub mod spotify;
 mod wire;
 pub mod ytdlp;
 
@@ -48,4 +49,5 @@ pub use session::{
     LocalApi, PlaybackServices, QueueMaterializer, QueueMirrorSnapshot, SessionHandle,
 };
 pub use sources::SourceService;
+pub use spotify::SpotifySink;
 pub use ytdlp::YtdlpService;

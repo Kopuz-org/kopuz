@@ -18,6 +18,7 @@ pub struct LocalApi {
     pub(super) sources: Option<Arc<crate::sources::SourceService>>,
     pub(super) integrations: Option<Arc<crate::integrations::IntegrationService>>,
     pub(super) ytdlp: Option<Arc<crate::ytdlp::YtdlpService>>,
+    pub(super) spotify: Option<Arc<crate::spotify::SpotifySink>>,
 }
 
 impl LocalApi {
@@ -37,6 +38,7 @@ impl LocalApi {
             sources: None,
             integrations: None,
             ytdlp: None,
+            spotify: None,
         }
     }
 
@@ -149,6 +151,22 @@ impl LocalApi {
         self.ytdlp = Some(ytdlp);
         self
     }
+
+    pub fn with_spotify(mut self, spotify: Arc<crate::spotify::SpotifySink>) -> Self {
+        self.spotify = Some(spotify);
+        self
+    }
+
+    /// The integration named by `kind`. Only Spotify plays itself today, so
+    /// any other name is a client asking for something that is not here.
+    fn spotify_sink(&self, kind: &str) -> Result<&Arc<crate::spotify::SpotifySink>, ApiError> {
+        if kind != "spotify" {
+            return Err(ApiError::unsupported("no such external player"));
+        }
+        self.spotify
+            .as_ref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without Spotify playback"))
+    }
 }
 
 #[async_trait::async_trait]
@@ -252,6 +270,18 @@ impl api::PlayerApi for LocalApi {
 
     async fn queue_edit(&self, edit: QueueEdit) -> Result<CommandAck, ApiError> {
         self.session.queue_edit(edit).await
+    }
+
+    async fn external_devices(&self, kind: String) -> Result<Vec<api::ExternalDevice>, ApiError> {
+        self.spotify_sink(&kind)?.devices().await
+    }
+
+    async fn select_external_device(
+        &self,
+        kind: String,
+        device_id: Option<String>,
+    ) -> Result<(), ApiError> {
+        self.spotify_sink(&kind)?.select_device(device_id).await
     }
 }
 
