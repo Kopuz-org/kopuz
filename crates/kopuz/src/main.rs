@@ -449,9 +449,8 @@ fn App() -> Element {
         }
     });
 
-    // The whole-Library signal is GONE — pages/components read the DB through
-    // query hooks, and every track self-resolves its cover via the cover seam
-    // (a local row's cover_path is projected from its album in the DB read layer).
+    // The whole-Library signal is GONE — pages read through query hooks, and
+    // every row carries the reference its picture resolves from.
     let mut current_route = use_signal(|| Route::Home);
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
         use_signal(std::collections::HashMap::new);
