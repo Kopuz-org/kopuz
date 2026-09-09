@@ -131,19 +131,10 @@ ytdlp_format_flac = FLAC
 ytdlp_format_opus = OPUS
 ytdlp_format_wav = WAV
 ytdlp_format_video = Vídeo (MP4)
-ytdlp_status_downloading_eta = { $percent }%  { $speed }  ETA { $eta }
 ytdlp_status_downloading = { $percent }%
 ytdlp_status_processing = A processar…
 ytdlp_status_completed = Concluído
 ytdlp_status_waiting = A aguardar…
-ytdlp_error_not_found = yt-dlp não encontrado no PATH. Instala-o: https://github.com/yt-dlp/yt-dlp
-ytdlp_error_ffmpeg_not_found = ffmpeg não encontrado no PATH. Instala-o para que o pós-processamento do yt-dlp funcione corretamente.
-ytdlp_error_start = Erro ao iniciar o yt-dlp: { $error }
-ytdlp_error_exit = yt-dlp terminou: { $status }
-ytdlp_error_duplicate_active = Este URL já se encontra a ser descarregado.
-ytdlp_error_output_not_directory = O caminho de destino não é uma pasta: { $path }
-ytdlp_error_output_prepare = Falha ao preparar a pasta de destino: { $error }
-ytdlp_error_output_not_writable = Sem permissão de escrita na pasta de destino: { $path }
 
 # UI Actions & Buttons
 add_to_favorites = Adicionar aos favoritos

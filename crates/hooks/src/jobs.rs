@@ -13,6 +13,9 @@ use crate::api::use_api;
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct JobProgress {
     pub running: bool,
+    /// What the job is doing now: "starting", then whatever the job names its
+    /// stages -- a page picks its icon from this.
+    pub phase: String,
     /// Items handled so far, when the job counts them.
     pub current: Option<u64>,
     pub total: Option<u64>,
@@ -37,6 +40,7 @@ pub fn use_job_progress(kind: api::JobKind) -> Signal<JobProgress> {
             {
                 state.set(JobProgress {
                     running: true,
+                    phase: job.phase.clone(),
                     current: job.current,
                     message: job.message.clone(),
                     total: job.total,
@@ -50,6 +54,7 @@ pub fn use_job_progress(kind: api::JobKind) -> Signal<JobProgress> {
                     api::ApiEvent::JobProgress(progress) if progress.kind == kind => {
                         state.set(JobProgress {
                             running: true,
+                            phase: progress.phase.clone(),
                             current: progress.current,
                             message: progress.message.clone(),
                             total: progress.total,

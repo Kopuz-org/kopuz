@@ -4605,7 +4605,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
- "uuid 1.23.5",
 ]
 
 [[package]]

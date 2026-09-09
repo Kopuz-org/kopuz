@@ -62,7 +62,13 @@ impl JobCtx {
 
     /// Progress capped at ~5 events/s, for per-file callbacks that would
     /// otherwise flood the event ring.
-    pub fn progress_throttled(&self, phase: &str, message: Option<String>) {
+    pub fn progress_throttled(
+        &self,
+        phase: &str,
+        current: Option<u64>,
+        total: Option<u64>,
+        message: Option<String>,
+    ) {
         let due = {
             let Ok(mut last) = self.last_emit.lock() else {
                 return;
@@ -75,7 +81,7 @@ impl JobCtx {
             }
         };
         if due {
-            self.progress(phase, None, None, message);
+            self.progress(phase, current, total, message);
         }
     }
 
@@ -148,6 +154,18 @@ impl JobRunner {
                 cancelled: cancelled.clone(),
             });
         }
+
+        // Announce the job before it produces anything, or a page that just
+        // asked for one sits blank until the first line of real progress.
+        self.session
+            .emit_event(ApiEvent::JobProgress(api::JobProgress {
+                id: id.clone(),
+                kind,
+                phase: "starting".to_string(),
+                current: None,
+                total: None,
+                message: None,
+            }));
 
         let ctx = JobCtx {
             id: id.clone(),
