@@ -91,9 +91,21 @@ async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
         {
             return Ok(saved);
         }
-        let fresh = innertube::visitor_id(cookies).await?;
-        if let Some(handle) = db::cache::get() {
-            let _ = handle.meta_put(&key, VISITOR_META_KIND, &fresh).await;
+        // Any stable id will do for stability's sake, so a signed-in fetch
+        // that yields none falls back to an anonymous one filed under the
+        // account: the point is that the same id comes back next launch.
+        let fresh = match innertube::visitor_id(cookies).await {
+            Ok(id) => id,
+            Err(error) if cookies.is_some() => {
+                tracing::debug!(%error, "signed-in visitor id fetch failed; using an anonymous one");
+                innertube::visitor_id(None).await?
+            }
+            Err(error) => return Err(error),
+        };
+        if let Some(handle) = db::cache::get()
+            && let Err(error) = handle.meta_put(&key, VISITOR_META_KIND, &fresh).await
+        {
+            tracing::warn!(%error, "storing the visitor id failed; it will be minted again next launch");
         }
         Ok(fresh)
     })
@@ -594,7 +606,15 @@ async fn try_native_decipher(
     let player = decipher::player_js(video_id).await?;
     // The same device identity a browser would present with these cookies;
     // a signed-in request with none is the odd one out.
-    let visitor = visitor_data(cookies).await.ok();
+    let visitor = match visitor_data(cookies).await {
+        Ok(visitor) => Some(visitor),
+        // Proceeding without one is the state that draws challenges, so it
+        // is not something to do quietly.
+        Err(error) => {
+            tracing::warn!(%error, "no visitor id for the signed-in player call");
+            None
+        }
+    };
     let extras = PlayerExtras {
         signature_timestamp: Some(player.1),
         visitor_data: visitor,
