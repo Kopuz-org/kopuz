@@ -353,7 +353,7 @@ fn PlaylistsGrid(
     // middle one is signed with credentials that never leave the daemon, so
     // the chain cannot live here.
     let cover_for = |playlist: &reader::models::Playlist| -> Option<utils::CoverUrl> {
-        Some(hooks::wire::playlist_cover_url(&playlist.id))
+        ::server::cover::from_path(&config.read(), playlist.cover_path.as_deref(), 384)
     };
 
     if caps().folders {

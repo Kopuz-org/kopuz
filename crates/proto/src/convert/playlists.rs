@@ -6,7 +6,7 @@ pub fn playlist_info_to_proto(value: &api::PlaylistInfo) -> PlaylistInfo {
         id: value.id.clone(),
         name: value.name.clone(),
         track_keys: value.track_keys.clone(),
-        artwork: value.artwork.as_ref().map(artwork_target_to_proto),
+        artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
     }
 }
 
@@ -15,7 +15,7 @@ pub fn playlist_info_from_proto(value: &PlaylistInfo) -> api::PlaylistInfo {
         id: value.id.clone(),
         name: value.name.clone(),
         track_keys: value.track_keys.clone(),
-        artwork: value.artwork.as_ref().and_then(artwork_target_from_proto),
+        artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
     }
 }
 

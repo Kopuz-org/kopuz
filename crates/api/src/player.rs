@@ -64,6 +64,7 @@ pub struct NowPlaying {
     pub bitrate: u16,
     pub kind: TrackKind,
     pub seekable: bool,
+    pub artwork: Option<crate::ArtworkRef>,
 }
 
 /// Position as an anchor, not a ticker: `ms` was correct at daemon-monotonic

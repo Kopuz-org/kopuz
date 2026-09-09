@@ -151,6 +151,26 @@ impl api::PlayerApi for LocalApi {
         self.session.queue_window(page).await
     }
 
+    async fn queue_snapshot(&self) -> Result<api::QueueSnapshot, ApiError> {
+        let mirror = self.session.queue_mirror().await;
+        let config = self.session.config_watch().borrow().clone();
+        Ok(api::QueueSnapshot {
+            rev: self.session.state().queue.rev,
+            items: mirror
+                .tracks
+                .iter()
+                .map(|track| crate::wire::track_info(track, &config))
+                .collect(),
+            shuffle_order: mirror
+                .shuffle_order
+                .iter()
+                .map(|index| *index as u32)
+                .collect(),
+            position: (!mirror.tracks.is_empty()).then_some(mirror.position as u32),
+            shuffle: mirror.shuffle,
+        })
+    }
+
     async fn set_queue(&self, request: SetQueueRequest) -> Result<CommandAck, ApiError> {
         self.session.set_queue(request).await
     }
@@ -275,13 +295,7 @@ impl api::ArtworkApi for LocalApi {
                 "this daemon runs without an artwork service",
             ));
         };
-        let entity = match &request.target {
-            api::ArtworkTarget::Track(key) => crate::artwork::ArtworkEntity::Track(key),
-            api::ArtworkTarget::Album(id) => crate::artwork::ArtworkEntity::Album(id),
-            api::ArtworkTarget::Artist(name) => crate::artwork::ArtworkEntity::Artist(name),
-            api::ArtworkTarget::Playlist(id) => crate::artwork::ArtworkEntity::Playlist(id),
-        };
-        let payload = artwork.fetch(entity, request.hq).await?;
+        let payload = artwork.fetch(&request.target, request.hq).await?;
         Ok(api::ArtworkData {
             content_type: payload.content_type.to_string(),
             bytes: payload.bytes,

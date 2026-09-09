@@ -91,6 +91,7 @@ struct Pair {
     local: LocalApi,
     wire: client::GrpcApi,
     jobs: Arc<JobRunner>,
+    database: db::Db,
     session: SessionHandle,
     _dir: tempfile::TempDir,
 }
@@ -159,6 +160,7 @@ async fn spawn_pair() -> Pair {
         local: build_api(session.clone()),
         wire: client::GrpcApi::new(&socket).expect("wire client"),
         jobs,
+        database,
         session,
         _dir: dir,
     }
@@ -801,4 +803,175 @@ async fn playlists_round_trip_across_transports() {
         .expect("delete locally");
     let catalog = pair.wire.playlists().await.expect("catalog");
     assert!(!catalog.playlists.iter().any(|playlist| playlist.id == id));
+}
+
+/// A row's artwork ref is the client's whole decision: absent means there is
+/// no picture, so a grid draws its placeholder without a request. Both
+/// transports must agree on that, and on the version that keys the cache.
+#[tokio::test]
+async fn artwork_refs_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    // The seeded tracks have no cover, so no row may claim one.
+    let local = pair
+        .local
+        .tracks(TrackFilter::default(), Page::default())
+        .await
+        .expect("local tracks");
+    let wire = pair
+        .wire
+        .tracks(TrackFilter::default(), Page::default())
+        .await
+        .expect("wire tracks");
+    assert_eq!(local.items, wire.items, "rows agree across transports");
+    assert!(
+        local.items.iter().all(|track| track.artwork.is_none()),
+        "a track with no cover advertises none: {:?}",
+        local.items
+    );
+
+    // Asking anyway is the same not-found on both sides, which is what makes
+    // "absent means do not ask" safe rather than merely conventional.
+    let request = api::ArtworkRequest {
+        target: api::ArtworkTarget::Track("/lib/seed-0.flac".into()),
+        hq: false,
+    };
+    assert_eq!(
+        pair.local
+            .artwork(request.clone())
+            .await
+            .err()
+            .map(|error| error.code),
+        pair.wire
+            .artwork(request)
+            .await
+            .err()
+            .map(|error| error.code),
+    );
+
+    // A cover appears: the row starts advertising one, and its version is
+    // stable across reads and transports.
+    // Undecodable bytes on purpose: the service falls back to serving the
+    // file as-is, which is the path an unusual cover format takes anyway.
+    let cover = pair._dir.path().join("cover.png");
+    std::fs::write(&cover, b"\x89PNG\r\n\x1a\nnot-really-an-image").expect("write cover");
+    let mut with_art = track("/lib/seed-0.flac");
+    with_art.cover = Some(cover.to_string_lossy().into_owned());
+    pair.database
+        .upsert_tracks(&config::Source::Local, &[with_art])
+        .await
+        .expect("re-seed with a cover");
+
+    let local = pair
+        .local
+        .tracks(TrackFilter::default(), Page::default())
+        .await
+        .expect("local tracks");
+    let wire = pair
+        .wire
+        .tracks(TrackFilter::default(), Page::default())
+        .await
+        .expect("wire tracks");
+    let art = local
+        .items
+        .iter()
+        .find(|track| track.key == "/lib/seed-0.flac")
+        .and_then(|track| track.artwork.clone())
+        .expect("the row now advertises artwork");
+    assert_eq!(
+        art.target,
+        api::ArtworkTarget::Track("/lib/seed-0.flac".into())
+    );
+    assert_eq!(local.items, wire.items, "the version crosses the wire");
+
+    // And it now serves bytes, on both transports.
+    let request = api::ArtworkRequest {
+        target: art.target.clone(),
+        hq: false,
+    };
+    let bytes = pair
+        .wire
+        .artwork(request.clone())
+        .await
+        .expect("artwork over the wire");
+    assert!(!bytes.bytes.is_empty());
+    assert_eq!(
+        bytes.content_type,
+        pair.local
+            .artwork(request)
+            .await
+            .expect("artwork locally")
+            .content_type
+    );
+}
+
+/// The queue snapshot is what a frontend mirrors: the rows in play order plus
+/// the permutation behind them. `Insert` and `JumpPhysical` are the two edits
+/// a queue view makes that a paged window cannot express.
+#[tokio::test]
+async fn queue_snapshot_and_edits_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    pair.local
+        .set_queue(SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: QueueContext::Tracks {
+                keys: vec!["/lib/a.flac".into(), "/lib/b.flac".into()],
+            },
+            start_index: Some(0),
+            shuffle: Some(false),
+        })
+        .await
+        .expect("seed the queue");
+
+    let local = pair.local.queue_snapshot().await.expect("local snapshot");
+    let wire = pair.wire.queue_snapshot().await.expect("wire snapshot");
+    assert_eq!(local.items.len(), 2);
+    assert_eq!(local.position, Some(0));
+    assert_eq!(
+        local.items.iter().map(|item| &item.key).collect::<Vec<_>>(),
+        wire.items.iter().map(|item| &item.key).collect::<Vec<_>>(),
+    );
+
+    // Insert lands where it was asked to, without disturbing what plays.
+    pair.wire
+        .queue_edit(QueueEdit::Insert {
+            index: 1,
+            keys: vec!["/lib/c.flac".into()],
+        })
+        .await
+        .expect("insert over the wire");
+    let snapshot = pair.local.queue_snapshot().await.expect("snapshot");
+    assert_eq!(
+        snapshot
+            .items
+            .iter()
+            .map(|item| item.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["/lib/a.flac", "/lib/c.flac", "/lib/b.flac"],
+    );
+    assert_eq!(snapshot.position, Some(0), "the playing track did not move");
+
+    // A physical jump names a position in the unshuffled queue.
+    pair.wire
+        .queue_edit(QueueEdit::JumpPhysical { index: 2 })
+        .await
+        .expect("jump over the wire");
+    let snapshot = pair.wire.queue_snapshot().await.expect("snapshot");
+    assert_eq!(snapshot.position, Some(2));
+
+    // Out of range is an error, not a silent no-op, on both transports.
+    let edit = QueueEdit::JumpPhysical { index: 99 };
+    assert_eq!(
+        pair.local
+            .queue_edit(edit.clone())
+            .await
+            .err()
+            .map(|error| error.code),
+        pair.wire
+            .queue_edit(edit)
+            .await
+            .err()
+            .map(|error| error.code),
+    );
 }

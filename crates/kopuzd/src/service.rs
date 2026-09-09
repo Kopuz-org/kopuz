@@ -259,6 +259,14 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::queue_window_to_proto(&window)))
     }
 
+    async fn get_queue_snapshot(
+        &self,
+        _: Request<proto::GetQueueSnapshotRequest>,
+    ) -> Result<Response<proto::QueueSnapshot>, Status> {
+        let snapshot = self.0.api.queue_snapshot().await.map_err(failed)?;
+        Ok(Response::new(convert::queue_snapshot_to_proto(&snapshot)))
+    }
+
     async fn get_tracks(
         &self,
         request: Request<proto::TracksRequest>,
@@ -767,27 +775,19 @@ impl Kopuz for KopuzGrpc {
         &self,
         request: Request<proto::ArtworkRequest>,
     ) -> Result<Response<Self::GetArtworkStream>, Status> {
-        use daemon::artwork::ArtworkEntity;
         let Some(service) = &self.0.artwork else {
             return Err(failed(ApiError::unsupported(
                 "this daemon runs without artwork",
             )));
         };
         let request = request.get_ref();
-        let entity = match request.entity.as_ref() {
-            Some(proto::artwork_request::Entity::Track(track)) => ArtworkEntity::Track(track),
-            Some(proto::artwork_request::Entity::Album(album)) => ArtworkEntity::Album(album),
-            Some(proto::artwork_request::Entity::Artist(artist)) => ArtworkEntity::Artist(artist),
-            Some(proto::artwork_request::Entity::Playlist(playlist)) => {
-                ArtworkEntity::Playlist(playlist)
-            }
-            None => {
-                return Err(Status::invalid_argument(
-                    "pass one of track, album, artist, or playlist",
-                ));
-            }
-        };
-        let payload = service.fetch(entity, request.hq).await.map_err(failed)?;
+        let request = convert::artwork_request_from_proto(request).ok_or_else(|| {
+            Status::invalid_argument("pass one of track, album, artist, playlist, catalog, station")
+        })?;
+        let payload = service
+            .fetch(&request.target, request.hq)
+            .await
+            .map_err(failed)?;
         let content_type = payload.content_type.to_string();
         let chunks: Vec<Result<proto::ArtworkChunk, Status>> = payload
             .bytes

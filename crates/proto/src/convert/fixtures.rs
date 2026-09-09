@@ -20,6 +20,10 @@ pub(super) fn sample_state() -> api::PlayerState {
             bitrate: 320,
             kind: api::TrackKind::Normal,
             seekable: true,
+            artwork: Some(api::ArtworkRef {
+                target: api::ArtworkTarget::Track("k".into()),
+                version: 9,
+            }),
         }),
         position: Some(api::PositionAnchor {
             ms: 63_210,

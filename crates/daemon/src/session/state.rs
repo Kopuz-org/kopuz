@@ -171,5 +171,6 @@ pub(super) fn now_playing_from(track: &Track, config: &config::AppConfig) -> Now
             TrackKind::Normal
         },
         seekable: !radio,
+        artwork: crate::artwork::track_ref(track),
     }
 }

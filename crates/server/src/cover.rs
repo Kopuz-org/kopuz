@@ -96,6 +96,33 @@ pub fn remote_artwork_url_at_size(url: String, max_width: u32) -> String {
     parsed.to_string()
 }
 
+/// Where a cover's bytes actually are.
+///
+/// [`resolve`] answers the same question as a URL, which forces whoever wants
+/// the bytes to parse the URL back apart. Anything that reads a cover rather
+/// than rendering it -- the daemon's artwork service, palette extraction --
+/// asks for this instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Located {
+    File(PathBuf),
+    /// Already signed where the service needs it, so it must not be logged.
+    Url(String),
+}
+
+/// Locate a cover's bytes: an on-disk file, or a URL to fetch.
+pub fn locate(config: &AppConfig, cover: CoverRef, max_width: u32) -> Option<Located> {
+    if let CoverRef::Local(path) = cover {
+        return Some(Located::File(path));
+    }
+    match resolve(config, cover, max_width)? {
+        // Neither is fetchable: a data URL carries its own bytes, and
+        // `artwork://` is the app's scheme for asking the daemon -- which is
+        // whoever is calling this.
+        url if url.starts_with("data:") || url.starts_with("artwork://") => None,
+        url => Some(Located::Url(url.as_ref().to_string())),
+    }
+}
+
 /// Resolve a typed cover reference to a renderable URL.
 pub fn resolve(config: &AppConfig, cover: CoverRef, max_width: u32) -> Option<CoverUrl> {
     let server = config.server.as_ref();

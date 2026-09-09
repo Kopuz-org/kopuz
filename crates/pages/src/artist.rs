@@ -68,6 +68,20 @@ pub fn Artist(
 
     let albums_res = use_albums(source);
     let artist_counts_res = use_artists(source);
+    // Photos, by normalized name: the daemon says which artists have one, and
+    // the grid renders its placeholder for the rest without asking.
+    let artist_covers = use_memo(move || {
+        artist_counts_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|artist| {
+                let cover = hooks::use_db_queries::artist_cover_url(artist)?;
+                Some((normalize_artist_key(&artist.name), cover))
+            })
+            .collect::<HashMap<String, utils::CoverUrl>>()
+    });
     let sample_tracks_res = use_artist_sample_tracks(source, u32::MAX);
     let artist_memo = use_memo(move || artist_name.read().clone());
     let artist_tracks_res = use_artist_tracks(source, artist_memo);
@@ -199,8 +213,10 @@ pub fn Artist(
         // Per-artist counts for the count-based sort fields; keyed by the
         // normalized name so differently-cased credits collapse into one bucket.
         let mut track_counts: HashMap<String, u32> = HashMap::new();
-        for (name, n) in artist_counts_res.read().clone().unwrap_or_default() {
-            *track_counts.entry(normalize_artist_key(&name)).or_default() += n;
+        for artist in artist_counts_res.read().clone().unwrap_or_default() {
+            *track_counts
+                .entry(normalize_artist_key(&artist.name))
+                .or_default() += artist.track_count;
         }
         let mut album_counts: HashMap<String, u32> = HashMap::new();
         for album in &albums {
@@ -212,8 +228,8 @@ pub fn Artist(
         let out: Vec<(String, Option<utils::CoverUrl>)> = artist_map
             .into_iter()
             .filter(|(_, (display, _))| !offline || downloaded.contains(&display.to_lowercase()))
-            .map(|(_norm, (display, _album_cover))| {
-                let cover = Some(hooks::use_db_queries::artist_cover_url(&display));
+            .map(|(norm, (display, _album_cover))| {
+                let cover = artist_covers.read().get(&norm).cloned();
                 (display, cover)
             })
             .collect();
@@ -293,7 +309,10 @@ pub fn Artist(
 
     let artist_cover = use_memo(move || {
         let artist = artist_name.read();
-        (!artist.is_empty()).then(|| hooks::use_db_queries::artist_cover_url(&artist))
+        artist_covers
+            .read()
+            .get(&normalize_artist_key(&artist))
+            .cloned()
     });
 
     let artist_albums = use_memo(move || {

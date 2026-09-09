@@ -2,13 +2,14 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
-    use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_favorites,
-    use_playlists, use_recently_added_albums, use_top_genre, use_tracks_by_keys,
+    use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_artists,
+    use_favorites, use_playlists, use_recently_added_albums, use_top_genre, use_tracks_by_keys,
 };
 use rand::rng;
 use rand::seq::SliceRandom;
 use reader::{Album, Track};
 use std::collections::HashMap;
+use utils::artist::normalize_artist_key;
 
 type AlbumCard = (String, String, String, Option<String>);
 
@@ -80,6 +81,21 @@ pub fn HomeBody(
 
     let albums_res = use_albums(source);
     let recently_added_res = use_recently_added_albums(source, RECENTLY_ADDED_WINDOW);
+    let artists_res = use_artists(source);
+    // Photos by normalized name, so the Top Artists row renders exactly the
+    // ones the daemon actually holds a picture for.
+    let artist_covers = use_memo(move || {
+        artists_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|artist| {
+                let cover = hooks::use_db_queries::artist_cover_url(artist)?;
+                Some((normalize_artist_key(&artist.name), cover))
+            })
+            .collect::<HashMap<String, utils::CoverUrl>>()
+    });
     let playlists_res = use_playlists();
     let offline_keys = use_memo(move || -> Vec<String> {
         if !(caps().downloads && *is_offline.read()) {
@@ -346,11 +362,10 @@ pub fn HomeBody(
                 // The daemon walks override, then photo, then an album cover
                 // for a library source; a missing photo answers 404 and the
                 // tile falls back to its placeholder.
-                let cover_url = Some(
-                    hooks::use_db_queries::artist_cover_url(&track.artist)
-                        .as_ref()
-                        .to_string(),
-                );
+                let cover_url = artist_covers
+                    .read()
+                    .get(&normalize_artist_key(&track.artist))
+                    .map(|cover: &utils::CoverUrl| cover.as_ref().to_string());
                 artist_list.push((track.artist.clone(), cover_url));
             }
             if artist_list.len() >= 10 {

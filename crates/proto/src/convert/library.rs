@@ -59,6 +59,15 @@ pub fn track_info_to_proto(value: &api::TrackInfo) -> TrackInfo {
         kind: track_kind_to_proto(value.kind) as i32,
         seekable: value.seekable,
         offline: value.offline,
+        service: value
+            .service
+            .map(|service| music_service_to_proto(service) as i32),
+        artists: value.artists.clone(),
+        musicbrainz_release_id: value.musicbrainz_release_id.clone(),
+        musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
+        musicbrainz_track_id: value.musicbrainz_track_id.clone(),
+        playlist_item_id: value.playlist_item_id.clone(),
+        artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
     }
 }
 
@@ -78,6 +87,13 @@ pub fn track_info_from_proto(value: &TrackInfo) -> api::TrackInfo {
         kind: track_kind_from_proto(value.kind),
         seekable: value.seekable,
         offline: value.offline,
+        service: value.service.and_then(music_service_from_proto),
+        artists: value.artists.clone(),
+        musicbrainz_release_id: value.musicbrainz_release_id.clone(),
+        musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
+        musicbrainz_track_id: value.musicbrainz_track_id.clone(),
+        playlist_item_id: value.playlist_item_id.clone(),
+        artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
     }
 }
 
@@ -168,6 +184,8 @@ pub fn artwork_request_to_proto(value: &api::ArtworkRequest) -> ArtworkRequest {
         api::ArtworkTarget::Album(id) => Entity::Album(id.clone()),
         api::ArtworkTarget::Artist(name) => Entity::Artist(name.clone()),
         api::ArtworkTarget::Playlist(id) => Entity::Playlist(id.clone()),
+        api::ArtworkTarget::Catalog(id) => Entity::Catalog(id.clone()),
+        api::ArtworkTarget::Station(id) => Entity::Station(id.clone()),
     };
     ArtworkRequest {
         entity: Some(entity),
@@ -182,6 +200,8 @@ pub fn artwork_request_from_proto(value: &ArtworkRequest) -> Option<api::Artwork
         Entity::Album(id) => api::ArtworkTarget::Album(id.clone()),
         Entity::Artist(name) => api::ArtworkTarget::Artist(name.clone()),
         Entity::Playlist(id) => api::ArtworkTarget::Playlist(id.clone()),
+        Entity::Catalog(id) => api::ArtworkTarget::Catalog(id.clone()),
+        Entity::Station(id) => api::ArtworkTarget::Station(id.clone()),
     };
     Some(api::ArtworkRequest {
         target,
@@ -196,6 +216,8 @@ pub fn artwork_target_to_proto(value: &api::ArtworkTarget) -> ArtworkTarget {
         api::ArtworkTarget::Album(id) => Entity::Album(id.clone()),
         api::ArtworkTarget::Artist(name) => Entity::Artist(name.clone()),
         api::ArtworkTarget::Playlist(id) => Entity::Playlist(id.clone()),
+        api::ArtworkTarget::Catalog(id) => Entity::Catalog(id.clone()),
+        api::ArtworkTarget::Station(id) => Entity::Station(id.clone()),
     };
     ArtworkTarget {
         entity: Some(entity),
@@ -209,6 +231,53 @@ pub fn artwork_target_from_proto(value: &ArtworkTarget) -> Option<api::ArtworkTa
         Entity::Album(id) => api::ArtworkTarget::Album(id.clone()),
         Entity::Artist(name) => api::ArtworkTarget::Artist(name.clone()),
         Entity::Playlist(id) => api::ArtworkTarget::Playlist(id.clone()),
+        Entity::Catalog(id) => api::ArtworkTarget::Catalog(id.clone()),
+        Entity::Station(id) => api::ArtworkTarget::Station(id.clone()),
+    })
+}
+
+pub fn artwork_ref_to_proto(value: &api::ArtworkRef) -> ArtworkRef {
+    ArtworkRef {
+        target: Some(artwork_target_to_proto(&value.target)),
+        version: value.version,
+    }
+}
+
+/// A ref whose target failed to decode is no ref at all: a client would
+/// otherwise ask for artwork it cannot name.
+pub fn artwork_ref_from_proto(value: &ArtworkRef) -> Option<api::ArtworkRef> {
+    Some(api::ArtworkRef {
+        target: artwork_target_from_proto(value.target.as_ref()?)?,
+        version: value.version,
+    })
+}
+
+pub fn music_service_to_proto(value: ::config::MusicService) -> MusicService {
+    match value {
+        ::config::MusicService::Jellyfin => MusicService::Jellyfin,
+        ::config::MusicService::Subsonic => MusicService::Subsonic,
+        ::config::MusicService::Custom => MusicService::Custom,
+        ::config::MusicService::YtMusic => MusicService::YtMusic,
+        ::config::MusicService::AppleMusic => MusicService::AppleMusic,
+        ::config::MusicService::SoundCloud => MusicService::Soundcloud,
+        ::config::MusicService::Spotify => MusicService::Spotify,
+        ::config::MusicService::Nextcloud => MusicService::Nextcloud,
+    }
+}
+
+/// `None` for both the explicit unknown and any value this build predates --
+/// a service it cannot name is one it cannot branch on anyway.
+pub fn music_service_from_proto(value: i32) -> Option<::config::MusicService> {
+    Some(match MusicService::try_from(value).ok()? {
+        MusicService::Unknown => return None,
+        MusicService::Jellyfin => ::config::MusicService::Jellyfin,
+        MusicService::Subsonic => ::config::MusicService::Subsonic,
+        MusicService::Custom => ::config::MusicService::Custom,
+        MusicService::YtMusic => ::config::MusicService::YtMusic,
+        MusicService::AppleMusic => ::config::MusicService::AppleMusic,
+        MusicService::Soundcloud => ::config::MusicService::SoundCloud,
+        MusicService::Spotify => ::config::MusicService::Spotify,
+        MusicService::Nextcloud => ::config::MusicService::Nextcloud,
     })
 }
 
@@ -219,7 +288,7 @@ pub fn album_info_to_proto(value: &api::AlbumInfo) -> AlbumInfo {
         artist: value.artist.clone(),
         genre: value.genre.clone(),
         year: value.year as u32,
-        artwork: value.artwork.as_ref().map(artwork_target_to_proto),
+        artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
     }
 }
 
@@ -230,7 +299,7 @@ pub fn album_info_from_proto(value: &AlbumInfo) -> api::AlbumInfo {
         artist: value.artist.clone(),
         genre: value.genre.clone(),
         year: value.year as u16,
-        artwork: value.artwork.as_ref().and_then(artwork_target_from_proto),
+        artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
     }
 }
 
@@ -252,7 +321,7 @@ pub fn artist_info_to_proto(value: &api::ArtistInfo) -> ArtistInfo {
     ArtistInfo {
         name: value.name.clone(),
         track_count: value.track_count,
-        artwork: value.artwork.as_ref().map(artwork_target_to_proto),
+        artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
     }
 }
 
@@ -260,7 +329,7 @@ pub fn artist_info_from_proto(value: &ArtistInfo) -> api::ArtistInfo {
     api::ArtistInfo {
         name: value.name.clone(),
         track_count: value.track_count,
-        artwork: value.artwork.as_ref().and_then(artwork_target_from_proto),
+        artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
     }
 }
 
