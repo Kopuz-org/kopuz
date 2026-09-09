@@ -104,6 +104,7 @@ service Kopuz {
   rpc AuthenticateSource(SourceId) returns (SourceInfo);
   rpc BrowseSource(BrowseSourceRequest) returns (SourceFolderList);
   rpc ValidateSource(SourceId) returns (SourceStateResponse);
+  rpc CanOpenBrowser(CanOpenBrowserRequest) returns (BrowserAccess);
   rpc GetIntegrations(GetIntegrationsRequest) returns (IntegrationList);
   rpc ProvisionIntegration(IntegrationProvision) returns (IntegrationStatus);
   rpc ClearIntegration(IntegrationRef) returns (Unit);
@@ -689,6 +690,13 @@ message SourceFolderList {
 
 message SourceStateResponse {
   SourceState state = 1;
+}
+
+message CanOpenBrowserRequest {}
+
+// False on a sandboxed daemon that cannot spawn a browser for a sign-in.
+message BrowserAccess {
+  bool available = 1;
 }
 
 enum IntegrationKind {

@@ -494,17 +494,6 @@ fn App() -> Element {
     // these after the spawning page — and in principle this component — is
     // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
     let mut config = use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
-    // Snapshot of the file/env config layers (issue #530): which settings file
-    // is in play, whether it is Nix-managed, and which keys are pinned by an
-    // unwritable layer — the settings UI grays those out.
-    use_context_provider(|| {
-        let db_path = db::default_db_path();
-        let db_dir = match db_path.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-            _ => std::path::PathBuf::from("."),
-        };
-        config::store::FileLayers::read(&config::store::settings_path_for(&db_dir))
-    });
     let core = backend::core().expect("core started in main before launch");
     let db = core.db.clone();
     // The one seam every hook and page reads through.
@@ -521,14 +510,14 @@ fn App() -> Element {
     #[cfg(debug_assertions)]
     use_context_provider(|| db.clone());
     hooks::db_reactivity::use_generations_provider();
+    // Which settings a managed file pins, so those rows render locked. The
+    // daemon reads those layers; nothing here opens the file.
+    hooks::config_view::use_locked_keys_provider();
 
-    // The active source — the single source the UI operates through — resolved
-    // ONCE and held, so call sites read this shared handle instead of rebuilding
-    // the source (and, for a server, a fresh HTTP client) per operation. Rotation
-    // isn't mutation: an identity change (source switch or cred change) rebuilds
-    // and swaps the `Arc`. Capability gating guarantees an op is only reachable
-    // when the active source can do it (no local-only op offered under a server).
-    let active_source = {
+    // The last media source this process builds, and the only one: the
+    // external (Spotify) playback path still records its own listens and
+    // now-playing pings here. It goes when that path moves into the daemon.
+    {
         let db_init = db.clone();
         let mut active_source = use_signal(move || {
             ::server::source::ActiveSource::from(::server::source::active(
@@ -536,17 +525,11 @@ fn App() -> Element {
                 &config.peek(),
             ))
         });
-        // Only the resolution-relevant slice of config; a volume/theme change
-        // must not rebuild the client. `Memo`'s `PartialEq` dedup gates the effect.
+        // Only the resolution-relevant slice of config; a volume or theme
+        // change must not rebuild the client.
         let identity = use_memo(move || {
             let cfg = config.read();
-            (
-                cfg.active_source.clone(),
-                cfg.server.clone(),
-                // Library roots define what a folder-tree backend scans, so
-                // editing them has to rebuild the source like a cred change.
-                cfg.active_server_folders(),
-            )
+            (cfg.active_source.clone(), cfg.server.clone())
         });
         let db_eff = db.clone();
         use_effect(move || {
@@ -555,8 +538,8 @@ fn App() -> Element {
                 ::server::source::active(db_eff.clone(), &config.peek()),
             ));
         });
-        use_context_provider(|| active_source)
-    };
+        use_context_provider(|| active_source);
+    }
 
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.
@@ -575,16 +558,6 @@ fn App() -> Element {
     let job_runner = core.jobs.clone();
     let favorites_service = core.favorites.clone();
     let scrobbler = core.scrobbler.clone();
-
-    // A server switch or credential rotation rebuilds the shared source
-    // handle; the session's loader has to follow it.
-    {
-        let session = session.clone();
-        use_effect(move || {
-            let source = active_source.read().clone();
-            session.set_active_source(Some(source));
-        });
-    }
 
     // Bridge config changes into the session: every change updates its
     // config watch (crossfade, scrobble creds, Jellyfin reporting), and

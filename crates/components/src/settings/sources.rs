@@ -1,6 +1,6 @@
 //! Local-library and remote-server settings controls.
 
-use config::{MusicService, SavedLocalSource, SavedServer};
+use config::{MusicService, SavedLocalSource};
 use dioxus::prelude::*;
 #[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
@@ -194,10 +194,9 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
 
 #[component]
 pub fn ServerSettings(
-    /// The active source's server id (`None` ⇒ Local) — the authoritative "which
-    /// server is active", reactive to the sidebar source switcher too.
-    active_source_id: Option<String>,
-    servers: Vec<SavedServer>,
+    /// The configured servers as the daemon reports them, including which one
+    /// is active and whether it holds usable credentials.
+    servers: Vec<api::SourceInfo>,
     on_add: EventHandler<()>,
     on_delete: EventHandler<String>,
     on_switch: EventHandler<String>,
@@ -230,10 +229,15 @@ pub fn ServerSettings(
             for srv in servers.iter().cloned() {
                 {
                     let id = srv.id.clone();
-                    let is_active = active_source_id.as_deref() == Some(srv.id.as_str());
+                    let is_active = srv.active;
                     let id_switch = id.clone();
                     let id_delete = id.clone();
-                    let is_spotify = srv.service == MusicService::Spotify;
+                    let is_spotify = srv.service == Some(MusicService::Spotify);
+                    let service_name = srv
+                        .service
+                        .map(|service| service.display_name().to_string())
+                        .unwrap_or_default();
+                    let url = srv.url.clone().unwrap_or_default();
                     // Folders are the whole library definition here, so the
                     // picker sits on the card the way it does for a local
                     // library, not behind a separate dialog.
@@ -254,8 +258,8 @@ pub fn ServerSettings(
                                         }
                                     }
                                 }
-                                p { class: "text-xs text-white/60", "{i18n::t_with(\"service\", &[(\"name\", srv.service.display_name().to_string())])}" }
-                                p { class: "text-xs text-white/60 truncate", "{srv.url}" }
+                                p { class: "text-xs text-white/60", "{i18n::t_with(\"service\", &[(\"name\", service_name.clone())])}" }
+                                p { class: "text-xs text-white/60 truncate", "{url}" }
                                 if is_active {
                                     match conn() {
                                         hooks::source_switch::ConnStatus::Online => rsx! {

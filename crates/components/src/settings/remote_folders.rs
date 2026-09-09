@@ -1,44 +1,48 @@
 //! Folder picker for backends whose library is a directory tree (Nextcloud over
 //! WebDAV). Same list-plus-add shape as a local library, except the file dialog
 //! is an in-place browser, since the folders live on the server.
+//!
+//! The listing is a daemon call: it holds the server's credentials, so this
+//! shows what it browses rather than browsing itself.
 
 use dioxus::prelude::*;
-use server::nextcloud::{folder_name, parent_dir};
-
-/// Credentials the browser needs. The picker runs from Settings, before the
-/// active source is rebuilt, so it takes them rather than a `MediaSource`.
-#[derive(Clone, PartialEq)]
-pub struct RemoteCreds {
-    pub url: String,
-    pub user_id: String,
-    pub token: String,
-}
 
 /// A server card's folder picker, absent unless the active server browses a
 /// folder tree and is signed in. `folders` empty means the backend guesses a
 /// root for itself.
 #[derive(Clone, PartialEq)]
 pub struct RemoteFolderSettings {
-    pub creds: RemoteCreds,
+    pub source_id: String,
     pub folders: Vec<String>,
     pub on_add: EventHandler<String>,
     pub on_remove: EventHandler<usize>,
 }
 
+/// The path one level up, for the picker's back button.
+fn parent_dir(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    match trimmed.rfind('/') {
+        Some(0) | None => "/".to_string(),
+        Some(cut) => trimmed[..cut].to_string(),
+    }
+}
+
 #[component]
 pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
+    let api = hooks::use_api();
     let mut browsing = use_signal(|| false);
     let mut path = use_signal(|| "/".to_string());
 
     let RemoteFolderSettings {
-        creds,
+        source_id,
         folders,
         on_add,
         on_remove,
     } = settings;
 
     let listing = use_resource(move || {
-        let creds = creds.clone();
+        let api = api.clone();
+        let id = source_id.clone();
         let at = path();
         let open = browsing();
         // Closed means nothing to list, not an empty server.
@@ -46,7 +50,9 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
             if !open {
                 return Ok(Vec::new());
             }
-            server::nextcloud::browse_folders(&creds.url, &creds.user_id, &creds.token, &at).await
+            api.browse_source(id, at)
+                .await
+                .map_err(|error| error.to_string())
         }
     });
 
@@ -96,11 +102,11 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
                             Some(Ok(dirs)) => rsx! {
                                 for dir in dirs.clone() {
                                     button {
-                                        key: "{dir}",
-                                        onclick: move |_| path.set(dir.clone()),
+                                        key: "{dir.path}",
+                                        onclick: move |_| path.set(dir.path.clone()),
                                         class: "flex items-center gap-2 text-left text-xs text-white/80 hover:bg-white/10 px-2 py-1 rounded transition-colors",
                                         i { class: "fa-solid fa-folder text-white/40" }
-                                        span { class: "truncate", "{folder_name(&dir)}" }
+                                        span { class: "truncate", "{dir.name}" }
                                     }
                                 }
                             },

@@ -9,7 +9,7 @@
 //! read); the active row is highlighted. Styling matches the sidebar's flat,
 //! single-line nav items rather than a glassy stand-alone widget.
 
-use config::{AppConfig, MusicService, Source};
+use config::{MusicService, Source};
 use dioxus::prelude::*;
 use hooks::source_switch::ConnStatus;
 
@@ -69,34 +69,44 @@ const SWITCHER_CSS: &str = r#"
 const LOCAL_ACCENT: &str = "var(--color-indigo-500)";
 
 /// One selectable source: key, label, icon class, accent colour, mono subline.
-fn entries(config: &AppConfig) -> Vec<(Source, String, &'static str, &'static str, String)> {
-    let mut v = vec![(
-        Source::Local,
-        i18n::t("local").to_string(),
-        "fa-solid fa-hard-drive",
-        LOCAL_ACCENT,
-        i18n::t("source_on_this_device").to_string(),
-    )];
-    for local in &config.local_sources {
-        v.push((
-            Source::LocalLibrary(local.id.clone()),
-            local.name.clone(),
-            "fa-solid fa-folder-tree",
-            LOCAL_ACCENT,
-            i18n::t("source_on_this_device").to_string(),
-        ));
-    }
-    for s in &config.servers {
-        let (icon, accent) = service_style(s.service);
-        v.push((
-            Source::Server(s.id.clone()),
-            s.name.clone(),
-            icon,
-            accent,
-            s.service.display_name().to_uppercase(),
-        ));
-    }
-    v
+///
+/// The rows are the daemon's list, so a server appears here whether or not
+/// this process could have described it.
+fn entries(
+    sources: &[api::SourceInfo],
+) -> Vec<(Source, String, &'static str, &'static str, String)> {
+    sources
+        .iter()
+        .map(|source| {
+            let on_device = i18n::t("source_on_this_device").to_string();
+            match (source.kind, source.service) {
+                (api::SourceKind::Server, Some(service)) => {
+                    let (icon, accent) = service_style(service);
+                    (
+                        Source::Server(source.id.clone()),
+                        source.name.clone(),
+                        icon,
+                        accent,
+                        service.display_name().to_uppercase(),
+                    )
+                }
+                (api::SourceKind::LocalLibrary, _) => (
+                    Source::LocalLibrary(source.id.clone()),
+                    source.name.clone(),
+                    "fa-solid fa-folder-tree",
+                    LOCAL_ACCENT,
+                    on_device,
+                ),
+                _ => (
+                    Source::Local,
+                    i18n::t("local").to_string(),
+                    "fa-solid fa-hard-drive",
+                    LOCAL_ACCENT,
+                    on_device,
+                ),
+            }
+        })
+        .collect()
 }
 
 /// Icon + accent colour per service, so each source reads at a glance.
@@ -143,7 +153,6 @@ fn ServiceGlyph(icon: &'static str) -> Element {
 
 #[component]
 pub fn SourceSwitcher(
-    config: Signal<AppConfig>,
     #[props(default = false)] collapsed: bool,
     #[props(default)] on_manage: Option<EventHandler<()>>,
 ) -> Element {
@@ -153,9 +162,19 @@ pub fn SourceSwitcher(
     let switch = hooks::source_switch::use_switch_source();
     // Live auth/connection status of the active source, for the status indicator.
     let conn = hooks::source_switch::use_connection_status();
-    let sources = entries(&config.read());
+    let rows = hooks::sources::use_sources();
+    let rows = rows.read().clone().unwrap_or_default();
+    let active = rows
+        .iter()
+        .find(|source| source.active)
+        .map(|source| match (source.kind, source.service) {
+            (api::SourceKind::Server, _) => Source::Server(source.id.clone()),
+            (api::SourceKind::LocalLibrary, _) => Source::LocalLibrary(source.id.clone()),
+            _ => Source::Local,
+        })
+        .unwrap_or(Source::Local);
+    let sources = entries(&rows);
     let count = sources.len();
-    let active = config.read().active_source.clone();
     // Follow the active theme palette in both UI styles (the chrome does too), so
     // the switcher harmonises with the theme instead of a fixed dark.
     let surface_vars = "--ss-surface:var(--color-neutral-900);--ss-fg:var(--color-white);";

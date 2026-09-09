@@ -1001,6 +1001,15 @@ impl api::SourceApi for GrpcApi {
         Ok(convert::source_state_from_proto(state.get_ref().state))
     }
 
+    async fn can_open_browser(&self) -> Result<bool, ApiError> {
+        let access = self
+            .client()
+            .can_open_browser(Request::new(proto::CanOpenBrowserRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(access.get_ref().available)
+    }
+
     async fn integrations(&self) -> Result<Vec<api::IntegrationStatus>, ApiError> {
         let list = self
             .client()
