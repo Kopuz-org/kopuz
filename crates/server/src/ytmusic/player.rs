@@ -1,9 +1,8 @@
 //! Resolve a video_id to a playable stream URL.
 //!
 //! - **Premium (cookies):** WEB_REMIX + native sig/n decipher, no PO token.
-//! - **Anonymous:** ANDROID_VR + a content-bound PO token (`botguard`); anon
-//!   googlevideo URLs 403 on deep/seek ranges without it.
-//! - **Last resort:** ANDROID_VR bare, if the minter is down.
+//! - **Anonymous:** VISIONOS, plain URLs with no token; then the same client
+//!   with a content-bound PO token (`botguard`) if the plain request was refused.
 //!
 //! No yt-dlp, no external binary (issue #349).
 
@@ -16,7 +15,7 @@ use tokio::sync::OnceCell;
 use tracing::Instrument;
 
 use super::botguard;
-use super::clients::{ANDROID_VR_1_61_48, STREAM_FALLBACK_CLIENTS, WEB_REMIX, YouTubeClient};
+use super::clients::{VISIONOS, WEB_REMIX, YouTubeClient};
 use super::decipher;
 use super::innertube::{self, PlayerExtras};
 
@@ -114,8 +113,8 @@ async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
 }
 
 /// Resolve a YT video to a playable stream. Premium (cookies) → decipher;
-/// anonymous → ANDROID_VR + a headless-minted content pot; last resort →
-/// ANDROID_VR bare.
+/// anonymous → VISIONOS, plain; then VISIONOS with a headless-minted content
+/// pot if the plain request was refused.
 #[tracing::instrument(name = "yt.resolve", skip(cookies), fields(video_id = %video_id, anon = cookies.is_none()))]
 pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
     // A Premium *subscription* — not merely being signed in — is what exempts a
@@ -151,7 +150,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
                     if let Some(u) = &uid {
                         remember_tier(u, false);
                     }
-                    tracing::debug!(itag = ?info.itag, "signed-in but non-Premium — needs a content pot, trying ANDROID_VR");
+                    tracing::debug!(itag = ?info.itag, "signed-in but non-Premium — trying the anonymous client");
                     decipher_fallback = Some(info);
                 }
                 Err(e) => {
@@ -165,96 +164,99 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         }
     }
 
-    // Anonymous: ANDROID_VR + content_pot. Mint + visitor_data in parallel.
-    let mut last_err = {
-        let (pot, visitor) = tokio::join!(botguard::mint_content_pot(video_id), visitor_data(None));
-        match (pot, visitor) {
-            (Ok(pot), Ok(visitor)) => {
-                let extras = PlayerExtras {
-                    content_pot: Some(&pot),
-                    visitor_data: Some(visitor),
-                    signature_timestamp: None,
-                };
-                match innertube::player(ANDROID_VR_1_61_48, video_id, None, extras).await {
-                    Ok(json) => {
-                        let status = PlayabilityStatus::from_response(&json);
-                        if status == PlayabilityStatus::Ok {
-                            if let Some(info) = pick_plain_format(&json, ANDROID_VR_1_61_48) {
-                                return Ok(info);
-                            }
-                            "ANDROID_VR+pot: no plain audio format".to_string()
-                        } else {
-                            format!(
-                                "ANDROID_VR+pot playability {}: {}",
-                                status.as_str(),
-                                playability_reason(&json)
-                            )
-                        }
-                    }
-                    Err(e) => format!("ANDROID_VR+pot: {e}"),
-                }
-            }
-            (Err(e), _) => format!("PO mint: {e}"),
-            (_, Err(e)) => format!("visitor_data: {e}"),
+    // Anonymous: VISIONOS with the kept visitor id. Plain URLs, no token.
+    let visitor = match visitor_data(None).await {
+        Ok(visitor) => Some(visitor),
+        Err(error) => {
+            tracing::warn!(%error, "no visitor id for the anonymous player call");
+            None
         }
     };
-    tracing::debug!(%last_err, "ANDROID_VR+pot failed — trying bare clients");
-    let pot_err = last_err.clone();
+    let extras = PlayerExtras {
+        visitor_data: visitor,
+        ..Default::default()
+    };
+    let anonymous_err = match anonymous_attempt(video_id, extras).await {
+        Ok(info) => return Ok(info),
+        Err(error) => error,
+    };
+    tracing::debug!(%anonymous_err, "anonymous path failed");
 
-    for client in STREAM_FALLBACK_CLIENTS {
-        let cookies_for = if client.login_supported {
-            cookies
-        } else {
-            None
-        };
-        match innertube::player(*client, video_id, cookies_for, PlayerExtras::default()).await {
-            Ok(json) => {
-                let status = PlayabilityStatus::from_response(&json);
-                if !status.is_attemptable() {
-                    last_err = format!(
-                        "{} playability {}: {}",
-                        client.client_name,
-                        status.as_str(),
-                        playability_reason(&json)
-                    );
-                    continue;
+    // The same client with a content-bound token. yt-dlp marks it neither
+    // required nor recommended for this client, so it is asked for only
+    // once the plain request was refused: that is the one case the token
+    // can change the answer, and minting is a V8 round trip.
+    let with_pot_err = if innertube::is_google_block(&anonymous_err) {
+        "not attempted behind Google's abuse page".to_string()
+    } else {
+        match botguard::mint_content_pot(video_id).await {
+            Ok(pot) => {
+                let extras = PlayerExtras {
+                    content_pot: Some(&pot),
+                    visitor_data: visitor,
+                    signature_timestamp: None,
+                };
+                match anonymous_attempt(video_id, extras).await {
+                    Ok(info) => return Ok(info),
+                    Err(error) => error,
                 }
-                if let Some(info) = pick_plain_format(&json, *client) {
-                    return Ok(info);
-                }
-                last_err = format!("{} returned no plain audio formats", client.client_name);
             }
-            Err(e) => last_err = format!("{}: {e}", client.client_name),
+            Err(error) => format!("PO mint: {error}"),
         }
-    }
+    };
+
     if let Some(mut info) = decipher_fallback {
         tracing::warn!(
-            "no content pot available (minter not running?) — using the non-Premium decipher \
-             stream sequentially (range requests 403 without a pot, so seeking is disabled)"
+            "anonymous paths refused — using the non-Premium decipher stream sequentially \
+             (range requests 403 without a token, so seeking is disabled)"
         );
         info.range_safe = false;
         return Ok(info);
     }
     Err(all_paths_failed(
         decipher_err.as_deref(),
-        &pot_err,
-        &last_err,
+        &anonymous_err,
+        &with_pot_err,
     ))
+}
+
+/// One anonymous `/player` call, reported as a stream or as the reason it
+/// is not one.
+async fn anonymous_attempt(
+    video_id: &str,
+    extras: PlayerExtras<'_>,
+) -> Result<YtStreamInfo, String> {
+    let json = innertube::player(VISIONOS, video_id, None, extras)
+        .await
+        .map_err(|error| format!("{}: {error}", VISIONOS.client_name))?;
+    let status = PlayabilityStatus::from_response(&json);
+    if !status.is_attemptable() {
+        return Err(format!(
+            "{} playability {}: {}",
+            VISIONOS.client_name,
+            status.as_str(),
+            playability_reason(&json)
+        ));
+    }
+    pick_plain_format(&json, VISIONOS)
+        .ok_or_else(|| format!("{} returned no plain audio format", VISIONOS.client_name))
 }
 
 /// Why every path failed, not only the last one.
 ///
-/// The bare clients are tried anonymously, so their `LOGIN_REQUIRED` is the
-/// expected ending for any track YouTube gates -- reporting that alone said
-/// "sign in" to someone who already was, and hid the signed-in path's actual
-/// error behind a debug line nobody runs with.
-fn all_paths_failed(decipher: Option<&str>, pot: &str, bare: &str) -> String {
+/// The anonymous client answers LOGIN_REQUIRED for anything gated, so that is
+/// the expected ending for such a track -- reporting it alone said "sign in"
+/// to someone who already was, and hid the signed-in path's actual error
+/// behind a debug line nobody runs with.
+fn all_paths_failed(decipher: Option<&str>, anonymous: &str, with_pot: &str) -> String {
     let mut message = String::from("all stream paths failed");
     match decipher {
         Some(error) => message.push_str(&format!("; signed-in: {error}")),
         None => message.push_str("; signed-in: not attempted"),
     }
-    message.push_str(&format!("; anonymous+pot: {pot}; bare clients: {bare}"));
+    message.push_str(&format!(
+        "; anonymous: {anonymous}; anonymous+pot: {with_pot}"
+    ));
     message
 }
 
@@ -266,7 +268,7 @@ fn is_premium_itag(itag: Option<u32>) -> bool {
     // 256k), 256/258 (AAC 192/384k). A free/anon account never sees these — it
     // caps at 251/140 (~128k) — so any of them proves the account is Premium
     // and the deciphered stream is served directly, no content pot. Only the
-    // free-tier itags fall through to the ANDROID_VR + pot path. (Crucially:
+    // free-tier itags fall through to the anonymous path. (Crucially:
     // without 141 here, a Premium user playing a video that has no Opus format
     // gets mis-tagged as free, poisoning the per-account tier cache — and with
     // a flaky minter that breaks playback for the whole 5-min TTL window.)
@@ -424,9 +426,8 @@ impl PlayabilityStatus {
         }
     }
 
-    /// Whether this status should be treated as "try the fallback chain"
-    /// — covers both the explicit `UNKNOWN` we infer when YT omits the
-    /// field entirely (we want to be permissive there) and `Ok`.
+    /// Whether the response is worth reading formats out of: `Ok`, and the
+    /// `Unknown` inferred when YouTube omits the field entirely.
     fn is_attemptable(self) -> bool {
         matches!(self, PlayabilityStatus::Ok | PlayabilityStatus::Unknown)
     }
@@ -640,27 +641,28 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// The bare clients end on LOGIN_REQUIRED for anything YouTube gates, so
-    /// that line alone told a signed-in user to sign in. The reason their own
-    /// path failed has to travel with it.
+    /// The anonymous client ends on LOGIN_REQUIRED for anything YouTube gates,
+    /// so that line alone told a signed-in user to sign in. The reason their
+    /// own path failed has to travel with it.
     #[test]
     fn the_failure_names_the_signed_in_reason_not_just_the_last_client() {
         let message = all_paths_failed(
             Some("WEB_REMIX playability UNPLAYABLE: try again later"),
-            "ANDROID_VR+pot playability LOGIN_REQUIRED: Sign in to confirm you're not a bot",
-            "ANDROID_VR playability LOGIN_REQUIRED: Sign in to confirm you're not a bot",
+            "VISIONOS playability LOGIN_REQUIRED: Sign in to confirm you're not a bot",
+            "PO mint: minter unavailable",
         );
 
         assert!(
             message.contains("signed-in: WEB_REMIX playability UNPLAYABLE: try again later"),
             "{message}"
         );
-        assert!(message.contains("anonymous+pot: "), "{message}");
+        assert!(message.contains("anonymous: VISIONOS"), "{message}");
+        assert!(message.contains("anonymous+pot: PO mint"), "{message}");
     }
 
     #[test]
     fn a_skipped_signed_in_path_says_so_rather_than_looking_like_a_success() {
-        let message = all_paths_failed(None, "PO mint: minter unavailable", "bare: nope");
+        let message = all_paths_failed(None, "VISIONOS: nope", "PO mint: minter unavailable");
         assert!(message.contains("signed-in: not attempted"), "{message}");
     }
 
