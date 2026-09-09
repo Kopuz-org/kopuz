@@ -120,6 +120,15 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
                 &mut ctrl.current_song_duration,
                 now.duration_ms.map(|ms| ms / 1000).unwrap_or(u64::MAX),
             );
+            // The picture comes with the row rather than being derived from
+            // it, so a cover only the daemon can fetch still resolves.
+            set_if_changed(&mut ctrl.current_artwork, now.artwork.clone());
+            set_if_changed(
+                &mut ctrl.current_song_cover_url,
+                crate::artwork::url(now.artwork.as_ref(), crate::artwork::Size::Thumb)
+                    .map(|cover| cover.as_ref().to_string())
+                    .unwrap_or_default(),
+            );
             // Match on uid, not key: key is the bare library ref, which is
             // the same string as the uid for local tracks but not for server
             // ones, so matching on it missed every server track and left the
@@ -137,8 +146,6 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
                     .find(|track| track.id.uid() == now.uid)
                     .cloned();
                 if let Some(track) = track {
-                    ctrl.current_song_cover_url
-                        .set(ctrl.cover_url_for_track(&track));
                     ctrl.current_track_snapshot.set(Some(track));
                 }
             }

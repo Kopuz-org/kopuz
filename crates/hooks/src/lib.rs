@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod artist_images;
+pub mod artwork;
 pub mod config_view;
 pub mod db_reactivity;
 pub mod downloads;
@@ -10,6 +11,7 @@ pub mod favorites;
 pub mod integrations;
 pub mod jobs;
 pub mod library_actions;
+pub mod lyrics;
 pub mod playlist_actions;
 mod session_projector;
 pub mod source_switch;

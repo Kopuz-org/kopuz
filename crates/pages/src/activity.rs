@@ -100,7 +100,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                 let count_key = active_source.listen_count_key(&track.id.uid());
                 let plays = conf.listen_counts.get(&count_key).copied().unwrap_or(0);
                 let genre = albums.get(&track.album_id).cloned().unwrap_or_default();
-                let cover_url = ::server::cover::track(&conf, &track, 64);
+                let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
                 (row_offset + i, track, plays, genre, cover_url)
             })
             .collect()

@@ -43,12 +43,11 @@ pub fn Search(
         if tracks.is_empty() {
             return Vec::new();
         }
-        let conf = config.read();
         tracks
             .iter()
             .map(|track| {
                 // Source-agnostic via the cover seam — the track self-describes.
-                let cover = ::server::cover::track(&conf, track, 80);
+                let cover = hooks::artwork::for_track(track, hooks::artwork::Size::Thumb);
                 (track.clone(), cover)
             })
             .collect()

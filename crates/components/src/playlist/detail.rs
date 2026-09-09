@@ -80,17 +80,7 @@ pub fn PlaylistDetail(
     // tag; then the first track's cover via the source-agnostic seam.
     let playlist_cover = playlist_custom_cover
         .as_ref()
-        .and_then(|p| utils::format_artwork_url(Some(p)))
-        .or_else(|| {
-            let tag = playlist_image_tag.as_ref()?;
-            let conf = config.read();
-            let server = conf.server.as_ref()?;
-            server::cover::resolve(
-                &conf,
-                reader::CoverRef::remote_item(server.service, &playlist_id, Some(tag.as_str())),
-                512,
-            )
-        })
+        .and_then(|p| hooks::artwork::stored(p.to_str(), hooks::artwork::Size::Full))
         .or_else(|| tracks_val.first().and_then(&cover_for));
 
     let start_radio = crate::radio_actions::playlist_radio_handler(playlist_id.clone());

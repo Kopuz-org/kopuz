@@ -573,7 +573,7 @@ pub fn Artist(
                                             let id_for_navigate = album.id.clone();
                                             let is_open = open_album_menu.read().as_deref() == Some(&album.id);
                                             // Same size in both modes so toggling never refetches covers.
-                                            let cover_url = ::server::cover::from_path(&config.read(), album.cover_path.as_deref(), 320);
+                                            let cover_url = hooks::artwork::for_album(&album, hooks::artwork::Size::Thumb);
                                             // Whether every track of this album is downloaded (servers only).
                                             let downloaded = cap.downloads && {
                                                 let all = artist_tracks_res.read().clone().unwrap_or_default();

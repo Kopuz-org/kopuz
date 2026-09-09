@@ -262,7 +262,7 @@ fn AlbumGrid(
                             let id_for_nav = album.id.clone();
                             let id_for_menu = album.id.clone();
                             let is_open = open_album_menu.read().as_deref() == Some(&album.id);
-                            let cover_url = ::server::cover::from_path(&config.read(), album.cover_path.as_deref(), 360);
+                            let cover_url = hooks::artwork::for_album(&album, hooks::artwork::Size::Thumb);
                             let remove_label = if cap.delete_from_disk {
                                 i18n::t("delete_album").to_string()
                             } else {
@@ -565,7 +565,7 @@ fn AlbumDetail(
     let album_title = album.title.clone();
     let album_artist = album.artist.clone();
     let album_artist_for_nav = album_artist.clone();
-    let cover_url = ::server::cover::from_path(&config.read(), album.cover_path.as_deref(), 512);
+    let cover_url = hooks::artwork::for_album(&album, hooks::artwork::Size::Thumb);
     let cap = caps();
     let aid = album.id.clone();
 

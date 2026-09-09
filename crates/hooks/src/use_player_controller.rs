@@ -43,6 +43,9 @@ pub struct PlayerController {
     pub browse_loading: Signal<bool>,
     pub(crate) engine_anchor: Signal<Option<(u64, std::time::Instant, bool)>>,
     pub(crate) fading_progress: Signal<Option<f64>>,
+    /// The picture for what is playing, as a reference the daemon resolves.
+    /// Every surface that paints the cover reads it through hooks::artwork.
+    pub current_artwork: Signal<Option<api::ArtworkRef>>,
     /// The device an integration is playing on, when one owns playback.
     pub external_device: Signal<Option<String>>,
     pub(crate) output_latency_ms: Signal<u64>,
@@ -444,12 +447,6 @@ impl PlayerController {
         *self.current_song_progress.peek() as f64
     }
 
-    pub(crate) fn cover_url_for_track(&self, track: &Track) -> String {
-        ::server::cover::track(&self.config.read(), track, 800)
-            .map(|cover| cover.as_ref().to_string())
-            .unwrap_or_else(|| utils::default_cover_url().as_ref().to_string())
-    }
-
     pub(crate) fn clear_current_track_metadata(&mut self) {
         self.current_song_title.set(String::new());
         self.current_song_artist.set(String::new());
@@ -496,6 +493,7 @@ pub fn use_player_controller(
     let engine_anchor = use_signal(|| None::<(u64, std::time::Instant, bool)>);
     let fading_progress = use_signal(|| None::<f64>);
     let output_latency_ms = use_signal(|| 0u64);
+    let current_artwork = use_signal(|| None::<api::ArtworkRef>);
     let external_device = use_signal(|| None::<String>);
 
     let ctrl = PlayerController {
@@ -525,6 +523,7 @@ pub fn use_player_controller(
         browse_loading,
         engine_anchor,
         fading_progress,
+        current_artwork,
         external_device,
         output_latency_ms,
     };

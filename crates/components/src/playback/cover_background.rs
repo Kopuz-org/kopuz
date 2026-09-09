@@ -1,15 +1,10 @@
 use config::AppConfig;
 use dioxus::prelude::*;
 
-/// Upgrade artwork for views that paint it large. Local files use the artwork
-/// protocol's HQ variant; provider URLs with a resizable image endpoint are
-/// raised to a desktop-sized request instead of enlarging the row thumbnail.
+/// Upgrade artwork for views that paint it large: the same reference, asked
+/// for at the size the surface wants.
 pub fn high_quality_artwork_url(cover: String) -> String {
-    if cover.starts_with("artwork://") || cover.starts_with("http://artwork.dioxus.localhost/") {
-        format!("{cover}&hq=1")
-    } else {
-        ::server::cover::remote_artwork_url_at_size(cover, 1920)
-    }
+    hooks::artwork::at_full_size(&cover)
 }
 
 /// Art backdrop: the cover under user-configurable blur and darkening so
@@ -68,13 +63,12 @@ mod tests {
         );
     }
 
+    /// A picture that is not the daemon's to serve is left exactly as it is:
+    /// resizing a provider's URL is the daemon's business now, and guessing at
+    /// one here would produce a request nothing answers.
     #[test]
-    fn subsonic_artwork_is_upgraded_for_large_views() {
-        let got = high_quality_artwork_url(
-            "https://music.example/rest/getCoverArt.view?id=cover-1&size=80".to_string(),
-        );
-        assert!(got.contains("id=cover-1"));
-        assert!(got.contains("size=1920"));
-        assert!(!got.contains("size=80"));
+    fn a_url_from_elsewhere_is_left_alone() {
+        let original = "https://music.example/rest/getCoverArt.view?id=cover-1&size=80";
+        assert_eq!(high_quality_artwork_url(original.to_string()), original);
     }
 }

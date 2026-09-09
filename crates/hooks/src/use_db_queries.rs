@@ -394,14 +394,15 @@ pub fn use_albums(source: Memo<Source>) -> Resource<Vec<reader::Album>> {
     })
 }
 
-/// A per-track display-cover resolver: call `resolve(&track)` for any track and
-/// get its cover, with no source/partition decision at the call site. Every track
-/// self-describes its cover via the source-layer seam ([`server::cover::track`])
-/// — an API row carries an `artwork://` ref the daemon resolves — so this needs
-/// no album lookup; a mixed-source list resolves correctly.
+/// A per-track display-cover resolver: call it for any track and get its
+/// cover. Every row carries its own artwork reference, so a mixed-source
+/// list resolves without a source decision at the call site.
 pub fn use_cover_resolver(max_width: u32) -> impl Fn(&reader::Track) -> Option<utils::CoverUrl> {
-    let config = use_context::<Signal<config::AppConfig>>();
-    move |track: &reader::Track| ::server::cover::track(&config.read(), track, max_width)
+    let size = match max_width > 512 {
+        true => crate::artwork::Size::Full,
+        false => crate::artwork::Size::Thumb,
+    };
+    move |track: &reader::Track| crate::artwork::for_track(track, size)
 }
 
 /// The active source's favorite refs, re-queried on a favorites bump or a
