@@ -551,7 +551,7 @@ pub async fn add_playlist_tracks(
     refs: &[String],
 ) -> Result<(), DbError> {
     let src = source.as_str();
-    let mut tx = pool.begin().await?;
+    let mut tx = super::begin_immediate(pool).await?;
     let pk = resolve_or_create_pk(&mut tx, src, pl_id).await?;
     let mut present: std::collections::HashSet<String> = sqlx::query_scalar!(
         "SELECT track_ref FROM playlist_tracks WHERE playlist_pk = ?1",
@@ -599,7 +599,7 @@ pub async fn remove_playlist_tracks(
         return Ok(());
     }
     let src = source.as_str();
-    let mut tx = pool.begin().await?;
+    let mut tx = super::begin_immediate(pool).await?;
     let pk: Option<i64> = sqlx::query_scalar!(
         "SELECT rowid_pk FROM playlists WHERE source = ?1 AND source_pl_id = ?2",
         src,
