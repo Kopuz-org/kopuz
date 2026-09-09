@@ -31,9 +31,12 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   prepare.
 - **Crate wall:** the frontend crates (`hooks`, `pages`, `components`) reach
   the daemon through `api` and nothing else. They do not depend on `db`,
-  `daemon`, `server` or `player`: no database handle, no media source, no
-  credentials, no system integration. A feature that needs one of those is a
-  daemon service with an API method, not a hook.
+  `daemon`, `server`, `reader` or (off Android) `player`: no database handle,
+  no domain model, no media source, no credentials, no system integration. A
+  feature that needs one of those is a daemon service with an API method, not a
+  hook. Pages render the wire rows themselves — `api::TrackInfo`,
+  `AlbumInfo`, `PlaylistCatalog` — so there is no conversion layer to keep in
+  step.
 - **Settings file:** `AppConfig` persists to the `app_config` blob AND a
   standalone `settings.toml` next to the DB (`crates/config/src/store.rs`; the
   dead legacy store was `config.json`, which the importer renames).
@@ -77,14 +80,16 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   mutations, jobs, artwork, and `LocalApi` over them. `crates/kopuzd` — the
   headless binary and the tonic shell.
 - `crates/config` — `AppConfig`, `Source`, `MusicService`, `MusicServer`.
-- `crates/reader` — domain models (`Track`, `Album`, `TrackId`), scanner, tag IO.
+- `crates/reader` — domain models (`Track`, `Album`, `TrackId`), scanner, tag
+  IO. Daemon-side: what crosses to a frontend is `api::TrackInfo`.
 - `crates/db` — SQLite backend, `ReadStore` / `Storage`, migrations.
 - `crates/server` — `MediaSource` backends, sync, cover resolution.
 - `crates/hooks` — Dioxus data hooks over the API (queries, player controller,
   artwork, sources).
 - `crates/pages`, `crates/components`, `crates/kopuz_route` — UI + routing.
 - `crates/player` audio · `crates/radio` · `crates/scrobble` · `crates/discord-presence`
-  · `crates/i18n` · `crates/utils` (`CoverUrl`, image-URL builders).
+  · `crates/i18n` · `crates/utils` (`CoverUrl`, image-URL builders; its cover
+  cache is behind the `db-cache` feature, so a frontend never links SQLite).
 - `android-src/` — Kotlin media-session classes patched in by `build.rs`.
 - `packaging/` (flatpak / AUR / nix) · `scripts/` (codegen + vendor helpers).
 
