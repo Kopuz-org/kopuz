@@ -65,15 +65,40 @@ pub struct YtStreamInfo {
     pub range_safe: bool,
 }
 
-/// Process-wide anonymous visitor_data cache (the ANDROID_VR + pot path).
-/// Refetched on process restart.
+/// The visitor id every player call carries, held for the process and kept
+/// across launches in the library's metadata cache.
+///
+/// A visitor id is YouTube's notion of "this device". Minting a new one on
+/// every launch, from the same address with the same account, is what a
+/// fleet of fresh devices looks like, and a fresh device asking for a stream
+/// is what gets challenged. One id per identity, kept, is what a browser
+/// presents. The anonymous path and the signed-in one are different
+/// identities, so each keeps its own.
 static VISITOR_DATA: OnceCell<String> = OnceCell::const_new();
+static VISITOR_DATA_SIGNED_IN: OnceCell<String> = OnceCell::const_new();
+
+const VISITOR_META_KIND: &str = "yt_visitor";
 
 async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
-    VISITOR_DATA
-        .get_or_try_init(|| async { innertube::visitor_id(cookies).await })
-        .await
-        .map(|s| s.as_str())
+    let (cell, key) = match cookies.and_then(super::derive_user_id) {
+        Some(user) => (&VISITOR_DATA_SIGNED_IN, user),
+        None => (&VISITOR_DATA, "anon".to_string()),
+    };
+    cell.get_or_try_init(|| async {
+        if let Some(saved) = db::cache::get()
+            && let Ok(Some(saved)) = saved.meta_get(&key, VISITOR_META_KIND).await
+            && !saved.is_empty()
+        {
+            return Ok(saved);
+        }
+        let fresh = innertube::visitor_id(cookies).await?;
+        if let Some(handle) = db::cache::get() {
+            let _ = handle.meta_put(&key, VISITOR_META_KIND, &fresh).await;
+        }
+        Ok(fresh)
+    })
+    .await
+    .map(|s| s.as_str())
 }
 
 /// Resolve a YT video to a playable stream. Premium (cookies) → decipher;
@@ -103,7 +128,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         // track once the account's tier is learned.
         let skip = uid.as_deref().is_some_and(known_non_premium) && botguard::is_available();
         if !skip {
-            match try_native_decipher(video_id, cookies).await {
+            match signed_in_with_retry(video_id, cookies).await {
                 Ok(info) if is_premium_itag(info.itag) => {
                     if let Some(u) = &uid {
                         remember_tier(u, true);
@@ -533,13 +558,46 @@ fn stream_info_from(
 /// unlock Premium itags; **no PO token is sent** — an authenticated session is
 /// its own proof-of-origin (issue #349). Anonymous callers still resolve here,
 /// at the standard ~128 kbps ceiling.
+/// How long to wait before each further attempt when Google's abuse page
+/// answers instead of the API. It is sampled per request and clears within
+/// seconds; a retry by hand was enough, so this is that retry, done for the
+/// user. Anything longer would make a stuck track worse than a skipped one.
+const BLOCK_RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(2), Duration::from_secs(5)];
+
+/// The signed-in path, retried across Google's block page. Any other failure
+/// is an answer about the track and is not retried.
+async fn signed_in_with_retry(
+    video_id: &str,
+    cookies: Option<&str>,
+) -> Result<YtStreamInfo, String> {
+    let mut attempt = try_native_decipher(video_id, cookies).await;
+    for delay in BLOCK_RETRY_DELAYS {
+        match &attempt {
+            Err(error) if innertube::is_google_block(error) => {
+                tracing::info!(
+                    ?delay,
+                    "blocked by Google's abuse page; retrying the signed-in path"
+                );
+                tokio::time::sleep(delay).await;
+                attempt = try_native_decipher(video_id, cookies).await;
+            }
+            _ => break,
+        }
+    }
+    attempt
+}
+
 async fn try_native_decipher(
     video_id: &str,
     cookies: Option<&str>,
 ) -> Result<YtStreamInfo, String> {
     let player = decipher::player_js(video_id).await?;
+    // The same device identity a browser would present with these cookies;
+    // a signed-in request with none is the odd one out.
+    let visitor = visitor_data(cookies).await.ok();
     let extras = PlayerExtras {
         signature_timestamp: Some(player.1),
+        visitor_data: visitor,
         ..Default::default()
     };
     let json = innertube::player(WEB_REMIX, video_id, cookies, extras).await?;
