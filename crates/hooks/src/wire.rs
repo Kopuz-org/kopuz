@@ -1,39 +1,38 @@
 //! Turning API rows into the models the UI renders.
 //!
 //! Pages still render `reader::Track` and `reader::Album`; only the source of
-//! those rows changed. The one real difference is the cover: an API row names
-//! the entity its artwork belongs to instead of a path, because the daemon may
-//! be another process and the credentials that sign a server cover URL never
-//! leave it. That name becomes an `artwork://api?...` URL, which parses as an
-//! ordinary embedded-cover ref, so every `server::cover::*` call site keeps
-//! working unchanged.
+//! those rows changed. The one real difference is the cover: an API row says
+//! whether artwork exists and names the entity it belongs to, because the
+//! daemon may be another process and the credentials that sign a server cover
+//! URL never leave it. That name becomes an `artwork://api?...` URL, which
+//! `CoverRef::parse` reads as a self-contained embedded URL, so every
+//! `server::cover::*` call site keeps working unchanged.
 
-use api::{AlbumInfo, ArtworkTarget, TrackInfo, TrackKind};
+use api::{AlbumInfo, TrackInfo, TrackKind};
 use reader::{Album, Track, TrackId};
 
-/// The cover URL for an artwork target, or `None` when the daemon has no
-/// cover for the entity.
-pub fn artwork_url(target: Option<&ArtworkTarget>) -> Option<String> {
-    let target = target?;
-    let (kind, id) = match target {
-        ArtworkTarget::Track(key) => ("track", key),
-        ArtworkTarget::Album(id) => ("album", id),
-        ArtworkTarget::Artist(name) => ("artist", name),
-        ArtworkTarget::Playlist(id) => ("playlist", id),
-    };
-    Some(
-        utils::format_entity_artwork_url(kind, id, false)
-            .as_ref()
-            .to_string(),
-    )
+/// The cover URL for an artwork ref, or `None` when the daemon has no cover
+/// for the entity -- in which case the UI draws its placeholder and never
+/// asks for an image that does not exist.
+pub fn artwork_url(artwork: Option<&api::ArtworkRef>) -> Option<utils::CoverUrl> {
+    let artwork = artwork?;
+    Some(utils::format_entity_artwork_url(
+        artwork.target.kind(),
+        artwork.target.id(),
+        artwork.version,
+        false,
+    ))
+}
+
+fn artwork_string(artwork: Option<&api::ArtworkRef>) -> Option<String> {
+    artwork_url(artwork).map(|url| url.as_ref().to_string())
 }
 
 pub fn track_from_api(info: TrackInfo) -> Track {
-    let cover = artwork_url(Some(&ArtworkTarget::Track(info.key.clone())));
     Track {
         // `uid` is exactly the "service:id" form TrackId round-trips through.
         id: TrackId::from_legacy_path(&info.uid),
-        cover,
+        cover: artwork_string(info.artwork.as_ref()),
         album_id: info.album_id,
         title: info.title,
         artist: info.artist,
@@ -47,11 +46,11 @@ pub fn track_from_api(info: TrackInfo) -> Track {
         bitrate: info.bitrate,
         track_number: info.track_number,
         disc_number: info.disc_number,
-        musicbrainz_release_id: None,
-        musicbrainz_recording_id: None,
-        musicbrainz_track_id: None,
-        playlist_item_id: None,
-        artists: Vec::new(),
+        musicbrainz_release_id: info.musicbrainz_release_id,
+        musicbrainz_recording_id: info.musicbrainz_recording_id,
+        musicbrainz_track_id: info.musicbrainz_track_id,
+        playlist_item_id: info.playlist_item_id,
+        artists: info.artists,
     }
 }
 
@@ -66,7 +65,7 @@ pub fn album_from_api(info: AlbumInfo) -> Album {
         artist: info.artist,
         genre: info.genre,
         year: info.year,
-        cover_path: None,
+        cover_path: artwork_string(info.artwork.as_ref()).map(std::path::PathBuf::from),
         manual_cover: false,
     }
 }
@@ -75,18 +74,17 @@ pub fn albums_from_api(items: Vec<AlbumInfo>) -> Vec<Album> {
     items.into_iter().map(album_from_api).collect()
 }
 
-/// The playlist catalog as the views render it. `cover_path` and `image_tag`
-/// stay empty on purpose: a playlist's cover is resolved by the daemon (an
-/// explicit cover, then the server's tag, then the first track's), so the
-/// artwork ref is the whole answer and the fallback chain does not have to be
-/// repeated here.
+/// The playlist catalog as the views render it. `image_tag` stays empty on
+/// purpose: the daemon already walked the explicit cover, the server's tag
+/// and the first track's art, so the resolved ref is the whole answer and the
+/// fallback chain is not repeated here.
 pub fn playlist_store_from_api(catalog: api::PlaylistCatalog) -> reader::PlaylistStore {
     reader::PlaylistStore {
         playlists: catalog
             .playlists
             .into_iter()
             .map(|playlist| reader::models::Playlist {
-                cover_path: None,
+                cover_path: artwork_string(playlist.artwork.as_ref()).map(std::path::PathBuf::from),
                 image_tag: None,
                 id: playlist.id,
                 name: playlist.name,
@@ -103,9 +101,4 @@ pub fn playlist_store_from_api(catalog: api::PlaylistCatalog) -> reader::Playlis
             })
             .collect(),
     }
-}
-
-/// The cover for a playlist, which the daemon resolves by id.
-pub fn playlist_cover_url(id: &str) -> utils::CoverUrl {
-    utils::format_entity_artwork_url("playlist", id, false)
 }

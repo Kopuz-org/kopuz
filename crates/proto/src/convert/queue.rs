@@ -28,6 +28,12 @@ pub fn queue_context_to_proto(value: &api::QueueContext) -> QueueContext {
             station_id: station_id.clone(),
             stream_id: stream_id.clone(),
         }),
+        api::QueueContext::TrackRadio { key } => {
+            queue_context::Kind::TrackRadio(queue_context::Key { key: key.clone() })
+        }
+        api::QueueContext::PlaylistRadio { id } => {
+            queue_context::Kind::PlaylistRadio(queue_context::Id { id: id.clone() })
+        }
     };
     QueueContext { kind: Some(kind) }
 }
@@ -51,6 +57,12 @@ pub fn queue_context_from_proto(value: &QueueContext) -> Option<api::QueueContex
         queue_context::Kind::Radio(radio) => api::QueueContext::Radio {
             station_id: radio.station_id.clone(),
             stream_id: radio.stream_id.clone(),
+        },
+        queue_context::Kind::TrackRadio(seed) => api::QueueContext::TrackRadio {
+            key: seed.key.clone(),
+        },
+        queue_context::Kind::PlaylistRadio(seed) => api::QueueContext::PlaylistRadio {
+            id: seed.id.clone(),
         },
     })
 }
@@ -87,6 +99,15 @@ pub fn queue_edit_to_proto(value: &api::QueueEdit) -> QueueEditRequest {
         api::QueueEdit::Remove { index } => {
             queue_edit_request::Op::Remove(queue_edit_request::Remove { index: *index })
         }
+        api::QueueEdit::JumpPhysical { index } => {
+            queue_edit_request::Op::JumpPhysical(queue_edit_request::Jump { index: *index })
+        }
+        api::QueueEdit::Insert { index, keys } => {
+            queue_edit_request::Op::Insert(queue_edit_request::Insert {
+                index: *index,
+                keys: keys.clone(),
+            })
+        }
     };
     QueueEditRequest { op: Some(op) }
 }
@@ -100,6 +121,13 @@ pub fn queue_edit_from_proto(value: &QueueEditRequest) -> Option<api::QueueEdit>
         },
         queue_edit_request::Op::Remove(remove) => api::QueueEdit::Remove {
             index: remove.index,
+        },
+        queue_edit_request::Op::JumpPhysical(jump) => {
+            api::QueueEdit::JumpPhysical { index: jump.index }
+        }
+        queue_edit_request::Op::Insert(insert) => api::QueueEdit::Insert {
+            index: insert.index,
+            keys: insert.keys.clone(),
         },
     })
 }
@@ -137,6 +165,26 @@ pub fn queue_window_from_proto(value: &QueueWindow) -> api::QueueWindow {
                     .unwrap_or_default(),
             })
             .collect(),
+    }
+}
+
+pub fn queue_snapshot_to_proto(value: &api::QueueSnapshot) -> QueueSnapshot {
+    QueueSnapshot {
+        rev: value.rev,
+        items: value.items.iter().map(track_info_to_proto).collect(),
+        shuffle_order: value.shuffle_order.clone(),
+        position: value.position,
+        shuffle: value.shuffle,
+    }
+}
+
+pub fn queue_snapshot_from_proto(value: &QueueSnapshot) -> api::QueueSnapshot {
+    api::QueueSnapshot {
+        rev: value.rev,
+        items: value.items.iter().map(track_info_from_proto).collect(),
+        shuffle_order: value.shuffle_order.clone(),
+        position: value.position,
+        shuffle: value.shuffle,
     }
 }
 

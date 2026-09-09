@@ -309,8 +309,8 @@ pub fn use_album(source: Memo<Source>, album_id: Memo<String>) -> Resource<Optio
     })
 }
 
-/// Distinct artists for a source with track counts, A→Z.
-pub fn use_artists(source: Memo<Source>) -> Resource<Vec<(String, u32)>> {
+/// Distinct artists for a source with track counts and photos, A→Z.
+pub fn use_artists(source: Memo<Source>) -> Resource<Vec<api::ArtistInfo>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
@@ -322,15 +322,10 @@ pub fn use_artists(source: Memo<Source>) -> Resource<Vec<(String, u32)>> {
             rows = tracing::field::Empty
         );
         async move {
-            let rows: Vec<(String, u32)> = api
+            let rows = api
                 .artists(all())
                 .await
-                .map(|page| {
-                    page.artists
-                        .into_iter()
-                        .map(|artist| (artist.name, artist.track_count))
-                        .collect()
-                })
+                .map(|page| page.artists)
                 .unwrap_or_default();
             tracing::Span::current().record("rows", rows.len());
             rows
@@ -370,8 +365,8 @@ pub fn use_playlists() -> Resource<reader::PlaylistStore> {
 /// The cover for one artist, which the daemon resolves: a custom override,
 /// then the source's photo, then -- for a library source -- one of the
 /// artist's album covers. A frontend never sees which of those it got.
-pub fn artist_cover_url(name: &str) -> utils::CoverUrl {
-    utils::format_entity_artwork_url("artist", name, false)
+pub fn artist_cover_url(artist: &api::ArtistInfo) -> Option<utils::CoverUrl> {
+    crate::wire::artwork_url(artist.artwork.as_ref())
 }
 
 /// All albums for a source, re-queried when the albums table changes.

@@ -32,7 +32,7 @@ pub enum ArtistImageRef {
 /// Storage remains string-based for backwards compatibility. All interpretation
 /// of those strings happens here so callers never need to split service prefixes
 /// or decode embedded URLs themselves.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CoverRef {
     Local(PathBuf),
     JellyfinItem {
@@ -314,7 +314,14 @@ impl CoverRef {
         if let Some(url) = stored.strip_prefix("directurl:") {
             return (!url.is_empty()).then(|| url.to_string());
         }
-        if stored.starts_with("http://") || stored.starts_with("https://") {
+        // `artwork://` is the app's own scheme for a cover the daemon
+        // resolves. It is as self-contained as an http URL, and saying so
+        // here is what keeps a daemon-sourced row from being misread as a
+        // service-specific image tag.
+        if stored.starts_with("http://")
+            || stored.starts_with("https://")
+            || stored.starts_with("artwork://")
+        {
             return Some(stored.to_string());
         }
 

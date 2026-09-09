@@ -17,8 +17,11 @@ pub enum TrackSort {
 }
 
 /// A track row on the wire. `key` is the stable library ref used everywhere
-/// else in the API, and the entity id `GetArtwork` takes; local filesystem
-/// paths and credentialed remote URLs never appear here.
+/// else in the API; local filesystem paths and credentialed remote URLs never
+/// appear here.
+///
+/// This is what frontends render, so it carries everything a row displays --
+/// including `artwork`, which says whether a cover exists at all.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrackInfo {
     pub key: String,
@@ -35,6 +38,18 @@ pub struct TrackInfo {
     pub kind: TrackKind,
     pub seekable: bool,
     pub offline: bool,
+    /// Which service the track came from; `None` for a local file.
+    pub service: Option<config::MusicService>,
+    /// Every credited artist, where the source distinguishes them from the
+    /// single `artist` string.
+    pub artists: Vec<String>,
+    pub musicbrainz_release_id: Option<String>,
+    pub musicbrainz_recording_id: Option<String>,
+    pub musicbrainz_track_id: Option<String>,
+    /// A playlist's own id for this entry, when the row came from one and the
+    /// source distinguishes duplicate entries.
+    pub playlist_item_id: Option<String>,
+    pub artwork: Option<crate::ArtworkRef>,
 }
 
 pub const DEFAULT_PAGE_LIMIT: u32 = 200;
@@ -114,7 +129,7 @@ pub struct AlbumInfo {
     pub artist: String,
     pub genre: String,
     pub year: u16,
-    pub artwork: Option<crate::ArtworkTarget>,
+    pub artwork: Option<crate::ArtworkRef>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -128,7 +143,7 @@ pub struct AlbumPage {
 pub struct ArtistInfo {
     pub name: String,
     pub track_count: u32,
-    pub artwork: Option<crate::ArtworkTarget>,
+    pub artwork: Option<crate::ArtworkRef>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -162,7 +162,10 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
 /// `id` the entity's key; the app's `artwork` protocol handler turns it back
 /// into an API call. Server covers are signed with credentials a frontend
 /// never sees, so this is the only way to show one.
-pub fn format_entity_artwork_url(kind: &str, id: &str, hq: bool) -> CoverUrl {
+///
+/// `version` comes from the row's artwork ref and changes when the picture
+/// does, which is what makes the year-long immutable cache correct.
+pub fn format_entity_artwork_url(kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
     const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
         .add(b' ')
         .add(b'"')
@@ -181,9 +184,9 @@ pub fn format_entity_artwork_url(kind: &str, id: &str, hq: bool) -> CoverUrl {
     let id = percent_encoding::utf8_percent_encode(id, QUERY_VAL);
     let quality = if hq { "&hq=1" } else { "" };
     let url = if cfg!(target_os = "windows") {
-        format!("http://artwork.dioxus.localhost/api?{kind}={id}{quality}&v=thumb400-hq1920")
+        format!("http://artwork.dioxus.localhost/api?{kind}={id}{quality}&v={version}")
     } else {
-        format!("artwork://api?{kind}={id}{quality}&v=thumb400-hq1920")
+        format!("artwork://api?{kind}={id}{quality}&v={version}")
     };
     cover_url_from_string(url)
 }

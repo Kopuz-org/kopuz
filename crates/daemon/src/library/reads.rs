@@ -5,10 +5,9 @@
 //! in the daemon so a frontend never holds the whole library, and they answer
 //! with wire rows, so cover paths and local filesystem paths stay here.
 
-use api::{
-    AlbumInfo, AlbumPage, ApiError, ArtistInfo, ArtistPage, ArtworkTarget, Page, SearchResults,
-    TrackPage,
-};
+use std::path::PathBuf;
+
+use api::{AlbumInfo, AlbumPage, ApiError, ArtistInfo, ArtistPage, Page, SearchResults, TrackPage};
 use reader::Album;
 
 use super::{LibraryService, db_error};
@@ -34,7 +33,7 @@ fn album_info(album: &Album) -> AlbumInfo {
         artist: album.artist.clone(),
         genre: album.genre.clone(),
         year: album.year,
-        artwork: Some(ArtworkTarget::Album(album.id.clone())),
+        artwork: crate::artwork::album_ref(album),
     }
 }
 
@@ -95,18 +94,45 @@ impl LibraryService {
         })
     }
 
+    /// The artist grid. Its artwork chain ends in "one of this artist's album
+    /// covers", so the covers and photos are loaded once for the page rather
+    /// than per row -- the same walk `ArtworkService` does, on bulk data.
     pub async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError> {
-        let rows = self
-            .db
-            .artists(&self.query_source())
-            .await
-            .map_err(db_error)?;
+        let source = self.query_source();
+        let rows = self.db.artists(&source).await.map_err(db_error)?;
         let (total, items) = window(&rows, page);
+        let images = self.db.artist_images().await.map_err(db_error)?;
+        let config = self.current_config();
+        let library_view = server::source::active(self.db.clone(), &config)
+            .capabilities()
+            .artist_view
+            == server::source::ArtistView::Library;
+        let album_covers = if library_view {
+            self.db
+                .albums(&source)
+                .await
+                .map_err(db_error)?
+                .into_iter()
+                .filter_map(|album| {
+                    let cover = album.cover_path?;
+                    Some((album.artist.trim().to_lowercase(), cover))
+                })
+                .collect()
+        } else {
+            std::collections::HashMap::new()
+        };
         Ok(ArtistPage {
             artists: items
                 .into_iter()
                 .map(|(name, track_count)| ArtistInfo {
-                    artwork: Some(ArtworkTarget::Artist(name.clone())),
+                    artwork: crate::artwork::artist_ref(
+                        &name,
+                        &images,
+                        album_covers
+                            .get(&name.trim().to_lowercase())
+                            .map(PathBuf::as_path),
+                        library_view,
+                    ),
                     name,
                     track_count,
                 })

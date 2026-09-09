@@ -147,6 +147,15 @@ impl api::PlayerApi for GrpcApi {
         Ok(convert::queue_window_from_proto(window.get_ref()))
     }
 
+    async fn queue_snapshot(&self) -> Result<api::QueueSnapshot, ApiError> {
+        let snapshot = self
+            .client()
+            .get_queue_snapshot(Request::new(proto::GetQueueSnapshotRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::queue_snapshot_from_proto(snapshot.get_ref()))
+    }
+
     async fn set_queue(&self, request: SetQueueRequest) -> Result<CommandAck, ApiError> {
         let ack = self
             .client()

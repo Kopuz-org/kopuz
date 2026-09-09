@@ -31,6 +31,7 @@ service Kopuz {
   rpc GetStatus(GetStatusRequest) returns (DaemonStatus);
   rpc GetPlayerState(GetPlayerStateRequest) returns (PlayerState);
   rpc GetQueue(Page) returns (QueueWindow);
+  rpc GetQueueSnapshot(GetQueueSnapshotRequest) returns (QueueSnapshot);
   rpc GetTracks(TracksRequest) returns (TrackPage);
   rpc GetFolderTracks(FolderRequest) returns (TrackPage);
   rpc GetTracksByKeys(TracksByKeysRequest) returns (TrackList);
@@ -257,6 +258,7 @@ message NowPlaying {
   uint32 bitrate = 7;
   TrackKind kind = 8;
   bool seekable = 9;
+  optional ArtworkRef artwork = 11;
 }
 
 message PositionAnchor {
@@ -311,12 +313,19 @@ message QueueContext {
     Id playlist = 5;
     TrackFilter filter = 6;
     Radio radio = 7;
+    // The source's mix seeded by a track or a playlist. The daemon fetches
+    // it and pins the seed at the front.
+    Key track_radio = 8;
+    Id playlist_radio = 9;
   }
   message TrackKeys {
     repeated string keys = 1;
   }
   message Id {
     string id = 1;
+  }
+  message Key {
+    string key = 1;
   }
   message Name {
     string name = 1;
@@ -334,6 +343,10 @@ message QueueEditRequest {
     Jump jump = 1;
     Move move = 2;
     Remove remove = 3;
+    // Index into the UNSHUFFLED queue; the shuffle order is re-pinned so the
+    // named track plays now and the rest follows it.
+    Jump jump_physical = 4;
+    Insert insert = 5;
   }
   message Jump {
     uint32 index = 1;
@@ -344,6 +357,10 @@ message QueueEditRequest {
   }
   message Remove {
     uint32 index = 1;
+  }
+  message Insert {
+    uint32 index = 1;
+    repeated string keys = 2;
   }
 }
 
@@ -363,6 +380,19 @@ message QueueWindow {
 message QueueItem {
   uint32 index = 1;
   TrackInfo track = 2;
+}
+
+message GetQueueSnapshotRequest {}
+
+// The whole queue at once: what a frontend needs to render a queue view, a
+// shuffle order, and "is this queued?" checks without paging.
+message QueueSnapshot {
+  uint64 rev = 1;
+  repeated TrackInfo items = 2;
+  // Play-order position -> unshuffled index. Empty while shuffle is off.
+  repeated uint32 shuffle_order = 3;
+  optional uint32 position = 4;
+  bool shuffle = 5;
 }
 
 // ---------------- library ----------------
@@ -416,7 +446,7 @@ message AlbumInfo {
   string genre = 4;
   uint32 year = 5;
   // Absent when the daemon has no cover for the album.
-  optional ArtworkTarget artwork = 6;
+  optional ArtworkRef artwork = 6;
 }
 
 message AlbumPage {
@@ -440,7 +470,7 @@ message AlbumTracksRequest {
 message ArtistInfo {
   string name = 1;
   uint32 track_count = 2;
-  optional ArtworkTarget artwork = 3;
+  optional ArtworkRef artwork = 3;
 }
 
 message ArtistPage {
@@ -492,7 +522,7 @@ message PlaylistInfo {
   string name = 2;
   // Library refs, in playlist order; resolve with GetTracksByKeys.
   repeated string track_keys = 3;
-  optional ArtworkTarget artwork = 4;
+  optional ArtworkRef artwork = 4;
 }
 
 message PlaylistFolderInfo {
@@ -572,6 +602,16 @@ message TrackInfo {
   TrackKind kind = 12;
   bool seekable = 13;
   bool offline = 14;
+  // Absent for a local file.
+  optional MusicService service = 15;
+  // Every credited artist, where the source separates them.
+  repeated string artists = 16;
+  optional string musicbrainz_release_id = 17;
+  optional string musicbrainz_recording_id = 18;
+  optional string musicbrainz_track_id = 19;
+  optional string playlist_item_id = 20;
+  // Absent when there is no cover.
+  optional ArtworkRef artwork = 21;
 }
 
 message TrackRef {
@@ -988,14 +1028,25 @@ message DaemonStatus {
 }
 
 // Which entity a cover belongs to. Carried on library rows so a client can
-// ask for the image without knowing how it is stored.
+// ask for the image without knowing how it is stored. catalog and station
+// name things outside the library: a browse tile, a radio station icon.
 message ArtworkTarget {
   oneof entity {
     string track = 1;
     string album = 2;
     string artist = 3;
     string playlist = 4;
+    string catalog = 5;
+    string station = 6;
   }
+}
+
+// The artwork a row has. Absent on a row means there is no picture; do not
+// ask for one. version changes when the image would, and never encodes a
+// credential, so a client caches bytes under it indefinitely.
+message ArtworkRef {
+  ArtworkTarget target = 1;
+  uint64 version = 2;
 }
 
 message ArtworkRequest {
@@ -1004,6 +1055,8 @@ message ArtworkRequest {
     string album = 2;
     string artist = 3;
     string playlist = 5;
+    string catalog = 6;
+    string station = 7;
   }
   bool hq = 4;
 }
@@ -1062,6 +1115,20 @@ enum TrackSort {
   TRACK_SORT_PLAY_COUNT = 5;
   // Ordering comes from TrackFilter.sort_fields instead.
   TRACK_SORT_FIELDS = 6;
+}
+
+// Which backend a row came from. UNKNOWN is the forward-compatibility
+// fallback; the daemon never sends it.
+enum MusicService {
+  MUSIC_SERVICE_UNKNOWN = 0;
+  MUSIC_SERVICE_JELLYFIN = 1;
+  MUSIC_SERVICE_SUBSONIC = 2;
+  MUSIC_SERVICE_CUSTOM = 3;
+  MUSIC_SERVICE_YT_MUSIC = 4;
+  MUSIC_SERVICE_APPLE_MUSIC = 5;
+  MUSIC_SERVICE_SOUNDCLOUD = 6;
+  MUSIC_SERVICE_SPOTIFY = 7;
+  MUSIC_SERVICE_NEXTCLOUD = 8;
 }
 
 enum TrackKind {

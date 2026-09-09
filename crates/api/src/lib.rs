@@ -15,8 +15,9 @@ mod library;
 mod player;
 mod playlists;
 mod queue;
+mod sources;
 
-pub use artwork::{ArtworkData, ArtworkRequest, ArtworkTarget};
+pub use artwork::{ArtworkData, ArtworkRef, ArtworkRequest, ArtworkTarget};
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
 pub use library::{
@@ -29,7 +30,14 @@ pub use player::{
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
 };
 pub use playlists::{PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder};
-pub use queue::{QueueContext, QueueEdit, QueueItem, QueueMode, QueueWindow, SetQueueRequest};
+pub use queue::{
+    QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow, SetQueueRequest,
+};
+pub use sources::{
+    AlbumPresentation, ArtistPresentation, CredentialProvision, FavoritesSyncMode, IntegrationKind,
+    IntegrationProvision, IntegrationStatus, LocalSourceDraft, PlaylistCapability, ServerDraft,
+    SourceCapabilities, SourceFolderEntry, SourceInfo, SourceKind, SourceLoginRequest,
+};
 
 /// The config view: the layered config with credential keys
 /// stripped, plus the keys a managed settings file pins (rendered locked in
@@ -90,6 +98,10 @@ pub trait PlayerApi: Send + Sync {
     async fn player_command(&self, cmd: PlayerCommand) -> Result<CommandAck, ApiError>;
 
     async fn queue_window(&self, page: Page) -> Result<QueueWindow, ApiError>;
+
+    /// The whole queue, including the shuffle permutation. A frontend that
+    /// mirrors the queue reads this once and then follows `queue.changed`.
+    async fn queue_snapshot(&self) -> Result<QueueSnapshot, ApiError>;
 
     async fn set_queue(&self, req: SetQueueRequest) -> Result<CommandAck, ApiError>;
 

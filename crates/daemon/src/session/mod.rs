@@ -390,6 +390,17 @@ impl SessionHandle {
         rx.await.unwrap_or_default()
     }
 
+    /// A queued track by key. The queue is where a row the database has never
+    /// seen still exists -- a catalog listing played straight from the
+    /// network -- so artwork and metadata for it resolve from here.
+    pub async fn queued_track(&self, key: &str) -> Option<Track> {
+        self.queue_mirror()
+            .await
+            .tracks
+            .into_iter()
+            .find(|track| track.id.key() == key)
+    }
+
     /// Adopt a new config (a ConfigService patch): applies live audio
     /// settings and emits `config.changed`.
     pub fn set_config(&self, config: config::AppConfig, changed: Vec<String>) {
@@ -566,7 +577,7 @@ impl Session {
                 let _ = reply.send(Ok(self.window(page)));
             }
             SessionCmd::Edit(edit, reply) => {
-                let result = self.handle_queue_edit(edit, state_tx);
+                let result = self.handle_queue_edit(edit, state_tx).await;
                 let _ = reply.send(result);
             }
             SessionCmd::RadioMetadata {
@@ -752,13 +763,45 @@ impl Session {
         Ok(self.publish(state_tx, queue_changed))
     }
 
-    fn handle_queue_edit(
+    async fn handle_queue_edit(
         &mut self,
         edit: QueueEdit,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
         let len = self.model.len();
         match edit {
+            QueueEdit::JumpPhysical { index } => {
+                let index = index as usize;
+                if self.model.items().get(index).is_none() {
+                    return Err(ApiError::invalid_input("no track at that queue position"));
+                }
+                let position = self.model.jump_to(index);
+                self.start_load(position, false);
+                Ok(self.publish(state_tx, true))
+            }
+            QueueEdit::Insert { index, keys } => {
+                let index = index as usize;
+                if index > len {
+                    return Err(ApiError::invalid_input("queue position out of range"));
+                }
+                let tracks = tokio::time::timeout(
+                    MATERIALIZE_TIMEOUT,
+                    self.materializer
+                        .materialize(&QueueContext::Tracks { keys: keys.clone() }),
+                )
+                .await
+                .map_err(|_| {
+                    ApiError::new(
+                        api::ErrorCode::SourceUnreachable,
+                        "timed out resolving the tracks to insert",
+                    )
+                })??;
+                if tracks.is_empty() {
+                    return Err(ApiError::not_found("none of those keys are in the library"));
+                }
+                self.model.insert_at(index, tracks);
+                Ok(self.publish(state_tx, true))
+            }
             QueueEdit::Jump { index } => {
                 let index = index as usize;
                 let position_exists = self.model.track_at(index).is_some();

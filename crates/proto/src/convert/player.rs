@@ -40,6 +40,7 @@ pub fn now_playing_to_proto(value: &api::NowPlaying) -> NowPlaying {
         bitrate: u32::from(value.bitrate),
         kind: track_kind_to_proto(value.kind) as i32,
         seekable: value.seekable,
+        artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
     }
 }
 
@@ -55,6 +56,7 @@ pub fn now_playing_from_proto(value: &NowPlaying) -> api::NowPlaying {
         bitrate: value.bitrate.min(u32::from(u16::MAX)) as u16,
         kind: track_kind_from_proto(value.kind),
         seekable: value.seekable,
+        artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
     }
 }
 

@@ -12,10 +12,7 @@
 
 use std::sync::Arc;
 
-use api::{
-    ApiError, ArtworkTarget, PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder,
-    Table,
-};
+use api::{ApiError, PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder, Table};
 
 use crate::session::SessionHandle;
 
@@ -54,20 +51,40 @@ impl PlaylistService {
     }
 
     pub async fn catalog(&self) -> Result<PlaylistCatalog, ApiError> {
+        let config = self.config();
         let store = self
             .db
-            .load_playlists(&self.config().active_source)
+            .load_playlists(&config.active_source)
             .await
             .map_err(db_error)?;
+        // A playlist with no cover of its own borrows its first track's, so
+        // those tracks are fetched once for the whole catalog.
+        let first_keys: Vec<String> = store
+            .playlists
+            .iter()
+            .filter_map(|playlist| playlist.tracks.first().cloned())
+            .collect();
+        let first_tracks: std::collections::HashMap<String, reader::Track> = self
+            .db
+            .tracks_by_keys(&config.active_source, &first_keys)
+            .await
+            .map_err(db_error)?
+            .into_iter()
+            .map(|track| (track.id.key().into_owned(), track))
+            .collect();
         Ok(PlaylistCatalog {
             playlists: store
                 .playlists
                 .into_iter()
                 .map(|playlist| PlaylistInfo {
-                    // Always set: the daemon falls back through the explicit
-                    // cover, the server's tag, and the first track's art, and
-                    // only it can sign the middle one.
-                    artwork: Some(ArtworkTarget::Playlist(playlist.id.clone())),
+                    artwork: crate::artwork::playlist_ref(
+                        &playlist,
+                        &config,
+                        playlist
+                            .tracks
+                            .first()
+                            .and_then(|key| first_tracks.get(key)),
+                    ),
                     id: playlist.id,
                     name: playlist.name,
                     track_keys: playlist.tracks,

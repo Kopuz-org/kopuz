@@ -6,7 +6,7 @@ pub struct PlaylistInfo {
     pub id: String,
     pub name: String,
     pub track_keys: Vec<String>,
-    pub artwork: Option<crate::ArtworkTarget>,
+    pub artwork: Option<crate::ArtworkRef>,
 }
 
 /// A user-made grouping of playlists. Local organisation only -- no source

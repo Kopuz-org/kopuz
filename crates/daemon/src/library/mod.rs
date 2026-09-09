@@ -454,6 +454,9 @@ impl QueueMaterializer for LibraryService {
                 station_id,
                 stream_id,
             } => Ok(vec![self.radio_track(station_id, stream_id)]),
+            QueueContext::TrackRadio { .. } | QueueContext::PlaylistRadio { .. } => Err(
+                ApiError::unsupported("this daemon runs without a catalog service"),
+            ),
         }
     }
 }
