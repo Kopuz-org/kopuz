@@ -503,6 +503,19 @@ impl api::ConfigApi for LocalApi {
         self.session.set_config(updated, changed);
         Ok(view)
     }
+
+    async fn preview_equalizer(
+        &self,
+        equalizer: config::EqualizerSettings,
+    ) -> Result<(), ApiError> {
+        // Not a config write: the engine hears it, nothing is stored, and
+        // the session keeps the settings it already had.
+        let mut preview = self.session.config_watch().borrow().clone();
+        preview.equalizer = equalizer;
+        self.session
+            .set_config(preview, vec!["equalizer".to_string()]);
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]

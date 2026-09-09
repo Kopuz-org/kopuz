@@ -994,6 +994,19 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::config_view_to_proto(&view)))
     }
 
+    async fn preview_equalizer(
+        &self,
+        request: Request<proto::EqualizerSettings>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let equalizer = convert::equalizer_from_proto(Some(request.get_ref()));
+        self.0
+            .api
+            .preview_equalizer(equalizer)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     #[allow(clippy::result_large_err)]
     async fn get_artwork(
         &self,

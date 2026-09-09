@@ -45,9 +45,7 @@ pub use playlists::PlaylistService;
 pub use queue_model::{NextOutcome, QueueModel};
 pub use radio::RadioService;
 pub use scrobbler::Scrobbler;
-pub use session::{
-    LocalApi, PlaybackServices, QueueMaterializer, QueueMirrorSnapshot, SessionHandle,
-};
+pub use session::{LocalApi, PlaybackServices, QueueMaterializer, SessionHandle};
 pub use sources::SourceService;
 pub use spotify::SpotifySink;
 pub use ytdlp::YtdlpService;

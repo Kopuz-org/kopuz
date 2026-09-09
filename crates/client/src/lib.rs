@@ -588,6 +588,17 @@ impl api::ConfigApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(convert::config_view_from_proto(view.get_ref()))
     }
+
+    async fn preview_equalizer(
+        &self,
+        equalizer: config::EqualizerSettings,
+    ) -> Result<(), ApiError> {
+        self.client()
+            .preview_equalizer(Request::new(convert::equalizer_to_proto(&equalizer)))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]

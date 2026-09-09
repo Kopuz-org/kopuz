@@ -5,10 +5,11 @@
 //! special case for a track the engine cannot decode: the daemon hands that
 //! one to whatever can play it and reports back the same way.
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use api::KopuzApi;
 use config::AppConfig;
-use daemon::SessionHandle;
 use dioxus::prelude::*;
 use reader::Track;
 
@@ -16,7 +17,7 @@ pub use api::LoopMode;
 
 #[derive(Clone, Copy)]
 pub struct PlayerController {
-    pub(crate) session: Signal<SessionHandle>,
+    pub(crate) api: Signal<Arc<dyn KopuzApi>>,
     pub is_playing: Signal<bool>,
     pub is_loading: Memo<bool>,
     pub(crate) loading: Signal<bool>,
@@ -66,8 +67,8 @@ pub struct BufferedRange {
 }
 
 impl PlayerController {
-    fn handle(&self) -> SessionHandle {
-        self.session.peek().clone()
+    fn handle(&self) -> Arc<dyn KopuzApi> {
+        self.api.peek().clone()
     }
 
     fn command(&self, command: api::PlayerCommand) {
@@ -134,10 +135,24 @@ impl PlayerController {
     fn play_physical(&mut self, physical_idx: usize) {
         let handle = self.handle();
         spawn(async move {
-            if let Err(error) = handle.jump_physical(physical_idx).await {
+            let edit = api::QueueEdit::JumpPhysical {
+                index: physical_idx as u32,
+            };
+            if let Err(error) = handle.queue_edit(edit).await {
                 tracing::warn!(%error, "queue jump failed");
             }
         });
+    }
+
+    /// The keys of a track list, for the calls that name rows rather than
+    /// carrying them. Every track the UI holds came from the daemon, so its
+    /// key resolves there -- including a browse row it registered.
+    fn keys_of(tracks: &[Track]) -> Vec<String> {
+        tracks
+            .iter()
+            .map(|track| track.id.key().into_owned())
+            .filter(|key| !key.is_empty())
+            .collect()
     }
 
     pub fn play_queue_linear(&mut self, tracks: Vec<Track>) {
@@ -164,11 +179,18 @@ impl PlayerController {
         if tracks.is_empty() {
             return;
         }
+        let keys = Self::keys_of(&tracks);
         let handle = self.handle();
         spawn(async move {
-            let _ = handle
-                .set_queue_tracks(tracks, api::QueueMode::Replace, start_index, shuffle)
-                .await;
+            let request = api::SetQueueRequest {
+                mode: api::QueueMode::Replace,
+                context: api::QueueContext::Tracks { keys },
+                start_index: start_index.map(|index| index as u32),
+                shuffle,
+            };
+            if let Err(error) = handle.set_queue(request).await {
+                tracing::warn!(%error, "replacing the queue failed");
+            }
         });
     }
 
@@ -200,28 +222,12 @@ impl PlayerController {
 
     pub fn add_to_queue(&mut self, tracks: impl IntoIterator<Item = Track>) {
         let tracks: Vec<Track> = tracks.into_iter().collect();
-        if tracks.is_empty() {
-            return;
-        }
-        let handle = self.handle();
-        spawn(async move {
-            let _ = handle
-                .set_queue_tracks(tracks, api::QueueMode::Append, None, None)
-                .await;
-        });
+        self.set_queue_keys(Self::keys_of(&tracks), api::QueueMode::Append, None);
     }
 
     pub fn queue_play_next(&mut self, tracks: impl IntoIterator<Item = Track>) {
         let tracks: Vec<Track> = tracks.into_iter().collect();
-        if tracks.is_empty() {
-            return;
-        }
-        let handle = self.handle();
-        spawn(async move {
-            let _ = handle
-                .set_queue_tracks(tracks, api::QueueMode::PlayNext, None, None)
-                .await;
-        });
+        self.set_queue_keys(Self::keys_of(&tracks), api::QueueMode::PlayNext, None);
     }
 
     pub fn play_next(&mut self) {
@@ -235,12 +241,19 @@ impl PlayerController {
     /// Insert tracks at a play-order position, as the queue view's drag-drop
     /// uses.
     pub fn insert_queue_tracks(&mut self, insert_at: usize, tracks: Vec<Track>) {
-        if tracks.is_empty() {
+        let keys = Self::keys_of(&tracks);
+        if keys.is_empty() {
             return;
         }
         let handle = self.handle();
         spawn(async move {
-            let _ = handle.insert_tracks_at(insert_at, tracks).await;
+            let edit = api::QueueEdit::Insert {
+                index: insert_at as u32,
+                keys,
+            };
+            if let Err(error) = handle.queue_edit(edit).await {
+                tracing::warn!(%error, "inserting into the queue failed");
+            }
         });
     }
 
@@ -286,10 +299,12 @@ impl PlayerController {
     /// config; a commit goes through the config signal and the session's
     /// config bridge instead.
     pub fn preview_equalizer(&self, equalizer: config::EqualizerSettings) {
-        let mut snapshot = self.config.peek().clone();
-        snapshot.equalizer = equalizer;
-        self.handle()
-            .set_config(snapshot, vec!["equalizer".to_string()]);
+        let handle = self.handle();
+        spawn(async move {
+            if let Err(error) = handle.preview_equalizer(equalizer).await {
+                tracing::warn!(%error, "equalizer preview failed");
+            }
+        });
     }
 
     pub fn set_shuffle(&mut self, on: bool) {
@@ -397,9 +412,13 @@ impl PlayerController {
         let handle = self.handle();
         spawn(async move {
             let _ = handle.player_command(api::PlayerCommand::Stop).await;
-            let _ = handle
-                .set_queue_tracks(Vec::new(), api::QueueMode::Replace, None, None)
-                .await;
+            let request = api::SetQueueRequest {
+                mode: api::QueueMode::Replace,
+                context: api::QueueContext::Tracks { keys: Vec::new() },
+                start_index: None,
+                shuffle: None,
+            };
+            let _ = handle.set_queue(request).await;
         });
     }
 
@@ -447,7 +466,7 @@ impl PlayerController {
 
 #[allow(clippy::too_many_arguments)]
 pub fn use_player_controller(
-    session_handle: SessionHandle,
+    api_handle: Arc<dyn KopuzApi>,
     is_playing: Signal<bool>,
     queue: Signal<Vec<Track>>,
     current_queue_index: Signal<usize>,
@@ -464,7 +483,7 @@ pub fn use_player_controller(
     config: Signal<AppConfig>,
     _config_loaded_ok: Signal<bool>,
 ) -> PlayerController {
-    let session = use_signal(move || session_handle);
+    let api = use_signal(move || api_handle);
     let loading = use_signal(|| false);
     let browse_loading = use_signal(|| false);
     let is_loading = use_memo(move || *loading.read() || *browse_loading.read());
@@ -480,7 +499,7 @@ pub fn use_player_controller(
     let external_device = use_signal(|| None::<String>);
 
     let ctrl = PlayerController {
-        session,
+        api,
         is_playing,
         is_loading,
         loading,
