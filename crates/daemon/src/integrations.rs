@@ -204,6 +204,7 @@ pub fn spawn_discord_presence(
     config: watch::Receiver<config::AppConfig>,
 ) -> tokio::task::JoinHandle<()> {
     let mut events = session.subscribe();
+    let session = session.clone();
     tokio::spawn(async move {
         let presence = match discord_presence::Presence::new(DISCORD_APP_ID) {
             Ok(presence) => Arc::new(presence),
@@ -235,7 +236,7 @@ pub fn spawn_discord_presence(
                     let Some(state) = state else { break };
                     let Some(state) = state else { continue };
                     let received = Instant::now();
-                    project(&presence, &config.borrow(), &state, received, &mut discord, &cover_tx);
+                    project(&presence, &config.borrow(), &state, received, &mut discord, &session, &cover_tx);
                     last_state = Some((state, received));
                 }
                 resolved = cover_rx.recv() => {
@@ -245,7 +246,7 @@ pub fn spawn_discord_presence(
                         discord.cover = url;
                         discord.cover_sent = false;
                         if let Some((state, received)) = &last_state {
-                            project(&presence, &config.borrow(), state, *received, &mut discord, &cover_tx);
+                            project(&presence, &config.borrow(), state, *received, &mut discord, &session, &cover_tx);
                         }
                     }
                 }
@@ -263,6 +264,7 @@ fn project(
     state: &PlayerState,
     received: Instant,
     discord: &mut DiscordState,
+    session: &SessionHandle,
     cover_tx: &tokio::sync::mpsc::UnboundedSender<(String, Option<String>)>,
 ) {
     let enabled = config.discord_presence.unwrap_or(true);
@@ -306,11 +308,25 @@ fn project(
             discord.cover_lookup_attempted = true;
             let tx = cover_tx.clone();
             let (artist_c, album_c) = (artist.clone(), album.clone());
+            let session = session.clone();
+            let key = track.map(|t| t.key.clone()).unwrap_or_default();
             discord.cover_task = Some(tokio::spawn(async move {
-                let resolved = discord_presence::cover_art::resolve_cover_art_url_cached(
-                    None, &artist_c, &album_c,
-                )
-                .await;
+                let track = session.queued_track(&key).await;
+                let resolved = match track
+                    .as_ref()
+                    .and_then(discord_presence::cover_art::youtube_cover_art_url)
+                {
+                    Some(url) => Some(url),
+                    None => {
+                        let mbid = track.and_then(|track| track.musicbrainz_release_id);
+                        discord_presence::cover_art::resolve_cover_art_url_cached(
+                            mbid.as_deref(),
+                            &artist_c,
+                            &album_c,
+                        )
+                        .await
+                    }
+                };
                 let _ = tx.send((song_key, resolved));
             }));
         }
