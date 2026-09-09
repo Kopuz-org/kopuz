@@ -71,6 +71,15 @@ async fn open_database(path: &Path) -> Result<db::Db, Box<dyn std::error::Error>
     Ok(db::init(path).await?)
 }
 
+/// What the core needs done on the thread that builds its runtime, before it
+/// is built. Today that is the JS platform: every thread that will run V8
+/// has to descend from the one that initialised it, and the runtime's workers
+/// are the ancestors of everything the core spawns.
+pub fn prepare_thread() {
+    #[cfg(not(target_os = "android"))]
+    server::ytmusic::ensure_v8_platform();
+}
+
 /// Open the library, start the audio engine, and wire every service onto it.
 pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error>> {
     let using_default_database =

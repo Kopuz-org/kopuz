@@ -182,6 +182,7 @@ pub fn exit_now(code: i32) -> ! {
 /// thread running a CFRunLoop, so there the async work moves to a worker and
 /// the main thread parks; elsewhere the runtime keeps the main thread.
 pub fn block_on_run(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
+    daemon::boot::prepare_thread();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
