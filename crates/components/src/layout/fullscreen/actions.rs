@@ -80,8 +80,11 @@ pub(crate) fn TrackActions(track: Track) -> Element {
                         let source = active_source.peek().clone();
                         crate::track_row::share_track(action_track.clone(), source);
                     } else if radio_idx == Some(idx) {
-                        let source = active_source.peek().clone();
-                        crate::track_row::play_radio(action_track.clone(), source, ctrl);
+                        if let Some(start) = crate::radio_actions::track_radio_handler(
+                            action_track.id.key().into_owned(),
+                        ) {
+                            start.call(());
+                        }
                     } else if idx == metadata_idx {
                         show_metadata.set(true);
                     }
