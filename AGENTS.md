@@ -29,8 +29,11 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   temp DB, `sqlx migrate run`, then `cargo sqlx prepare` (run from `crates/db`).
   Runtime `sqlx::query_as` (most track queries) is not macro-checked and needs no
   prepare.
-- **Crate wall:** only `kopuz-db` and `kopuz-hooks` depend on `db`. UI crates
-  (`pages`, `components`) read through hooks, never `db` directly.
+- **Crate wall:** the frontend crates (`hooks`, `pages`, `components`) reach
+  the daemon through `api` and nothing else. They do not depend on `db`,
+  `daemon`, `server` or `player`: no database handle, no media source, no
+  credentials, no system integration. A feature that needs one of those is a
+  daemon service with an API method, not a hook.
 - **Settings file:** `AppConfig` persists to the `app_config` blob AND a
   standalone `settings.toml` next to the DB (`crates/config/src/store.rs`; the
   dead legacy store was `config.json`, which the importer renames).
@@ -39,13 +42,15 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   hjem-managed file (store symlink / read-only) is never written and its keys
   render locked in the settings UI.
 
-## Sources & covers (`crates/server`)
+## Sources & covers (`crates/server`, daemon-only)
 
 - Each backend implements the `MediaSource` trait (`source.rs`): Local, Jellyfin,
-  Subsonic/Custom, YtMusic, SoundCloud. Don't hardcode a service into UI — go
-  through the trait.
-- Cover resolution lives in `cover.rs` (`track` / `from_path` / `artist`); dispatch
-  on the cover ref's own shape, not the active source.
+  Subsonic/Custom, YtMusic, SoundCloud, Spotify, Apple Music, Nextcloud. The
+  daemon owns them; a frontend asks `SourceApi` what the active one can do
+  and never branches on a service name.
+- Cover resolution lives in `cover.rs` (`locate` / `track` / `from_path`);
+  dispatch on the cover ref's own shape, not the active source. What a
+  frontend sees is an `ArtworkRef`, resolved to bytes by `ArtworkApi`.
 
 ## i18n (`crates/i18n`)
 
@@ -65,12 +70,18 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
 ## Directory Structure
 
 - `crates/kopuz` — app binary (Dioxus entry `main.rs`, `build.rs` font/asset
-  embedding + Android packaging).
+  embedding + Android packaging). Hosts the daemon core in-process.
+- `crates/api` — the client-facing trait and its wire types; `crates/proto` —
+  the gRPC schema; `crates/client` — the same trait over a socket.
+- `crates/daemon` — the core: session, library, catalog, radio, sources,
+  mutations, jobs, artwork, and `LocalApi` over them. `crates/kopuzd` — the
+  headless binary and the tonic shell.
 - `crates/config` — `AppConfig`, `Source`, `MusicService`, `MusicServer`.
 - `crates/reader` — domain models (`Track`, `Album`, `TrackId`), scanner, tag IO.
 - `crates/db` — SQLite backend, `ReadStore` / `Storage`, migrations.
 - `crates/server` — `MediaSource` backends, sync, cover resolution.
-- `crates/hooks` — Dioxus data hooks (db queries, player controller, sync task).
+- `crates/hooks` — Dioxus data hooks over the API (queries, player controller,
+  artwork, sources).
 - `crates/pages`, `crates/components`, `crates/kopuz_route` — UI + routing.
 - `crates/player` audio · `crates/radio` · `crates/scrobble` · `crates/discord-presence`
   · `crates/i18n` · `crates/utils` (`CoverUrl`, image-URL builders).
