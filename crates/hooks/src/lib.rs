@@ -7,6 +7,7 @@ pub mod config_view;
 pub mod db_reactivity;
 pub mod downloads;
 pub mod favorites;
+pub mod integrations;
 pub mod jobs;
 pub mod library_actions;
 pub mod playlist_actions;

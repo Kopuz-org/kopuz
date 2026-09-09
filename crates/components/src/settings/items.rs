@@ -1,9 +1,6 @@
 use config::{AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, SampleRateMode};
 use dioxus::prelude::*;
-use scrobble::lastfm;
-use scrobble::librefm;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tracing::Instrument;
 
 static APP_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -494,8 +491,8 @@ pub fn ToggleSetting(enabled: bool, on_change: EventHandler<bool>) -> Element {
 }
 
 #[component]
-pub fn MusicBrainzSettings(current: String, on_save: EventHandler<String>) -> Element {
-    let mut input = use_signal(move || current.clone());
+pub fn MusicBrainzSettings(on_save: EventHandler<String>) -> Element {
+    let mut input = use_signal(String::new);
 
     rsx! {
         div {
@@ -519,15 +516,14 @@ pub fn MusicBrainzSettings(current: String, on_save: EventHandler<String>) -> El
 
 #[component]
 pub fn LastFmSettings(
-    api_key: String,
-    api_secret: String,
-    session_key: String,
+    /// Whether the daemon holds a usable Last.fm session.
+    connected: bool,
     on_api_key_save: EventHandler<String>,
     on_api_secret_save: EventHandler<String>,
-    on_session_key_save: EventHandler<String>,
+    on_connect: EventHandler<()>,
 ) -> Element {
-    let mut api_key_input = use_signal(move || api_key.clone());
-    let mut api_secret_input = use_signal(move || api_secret.clone());
+    let mut api_key_input = use_signal(String::new);
+    let mut api_secret_input = use_signal(String::new);
 
     rsx! {
         div {
@@ -542,7 +538,6 @@ pub fn LastFmSettings(
                         let value = evt.value();
                         api_key_input.set(value.clone());
                         on_api_key_save.call(value);
-                        on_session_key_save.call(String::new());
                     },
                     r#type: "password",
                 }
@@ -564,50 +559,12 @@ pub fn LastFmSettings(
             }
             button {
                 class: "bg-white/10 hover:bg-white/20 px-5 py-2 rounded text-sm text-white transition-colors self-start mx-auto w-fit",
-                onclick: move |_| {
-                    let api_key = api_key_input();
-                    let api_secret = api_secret_input();
-                    let on_session_key_save = on_session_key_save;
+                onclick: move |_| on_connect.call(()),
 
-                    spawn(async move {
-                        match lastfm::get_auth_token(&api_key).await {
-                            Ok(token) => {
-                                let url = lastfm::auth_url(&api_key, &token);
-
-                                if let Err(e) = webbrowser::open(&url) {
-                                    tracing::warn!("Failed to open browser: {}", e);
-                                    return;
-                                }
-                                let mut connected = false;
-                                for _ in 0..30 {
-                                    match lastfm::get_session_key(&api_key, &api_secret, &token).await {
-                                        Ok(session_key) => {
-                                            on_session_key_save.call(session_key);
-                                            tracing::info!("Last.fm connected successfully");
-                                            connected = true;
-                                            break;
-                                        }
-                                        Err(_) => {
-                                            utils::sleep(std::time::Duration::from_secs(2)).await;
-                                        }
-                                    }
-                                }
-                            if !connected {
-                                tracing::warn!("Timed out waiting for Last.fm authorization");
-                            }
-
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to get auth token: {}", e);
-                            }
-                        }
-                    }.instrument(tracing::info_span!("lastfm.auth")));
-                },
-
-                if session_key.is_empty() || api_key_input.is_empty() || api_secret_input.is_empty() {
-                    "{i18n::t(\"connect_to_lastfm\")}"
-                } else {
+                if connected {
                     "{i18n::t(\"lastfm_connected\")}"
+                } else {
+                    "{i18n::t(\"connect_to_lastfm\")}"
                 }
             }
         }
@@ -615,59 +572,18 @@ pub fn LastFmSettings(
 }
 
 #[component]
-pub fn LibreFmSettings(session_key: String, on_session_key_save: EventHandler<String>) -> Element {
+pub fn LibreFmSettings(connected: bool, on_connect: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "flex flex-col gap-3 w-full max-w-xl",
             button {
                 class: "bg-white/10 hover:bg-white/20 px-5 py-2 rounded text-sm text-white transition-colors self-start mx-auto w-fit",
-                onclick: move |_| {
-                    let on_session_key_save = on_session_key_save;
+                onclick: move |_| on_connect.call(()),
 
-                    spawn(async move {
-                        match librefm::get_auth_token(librefm::API_KEY).await {
-                            Ok(token) => {
-                                let url = librefm::auth_url(librefm::API_KEY, &token);
-
-                                if let Err(e) = webbrowser::open(&url) {
-                                    tracing::warn!("Failed to open browser: {}", e);
-                                    return;
-                                }
-                                let mut connected = false;
-                                for _ in 0..30 {
-                                    match librefm::get_session_key(
-                                        librefm::API_KEY,
-                                        librefm::API_SECRET,
-                                        &token,
-                                    )
-                                    .await
-                                    {
-                                        Ok(session_key) => {
-                                            on_session_key_save.call(session_key);
-                                            tracing::info!("Libre.fm connected successfully");
-                                            connected = true;
-                                            break;
-                                        }
-                                        Err(_) => {
-                                            utils::sleep(std::time::Duration::from_secs(2)).await;
-                                        }
-                                    }
-                                }
-                                if !connected {
-                                    tracing::warn!("Timed out waiting for Libre.fm authorization");
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to get auth token: {}", e);
-                            }
-                        }
-                    });
-                },
-
-                if session_key.is_empty() {
-                    "{i18n::t(\"connect_to_librefm\")}"
-                } else {
+                if connected {
                     "{i18n::t(\"librefm_connected\")}"
+                } else {
+                    "{i18n::t(\"connect_to_librefm\")}"
                 }
             }
         }
@@ -677,6 +593,7 @@ pub fn LibreFmSettings(session_key: String, on_session_key_save: EventHandler<St
 #[path = "equalizer.rs"]
 mod equalizer;
 pub use equalizer::EqualizerPanel;
+
 #[component]
 pub fn BackBehaviorSelector(
     current: BackBehavior,
