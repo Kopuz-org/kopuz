@@ -158,7 +158,6 @@ pub fn Artist(
     // resolved by the cover seam.
     let artists = use_memo(move || -> Vec<(String, Option<utils::CoverUrl>)> {
         let albums = albums_res.read().clone().unwrap_or_default();
-        let sample = sample_tracks_res.read().clone().unwrap_or_default();
         let offline = caps().downloads && *is_offline.read();
 
         // norm → display name. The picture is the daemon's answer alone: it
@@ -169,13 +168,6 @@ pub fn Artist(
             artist_map
                 .entry(normalize_artist_key(&album.artist))
                 .or_insert_with(|| album.artist.clone());
-        }
-        for track in &sample {
-            for artist in &track.artists {
-                artist_map
-                    .entry(normalize_artist_key(artist))
-                    .or_insert_with(|| artist.clone());
-            }
         }
         // Drop joined collab credits whose primary artist has their own tile.
         let joined: Vec<String> = artist_map
