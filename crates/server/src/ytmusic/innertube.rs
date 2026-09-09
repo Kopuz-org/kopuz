@@ -158,15 +158,25 @@ pub async fn player(
         req = req.header("Cookie", c).header("Authorization", auth);
     }
 
-    let resp = req
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("player HTTP: {e}"))?;
+    let resp = match req.json(&body).send().await {
+        Ok(resp) => resp,
+        Err(error) => {
+            // On the span, so a failed call is not just a slow one with no
+            // outcome recorded next to it.
+            tracing::warn!(client = client.client_name, %error, "player request failed");
+            return Err(format!("player HTTP: {error}"));
+        }
+    };
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         let snippet: String = text.chars().take(300).collect();
+        tracing::warn!(
+            client = client.client_name,
+            %status,
+            body = %snippet,
+            "player request rejected"
+        );
         return Err(format!("player HTTP {status}: {snippet}"));
     }
     resp.json::<Value>()
