@@ -697,3 +697,21 @@ fn android_files_dir() -> Option<std::path::PathBuf> {
     let path: String = env.get_string(&JString::from(path)).ok()?.into();
     Some(std::path::PathBuf::from(path))
 }
+
+/// The process-wide database handle, for the read-through caches that live in
+/// crates below the daemon (Discord cover art). Registered once at boot; a
+/// cache with no handle degrades to fetch-only, which is what tests and early
+/// boot get.
+pub mod cache {
+    use std::sync::OnceLock;
+
+    static DB: OnceLock<super::Db> = OnceLock::new();
+
+    pub fn init(handle: super::Db) {
+        let _ = DB.set(handle);
+    }
+
+    pub fn get() -> Option<&'static super::Db> {
+        DB.get()
+    }
+}

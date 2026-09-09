@@ -4503,8 +4503,8 @@ version = "0.16.2"
 dependencies = [
  "discord-rich-presence",
  "kopuz-config",
+ "kopuz-db",
  "kopuz-reader",
- "kopuz-utils",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -4726,7 +4726,6 @@ dependencies = [
  "directories",
  "hex",
  "image",
- "kopuz-db",
  "lofty",
  "md5",
  "percent-encoding",

@@ -1,11 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 
-use super::{LyricLine, Lyrics};
+use super::Lyrics;
 
 const LYRICS_CACHE_CAPACITY: usize = 256;
-const LYRICS_META_KIND: &str = "lyrics";
-const NEGATIVE_TTL_SECS: u64 = 24 * 60 * 60;
 
 static LYRICS_CACHE: OnceLock<Mutex<LyricsCache>> = OnceLock::new();
 static LYRICS_INFLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -70,58 +68,18 @@ impl LyricsCache {
     }
 }
 
-fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-fn lyrics_to_payload(value: &Option<Lyrics>) -> String {
-    let v = match value {
-        Some(Lyrics::Synced(lines)) => serde_json::json!({
-            "kind": "synced2",
-            "lines": lines,
-        }),
-        Some(Lyrics::Plain(text)) => serde_json::json!({ "kind": "plain", "text": text }),
-        None => serde_json::json!({ "kind": "none", "ts": now_unix() }),
-    };
-    v.to_string()
-}
-
-fn lyrics_from_payload(payload: &str) -> Option<Option<Lyrics>> {
-    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
-    match v.get("kind").and_then(|k| k.as_str())? {
-        "synced2" => {
-            let lines: Vec<LyricLine> = serde_json::from_value(v.get("lines")?.clone()).ok()?;
-            Some(Some(Lyrics::Synced(lines)))
-        }
-        "plain" => Some(Some(Lyrics::Plain(v.get("text")?.as_str()?.to_string()))),
-        "none" => {
-            let ts = v.get("ts").and_then(|t| t.as_u64()).unwrap_or(0);
-            if now_unix().saturating_sub(ts) < NEGATIVE_TTL_SECS {
-                Some(None)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-pub(super) async fn load_persisted_lyrics(cache_key: &str) -> Option<Option<Lyrics>> {
-    let handle = crate::db_cache::get()?;
-    let payload = handle.meta_get(cache_key, LYRICS_META_KIND).await.ok()??;
-    lyrics_from_payload(&payload)
-}
-
-pub(super) async fn store_lyrics(cache_key: &str, value: &Option<Lyrics>) {
+/// Hold an answer for this process. Surviving a restart is the daemon's job:
+/// it owns the library the words are written to.
+pub(super) fn remember_lyrics(cache_key: &str, value: &Option<Lyrics>) {
     if let Ok(mut cache) = lyrics_cache().lock() {
         cache.put(cache_key.to_string(), value.clone());
     }
-    if let Some(handle) = crate::db_cache::get() {
-        let payload = lyrics_to_payload(value);
-        let _ = handle.meta_put(cache_key, LYRICS_META_KIND, &payload).await;
+}
+
+/// Seed the in-memory cache from whatever the caller persisted.
+pub fn prime(cache_key: &str, value: Option<Lyrics>) {
+    if let Ok(mut cache) = lyrics_cache().lock() {
+        cache.put(cache_key.to_string(), value);
     }
 }
 
