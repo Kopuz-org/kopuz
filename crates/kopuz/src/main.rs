@@ -514,33 +514,6 @@ fn App() -> Element {
     // daemon reads those layers; nothing here opens the file.
     hooks::config_view::use_locked_keys_provider();
 
-    // The last media source this process builds, and the only one: the
-    // external (Spotify) playback path still records its own listens and
-    // now-playing pings here. It goes when that path moves into the daemon.
-    {
-        let db_init = db.clone();
-        let mut active_source = use_signal(move || {
-            ::server::source::ActiveSource::from(::server::source::active(
-                db_init.clone(),
-                &config.peek(),
-            ))
-        });
-        // Only the resolution-relevant slice of config; a volume or theme
-        // change must not rebuild the client.
-        let identity = use_memo(move || {
-            let cfg = config.read();
-            (cfg.active_source.clone(), cfg.server.clone())
-        });
-        let db_eff = db.clone();
-        use_effect(move || {
-            let _ = identity.read();
-            active_source.set(::server::source::ActiveSource::from(
-                ::server::source::active(db_eff.clone(), &config.peek()),
-            ));
-        });
-        use_context_provider(|| active_source);
-    }
-
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.
     let active_caps = hooks::sources::use_capabilities_provider();
@@ -775,7 +748,6 @@ fn App() -> Element {
         volume,
         config,
         config_loaded_ok,
-        db.clone(),
     );
 
     // Generations handle the rescan task bumps after writing scanned tracks/albums,

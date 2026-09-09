@@ -107,6 +107,9 @@ enum SessionCmd {
     },
     Emit(Box<ApiEvent>),
     AttachExternal(crate::external::SharedExternalPlayer),
+    /// The integration that can play what the engine cannot, offered
+    /// once at boot and consulted on every load.
+    SetExternalSink(crate::external::SharedExternalPlayer),
     DetachExternal,
     ExternalReport(Box<crate::external::ExternalReport>),
     ExternalArtworkFetched(String),
@@ -207,6 +210,7 @@ impl SessionHandle {
             scrobbler: services.scrobbler,
             last_recent_key: None,
             external: None,
+            sink: None,
             config_tx,
             config: services.config,
             active_source: services.active_source,
@@ -298,6 +302,12 @@ impl SessionHandle {
 
     pub fn detach_external(&self) {
         let _ = self.cmd_tx.send(SessionCmd::DetachExternal);
+    }
+
+    /// Offer the integration that plays what the engine cannot. Consulted
+    /// on every load, so a Spotify track in the queue reaches it.
+    pub fn set_external_sink(&self, player: crate::external::SharedExternalPlayer) {
+        let _ = self.cmd_tx.send(SessionCmd::SetExternalSink(player));
     }
 
     /// Report what the attached integration is playing.
@@ -538,6 +548,9 @@ struct Session {
     last_recent_key: Option<String>,
     /// Set while an integration the engine cannot drive owns playback.
     external: Option<ExternalState>,
+    /// The integration that can play tracks the engine cannot, whether or
+    /// not it currently owns playback.
+    sink: Option<crate::external::SharedExternalPlayer>,
     config_tx: watch::Sender<config::AppConfig>,
     config: config::AppConfig,
     active_source: Option<server::source::ActiveSource>,
@@ -617,18 +630,10 @@ impl Session {
             }
             SessionCmd::Emit(event) => self.emit(*event),
             SessionCmd::AttachExternal(player) => {
-                // Two players cannot both be playing: ours stops before the
-                // integration starts.
-                self.stop(state_tx);
-                self.external = Some(ExternalState {
-                    player,
-                    device: None,
-                    track: None,
-                    artwork: None,
-                    completed_key: None,
-                });
+                self.attach_external_now(player);
                 self.publish(state_tx, false);
             }
+            SessionCmd::SetExternalSink(player) => self.sink = Some(player),
             SessionCmd::DetachExternal => {
                 if self.external.take().is_some() {
                     self.last_recent_key = None;
@@ -714,7 +719,11 @@ impl Session {
         // is playing; while an integration owns playback they go to it, since
         // the engine has nothing to act on. Toggle resolves here because only
         // the daemon knows the current phase.
-        if self.external.is_some() {
+        // Next and previous are the queue's, whoever is playing: an
+        // integration holds one track and knows nothing about what follows it.
+        if self.external.is_some()
+            && !matches!(command, PlayerCommand::Next | PlayerCommand::Previous)
+        {
             let command = match command {
                 PlayerCommand::Toggle if self.phase == ApiPhase::Playing => PlayerCommand::Pause,
                 PlayerCommand::Toggle => PlayerCommand::Play,
@@ -1140,6 +1149,34 @@ impl Session {
         self.publish_position_anchor(state_tx, Some(0), Some(Duration::ZERO), false);
     }
 
+    /// Two players cannot both be playing: ours stops before the integration
+    /// starts, and what it plays arrives on its report stream.
+    fn attach_external_now(&mut self, player: crate::external::SharedExternalPlayer) {
+        self.stop_playback();
+        self.external = Some(ExternalState {
+            player,
+            device: None,
+            track: None,
+            artwork: None,
+            completed_key: None,
+        });
+    }
+
+    /// Hand playback back to the engine: the integration is told to stop, and
+    /// the caller is about to load into the engine instead.
+    fn release_external(&mut self) {
+        let Some(external) = self.external.take() else {
+            return;
+        };
+        self.last_recent_key = None;
+        let player = external.player;
+        tokio::spawn(async move {
+            if let Err(error) = player.stop().await {
+                tracing::warn!(%error, "external playback would not stop");
+            }
+        });
+    }
+
     fn stop_playback(&mut self) {
         self.cancel_load_task();
         self.cancel_radio_task();
@@ -1268,6 +1305,12 @@ impl Session {
                 external.completed_key = Some(track.id.uid());
             }
             self.record_listen(track);
+            // The queue is kopuz's, so its end-of-track is kopuz's too: the
+            // next item may be another Spotify track or a local file, and
+            // either way the load path decides who plays it.
+            if let Err(error) = self.play_next(false, state_tx) {
+                tracing::warn!(%error, "advancing after an external track failed");
+            }
         }
         self.push_external_now_playing();
         self.publish(state_tx, false);
@@ -1322,13 +1365,15 @@ impl Session {
         };
         tokio::spawn(async move {
             let result = match command {
-                PlayerCommand::Play => player.play().await,
-                PlayerCommand::Pause | PlayerCommand::Stop => player.pause().await,
-                PlayerCommand::Next => player.next().await,
-                PlayerCommand::Previous => player.previous().await,
+                PlayerCommand::Play => player.resume().await,
+                PlayerCommand::Pause => player.pause().await,
+                PlayerCommand::Stop => player.stop().await,
                 PlayerCommand::Seek { position_ms } => player.seek(position_ms).await,
                 PlayerCommand::SetVolume { volume } => player.set_volume(volume).await,
-                PlayerCommand::Toggle | PlayerCommand::SetMode { .. } => Ok(()),
+                PlayerCommand::Next
+                | PlayerCommand::Previous
+                | PlayerCommand::Toggle
+                | PlayerCommand::SetMode { .. } => Ok(()),
             };
             if let Err(error) = result {
                 tracing::warn!(%error, "external playback command failed");

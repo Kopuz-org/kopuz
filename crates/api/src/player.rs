@@ -100,6 +100,17 @@ pub struct ExternalPlayback {
     pub device: Option<String>,
 }
 
+/// One place an integration can play: a Connect speaker, a phone, another
+/// desktop. `active` marks the one it is playing on now.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExternalDevice {
+    pub id: String,
+    pub name: String,
+    /// What the service calls it: "Smartphone", "Speaker", "Computer".
+    pub kind: String,
+    pub active: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct QueueSummary {
     pub rev: u64,
