@@ -16,12 +16,16 @@ pub type LyricsState = Option<Option<Lyrics>>;
 /// is what a view shows when there are none: the string table is the
 /// caller's, so the text comes with the ask. A radio stream
 /// is answered immediately: station names only ever match junk.
+///
+/// The daemon's chain runs to its slowest provider, so a track skipped past
+/// seconds ago still answers, and answers after the track that replaced it.
+/// An answer is taken only while its own key is still the one playing.
 pub fn use_lyrics(key: Memo<String>, not_found: String) -> Signal<LyricsState> {
     let api = use_api();
     let mut state = use_signal(|| None as LyricsState);
     use_effect(move || {
-        let key = key();
-        if key.is_empty() || utils::playback_ref::PlaybackItemRef::parse(&key).is_radio() {
+        let asked = key();
+        if asked.is_empty() || utils::playback_ref::PlaybackItemRef::parse(&asked).is_radio() {
             state.set(Some(None));
             return;
         }
@@ -29,7 +33,10 @@ pub fn use_lyrics(key: Memo<String>, not_found: String) -> Signal<LyricsState> {
         let api = api.clone();
         let not_found = not_found.clone();
         spawn(async move {
-            let found = api.lyrics(key).await.ok().map(from_view);
+            let found = api.lyrics(asked.clone()).await.ok().map(from_view);
+            if *key.peek() != asked {
+                return;
+            }
             let found = found.or_else(|| Some(Lyrics::Plain(not_found.clone())));
             state.set(Some(found));
         });
