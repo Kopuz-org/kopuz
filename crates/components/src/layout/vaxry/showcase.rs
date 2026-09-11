@@ -173,7 +173,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                             }
                             button {
                                 class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
-                                style: if *ctrl.shuffle.read() { "background: var(--color-indigo-500);" } else { "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);" },
+                                style: if *ctrl.shuffle.read() { "background: var(--color-indigo-500); border: 1px solid transparent;" } else { "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);" },
                                 onclick: move |_| {
                                     ctrl.toggle_shuffle();
                                     ctrl.play_queue_shuffled(tracks_for_shuffle.clone());

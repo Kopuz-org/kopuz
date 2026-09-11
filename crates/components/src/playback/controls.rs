@@ -214,7 +214,13 @@ pub enum ControlsVariant {
 struct TransportClasses {
     wrapper: &'static str,
     side: &'static str,
+    /// The on/off colour of a side toggle (shuffle, repeat) as classes, never as
+    /// an inline `style`. Dioxus merges a style attribute with what the element
+    /// already has instead of replacing it, so a style that turns the colour on
+    /// can only ever be turned off by another style naming the same property:
+    /// an empty one leaves the button lit for the rest of the session (#690).
     side_idle: &'static str,
+    side_active: &'static str,
     side_icon: &'static str,
     step: &'static str,
     step_icon: &'static str,
@@ -228,7 +234,8 @@ fn transport_classes(variant: ControlsVariant) -> TransportClasses {
         ControlsVariant::Fullscreen => TransportClasses {
             wrapper: "flex items-center justify-between w-full mb-3",
             side: "w-11 h-11 rounded-full flex items-center justify-center transition-colors active:scale-95 relative flex-shrink-0 hover:bg-white/10",
-            side_idle: "color: rgba(255,255,255,0.6);",
+            side_idle: "text-white/60 hover:text-white",
+            side_active: "text-indigo-500",
             side_icon: "text-lg",
             step: "w-14 h-14 rounded-full flex items-center justify-center text-white/90 hover:text-white hover:bg-white/10 transition-colors active:scale-95 flex-shrink-0",
             step_icon: "text-3xl",
@@ -238,8 +245,9 @@ fn transport_classes(variant: ControlsVariant) -> TransportClasses {
         },
         ControlsVariant::Bar => TransportClasses {
             wrapper: "flex items-center gap-2",
-            side: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95 relative flex-shrink-0",
-            side_idle: "",
+            side: "w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors active:scale-95 relative flex-shrink-0",
+            side_idle: "text-slate-400 hover:text-white",
+            side_active: "text-indigo-500",
             side_icon: "text-sm",
             step: "w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95 flex-shrink-0",
             step_icon: "text-xl",
@@ -270,8 +278,7 @@ pub fn TransportButtons(is_playing: Signal<bool>, variant: ControlsVariant) -> E
             dir: "ltr",
             style: if variant == ControlsVariant::Fullscreen { "max-width: 640px;" } else { "" },
             button {
-                class: classes.side,
-                style: if *ctrl.shuffle.read() { "color: var(--color-indigo-500);" } else { classes.side_idle },
+                class: if *ctrl.shuffle.read() { format!("{} {}", classes.side, classes.side_active) } else { format!("{} {}", classes.side, classes.side_idle) },
                 title: if *ctrl.shuffle.read() { i18n::t("shuffle_on").to_string() } else { i18n::t("shuffle_off").to_string() },
                 onclick: move |_| ctrl.toggle_shuffle(),
                 i { class: "fa-solid fa-shuffle {classes.side_icon}" }
@@ -295,10 +302,9 @@ pub fn TransportButtons(is_playing: Signal<bool>, variant: ControlsVariant) -> E
                 }
             }
             button {
-                class: classes.side,
-                style: match *ctrl.loop_mode.read() {
-                    LoopMode::None => classes.side_idle,
-                    _ => "color: var(--color-indigo-500);",
+                class: match *ctrl.loop_mode.read() {
+                    LoopMode::None => format!("{} {}", classes.side, classes.side_idle),
+                    _ => format!("{} {}", classes.side, classes.side_active),
                 },
                 title: match *ctrl.loop_mode.read() {
                     LoopMode::None => i18n::t("repeat_off").to_string(),
