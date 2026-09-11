@@ -78,6 +78,36 @@ pub async fn upsert_tracks(
     Ok(())
 }
 
+/// Stamp each `(track_key, unix_secs)` as the track's date added. Only rows that
+/// have never been stamped are touched, so the value survives everything that
+/// rewrites a file afterwards: a tag edit bumping the mtime must not make a
+/// track look freshly added.
+#[tracing::instrument(skip_all, fields(count = stamps.len(), source = %source.as_str()))]
+pub async fn stamp_added_at(
+    pool: &SqlitePool,
+    source: &Source,
+    stamps: &[(String, i64)],
+) -> Result<(), DbError> {
+    if stamps.is_empty() {
+        return Ok(());
+    }
+    let src = source.as_str();
+    let mut tx = pool.begin().await?;
+    for (track_key, added_at) in stamps {
+        sqlx::query!(
+            "UPDATE tracks SET added_at = ?3 \
+             WHERE source = ?1 AND track_key = ?2 AND added_at = 0",
+            src,
+            track_key,
+            added_at
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 #[tracing::instrument(skip_all, fields(count = albums.len(), source = %source.as_str()))]
 pub async fn upsert_albums(
     pool: &SqlitePool,

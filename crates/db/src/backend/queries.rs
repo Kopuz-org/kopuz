@@ -52,7 +52,7 @@ fn order_by(sort: &TrackSort) -> String {
         TrackSort::Title => "t.title COLLATE NOCASE".into(),
         TrackSort::Artist => "t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.track_number".into(),
         TrackSort::Album => "t.album COLLATE NOCASE, t.disc_number, t.track_number".into(),
-        TrackSort::DateAdded => "t.rowid_pk DESC".into(),
+        TrackSort::DateAdded => "t.added_at DESC, t.rowid_pk DESC".into(),
         TrackSort::PlayCount => "COALESCE(lc.count, 0) DESC, t.title COLLATE NOCASE".into(),
         TrackSort::Fields(criteria) => {
             if criteria.is_empty() {
@@ -65,14 +65,20 @@ fn order_by(sort: &TrackSort) -> String {
                         config::SortDirection::Asc => "ASC",
                         config::SortDirection::Desc => "DESC",
                     };
-                    let col = match c.field {
-                        config::TrackSortField::Title => "t.title COLLATE NOCASE",
-                        config::TrackSortField::Artist => "t.artist COLLATE NOCASE",
-                        config::TrackSortField::Album => "t.album COLLATE NOCASE",
-                        config::TrackSortField::Duration => "t.duration",
-                        config::TrackSortField::DateAdded => "t.rowid_pk",
+                    // A field may span more than one column (date added falls
+                    // back to insertion order), and each needs its own direction.
+                    let fields: &[&str] = match c.field {
+                        config::TrackSortField::Title => &["t.title COLLATE NOCASE"],
+                        config::TrackSortField::Artist => &["t.artist COLLATE NOCASE"],
+                        config::TrackSortField::Album => &["t.album COLLATE NOCASE"],
+                        config::TrackSortField::Duration => &["t.duration"],
+                        config::TrackSortField::DateAdded => &["t.added_at", "t.rowid_pk"],
                     };
-                    format!("{col} {dir}")
+                    fields
+                        .iter()
+                        .map(|col| format!("{col} {dir}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 })
                 .collect();
             // Stable tail so rows equal on every criterion keep album order.
@@ -358,6 +364,38 @@ pub async fn albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, Db
         "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover \
          FROM albums WHERE source = ?1 ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE",
         src
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Albums ordered by the newest track they hold, newest first, on the same
+/// `added_at`-then-insertion order [`TrackSort::DateAdded`] uses. An album is
+/// recent when its music is, not when its row happened to be written, and
+/// ordering on the tracks is also what lets music added to an album Kopuz
+/// already knows pull that album back up.
+///
+/// [`TrackSort::DateAdded`]: crate::TrackSort::DateAdded
+pub async fn albums_recently_added(
+    pool: &SqlitePool,
+    source: &Source,
+    limit: u32,
+) -> Result<Vec<Album>, DbError> {
+    let src = source.as_str();
+    let limit = limit as i64;
+    let rows = sqlx::query_as!(
+        AlbumRow,
+        "SELECT a.source_album_id, a.title, a.artist, a.genre, a.year, a.cover_path, \
+                a.manual_cover \
+         FROM albums a JOIN tracks t \
+           ON t.source = a.source AND t.source_album_id = a.source_album_id \
+         WHERE a.source = ?1 \
+         GROUP BY a.rowid_pk \
+         ORDER BY MAX(t.added_at) DESC, MAX(t.rowid_pk) DESC \
+         LIMIT ?2",
+        src,
+        limit
     )
     .fetch_all(pool)
     .await?;

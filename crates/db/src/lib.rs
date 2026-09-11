@@ -237,6 +237,16 @@ pub trait ReadStore: Send + Sync {
     /// All albums for a source, ordered by artist then title.
     async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
 
+    /// At most `limit` albums for a source, most recently added first, on the
+    /// same order as [`TrackSort::DateAdded`]. It is its own query because
+    /// [`ReadStore::albums`] sorts alphabetically, an order no amount of
+    /// reshuffling in the caller can turn into recency.
+    async fn albums_recently_added(
+        &self,
+        source: &Source,
+        limit: u32,
+    ) -> Result<Vec<reader::Album>, DbError>;
+
     /// Reconstruct the queue/progress snapshot from the `queue_state` row.
     async fn load_queue(&self) -> Result<QueueSnapshot, DbError>;
 
@@ -521,6 +531,15 @@ pub trait Storage: ReadStore {
     /// Batch upsert albums for a source (one transaction).
     async fn upsert_albums(&self, source: &Source, albums: &[reader::Album])
     -> Result<(), DbError>;
+
+    /// Record when each `(track_key, unix_secs)` track was added, for the
+    /// listings that sort by date added. Rows already stamped keep their value,
+    /// so this is safe to call on every scan.
+    async fn stamp_added_at(
+        &self,
+        source: &Source,
+        stamps: &[(String, i64)],
+    ) -> Result<(), DbError>;
 }
 
 /// Cheap-`Clone` handle to the active storage backend, shared via Dioxus context.

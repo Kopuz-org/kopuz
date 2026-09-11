@@ -78,6 +78,27 @@ fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, 
         .collect()
 }
 
+/// When each scanned file landed on this machine, as unix seconds: its birth
+/// time, falling back to the mtime on filesystems that do not record one. Birth
+/// time is the closer match for what "recently added" means to someone looking
+/// at their music folder, since a copy can carry the mtime it was published
+/// with but never an older birth time. Only the DB's first stamp for a track
+/// sticks, so a later tag rewrite bumping the mtime cannot resurface old music.
+fn added_at_stamps(tracks: &[reader::Track]) -> Vec<(String, i64)> {
+    tracks
+        .iter()
+        .filter_map(|track| {
+            let meta = std::fs::metadata(track.id.local_path()?).ok()?;
+            let stamped = meta.created().or_else(|_| meta.modified()).ok()?;
+            let secs = stamped
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs();
+            Some((track.id.key().into_owned(), secs as i64))
+        })
+        .collect()
+}
+
 async fn persist_resolved_covers(
     db: &db::Db,
     source: &config::Source,
@@ -1545,6 +1566,7 @@ fn App() -> Element {
                 }
                 for chunk in current_lib.tracks.chunks(100) {
                     let _ = db.upsert_tracks(&source, chunk).await;
+                    let _ = db.stamp_added_at(&source, &added_at_stamps(chunk)).await;
                     gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
                 }
                 let _ = db.upsert_albums(&source, &current_lib.albums).await;
