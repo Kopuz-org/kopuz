@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT a.source_album_id, a.title, a.artist, a.genre, a.year, a.cover_path, a.manual_cover FROM albums a JOIN tracks t ON t.source = a.source AND t.source_album_id = a.source_album_id WHERE a.source = ?1 GROUP BY a.rowid_pk ORDER BY MAX(t.added_at) DESC, MAX(t.rowid_pk) DESC LIMIT ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_album_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "title",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "artist",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "genre",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "year",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "cover_path",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "manual_cover",
+        "ordinal": 6,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "08a299080da0d92e078fef79cc83ed5b5a75e11f991670999966c9fca8facc7e"
+}

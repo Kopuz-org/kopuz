@@ -190,6 +190,14 @@ impl ReadStore for Native {
         queries::albums(&self.pool(), source).await
     }
 
+    async fn albums_recently_added(
+        &self,
+        source: &crate::Source,
+        limit: u32,
+    ) -> Result<Vec<reader::Album>, DbError> {
+        queries::albums_recently_added(&self.pool(), source, limit).await
+    }
+
     async fn load_queue(&self) -> Result<crate::QueueSnapshot, DbError> {
         dump::load_queue(&self.pool()).await
     }
@@ -431,6 +439,14 @@ impl Storage for Native {
         albums: &[reader::Album],
     ) -> Result<(), DbError> {
         writes::upsert_albums(&self.pool(), source, albums).await
+    }
+
+    async fn stamp_added_at(
+        &self,
+        source: &crate::Source,
+        stamps: &[(String, i64)],
+    ) -> Result<(), DbError> {
+        writes::stamp_added_at(&self.pool(), source, stamps).await
     }
 
     async fn set_favorite(&self, server_id: &str, ref_: &str, on: bool) -> Result<(), DbError> {
