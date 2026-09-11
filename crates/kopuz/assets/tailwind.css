@@ -667,6 +667,9 @@
   .max-h-48 {
     max-height: calc(var(--spacing) * 48);
   }
+  .max-h-56 {
+    max-height: calc(var(--spacing) * 56);
+  }
   .max-h-60 {
     max-height: calc(var(--spacing) * 60);
   }
@@ -1386,6 +1389,12 @@
       background-color: color-mix(in oklab, var(--color-indigo-500) 30%, transparent);
     }
   }
+  .bg-indigo-500\/70 {
+    background-color: color-mix(in srgb, oklch(58.5% 0.233 277.117) 70%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-indigo-500) 70%, transparent);
+    }
+  }
   .bg-indigo-600 {
     background-color: var(--color-indigo-600);
   }
@@ -2019,6 +2028,9 @@
   }
   .text-indigo-400 {
     color: var(--color-indigo-400);
+  }
+  .text-indigo-500 {
+    color: var(--color-indigo-500);
   }
   .text-orange-500\/80 {
     color: color-mix(in srgb, oklch(70.5% 0.213 47.604) 80%, transparent);
