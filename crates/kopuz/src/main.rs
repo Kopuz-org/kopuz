@@ -1566,7 +1566,12 @@ fn App() -> Element {
                 }
                 for chunk in current_lib.tracks.chunks(100) {
                     let _ = db.upsert_tracks(&source, chunk).await;
-                    let _ = db.stamp_added_at(&source, &added_at_stamps(chunk)).await;
+                    if let Err(err) = db.stamp_added_at(&source, &added_at_stamps(chunk)).await {
+                        tracing::warn!(
+                            %err,
+                            "could not stamp date added; this batch keeps insertion order until a later scan stamps it"
+                        );
+                    }
                     gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
                 }
                 let _ = db.upsert_albums(&source, &current_lib.albums).await;
