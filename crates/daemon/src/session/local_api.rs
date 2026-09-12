@@ -344,6 +344,10 @@ impl api::LibraryApi for LocalApi {
         self.library()?.albums(page).await
     }
 
+    async fn albums_recently_added(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
+        self.library()?.albums_recently_added(page).await
+    }
+
     async fn album(&self, id: String) -> Result<Option<api::AlbumInfo>, ApiError> {
         self.library()?.album(&id).await
     }

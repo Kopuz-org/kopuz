@@ -260,6 +260,20 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::album_page_to_proto(&albums)))
     }
 
+    async fn get_recently_added_albums(
+        &self,
+        request: Request<proto::Page>,
+    ) -> Result<Response<proto::AlbumPage>, Status> {
+        let page = convert::page_from_proto(Some(request.get_ref()));
+        let albums = self
+            .0
+            .api
+            .albums_recently_added(page)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::album_page_to_proto(&albums)))
+    }
+
     async fn get_album(
         &self,
         request: Request<proto::AlbumRef>,

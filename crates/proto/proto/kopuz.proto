@@ -36,6 +36,7 @@ service Kopuz {
   rpc GetFolderTracks(FolderRequest) returns (TrackPage);
   rpc GetTracksByKeys(TracksByKeysRequest) returns (TrackList);
   rpc GetAlbums(Page) returns (AlbumPage);
+  rpc GetRecentlyAddedAlbums(Page) returns (AlbumPage);
   rpc GetAlbum(AlbumRef) returns (AlbumResponse);
   rpc GetAlbumTracks(AlbumTracksRequest) returns (TrackPage);
   rpc GetArtists(Page) returns (ArtistPage);

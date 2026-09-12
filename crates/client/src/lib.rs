@@ -248,6 +248,15 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::album_page_from_proto(albums.get_ref()))
     }
 
+    async fn albums_recently_added(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
+        let albums = self
+            .client()
+            .get_recently_added_albums(Request::new(convert::page_to_proto(page)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::album_page_from_proto(albums.get_ref()))
+    }
+
     async fn album(&self, id: String) -> Result<Option<api::AlbumInfo>, ApiError> {
         let album = self
             .client()

@@ -151,6 +151,12 @@ pub trait LibraryApi: Send + Sync {
 
     async fn albums(&self, page: Page) -> Result<AlbumPage, ApiError>;
 
+    /// Albums newest-first by when their tracks were added. Its own call
+    /// because [`LibraryApi::albums`] answers alphabetically, and recency comes
+    /// from each album's newest track — an order no reshuffling of an
+    /// alphabetical page can recover.
+    async fn albums_recently_added(&self, page: Page) -> Result<AlbumPage, ApiError>;
+
     async fn album(&self, id: String) -> Result<Option<AlbumInfo>, ApiError>;
 
     async fn album_tracks(&self, id: String, page: Page) -> Result<TrackPage, ApiError>;

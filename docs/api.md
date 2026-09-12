@@ -144,6 +144,7 @@ Library:
 | `GetFolderTracks` | `{prefix, page}` | same shape |
 | `GetTracksByKeys` | `{keys}` | rows in the order asked for |
 | `GetAlbums` / `GetAlbum` / `GetAlbumTracks` | | album rows and their tracks |
+| `GetRecentlyAddedAlbums` | `Page` | newest first, by each album's newest track |
 | `GetArtists` / `GetArtistTracks` / `GetArtistSampleTracks` | | artist rows and their tracks |
 | `GetGenres` / `GetTopGenre` / `GetGenreTracks` | | |
 | `GetRecentTracks` | `Page` | most recently played first |

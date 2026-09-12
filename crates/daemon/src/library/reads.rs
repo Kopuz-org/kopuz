@@ -116,6 +116,22 @@ impl LibraryService {
         })
     }
 
+    pub async fn albums_recently_added(&self, page: Page) -> Result<AlbumPage, ApiError> {
+        // The store applies the recency order and the cut, so it has to see the
+        // whole window the caller is paging within, not just the page length.
+        let depth = page.offset.saturating_add(page.limit);
+        let rows = self
+            .db
+            .albums_recently_added(&self.query_source(), depth)
+            .await
+            .map_err(db_error)?;
+        let (total, items) = window(&rows, page);
+        Ok(AlbumPage {
+            albums: items.iter().map(album_info).collect(),
+            total,
+        })
+    }
+
     pub async fn album(&self, id: &str) -> Result<Option<AlbumInfo>, ApiError> {
         let album = self
             .db

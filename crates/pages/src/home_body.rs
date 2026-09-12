@@ -4,7 +4,7 @@ use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
     use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_artists,
-    use_favorites, use_playlists, use_top_genre, use_tracks_by_keys,
+    use_favorites, use_playlists, use_recently_added_albums, use_top_genre, use_tracks_by_keys,
 };
 use rand::rng;
 use rand::seq::SliceRandom;
@@ -48,6 +48,11 @@ fn track_cover_url(track: &Track) -> Option<String> {
     hooks::artwork::for_track(track, hooks::artwork::Size::Thumb).map(|cover| cover.to_string())
 }
 
+/// How many newest albums the Recently Added query pulls. The row shows 12, but
+/// untitled albums and same-title duplicates are dropped afterwards, so the
+/// window has to be wide enough to still fill it.
+const RECENTLY_ADDED_WINDOW: u32 = 64;
+
 /// The source-agnostic Home body (sections + hero). Rendered for local and any
 /// server; the active source decides the data, covers (via the source seam), the
 /// recently-played list, and offline/sync gating.
@@ -70,6 +75,7 @@ pub fn HomeBody(
     let active_card_menu = use_signal(|| None::<String>);
 
     let albums_res = use_albums(source);
+    let recently_added_res = use_recently_added_albums(source, RECENTLY_ADDED_WINDOW);
     let artists_res = use_artists(source);
     // Photos by normalized name, so the Top Artists row renders exactly the
     // ones the daemon actually holds a picture for.
@@ -217,10 +223,11 @@ pub fn HomeBody(
     });
 
     let recently_added = use_memo(move || -> Vec<AlbumCard> {
-        let all_albums = albums_res.read().clone().unwrap_or_default();
+        // Already newest-first from the daemon, so this only de-duplicates.
+        let all_albums = recently_added_res.read().clone().unwrap_or_default();
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for album in all_albums.iter().rev() {
+        for album in all_albums.iter() {
             if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
                 continue;
             }

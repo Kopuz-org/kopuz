@@ -349,6 +349,38 @@ pub fn use_playlists() -> Resource<api::PlaylistCatalog> {
 }
 
 /// All albums for a source, re-queried when the albums table changes.
+/// The `limit` most recently added albums for a source. Tracked against the
+/// tracks table as well as the albums one: the order comes from each album's
+/// newest track, so a scan that only adds tracks to a known album still moves
+/// it up.
+pub fn use_recently_added_albums(
+    source: Memo<Source>,
+    limit: u32,
+) -> Resource<Vec<api::AlbumInfo>> {
+    let api = use_api();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Albums);
+        let _ = gens.generation(Table::Tracks);
+        let (api, s) = (api.clone(), source());
+        let span = tracing::info_span!(
+            "query.albums_recently_added",
+            source = s.as_str(),
+            rows = tracing::field::Empty
+        );
+        async move {
+            let rows = api
+                .albums_recently_added(Page { offset: 0, limit })
+                .await
+                .map(|page| page.albums)
+                .unwrap_or_default();
+            tracing::Span::current().record("rows", rows.len());
+            rows
+        }
+        .instrument(span)
+    })
+}
+
 pub fn use_albums(source: Memo<Source>) -> Resource<Vec<api::AlbumInfo>> {
     let api = use_api();
     let gens = use_generations();

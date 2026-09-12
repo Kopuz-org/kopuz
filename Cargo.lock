@@ -4385,7 +4385,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-api"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4395,7 +4395,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-client"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4447,7 +4447,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-daemon"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "async-trait",
  "base64",
@@ -4539,7 +4539,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-kopuzd"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "async-trait",
  "directories",
@@ -4616,7 +4616,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz-proto"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "kopuz-api",
  "kopuz-config",
