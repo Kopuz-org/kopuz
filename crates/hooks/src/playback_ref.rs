@@ -21,6 +21,11 @@ impl<'a> PlaybackItemRef<'a> {
                 station_id: parts.next().unwrap_or_default(),
                 stream_id: parts.next().unwrap_or_default(),
             },
+            "nextcloud" => Self::Server {
+                service: scheme,
+                item_id: value.get(scheme.len() + 1..).unwrap_or_default(),
+                extra: None,
+            },
             "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "applemusic"
             | "spotify" => Self::Server {
                 service: scheme,
@@ -119,6 +124,19 @@ mod tests {
                 extra: Some("extra"),
             }
         );
+    }
+
+    #[test]
+    fn parses_nextcloud_refs_whole() {
+        assert_eq!(
+            PlaybackItemRef::parse("nextcloud:/music/Artist/Vol 1: Deluxe/01.mp3"),
+            PlaybackItemRef::Server {
+                service: "nextcloud",
+                item_id: "/music/Artist/Vol 1: Deluxe/01.mp3",
+                extra: None,
+            }
+        );
+        assert!(PlaybackItemRef::parse("nextcloud:/music/a.mp3").is_server());
     }
 
     #[test]

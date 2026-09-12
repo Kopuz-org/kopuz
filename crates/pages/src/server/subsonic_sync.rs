@@ -1,7 +1,39 @@
+use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use reader::models::Album;
-use tracing::info;
+use tracing::{error, info};
+
+/// Whether a sync is in flight, for the spinner and the guard below. Global
+/// because the task outlives the page that started it.
+pub static SYNC_RUNNING: GlobalSignal<bool> = Signal::global(|| false);
+
+/// Start a library sync detached from the calling page, one at a time.
+///
+/// `spawn_forever` because a scope-tied task dies with its component, and a
+/// source slow enough to outlast a page change (Nextcloud probes every file
+/// header) never survived to persist anything: the same trap as the downloads
+/// in #327. The guard collapses the stampede an empty library provokes, since
+/// Home, Library and Album each pull on mount.
+pub fn spawn_library_sync(clear_first: bool) {
+    if *SYNC_RUNNING.peek() {
+        return;
+    }
+    // A detached task has no scope, so the contexts are read here, not inside it.
+    let read_db = consume_context::<hooks::ReadDb>();
+    let gens = consume_context::<hooks::db_reactivity::Generations>();
+    let source = consume_context::<Signal<::server::source::ActiveSource>>()
+        .peek()
+        .clone();
+
+    *SYNC_RUNNING.write() = true;
+    spawn_forever(async move {
+        if let Err(e) = sync_server_library(clear_first, read_db, gens, source).await {
+            error!(error = %e, "server library sync failed");
+        }
+        *SYNC_RUNNING.write() = false;
+    });
+}
 
 fn normalize_album_id(id: &str) -> String {
     let parts: Vec<&str> = id.split(':').collect();
@@ -20,11 +52,12 @@ fn normalize_album_id(id: &str) -> String {
 /// the snapshot — chunked upsert + coalesced bumps keep the library view
 /// streaming in — merges manual covers, and prunes rows the server dropped.
 #[tracing::instrument(name = "library.sync", skip_all, fields(clear_first = clear_first))]
-pub async fn sync_server_library(clear_first: bool) -> Result<(), String> {
-    let read_db = consume_context::<hooks::ReadDb>();
-    let gens = hooks::db_reactivity::use_generations();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let source = active_source.peek().clone();
+pub async fn sync_server_library(
+    clear_first: bool,
+    read_db: hooks::ReadDb,
+    gens: hooks::db_reactivity::Generations,
+    source: ::server::source::ActiveSource,
+) -> Result<(), String> {
     if !source.capabilities().sync {
         return Ok(());
     }

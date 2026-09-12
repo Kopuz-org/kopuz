@@ -77,9 +77,7 @@ pub fn Album(
         if let Some(albums) = albums_res.read().clone() {
             has_fetched.set(true);
             if albums.is_empty() {
-                spawn(async move {
-                    let _ = crate::server::subsonic_sync::sync_server_library(false).await;
-                });
+                crate::server::subsonic_sync::spawn_library_sync(false);
             }
         }
     });

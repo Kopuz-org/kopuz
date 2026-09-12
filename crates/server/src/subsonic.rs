@@ -1,6 +1,8 @@
 use rand::{RngExt, distr::Alphanumeric};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use std::collections::HashSet;
+use std::sync::{LazyLock, RwLock};
 
 const SUBSONIC_API_VERSION: &str = "1.16.1";
 const CLIENT_NAME: &str = "kopuz";
@@ -43,6 +45,28 @@ struct SubsonicError {
     code: i32,
     message: String,
 }
+
+enum CallFailure {
+    Api { code: i32, message: String },
+    Transport(String),
+}
+
+impl CallFailure {
+    fn into_message(self) -> String {
+        match self {
+            CallFailure::Api { code, message } => {
+                format!("Subsonic request failed ({code}): {message}")
+            }
+            CallFailure::Transport(message) => message,
+        }
+    }
+}
+
+/// Bad credentials (40), token auth unsupported (41), mechanism (42, 43).
+const AUTH_REJECTED_CODES: [i32; 4] = [40, 41, 42, 43];
+
+/// Global so the throwaway clients behind the URL builders see it too.
+static LEGACY_AUTH_SERVERS: LazyLock<RwLock<HashSet<String>>> = LazyLock::new(Default::default);
 
 pub(crate) struct SubsonicClient {
     http_client: reqwest::Client,
@@ -617,6 +641,20 @@ impl SubsonicClient {
     }
 
     fn auth_params(&self) -> Vec<(String, String)> {
+        if self.uses_legacy_auth() && self.allows_legacy_auth() {
+            self.legacy_auth_params()
+        } else {
+            self.token_auth_params()
+        }
+    }
+
+    /// `p=enc:` is reversible and rides in the query string, so it is never
+    /// constructed or sent for a non-HTTPS base URL.
+    fn allows_legacy_auth(&self) -> bool {
+        self.base_url.starts_with("https://")
+    }
+
+    fn token_auth_params(&self) -> Vec<(String, String)> {
         let salt = self.random_salt();
         let token_input = format!("{}{}", self.password, salt);
         let token = format!("{:x}", md5::compute(token_input));
@@ -629,6 +667,36 @@ impl SubsonicClient {
             ("c".to_string(), CLIENT_NAME.to_string()),
             ("f".to_string(), "json".to_string()),
         ]
+    }
+
+    fn legacy_auth_params(&self) -> Vec<(String, String)> {
+        vec![
+            ("u".to_string(), self.username.clone()),
+            (
+                "p".to_string(),
+                format!("enc:{}", hex::encode(self.password.as_bytes())),
+            ),
+            ("v".to_string(), SUBSONIC_API_VERSION.to_string()),
+            ("c".to_string(), CLIENT_NAME.to_string()),
+            ("f".to_string(), "json".to_string()),
+        ]
+    }
+
+    fn legacy_auth_key(&self) -> String {
+        format!("{}\n{}", self.base_url, self.username)
+    }
+
+    fn uses_legacy_auth(&self) -> bool {
+        LEGACY_AUTH_SERVERS
+            .read()
+            .map(|servers| servers.contains(&self.legacy_auth_key()))
+            .unwrap_or(false)
+    }
+
+    fn remember_legacy_auth(&self) {
+        if let Ok(mut servers) = LEGACY_AUTH_SERVERS.write() {
+            servers.insert(self.legacy_auth_key());
+        }
     }
 
     fn random_salt(&self) -> String {
@@ -652,41 +720,83 @@ impl SubsonicClient {
     async fn call_within<T: DeserializeOwned + Default>(
         &self,
         endpoint: &str,
-        mut extra_params: Vec<(String, String)>,
+        extra_params: Vec<(String, String)>,
         timeout: std::time::Duration,
     ) -> Result<T, String> {
         let url = format!("{}/rest/{}", self.base_url, endpoint);
 
-        let mut params = self.auth_params();
-        params.append(&mut extra_params);
+        let first = self
+            .request::<T>(&url, self.auth_params(), &extra_params, timeout)
+            .await;
+
+        let retry_auth = matches!(
+            &first,
+            Err(CallFailure::Api { code, .. })
+                if AUTH_REJECTED_CODES.contains(code) && !self.uses_legacy_auth()
+        );
+        if !retry_auth {
+            return first.map_err(CallFailure::into_message);
+        }
+        if !self.allows_legacy_auth() {
+            tracing::warn!(
+                "server rejected token auth; not falling back over plain http, the legacy scheme would put the password in the URL"
+            );
+            return first.map_err(CallFailure::into_message);
+        }
+
+        tracing::debug!("token auth rejected, retrying with the legacy password scheme");
+        let retry = self
+            .request::<T>(&url, self.legacy_auth_params(), &extra_params, timeout)
+            .await;
+        if retry.is_ok() {
+            self.remember_legacy_auth();
+        }
+        retry.map_err(CallFailure::into_message)
+    }
+
+    async fn request<T: DeserializeOwned + Default>(
+        &self,
+        url: &str,
+        mut params: Vec<(String, String)>,
+        extra_params: &[(String, String)],
+        timeout: std::time::Duration,
+    ) -> Result<T, CallFailure> {
+        params.extend_from_slice(extra_params);
 
         let resp = self
             .http_client
-            .get(&url)
+            .get(url)
             .query(&params)
             .timeout(timeout)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| CallFailure::Transport(e.to_string()))?;
 
         if !resp.status().is_success() {
-            return Err(format!("Subsonic request failed: {}", resp.status()));
+            return Err(CallFailure::Transport(format!(
+                "Subsonic request failed: {}",
+                resp.status()
+            )));
         }
 
-        let parsed: SubsonicEnvelope<T> = resp.json().await.map_err(|e| e.to_string())?;
+        let parsed: SubsonicEnvelope<T> = resp
+            .json()
+            .await
+            .map_err(|e| CallFailure::Transport(e.to_string()))?;
 
         if parsed.response.status.eq_ignore_ascii_case("ok") {
             return Ok(parsed.response.data);
         }
 
-        if let Some(err) = parsed.response.error {
-            return Err(format!(
-                "Subsonic request failed ({}): {}",
-                err.code, err.message
-            ));
+        match parsed.response.error {
+            Some(err) => Err(CallFailure::Api {
+                code: err.code,
+                message: err.message,
+            }),
+            None => Err(CallFailure::Transport(
+                "Subsonic request failed with unknown error".to_string(),
+            )),
         }
-
-        Err("Subsonic request failed with unknown error".to_string())
     }
 }
 
@@ -794,6 +904,109 @@ mod tests {
                 .open_subsonic_extensions
                 .iter()
                 .any(|ext| ext.name == SONIC_SIMILARITY_EXTENSION)
+        );
+    }
+
+    #[test]
+    fn legacy_auth_params_hex_encode_the_password() {
+        let client = SubsonicClient::new("https://music.example.test", "user", "password");
+        let params = client.legacy_auth_params();
+
+        let p = params.iter().find(|(k, _)| k == "p").map(|(_, v)| v);
+        assert_eq!(p, Some(&"enc:70617373776f7264".to_string()));
+        assert!(!params.iter().any(|(k, _)| k == "t" || k == "s"));
+    }
+
+    /// A server that refuses every credential with `code`, recording what it saw.
+    async fn serve_rejecting(
+        listener: tokio::net::TcpListener,
+        code: i32,
+        seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        loop {
+            let (mut sock, _) = listener.accept().await.expect("accept");
+            let mut req = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                let n = sock.read(&mut buf).await.expect("read");
+                if n == 0 {
+                    break;
+                }
+                req.extend_from_slice(&buf[..n]);
+            }
+            seen.lock()
+                .expect("seen lock")
+                .push(String::from_utf8_lossy(&req).into_owned());
+
+            let body = format!(
+                r#"{{"subsonic-response":{{"status":"failed","version":"1.16.1","error":{{"code":{code},"message":"rejected"}}}}}}"#
+            );
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            sock.write_all(resp.as_bytes()).await.expect("write");
+        }
+    }
+
+    /// The legacy scheme would put a reversible password on an unencrypted
+    /// wire, so a plain-http server that refuses the token gets no second try.
+    #[tokio::test]
+    async fn plain_http_never_sends_the_legacy_password() {
+        for code in [41, 40] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
+            let addr = listener.local_addr().expect("local addr");
+            let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            tokio::spawn(serve_rejecting(listener, code, seen.clone()));
+
+            let client = SubsonicClient::new(&format!("http://{addr}"), "user", "password");
+            let err = client
+                .ping()
+                .await
+                .expect_err("plain http must not fall back");
+            assert!(err.contains(&format!("({code})")), "{err}");
+
+            let seen = seen.lock().expect("seen lock");
+            assert_eq!(seen.len(), 1, "code {code} must not be retried");
+            assert!(!seen.iter().any(|req| req.contains("p=enc")));
+        }
+    }
+
+    #[test]
+    fn sticky_legacy_auth_applies_only_over_https() {
+        let secure = SubsonicClient::new("https://secure.example.test", "user", "password");
+        let plain = SubsonicClient::new("http://plain.example.test", "user", "password");
+        secure.remember_legacy_auth();
+        plain.remember_legacy_auth();
+
+        assert!(
+            secure
+                .auth_params()
+                .iter()
+                .any(|(k, v)| k == "p" && v.starts_with("enc:"))
+        );
+        assert!(secure.stream_url("song-1").expect("url").contains("p=enc"));
+        assert!(
+            secure
+                .cover_art_url("cover-1", None)
+                .expect("url")
+                .contains("p=enc")
+        );
+
+        let plain_params = plain.auth_params();
+        assert!(!plain_params.iter().any(|(k, _)| k == "p"));
+        assert!(plain_params.iter().any(|(k, _)| k == "t"));
+        assert!(!plain.stream_url("song-1").expect("url").contains("p=enc"));
+        assert!(
+            !plain
+                .cover_art_url("cover-1", None)
+                .expect("url")
+                .contains("p=enc")
         );
     }
 }
