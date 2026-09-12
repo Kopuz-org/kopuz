@@ -28,3 +28,6 @@ devenv.local.yaml
 
 # PR comments log
 pr_comments.txt
+
+# local working notes for the daemon/frontend split
+docs/daemon-split-plan.md

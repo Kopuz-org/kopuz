@@ -1,8 +1,8 @@
 //! Source-agnostic Library page (issue #35). One component for local and any
 //! server: a windowed track list with stat cards and multi-select. The refresh
 //! action (filesystem rescan vs remote sync), per-row affordances (tag edit,
-//! delete-from-disk, download) and the selection bar all gate on the resolved
-//! source's [`Capabilities`](server::source::Capabilities) — no `is_server()`.
+//! delete-from-disk, download) and the selection bar all gate on
+//! [`api::SourceCapabilities`] — no `is_server()`.
 
 use components::header::Header;
 use components::metadata_modal::MetadataModal;
@@ -14,7 +14,6 @@ use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, TrackSortField, UiStyle};
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
     use_active_source, use_albums, use_artists, use_playlists, use_tracks_window,
 };
@@ -23,36 +22,34 @@ use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
 use std::collections::HashSet;
 
-use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
-
 const ITEM_HEIGHT: f64 = 60.0; // 60px: p-2 padding (16px*2=32) + content height (~28px)
 
 #[component]
 pub fn LibraryPage(
     mut config: Signal<AppConfig>,
     on_rescan: EventHandler,
-    player: Signal<player::player::Player>,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
-    mut current_song_cover_url: Signal<String>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
     mut current_song_duration: Signal<u64>,
     mut current_song_progress: Signal<u64>,
-    mut queue: Signal<Vec<reader::models::Track>>,
+    mut queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
-    let download_queue = use_context::<Signal<DownloadQueue>>();
+    let caps = hooks::sources::use_capabilities();
+    let downloads = hooks::downloads::use_downloads();
 
     let library_sort = use_signal(|| config.peek().library_sort.clone());
-    let filter = use_memo(move || TrackFilter {
-        source: source(),
-        sort: TrackSort::Fields(library_sort.read().clone()),
-        ..Default::default()
+    let filter = use_memo(move || {
+        // The source is the daemon's; naming it here only keeps the memo
+        // re-running across a switch.
+        let _ = source();
+        TrackFilter {
+            sort: TrackSort::Fields(library_sort.read().clone()),
+            ..Default::default()
+        }
     });
     use_effect(move || {
         let curr = library_sort.read().clone();
@@ -95,22 +92,14 @@ pub fn LibraryPage(
     });
 
     // Remote sync (servers). Local never calls this — its refresh is `on_rescan`.
-    let mut is_loading = use_signal(|| false);
+    // The daemon runs it, single-flight, so a second request while one is in
+    // flight is its business rather than a generation counter kept here.
+    let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::LibrarySync);
+    let is_loading = use_memo(move || sync_job.read().running);
     let mut has_fetched = use_signal(|| false);
-    let mut fetch_generation = use_signal(|| 0usize);
     let mut sync_server = move || {
         has_fetched.set(true);
-        is_loading.set(true);
-        fetch_generation.with_mut(|g| *g += 1);
-        let current_gen = *fetch_generation.peek();
-        spawn(async move {
-            if *fetch_generation.read() == current_gen {
-                let _ = crate::server::subsonic_sync::sync_server_library(true).await;
-                if *fetch_generation.read() == current_gen {
-                    is_loading.set(false);
-                }
-            }
-        });
+        hooks::jobs::start(hooks::JobKind::LibrarySync);
     };
     // First visit with an empty server library → auto-pull once.
     use_effect(move || {
@@ -129,12 +118,12 @@ pub fn LibraryPage(
     });
 
     let mut ctrl = use_context::<PlayerController>();
-    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
+    let mut active_menu_track = use_signal(|| None::<String>);
     let mut show_playlist_modal = use_signal(|| false);
-    let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
-    let mut metadata_track = use_signal(|| None::<reader::models::Track>);
+    let mut selected_track_for_playlist = use_signal(|| None::<String>);
+    let mut metadata_track = use_signal(|| None::<api::TrackInfo>);
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
+    let mut selected_tracks = use_signal(HashSet::<String>::new);
 
     let total_tracks = total_rows();
     let is_empty = total_tracks == 0;
@@ -168,39 +157,30 @@ pub fn LibraryPage(
                 let track_meta = track.clone();
                 let track_delete = track.clone();
                 let track_radio = track.clone();
-                let track_path = track.id.clone();
-                let track_select = track.id.clone();
-                let track_key = track.id.uid();
+                let track_path = track.key.clone();
+                let track_select = track.key.clone();
+                let track_key = track.uid.clone();
                 let is_currently_playing = currently_playing_idx == Some(idx)
                     && ctrl
                         .queue
                         .read()
                         .get(idx)
-                        .map(|q| q.id == track.id)
+                        .map(|q| q.uid == track.uid)
                         .unwrap_or(false);
-                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id);
+                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.uid);
                 let is_selected = selected_tracks.read().contains(&track_path);
-                let cover_url = ::server::cover::track(&conf, &track, 80);
+                let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
 
                 // Download state (servers only).
-                let item_id: String = track.id.key().to_string();
+                let item_id: String = track.key.clone();
                 let is_downloaded = cap.downloads
                     && conf
                         .offline_tracks
                         .get(&item_id)
                         .map(|p| std::path::Path::new(p).exists())
                         .unwrap_or(false);
-                let is_downloading = cap.downloads
-                    && download_queue.read().items.iter().any(|i| {
-                        i.id == item_id
-                            && matches!(
-                                i.status,
-                                DownloadStatus::Queued | DownloadStatus::Downloading
-                            )
-                    });
+                let is_downloading = cap.downloads && downloads.read().is_active(&item_id);
                 let item_id_dl = item_id.clone();
-                let track_title = track.title.clone();
-                let track_artist = track.artist.clone();
 
                 rsx! {
                     div {
@@ -234,14 +214,14 @@ pub fn LibraryPage(
                                 }
                             },
                             on_click_menu: move |_| {
-                                if active_menu_track.read().as_ref() == Some(&track_menu.id) {
+                                if active_menu_track.read().as_ref() == Some(&track_menu.uid) {
                                     active_menu_track.set(None);
                                 } else {
-                                    active_menu_track.set(Some(track_menu.id.clone()));
+                                    active_menu_track.set(Some(track_menu.uid.clone()));
                                 }
                             },
                             on_add_to_playlist: move |_| {
-                                selected_track_for_playlist.set(Some(track_add.id.clone()));
+                                selected_track_for_playlist.set(Some(track_add.key.clone()));
                                 show_playlist_modal.set(true);
                                 active_menu_track.set(None);
                             },
@@ -256,41 +236,30 @@ pub fn LibraryPage(
                             })),
                             on_delete: move |_| {
                                 active_menu_track.set(None);
-                                if caps().delete_from_disk
-                                    && let Some(p) = track_delete.id.local_path()
-                                    && crate::local_files::remove(&config.read(), &source(), p)
-                                        .is_ok_and(|removed| removed)
-                                {
-                                    let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                    let key = track_delete.id.key().into_owned();
-                                    spawn(async move {
-                                        if s.delete_tracks(&[key]).await.is_ok() {
-                                            gens.bump(Table::Tracks);
-                                        }
-                                    });
-                                }
+                                hooks::library_actions::delete_tracks(
+                                    vec![track_delete.key.clone()],
+                                    caps().delete_from_disk,
+                                );
                             },
                             on_download: caps().downloads.then(|| EventHandler::new(move |_| {
                                 if !is_downloaded {
                                     active_menu_track.set(None);
-                                    queue_downloads(
-                                        vec![(item_id_dl.clone(), track_title.clone(), track_artist.clone())],
-                                        config,
-                                        download_queue,
+                                    hooks::downloads::start(
+                                        vec![item_id_dl.clone()],
                                     );
                                 }
                             })),
-                            on_start_radio: components::track_row::radio_handler(track_radio.clone()),
+                            on_start_radio: components::track_row::radio_handler(track_radio.key.clone()),
                             on_play: move |_| {
-                                let read_db = consume_context::<hooks::ReadDb>();
+                                let api = hooks::consume_api();
                                 let f = filter();
                                 spawn(async move {
-                                    let all = read_db
-                                        .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
+                                    let all = api
+                                        .tracks(f, hooks::use_db_queries::all())
                                         .await
+                                        .map(|page| page.items)
                                         .unwrap_or_default();
-                                    queue.set(all);
-                                    ctrl.play_track(idx);
+                                    ctrl.play_queue_at(all, idx);
                                 });
                             },
                         }
@@ -313,40 +282,26 @@ pub fn LibraryPage(
                         selected_tracks.write().clear();
                     },
                     on_add_to_playlist: move |playlist_id: String| {
-                        let paths: Vec<reader::TrackId> = if is_selection_mode() {
+                        let paths: Vec<String> = if is_selection_mode() {
                             selected_tracks.read().iter().cloned().collect()
                         } else {
                             selected_track_for_playlist.read().iter().cloned().collect()
                         };
-                        let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
-                        if !refs.is_empty() {
-                            let s = active_source.peek().clone();
-                            spawn(async move {
-                                if s.add_to_playlist(&playlist_id, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
-                        }
+                        let refs: Vec<String> = paths.clone();
+                        hooks::playlist_actions::add_tracks(playlist_id, refs);
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();
                     },
                     on_create_playlist: move |name: String| {
-                        let paths: Vec<reader::TrackId> = if is_selection_mode() {
+                        let paths: Vec<String> = if is_selection_mode() {
                             selected_tracks.read().iter().cloned().collect()
                         } else {
                             selected_track_for_playlist.read().iter().cloned().collect()
                         };
-                        let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
-                        if !refs.is_empty() {
-                            let s = active_source.peek().clone();
-                            spawn(async move {
-                                if s.create_playlist(&name, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
-                        }
+                        let refs: Vec<String> = paths.clone();
+                        hooks::playlist_actions::create_with(name, refs);
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
                         is_selection_mode.set(false);
@@ -359,40 +314,9 @@ pub fn LibraryPage(
                 MetadataModal {
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
-                    on_save: move |edits: reader::models::TrackEdits| {
-                        let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
-                            return;
-                        };
-                        match reader::write_tags(&path, &edits) {
-                            Ok(()) => {
-                                let mut t = track.clone();
-                                t.title = edits.title.trim().to_string();
-                                t.artist = edits.artist.trim().to_string();
-                                t.artists = edits
-                                    .artist
-                                    .split([';', ','])
-                                    .map(|a| a.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-                                t.album = edits.album.trim().to_string();
-                                t.track_number = edits.track_number;
-                                t.disc_number = edits.disc_number;
-                                t.album_id = reader::metadata::make_album_id(
-                                    edits.album.trim(),
-                                    edits.artist.trim(),
-                                );
-                                let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                spawn(async move {
-                                    if s.upsert_tracks(&[t]).await.is_ok() {
-                                        gens.bump(Table::Tracks);
-                                    }
-                                });
-                                metadata_track.set(None);
-                            }
-                            Err(e) => {
-                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
-                            }
-                        }
+                    on_save: move |patch: api::TrackMetadataPatch| {
+                        hooks::library_actions::edit_track(patch);
+                        metadata_track.set(None);
                     },
                 }
             }
@@ -406,16 +330,16 @@ pub fn LibraryPage(
                         if selected.is_empty() {
                             return;
                         }
-                        let read_db = consume_context::<hooks::ReadDb>();
+                        let api = hooks::consume_api();
                         let f = filter();
                         spawn(async move {
-                            let total = read_db.tracks_count(&f).await.unwrap_or(0);
-                            let tracks: Vec<_> = read_db
-                                .tracks_page(&f, Page { offset: 0, limit: total })
+                            let tracks: Vec<_> = api
+                                .tracks(f, hooks::use_db_queries::all())
                                 .await
+                                .map(|page| page.items)
                                 .unwrap_or_default()
                                 .into_iter()
-                                .filter(|t| selected.contains(&t.id))
+                                .filter(|t| selected.contains(&t.key))
                                 .collect();
                             if !tracks.is_empty() {
                                 ctrl.add_to_queue(tracks);
@@ -426,28 +350,12 @@ pub fn LibraryPage(
                     },
                     on_add_to_playlist: move |_| show_playlist_modal.set(true),
                     on_delete: move |_| {
-                        if caps().delete_from_disk {
-                            let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
-                            let mut keys = Vec::new();
-                            for id in paths {
-                                let Some(path) = id.local_path() else {
-                                    continue;
-                                };
-                                if crate::local_files::remove(&config.read(), &source(), path)
-                                    .is_ok_and(|removed| removed)
-                                {
-                                    keys.push(id.key().into_owned());
-                                }
-                            }
-                            if !keys.is_empty() {
-                                let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                spawn(async move {
-                                    if s.delete_tracks(&keys).await.is_ok() {
-                                        gens.bump(Table::Tracks);
-                                    }
-                                });
-                            }
-                        }
+                        let keys: Vec<String> = selected_tracks
+                            .read()
+                            .iter()
+                            .cloned()
+                            .collect();
+                        hooks::library_actions::delete_tracks(keys, caps().delete_from_disk);
                         selected_tracks.write().clear();
                         is_selection_mode.set(false);
                     },
@@ -527,16 +435,16 @@ pub fn LibraryPage(
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                let read_db = consume_context::<hooks::ReadDb>();
+                                let api = hooks::consume_api();
                                 let f = filter();
                                 spawn(async move {
-                                    let total = read_db.tracks_count(&f).await.unwrap_or(0);
-                                    let tracks = read_db
-                                        .tracks_page(&f, Page { offset: 0, limit: total })
+                                    let tracks = api
+                                        .tracks(f, hooks::use_db_queries::all())
                                         .await
+                                        .map(|page| page.items)
                                         .unwrap_or_default();
                                     selected_tracks
-                                        .set(tracks.into_iter().map(|track| track.id).collect());
+                                        .set(tracks.into_iter().map(|track| track.key).collect());
                                     is_selection_mode.set(true);
                                 });
                             }

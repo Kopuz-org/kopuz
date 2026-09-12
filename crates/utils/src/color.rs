@@ -1,6 +1,5 @@
 use color_thief::{ColorFormat, get_palette};
 use image::ImageReader;
-use reqwest;
 use std::io::Cursor;
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -16,6 +15,7 @@ impl Color {
     }
 }
 
+#[cfg(test)]
 fn local_artwork_path(url: &str) -> Option<String> {
     let query = url
         .strip_prefix("artwork://local")
@@ -32,15 +32,10 @@ fn local_artwork_path(url: &str) -> Option<String> {
     )
 }
 
-pub async fn get_palette_from_url(url: &str) -> Option<Vec<Color>> {
-    let bytes = if let Some(path) = local_artwork_path(url) {
-        std::fs::read(path).ok()?
-    } else if url.starts_with("http") {
-        reqwest::get(url).await.ok()?.bytes().await.ok()?.to_vec()
-    } else {
-        std::fs::read(url).ok()?
-    };
-
+/// The dominant colours of an image, for the surfaces that tint themselves
+/// with the cover. Bytes rather than a URL: the picture may only be reachable
+/// through the daemon, which is what hands them over.
+pub fn palette_from_bytes(bytes: &[u8]) -> Option<Vec<Color>> {
     let img = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .ok()?

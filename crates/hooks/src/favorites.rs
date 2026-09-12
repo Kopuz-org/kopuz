@@ -1,107 +1,73 @@
-//! Favorite toggling on the active source, optimistically.
+//! Favourite toggling.
 //!
-//! The heart flips immediately: the local state is written
-//! ([`record_favorite`](server::source::MediaSource::record_favorite)) and shown,
-//! then the change is pushed to the remote in the background
-//! ([`push_favorite`](server::source::MediaSource::push_favorite)); if the push
-//! is rejected the local state is reverted and a toast explains why, so a
-//! snapping-back heart doesn't read as a broken UI.
+//! The optimistic write, the background push and the revert-on-rejection all
+//! live in the daemon now: `set_favorite` records the change, reflects it, and
+//! pushes to the remote, reverting if the remote refuses. What is left here is
+//! which track, and reporting a refusal in words the person can act on.
 
 use dioxus::prelude::*;
-use reader::Track;
-use server::source::ActiveSource;
 
-use crate::db_reactivity::{Generations, Table};
+use crate::api::consume_api;
 
-/// Toggle `track`'s favorite state on the active source, optimistically (write +
-/// show immediately, push in the background, revert + toast if the remote
-/// rejects it). A no-op for an empty key.
-pub fn toggle_favorite(track: Option<Track>) {
-    let Some(track) = track else { return };
-    if track.id.key().trim().is_empty() {
+/// Toggle one track's favourite state. A no-op for an empty key.
+pub fn toggle_favorite(key: String) {
+    if key.trim().is_empty() {
         return;
     }
-    let source = consume_context::<Signal<ActiveSource>>().peek().clone();
-    let gens = consume_context::<Generations>();
-
+    let api = consume_api();
     spawn(async move {
-        let key = track.id.key().to_string();
-        let new_fav = !source.is_favorite(&key).await;
-
-        // Optimistic: write locally and reflect it on the heart right away.
-        if let Err(e) = source.record_favorite(&track, new_fav).await {
-            tracing::warn!(error = %e, track = %track.id.uid(), "favorite: local write failed");
-            return;
-        }
-        // Favorites changed; Tracks too (record_favorite caches the track).
-        gens.bump(Table::Favorites);
-        gens.bump(Table::Tracks);
-
-        // Push in the background; revert the local state if the remote rejects it.
-        if let Err(e) = source.push_favorite(&key, new_fav).await {
-            tracing::warn!(error = %e, track = %track.id.uid(), "favorite push rejected; reverting");
-            let _ = source.record_favorite(&track, !new_fav).await;
-            gens.bump(Table::Favorites);
-            gens.bump(Table::Tracks);
-            // Name the service so a snapped-back heart doesn't read as a broken UI.
-            let msg = match track.id.service() {
-                Some(service) => format!("Couldn't update favorite on {}", service.display_name()),
-                None => "Couldn't update favorite".to_string(),
-            };
-            crate::toast::toast_error(&msg);
+        let favorite = match api.favorites().await {
+            Ok(view) => !view.refs.iter().any(|existing| existing == &key),
+            Err(error) => {
+                tracing::warn!(%error, "could not read favorites");
+                return;
+            }
+        };
+        if let Err(error) = api.set_favorite(key.clone(), favorite).await {
+            // The daemon says what refused it, so a heart that snaps back
+            // does not read as a broken button.
+            crate::toast::toast_error(&error.to_string());
         }
     });
 }
 
-/// Set every track in `tracks` to `on` on the active source (the home-hero heart,
-/// favoriting a whole album). Optimistic: all are recorded and shown, then
-/// pushed; any the remote rejects are reverted.
-pub fn set_favorite_many(tracks: Vec<Track>, on: bool) {
-    if tracks.is_empty() {
+/// Set every track to `on` -- the home hero's heart, favouriting a whole
+/// album. Tracks already in the target state are skipped, because pushing
+/// them again is at best wasted requests and at worst a rejection that would
+/// revert a state which was correct.
+pub fn set_favorite_many(keys: Vec<String>, on: bool) {
+    if keys.is_empty() {
         return;
     }
-    let source = consume_context::<Signal<ActiveSource>>().peek().clone();
-    let gens = consume_context::<Generations>();
-
+    let api = consume_api();
     spawn(async move {
-        // Optimistic: record every track locally, then show them all. Tracks
-        // already in the target state are skipped — pushing them again is at
-        // best wasted requests, at worst a remote rejection (e.g. deleting a
-        // like that doesn't exist) that would revert a state that was correct.
-        let mut recorded = Vec::new();
-        for track in tracks {
-            let key = track.id.key().to_string();
-            if key.trim().is_empty() {
+        let current = match api.favorites().await {
+            Ok(view) => view.refs,
+            Err(error) => {
+                tracing::warn!(%error, "could not read favorites");
+                return;
+            }
+        };
+        let mut refused = false;
+        for key in keys {
+            if current.iter().any(|existing| existing == &key) == on {
                 continue;
             }
-            if source.is_favorite(&key).await == on {
-                continue;
-            }
-            if source.record_favorite(&track, on).await.is_ok() {
-                recorded.push(track);
+            if let Err(error) = api.set_favorite(key.clone(), on).await {
+                tracing::warn!(%error, %key, "favorite rejected");
+                refused = true;
             }
         }
-        if recorded.is_empty() {
-            return;
-        }
-        // Favorites changed; Tracks too (record_favorite caches the tracks).
-        gens.bump(Table::Favorites);
-        gens.bump(Table::Tracks);
-
-        // Push each; revert the ones the remote rejects.
-        let mut reverted = false;
-        for track in recorded {
-            let key = track.id.key().to_string();
-            if let Err(e) = source.push_favorite(&key, on).await {
-                tracing::warn!(error = %e, track = %track.id.uid(), "favorite push rejected; reverting");
-                let _ = source.record_favorite(&track, !on).await;
-                reverted = true;
-            }
-        }
-        if reverted {
-            gens.bump(Table::Favorites);
-            gens.bump(Table::Tracks);
+        if refused {
             crate::toast::toast_error("Couldn't update some favorites");
         }
     });
+}
+
+/// The heart's argument, from whatever the player is currently showing.
+pub fn current(ctrl: &crate::use_player_controller::PlayerController) -> String {
+    match ctrl.current_track_snapshot.read().as_ref() {
+        Some(track) => track.key.clone(),
+        None => String::new(),
+    }
 }

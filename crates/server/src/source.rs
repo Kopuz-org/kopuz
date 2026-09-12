@@ -116,7 +116,7 @@ pub trait MediaSource: Send + Sync {
     async fn download_track(
         &self,
         _item_id: &str,
-        _progress: Option<utils::stream_buffer::BufferProgressCallback>,
+        _progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
     ) -> Result<Vec<u8>, SourceError> {
         Err(SourceError::unsupported("track download"))
     }
@@ -171,6 +171,13 @@ pub trait MediaSource: Send + Sync {
     /// pages (e.g. a YouTube Music watch link or Spotify track link). `None` otherwise — callers fall
     /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.
     fn web_url(&self, _track: &reader::Track) -> Option<String> {
+        None
+    }
+
+    /// The same for an album, given the id this source browses it by. `None`
+    /// when the source has no album pages, in which case a caller shares the
+    /// first track's page instead.
+    fn album_web_url(&self, _browse_id: &str) -> Option<String> {
         None
     }
 

@@ -1,0 +1,1742 @@
+// The Kopuz daemon wire contract, v1.
+//
+// One gRPC endpoint on a Unix domain socket in the user's runtime dir.
+// Access control is the socket's file mode: the OS decides who may connect,
+// so the channel carries no credentials of its own.
+//
+// Reads and mutations are unary RPCs. Event delivery is a server-streaming
+// subscription with an explicit replay cursor. A client MUST ignore an Event
+// whose oneof it does not know (it decodes as unset) and MUST treat unknown
+// enum values as their UNSPECIFIED default.
+
+syntax = "proto3";
+package kopuz.v1;
+
+service Kopuz {
+  // Follows the live event stream from the moment of subscription. A
+  // subscriber that falls behind gets one `resync` event and keeps going;
+  // fetch the snapshots again when you see it.
+  rpc Subscribe(SubscribeRequest) returns (stream EventEnvelope);
+
+  rpc Play(PlayRequest) returns (MutationResult);
+  rpc Pause(PauseRequest) returns (MutationResult);
+  rpc Toggle(ToggleRequest) returns (MutationResult);
+  rpc Next(NextRequest) returns (MutationResult);
+  rpc Previous(PreviousRequest) returns (MutationResult);
+  rpc Stop(StopRequest) returns (MutationResult);
+  rpc Seek(Seek) returns (MutationResult);
+  rpc SetVolume(SetVolume) returns (MutationResult);
+  rpc SetMode(SetMode) returns (MutationResult);
+
+  rpc GetStatus(GetStatusRequest) returns (DaemonStatus);
+  rpc GetPlayerState(GetPlayerStateRequest) returns (PlayerState);
+  rpc GetQueue(Page) returns (QueueWindow);
+  rpc GetQueueSnapshot(GetQueueSnapshotRequest) returns (QueueSnapshot);
+  rpc GetTracks(TracksRequest) returns (TrackPage);
+  rpc GetFolderTracks(FolderRequest) returns (TrackPage);
+  rpc GetTracksByKeys(TracksByKeysRequest) returns (TrackList);
+  rpc GetAlbums(Page) returns (AlbumPage);
+  rpc GetRecentlyAddedAlbums(Page) returns (AlbumPage);
+  rpc GetAlbum(AlbumRef) returns (AlbumResponse);
+  rpc GetAlbumTracks(AlbumTracksRequest) returns (TrackPage);
+  rpc GetArtists(Page) returns (ArtistPage);
+  rpc GetArtistTracks(ArtistTracksRequest) returns (TrackPage);
+  rpc GetArtistSampleTracks(Page) returns (TrackPage);
+  rpc GetGenres(GetGenresRequest) returns (GenreList);
+  rpc GetTopGenre(GetTopGenreRequest) returns (TopGenreResponse);
+  rpc GetGenreTracks(GenreTracksRequest) returns (TrackPage);
+  rpc GetRecentTracks(Page) returns (TrackPage);
+  rpc Search(SearchRequest) returns (SearchResults);
+  rpc GetTrackWebUrl(TrackWebUrlRequest) returns (WebUrl);
+  rpc GetAlbumWebUrl(AlbumWebUrlRequest) returns (WebUrl);
+  rpc GetCatalog(CatalogRequest) returns (CatalogPage);
+  rpc GetCatalogDetail(CatalogDetailRequest) returns (CatalogDetail);
+  rpc GetRadioStations(GetRadioStationsRequest) returns (RadioStationList);
+  rpc SearchRadio(SearchRadioRequest) returns (RadioStationList);
+  rpc PinRadioStation(PinRadioStationRequest) returns (Unit);
+  rpc ValidateRadioRegistry(ValidateRadioRegistryRequest) returns (RadioRegistryInfo);
+  rpc RefreshArtistArtwork(RefreshArtistArtworkRequest) returns (Unit);
+
+  rpc GetPlaylists(GetPlaylistsRequest) returns (PlaylistCatalog);
+  rpc CreatePlaylist(CreatePlaylistRequest) returns (PlaylistId);
+  rpc RenamePlaylist(RenamePlaylistRequest) returns (Unit);
+  rpc DeletePlaylist(PlaylistId) returns (Unit);
+  rpc AddPlaylistTracks(AddPlaylistTracksRequest) returns (Unit);
+  rpc RemovePlaylistTrack(RemovePlaylistTrackRequest) returns (Unit);
+  rpc ReorderPlaylist(ReorderPlaylistRequest) returns (Unit);
+  rpc RefreshPlaylist(PlaylistId) returns (Unit);
+  rpc CreatePlaylistFolder(CreatePlaylistFolderRequest) returns (PlaylistFolderId);
+  rpc RenamePlaylistFolder(RenamePlaylistFolderRequest) returns (Unit);
+  rpc DeletePlaylistFolder(PlaylistFolderId) returns (Unit);
+  rpc MovePlaylist(MovePlaylistRequest) returns (Unit);
+  rpc GetStats(GetStatsRequest) returns (Stats);
+  rpc GetLyrics(TrackRef) returns (Lyrics);
+  rpc GetFavorites(GetFavoritesRequest) returns (Favorites);
+  rpc GetJobs(GetJobsRequest) returns (JobList);
+  rpc GetDownloads(GetDownloadsRequest) returns (DownloadList);
+  rpc GetConfig(GetConfigRequest) returns (ConfigView);
+
+  rpc SetQueue(SetQueueRequest) returns (MutationResult);
+  rpc EditQueue(QueueEditRequest) returns (MutationResult);
+  rpc GetExternalDevices(ExternalDevicesRequest) returns (ExternalDeviceList);
+  rpc SelectExternalDevice(SelectExternalDeviceRequest) returns (Unit);
+  rpc SetFavorite(FavoriteRequest) returns (SetFavoriteResponse);
+  rpc UpdateTrackMetadata(TrackMetadataPatch) returns (TrackInfo);
+  rpc DeleteTracks(DeleteTracksRequest) returns (Unit);
+  rpc DeleteAlbum(DeleteAlbumRequest) returns (Unit);
+  rpc UploadArtwork(ArtworkUpload) returns (Unit);
+  rpc RemoveArtwork(ArtworkTarget) returns (Unit);
+  rpc StartJob(StartJobRequest) returns (JobRef);
+  rpc CancelJob(JobId) returns (CancelJobResponse);
+  rpc StartDownloads(DownloadRequest) returns (JobRef);
+  rpc DownloadUrl(DownloadUrlRequest) returns (JobRef);
+  rpc GetDownloadFormats(GetDownloadFormatsRequest) returns (DownloadFormats);
+  rpc GetArtworkSettings(GetArtworkSettingsRequest) returns (ArtworkSettings);
+  rpc SetArtworkSettings(SetArtworkSettingsRequest) returns (ArtworkSettings);
+  rpc GetDownloaderSettings(GetDownloaderSettingsRequest) returns (DownloaderSettings);
+  rpc SetDownloaderSettings(SetDownloaderSettingsRequest) returns (DownloaderSettings);
+  rpc GetDownloaderHistory(GetDownloaderHistoryRequest) returns (DownloadHistory);
+  rpc ClearDownloaderHistory(ClearDownloaderHistoryRequest) returns (Unit);
+  rpc GetDownloadStatuses(GetDownloadStatusesRequest) returns (DownloadStatusList);
+  rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
+  rpc SetConfig(SetConfigRequest) returns (ConfigView);
+  rpc PreviewEqualizer(EqualizerSettings) returns (Unit);
+
+  rpc GetSources(GetSourcesRequest) returns (SourceList);
+  rpc GetServices(GetServicesRequest) returns (ServiceList);
+  rpc SelectSource(SourceId) returns (SourceInfo);
+  rpc UpsertLocalSource(LocalSourceDraft) returns (SourceInfo);
+  rpc DeleteLocalSource(SourceId) returns (Unit);
+  rpc SetSourceDirectories(SetSourceDirectoriesRequest) returns (SourceInfo);
+  rpc SetSourceSettings(SetSourceSettingsRequest) returns (SourceInfo);
+  rpc CheckServerDraft(ServerDraft) returns (DraftCheck);
+  rpc UpsertServer(ServerDraft) returns (SourceInfo);
+  rpc DeleteServer(SourceId) returns (Unit);
+  rpc ProvisionCredentials(CredentialProvision) returns (SourceInfo);
+  rpc LoginSource(SourceLoginRequest) returns (SourceInfo);
+  rpc ClearCredentials(SourceId) returns (Unit);
+  rpc AuthenticateSource(SourceId) returns (SourceInfo);
+  rpc BrowseSource(BrowseSourceRequest) returns (SourceFolderList);
+  rpc ValidateSource(SourceId) returns (SourceStateResponse);
+  rpc CanOpenBrowser(CanOpenBrowserRequest) returns (BrowserAccess);
+  rpc GetIntegrations(GetIntegrationsRequest) returns (IntegrationList);
+  rpc SetIntegrationSettings(SetIntegrationSettingsRequest) returns (IntegrationInfo);
+  rpc ClearIntegration(IntegrationId) returns (Unit);
+  rpc AuthenticateIntegration(IntegrationId) returns (IntegrationInfo);
+
+  rpc GetArtwork(ArtworkRequest) returns (stream ArtworkChunk);
+}
+
+// One message per RPC even when it carries nothing, so any of them can gain
+// a field without a signature change. Unit is the marker inside oneofs.
+message Unit {}
+
+message PlayRequest {}
+message PauseRequest {}
+message ToggleRequest {}
+message NextRequest {}
+message PreviousRequest {}
+message StopRequest {}
+message GetStatusRequest {}
+message GetPlayerStateRequest {}
+message GetStatsRequest {}
+message GetFavoritesRequest {}
+message GetJobsRequest {}
+message GetDownloadsRequest {}
+message GetConfigRequest {}
+message SetFavoriteResponse {}
+message CancelJobResponse {}
+message RemoveDownloadResponse {}
+
+// ---------------- event subscription ----------------
+
+message SubscribeRequest {
+  reserved 1; // was after_sequence, from the replay-cursor design
+}
+
+message EventEnvelope {
+  reserved 1; // was sequence, from the replay-cursor design
+  Event event = 2;
+}
+
+message Seek {
+  uint64 position_ms = 1;
+}
+
+message SetVolume {
+  // 0.0 to 1.0.
+  float volume = 1;
+}
+
+message SetMode {
+  optional bool shuffle = 1;
+  optional LoopMode loop = 2;
+}
+
+message MutationResult {
+  // State revision containing the mutation's effect.
+  uint64 rev = 1;
+}
+
+// ---------------- events ----------------
+
+message Event {
+  oneof kind {
+    PlayerState player_state = 1;
+    PositionEvent position = 2;
+    BufferedEvent buffered = 3;
+    QueueChanged queue_changed = 5;
+    LibraryInvalidated library_invalidated = 6;
+    JobProgress job_progress = 7;
+    JobFinished job_finished = 8;
+    ConfigChanged config_changed = 9;
+    SourceStatusEvent source_status = 10;
+    Notice notice = 11;
+    // The reconnect gap exceeded the replay ring: refetch snapshots.
+    Unit resync = 12;
+  }
+}
+
+message PositionEvent {
+  uint64 token = 1;
+  uint64 position_ms = 2;
+  uint64 at_ms = 3;
+  bool playing = 4;
+}
+
+message BufferedEvent {
+  uint64 token = 1;
+  repeated BufferedRange ranges = 2;
+}
+
+message QueueChanged {
+  uint64 rev = 1;
+  uint32 length = 2;
+  optional uint32 index = 3;
+}
+
+message LibraryInvalidated {
+  Table table = 1;
+  reserved 2; // was generation: independent writers, never a shared counter
+}
+
+message JobProgress {
+  string id = 1;
+  JobKind kind = 2;
+  string phase = 3;
+  optional uint64 current = 4;
+  optional uint64 total = 5;
+  optional string message = 6;
+}
+
+message JobFinished {
+  string id = 1;
+  JobKind kind = 2;
+  bool ok = 3;
+  optional ErrorBody error = 4;
+}
+
+message ConfigChanged {
+  repeated string keys = 1;
+}
+
+message SourceStatusEvent {
+  string source = 1;
+  SourceState state = 2;
+}
+
+message Notice {
+  NoticeLevel level = 1;
+  string code = 2;
+  optional string message = 3;
+}
+
+// ---------------- player state ----------------
+
+message PlayerState {
+  uint64 rev = 1;
+  // Daemon monotonic clock at send time; pairs with position.at_ms so
+  // clients compute one clock offset and interpolate locally. There is no
+  // per-second tick stream.
+  uint64 now_ms = 2;
+  Phase phase = 3;
+  Intent intent = 4;
+  optional NowPlaying track = 5;
+  optional PositionAnchor position = 6;
+  QueueSummary queue = 7;
+  float volume = 8;
+  repeated BufferedRange buffered = 9;
+  // While present, keep displaying this track and drive the seek bar from
+  // its position_ms (a crossfade is resolving).
+  optional FadingState fading = 10;
+  optional ExternalPlayback external = 11;
+  optional ErrorBody error = 12;
+  optional uint64 output_latency_ms = 13;
+}
+
+// phase is engine truth; intent is what the daemon is trying to do.
+// Frontends render optimistic UI from intent, exactly like the built-in
+// GUI (pause glyph while loading).
+message Intent {
+  oneof kind {
+    Unit stopped = 1;
+    Loading loading = 2;
+    Committed committed = 3;
+  }
+  message Loading {
+    uint64 token = 1;
+    optional uint64 from_token = 2;
+  }
+  message Committed {
+    uint64 token = 1;
+  }
+}
+
+message NowPlaying {
+  // key is the library ref and the GetArtwork entity id; uid is the
+  // source-qualified identity. Same meaning as on TrackInfo.
+  string key = 1;
+  string uid = 10;
+  string title = 2;
+  string artist = 3;
+  string album = 4;
+  optional uint64 duration_ms = 5;
+  uint32 khz = 6;
+  uint32 bitrate = 7;
+  TrackKind kind = 8;
+  bool seekable = 9;
+  optional ArtworkRef artwork = 11;
+}
+
+message PositionAnchor {
+  uint64 ms = 1;
+  uint64 at_ms = 2;
+  bool playing = 3;
+}
+
+message BufferedRange {
+  uint64 start = 1;
+  uint64 end = 2;
+  optional uint64 total = 3;
+}
+
+message FadingState {
+  uint64 from_token = 1;
+  NowPlaying track = 2;
+  uint64 position_ms = 3;
+}
+
+message ExternalPlayback {
+  string kind = 1;
+  optional string device = 2;
+}
+
+message ExternalDevicesRequest {
+  string source_id = 1;
+}
+
+message ExternalDevice {
+  string id = 1;
+  string name = 2;
+  string kind = 3;
+  // A glyph for that kind, so a client need not know its vocabulary.
+  Icon icon = 5;
+  bool active = 4;
+}
+
+message ExternalDeviceList {
+  repeated ExternalDevice devices = 1;
+}
+
+// Absent device_id moves playback back to this app's own player.
+message SelectExternalDeviceRequest {
+  string source_id = 1;
+  optional string device_id = 2;
+}
+
+message QueueSummary {
+  uint64 rev = 1;
+  uint32 length = 2;
+  optional uint32 index = 3;
+  bool shuffle = 4;
+  LoopMode loop = 5;
+}
+
+// ---------------- queue ----------------
+
+message SetQueueRequest {
+  QueueMode mode = 1;
+  QueueContext context = 2;
+  // replace mode only.
+  optional uint32 start_index = 3;
+  optional bool shuffle = 4;
+}
+
+// Reference-shaped contexts materialize daemon-side, so "play this album"
+// never round-trips a track list through the client.
+message QueueContext {
+  oneof kind {
+    TrackKeys tracks = 1;
+    Id album = 2;
+    Name artist = 3;
+    Name genre = 4;
+    Id playlist = 5;
+    TrackFilter filter = 6;
+    Radio radio = 7;
+    // The source's mix seeded by a track or a playlist. The daemon fetches
+    // it and pins the seed at the front.
+    Key track_radio = 8;
+    Id playlist_radio = 9;
+  }
+  message TrackKeys {
+    repeated string keys = 1;
+  }
+  message Id {
+    string id = 1;
+  }
+  message Key {
+    string key = 1;
+  }
+  message Name {
+    string name = 1;
+  }
+  message Radio {
+    string station_id = 1;
+    string stream_id = 2;
+  }
+}
+
+// Positions are play-order (logical) indices, the same space
+// QueueSummary.index and QueueItem.index use.
+message QueueEditRequest {
+  oneof op {
+    Jump jump = 1;
+    Move move = 2;
+    Remove remove = 3;
+    // Index into the UNSHUFFLED queue; the shuffle order is re-pinned so the
+    // named track plays now and the rest follows it.
+    Jump jump_physical = 4;
+    Insert insert = 5;
+  }
+  message Jump {
+    uint32 index = 1;
+  }
+  message Move {
+    uint32 from = 1;
+    uint32 to = 2;
+  }
+  message Remove {
+    uint32 index = 1;
+  }
+  message Insert {
+    uint32 index = 1;
+    repeated string keys = 2;
+  }
+}
+
+message Page {
+  uint32 offset = 1;
+  // 0 means the server default (200).
+  uint32 limit = 2;
+}
+
+message QueueWindow {
+  uint64 rev = 1;
+  uint32 total = 2;
+  uint32 offset = 3;
+  repeated QueueItem items = 4;
+}
+
+message QueueItem {
+  uint32 index = 1;
+  TrackInfo track = 2;
+}
+
+message GetQueueSnapshotRequest {}
+
+// The whole queue at once: what a frontend needs to render a queue view, a
+// shuffle order, and "is this queued?" checks without paging.
+message QueueSnapshot {
+  uint64 rev = 1;
+  repeated TrackInfo items = 2;
+  // Play-order position -> unshuffled index. Empty while shuffle is off.
+  repeated uint32 shuffle_order = 3;
+  optional uint32 position = 4;
+  bool shuffle = 5;
+}
+
+// ---------------- library ----------------
+
+message TrackFilter {
+  optional string search = 1;
+  optional string artist = 2;
+  optional string album = 3;
+  optional string genre = 4;
+  optional bool favorite = 5;
+  reserved 6; // was a free-form `sort` string
+  TrackSort sort = 7;
+  // Set when sort is TRACK_SORT_FIELDS: the first criterion decides, the
+  // rest break ties.
+  repeated SortCriterion sort_fields = 8;
+}
+
+message SortCriterion {
+  TrackSortField field = 1;
+  bool descending = 2;
+}
+
+message TracksRequest {
+  TrackFilter filter = 1;
+  Page page = 2;
+}
+
+message FolderRequest {
+  string prefix = 1;
+  Page page = 2;
+}
+
+message TrackPage {
+  uint32 total = 1;
+  uint32 offset = 2;
+  repeated TrackInfo items = 3;
+}
+
+message TrackList {
+  repeated TrackInfo items = 1;
+}
+
+message TracksByKeysRequest {
+  repeated string keys = 1;
+}
+
+message AlbumInfo {
+  string id = 1;
+  string title = 2;
+  string artist = 3;
+  string genre = 4;
+  uint32 year = 5;
+  // Absent when the daemon has no cover for the album.
+  optional ArtworkRef artwork = 6;
+}
+
+message AlbumPage {
+  repeated AlbumInfo albums = 1;
+  uint32 total = 2;
+}
+
+message AlbumRef {
+  string id = 1;
+}
+
+message AlbumResponse {
+  optional AlbumInfo album = 1;
+}
+
+message AlbumTracksRequest {
+  string id = 1;
+  Page page = 2;
+}
+
+message ArtistInfo {
+  string name = 1;
+  uint32 track_count = 2;
+  optional ArtworkRef artwork = 3;
+}
+
+message ArtistPage {
+  repeated ArtistInfo artists = 1;
+  uint32 total = 2;
+}
+
+message ArtistTracksRequest {
+  string artist = 1;
+  Page page = 2;
+}
+
+message GetGenresRequest {}
+
+message GenreList {
+  repeated string genres = 1;
+}
+
+message GetTopGenreRequest {}
+
+message TopGenreResponse {
+  optional string genre = 1;
+}
+
+message GenreTracksRequest {
+  string genre = 1;
+  Page page = 2;
+}
+
+message SearchRequest {
+  string query = 1;
+}
+
+message TrackWebUrlRequest {
+  string key = 1;
+}
+
+message AlbumWebUrlRequest {
+  string id = 1;
+}
+
+// Absent when the source has no page for the row.
+message WebUrl {
+  optional string url = 1;
+}
+
+message RefreshArtistArtworkRequest {
+  repeated string names = 1;
+}
+
+message SearchResults {
+  repeated TrackInfo tracks = 1;
+  repeated AlbumInfo albums = 2;
+}
+
+// ---------------- settings schema ----------------
+
+// A surface the daemon publishes: FieldSpec out, FieldValue back.
+
+// A KEY is looked up in the client's own translations; a LITERAL is a brand.
+enum TextKind {
+  TEXT_KIND_UNSPECIFIED = 0;
+  TEXT_KIND_KEY = 1;
+  TEXT_KIND_LITERAL = 2;
+}
+
+message Text {
+  TextKind kind = 1;
+  string value = 2;
+}
+
+// CLASS is an icon-font class the app ships; SVG is a path, for a logo none has.
+enum IconKind {
+  ICON_KIND_UNSPECIFIED = 0;
+  ICON_KIND_CLASS = 1;
+  ICON_KIND_SVG = 2;
+}
+
+message Icon {
+  IconKind kind = 1;
+  string value = 2;
+}
+
+message ChoiceOption {
+  string value = 1;
+  Text label = 2;
+}
+
+enum FieldKindTag {
+  FIELD_KIND_TAG_UNSPECIFIED = 0;
+  FIELD_KIND_TAG_TEXT = 1;
+  // Never sent back out with a value; an empty one coming in leaves it alone.
+  FIELD_KIND_TAG_SECRET = 2;
+  FIELD_KIND_TAG_URL = 3;
+  FIELD_KIND_TAG_TOGGLE = 4;
+  FIELD_KIND_TAG_DIRECTORY = 5;
+  FIELD_KIND_TAG_CHOICE = 6;
+  FIELD_KIND_TAG_RADIO = 7;
+  // No control: a line of explanation, which show_when can hide.
+  FIELD_KIND_TAG_NOTE = 8;
+}
+
+message FieldKind {
+  FieldKindTag tag = 1;
+  // Set for CHOICE and RADIO.
+  repeated ChoiceOption options = 2;
+  // CHOICE only: a value outside the list may be typed in.
+  bool custom = 3;
+}
+
+message FieldSpec {
+  string key = 1;
+  Text label = 2;
+  // Rendered under the control.
+  optional Text help = 3;
+  optional Text placeholder = 4;
+  // Starts a titled group before this row.
+  optional Text section = 5;
+  FieldKind kind = 6;
+  bool required = 7;
+  // The current value, or the default for a new one. Never set for a secret.
+  optional string value = 8;
+  // The settings key behind this row: a pinned one renders locked.
+  optional string config_key = 9;
+  // Show this row only while another field holds a given value.
+  optional FieldValue show_when = 10;
+}
+
+// One answer. A toggle is "true" or "false".
+message FieldValue {
+  string key = 1;
+  string value = 2;
+}
+
+// Absent field means the problem is about the form as a whole.
+message Problem {
+  optional string field = 1;
+  Text label = 2;
+}
+
+// ---------------- playlists ----------------
+
+// ---------------- sources ----------------
+
+// No credential appears in any of these. A source says whether it is
+// authenticated, never with what.
+enum SourceKind {
+  SOURCE_KIND_UNKNOWN = 0;
+  SOURCE_KIND_LOCAL = 1;
+  SOURCE_KIND_LOCAL_LIBRARY = 2;
+  SOURCE_KIND_SERVER = 3;
+}
+
+enum PlaylistCapability {
+  PLAYLIST_CAPABILITY_NONE = 0;
+  PLAYLIST_CAPABILITY_ADD_REMOVE = 1;
+  PLAYLIST_CAPABILITY_REORDER = 2;
+}
+
+enum ArtistPresentation {
+  ARTIST_PRESENTATION_LIBRARY = 0;
+  ARTIST_PRESENTATION_REMOTE = 1;
+}
+
+enum AlbumPresentation {
+  ALBUM_PRESENTATION_STANDARD = 0;
+  ALBUM_PRESENTATION_REMOTE = 1;
+}
+
+enum FavoritesSyncMode {
+  FAVORITES_SYNC_INSTANT = 0;
+  FAVORITES_SYNC_PAGINATED = 1;
+}
+
+// Every "should this button exist?" question is answered from here, so no
+// frontend branches on a service name.
+message SourceCapabilities {
+  bool edit_tags = 1;
+  bool delete_from_disk = 2;
+  bool scan_folders = 3;
+  bool folders = 4;
+  bool sync = 5;
+  bool downloads = 6;
+  bool discover = 7;
+  bool track_radio = 8;
+  bool playlist_radio = 9;
+  PlaylistCapability playlists = 10;
+  ArtistPresentation artists = 11;
+  AlbumPresentation albums = 12;
+  FavoritesSyncMode favorites_sync = 13;
+  // Its library is a directory tree to be picked from, not a catalog.
+  bool browse_folders = 14;
+  // It plays on devices of its own, which a client can list and move to.
+  bool external_devices = 15;
+}
+
+// What making a source usable takes.
+enum SignInKind {
+  SIGN_IN_KIND_UNSPECIFIED = 0;
+  SIGN_IN_KIND_NONE = 1;
+  SIGN_IN_KIND_PASSWORD = 2;
+  SIGN_IN_KIND_BROWSER = 3;
+}
+
+// A service the daemon can be pointed at, and the form that adds one.
+message ServiceInfo {
+  string id = 1;
+  Text name = 2;
+  Icon icon = 3;
+  // A colour to tint its rows with.
+  string accent = 4;
+  bool experimental = 5;
+  repeated FieldSpec fields = 6;
+}
+
+// Which service a configured source speaks: what to call it, how to draw it.
+message ServiceRef {
+  string id = 1;
+  Text name = 2;
+  Icon icon = 3;
+  string accent = 4;
+}
+
+message GetServicesRequest {}
+
+message ServiceList {
+  repeated ServiceInfo services = 1;
+}
+
+message SourceInfo {
+  string id = 1;
+  string name = 2;
+  SourceKind kind = 3;
+  // Absent for a local source.
+  optional ServiceRef service = 4;
+  bool active = 5;
+  bool authenticated = 6;
+  SourceCapabilities capabilities = 7;
+  reserved 8, 9, 11, 12; // were url, browser, storefront, language: now settings rows
+  bool anonymous = 10;
+  repeated string directories = 13;
+  // The line under its name: an address, or whatever else identifies it.
+  optional string detail = 14;
+  SignInKind sign_in = 15;
+  // Its options, with the values it currently has.
+  repeated FieldSpec settings = 16;
+}
+
+message GetSourcesRequest {}
+
+message SourceList {
+  repeated SourceInfo sources = 1;
+}
+
+message SourceId {
+  string id = 1;
+}
+
+message LocalSourceDraft {
+  // Absent creates a new local library.
+  optional string id = 1;
+  string name = 2;
+  repeated string directories = 3;
+}
+
+// The answers to a ServiceInfo's form. Absent id creates.
+message ServerDraft {
+  optional string id = 1;
+  string name = 2;
+  reserved 3, 5, 6, 7, 8; // were url, browser, anonymous, storefront, language: now form answers
+  string service = 4;
+  repeated FieldValue values = 9;
+  // Write-only. No response carries these back.
+  repeated FieldValue secrets = 10;
+}
+
+// What a draft would do if it were saved, and what is wrong with it.
+message DraftCheck {
+  SignInKind sign_in = 1;
+  repeated Problem problems = 2;
+}
+
+message SetSourceDirectoriesRequest {
+  string id = 1;
+  repeated string directories = 2;
+}
+
+message SetSourceSettingsRequest {
+  string id = 1;
+  repeated FieldValue values = 2;
+}
+
+// Write-only. No response carries these values back.
+message CredentialProvision {
+  string server_id = 1;
+  string secret = 2;
+  optional string user_id = 3;
+  optional string browser = 4;
+}
+
+message SourceLoginRequest {
+  string server_id = 1;
+  string username = 2;
+  string password = 3;
+}
+
+message BrowseSourceRequest {
+  string id = 1;
+  string path = 2;
+}
+
+message SourceFolderEntry {
+  string path = 1;
+  string name = 2;
+}
+
+message SourceFolderList {
+  repeated SourceFolderEntry entries = 1;
+}
+
+message SourceStateResponse {
+  SourceState state = 1;
+}
+
+message CanOpenBrowserRequest {}
+
+// False on a sandboxed daemon that cannot spawn a browser for a sign-in.
+message BrowserAccess {
+  bool available = 1;
+}
+
+// How an integration is connected, once its fields are filled in.
+enum ConnectKind {
+  CONNECT_KIND_UNSPECIFIED = 0;
+  // Nothing to press: filling the fields in is the whole of it.
+  CONNECT_KIND_NONE = 1;
+  CONNECT_KIND_WEB_SIGN_IN = 2;
+}
+
+message GetIntegrationsRequest {}
+
+// Configured per account rather than per source, and shaped like a service so
+// the same renderer draws it. No credential is ever in it.
+message IntegrationInfo {
+  string id = 1;
+  Text name = 2;
+  Icon icon = 3;
+  bool configured = 4;
+  ConnectKind connect = 5;
+  repeated FieldSpec fields = 6;
+}
+
+message IntegrationList {
+  repeated IntegrationInfo integrations = 1;
+}
+
+message IntegrationId {
+  string id = 1;
+}
+
+message SetIntegrationSettingsRequest {
+  string id = 1;
+  repeated FieldValue values = 2;
+}
+
+// ---------------- mutations ----------------
+
+// What to do with an entity's picture. Absent means leave it alone.
+message ArtworkChange {
+  oneof change {
+    Unit remove = 1;
+    bytes set = 2;
+  }
+}
+
+// A field left unset keeps its current value; the clear_* flags remove a
+// number, since "unset" already means "unchanged".
+message TrackMetadataPatch {
+  string key = 1;
+  optional string title = 2;
+  optional string artist = 3;
+  optional string album = 4;
+  optional uint32 track_number = 5;
+  bool clear_track_number = 6;
+  optional uint32 disc_number = 7;
+  bool clear_disc_number = 8;
+  optional ArtworkChange cover = 9;
+}
+
+message DeleteTracksRequest {
+  repeated string keys = 1;
+  // Also unlink the files. Refused outside the configured library roots.
+  bool from_disk = 2;
+}
+
+message DeleteAlbumRequest {
+  string id = 1;
+  bool from_disk = 2;
+}
+
+message ArtworkUpload {
+  ArtworkTarget target = 1;
+  string content_type = 2;
+  bytes bytes = 3;
+}
+
+// ---------------- catalog ----------------
+
+// The source's own browse feed. Songs arrive as ordinary TrackInfo, and the
+// daemon remembers them, so queueing a browse row is the same call as
+// queueing a library track.
+enum CatalogItemKind {
+  CATALOG_ITEM_UNKNOWN = 0;
+  CATALOG_ITEM_TRACK = 1;
+  CATALOG_ITEM_ALBUM = 2;
+  CATALOG_ITEM_PLAYLIST = 3;
+  CATALOG_ITEM_ARTIST = 4;
+  CATALOG_ITEM_MOOD = 5;
+}
+
+message CatalogItem {
+  CatalogItemKind kind = 1;
+  string id = 2;
+  string title = 3;
+  optional string subtitle = 4;
+  optional ArtworkRef artwork = 5;
+  // Set for tracks, so a shelf of songs is playable without a second call.
+  optional TrackInfo track = 6;
+}
+
+message CatalogShelf {
+  string title = 1;
+  optional string strapline = 2;
+  repeated CatalogItem items = 3;
+  optional string more_ref = 4;
+  bool list = 5;
+}
+
+message CatalogRequest {
+  optional string continuation = 1;
+}
+
+message CatalogPage {
+  repeated CatalogShelf shelves = 1;
+  optional string continuation = 2;
+}
+
+message CatalogDetailRequest {
+  CatalogItemKind kind = 1;
+  string id = 2;
+  optional string continuation = 3;
+}
+
+message CatalogDetail {
+  CatalogItemKind kind = 1;
+  string id = 2;
+  string title = 3;
+  optional string subtitle = 4;
+  optional string description = 5;
+  optional ArtworkRef artwork = 6;
+  optional string playback_id = 7;
+  optional string year = 8;
+  repeated TrackInfo tracks = 9;
+  repeated CatalogShelf shelves = 10;
+  optional string continuation = 11;
+}
+
+// ---------------- radio ----------------
+
+// Stream URLs never appear here: a client names a station and one of its
+// streams, and the daemon resolves the rest.
+message RadioStreamInfo {
+  string id = 1;
+  // May be a translation key; the client owns the locale.
+  string name = 2;
+  // An icon name the registry authored, for a client that draws icons.
+  optional string icon = 3;
+}
+
+message RadioStationInfo {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated string tags = 4;
+  repeated RadioStreamInfo streams = 5;
+  bool pinned = 6;
+  optional ArtworkRef artwork = 7;
+  string icon = 8;
+}
+
+message GetRadioStationsRequest {}
+
+message RadioStationList {
+  repeated RadioStationInfo stations = 1;
+}
+
+message SearchRadioRequest {
+  string query = 1;
+  uint32 limit = 2;
+}
+
+message PinRadioStationRequest {
+  string id = 1;
+  bool pinned = 2;
+}
+
+message ValidateRadioRegistryRequest {
+  string url = 1;
+}
+
+message RadioRegistryInfo {
+  uint32 stations = 1;
+}
+
+message GetPlaylistsRequest {}
+
+message PlaylistInfo {
+  string id = 1;
+  string name = 2;
+  // Library refs, in playlist order; resolve with GetTracksByKeys.
+  repeated string track_keys = 3;
+  optional ArtworkRef artwork = 4;
+}
+
+message PlaylistFolderInfo {
+  string id = 1;
+  string name = 2;
+  repeated string playlist_ids = 3;
+}
+
+message PlaylistCatalog {
+  repeated PlaylistInfo playlists = 1;
+  repeated PlaylistFolderInfo folders = 2;
+}
+
+message PlaylistId {
+  string id = 1;
+}
+
+message PlaylistFolderId {
+  string id = 1;
+}
+
+message CreatePlaylistRequest {
+  string name = 1;
+  repeated string keys = 2;
+}
+
+message RenamePlaylistRequest {
+  string id = 1;
+  string name = 2;
+}
+
+message AddPlaylistTracksRequest {
+  string id = 1;
+  repeated string keys = 2;
+}
+
+message RemovePlaylistTrackRequest {
+  string id = 1;
+  // Position, not key: a playlist may hold the same track twice.
+  uint32 index = 2;
+}
+
+message ReorderPlaylistRequest {
+  string id = 1;
+  uint32 from = 2;
+  uint32 to = 3;
+}
+
+message CreatePlaylistFolderRequest {
+  string name = 1;
+}
+
+message RenamePlaylistFolderRequest {
+  string id = 1;
+  string name = 2;
+}
+
+message MovePlaylistRequest {
+  string playlist_id = 1;
+  // Absent takes the playlist out of every folder.
+  optional string folder_id = 2;
+}
+
+message TrackInfo {
+  // The stable library ref; use it for queueing, favorites, and artwork.
+  string key = 1;
+  string uid = 2;
+  string title = 3;
+  string artist = 4;
+  string album = 5;
+  string album_id = 6;
+  optional uint64 duration_ms = 7;
+  uint32 khz = 8;
+  uint32 bitrate = 9;
+  optional uint32 track_number = 10;
+  optional uint32 disc_number = 11;
+  TrackKind kind = 12;
+  bool seekable = 13;
+  bool offline = 14;
+  reserved 15;
+  // The container, upper-cased ("FLAC"); a row from a service names no file.
+  optional string format = 22;
+  // Every credited artist, where the source separates them.
+  repeated string artists = 16;
+  optional string musicbrainz_release_id = 17;
+  optional string musicbrainz_recording_id = 18;
+  optional string musicbrainz_track_id = 19;
+  optional string playlist_item_id = 20;
+  // Absent when there is no cover.
+  optional ArtworkRef artwork = 21;
+}
+
+message TrackRef {
+  string key = 1;
+}
+
+message Stats {
+  map<string, uint64> listen_counts = 1;
+}
+
+message Lyrics {
+  optional string plain = 1;
+  repeated LyricLine synced = 2;
+}
+
+message LyricLine {
+  uint64 start_ms = 1;
+  optional uint64 end_ms = 2;
+  string text = 3;
+  // Word or syllable timing where the provider has it.
+  repeated LyricChunk chunks = 4;
+  optional uint32 parent_line_index = 5;
+  bool background = 6;
+  bool opposite_turn = 7;
+}
+
+message LyricChunk {
+  uint64 start_ms = 1;
+  string text = 2;
+}
+
+// ---------------- favorites, jobs, downloads ----------------
+
+message Favorites {
+  repeated string refs = 1;
+  uint64 generation = 2;
+}
+
+message FavoriteRequest {
+  string key = 1;
+  bool favorite = 2;
+}
+
+message StartJobRequest {
+  JobKind kind = 1;
+}
+
+message JobRef {
+  string job_id = 1;
+}
+
+message JobId {
+  string id = 1;
+}
+
+message JobList {
+  repeated JobStatus jobs = 1;
+}
+
+message JobStatus {
+  string id = 1;
+  JobKind kind = 2;
+  JobState state = 3;
+  string phase = 4;
+  optional uint64 current = 5;
+  optional uint64 total = 6;
+  optional string message = 7;
+  optional ErrorBody error = 8;
+}
+
+// What tool fetches the URL, and every option beyond the format, is the
+// daemon's; the client picks a published format id and nothing else.
+message DownloadUrlRequest {
+  string url = 1;
+  // One of GetDownloadFormats' option values.
+  string format = 2;
+}
+
+message GetDownloadFormatsRequest {}
+
+message DownloadFormats {
+  repeated ChoiceOption formats = 1;
+}
+
+message GetArtworkSettingsRequest {}
+
+message ArtworkSettings {
+  repeated FieldSpec fields = 1;
+}
+
+message SetArtworkSettingsRequest {
+  repeated FieldValue values = 1;
+}
+
+message GetDownloaderSettingsRequest {}
+
+message DownloaderSettings {
+  repeated FieldSpec fields = 1;
+}
+
+message SetDownloaderSettingsRequest {
+  repeated FieldValue values = 1;
+}
+
+enum DownloadState {
+  DOWNLOAD_STATE_UNSPECIFIED = 0;
+  DOWNLOAD_STATE_FINISHED = 1;
+  DOWNLOAD_STATE_FAILED = 2;
+}
+
+message DownloadHistoryEntry {
+  string url = 1;
+  string title = 2;
+  string format = 3;
+  DownloadState state = 4;
+  optional string error = 5;
+}
+
+message GetDownloaderHistoryRequest {}
+
+message DownloadHistory {
+  repeated DownloadHistoryEntry entries = 1;
+}
+
+message ClearDownloaderHistoryRequest {}
+
+message DownloadRequest {
+  repeated string keys = 1;
+}
+
+enum DownloadItemState {
+  DOWNLOAD_ITEM_QUEUED = 0;
+  DOWNLOAD_ITEM_DOWNLOADING = 1;
+  DOWNLOAD_ITEM_FAILED = 2;
+}
+
+message GetDownloadStatusesRequest {}
+
+// Only what a batch is still working through; a finished download is
+// answered by GetDownloads, since the file outlives the job.
+message DownloadItemStatus {
+  string key = 1;
+  DownloadItemState state = 2;
+}
+
+message DownloadStatusList {
+  repeated DownloadItemStatus items = 1;
+}
+
+message DownloadList {
+  repeated string keys = 1;
+}
+
+// ---------------- config, status, artwork ----------------
+
+// The settings surface as a real message. Credential keys and machine-local
+// path state never leave the daemon; locked_keys are pinned by a managed
+// settings layer (a read-only or Nix-store settings.toml, a drop-in, or an
+// env override) and render read-only.
+message ConfigView {
+  Config config = 1;
+  repeated string locked_keys = 2;
+}
+
+// Replaces the settings surface wholesale: read the view, change what you
+// want, send it back. A locked key whose value actually differs is refused.
+message SetConfigRequest {
+  Config config = 1;
+}
+
+
+
+// ---------------- config ----------------
+
+// A source is Local, a named local library, or a server; the id carries the
+// namespace (`local:<uuid>` or the server id) exactly as AppConfig holds it.
+message SourceRef {
+  oneof kind {
+    Unit local = 1;
+    string local_library = 2;
+    string server = 3;
+  }
+}
+
+// proto maps cannot hold a repeated value, so the folder list is wrapped.
+message StringList {
+  repeated string values = 1;
+}
+
+message SavedLocalSource {
+  string id = 1;
+  string name = 2;
+  repeated string directories = 3;
+}
+
+message HomeSection {
+  string key = 1;
+  bool enabled = 2;
+}
+
+message RegistryEntry {
+  string url = 1;
+  bool enabled = 2;
+  bool is_default = 3;
+}
+
+message CustomTheme {
+  string name = 1;
+  map<string, string> vars = 2;
+}
+
+message EqualizerSettings {
+  bool enabled = 1;
+  EqPreset preset = 2;
+  // Exactly ten bands; a different length is rejected at the boundary.
+  repeated float bands = 3;
+  float preamp_db = 4;
+}
+
+message AlbumSortCriterion {
+  AlbumSortField field = 1;
+  SortDirection direction = 2;
+}
+
+message TrackSortCriterion {
+  TrackSortField field = 1;
+  SortDirection direction = 2;
+}
+
+message ArtistSortCriterion {
+  ArtistSortField field = 1;
+  SortDirection direction = 2;
+}
+
+// The settings surface, mirroring config::AppConfig minus the keys the
+// daemon never sends: credentials and machine-local path state.
+message Config {
+  repeated SavedLocalSource local_sources = 1;
+  SourceRef active_source = 2;
+  bool source_explicitly_set = 3;
+  map<string, StringList> server_folders = 4;
+  // 5, 6, 11-13, 48-50 were the settings the daemon publishes as field lists.
+  reserved 5, 6, 11, 12, 13, 48, 49, 50;
+  repeated string music_directory = 7;
+  string theme = 8;
+  string live_theme_path = 9;
+  string device_id = 10;
+  SortOrder sort_order = 14;
+  repeated AlbumSortCriterion album_sort = 15;
+  repeated TrackSortCriterion library_sort = 16;
+  repeated AlbumSortCriterion artist_album_sort = 17;
+  repeated ArtistSortCriterion artist_sort = 18;
+  AlbumViewMode album_view_mode = 19;
+  AlbumViewMode artist_album_view_mode = 20;
+  AlbumViewMode artists_view_mode = 21;
+  ArtistViewOrder artist_view_order = 22;
+  map<string, uint64> listen_counts = 23;
+  string language = 24;
+  bool reduce_animations = 25;
+  bool fullscreen_use_player_bar = 26;
+  bool fullscreen_tabs_collapsed = 27;
+  bool cover_art_background = 28;
+  uint32 cover_art_darkening = 29;
+  uint32 cover_art_blur = 30;
+  string custom_background_path = 31;
+  string custom_font_path = 32;
+  bool tracing_enabled = 33;
+  bool auto_check_updates = 34;
+  bool minimize_to_tray = 35;
+  bool show_source_toggle = 36;
+  bool show_row_images = 37;
+  repeated string sidebar_order = 38;
+  float volume = 39;
+  float volume_scroll_step = 40;
+  uint32 crossfade_seconds = 41;
+  map<string, CustomTheme> custom_themes = 42;
+  BackBehavior back_behavior = 43;
+  ChannelMode channel_mode = 44;
+  EqualizerSettings equalizer = 45;
+  DeviceChangeBehavior device_change_behavior = 46;
+  SampleRateMode sample_rate_mode = 47;
+  TitlebarMode titlebar_mode = 51;
+  OfflineQuality offline_quality = 52;
+  PlayerBarPosition player_bar_position = 53;
+  UiStyle ui_style = 54;
+  SettingsLayout settings_layout = 55;
+  uint32 hero_height = 56;
+  repeated HomeSection home_sections = 57;
+  ListenNowStyle listen_now_style = 58;
+  bool auto_fetch_covers = 59;
+  FetchStrategy cover_fetch_strategy = 60;
+  repeated RegistryEntry radio_registries = 61;
+  repeated string pinned_stations = 62;
+  bool prefer_local_lyrics = 63;
+  bool enable_musixmatch_lyrics = 64;
+  int32 lyrics_offset_ms = 65;
+  bool lyrics_offset_auto = 66;
+  bool lyrics_depth_blur = 67;
+  uint32 lyrics_depth_blur_strength = 68;
+}
+
+enum AlbumViewMode {
+  ALBUM_VIEW_MODE_UNSPECIFIED = 0;
+  ALBUM_VIEW_MODE_GRID = 1;
+  ALBUM_VIEW_MODE_LIST = 2;
+}
+
+enum ArtistViewOrder {
+  ARTIST_VIEW_ORDER_UNSPECIFIED = 0;
+  ARTIST_VIEW_ORDER_TRACKS = 1;
+  ARTIST_VIEW_ORDER_ALBUMS = 2;
+}
+
+enum BackBehavior {
+  BACK_BEHAVIOR_UNSPECIFIED = 0;
+  BACK_BEHAVIOR_REWIND_THEN_PREV = 1;
+  BACK_BEHAVIOR_ALWAYS_PREV = 2;
+}
+
+enum ChannelMode {
+  CHANNEL_MODE_UNSPECIFIED = 0;
+  CHANNEL_MODE_STEREO = 1;
+  CHANNEL_MODE_MONO = 2;
+  CHANNEL_MODE_LEFT_ONLY = 3;
+  CHANNEL_MODE_RIGHT_ONLY = 4;
+  CHANNEL_MODE_SWAP_LEFT_RIGHT = 5;
+}
+
+enum DeviceChangeBehavior {
+  DEVICE_CHANGE_BEHAVIOR_UNSPECIFIED = 0;
+  DEVICE_CHANGE_BEHAVIOR_RESUME = 1;
+  DEVICE_CHANGE_BEHAVIOR_PAUSE = 2;
+}
+
+enum FetchStrategy {
+  FETCH_STRATEGY_UNSPECIFIED = 0;
+  FETCH_STRATEGY_MUSIC_BRAINZ_FIRST = 1;
+  FETCH_STRATEGY_LAST_FM_FIRST = 2;
+  FETCH_STRATEGY_MUSIC_BRAINZ_ONLY = 3;
+  FETCH_STRATEGY_LAST_FM_ONLY = 4;
+}
+
+enum ListenNowStyle {
+  LISTEN_NOW_STYLE_UNSPECIFIED = 0;
+  LISTEN_NOW_STYLE_LIST = 1;
+  LISTEN_NOW_STYLE_CARDS = 2;
+}
+
+enum OfflineQuality {
+  OFFLINE_QUALITY_UNSPECIFIED = 0;
+  OFFLINE_QUALITY_KBPS128 = 1;
+  OFFLINE_QUALITY_KBPS160 = 2;
+  OFFLINE_QUALITY_KBPS192 = 3;
+  OFFLINE_QUALITY_KBPS256 = 4;
+  OFFLINE_QUALITY_KBPS320 = 5;
+  OFFLINE_QUALITY_ORIGINAL = 6;
+}
+
+enum PlayerBarPosition {
+  PLAYER_BAR_POSITION_UNSPECIFIED = 0;
+  PLAYER_BAR_POSITION_BOTTOM = 1;
+  PLAYER_BAR_POSITION_TOP = 2;
+}
+
+enum SampleRateMode {
+  SAMPLE_RATE_MODE_UNSPECIFIED = 0;
+  SAMPLE_RATE_MODE_SYSTEM = 1;
+  SAMPLE_RATE_MODE_SOURCE = 2;
+}
+
+enum SettingsLayout {
+  SETTINGS_LAYOUT_UNSPECIFIED = 0;
+  SETTINGS_LAYOUT_CD = 1;
+  SETTINGS_LAYOUT_TOP_BAR = 2;
+}
+
+enum SortOrder {
+  SORT_ORDER_UNSPECIFIED = 0;
+  SORT_ORDER_TITLE = 1;
+  SORT_ORDER_ARTIST = 2;
+  SORT_ORDER_ALBUM = 3;
+}
+
+enum TitlebarMode {
+  TITLEBAR_MODE_UNSPECIFIED = 0;
+  TITLEBAR_MODE_CUSTOM = 1;
+  TITLEBAR_MODE_SYSTEM = 2;
+  TITLEBAR_MODE_OFF = 3;
+}
+
+enum UiStyle {
+  UI_STYLE_UNSPECIFIED = 0;
+  UI_STYLE_NORMAL = 1;
+  UI_STYLE_VAXRY = 2;
+}
+
+enum EqPreset {
+  EQ_PRESET_UNSPECIFIED = 0;
+  EQ_PRESET_FLAT = 1;
+  EQ_PRESET_BASS_BOOST = 2;
+  EQ_PRESET_TREBLE_BOOST = 3;
+  EQ_PRESET_VOCAL_BOOST = 4;
+  EQ_PRESET_LOUDNESS = 5;
+  EQ_PRESET_CUSTOM = 6;
+}
+
+enum SortDirection {
+  SORT_DIRECTION_UNSPECIFIED = 0;
+  SORT_DIRECTION_ASC = 1;
+  SORT_DIRECTION_DESC = 2;
+}
+
+enum AlbumSortField {
+  ALBUM_SORT_FIELD_UNSPECIFIED = 0;
+  ALBUM_SORT_FIELD_TITLE = 1;
+  ALBUM_SORT_FIELD_ARTIST = 2;
+  ALBUM_SORT_FIELD_YEAR = 3;
+  ALBUM_SORT_FIELD_GENRE = 4;
+}
+
+enum TrackSortField {
+  TRACK_SORT_FIELD_UNSPECIFIED = 0;
+  TRACK_SORT_FIELD_TITLE = 1;
+  TRACK_SORT_FIELD_ARTIST = 2;
+  TRACK_SORT_FIELD_ALBUM = 3;
+  TRACK_SORT_FIELD_DURATION = 4;
+  TRACK_SORT_FIELD_DATE_ADDED = 5;
+}
+
+enum ArtistSortField {
+  ARTIST_SORT_FIELD_UNSPECIFIED = 0;
+  ARTIST_SORT_FIELD_NAME = 1;
+  ARTIST_SORT_FIELD_TRACKS = 2;
+  ARTIST_SORT_FIELD_ALBUMS = 3;
+}
+
+message DaemonStatus {
+  string version = 1;
+  reserved 2; // was api_version; the frontend ships with the daemon
+  uint64 uptime_secs = 3;
+}
+
+// Which entity a cover belongs to. Carried on library rows so a client can
+// ask for the image without knowing how it is stored. catalog and station
+// name things outside the library: a browse tile, a radio station icon.
+message ArtworkTarget {
+  oneof entity {
+    string track = 1;
+    string album = 2;
+    string artist = 3;
+    string playlist = 4;
+    string catalog = 5;
+    string station = 6;
+  }
+}
+
+// The artwork a row has. Absent on a row means there is no picture; do not
+// ask for one. version changes when the image would, and never encodes a
+// credential, so a client caches bytes under it indefinitely.
+message ArtworkRef {
+  ArtworkTarget target = 1;
+  uint64 version = 2;
+}
+
+message ArtworkRequest {
+  oneof entity {
+    string track = 1;
+    string album = 2;
+    string artist = 3;
+    string playlist = 5;
+    string catalog = 6;
+    string station = 7;
+  }
+  bool hq = 4;
+}
+
+message ArtworkChunk {
+  // Set on the first chunk only.
+  string content_type = 1;
+  bytes data = 2;
+}
+
+// ---------------- shared ----------------
+
+// Stable machine-readable error identity; localize by code, never by
+// message. The same codes ride tonic Status metadata (kopuz-error-code)
+// for RPC-level failures.
+message ErrorBody {
+  ErrorCode code = 1;
+  string message = 2;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INVALID_INPUT = 1;
+  reserved 2; // was ERROR_CODE_UNAUTHORIZED
+  ERROR_CODE_NOT_FOUND = 3;
+  ERROR_CODE_CONFLICT = 4;
+  ERROR_CODE_SOURCE_AUTH_EXPIRED = 5;
+  ERROR_CODE_SOURCE_UNREACHABLE = 6;
+  ERROR_CODE_DAEMON_GONE = 9;
+  ERROR_CODE_UNSUPPORTED = 7;
+  ERROR_CODE_INTERNAL = 8;
+}
+
+enum Phase {
+  PHASE_UNSPECIFIED = 0;
+  PHASE_IDLE = 1;
+  PHASE_PLAYING = 2;
+  PHASE_PAUSED = 3;
+  PHASE_ENDED = 4;
+}
+
+enum LoopMode {
+  LOOP_MODE_UNSPECIFIED = 0;
+  LOOP_MODE_NONE = 1;
+  LOOP_MODE_QUEUE = 2;
+  LOOP_MODE_TRACK = 3;
+}
+
+enum TrackSort {
+  // The daemon's own default ordering.
+  TRACK_SORT_UNSPECIFIED = 0;
+  TRACK_SORT_TITLE = 1;
+  TRACK_SORT_ARTIST = 2;
+  TRACK_SORT_ALBUM = 3;
+  TRACK_SORT_DATE_ADDED = 4;
+  TRACK_SORT_PLAY_COUNT = 5;
+  // Ordering comes from TrackFilter.sort_fields instead.
+  TRACK_SORT_FIELDS = 6;
+}
+
+enum TrackKind {
+  TRACK_KIND_UNSPECIFIED = 0;
+  TRACK_KIND_NORMAL = 1;
+  TRACK_KIND_RADIO = 2;
+}
+
+enum QueueMode {
+  QUEUE_MODE_UNSPECIFIED = 0;
+  QUEUE_MODE_REPLACE = 1;
+  QUEUE_MODE_APPEND = 2;
+  QUEUE_MODE_PLAY_NEXT = 3;
+}
+
+enum Table {
+  TABLE_UNSPECIFIED = 0;
+  TABLE_TRACKS = 1;
+  TABLE_ALBUMS = 2;
+  TABLE_PLAYLISTS = 3;
+  TABLE_FAVORITES = 4;
+  TABLE_FOLDERS = 5;
+  TABLE_SERVERS = 6;
+  TABLE_RECENTS = 7;
+}
+
+enum JobKind {
+  JOB_KIND_UNSPECIFIED = 0;
+  JOB_KIND_SCAN = 1;
+  JOB_KIND_LIBRARY_SYNC = 2;
+  JOB_KIND_FAVORITES_SYNC = 3;
+  JOB_KIND_PLAYLIST_SYNC = 4;
+  JOB_KIND_DOWNLOAD = 5;
+  JOB_KIND_URL_DOWNLOAD = 6;
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_RUNNING = 1;
+  JOB_STATE_FINISHED = 2;
+  JOB_STATE_FAILED = 3;
+  JOB_STATE_CANCELLED = 4;
+}
+
+enum SourceState {
+  SOURCE_STATE_UNSPECIFIED = 0;
+  SOURCE_STATE_ONLINE = 1;
+  SOURCE_STATE_AUTH_EXPIRED = 2;
+  SOURCE_STATE_OFFLINE = 3;
+}
+
+enum NoticeLevel {
+  NOTICE_LEVEL_UNSPECIFIED = 0;
+  NOTICE_LEVEL_INFO = 1;
+  NOTICE_LEVEL_WARNING = 2;
+  NOTICE_LEVEL_ERROR = 3;
+}

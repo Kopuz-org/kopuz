@@ -7,7 +7,6 @@ use hooks::use_player_controller::PlayerController;
 #[component]
 pub(crate) fn TrackMetadata(
     mut is_fullscreen: Signal<bool>,
-    current_song_cover_url: Signal<String>,
     current_song_title: Signal<String>,
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
@@ -29,7 +28,9 @@ pub(crate) fn TrackMetadata(
         div {
             class: "flex-1 min-h-0 w-full flex items-center justify-center mb-6",
             {
-                let cover = current_song_cover_url.read().clone();
+                let cover = ctrl
+                    .current_cover_url(hooks::artwork::Size::Full)
+                    .unwrap_or_default();
                 if cover.is_empty() {
                     rsx! {
                         div {
@@ -39,7 +40,6 @@ pub(crate) fn TrackMetadata(
                         }
                     }
                 } else {
-                    let cover = crate::cover_background::high_quality_artwork_url(cover);
                     rsx! {
                         img {
                             src: "{cover}",
@@ -99,7 +99,7 @@ pub(crate) fn TrackMetadata(
                     },
                     title: "{favorite_label}",
                     "aria-label": "{favorite_label}",
-                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone()),
+                    onclick: move |_| { toggle_favorite(hooks::favorites::current(&ctrl)) },
                     i {
                         class: if is_favorite { "fa-solid fa-heart" } else { "fa-regular fa-heart" },
                         "aria-hidden": "true",

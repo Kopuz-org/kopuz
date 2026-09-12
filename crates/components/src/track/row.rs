@@ -5,12 +5,12 @@ use crate::queue_drag::{
     clear_dragged_queue_track, handle_select_click, is_queue_drag_enabled, set_dragged_queue_track,
     set_dragged_queue_tracks,
 };
+use api::TrackInfo as Track;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
+use hooks::consume_api;
 use hooks::toast::toast;
-use reader::models::Track;
-use tracing::Instrument;
 
 pub(crate) fn copy_to_clipboard(text: &str) {
     let value = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string());
@@ -19,23 +19,6 @@ pub(crate) fn copy_to_clipboard(text: &str) {
     );
     let _ = dioxus::document::eval(&js);
 }
-
-pub(crate) fn share_to_musicbrainz(release_id: Option<String>, artist: String, title: String) {
-    spawn(
-        async move {
-            if let Some(url) =
-                utils::musicbrainz::track_page_url(release_id.as_deref(), &artist, &title).await
-            {
-                copy_to_clipboard(&url);
-                toast("Copied MusicBrainz link");
-            } else {
-                toast("Couldn't find this track on MusicBrainz");
-            }
-        }
-        .instrument(tracing::info_span!("musicbrainz.fetch")),
-    );
-}
-
 #[component]
 pub fn TrackRow(
     track: Track,
@@ -64,7 +47,6 @@ pub fn TrackRow(
     #[props(default = None)] row_num: Option<usize>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
@@ -221,8 +203,7 @@ pub fn TrackRow(
                 handler.call(());
             }
         } else if idx == share_idx {
-            let src = active_source.peek().clone();
-            share_track(menu_track.clone(), src);
+            share_track(menu_track.clone());
             on_close_menu.call(());
         } else if mix_idx == Some(idx) {
             if let Some(handler) = on_start_radio {
@@ -265,22 +246,11 @@ pub fn TrackRow(
     };
 
     let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
-    let duration_str = fmt_dur(track.duration);
+    let duration_str = fmt_dur(track.duration_secs().unwrap_or_default());
 
-    // File-type tag (MP3, FLAC, …) for local tracks. Server tracks have a
-    // `TrackId::Server` id with no filesystem path, so they get no badge.
-    let file_type = track
-        .id
-        .local_path()
-        .and_then(|p| p.extension())
-        .and_then(|e| e.to_str())
-        .filter(|e| {
-            matches!(
-                e.to_ascii_lowercase().as_str(),
-                "mp3" | "flac" | "m4a" | "wav" | "ogg" | "opus" | "mp4" | "mka"
-            )
-        })
-        .map(|e| e.to_uppercase());
+    // The container a local file is in, which the daemon works out: a row
+    // that came from a service names no file, so it has none.
+    let file_type = track.format.clone();
 
     let columns_vaxry = if is_album {
         COLUMNS_VAXRY_ALBUM
@@ -522,7 +492,7 @@ pub fn TrackRow(
                                 if !is_selection_mode {
                                     // Mobile always plays. Desktop drills into the
                                     // album — but only if the track actually has one.
-                                    // Albumless tracks (uploads, music videos, YT
+                                    // Albumless tracks (uploads, videos, catalog
                                     // singles, Unknown Album from local) just play
                                     // on title click; otherwise we'd be navigating
                                     // into a meaningless "Singles" / "Unknown Album"
@@ -873,18 +843,19 @@ pub fn TrackRow(
 /// Re-exported from [`crate::radio_actions`], where track and playlist radio
 /// share one implementation. Kept here so the existing row call sites keep
 /// reading `track_row::radio_handler(...)`.
-pub use crate::radio_actions::{
-    play_track_radio as play_radio, track_radio_handler as radio_handler,
-};
+pub use crate::radio_actions::track_radio_handler as radio_handler;
 
-/// Copy a shareable link for a track: its source's public web URL when it has
-/// one (YT Music or Spotify), else fall back to a MusicBrainz lookup by metadata. The provider
-/// URL knowledge lives in the source impl ([`MediaSource::web_url`]), not here.
-pub fn share_track(track: Track, source: ::server::source::ActiveSource) {
-    if let Some(url) = source.web_url(&track) {
-        copy_to_clipboard(&url);
-        toast("Copied link");
-    } else {
-        share_to_musicbrainz(track.musicbrainz_release_id, track.artist, track.title);
-    }
+/// Copy a shareable link for a track. Which page a row has -- the source's
+/// own, or the one its metadata names elsewhere -- is the daemon's knowledge.
+pub fn share_track(track: Track) {
+    let api = consume_api();
+    spawn(async move {
+        match api.track_web_url(track.key.clone()).await {
+            Ok(Some(url)) => {
+                copy_to_clipboard(&url);
+                toast("Copied link");
+            }
+            _ => toast("Couldn't find a page for this track"),
+        }
+    });
 }

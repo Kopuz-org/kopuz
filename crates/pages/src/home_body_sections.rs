@@ -9,7 +9,7 @@ pub(super) fn render_server_section(
     edit: bool,
     is_vaxry: bool,
     listen_now_style: ListenNowStyle,
-    jellyfin_shuffled: Vec<AlbumCard>,
+    shuffled_albums: Vec<AlbumCard>,
     hero_cover: Option<String>,
     continue_listening: Vec<(Track, Option<Album>, Option<String>)>,
     hero_entry: Option<(Track, Option<Album>, Option<String>)>,
@@ -47,13 +47,13 @@ pub(super) fn render_server_section(
         "listen_now" => render_listen_now(
             is_vaxry,
             listen_now_style,
-            jellyfin_shuffled,
+            shuffled_albums,
             on_select_album,
             on_play_album,
         ),
         "top_artists" => render_top_artists(is_vaxry, artists, on_search_artist, scroll_container),
         "new_releases" => render_albums_row(
-            "jelly-albums-scroll",
+            "home-albums-scroll",
             i18n::t("new_releases").to_string(),
             i18n::t("albums").to_string(),
             is_vaxry,
@@ -70,7 +70,7 @@ pub(super) fn render_server_section(
                 genre
             };
             render_albums_row(
-                "jelly-made-for-you-scroll",
+                "home-made-for-you-scroll",
                 i18n::t("made_for_you").to_string(),
                 eyebrow,
                 is_vaxry,
@@ -81,7 +81,7 @@ pub(super) fn render_server_section(
             )
         }
         "recently_added" => render_albums_row(
-            "jelly-recently-added-scroll",
+            "home-recently-added-scroll",
             i18n::t("recently_added").to_string(),
             i18n::t("library").to_string(),
             is_vaxry,
@@ -229,7 +229,7 @@ fn ServerHeroBanner(
                             span { class: "text-sm", "{i18n::t(\"start_listening\")}" }
                         }
                         {
-                            let jelly_hero_fav = {
+                            let hero_fav = {
                                 let tracks = if hero_album_id.read().is_empty() {
                                     Vec::new()
                                 } else {
@@ -241,27 +241,33 @@ fn ServerHeroBanner(
                                     .unwrap_or_default()
                                     .into_iter()
                                     .collect();
-                                !tracks.is_empty() && tracks.iter().all(|t| {
-                                    let id = t.id.key();
-                                    !id.is_empty() && favs.contains(id.as_ref())
-                                })
+                                !tracks.is_empty()
+                                    && tracks
+                                        .iter()
+                                        .all(|t| !t.key.is_empty() && favs.contains(&t.key))
                             };
-                            let hero_heart_class = if jelly_hero_fav {
+                            let hero_heart_class = if hero_fav {
                                 "w-11 h-11 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-red-400 hover:bg-white/20 transition-all"
                             } else {
                                 "w-11 h-11 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-white hover:bg-white/20 transition-all"
                             };
-                            let hero_heart_icon = if jelly_hero_fav { "fa-solid fa-heart" } else { "fa-regular fa-heart" };
+                            let hero_heart_icon = if hero_fav { "fa-solid fa-heart" } else { "fa-regular fa-heart" };
                             rsx! {
                                 button {
                                     class: "{hero_heart_class}",
                                     onclick: move |_| {
-                                        let tracks: Vec<_> = if hero_album_id.peek().is_empty() {
+                                        let keys: Vec<String> = if hero_album_id.peek().is_empty() {
                                             Vec::new()
                                         } else {
-                                            hero_tracks_res.read().clone().unwrap_or_default()
+                                            hero_tracks_res
+                                                .read()
+                                                .clone()
+                                                .unwrap_or_default()
+                                                .iter()
+                                                .map(|track| track.key.clone())
+                                                .collect()
                                         };
-                                        hooks::favorites::set_favorite_many(tracks, !jelly_hero_fav);
+                                        hooks::favorites::set_favorite_many(keys, !hero_fav);
                                     },
                                     i { class: "{hero_heart_icon}" }
                                 }
@@ -338,8 +344,8 @@ fn render_continue_listening(
         return rsx! { div {} };
     }
     let mut ctrl = consume_context::<hooks::PlayerController>();
-    let active_source = consume_context::<Signal<::server::source::ActiveSource>>();
-    let can_radio = active_source.read().capabilities().radio.track;
+    let caps = consume_context::<Signal<api::SourceCapabilities>>();
+    let can_radio = caps.read().track_radio;
     let (song_actions, song_action_kinds) = song_card_actions(can_radio);
     rsx! {
         section { class: if is_vaxry { "mb-10" } else { "mb-12" },
@@ -353,18 +359,18 @@ fn render_continue_listening(
                 div { class: "flex gap-2",
                     button {
                         class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
-                        onclick: move |_| scroll_container("jelly-continue-scroll", -1),
+                        onclick: move |_| scroll_container("home-continue-scroll", -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
                         class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
-                        onclick: move |_| scroll_container("jelly-continue-scroll", 1),
+                        onclick: move |_| scroll_container("home-continue-scroll", 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
                 }
             }
             div {
-                id: "jelly-continue-scroll",
+                id: "home-continue-scroll",
                 class: "flex overflow-x-auto gap-5 pb-6 pt-2 scrollbar-hide scroll-smooth -mx-2 px-2",
                 ontouchstart: move |evt| evt.stop_propagation(),
                 for (track, album_opt, cover_url) in tracks {
@@ -378,13 +384,13 @@ fn render_continue_listening(
                         let album_id_opt = album_opt.as_ref().map(|a| a.id.clone());
                         let album_id_click = album_id_opt.clone();
                         let album_id_play = album_id_opt.clone();
-                        let key = track.id.uid();
+                        let key = track.uid.clone();
                         let actions = song_actions.clone();
                         let action_kinds = song_action_kinds.clone();
                         // Resolved during render, not in the click closure: the
                         // handler reads context, which a closure cannot do.
                         let start_radio = components::radio_actions::track_radio_handler(
-                            track.clone(),
+                            track.key.clone(),
                         );
                         let open_key = key.clone();
                         let is_menu_open = active_card_menu.read().as_deref() == Some(key.as_str());
@@ -438,8 +444,7 @@ fn render_continue_listening(
                                                         }
                                                     }
                                                     Some(SongCardAction::Share) => {
-                                                        let src = active_source.peek().clone();
-                                                        components::track_row::share_track(menu_track.clone(), src);
+                                                        components::track_row::share_track(menu_track.clone());
                                                     }
                                                     None => {}
                                                 }
@@ -461,11 +466,11 @@ fn render_continue_listening(
 fn render_listen_now(
     is_vaxry: bool,
     listen_now_style: ListenNowStyle,
-    jellyfin_shuffled: Vec<AlbumCard>,
+    shuffled_albums: Vec<AlbumCard>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
 ) -> Element {
-    if jellyfin_shuffled.is_empty() {
+    if shuffled_albums.is_empty() {
         return rsx! { div {} };
     }
     let use_cards = listen_now_style == ListenNowStyle::Cards;
@@ -482,7 +487,7 @@ fn render_listen_now(
             if use_cards {
                 div { class: "flex overflow-x-auto gap-4 pb-4 scrollbar-hide scroll-smooth -mx-2 px-2",
                     ontouchstart: move |evt| evt.stop_propagation(),
-                    for (album_id, title, artist, cover_url) in jellyfin_shuffled.iter().skip(1).take(10).cloned() {
+                    for (album_id, title, artist, cover_url) in shuffled_albums.iter().skip(1).take(10).cloned() {
                         div {
                             class: "flex-none w-40 group cursor-pointer",
                             onclick: {
@@ -512,7 +517,7 @@ fn render_listen_now(
                 }
             } else {
                 div { class: "grid grid-cols-[repeat(auto-fill,minmax(350px,1fr))] gap-4",
-                    for (album_id, title, artist, cover_url) in jellyfin_shuffled.iter().skip(1).take(8).cloned() {
+                    for (album_id, title, artist, cover_url) in shuffled_albums.iter().skip(1).take(8).cloned() {
                         div {
                             class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
                             onclick: {
@@ -570,18 +575,18 @@ fn render_top_artists(
                 div { class: "flex gap-2",
                     button {
                         class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
-                        onclick: move |_| scroll_container("jelly-artists-scroll", -1),
+                        onclick: move |_| scroll_container("home-artists-scroll", -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
                         class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
-                        onclick: move |_| scroll_container("jelly-artists-scroll", 1),
+                        onclick: move |_| scroll_container("home-artists-scroll", 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
                 }
             }
             div {
-                id: "jelly-artists-scroll",
+                id: "home-artists-scroll",
                 class: "flex overflow-x-auto gap-6 pb-6 pt-2 overflow-y-visible scrollbar-hide scroll-smooth -mx-2 px-2",
                 ontouchstart: move |evt| evt.stop_propagation(),
                 for (artist, cover_url) in artists {
@@ -693,11 +698,9 @@ fn render_playlists(
     }
     // Radio is the one playlist action a home card can offer without the
     // playlists page's folder/rename state, so the whole menu rides its gate.
-    let can_radio = consume_context::<Signal<::server::source::ActiveSource>>()
+    let can_radio = consume_context::<Signal<api::SourceCapabilities>>()
         .read()
-        .capabilities()
-        .radio
-        .playlist;
+        .playlist_radio;
     let radio_actions = vec![MenuAction::new(
         components::radio_actions::radio_label(),
         components::radio_actions::RADIO_ICON,
@@ -714,18 +717,18 @@ fn render_playlists(
                 div { class: "flex gap-2",
                     button {
                         class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
-                        onclick: move |_| scroll_container("jelly-playlists-scroll", -1),
+                        onclick: move |_| scroll_container("home-playlists-scroll", -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
                         class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
-                        onclick: move |_| scroll_container("jelly-playlists-scroll", 1),
+                        onclick: move |_| scroll_container("home-playlists-scroll", 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
                 }
             }
             div {
-                id: "jelly-playlists-scroll",
+                id: "home-playlists-scroll",
                 class: "flex overflow-x-auto gap-6 pb-6 pt-2 scrollbar-hide scroll-smooth -mx-2 px-2",
                 ontouchstart: move |evt| evt.stop_propagation(),
                 for (id, name, track_count, cover_url) in recent_playlists {

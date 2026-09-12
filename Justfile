@@ -12,6 +12,15 @@ build: tailwind
     @echo ""
     @echo "Build complete!"
 
+# The app, hosting the daemon core and serving it on the socket. Extra flags
+# reach cargo, so `just run --release` builds and runs it released.
+run *FLAGS: tailwind
+    cargo run {{FLAGS}} -p kopuz
+
+# The daemon on its own, for attaching to or poking with grpcurl.
+daemon *FLAGS:
+    cargo run {{FLAGS}} -p kopuz-daemon --features kopuzd --bin kopuzd
+
 run-release: build
     target/dx/kopuz/release/linux/app/kopuz
 

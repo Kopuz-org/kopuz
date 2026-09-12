@@ -1,17 +1,6 @@
 use config::AppConfig;
 use dioxus::prelude::*;
 
-/// Upgrade artwork for views that paint it large. Local files use the artwork
-/// protocol's HQ variant; provider URLs with a resizable image endpoint are
-/// raised to a desktop-sized request instead of enlarging the row thumbnail.
-pub fn high_quality_artwork_url(cover: String) -> String {
-    if cover.starts_with("artwork://") || cover.starts_with("http://artwork.dioxus.localhost/") {
-        format!("{cover}&hq=1")
-    } else {
-        ::server::cover::remote_artwork_url_at_size(cover, 1920)
-    }
-}
-
 /// Art backdrop: the cover under user-configurable blur and darkening so
 /// text stays readable. The overscan grows with the blur radius to keep
 /// blurred edge bleed outside the viewport.
@@ -32,7 +21,7 @@ pub fn CoverArtBackground(cover: String) -> Element {
         "filter: none; transform: none;".to_string()
     };
 
-    let src = high_quality_artwork_url(cover);
+    let src = hooks::artwork::at_full_size(&cover);
 
     rsx! {
         div {
@@ -47,34 +36,5 @@ pub fn CoverArtBackground(cover: String) -> Element {
                 style: "background-color: rgba(0, 0, 0, {scrim});",
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::high_quality_artwork_url;
-
-    #[test]
-    fn local_artwork_uses_the_hq_protocol_variant() {
-        assert_eq!(
-            high_quality_artwork_url("artwork://local?p=%2Fcover.jpg".to_string()),
-            "artwork://local?p=%2Fcover.jpg&hq=1"
-        );
-        assert_eq!(
-            high_quality_artwork_url(
-                "http://artwork.dioxus.localhost/local?p=C%3A%5Ccover.jpg".to_string()
-            ),
-            "http://artwork.dioxus.localhost/local?p=C%3A%5Ccover.jpg&hq=1"
-        );
-    }
-
-    #[test]
-    fn subsonic_artwork_is_upgraded_for_large_views() {
-        let got = high_quality_artwork_url(
-            "https://music.example/rest/getCoverArt.view?id=cover-1&size=80".to_string(),
-        );
-        assert!(got.contains("id=cover-1"));
-        assert!(got.contains("size=1920"));
-        assert!(!got.contains("size=80"));
     }
 }

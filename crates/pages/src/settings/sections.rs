@@ -1,94 +1,66 @@
 use components::settings_items::{
-    ChannelModeSelector, DeviceChangeBehaviorSelector, DiscordPresencePausedSettings,
-    DiscordPresenceSettings, EqualizerPanel, LastFmSettings, LibreFmSettings, MusicBrainzSettings,
-    SampleRateModeSelector, SettingItem, SettingsSection, ToggleSetting,
+    ChannelModeSelector, DeviceChangeBehaviorSelector, EqualizerPanel, SampleRateModeSelector,
+    SettingItem, SettingsSection, ToggleSetting,
 };
-use config::{AppConfig, FetchStrategy, LYRICS_OFFSET_LIMIT_MS, OfflineQuality};
+use config::{AppConfig, LYRICS_OFFSET_LIMIT_MS, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
 #[component]
-pub(super) fn ConnectivitySection(mut config: Signal<AppConfig>) -> Element {
+pub(super) fn ConnectivitySection() -> Element {
+    // What is offered, and whether each is connected, is the daemon's answer;
+    // this counter is what asks it again after a change.
+    let changed = use_signal(|| 0u64);
+    let mut integrations = hooks::integrations::use_integrations();
+    use_effect(move || {
+        let _ = changed();
+        integrations.restart();
+    });
+    let listed = integrations.read().clone().unwrap_or_default();
     rsx! {
         SettingsSection { title: i18n::t("connectivity").to_string(),
-            if !cfg!(target_os = "android") {
-                SettingItem {
-                    title: i18n::t("discord_presence").to_string(),
-                    config_key: "discord_presence",
-                    control: rsx! {
-                        DiscordPresenceSettings {
-                            enabled: config.read().discord_presence.unwrap_or(true),
-                            on_change: move |val| config.write().discord_presence = Some(val),
+            for integration in listed.into_iter() {
+                IntegrationRows { key: "{integration.id}", integration, changed }
+            }
+        }
+    }
+}
+
+/// One integration: its fields, and the button that connects it where
+/// filling the fields in is not the whole of it.
+#[component]
+fn IntegrationRows(integration: api::IntegrationInfo, changed: Signal<u64>) -> Element {
+    let name = components::forms::text(&integration.name);
+    let id = integration.id.clone();
+    let connect_id = integration.id.clone();
+    rsx! {
+        components::forms::schema_form::SchemaForm {
+            fields: integration.fields.clone(),
+            values: Vec::new(),
+            on_change: move |value: api::FieldValue| {
+                hooks::integrations::set_settings(id.clone(), vec![value], changed);
+            },
+        }
+        if integration.connect == api::ConnectKind::WebSignIn {
+            SettingItem {
+                title: name.clone(),
+                control: rsx! {
+                    button {
+                        class: if integration.configured {
+                            "bg-green-500/20 text-green-300 px-3 py-2 rounded-xl text-sm transition-colors"
+                        } else {
+                            "bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-xl text-sm transition-colors"
+                        },
+                        onclick: move |_| {
+                            hooks::integrations::authenticate(connect_id.clone(), changed);
+                        },
+                        if integration.configured {
+                            "{i18n::t_with(\"integration_connected\", &[(\"name\", name.clone())])}"
+                        } else {
+                            "{i18n::t_with(\"integration_connect\", &[(\"name\", name.clone())])}"
                         }
                     }
-                }
-                if config.read().discord_presence.unwrap_or(true) {
-                    SettingItem {
-                        title: i18n::t("discord_presence_paused").to_string(),
-                        config_key: "discord_presence_paused",
-                        control: rsx! {
-                            DiscordPresencePausedSettings {
-                                enabled: config.read().discord_presence_paused.unwrap_or(true),
-                                on_change: move |val| config.write().discord_presence_paused = Some(val),
-                            }
-                        }
-                    }
-                    SettingItem {
-                        title: i18n::t("discord_presence_source").to_string(),
-                        config_key: "discord_presence_source",
-                        control: rsx! {
-                            ToggleSetting {
-                                enabled: config.read().discord_presence_source.unwrap_or(true),
-                                on_change: move |val| config.write().discord_presence_source = Some(val),
-                            }
-                        }
-                    }
-                }
-            }
-            SettingItem {
-                title: i18n::t("listenbrainz").to_string(),
-                config_key: "musicbrainz_token",
-                control: rsx! {
-                    MusicBrainzSettings {
-                        current: config.read().musicbrainz_token.clone(),
-                        on_save: move |token: String| {
-                            config.write().musicbrainz_token = token;
-                        },
-                    }
-                }
-            }
-            SettingItem {
-                title: i18n::t("lastfm").to_string(),
-                config_key: "lastfm_api_key",
-                extra_config_keys: vec!["lastfm_api_secret", "lastfm_session_key"],
-                control: rsx! {
-                    LastFmSettings {
-                        api_key: config.read().lastfm_api_key.clone(),
-                        api_secret: config.read().lastfm_api_secret.clone(),
-                        session_key: config.read().lastfm_session_key.clone(),
-                        on_api_key_save: move |value: String| {
-                            config.write().lastfm_api_key = value;
-                        },
-                        on_api_secret_save: move |value: String| {
-                            config.write().lastfm_api_secret = value;
-                        },
-                        on_session_key_save: move |value: String| {
-                            config.write().lastfm_session_key = value;
-                        },
-                    }
-                }
-            }
-            SettingItem {
-                title: i18n::t("librefm").to_string(),
-                config_key: "librefm_session_key",
-                control: rsx! {
-                    LibreFmSettings {
-                        session_key: config.read().librefm_session_key.clone(),
-                        on_session_key_save: move |value: String| {
-                            config.write().librefm_session_key = value;
-                        },
-                    }
-                }
+                },
             }
         }
     }
@@ -124,6 +96,8 @@ pub(super) fn DownloadsSection(mut config: Signal<AppConfig>) -> Element {
 #[component]
 pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
+    let artwork_changed = use_signal(|| 0u64);
+    let artwork = hooks::artwork_settings::use_settings(artwork_changed);
     let lyrics_offset = config.read().lyrics_offset_ms;
     let lyrics_offset_auto = config.read().lyrics_offset_auto;
     let lyrics_offset_label = if lyrics_offset_auto {
@@ -144,15 +118,12 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
 
     rsx! {
         SettingsSection { title: i18n::t("metadata").to_string(),
-            SettingItem {
-                title: i18n::t("auto_fetch_covers").to_string(),
-                config_key: "auto_fetch_covers",
-                control: rsx! {
-                    ToggleSetting {
-                        enabled: config.read().auto_fetch_covers,
-                        on_change: move |val| config.write().auto_fetch_covers = val,
-                    }
-                }
+            components::forms::schema_form::SchemaForm {
+                fields: artwork.read().clone().unwrap_or_default(),
+                values: Vec::new(),
+                on_change: move |value: api::FieldValue| {
+                    hooks::artwork_settings::set(value, artwork_changed);
+                },
             }
             SettingItem {
                 title: i18n::t("prefer_local_lyrics").to_string(),
@@ -208,48 +179,6 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
                         span {
                             class: "text-xs font-mono text-white/80 w-20 text-right",
                             "{lyrics_offset_label}"
-                        }
-                    }
-                }
-            }
-            SettingItem {
-                title: i18n::t("cover_fetch_strategy").to_string(),
-                config_key: "cover_fetch_strategy",
-                control: rsx! {
-                    {
-                        let current = config.read().cover_fetch_strategy;
-                        rsx! {
-                            select {
-                                class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                                onchange: move |evt| {
-                                    config.write().cover_fetch_strategy = match evt.value().as_str() {
-                                        "lastfm_first" => FetchStrategy::LastFmFirst,
-                                        "musicbrainz_only" => FetchStrategy::MusicBrainzOnly,
-                                        "lastfm_only" => FetchStrategy::LastFmOnly,
-                                        _ => FetchStrategy::MusicBrainzFirst,
-                                    };
-                                },
-                                option {
-                                    value: "musicbrainz_first",
-                                    selected: current == FetchStrategy::MusicBrainzFirst,
-                                    "{i18n::t(\"musicbrainz_first\")}"
-                                }
-                                option {
-                                    value: "lastfm_first",
-                                    selected: current == FetchStrategy::LastFmFirst,
-                                    "{i18n::t(\"lastfm_first\")}"
-                                }
-                                option {
-                                    value: "musicbrainz_only",
-                                    selected: current == FetchStrategy::MusicBrainzOnly,
-                                    "{i18n::t(\"musicbrainz_only\")}"
-                                }
-                                option {
-                                    value: "lastfm_only",
-                                    selected: current == FetchStrategy::LastFmOnly,
-                                    "{i18n::t(\"lastfm_only\")}"
-                                }
-                            }
                         }
                     }
                 }
@@ -330,7 +259,6 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                         current: config.read().channel_mode,
                         on_change: move |mode| {
                             config.write().channel_mode = mode;
-                            ctrl.player.peek().set_channel_mode(mode);
                         }
                     }
                 }
@@ -343,7 +271,6 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                         current: config.read().device_change_behavior,
                         on_change: move |behavior| {
                             config.write().device_change_behavior = behavior;
-                            ctrl.player.peek().set_device_change_behavior(behavior);
                         }
                     }
                 }
@@ -356,7 +283,6 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                         current: config.read().sample_rate_mode,
                         on_change: move |mode| {
                             config.write().sample_rate_mode = mode;
-                            ctrl.player.peek().set_sample_rate_mode(mode);
                         }
                     }
                 }
@@ -369,11 +295,10 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                     EqualizerPanel {
                         current: config.read().equalizer.clone(),
                         on_preview: move |equalizer: config::EqualizerSettings| {
-                            ctrl.player.peek().set_equalizer(equalizer);
+                            ctrl.preview_equalizer(equalizer);
                         },
                         on_commit: move |equalizer: config::EqualizerSettings| {
-                            config.write().equalizer = equalizer.clone();
-                            ctrl.player.peek().set_equalizer(equalizer);
+                            config.write().equalizer = equalizer;
                         }
                     }
                 }

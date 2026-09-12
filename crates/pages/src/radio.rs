@@ -1,7 +1,14 @@
+//! Internet radio: the selected stations and the public directory.
+//!
+//! Both lists are the daemon's. It holds the registry, searches the directory
+//! and remembers the pins, so a station plays by naming it and one of its
+//! streams; nothing here imports a registry or builds a stream URL.
+
+use api::RadioStationInfo;
 use config::UiStyle;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
-use radio::browser::{self, BrowserStation};
+use std::collections::HashSet;
 use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
@@ -13,97 +20,119 @@ pub struct RadioProps {
     pub config: Signal<config::AppConfig>,
 }
 
-/// Insert the station into the live registry,
-/// report the play to radio-browser, and start it.
-fn play_browser_station(
-    ctrl: &mut PlayerController,
-    registry: &mut Signal<radio::registry::StationRegistry>,
-    station: &BrowserStation,
-) {
-    let manifest = browser::to_manifest(station);
-    let station_id = manifest.id.clone();
-    registry.write().insert_manifest(manifest);
-    browser::count_click(&station.stationuuid);
-    ctrl.play_radio(&station_id, browser::BROWSER_STREAM_ID);
+/// Pin or unpin, then re-read the selected list. The daemon keeps the
+/// station's manifest, so a pin outlives a registry that stops listing it.
+///
+/// The local set moves first and is put back on failure: the answer is a round
+/// trip away and a check mark that waits for it reads as a dead button.
+fn toggle_pin(id: String, mut pinned_ids: Signal<HashSet<String>>, mut generation: Signal<u64>) {
+    let pinned = pinned_ids.peek().contains(&id);
+    if pinned {
+        pinned_ids.write().remove(&id);
+    } else {
+        pinned_ids.write().insert(id.clone());
+    }
+    let api = hooks::consume_api();
+    spawn(async move {
+        if let Err(error) = api.pin_radio_station(id.clone(), !pinned).await {
+            tracing::warn!(%error, "pinning a station failed");
+            hooks::toast::toast_error(&error.to_string());
+            if pinned {
+                pinned_ids.write().insert(id);
+            } else {
+                pinned_ids.write().remove(&id);
+            }
+            return;
+        }
+        generation += 1;
+    });
 }
 
-/// Pin or unpin a browser station from the Selected list, persisted in config.
-fn toggle_pin_station(
-    config: &mut Signal<config::AppConfig>,
-    registry: &mut Signal<radio::registry::StationRegistry>,
-    station: &BrowserStation,
-) {
-    let manifest = browser::to_manifest(station);
-    let id = manifest.id.clone();
-    if registry.read().is_registry_station(&id) {
-        registry.write().unpin_station(&id);
-        config.write().pinned_stations.retain(|json| {
-            serde_json::from_str::<radio::manifest::StationManifest>(json)
-                .map(|m| m.id != id)
-                .unwrap_or(true)
-        });
-    } else {
-        if let Ok(json) = serde_json::to_string(&manifest) {
-            config.write().pinned_stations.push(json);
-        }
-        registry.write().pin_manifest(manifest);
+/// The stream a click plays when the row does not name one.
+fn first_stream(station: &RadioStationInfo) -> &str {
+    station
+        .streams
+        .first()
+        .map(|stream| stream.id.as_str())
+        .unwrap_or_default()
+}
+
+/// The station's own picture, where it has one.
+fn station_art(station: &RadioStationInfo) -> Option<utils::CoverUrl> {
+    hooks::artwork::url(station.artwork.as_ref(), hooks::artwork::Size::Thumb)
+}
+
+fn matches_query(station: &RadioStationInfo, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
     }
+    i18n::t(&station.name).to_lowercase().contains(query)
+        || i18n::t(&station.description).to_lowercase().contains(query)
+        || station
+            .streams
+            .iter()
+            .any(|stream| i18n::t(&stream.name).to_lowercase().contains(query))
+        || station
+            .tags
+            .iter()
+            .any(|tag| tag.to_lowercase().contains(query))
 }
 
 #[component]
 pub fn Radio(props: RadioProps) -> Element {
-    let _ = &props;
     let mut ctrl = use_context::<PlayerController>();
     let config = props.config;
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
-
-    let registry_sig = use_context::<Signal<radio::registry::StationRegistry>>();
-    // can panic, will check again later.
-    // Curated registries only; runtime radio-browser inserts excluded.
-    let stations: Vec<radio::manifest::StationManifest> = registry_sig
-        .read()
-        .registry_stations()
-        .into_iter()
-        .cloned()
-        .collect();
+    let api = hooks::use_api();
 
     // Search / filter
     let mut filter = use_signal(String::new);
     let debounce_gen = use_hook(|| Arc::new(AtomicU64::new(0))).clone();
 
     // Expanded stations set for stream overflow
-    let mut expanded_stations = use_signal(std::collections::HashSet::<String>::new);
+    let mut expanded_stations = use_signal(HashSet::<String>::new);
 
-    // radio-browser.info: popular stations is default,
-    // live search once the debounced filter has text.
-    let browser_res: Resource<Result<Vec<BrowserStation>, String>> = use_resource(move || {
+    // Bumped by a pin, so the selected list re-reads without re-searching.
+    let pin_gen = use_signal(|| 0u64);
+    let selected_api = api.clone();
+    let selected = use_resource(move || {
+        let _ = pin_gen();
+        let api = selected_api.clone();
+        async move { api.radio_stations().await.unwrap_or_default() }
+    });
+
+    // The public directory: popular stations by default, a live search once
+    // the debounced filter has text. The daemon queries it.
+    let directory: Resource<Result<Vec<RadioStationInfo>, String>> = use_resource(move || {
         let query = filter();
-        utils::offload(async move {
-            let q = query.trim().to_string();
-            let result = if q.is_empty() {
-                browser::top_stations(60).await
-            } else {
-                browser::search(&q, 60).await
-            };
-            result.map_err(|e| e.to_string())
-        })
+        let api = api.clone();
+        async move {
+            api.search_radio(query.trim().to_string(), 60)
+                .await
+                .map_err(|error| error.to_string())
+        }
+    });
+
+    let stations = selected.read().clone().unwrap_or_default();
+    let mut pinned_ids = use_signal(HashSet::<String>::new);
+    use_effect(move || {
+        let next: HashSet<String> = selected
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .filter(|station| station.pinned)
+            .map(|station| station.id.clone())
+            .collect();
+        if *pinned_ids.peek() != next {
+            pinned_ids.set(next);
+        }
     });
 
     let query = filter.read().to_lowercase();
-    let filtered: Vec<&radio::manifest::StationManifest> = stations
+    let filtered: Vec<&RadioStationInfo> = stations
         .iter()
-        .filter(|s| {
-            if query.is_empty() {
-                true
-            } else {
-                i18n::t(&s.name).to_lowercase().contains(&query)
-                    || i18n::t(&s.description).to_lowercase().contains(&query)
-                    || s.streams
-                        .iter()
-                        .any(|st| i18n::t(&st.name).to_lowercase().contains(&query))
-                    || s.tags.iter().any(|t| t.to_lowercase().contains(&query))
-            }
-        })
+        .filter(|station| station.pinned && matches_query(station, &query))
         .collect();
     let has_custom = !filtered.is_empty();
     let searching = !query.is_empty();
@@ -111,10 +140,10 @@ pub fn Radio(props: RadioProps) -> Element {
     // Resource keeps its stale value while refetching,
     // track pending separately for the search spinner.
     let browser_loading = matches!(
-        *browser_res.state().read(),
+        *directory.state().read(),
         UseResourceState::Pending | UseResourceState::Paused
     );
-    let browser_state = browser_res.read();
+    let browser_state = directory.read();
 
     rsx! {
             div {
@@ -536,21 +565,20 @@ pub fn Radio(props: RadioProps) -> Element {
                                 div { class: "flex flex-col",
                                     for st in results.iter() {
                                         div {
-                                            key: "{st.stationuuid}",
+                                            key: "{st.id}",
                                             class: "grid items-center px-4 py-2.5 rounded-lg mx-1 group cursor-pointer transition-colors hover:bg-white/[0.04]",
                                             style: "grid-template-columns: 48px 1fr 1.5fr 180px;",
                                             onclick: {
                                                 let st = st.clone();
-                                                let mut registry_sig = registry_sig;
                                                 move |_| {
-                                                    play_browser_station(&mut ctrl, &mut registry_sig, &st);
+                                                    ctrl.play_radio(&st.id, first_stream(&st));
                                                 }
                                             },
 
                                             div { class: "flex items-center justify-center",
-                                                if st.favicon.starts_with("https://") {
+                                                if let Some(art) = station_art(st) {
                                                     img {
-                                                        src: "{st.favicon}",
+                                                        src: "{art}",
                                                         class: "w-9 h-9 rounded-lg object-cover shrink-0",
                                                         style: "background: rgba(255,255,255,0.05);",
                                                         decoding: "async", loading: "lazy",
@@ -570,7 +598,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                             div { class: "flex items-center min-w-0 pr-4",
                                                 span {
                                                     class: "text-sm font-semibold truncate text-white",
-                                                    "{st.name.trim()}"
+                                                    "{st.name}"
                                                 }
                                             }
 
@@ -578,9 +606,9 @@ pub fn Radio(props: RadioProps) -> Element {
                                                 span {
                                                     class: "text-sm truncate",
                                                     style: "color: rgba(255,255,255,0.4);",
-                                                    "{browser::station_detail(st)}"
+                                                    "{st.description}"
                                                 }
-                                                for tag in st.tags.split(',').map(str::trim).filter(|t| !t.is_empty()).take(2) {
+                                                for tag in st.tags.iter().take(2) {
                                                     span {
                                                         class: "px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 shrink-0 whitespace-nowrap",
     style: "background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 25%, transparent); color: var(--color-indigo-400);",
@@ -592,7 +620,7 @@ pub fn Radio(props: RadioProps) -> Element {
 
                                             div { class: "flex items-center gap-2 justify-end min-w-0",
                                                 button {
-                                                    class: if registry_sig.read().is_registry_station(&st.stationuuid) {
+                                                    class: if pinned_ids.read().contains(&st.id) {
                                                         "inline-flex items-center justify-center w-8 h-8 rounded-full transition-all"
                                                     } else {
                                                         "inline-flex items-center justify-center w-8 h-8 rounded-full transition-all opacity-0 group-hover:opacity-100"
@@ -600,14 +628,12 @@ pub fn Radio(props: RadioProps) -> Element {
                                                     style: "background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5);",
                                                     onclick: {
                                                         let st = st.clone();
-                                                        let mut registry_sig = registry_sig;
-                                                        let mut config = config;
                                                         move |evt: MouseEvent| {
                                                             evt.stop_propagation();
-                                                            toggle_pin_station(&mut config, &mut registry_sig, &st);
+                                                            toggle_pin(st.id.clone(), pinned_ids, pin_gen);
                                                         }
                                                     },
-                                                    if registry_sig.read().is_registry_station(&st.stationuuid) {
+                                                    if pinned_ids.read().contains(&st.id) {
                                                         i { class: "fa-solid fa-check text-xs" }
                                                     } else {
                                                         i { class: "fa-solid fa-plus text-xs" }
@@ -618,10 +644,9 @@ pub fn Radio(props: RadioProps) -> Element {
                                                     style: "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-400);",
                                                     onclick: {
                                                         let st = st.clone();
-                                                        let mut registry_sig = registry_sig;
                                                         move |evt: MouseEvent| {
                                                             evt.stop_propagation();
-                                                            play_browser_station(&mut ctrl, &mut registry_sig, &st);
+                                                            ctrl.play_radio(&st.id, first_stream(&st));
                                                         }
                                                     },
                                                     i { class: "fa-solid fa-play text-xs" }
@@ -636,20 +661,19 @@ pub fn Radio(props: RadioProps) -> Element {
                                 div { class: "grid grid-cols-1 lg:grid-cols-2 gap-3",
                                     for st in results.iter() {
                                         div {
-                                            key: "{st.stationuuid}",
+                                            key: "{st.id}",
                                             class: "group flex items-start gap-4 p-4 rounded-xl border transition-colors cursor-pointer hover:bg-white/10",
                                             style: "border-color: rgba(255,255,255,0.08);",
                                             onclick: {
                                                 let st = st.clone();
-                                                let mut registry_sig = registry_sig;
                                                 move |_| {
-                                                    play_browser_station(&mut ctrl, &mut registry_sig, &st);
+                                                    ctrl.play_radio(&st.id, first_stream(&st));
                                                 }
                                             },
 
-                                            if st.favicon.starts_with("https://") {
+                                            if let Some(art) = station_art(st) {
                                                 img {
-                                                    src: "{st.favicon}",
+                                                    src: "{art}",
                                                     class: "w-11 h-11 rounded-md object-cover shrink-0",
                                                     style: "background: rgba(255,255,255,0.05);",
                                                     decoding: "async", loading: "lazy",
@@ -668,18 +692,18 @@ pub fn Radio(props: RadioProps) -> Element {
                                             div { class: "flex-1 min-w-0",
                                                 h2 {
                                                     class: "text-base font-semibold text-white truncate",
-                                                    "{st.name.trim()}"
+                                                    "{st.name}"
                                                 }
                                                 p {
                                                     class: "text-xs mt-0.5 leading-relaxed truncate",
                                                     style: "color: var(--color-slate-400);",
-                                                    "{browser::station_detail(st)}"
+                                                    "{st.description}"
                                                 }
-                                                if st.tags.split(',').any(|t| !t.trim().is_empty()) {
+                                                if !st.tags.is_empty() {
                                                     p {
                                                         class: "text-xs mt-2 truncate",
                                                         style: "color: var(--color-slate-500);",
-                                                        {st.tags.split(',').map(str::trim).filter(|t| !t.is_empty()).take(4).collect::<Vec<_>>().join(" · ")}
+                                                        {st.tags.iter().take(4).cloned().collect::<Vec<_>>().join(" · ")}
                                                     }
                                                 }
                                             }
@@ -689,14 +713,12 @@ pub fn Radio(props: RadioProps) -> Element {
                                                 style: "color: var(--color-slate-400);",
                                                 onclick: {
                                                     let st = st.clone();
-                                                    let mut registry_sig = registry_sig;
-                                                    let mut config = config;
                                                     move |evt: MouseEvent| {
                                                         evt.stop_propagation();
-                                                        toggle_pin_station(&mut config, &mut registry_sig, &st);
+                                                        toggle_pin(st.id.clone(), pinned_ids, pin_gen);
                                                     }
                                                 },
-                                                if registry_sig.read().is_registry_station(&st.stationuuid) {
+                                                if pinned_ids.read().contains(&st.id) {
                                                     i { class: "fa-solid fa-check text-xs" }
                                                 } else {
                                                     i { class: "fa-solid fa-plus text-xs" }

@@ -59,6 +59,12 @@ Library, playlists, favorites, and settings are stored in a local **SQLite**
 database (`kopuz.db`); the UI reads it live so changes show up immediately. Each
 media source carries its own credentials and its own favorites.
 
+The player itself is a daemon: it owns the library, the audio engine, the
+media sources and their credentials, and everything that touches the system.
+The window is a client of it, and so is anything else you write — the
+contract is one gRPC schema on a local socket, documented in
+[docs/api.md](docs/api.md). `kopuzd` runs the same core with no window.
+
 ## Features
 
 [jellyfin-plugin-listenbrainz]: https://github.com/lyarenei/jellyfin-plugin-listenbrainz

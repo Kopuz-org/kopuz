@@ -2,42 +2,38 @@ use crate::header::Header;
 use crate::showcase::{self};
 use crate::track_row::TrackRow;
 use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
+use api::{AlbumInfo as Album, TrackInfo as Track};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
-use player::player;
-use reader::models::{Album, Track};
 
 #[component]
 pub fn SearchResults(
     search_query: String,
-    tracks: Vec<(Track, Option<utils::CoverUrl>)>,
-    albums: Vec<(Album, Option<utils::CoverUrl>)>,
-    player: Signal<player::Player>,
+    tracks: Vec<Track>,
+    albums: Vec<Album>,
     mut is_playing: Signal<bool>,
-    mut current_song_cover_url: Signal<String>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
     mut current_song_duration: Signal<u64>,
     mut current_song_progress: Signal<u64>,
     mut queue: Signal<Vec<Track>>,
     mut current_queue_index: Signal<usize>,
-    mut active_menu_track: Signal<Option<reader::TrackId>>,
+    mut active_menu_track: Signal<Option<String>>,
     mut show_playlist_modal: Signal<bool>,
-    mut selected_track_for_playlist: Signal<Option<reader::TrackId>>,
+    mut selected_track_for_playlist: Signal<Option<String>>,
     on_select_album: EventHandler<String>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
-    let gens = hooks::db_reactivity::use_generations();
     let offline_tracks = config.read().offline_tracks.clone();
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let sort_state = use_signal(|| None);
-    let sorted_tracks = showcase::sorted_track_pairs(&tracks, *sort_state.read());
-    let search_queue: Vec<Track> = sorted_tracks.iter().map(|(t, _)| t.clone()).collect();
+    let sorted_tracks = showcase::sorted_tracks(&tracks, *sort_state.read());
+    let search_queue: Vec<Track> = sorted_tracks.clone();
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.clone())
+        ctrl.get_track_at(idx).map(|track| track.uid.clone())
     };
     let current_song_title = ctrl.current_song_title.read().clone();
     let current_song_artist = ctrl.current_song_artist.read().clone();
@@ -81,7 +77,7 @@ pub fn SearchResults(
                                 div { class: "mt-12",
                                     h2 { class: "text-xl font-semibold text-white/80 mb-4", "{i18n::t(\"albums\")}" }
                                     div { class: "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4",
-                                        for (album, cover_url) in &albums {
+                                        for album in &albums {
                                             {
                                                 let album_id = album.id.clone();
                                                 rsx! {
@@ -91,7 +87,7 @@ pub fn SearchResults(
                                                         onclick: move |_| on_select_album.call(album_id.clone()),
                                                         div {
                                                             class: "aspect-square rounded-lg bg-black/40 mb-3 overflow-hidden relative",
-                                                            if let Some(url) = cover_url {
+                                                            if let Some(url) = hooks::artwork::for_album(album, hooks::artwork::Size::Thumb) {
                                                                 img {
                                                                     src: "{url.as_ref()}",
                                                                     class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
@@ -113,60 +109,48 @@ pub fn SearchResults(
                                 }
                             }
                         },
-                        for (idx, (track, cover_url)) in sorted_tracks.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
+                        for (idx, track) in sorted_tracks.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
                             {
                                 let track = track.clone();
-                                let track_key = track.id.uid();
+                                let track_key = track.uid.clone();
                                 let track_menu = track.clone();
                                 let track_add = track.clone();
                                 let track_queue = track.clone();
                                 let track_delete = track.clone();
                                 let queue_source = search_queue.clone();
-                                let matches_current_path = currently_playing_path.as_ref() == Some(&track.id);
+                                let matches_current_path = currently_playing_path.as_ref() == Some(&track.uid);
                                 let matches_current_metadata = currently_playing_path.is_none()
                                     && !current_song_title.is_empty()
                                     && track.title == current_song_title
                                     && track.album == current_song_album
                                     && track.artist == current_song_artist
-                                    && track.duration == current_song_duration;
+                                    && track.duration_secs() == Some(current_song_duration);
                                 let is_currently_playing: bool = matches_current_path || matches_current_metadata;
-                                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id);
-                                let item_id: Option<String> = {
-                                    let s = track.id.uid();
-                                    if s.starts_with("jellyfin:") {
-                                        s.split(':').nth(1).map(|id| id.to_string())
-                                    } else { None }
-                                };
-                                let is_downloaded = item_id
-                                    .as_ref()
-                                    .is_some_and(|id| {
-                                        if let Some(path_str) = offline_tracks.get(id) {
-                                            std::path::Path::new(path_str).exists()
-                                        } else {
-                                            false
-                                        }
-                                    });
+                                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.uid);
+                                let is_downloaded = offline_tracks
+                                    .get(&track.key)
+                                    .is_some_and(|path| std::path::Path::new(path).exists());
 
                                 rsx! {
                                     TrackRow {
                                         key: "{track_key}",
                                         track: track.clone(),
-                                        cover_url: cover_url.clone(),
-                                        on_start_radio: crate::track_row::radio_handler(track.clone()),
+                                        cover_url: hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb),
+                                        on_start_radio: crate::track_row::radio_handler(track.key.clone()),
                                         row_num: Some(idx + 1),
                                         is_menu_open: is_menu_open,
                                         is_album: false,
                                         is_downloaded: is_downloaded,
                                         is_currently_playing,
                                         on_click_menu: move |_| {
-                                            if active_menu_track.read().as_ref() == Some(&track_menu.id) {
+                                            if active_menu_track.read().as_ref() == Some(&track_menu.uid) {
                                                 active_menu_track.set(None);
                                             } else {
-                                                active_menu_track.set(Some(track_menu.id.clone()));
+                                                active_menu_track.set(Some(track_menu.uid.clone()));
                                             }
                                         },
                                         on_add_to_playlist: move |_| {
-                                            selected_track_for_playlist.set(Some(track_add.id.clone()));
+                                            selected_track_for_playlist.set(Some(track_add.key.clone()));
                                             show_playlist_modal.set(true);
                                             active_menu_track.set(None);
                                         },
@@ -177,25 +161,13 @@ pub fn SearchResults(
                                         on_close_menu: move |_| active_menu_track.set(None),
                                         on_delete: move |_| {
                                             active_menu_track.set(None);
-                                            if let Some(del_path) = track_delete.id.local_path()
-                                                && std::fs::remove_file(del_path).is_ok()
-                                            {
-                                                let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                                let key = track_delete.id.key().into_owned();
-                                                spawn(async move {
-                                                    if local
-                                                        .delete_tracks(&[key])
-                                                        .await
-                                                        .is_ok()
-                                                    {
-                                                        gens.bump(hooks::db_reactivity::Table::Tracks);
-                                                    }
-                                                });
-                                            }
+                                            hooks::library_actions::delete_tracks(
+                                                vec![track_delete.key.clone()],
+                                                true,
+                                            );
                                         },
                                         on_play: move |_| {
-                                            queue.set(queue_source.clone());
-                                            ctrl.play_track(idx);
+                                            ctrl.play_queue_at(queue_source.clone(), idx);
                                         }
                                     }
                                 }
@@ -207,7 +179,7 @@ pub fn SearchResults(
                 div { class: "flex-1 overflow-y-auto pb-20",
                     h2 { class: "text-xl font-semibold text-white/80 mb-4", "{i18n::t(\"albums\")}" }
                     div { class: "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4",
-                        for (album, cover_url) in &albums {
+                        for album in &albums {
                             {
                                 let album_id = album.id.clone();
                                 rsx! {
@@ -217,7 +189,7 @@ pub fn SearchResults(
                                         onclick: move |_| on_select_album.call(album_id.clone()),
                                         div {
                                             class: "aspect-square rounded-lg bg-black/40 mb-3 overflow-hidden relative",
-                                            if let Some(url) = cover_url {
+                                            if let Some(url) = hooks::artwork::for_album(album, hooks::artwork::Size::Thumb) {
                                                 img {
                                                     src: "{url.as_ref()}",
                                                     class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",

@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 #[component]
 pub(crate) fn Tabs(
     mut config: Signal<AppConfig>,
-    items: Vec<reader::Track>,
+    items: Vec<api::TrackInfo>,
     current_queue_index: Signal<usize>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
     current_song_progress: Signal<u64>,

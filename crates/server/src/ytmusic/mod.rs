@@ -19,12 +19,19 @@ pub use player::YtStreamInfo;
 
 pub const SOURCE_PREFIX: &str = "ytmusic";
 
-/// Initialize the process-global V8 platform once, before any isolate. The
-/// decipher and BotGuard runtimes are separate isolates on separate threads; if
-/// each inits lazily, the second races the first and segfaults. Lazy, so a
-/// non-YouTube session never touches V8.
+/// Initialize the process-global V8 platform once, before any isolate.
+///
+/// Call it from the thread that will build the async runtime, before building
+/// it. V8's default platform protects JIT memory with memory protection keys
+/// on CPUs that have them, and a key's permission is inherited only by threads
+/// created *after* it, by descendants of the thread that called initialize.
+/// The decipher and BotGuard runtimes each spawn their own thread from
+/// whichever runtime worker first needs them; when the first V8 user
+/// initialised lazily from one worker, the other user's thread descended from
+/// a worker without the key and died on first touch (SEGV_PKUERR). The lazy
+/// calls stay as a backstop; they are no-ops after the eager one.
 #[cfg(not(target_os = "android"))]
-pub(crate) fn ensure_v8_platform() {
+pub fn ensure_v8_platform() {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| deno_core::JsRuntime::init_platform(None, false));
@@ -372,5 +379,62 @@ fn has_playlist_shelf(json: &Value) -> bool {
 impl Default for YouTubeMusicClient {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+mod v8_thread_tests {
+    /// One isolate on a fresh thread, running enough of a loop to hit the JIT.
+    /// The value is the proof the isolate actually executed code.
+    fn run_isolate_on_new_thread() -> std::thread::JoinHandle<i64> {
+        std::thread::spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
+            rt.block_on(async {
+                let mut js = deno_core::JsRuntime::new(deno_core::RuntimeOptions::default());
+                let value = js
+                    .execute_script(
+                        "test:jit",
+                        "let s = 0; for (let i = 0; i < 200000; i++) { s += i % 7; } s",
+                    )
+                    .expect("script");
+                let scope = &mut js.handle_scope();
+                let local = deno_core::v8::Local::new(scope, value);
+                local.integer_value(scope).expect("integer")
+            })
+        })
+    }
+
+    /// V8's default platform guards JIT memory with protection keys on CPUs
+    /// that have them, and only descendants of the initialising thread carry
+    /// the key. Two isolates on threads spawned from two different runtime
+    /// workers is exactly the shape of the decipher and BotGuard runtimes; it
+    /// segfaulted (SEGV_PKUERR) whenever V8 was initialised lazily from one
+    /// worker. Initialising on the thread that builds the runtime -- what
+    /// `daemon::boot::prepare_thread` does -- makes every worker a descendant.
+    #[test]
+    fn isolates_on_threads_from_different_workers_survive_when_v8_inits_on_their_ancestor() {
+        let core = std::thread::spawn(|| {
+            super::ensure_v8_platform();
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("runtime");
+            rt.block_on(async {
+                let first = tokio::task::spawn_blocking(run_isolate_on_new_thread)
+                    .await
+                    .expect("spawn");
+                let second = tokio::task::spawn_blocking(run_isolate_on_new_thread)
+                    .await
+                    .expect("spawn");
+                (first.join().expect("first"), second.join().expect("second"))
+            })
+        });
+        let (first, second) = core.join().expect("core thread");
+        assert_eq!(first, 599_994);
+        assert_eq!(second, 599_994);
     }
 }

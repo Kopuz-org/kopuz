@@ -3,8 +3,8 @@ mod macos;
 
 #[cfg(target_os = "macos")]
 pub use macos::{
-    SystemEvent, init, refresh_now_playing, set_background_handler, set_tokio_waker,
-    update_now_playing, wake_run_loop,
+    SystemEvent, init, park_main_loop, refresh_now_playing, set_background_handler,
+    set_tokio_waker, update_now_playing, wake_run_loop,
 };
 
 #[cfg(target_os = "linux")]
@@ -13,6 +13,7 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{
     RepeatMode, SystemEvent, poll_event, update_modes, update_now_playing, update_position,
+    wait_event,
 };
 
 #[cfg(target_os = "windows")]

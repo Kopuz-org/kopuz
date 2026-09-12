@@ -20,7 +20,7 @@ tracing = { workspace = true }
 directories = { workspace = true }
 nextcloud-rs = { workspace = true }
 percent-encoding = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["blocking", "json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 config = { workspace = true }
@@ -41,6 +41,7 @@ db = { workspace = true }
 utils = { workspace = true }
 async-trait = { workspace = true }
 quick-xml = { workspace = true }
+lofty = { workspace = true }
 urlencoding = "2.1"
 regex = "1"
 m3u8-rs = "6"

@@ -13,9 +13,11 @@ use components::settings_items::{
 use components::settings_popups::{
     AddLocalSourcePopup, AddRegistryPopup, AddServerPopup, LoginPopup,
 };
-use components::settings_remote_folders::{RemoteCreds, RemoteFolderSettings};
-use config::{AppConfig, MusicService};
+use components::settings_remote_folders::RemoteFolderSettings;
+use config::AppConfig;
 use dioxus::prelude::*;
+
+use crate::DebugPanel;
 use hooks::use_player_controller::PlayerController;
 
 #[component]
@@ -52,12 +54,19 @@ fn BuildInfoCard() -> Element {
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
-    let spotify_browsers = use_hook(|| {
-        ::server::spotify::host::available_browsers()
+    // The servers are the daemon's: it holds their credentials, so the config
+    // this page reads never carries them.
+    let sources = hooks::sources::use_sources();
+    let servers = use_memo(move || -> Vec<api::SourceInfo> {
+        sources
+            .read()
+            .clone()
+            .unwrap_or_default()
             .into_iter()
-            .map(|b| (b.id.to_string(), b.label.to_string()))
-            .collect::<Vec<_>>()
+            .filter(|source| source.kind == api::SourceKind::Server)
+            .collect()
     });
+    let active_server = use_memo(move || servers().into_iter().find(|server| server.active));
     let mut show_add_server = use_signal(|| false);
     let mut show_add_local_source = use_signal(|| false);
     let mut show_login = use_signal(|| false);
@@ -66,22 +75,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut local_source_directories = use_signal(Vec::<std::path::PathBuf>::new);
     let mut local_source_error = use_signal(|| Option::<String>::None);
 
+    let services = hooks::sources::use_services();
     let server_name = use_signal(String::new);
-    let server_url = use_signal(String::new);
-    let server_service = use_signal(|| MusicService::Jellyfin);
-    let yt_browser = use_signal(|| {
-        config
-            .peek()
-            .server
-            .as_ref()
-            .and_then(|s| s.yt_browser)
-            .unwrap_or(config::Browser::Chrome)
-    });
-    let yt_anonymous = use_signal(|| false);
-    let apple_music_storefront = use_signal(|| "us".to_string());
-    let apple_music_language = use_signal(|| "en".to_string());
-    let apple_music_manual_token = use_signal(String::new);
-    let apple_music_use_manual = use_signal(|| false);
+    let server_service = use_signal(String::new);
+    let draft_values = use_signal(Vec::<api::FieldValue>::new);
+    let draft_secrets = use_signal(Vec::<api::FieldValue>::new);
+    let draft_check = use_signal(|| Option::<api::DraftCheck>::None);
 
     let mut username = use_signal(String::new);
     let mut password = use_signal(String::new);
@@ -124,65 +123,64 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         );
     };
 
-    let ytmusic_auto_login = move || {
-        crate::settings_actions::ytmusic_auto_login(config, yt_browser, error, ctrl.playback_error);
+    // Signing in again on an active server: which flow it is belongs to the
+    // service, and the daemon runs it.
+    let mut sign_in_again = move || match active_server() {
+        Some(server) if server.sign_in == api::SignInKind::Browser => {
+            crate::settings_actions::authenticate(server.id, error, ctrl.playback_error);
+        }
+        _ => show_login.set(true),
     };
 
-    let applemusic_auto_login = move || {
-        crate::settings_actions::applemusic_auto_login(
-            config,
-            yt_browser,
-            error,
-            ctrl.playback_error,
+    // The daemon checks the draft as it is typed, so the form knows what is
+    // wrong with it and which sign-in saving it will start.
+    use_effect(move || {
+        let draft = crate::settings_actions::draft(
+            server_name,
+            server_service,
+            draft_values,
+            draft_secrets,
         );
-    };
+        crate::settings_actions::check_draft(draft, draft_check);
+    });
 
     let handle_add_server = move |_| {
         crate::settings_actions::add_server(
-            config,
+            crate::settings_actions::draft(
+                server_name,
+                server_service,
+                draft_values,
+                draft_secrets,
+            ),
             server_name,
-            server_url,
-            server_service,
-            yt_browser,
-            yt_anonymous,
+            draft_values,
+            draft_secrets,
             error,
             show_add_server,
             show_login,
             ctrl.playback_error,
-            apple_music_storefront,
-            apple_music_language,
-            apple_music_manual_token,
-            apple_music_use_manual,
         );
     };
 
-    let db_for_switch = use_context::<hooks::ReadDb>();
-    let db_for_local_switch = db_for_switch.clone();
     let handle_switch_local = move |source: config::Source| {
-        let db = db_for_local_switch.clone();
         spawn(async move {
-            hooks::source_switch::apply_source_switch(config, db, source).await;
+            hooks::source_switch::apply_source_switch(config, source).await;
         });
     };
     let handle_switch_server = move |id: String| {
-        crate::settings_actions::switch_server(
-            config,
-            db_for_switch.clone(),
-            id,
-            yt_browser,
-            error,
-            show_login,
-            ctrl.playback_error,
-        );
+        crate::settings_actions::switch_server(id, error, show_login, ctrl.playback_error);
     };
 
     let handle_delete_saved = move |id: String| {
-        crate::settings_actions::delete_saved(config, id);
+        crate::settings_actions::delete_saved(id);
     };
 
     let handle_login = move |_| {
+        let Some(server) = active_server() else {
+            return;
+        };
         crate::settings_actions::login_with_password(
-            config,
+            server.id,
             username,
             password,
             login_error,
@@ -197,7 +195,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
 
-            if try_consume_context::<config::store::FileLayers>().is_some_and(|layers| !layers.locked_keys.is_empty()) {
+            if try_consume_context::<hooks::config_view::LockedKeys>().is_some_and(|layers| layers.any()) {
                 aside { class: "mb-4 rounded-xl border border-white/10 bg-white/5 px-5 py-3 flex items-center gap-3",
                     i { class: "fa-solid fa-lock text-white/40 text-sm shrink-0" }
                     p { class: "text-sm text-white/70", "{i18n::t(\"settings_managed_notice\")}" }
@@ -543,9 +541,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
                                 if is_enabling && !url.is_empty() {
                                     registry_toggle_error.set(None);
+                                    let api = hooks::consume_api();
                                     spawn(async move {
-                                        let mut temp_registry = radio::registry::StationRegistry::new();
-                                        match temp_registry.import_registry(&url).await {
+                                        match api.validate_radio_registry(url.clone()).await {
                                             Ok(_) => {
                                                 let mut cfg = config.write();
                                                 if let Some(entry) = cfg
@@ -586,40 +584,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 title: i18n::t("media_servers").to_string(),
                                 control: rsx! {
                                     ServerSettings {
-                                        active_source_id: config
-                                            .read()
-                                            .active_source
-                                            .server_id()
-                                            .map(String::from),
-                                        servers: config.read().servers.clone(),
+                                        servers: servers(),
                                         on_add: move |_| show_add_server.set(true),
                                         on_delete: handle_delete_saved,
                                         on_switch: handle_switch_server,
-                                        on_login: move |_| {
-                                            let service =
-                                                config.read().server.as_ref().map(|s| s.service);
-                                            match service {
-                                                Some(MusicService::YtMusic) => {
-                                                    ytmusic_auto_login();
-                                                }
-                                                Some(MusicService::AppleMusic) => {
-                                                    applemusic_auto_login();
-                                                }
-                                                _ => {
-                                                    show_login.set(true);
-                                                }
-                                            }
-                                        },
-                                        spotify_browsers: spotify_browsers.clone(),
-                                        spotify_browser: config.read().spotify_browser.clone(),
-                                        on_spotify_browser: move |v: Option<String>| {
-                                            config.write().spotify_browser = v;
-                                        },
-                                        spotify_prefer_active_device: config.read().spotify_prefer_active_device,
-                                        on_spotify_prefer_active_device: move |v: bool| {
-                                            config.write().spotify_prefer_active_device = v;
-                                        },
-                                        remote_folders: remote_folder_settings(config),
+                                        on_login: move |_| sign_in_again(),
+                                        remote_folders: remote_folder_settings(active_server()),
                                     }
                                 }
                             }
@@ -812,7 +782,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     {theme_editor_section(config)}
                 }
                 if active_category() == SettingsCategory::Connectivity {
-                    ConnectivitySection { config }
+                    ConnectivitySection {}
                 }
                 if active_category() == SettingsCategory::Downloads {
                     DownloadsSection { config }
@@ -826,7 +796,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 if active_category() == SettingsCategory::Tools {
                     div { class: "space-y-8",
                         {logs_section(config)}
-                        {hooks::debug_db_section()}
+                        // The app fills this in debug builds; it is the only
+                        // crate that still holds a write-capable database.
+                        if let Some(panel) = try_consume_context::<DebugPanel>() {
+                            {(panel.0)()}
+                        }
                     }
                 }
             }
@@ -834,16 +808,13 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
             if show_add_server() {
                 AddServerPopup {
-                    server_name,
-                    server_url,
-                    server_service,
-                    yt_browser,
-                    yt_anonymous,
-                    apple_music_storefront,
-                    apple_music_language,
-                    apple_music_manual_token,
-                    apple_music_use_manual,
-                    host_access,
+                    services: services.read().clone().unwrap_or_default(),
+                    service: server_service,
+                    name: server_name,
+                    values: draft_values,
+                    secrets: draft_secrets,
+                    check: draft_check(),
+                    host_access: host_access(),
                     error,
                     on_close: move |_| show_add_server.set(false),
                     on_save: handle_add_server
@@ -901,11 +872,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 LoginPopup {
                     username,
                     password,
-                    service_name: config
-                        .read()
-                        .server
-                        .as_ref()
-                        .map(|server| server.service.display_name().to_string())
+                    service_name: active_server()
+                        .and_then(|server| server.service)
+                        .map(|service| components::forms::text(&service.name))
                         .unwrap_or_else(|| i18n::t("server").to_string()),
                     error: login_error,
                     loading: is_loading,
@@ -922,42 +891,45 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     }
 }
 
-/// The active server's folder picker, or `None` when it has no folder tree or
-/// no creds. Only the active server carries hydrated creds.
-fn remote_folder_settings(mut config: Signal<AppConfig>) -> Option<RemoteFolderSettings> {
-    let creds = {
-        let cfg = config.read();
-        let server = cfg.server.as_ref()?;
-        let active_id = cfg.active_source.server_id()?;
-        if server.id.as_deref() != Some(active_id) {
-            return None;
-        }
-        if server.service != MusicService::Nextcloud {
-            return None;
-        }
-        RemoteCreds {
-            url: server.url.clone(),
-            user_id: server.user_id.clone()?,
-            token: server.access_token.clone()?,
-        }
-    };
+/// The active server's folder picker, or `None` unless it browses a folder
+/// tree and is signed in -- the daemon lists the folders, so it needs both.
+fn remote_folder_settings(server: Option<api::SourceInfo>) -> Option<RemoteFolderSettings> {
+    let server = server?;
+    if !server.capabilities.browse_folders || !server.authenticated {
+        return None;
+    }
+    let folders = server.directories.clone();
+    let add_id = server.id.clone();
+    let add_folders = folders.clone();
+    let remove_id = server.id.clone();
+    let remove_folders = folders.clone();
 
     Some(RemoteFolderSettings {
-        creds,
-        folders: config.read().active_server_folders(),
+        source_id: server.id,
+        folders,
         on_add: EventHandler::new(move |path: String| {
-            config.write().edit_active_server_folders(|folders| {
-                if !folders.contains(&path) {
-                    folders.push(path);
-                }
-            });
+            let mut next = add_folders.clone();
+            if !next.contains(&path) {
+                next.push(path);
+            }
+            set_directories(add_id.clone(), next);
         }),
         on_remove: EventHandler::new(move |index: usize| {
-            config.write().edit_active_server_folders(|folders| {
-                if index < folders.len() {
-                    folders.remove(index);
-                }
-            });
+            let mut next = remove_folders.clone();
+            if index < next.len() {
+                next.remove(index);
+                set_directories(remove_id.clone(), next);
+            }
         }),
     })
+}
+
+fn set_directories(id: String, directories: Vec<String>) {
+    let api = hooks::consume_api();
+    spawn(async move {
+        if let Err(error) = api.set_source_directories(id, directories).await {
+            tracing::warn!(%error, "setting the source folders failed");
+            hooks::toast::toast_error(&error.to_string());
+        }
+    });
 }
