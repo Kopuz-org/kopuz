@@ -648,6 +648,7 @@ fn parsed_to_track(p: ParsedRow) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: p.artists,
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 

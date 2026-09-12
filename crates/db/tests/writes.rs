@@ -38,6 +38,7 @@ fn local(path: &str, title: &str) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: vec!["Artist".into(), "Feat".into()],
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 
@@ -228,6 +229,57 @@ async fn a_blank_album_id_does_not_erase_a_known_one() {
         db.album_tracks(&Source::Local, "alb2").await.unwrap().len(),
         1
     );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn replay_gain_round_trips_and_clears() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+
+    let mut track = local("/music/rg.flac", "RG");
+    track.replay_gain = config::ReplayGainInfo {
+        track_gain_db: Some(-7.5),
+        track_peak: Some(0.98),
+        album_gain_db: Some(-5.25),
+        album_peak: None,
+    };
+    db.upsert_tracks(&Source::Local, &[track.clone()])
+        .await
+        .unwrap();
+
+    let filter = TrackFilter::new(Source::Local);
+    let stored = db
+        .tracks_page(
+            &filter,
+            Page {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(stored[0].replay_gain, track.replay_gain);
+
+    // A re-sync from a server that stopped reporting gain must clear the row,
+    // not leave the old values to level a re-encoded file.
+    track.replay_gain = config::ReplayGainInfo::default();
+    db.upsert_tracks(&Source::Local, &[track.clone()])
+        .await
+        .unwrap();
+    let stored = db
+        .tracks_page(
+            &filter,
+            Page {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(stored[0].replay_gain.is_empty());
+    assert_eq!(stored[0].replay_gain.track_peak, None);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

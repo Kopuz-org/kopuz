@@ -44,6 +44,7 @@ fn server_track(id: &str, title: &str) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: vec!["Art".into()],
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 

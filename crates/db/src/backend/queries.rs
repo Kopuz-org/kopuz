@@ -27,7 +27,8 @@ const TRACK_COLUMNS: &str = "t.track_key, t.service, \
     COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS cover_path, \
     t.source_album_id, t.title, \
     t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
-    t.mb_release_id, t.mb_recording_id, t.mb_track_id, t.playlist_item_id, t.artists_json";
+    t.mb_release_id, t.mb_recording_id, t.mb_track_id, t.playlist_item_id, t.artists_json, \
+    t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak";
 
 /// `FROM tracks t` + the album join that backs the `COALESCE` in [`TRACK_COLUMNS`].
 /// LEFT so a track whose album row is missing still returns (cover → NULL → default).

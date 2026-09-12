@@ -850,6 +850,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec!["Anthony Gonzalez".to_string()],
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 

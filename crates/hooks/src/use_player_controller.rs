@@ -271,6 +271,21 @@ impl PlayerController {
         self.queue.peek().get(idx).cloned()
     }
 
+    /// Whether the queue is walking an album at `idx`: a neighbour in play
+    /// order belongs to the same album. Shuffle scatters an album, so this
+    /// reads false there, which is what ReplayGain's auto mode wants: a
+    /// shuffled mix should level track to track.
+    pub(crate) fn album_context_at(&self, idx: usize, album_id: &str) -> bool {
+        if album_id.is_empty() {
+            return false;
+        }
+        let shares_album = |other: usize| {
+            self.get_track_at(other)
+                .is_some_and(|t| t.album_id == album_id)
+        };
+        idx.checked_sub(1).is_some_and(shares_album) || shares_album(idx + 1)
+    }
+
     /// Retrieves the current track
     pub fn current_track(&self) -> Option<Track> {
         self.get_track_at(*self.current_queue_index.peek())

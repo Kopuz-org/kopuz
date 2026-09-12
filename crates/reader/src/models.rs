@@ -165,6 +165,11 @@ pub struct Track {
     pub playlist_item_id: Option<String>,
     #[serde(default)]
     pub artists: Vec<String>,
+    /// ReplayGain values the source reported. Media servers publish them so a
+    /// transcoded stream still levels; local files leave this empty, since the
+    /// player reads their tags off the file it is decoding.
+    #[serde(default)]
+    pub replay_gain: config::ReplayGainInfo,
 }
 
 impl CoverRef {
@@ -526,6 +531,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: Vec::new(),
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 

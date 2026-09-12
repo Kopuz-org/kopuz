@@ -365,6 +365,7 @@ impl PlayerController {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec![],
+            replay_gain: config::ReplayGainInfo::default(),
         };
 
         let mut q = self.queue.write();

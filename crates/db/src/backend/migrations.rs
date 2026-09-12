@@ -861,6 +861,7 @@ fn legacy_to_track(l: &LegacyTrack) -> Option<Track> {
         musicbrainz_track_id: l.musicbrainz_track_id.clone(),
         playlist_item_id: l.playlist_item_id.clone(),
         artists: l.artists.clone(),
+        replay_gain: config::ReplayGainInfo::default(),
     })
 }
 

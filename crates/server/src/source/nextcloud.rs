@@ -219,6 +219,7 @@ impl MediaSource for NextcloudSource {
                     musicbrainz_track_id: None,
                     playlist_item_id: None,
                     artists: vec![track.artist],
+                    replay_gain: config::ReplayGainInfo::default(),
                 }
             })
             .collect();

@@ -141,6 +141,7 @@ impl MediaSource for JellyfinSource {
                         .and_then(|tags| tags.get("Primary").cloned());
                     let bitrate_u16 =
                         (item.bitrate.unwrap_or(0) / 1000).min(u16::MAX as u32) as u16;
+                    let replay_gain = item.replay_gain_info();
                     tracks.push(reader::Track {
                         id: reader::models::TrackId::Server {
                             service: MusicService::Jellyfin,
@@ -170,6 +171,7 @@ impl MediaSource for JellyfinSource {
                         artists: item
                             .artists
                             .unwrap_or_else(|| item.album_artist.into_iter().collect()),
+                        replay_gain,
                     });
                 }
                 start += count;
@@ -387,6 +389,7 @@ impl MediaSource for JellyfinSource {
                     .clone()
                     .or_else(|| item.artists.as_ref().map(|a| a.join(", ")))
                     .unwrap_or_default();
+                let replay_gain = item.replay_gain_info();
                 reader::models::Track {
                     id: reader::models::TrackId::Server {
                         service: MusicService::Jellyfin,
@@ -410,6 +413,7 @@ impl MediaSource for JellyfinSource {
                     musicbrainz_track_id: None,
                     playlist_item_id: item.playlist_item_id,
                     artists: item.artists.unwrap_or_default(),
+                    replay_gain,
                 }
             })
             .collect())

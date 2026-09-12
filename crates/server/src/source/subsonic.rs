@@ -48,6 +48,7 @@ fn song_to_track(
         Some(cover_tag.as_deref().unwrap_or(reader::CoverRef::NO_COVER)),
     );
     let artist = item.artist.clone().unwrap_or_default();
+    let replay_gain = item.replay_gain_info();
     reader::models::Track {
         id: reader::models::TrackId::Server {
             service,
@@ -68,6 +69,7 @@ fn song_to_track(
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: vec![artist],
+        replay_gain,
     }
 }
 
@@ -188,6 +190,7 @@ impl MediaSource for SubsonicSource {
                         .as_ref()
                         .and_then(|c| self.client.cover_art_url(c, Some(512)).ok())
                         .map(|url| reader::CoverRef::encode_url(&url));
+                    let replay_gain = song.replay_gain_info();
                     tracks.push(reader::Track {
                         id: reader::models::TrackId::Server {
                             service: self.service,
@@ -211,6 +214,7 @@ impl MediaSource for SubsonicSource {
                         musicbrainz_track_id: None,
                         playlist_item_id: None,
                         artists: vec![song.artist.unwrap_or_else(|| album_artist.clone())],
+                        replay_gain,
                     });
                 }
             }
