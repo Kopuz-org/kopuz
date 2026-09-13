@@ -43,7 +43,7 @@ Good bug reports include:
 - the Kopuz version or commit;
 - the operating system and package format;
 - the backend involved, such as local files, Jellyfin, Subsonic, YouTube Music,
-  SoundCloud, ListenBrainz, or yt-dlp;
+  native YouTube downloads, SoundCloud, or ListenBrainz;
 - relevant logs from **Settings -> Logs -> Export logs** when the bug involves
   playback, scanning, crashes, or network behavior.
 

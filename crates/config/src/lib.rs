@@ -42,81 +42,27 @@ pub fn default_radio_registries() -> Vec<RegistryEntry> {
     }]
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct YtdlpOptions {
-    #[serde(default = "default_true")]
+pub struct YoutubeDownloadOptions {
+    #[serde(default)]
     pub embed_metadata: bool,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub embed_thumbnail: bool,
     #[serde(default)]
-    pub postprocess_thumbnail_square: bool,
-    #[serde(default)]
-    pub embed_chapters: bool,
-    #[serde(default)]
-    pub embed_subs: bool,
-    #[serde(default)]
-    pub embed_info_json: bool,
-    #[serde(default)]
     pub write_thumbnail: bool,
+    #[serde(default = "default_true")]
+    pub organize_by_album: bool,
     #[serde(default)]
-    pub write_description: bool,
-    #[serde(default)]
-    pub write_info_json: bool,
-    #[serde(default)]
-    pub write_subs: bool,
-    #[serde(default)]
-    pub write_auto_subs: bool,
-    #[serde(default)]
-    pub write_comments: bool,
-    #[serde(default)]
-    pub sponsorblock: bool,
-    #[serde(default)]
-    pub sponsorblock_mark: bool,
-    #[serde(default)]
-    pub split_chapters: bool,
-    #[serde(default)]
-    pub convert_thumbnail: String,
-    #[serde(default)]
-    pub no_playlist: bool,
-    #[serde(default)]
-    pub xattrs: bool,
-    #[serde(default)]
-    pub no_mtime: bool,
-    #[serde(default)]
-    pub rate_limit: String,
-    #[serde(default)]
-    pub cookies_from_browser: String,
-    #[serde(default)]
-    pub js_runtimes: String,
-    #[serde(default = "default_audio_quality")]
-    pub audio_quality: u8,
+    pub overwrite_existing: bool,
 }
 
-impl Default for YtdlpOptions {
+impl Default for YoutubeDownloadOptions {
     fn default() -> Self {
         Self {
-            embed_metadata: true,
-            embed_thumbnail: true,
-            postprocess_thumbnail_square: false,
-            embed_chapters: false,
-            embed_subs: false,
-            embed_info_json: false,
+            embed_metadata: false,
+            embed_thumbnail: false,
             write_thumbnail: false,
-            write_description: false,
-            write_info_json: false,
-            write_subs: false,
-            write_auto_subs: false,
-            write_comments: false,
-            sponsorblock: false,
-            sponsorblock_mark: false,
-            split_chapters: false,
-            convert_thumbnail: String::new(),
-            no_playlist: false,
-            xattrs: false,
-            no_mtime: false,
-            rate_limit: String::new(),
-            cookies_from_browser: String::new(),
-            js_runtimes: String::new(),
-            audio_quality: 0,
+            organize_by_album: true,
+            overwrite_existing: false,
         }
     }
 }
@@ -128,13 +74,11 @@ fn default_depth_blur_strength() -> u8 {
 fn default_true() -> bool {
     true
 }
-fn default_audio_quality() -> u8 {
-    0
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct YtdlpHistoryEntry {
-    pub url: String,
+pub struct YoutubeDownloadHistoryEntry {
+    #[serde(alias = "url")]
+    pub video_id: String,
     pub title: String,
     pub format: String,
     pub status: String,
@@ -765,12 +709,12 @@ pub struct AppConfig {
     pub device_change_behavior: DeviceChangeBehavior,
     #[serde(default)]
     pub sample_rate_mode: SampleRateMode,
-    #[serde(default)]
-    pub ytdlp_output_dir: String,
-    #[serde(default)]
-    pub ytdlp_options: YtdlpOptions,
-    #[serde(default)]
-    pub ytdlp_history: Vec<YtdlpHistoryEntry>,
+    #[serde(default, alias = "ytdlp_output_dir")]
+    pub youtube_download_output_dir: String,
+    #[serde(default, alias = "ytdlp_options")]
+    pub youtube_download_options: YoutubeDownloadOptions,
+    #[serde(default, alias = "ytdlp_history")]
+    pub youtube_download_history: Vec<YoutubeDownloadHistoryEntry>,
     #[serde(default)]
     pub titlebar_mode: TitlebarMode,
     #[serde(default)]
@@ -889,7 +833,7 @@ pub fn default_sidebar_order() -> Vec<String> {
         "favorites".to_string(),
         "radio".to_string(),
         "activity".to_string(),
-        "ytdlp".to_string(),
+        "youtube_downloads".to_string(),
     ]
 }
 
@@ -1008,9 +952,9 @@ impl Default for AppConfig {
             equalizer: EqualizerSettings::default(),
             device_change_behavior: DeviceChangeBehavior::Pause,
             sample_rate_mode: SampleRateMode::System,
-            ytdlp_output_dir: String::new(),
-            ytdlp_options: YtdlpOptions::default(),
-            ytdlp_history: Vec::new(),
+            youtube_download_output_dir: String::new(),
+            youtube_download_options: YoutubeDownloadOptions::default(),
+            youtube_download_history: Vec::new(),
             titlebar_mode: TitlebarMode::Custom,
             offline_quality: OfflineQuality::default(),
             offline_tracks: HashMap::new(),
@@ -1114,6 +1058,11 @@ impl AppConfig {
     }
 
     pub fn migrate_sidebar_order(&mut self) {
+        for key in &mut self.sidebar_order {
+            if key == "ytdlp" {
+                *key = "youtube_downloads".to_string();
+            }
+        }
         let all_keys = default_sidebar_order();
         for key in &all_keys {
             if !self.sidebar_order.iter().any(|k| k == key) {
@@ -1290,6 +1239,51 @@ mod tests {
 
         assert_eq!(default_config.settings_layout, SettingsLayout::Cd);
         assert_eq!(top_bar_config.settings_layout, SettingsLayout::TopBar);
+    }
+
+    #[test]
+    fn legacy_downloader_config_migrates_to_native_youtube_fields() {
+        let config: AppConfig = serde_json::from_str(
+            r#"{
+                "ytdlp_output_dir": "/music/downloads",
+                "ytdlp_options": {
+                    "embed_metadata": false,
+                    "embed_thumbnail": true,
+                    "write_thumbnail": true,
+                    "sponsorblock": true
+                },
+                "ytdlp_history": [{
+                    "url": "https://music.youtube.com/watch?v=abc",
+                    "title": "Song",
+                    "format": "MP3",
+                    "status": "completed"
+                }]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.youtube_download_output_dir, "/music/downloads");
+        assert!(!config.youtube_download_options.embed_metadata);
+        assert!(config.youtube_download_options.embed_thumbnail);
+        assert!(config.youtube_download_options.write_thumbnail);
+        assert_eq!(config.youtube_download_history.len(), 1);
+        assert_eq!(
+            config.youtube_download_history[0].video_id,
+            "https://music.youtube.com/watch?v=abc"
+        );
+    }
+
+    #[test]
+    fn sidebar_migration_preserves_old_downloader_position() {
+        let mut config = AppConfig {
+            sidebar_order: vec!["home".into(), "ytdlp".into(), "search".into()],
+            ..AppConfig::default()
+        };
+
+        config.migrate_sidebar_order();
+
+        assert_eq!(config.sidebar_order[1], "youtube_downloads");
+        assert!(!config.sidebar_order.iter().any(|key| key == "ytdlp"));
     }
 
     #[test]

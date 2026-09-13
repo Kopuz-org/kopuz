@@ -15,7 +15,7 @@ name = "pages"
 [lints]
 workspace = true
 
-# rfd is only used by the yt-dlp page, which is desktop only (excluded on Android).
+# rfd is only used by the native YouTube download page, which is desktop only.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 rfd = { workspace = true }
 
