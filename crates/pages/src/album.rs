@@ -952,8 +952,7 @@ fn YtAlbumDetail(
                         }
                         // Shuffle.
                         button {
-                            class: format!("w-11 h-11 rounded-full border flex items-center justify-center transition-colors {}", if *ctrl.shuffle.read() { "bg-white/10 border-white/30" } else { "text-slate-300 border-white/15 hover:text-white hover:border-white/30" }),
-                            style: if *ctrl.shuffle.read() { "color: var(--color-indigo-500);" } else { "" },
+                            class: format!("w-11 h-11 rounded-full border flex items-center justify-center transition-colors {}", if *ctrl.shuffle.read() { "text-indigo-500 bg-white/10 border-white/30" } else { "text-slate-300 border-white/15 hover:text-white hover:border-white/30" }),
                             title: i18n::t("shuffle").to_string(),
                             onclick: move |_| ctrl.toggle_shuffle(),
                             i { class: "fa-solid fa-shuffle" }

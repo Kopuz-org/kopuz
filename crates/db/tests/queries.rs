@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use config::{SortCriterion, SortDirection, TrackSortField};
 use db::{Page, Source, TrackFilter, TrackSort};
+use reader::models::{Album, Track, TrackId};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Executor};
 
@@ -173,6 +174,111 @@ async fn windowed_queries_over_20k_tracks() {
 
     // Reconstructed identity is a local path.
     assert!(matches!(page[0].id, reader::models::TrackId::Local(_)));
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+fn album(id: &str, title: &str, artist: &str) -> Album {
+    Album {
+        id: id.into(),
+        title: title.into(),
+        artist: artist.into(),
+        genre: String::new(),
+        year: 2000,
+        cover_path: None,
+        manual_cover: false,
+    }
+}
+
+fn track(path: &str, album_id: &str) -> Track {
+    Track {
+        id: TrackId::Local(PathBuf::from(path)),
+        cover: None,
+        album_id: album_id.into(),
+        title: path.into(),
+        artist: "Artist".into(),
+        album: album_id.into(),
+        duration: 1,
+        khz: 44100,
+        bitrate: 900,
+        track_number: Some(1),
+        disc_number: Some(1),
+        musicbrainz_release_id: None,
+        musicbrainz_recording_id: None,
+        musicbrainz_track_id: None,
+        playlist_item_id: None,
+        artists: Vec::new(),
+    }
+}
+
+/// Recently-added is its own ordering, not the album listing read backwards:
+/// the listing is alphabetical, so reversing it only ever surfaces the end of
+/// the alphabet (issue #691, where a CJK-heavy library saw the same albums no
+/// matter what was scanned).
+#[tokio::test]
+async fn recently_added_albums_order_by_date_added() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+
+    // Written oldest-first, and deliberately neither alphabetical nor its
+    // reverse, so neither ordering can pass by accident.
+    for (id, artist) in [("bee", "Bea"), ("cee", "Cara"), ("ann", "Ann")] {
+        db.upsert_albums(&Source::Local, &[album(id, id, artist)])
+            .await
+            .unwrap();
+        db.upsert_tracks(&Source::Local, &[track(&format!("/music/{id}.flac"), id)])
+            .await
+            .unwrap();
+    }
+
+    let ids =
+        |albums: Vec<reader::Album>| -> Vec<String> { albums.into_iter().map(|a| a.id).collect() };
+
+    // Unstamped rows (a library not rescanned since the added_at migration, or
+    // any server source) still fall back to insertion order.
+    assert_eq!(
+        ids(db.albums_recently_added(&Source::Local, 10).await.unwrap()),
+        ["ann", "cee", "bee"]
+    );
+    assert_eq!(
+        ids(db.albums_recently_added(&Source::Local, 2).await.unwrap()),
+        ["ann", "cee"]
+    );
+
+    // A stamp outranks insertion order, and it is the album's newest track that
+    // decides: stamping the oldest album's track pulls that album to the front.
+    db.stamp_added_at(&Source::Local, &[("/music/bee.flac".into(), 1_700_000_000)])
+        .await
+        .unwrap();
+    assert_eq!(
+        ids(db.albums_recently_added(&Source::Local, 10).await.unwrap()),
+        ["bee", "ann", "cee"]
+    );
+
+    // Stamps are written once: a rescan after a tag edit bumped the file's
+    // mtime must not make old music look new.
+    db.stamp_added_at(&Source::Local, &[("/music/cee.flac".into(), 1_800_000_000)])
+        .await
+        .unwrap();
+    db.stamp_added_at(&Source::Local, &[("/music/cee.flac".into(), 1_900_000_000)])
+        .await
+        .unwrap();
+    let filter = TrackFilter {
+        sort: TrackSort::DateAdded,
+        ..TrackFilter::new(Source::Local)
+    };
+    let by_date = db
+        .tracks_page(
+            &filter,
+            Page {
+                offset: 0,
+                limit: 3,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(by_date[0].title, "/music/cee.flac");
+    assert_eq!(by_date[1].title, "/music/bee.flac");
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

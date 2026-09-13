@@ -121,7 +121,7 @@ pub fn SearchGenreDetail(
                                     button {
                                         class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
                                         style: if *ctrl.shuffle.read() {
-                                            "background: var(--color-indigo-500);"
+                                            "background: var(--color-indigo-500); border: 1px solid transparent;"
                                         } else {
                                             "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);"
                                         },

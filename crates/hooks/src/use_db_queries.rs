@@ -334,6 +334,36 @@ pub fn use_artist_images() -> Resource<db::ArtistImages> {
     })
 }
 
+/// The `limit` most recently added albums for a source. Tracked against the
+/// tracks table as well as the albums one: the order comes from each album's
+/// newest track, so a scan that only adds tracks to a known album still moves
+/// it up.
+pub fn use_recently_added_albums(source: Memo<Source>, limit: u32) -> Resource<Vec<reader::Album>> {
+    let db = use_context::<ReadDb>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Albums);
+        let _ = gens.generation(Table::Tracks);
+        let (db, s) = (db.clone(), source());
+        let span = tracing::info_span!(
+            "query.albums_recently_added",
+            source = s.as_str(),
+            rows = tracing::field::Empty
+        );
+        offload(
+            async move {
+                let rows = db
+                    .albums_recently_added(&s, limit)
+                    .await
+                    .unwrap_or_default();
+                tracing::Span::current().record("rows", rows.len());
+                rows
+            }
+            .instrument(span),
+        )
+    })
+}
+
 /// All albums for a source, re-queried when the albums table changes.
 pub fn use_albums(source: Memo<Source>) -> Resource<Vec<reader::Album>> {
     let db = use_context::<ReadDb>();

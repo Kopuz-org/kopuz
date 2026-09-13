@@ -48,6 +48,13 @@
   </screenshots>
 
   <releases>
+    <release version="0.16.2" date="2026-09-12">
+      <description>
+        <p>
+          Recently Added on the home page finally lists what was recently added: albums are ranked by when their music arrived, recorded per file as the library is scanned, and the library's own date-added sort reads the same stamp. Shuffle and repeat let go of their highlight when switched off instead of staying lit for the session. Apple Music takes a custom storefront, cookies import from Brave builds that ship their binary under another name, covers and context menus behave on unsynced albums, and windows with an app-drawn titlebar can be resized from their edges on Linux. Kopuz is now licensed under the EUPL-1.2.
+        </p>
+      </description>
+    </release>
     <release version="0.16.1" date="2026-08-26">
       <description>
         <p>

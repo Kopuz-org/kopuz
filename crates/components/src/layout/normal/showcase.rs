@@ -193,8 +193,11 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                 div { class: "flex items-center gap-4",
                      if !props.tracks.is_empty() {
                         button {
-                            class: "w-14 h-14 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
-                            style: if *ctrl.shuffle.read() { "color: var(--color-indigo-500);" } else { "" },
+                            class: if *ctrl.shuffle.read() {
+                                "w-14 h-14 rounded-full flex items-center justify-center text-indigo-500 hover:bg-white/10 transition-colors active:scale-95"
+                            } else {
+                                "w-14 h-14 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95"
+                            },
                             title: if *ctrl.shuffle.read() {
                                 i18n::t("shuffle_on").to_string()
                             } else {
