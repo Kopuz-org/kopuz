@@ -1487,9 +1487,93 @@ pub fn bind_socket(path: &std::path::Path) -> std::io::Result<Listener> {
     Listener::bind(path)
 }
 
-/// Serve the daemon on `listener` until the future is dropped. Reflection
-/// (v1 and v1alpha) is registered so `grpcurl` works out of the box.
-pub async fn serve(listener: Listener, state: Arc<GrpcState>) -> std::io::Result<()> {
+/// The bearer token a TCP client has to present. The socket and the pipe
+/// let the OS decide who may connect; a port has no owner, so on that
+/// transport the token is the boundary.
+#[derive(Clone)]
+pub struct Token(Arc<str>);
+
+impl Token {
+    pub fn new(secret: impl Into<Arc<str>>) -> Self {
+        Self(secret.into())
+    }
+
+    pub fn secret(&self) -> &str {
+        &self.0
+    }
+
+    /// 256 bits from the OS, hex-encoded so it survives a shell.
+    pub fn generate() -> Self {
+        let bytes: [u8; 32] = rand::random();
+        let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        Self(hex.into())
+    }
+
+    /// The token at `path`, minted there if the file does not exist yet.
+    /// The file is created private to this user, since it is the secret.
+    pub fn load_or_create(path: &std::path::Path) -> std::io::Result<Self> {
+        match std::fs::read_to_string(path) {
+            Ok(text) if !text.trim().is_empty() => return Ok(Self::new(text.trim())),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let token = Self::generate();
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        use std::io::Write;
+        options.open(path)?.write_all(token.secret().as_bytes())?;
+        Ok(token)
+    }
+
+    /// `result_large_err` is tonic's own Status type; nothing to shrink here.
+    #[allow(clippy::result_large_err)]
+    fn check(&self, request: Request<()>) -> Result<Request<()>, Status> {
+        let presented = request
+            .metadata()
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "));
+        match presented {
+            Some(presented) if same_secret(presented, &self.0) => Ok(request),
+            _ => Err(Status::unauthenticated(
+                "this transport requires the daemon token as `authorization: Bearer <token>`",
+            )),
+        }
+    }
+}
+
+impl std::fmt::Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Token(..)")
+    }
+}
+
+/// Compare without a length-dependent early exit, so timing does not leak
+/// how much of a guess was right.
+fn same_secret(presented: &str, expected: &str) -> bool {
+    let (a, b) = (presented.as_bytes(), expected.as_bytes());
+    let mut diff = a.len() ^ b.len();
+    for (x, y) in a.iter().zip(b.iter().chain(std::iter::repeat(&0))) {
+        diff |= usize::from(x ^ y);
+    }
+    diff == 0
+}
+
+/// Reflection (v1 and v1alpha) is registered so `grpcurl` works out of
+/// the box, on every transport.
+fn routes<L: Clone>(
+    mut builder: tonic::transport::Server<L>,
+    state: Arc<GrpcState>,
+) -> std::io::Result<tonic::transport::server::Router<L>> {
     let reflection_v1 = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build_v1()
@@ -1498,17 +1582,83 @@ pub async fn serve(listener: Listener, state: Arc<GrpcState>) -> std::io::Result
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build_v1alpha()
         .map_err(std::io::Error::other)?;
+    Ok(builder
+        .add_service(reflection_v1)
+        .add_service(reflection_v1alpha)
+        .add_service(KopuzServer::new(KopuzGrpc(state))))
+}
+
+/// Serve the daemon on `listener` until the future is dropped.
+pub async fn serve(listener: Listener, state: Arc<GrpcState>) -> std::io::Result<()> {
     #[cfg(unix)]
     let incoming = listener;
     #[cfg(windows)]
     let incoming = listener.incoming();
-    tonic::transport::Server::builder()
-        .add_service(reflection_v1)
-        .add_service(reflection_v1alpha)
-        .add_service(KopuzServer::new(KopuzGrpc(state)))
+    routes(tonic::transport::Server::builder(), state)?
         .serve_with_incoming(incoming)
         .await
         .map_err(std::io::Error::other)
+}
+
+/// Serve the daemon over plain HTTP/2 on `listener`, every call gated on
+/// `token`, until the future is dropped.
+#[allow(clippy::result_large_err)]
+pub async fn serve_tcp(
+    listener: tokio::net::TcpListener,
+    token: Token,
+    state: Arc<GrpcState>,
+) -> std::io::Result<()> {
+    let gate = tonic::service::interceptor(move |request| token.check(request));
+    routes(tonic::transport::Server::builder().layer(gate), state)?
+        .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+        .await
+        .map_err(std::io::Error::other)
+}
+
+#[cfg(test)]
+mod token_tests {
+    use super::Token;
+
+    #[test]
+    fn a_token_is_minted_once_and_read_back_thereafter() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("kopuzd.token");
+        let first = Token::load_or_create(&path).expect("mint");
+        assert_eq!(first.secret().len(), 64, "256 bits of hex");
+        let again = Token::load_or_create(&path).expect("read");
+        assert_eq!(first.secret(), again.secret());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "the token file is the secret");
+        }
+    }
+
+    #[test]
+    #[allow(clippy::result_large_err)]
+    fn only_the_exact_bearer_token_passes() {
+        let token = Token::new("s3cret");
+        let with = |value: Option<&str>| {
+            let mut request = tonic::Request::new(());
+            if let Some(value) = value {
+                request
+                    .metadata_mut()
+                    .insert("authorization", value.parse().expect("ascii"));
+            }
+            token.check(request).map(|_| ())
+        };
+        assert!(with(Some("Bearer s3cret")).is_ok());
+        for wrong in [
+            None,
+            Some("Bearer s3cre"),
+            Some("Bearer s3cret1"),
+            Some("s3cret"),
+        ] {
+            let status = with(wrong).expect_err("refused");
+            assert_eq!(status.code(), tonic::Code::Unauthenticated);
+        }
+    }
 }
 
 #[cfg(all(test, unix))]

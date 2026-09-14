@@ -10,7 +10,9 @@
 //! socket's file mode, or the pipe's DACL, is the access control, so the
 //! kernel decides who may connect. The path is stable across daemon
 //! restarts, so `events()` reattaches to it and reports the gap as
-//! [`api::ApiEvent::Resync`].
+//! [`api::ApiEvent::Resync`]. A daemon started with `--listen` is also
+//! reachable over plain HTTP/2, where [`GrpcApi::connect_tcp`] presents
+//! the daemon's bearer token on every call.
 //!
 //! Playback mutations use typed unary RPCs. `events()` owns a reattaching
 //! server-streaming subscription.
@@ -24,15 +26,43 @@ use api::{
 use hyper_util::rt::TokioIo;
 use proto::convert;
 use proto::kopuz_client::KopuzClient;
-use tonic::Request;
+use tonic::metadata::{Ascii, MetadataValue};
+use tonic::service::Interceptor;
+use tonic::service::interceptor::InterceptedService;
 use tonic::transport::{Channel, Endpoint, Uri};
+use tonic::{Request, Status};
 use tower::service_fn;
 
-type Client = KopuzClient<Channel>;
+type Client = KopuzClient<InterceptedService<Channel, Auth>>;
+
+/// Where a daemon is reached.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Address {
+    /// A Unix socket, or on Windows a named pipe.
+    Socket(PathBuf),
+    /// A `host:port` served with `--listen`.
+    Tcp(String),
+}
 
 pub struct GrpcApi {
-    path: PathBuf,
+    address: Address,
     client: Client,
+}
+
+/// Presents the bearer token a TCP daemon requires. Over the socket there
+/// is none, and requests pass through untouched.
+#[derive(Clone)]
+struct Auth(Option<MetadataValue<Ascii>>);
+
+impl Interceptor for Auth {
+    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
+        if let Some(header) = &self.0 {
+            request
+                .metadata_mut()
+                .insert("authorization", header.clone());
+        }
+        Ok(request)
+    }
 }
 
 fn wire_error(status: tonic::Status) -> ApiError {
@@ -52,8 +82,38 @@ async fn connect(
 }
 
 impl GrpcApi {
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn address(&self) -> &Address {
+        &self.address
+    }
+
+    /// The socket path, when this client dials one.
+    pub fn path(&self) -> Option<&Path> {
+        match &self.address {
+            Address::Socket(path) => Some(path),
+            Address::Tcp(_) => None,
+        }
+    }
+
+    /// Dial a daemon's `--listen` address, `host:port`, with the token
+    /// from its token file. Lazy like [`GrpcApi::new`]; a token the
+    /// header cannot carry is the one thing reported here.
+    pub fn connect_tcp(address: impl Into<String>, token: &str) -> Result<Self, ApiError> {
+        let address = address.into();
+        let header =
+            MetadataValue::try_from(format!("Bearer {}", token.trim())).map_err(|_| ApiError {
+                code: api::ErrorCode::InvalidInput,
+                message: "the daemon token is not printable ASCII".into(),
+            })?;
+        let channel = Endpoint::from_shared(format!("http://{address}"))
+            .map_err(|error| ApiError {
+                code: api::ErrorCode::InvalidInput,
+                message: format!("{address}: {error}"),
+            })?
+            .connect_lazy();
+        Ok(Self {
+            address: Address::Tcp(address),
+            client: KopuzClient::with_interceptor(channel, Auth(Some(header))),
+        })
     }
 
     /// `path` is the daemon's socket. The connector dials it lazily, so
@@ -72,8 +132,8 @@ impl GrpcApi {
             }),
         );
         Ok(Self {
-            path,
-            client: KopuzClient::new(channel),
+            address: Address::Socket(path),
+            client: KopuzClient::with_interceptor(channel, Auth(None)),
         })
     }
 

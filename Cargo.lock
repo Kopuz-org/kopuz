@@ -4555,6 +4555,7 @@ dependencies = [
  "kopuz-reader",
  "kopuz-utils",
  "libc",
+ "rand 0.10.2",
  "tempfile",
  "tokio",
  "tokio-stream",

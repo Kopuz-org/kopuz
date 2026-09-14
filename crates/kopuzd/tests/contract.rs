@@ -90,6 +90,8 @@ fn wav_factory(seconds: u64) -> SourceFactory {
 struct Pair {
     local: LocalApi,
     wire: client::GrpcApi,
+    tcp: client::GrpcApi,
+    tcp_address: String,
     jobs: Arc<JobRunner>,
     database: db::Db,
     session: SessionHandle,
@@ -174,10 +176,18 @@ async fn spawn_pair() -> Pair {
     });
     let socket = dir.path().join("kopuzd.sock");
     let listener = kopuzd::bind_socket(&socket).expect("bind socket");
-    tokio::spawn(kopuzd::serve(listener, state));
+    tokio::spawn(kopuzd::serve(listener, state.clone()));
+    let tcp = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
+    let tcp_address = tcp.local_addr().expect("bound address").to_string();
+    let token = kopuzd::Token::generate();
+    tokio::spawn(kopuzd::serve_tcp(tcp, token.clone(), state));
     Pair {
         local: build_api(session.clone()),
         wire: client::GrpcApi::new(&socket).expect("wire client"),
+        tcp: client::GrpcApi::connect_tcp(&tcp_address, token.secret()).expect("tcp client"),
+        tcp_address,
         jobs,
         database,
         session,
@@ -538,6 +548,32 @@ async fn folders_and_stats_agree_across_transports() {
 /// when it cannot reach the socket, and the daemon sends it for a media
 /// server that did not answer. A frontend has to tell those apart to know
 /// whether to show "kopuzd is not running" or "your server is down".
+/// The TCP transport is the same API behind a token: with it, reads agree
+/// with the socket; without it, or with a near miss, nothing gets through,
+/// reflection included.
+#[tokio::test]
+async fn the_tcp_transport_answers_only_to_the_token() {
+    let pair = spawn_pair().await;
+
+    let over_socket = pair.wire.player_state().await.expect("socket");
+    let over_tcp = pair.tcp.player_state().await.expect("tcp with token");
+    assert_eq!(over_socket, over_tcp);
+
+    for wrong in ["", "not-the-token"] {
+        let intruder = client::GrpcApi::connect_tcp(&pair.tcp_address, wrong).expect("client");
+        let error = intruder.player_state().await.expect_err("refused");
+        assert!(
+            error.message.contains("daemon token"),
+            "the refusal names what is missing: {error:?}"
+        );
+        assert_ne!(
+            error.code,
+            ErrorCode::DaemonGone,
+            "a refused token is not a missing daemon"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_missing_daemon_is_not_reported_as_a_dead_media_server() {
     let dir = tempfile::tempdir().expect("tempdir");

@@ -1,4 +1,5 @@
-//! Headless Kopuz daemon: a core from `daemon::boot`, served on a socket.
+//! Headless Kopuz daemon: a core from `daemon::boot`, served on a socket
+//! and, with `--listen`, on a token-gated TCP port.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -15,11 +16,26 @@ fn parse_args() -> Result<ServeArgs, String> {
                     iter.next().ok_or("--socket requires a path")?,
                 ));
             }
+            "--listen" => {
+                let address = iter.next().ok_or("--listen requires an <ip>:<port>")?;
+                args.listen = Some(
+                    address
+                        .parse()
+                        .map_err(|error| format!("--listen {address}: {error}"))?,
+                );
+            }
+            "--token-file" => {
+                args.token_path = Some(PathBuf::from(
+                    iter.next().ok_or("--token-file requires a path")?,
+                ));
+            }
             "--db-path" => {
                 args.db_path = Some(iter.next().ok_or("--db-path requires a path")?);
             }
             "--help" | "-h" => {
-                return Err("usage: kopuzd [--socket <path>] [--db-path <file>]".to_string());
+                return Err("usage: kopuzd [--socket <path>] [--listen <ip>:<port>] \
+                            [--token-file <path>] [--db-path <file>]"
+                    .to_string());
             }
             other => return Err(format!("unknown argument: {other}")),
         }

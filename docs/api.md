@@ -23,7 +23,8 @@ Two deployment shapes serve the same API:
   once, so a frontend that wants to attach while the app is open attaches to
   the app itself.
 
-`kopuzd` flags: `--socket <path>`, `--db-path <file>`.
+`kopuzd` flags: `--socket <path>`, `--listen <ip>:<port>`,
+`--token-file <path>`, `--db-path <file>`.
 
 Exclusive ownership is enforced with a lock file beside the database, so a
 second process pointed at the same library fails to start with a readable
@@ -63,6 +64,29 @@ SOCK=$XDG_RUNTIME_DIR/kopuz/kopuzd.sock
 grpcurl -unix -plaintext $SOCK list kopuz.v1.Kopuz
 grpcurl -unix -plaintext $SOCK kopuz.v1.Kopuz/GetPlayerState
 ```
+
+### Over TCP
+
+`kopuzd --listen <ip>:<port>` serves the same API as plain HTTP/2 on a port
+as well, for clients that cannot open a socket: another machine, a browser
+bridge, a language whose gRPC stack has no Unix socket support. A port has
+no owner the kernel can check, so this transport is the one place a secret
+comes back: every call must carry `authorization: Bearer <token>`, or it is
+refused with `UNAUTHENTICATED` before it reaches a service. The token is
+minted on first use and kept, `0600`, in the token file (`kopuzd.token`
+beside the socket by default; `--token-file` moves it). Binding beyond
+loopback is allowed and logged with a warning: the token is then the only
+thing between the network and the library, and the wire is not encrypted.
+
+```sh
+kopuzd --listen 127.0.0.1:7770
+TOKEN=$(cat $XDG_RUNTIME_DIR/kopuz/kopuzd.token)
+grpcurl -plaintext -H "authorization: Bearer $TOKEN" \
+  127.0.0.1:7770 kopuz.v1.Kopuz/GetPlayerState
+```
+
+The Rust client dials it with `client::GrpcApi::connect_tcp(address, token)`
+and presents the token on every call, the event stream included.
 
 ## Errors
 
