@@ -1,7 +1,7 @@
 //! Source-agnostic Album page (issue #35). One grid + one detail render any
-//! source: covers resolve through the source layer, and the divergent
+//! source: every cover is a reference the daemon resolves, and the divergent
 //! affordances (tag/cover edit + delete-from-disk for local, downloads for a
-//! server) gate on the resolved source's [`Capabilities`] — no `is_server()`.
+//! server) gate on [`api::SourceCapabilities`] — no `is_server()`.
 
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
@@ -15,13 +15,8 @@ use hooks::use_db_queries::{
     use_active_source, use_album, use_album_tracks, use_albums, use_tracks_by_keys,
 };
 use std::collections::HashSet;
-use std::path::PathBuf;
 
-use crate::server::download_manager::{
-    DownloadQueue, DownloadStatus, delete_downloads, queue_downloads,
-};
-
-/// Copy a link to the clipboard and flash a small toast. Used by the YT album
+/// Copy a link to the clipboard and flash a small toast. Used by the catalog album
 /// page's share button (the `track_row` clipboard helper is crate-private to
 /// `components`, so the page carries its own tiny copy).
 fn copy_album_link(url: String) {
@@ -53,13 +48,11 @@ enum AlbumAction {
 pub fn Album(
     config: Signal<AppConfig>,
     album_id: Signal<String>,
-    mut queue: Signal<Vec<reader::models::Track>>,
+    mut queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     let nav_ctrl = use_context::<components::NavigationController>();
 
     let open_album_menu = use_signal(|| None::<String>);
@@ -77,9 +70,7 @@ pub fn Album(
         if let Some(albums) = albums_res.read().clone() {
             has_fetched.set(true);
             if albums.is_empty() {
-                spawn(async move {
-                    let _ = crate::server::subsonic_sync::sync_server_library(false).await;
-                });
+                hooks::jobs::start(hooks::JobKind::LibrarySync);
             }
         }
     });
@@ -120,16 +111,9 @@ pub fn Album(
                                         .clone()
                                         .unwrap_or_default()
                                         .iter()
-                                        .map(|t| t.id.key().into_owned())
+                                        .map(|t| t.key.clone())
                                         .collect();
-                                    let s = active_source.peek().clone();
-                                    spawn(async move {
-                                        if !refs.is_empty()
-                                            && s.add_to_playlist(&playlist_id, &refs).await.is_ok()
-                                        {
-                                            gens.bump(Table::Playlists);
-                                        }
-                                    });
+                                    hooks::playlist_actions::add_tracks(playlist_id, refs);
                                 }
                                 show_album_playlist_modal.set(false);
                             },
@@ -140,16 +124,9 @@ pub fn Album(
                                         .clone()
                                         .unwrap_or_default()
                                         .iter()
-                                        .map(|t| t.id.key().into_owned())
+                                        .map(|t| t.key.clone())
                                         .collect();
-                                    let s = active_source.peek().clone();
-                                    spawn(async move {
-                                        if !refs.is_empty()
-                                            && s.create_playlist(&name, &refs).await.is_ok()
-                                        {
-                                            gens.bump(Table::Playlists);
-                                        }
-                                    });
+                                    hooks::playlist_actions::create_with(name, refs);
                                 }
                                 show_album_playlist_modal.set(false);
                             },
@@ -177,12 +154,10 @@ fn AlbumGrid(
     mut show_album_playlist_modal: Signal<bool>,
     mut pending_album_id_for_playlist: Signal<Option<String>>,
 ) -> Element {
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
-    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let albums_res = use_albums(source);
 
     let album_sort = use_signal(|| config.peek().album_sort.clone());
@@ -200,7 +175,7 @@ fn AlbumGrid(
         }
     });
     let available_sort_fields = use_memo(move || {
-        reader::sort::available_album_fields(&albums_res.read().clone().unwrap_or_default())
+        hooks::sort::available_album_fields(&albums_res.read().clone().unwrap_or_default())
     });
 
     // Offline (server): only albums with downloaded tracks. Album ids come from
@@ -244,7 +219,7 @@ fn AlbumGrid(
             .filter(|a| !offline || downloaded.contains(&a.id))
             .filter(|a| seen.insert(a.title.trim().to_lowercase()))
             .collect::<Vec<_>>();
-        reader::sort::sort_albums(&mut albums, &album_sort.read());
+        hooks::sort::sort_albums(&mut albums, &album_sort.read());
         albums
     });
 
@@ -286,7 +261,7 @@ fn AlbumGrid(
                             let id_for_nav = album.id.clone();
                             let id_for_menu = album.id.clone();
                             let is_open = open_album_menu.read().as_deref() == Some(&album.id);
-                            let cover_url = ::server::cover::from_path(&config.read(), album.cover_path.as_deref(), 360);
+                            let cover_url = hooks::artwork::for_album(&album, hooks::artwork::Size::Thumb);
                             let remove_label = if cap.delete_from_disk {
                                 i18n::t("delete_album").to_string()
                             } else {
@@ -352,15 +327,9 @@ fn AlbumGrid(
                                                     let Some(tag) = tags.get(idx).copied() else { return };
                                                     match tag {
                                                         AlbumAction::Queue => {
-                                                            let album_src = active_source.peek().clone();
-                                                            let album_id = id.clone();
-                                                            spawn(async move {
-                                                                let mut tracks = album_src.album_tracks(&album_id).await.unwrap_or_default();
-                                                                tracks.sort_by(|a, b| {
-                                                                    a.track_number.cmp(&b.track_number)
-                                                                        .then_with(|| a.title.cmp(&b.title))
-                                                                });
-                                                                ctrl.add_to_queue(tracks);
+                                                            hooks::library_actions::with_album_keys(id.clone(), move |keys| {
+                                                                let mut ctrl = ctrl;
+                                                                ctrl.set_queue_keys(keys, api::QueueMode::Append, None);
                                                             });
                                                         }
                                                         AlbumAction::Playlist => {
@@ -369,34 +338,15 @@ fn AlbumGrid(
                                                         }
                                                         AlbumAction::Remove => {
                                                             if cap.delete_from_disk {
-                                                                let album_src = active_source.peek().clone();
-                                                                let album_id = id.clone();
-                                                                let delete_config = config.read().clone();
-                                                                let delete_source = source();
-                                                                spawn(async move {
-                                                                    let to_delete = album_src.album_tracks(&album_id).await.unwrap_or_default();
-                                                                    for track in &to_delete {
-                                                                        if let Some(path) = track.id.local_path() {
-                                                                            let _ = crate::local_files::remove(&delete_config, &delete_source, path);
-                                                                        }
-                                                                    }
-                                                                    if album_src.delete_album(&album_id).await.is_ok() {
-                                                                        gens.bump(Table::Tracks);
-                                                                        gens.bump(Table::Albums);
-                                                                    }
-                                                                });
+                                                                hooks::library_actions::delete_album(id.clone(), true);
                                                             } else {
-                                                                // Server: drop every same-titled album's cache.
-                                                                let album_src = active_source.peek().clone();
+                                                                // A server splits one release across
+                                                                // same-titled albums, so dropping the
+                                                                // cache means dropping all of them.
                                                                 let all = albums_res.read().clone().unwrap_or_default();
-                                                                let ids: Vec<String> = all.iter().filter(|a| a.title == title).map(|a| a.id.clone()).collect();
-                                                                spawn(async move {
-                                                                    for aid in &ids {
-                                                                        let _ = album_src.delete_album(aid).await;
-                                                                    }
-                                                                    gens.bump(Table::Tracks);
-                                                                    gens.bump(Table::Albums);
-                                                                });
+                                                                for album in all.iter().filter(|album| album.title == title) {
+                                                                    hooks::library_actions::delete_album(album.id.clone(), false);
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -419,38 +369,45 @@ fn AlbumGrid(
 fn AlbumDetail(
     config: Signal<AppConfig>,
     album_id_str: String,
-    mut queue: Signal<Vec<reader::models::Track>>,
+    mut queue: Signal<Vec<api::TrackInfo>>,
     current_queue_index: Signal<usize>,
     on_close: EventHandler<()>,
 ) -> Element {
-    let gens = hooks::db_reactivity::use_generations();
     let nav_ctrl = use_context::<components::NavigationController>();
+    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let api = hooks::use_api();
+    let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
-    let download_queue = use_context::<Signal<DownloadQueue>>();
+    let downloads = hooks::downloads::use_downloads();
 
     let album_id_memo = use_memo(use_reactive!(|album_id_str| album_id_str));
     let album_res = use_album(source, album_id_memo);
     let albums_res = use_albums(source);
 
-    // Discover albums are opened by their YT browse id (MPRE…) and aren't in the
+    // Discover albums are opened by the source's own browse id and aren't in the
     // local DB until saved. When the DB has no row for the id, fetch the album
     // straight from the catalog remote by that browse id so every searched /
     // discovered album renders (header + full track list) instead of "not found".
-    let direct_remote_res: Resource<Option<::server::source::RemoteAlbum>> = {
+    let direct_remote_res: Resource<Option<api::CatalogDetail>> = {
+        let api = api.clone();
         use_resource(move || {
             let want = !*is_offline.read();
             let db_has = album_res.read().clone().flatten().is_some();
             let id = album_id_memo();
-            let src = active_source.peek().clone();
-            utils::offload(async move {
+            let api = api.clone();
+            async move {
                 if !want || db_has || id.trim().is_empty() {
                     return None;
                 }
-                src.fetch_album_by_ref(&id).await.ok().flatten()
-            })
+                api.catalog_detail(api::CatalogDetailRequest {
+                    kind: api::CatalogItemKind::Album,
+                    id,
+                    continuation: None,
+                })
+                .await
+                .ok()
+            }
         })
     };
 
@@ -476,10 +433,10 @@ fn AlbumDetail(
                         YtAlbumDetail {
                             config,
                             title: remote.title,
-                            artist: remote.artist.unwrap_or_default(),
+                            artist: remote.subtitle.unwrap_or_default(),
                             year: remote.year,
-                            browse_id: Some(remote.browse_id),
-                            local_cover: remote.thumbnail.map(utils::cover_url_from_string),
+                            browse_id: Some(remote.id),
+                            local_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
                             tracks,
                             on_close,
                         }
@@ -510,40 +467,56 @@ fn AlbumDetail(
         ids
     });
     let tracks_res = {
+        let api = api.clone();
         use_resource(move || {
             let _ = gens.generation(Table::Tracks);
-            let (src, ids) = (active_source(), matching_ids());
-            utils::offload(async move {
+            let ids = matching_ids();
+            let api = api.clone();
+            async move {
                 let mut out = Vec::new();
-                for id in &ids {
-                    out.extend(src.album_tracks(id).await.unwrap_or_default());
+                for id in ids {
+                    let page = api
+                        .album_tracks(
+                            id,
+                            api::Page {
+                                offset: 0,
+                                limit: u32::MAX,
+                            },
+                        )
+                        .await
+                        .unwrap_or_default();
+                    out.extend(page.items);
                 }
                 out
-            })
+            }
         })
     };
 
-    // Catalog remotes (YT) store albums under a title+artist hash with no
+    // Catalog sources store albums under a title+artist hash with no
     // browse id, so the library only ever holds the few tracks the user saved —
-    // an album page would show 1 of 18 songs. Resolve the album's browse id on
-    // demand and fetch the full album (header + every track), the way YT Music
-    // shows it. `None` for local/other sources (gated on `discover`) and while
-    // offline; drives both the full track list and the YT-styled header.
-    let remote_album_res: Resource<Option<::server::source::RemoteAlbum>> = {
+    // an album page would show 1 of 18 songs. The daemon resolves the saved
+    // album to its remote listing (header + every track), the way a catalog
+    // shows it. `None` for local/other sources and while offline; drives both
+    // the full track list and the catalog-styled header.
+    let remote_album_res: Resource<Option<api::CatalogDetail>> = {
+        let api = api.clone();
         use_resource(move || {
-            let want = caps().albums == ::server::source::AlbumType::YtMusic && !*is_offline.read();
+            let want = caps().albums == api::AlbumPresentation::Remote && !*is_offline.read();
             let album = album_res.read().clone().flatten();
-            let src = active_source.peek().clone();
-            utils::offload(async move {
+            let api = api.clone();
+            async move {
                 let album = album?;
                 if !want || album.title.trim().is_empty() {
                     return None;
                 }
-                src.fetch_album_by_meta(&album.title, &album.artist)
-                    .await
-                    .ok()
-                    .flatten()
-            })
+                api.catalog_detail(api::CatalogDetailRequest {
+                    kind: api::CatalogItemKind::Album,
+                    id: album.id,
+                    continuation: None,
+                })
+                .await
+                .ok()
+            }
         })
     };
 
@@ -568,12 +541,12 @@ fn AlbumDetail(
             return remote;
         }
 
-        let mut tracks: Vec<reader::models::Track> = tracks_res
+        let mut tracks: Vec<api::TrackInfo> = tracks_res
             .read()
             .clone()
             .unwrap_or_default()
             .into_iter()
-            .filter(|t| !offline || conf.offline_tracks.contains_key(t.id.key().as_ref()))
+            .filter(|t| !offline || conf.offline_tracks.contains_key(&t.key))
             .collect();
         tracks.sort_by(|a, b| {
             a.disc_number
@@ -591,19 +564,14 @@ fn AlbumDetail(
     let album_title = album.title.clone();
     let album_artist = album.artist.clone();
     let album_artist_for_nav = album_artist.clone();
-    let cover_url = ::server::cover::from_path(&config.read(), album.cover_path.as_deref(), 512);
+    let cover_url = hooks::artwork::for_album(&album, hooks::artwork::Size::Thumb);
     let cap = caps();
     let aid = album.id.clone();
 
-    let cover_cache = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
-        .map(|d| d.cache_dir().join("covers"))
-        .unwrap_or_else(|| PathBuf::from("./cache/covers"));
-
-    // Local-only custom cover reset.
-    let cover_reset_action = if cap.edit_tags && album.cover_path.is_some() {
+    // The daemon removes the stored picture and forgets the file it saved,
+    // so this only has to say which album.
+    let cover_reset_action = if cap.edit_tags && album.artwork.is_some() {
         let aid = aid.clone();
-        let delete_cover = album.cover_path.clone();
-        let cover_cache = cover_cache.clone();
         Some(rsx! {
             button {
                 class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10",
@@ -611,20 +579,7 @@ fn AlbumDetail(
                 aria_label: i18n::t("remove_cover").to_string(),
                 title: i18n::t("remove_cover").to_string(),
                 onclick: move |_| {
-                    let aid = aid.clone();
-                    let delete_cover = delete_cover.clone();
-                    let cover_cache = cover_cache.clone();
-                    let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                    spawn(async move {
-                        if local.update_album_cover(&aid, None, false).await.is_ok() {
-                            gens.bump(Table::Albums);
-                        }
-                        if let Some(path) = delete_cover
-                            && path.starts_with(&cover_cache)
-                        {
-                            let _ = tokio::fs::remove_file(&path).await;
-                        }
-                    });
+                    hooks::library_actions::remove_artwork(api::ArtworkTarget::Album(aid.clone()));
                 },
                 i { class: "fa-solid fa-trash text-xs" }
             }
@@ -639,26 +594,17 @@ fn AlbumDetail(
     let tracks_download_all = tracks();
     let tracks_delete_all = tracks();
 
-    let is_downloading_all = cap.downloads && {
-        let q = download_queue.read();
-        tracks().iter().any(|t| {
-            let key = t.id.key();
-            q.items.iter().any(|i| {
-                i.id.as_str() == key.as_ref()
-                    && matches!(
-                        i.status,
-                        DownloadStatus::Queued | DownloadStatus::Downloading
-                    )
-            })
-        })
-    };
+    let is_downloading_all = cap.downloads
+        && tracks()
+            .iter()
+            .any(|track| downloads.read().is_active(&track.key));
 
-    // YT-Music-style album page: the whole catalog-remote (YT) side renders this,
+    // Catalog-style album page: the whole catalog-remote side renders this,
     // from the moment the page opens — header built from the local album row so it
     // shows instantly, track list filling from the locally-saved subset until the
     // remote album resolves the full listing. Local / other sources keep the
     // standard TrackListView.
-    let cover_url_yt = cover_url.clone();
+    let cover_url_remote = cover_url.clone();
     let yt_title = album.title.clone();
     let yt_artist = album.artist.clone();
     // Prefer the remote album's year once resolved; fall back to the local row.
@@ -667,18 +613,18 @@ fn AlbumDetail(
         .as_ref()
         .and_then(|a| a.year.clone())
         .or_else(|| (album.year > 0).then(|| album.year.to_string()));
-    let yt_browse_id = yt_remote.as_ref().map(|a| a.browse_id.clone());
+    let yt_browse_id = yt_remote.as_ref().map(|a| a.id.clone());
 
     rsx! {
         div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
-            if cap.albums == ::server::source::AlbumType::YtMusic {
+            if cap.albums == api::AlbumPresentation::Remote {
                 YtAlbumDetail {
                     config,
                     title: yt_title,
                     artist: yt_artist,
                     year: yt_year,
                     browse_id: yt_browse_id,
-                    local_cover: cover_url_yt,
+                    local_cover: cover_url_remote,
                     tracks: tracks(),
                     on_close,
                 }
@@ -697,96 +643,72 @@ fn AlbumDetail(
                 enable_metadata: cap.edit_tags,
                 show_delete_in_selection: cap.delete_from_disk,
                 is_downloading_all,
+                // Picking the file is the UI's; storing it is not.
                 on_cover_click: cap.edit_tags.then(|| EventHandler::new(move |_| {
                     let aid = aid_cover.clone();
                     let _ = &aid;
                     #[cfg(not(target_os = "android"))]
-                    let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                    #[cfg(not(target_os = "android"))]
                     spawn(async move {
-                        let file = rfd::AsyncFileDialog::new()
+                        let Some(file) = rfd::AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
                             .pick_file()
-                            .await;
-                        if let Some(file) = file {
-                            let path = file.path().to_path_buf();
-                            let Ok(data) = tokio::fs::read(&path).await else { return };
-                            let cover_cache = directories::ProjectDirs::from("moe", "kopuz", "kopuz")
-                                .map(|d| d.cache_dir().join("covers"))
-                                .unwrap_or_else(|| PathBuf::from("./cache/covers"));
-                            if let Ok(saved) = reader::utils::save_cover(&aid, &data, path.extension().and_then(|e| e.to_str()), &cover_cache) {
-                                let saved_str = saved.to_string_lossy().into_owned();
-                                if local.update_album_cover(&aid, Some(&saved_str), true).await.is_ok() {
-                                    gens.bump(Table::Albums);
-                                }
-                            }
-                        }
+                            .await
+                        else {
+                            return;
+                        };
+                        let path = file.path().to_path_buf();
+                        let Ok(bytes) = tokio::fs::read(&path).await else {
+                            return;
+                        };
+                        hooks::library_actions::upload_artwork(
+                            api::ArtworkTarget::Album(aid),
+                            hooks::library_actions::content_type_for(&path),
+                            bytes,
+                        );
                     });
                 })),
                 actions: cover_reset_action,
                 on_delete_track: cap.delete_from_disk.then(|| EventHandler::new(move |idx: usize| {
-                    if let Some(t) = tracks_delete.get(idx)
-                        && let Some(track_path) = t.id.local_path()
-                        && crate::local_files::remove(&config.read(), &source(), track_path)
-                            .is_ok_and(|removed| removed)
-                    {
-                        let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                        let key = t.id.key().into_owned();
-                        spawn(async move {
-                            if s.delete_tracks(&[key]).await.is_ok() {
-                                gens.bump(Table::Tracks);
-                            }
-                        });
+                    if let Some(track) = tracks_delete.get(idx) {
+                        hooks::library_actions::delete_tracks(
+                            vec![track.key.clone()],
+                            true,
+                        );
                     }
                 })),
-                on_selection_delete: cap.delete_from_disk.then(|| EventHandler::new(move |paths: Vec<PathBuf>| {
-                    let mut keys = Vec::new();
-                    for path in &paths {
-                        if crate::local_files::remove(&config.read(), &source(), path)
-                            .is_ok_and(|removed| removed)
-                        {
-                            keys.push(path.to_string_lossy().into_owned());
-                        }
-                    }
-                    if !keys.is_empty() {
-                        let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                        spawn(async move {
-                            if s.delete_tracks(&keys).await.is_ok() {
-                                gens.bump(Table::Tracks);
-                            }
-                        });
-                    }
+                on_selection_delete: cap.delete_from_disk.then(|| EventHandler::new(move |keys: Vec<String>| {
+                    hooks::library_actions::delete_tracks(keys, true);
                 })),
                 on_download_track: cap.downloads.then(|| EventHandler::new(move |idx: usize| {
                     if let Some(t) = tracks_download.get(idx) {
-                        let key = t.id.key();
+                        let key = &t.key;
                         if key.is_empty() {
                             return;
                         }
-                        let key = key.as_ref();
+
                         let downloaded = config.read().offline_tracks.get(key)
                             .map(|p| std::path::Path::new(p).exists())
                             .unwrap_or(false);
                         if downloaded {
-                            delete_downloads(vec![key.to_string()], config, download_queue);
+                            hooks::downloads::remove(vec![key.to_string()]);
                         } else {
-                            queue_downloads(vec![(key.to_string(), t.title.clone(), t.artist.clone())], config, download_queue);
+                            hooks::downloads::start(vec![key.to_string()]);
                         }
                     }
                 })),
                 on_download_all: cap.downloads.then(|| EventHandler::new(move |_: ()| {
-                    let requests: Vec<(String, String, String)> = tracks_download_all.iter().filter_map(|t| {
-                        let k = t.id.key();
-                        (!k.is_empty()).then(|| (k.into_owned(), t.title.clone(), t.artist.clone()))
+                    let requests: Vec<String> = tracks_download_all.iter().filter_map(|t| {
+                        let k = t.key.clone();
+                        (!k.is_empty()).then_some(k)
                     }).collect();
-                    queue_downloads(requests, config, download_queue);
+                    hooks::downloads::start(requests);
                 })),
                 on_delete_all: cap.downloads.then(|| EventHandler::new(move |_: ()| {
                     let ids: Vec<String> = tracks_delete_all.iter().filter_map(|t| {
-                        let k = t.id.key();
-                        (!k.is_empty()).then(|| k.into_owned())
+                        let k = t.key.clone();
+                        (!k.is_empty()).then_some(k)
                     }).collect();
-                    delete_downloads(ids, config, download_queue);
+                    hooks::downloads::remove(ids);
                 })),
             }
             }
@@ -794,9 +716,9 @@ fn AlbumDetail(
     }
 }
 
-/// YT-Music-style album page: a left meta column (cover, artist link, title,
+/// Catalog-style album page: a left meta column (cover, artist link, title,
 /// "Album", song count · duration · year, play / shuffle / download) beside the
-/// full track list. Shown only for the catalog remote (YT) once the album
+/// full track list. Shown only for a catalog source once the album
 /// resolved; local/other sources use [`TrackListView`]. Rows reuse [`TrackRow`]
 /// so play / queue / menu / download behave exactly as everywhere else.
 #[component]
@@ -807,21 +729,18 @@ fn YtAlbumDetail(
     year: Option<String>,
     browse_id: Option<String>,
     local_cover: Option<utils::CoverUrl>,
-    tracks: Vec<reader::models::Track>,
+    tracks: Vec<api::TrackInfo>,
     on_close: EventHandler<()>,
 ) -> Element {
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let nav_ctrl = use_context::<components::NavigationController>();
-    let download_queue = use_context::<Signal<DownloadQueue>>();
-    let gens = hooks::db_reactivity::use_generations();
-    let cover_for = hooks::use_db_queries::use_cover_resolver(80);
+    let downloads = hooks::downloads::use_downloads();
 
-    let mut active_menu = use_signal(|| None::<reader::TrackId>);
+    let mut active_menu = use_signal(|| None::<String>);
     let mut show_playlist_modal = use_signal(|| false);
-    let mut playlist_track = use_signal(|| None::<reader::TrackId>);
+    let mut playlist_track = use_signal(|| None::<String>);
 
-    let total: u64 = tracks.iter().map(|t| t.duration).sum();
+    let total: u64 = tracks.iter().filter_map(|t| t.duration_secs()).sum();
     let dur_min = total / 60;
     let song_count = tracks.len();
     let artist_name = artist;
@@ -832,7 +751,7 @@ fn YtAlbumDetail(
     // skip) so the highlighted row follows next/prev.
     let current_id = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|t| t.id)
+        ctrl.get_track_at(idx).map(|t| t.uid)
     };
     let offline_tracks = config.read().offline_tracks.clone();
 
@@ -840,9 +759,8 @@ fn YtAlbumDetail(
     // button's toggle (download all ⇄ remove all).
     let all_downloaded = !tracks.is_empty()
         && tracks.iter().all(|t| {
-            let k = t.id.key();
             offline_tracks
-                .get(k.as_ref())
+                .get(&t.key)
                 .map(|p| std::path::Path::new(p).exists())
                 .unwrap_or(false)
         });
@@ -851,18 +769,27 @@ fn YtAlbumDetail(
     let tracks_download_all = tracks.clone();
     let artist_for_nav_btn = artist_name.clone();
     // Prefer the provider's album page; fall back to its first track page.
-    let share_url = browse_id
-        .as_ref()
-        .and_then(|id| match tracks.first().and_then(|t| t.id.service()) {
-            Some(config::MusicService::Spotify) => {
-                Some(format!("https://open.spotify.com/album/{id}"))
+    // The daemon knows which sources have web pages and how they spell them;
+    // an id and a key are all that leave here.
+    let share_api = hooks::use_api();
+    let share_id = browse_id.clone();
+    let share_key = tracks.first().map(|track| track.key.clone());
+    let share_url = use_resource(move || {
+        let api = share_api.clone();
+        let (id, key) = (share_id.clone(), share_key.clone());
+        async move {
+            if let Some(id) = id
+                && let Ok(Some(url)) = api.album_web_url(id).await
+            {
+                return Some(url);
             }
-            Some(config::MusicService::YtMusic) => {
-                Some(format!("https://music.youtube.com/browse/{id}"))
+            match key {
+                Some(key) => api.track_web_url(key).await.ok().flatten(),
+                None => None,
             }
-            _ => None,
-        })
-        .or_else(|| tracks.first().and_then(|t| active_source.peek().web_url(t)));
+        }
+    });
+    let share_url = share_url.read().clone().flatten();
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
@@ -912,20 +839,20 @@ fn YtAlbumDetail(
                         button {
                             class: "w-11 h-11 rounded-full border border-white/15 flex items-center justify-center text-slate-300 hover:text-white hover:border-white/30 transition-colors disabled:opacity-40",
                             title: if all_downloaded { "Remove download".to_string() } else { "Download".to_string() },
-                            disabled: download_queue.read().is_active(),
+                            disabled: downloads.read().running,
                             onclick: move |_| {
                                 if all_downloaded {
                                     let ids: Vec<String> = tracks_download_all.iter().filter_map(|t| {
-                                        let k = t.id.key();
-                                        (!k.is_empty()).then(|| k.into_owned())
+                                        let k = t.key.clone();
+                                        (!k.is_empty()).then_some(k)
                                     }).collect();
-                                    delete_downloads(ids, config, download_queue);
+                                    hooks::downloads::remove(ids);
                                 } else {
-                                    let reqs: Vec<(String, String, String)> = tracks_download_all.iter().filter_map(|t| {
-                                        let k = t.id.key();
-                                        (!k.is_empty()).then(|| (k.into_owned(), t.title.clone(), t.artist.clone()))
+                                    let reqs: Vec<String> = tracks_download_all.iter().filter_map(|t| {
+                                        let k = t.key.clone();
+                                        (!k.is_empty()).then_some(k)
                                     }).collect();
-                                    queue_downloads(reqs, config, download_queue);
+                                    hooks::downloads::start(reqs);
                                 }
                             },
                             i { class: if all_downloaded { "fa-solid fa-trash" } else { "fa-solid fa-download" } }
@@ -973,22 +900,22 @@ fn YtAlbumDetail(
                 div { class: "flex-1 min-h-0 overflow-y-auto pb-24",
                     for (idx, track) in tracks.iter().cloned().enumerate() {
                         {
-                            let cover_url = cover_for(&track);
-                            let is_menu_open = active_menu.read().as_ref() == Some(&track.id);
-                            let is_current = current_id.as_ref() == Some(&track.id);
-                            let key = track.id.key().into_owned();
+                            let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
+                            let is_menu_open = active_menu.read().as_ref() == Some(&track.uid);
+                            let is_current = current_id.as_ref() == Some(&track.uid);
+                            let key = track.key.clone();
                             let is_downloaded = offline_tracks
                                 .get(&key)
                                 .map(|p| std::path::Path::new(p).exists())
                                 .unwrap_or(false);
                             let row_tracks = tracks.clone();
-                            let menu_id = track.id.clone();
-                            let pl_id = track.id.clone();
+                            let menu_id = track.uid.clone();
+                            let pl_id = track.uid.clone();
                             let dl_track = track.clone();
                             let q_track = track.clone();
                             rsx! {
                                 components::track_row::TrackRow {
-                                    key: "{track.id.uid()}",
+                                    key: "{track.uid}",
                                     track: track.clone(),
                                     cover_url,
                                     is_album: true,
@@ -1001,10 +928,9 @@ fn YtAlbumDetail(
                                     is_menu_open,
                                     is_currently_playing: is_current,
                                     is_downloaded,
-                                    on_start_radio: components::track_row::radio_handler(track.clone()),
+                                    on_start_radio: components::track_row::radio_handler(track.key.clone()),
                                     on_play: move |_| {
-                                        ctrl.queue.set(row_tracks.clone());
-                                        ctrl.play_track(idx);
+                                        ctrl.play_queue_at(row_tracks.clone(), idx);
                                     },
                                     on_queue: Some(EventHandler::new(move |_| {
                                         ctrl.add_to_queue(vec![q_track.clone()]);
@@ -1022,18 +948,18 @@ fn YtAlbumDetail(
                                     },
                                     on_delete: move |_| {},
                                     on_download: Some(EventHandler::new(move |_| {
-                                        let k = dl_track.id.key();
+                                        let k = &dl_track.key;
                                         if k.is_empty() {
                                             return;
                                         }
-                                        let k = k.as_ref();
+
                                         let downloaded = config.read().offline_tracks.get(k)
                                             .map(|p| std::path::Path::new(p).exists())
                                             .unwrap_or(false);
                                         if downloaded {
-                                            delete_downloads(vec![k.to_string()], config, download_queue);
+                                            hooks::downloads::remove(vec![k.to_string()]);
                                         } else {
-                                            queue_downloads(vec![(k.to_string(), dl_track.title.clone(), dl_track.artist.clone())], config, download_queue);
+                                            hooks::downloads::start(vec![k.to_string()]);
                                         }
                                         active_menu.set(None);
                                     })),
@@ -1052,26 +978,20 @@ fn YtAlbumDetail(
                     },
                     on_add_to_playlist: move |playlist_id: String| {
                         if let Some(id) = playlist_track.read().clone() {
-                            let refs = vec![id.key().into_owned()];
-                            let s = active_source.peek().clone();
-                            spawn(async move {
-                                if s.add_to_playlist(&playlist_id, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
+                            hooks::playlist_actions::add_tracks(
+                                playlist_id,
+                                vec![id],
+                            );
                         }
                         show_playlist_modal.set(false);
                         playlist_track.set(None);
                     },
                     on_create_playlist: move |name: String| {
                         if let Some(id) = playlist_track.read().clone() {
-                            let refs = vec![id.key().into_owned()];
-                            let s = active_source.peek().clone();
-                            spawn(async move {
-                                if s.create_playlist(&name, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
+                            hooks::playlist_actions::create_with(
+                                name,
+                                vec![id],
+                            );
                         }
                         show_playlist_modal.set(false);
                         playlist_track.set(None);

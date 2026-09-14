@@ -77,7 +77,9 @@ pub fn CompactPlayer() -> Element {
     };
     let is_radio = duration == u64::MAX;
 
-    let cover = ctrl.current_song_cover_url.read().clone();
+    let cover = ctrl
+        .current_cover_url(hooks::artwork::Size::Thumb)
+        .unwrap_or_default();
     let is_playing = *ctrl.is_playing.read();
     let is_loading = *ctrl.is_loading.read();
     let buffered_ranges = ctrl.buffered_ranges.read().clone();

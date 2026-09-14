@@ -58,6 +58,64 @@ impl Native {
     }
 }
 
+/// A transaction that takes the write lock up front.
+///
+/// `pool.begin()` issues a deferred `BEGIN`: the first SELECT takes a shared
+/// lock, and if another connection commits before this one writes, SQLite
+/// refuses the upgrade with SQLITE_BUSY immediately -- the busy handler is
+/// never consulted, since waiting could deadlock. A transaction that must read
+/// before it writes starts here instead, so it queues on `busy_timeout` like
+/// any other writer.
+///
+/// sqlx only tracks transactions it began itself, so a connection returned to
+/// the pool mid-way would go back still holding the write lock. Dropping this
+/// without a commit therefore detaches the connection instead: closing the
+/// handle rolls the transaction back, and the pool opens a replacement.
+pub(crate) struct ImmediateTx {
+    conn: Option<sqlx::pool::PoolConnection<sqlx::Sqlite>>,
+}
+
+pub(crate) async fn begin_immediate(pool: &SqlitePool) -> Result<ImmediateTx, DbError> {
+    let mut conn = pool.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    Ok(ImmediateTx { conn: Some(conn) })
+}
+
+impl ImmediateTx {
+    pub(crate) async fn commit(mut self) -> Result<(), DbError> {
+        let mut conn = self.conn.take().expect("live until commit or drop");
+        match sqlx::query("COMMIT").execute(&mut *conn).await {
+            Ok(_) => Ok(()),
+            // A refused commit leaves the transaction open on the connection.
+            Err(error) => {
+                drop(conn.detach());
+                Err(error.into())
+            }
+        }
+    }
+}
+
+impl std::ops::Deref for ImmediateTx {
+    type Target = sqlx::SqliteConnection;
+    fn deref(&self) -> &Self::Target {
+        self.conn.as_deref().expect("live until commit or drop")
+    }
+}
+
+impl std::ops::DerefMut for ImmediateTx {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.conn.as_deref_mut().expect("live until commit or drop")
+    }
+}
+
+impl Drop for ImmediateTx {
+    fn drop(&mut self) {
+        if let Some(conn) = self.conn.take() {
+            drop(conn.detach());
+        }
+    }
+}
+
 async fn open_pool(path: &Path) -> Result<SqlitePool, DbError> {
     let opts = SqliteConnectOptions::new()
         .filename(path)
@@ -170,6 +228,13 @@ impl ReadStore for Native {
         queries::artists(&self.pool(), source).await
     }
 
+    async fn artist_album_covers(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        queries::artist_album_covers(&self.pool(), source).await
+    }
+
     async fn genres(&self, source: &crate::Source) -> Result<Vec<String>, DbError> {
         queries::genres(&self.pool(), source).await
     }
@@ -227,6 +292,15 @@ impl ReadStore for Native {
 
     async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError> {
         cfg_store::load_server(&self.pool(), id).await
+    }
+
+    async fn set_server_credentials(
+        &self,
+        id: &str,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<(), DbError> {
+        cfg_store::set_server_credentials(&self.pool(), id, access_token, user_id).await
     }
 
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError> {
@@ -568,5 +642,73 @@ impl Storage for Native {
 
     async fn sweep_favorites(&self, server_id: &str, epoch: i64) -> Result<(), DbError> {
         writes::sweep_favorites(&self.pool(), server_id, epoch).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn file_pool() -> (tempfile::TempDir, SqlitePool) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pool = open_pool(&dir.path().join("t.db")).await.expect("pool");
+        migrations::run_migrations(&pool).await.expect("migrate");
+        (dir, pool)
+    }
+
+    /// sqlx does not know about a transaction it did not begin, so the guard
+    /// has to make sure a connection never goes back to the pool holding one.
+    /// If it did, the write below would wait out the busy timeout and fail.
+    #[tokio::test]
+    async fn dropping_an_immediate_transaction_releases_the_write_lock() {
+        let (_dir, pool) = file_pool().await;
+
+        let held = begin_immediate(&pool).await.expect("begin immediate");
+        drop(held);
+
+        let started = std::time::Instant::now();
+        cfg_store::push_recent(&pool, &crate::Source::Local, "/after.flac")
+            .await
+            .expect("the lock was released with the connection");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "took {:?}: the dropped transaction was still holding the lock",
+            started.elapsed()
+        );
+    }
+
+    /// A detached connection is replaced, not counted against the pool, so
+    /// the error path cannot exhaust it.
+    #[tokio::test]
+    async fn the_pool_survives_more_abandoned_transactions_than_it_has_connections() {
+        let (_dir, pool) = file_pool().await;
+
+        for _ in 0..8 {
+            let held = begin_immediate(&pool).await.expect("begin immediate");
+            drop(held);
+        }
+
+        let committed = begin_immediate(&pool).await.expect("still acquirable");
+        committed.commit().await.expect("commit");
+    }
+
+    #[tokio::test]
+    async fn a_committed_immediate_transaction_keeps_its_writes() {
+        let (_dir, pool) = file_pool().await;
+
+        let mut tx = begin_immediate(&pool).await.expect("begin immediate");
+        sqlx::query(
+            "INSERT INTO recently_played (source, track_key, played_at) VALUES ('local', '/x', 1)",
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("insert");
+        tx.commit().await.expect("commit");
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM recently_played")
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+        assert_eq!(count, 1);
     }
 }

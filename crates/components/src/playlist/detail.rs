@@ -1,28 +1,7 @@
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
 #[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
-use std::collections::HashSet;
-use std::path::PathBuf;
-use tracing::Instrument;
-
-/// Wall-clock seconds since the epoch — the playlist-pull staleness stamp.
-fn unix_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-/// Wall-clock millis since the epoch — one reconcile's sweep epoch token.
-fn unix_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 #[component]
 #[tracing::instrument(name = "render.playlist_detail", skip_all)]
 pub fn PlaylistDetail(
@@ -34,201 +13,69 @@ pub fn PlaylistDetail(
     on_download_track: Option<EventHandler<usize>>,
     #[props(default = false)] is_downloading_all: bool,
 ) -> Element {
-    let mut tracks = use_signal(Vec::<reader::models::Track>::new);
-    let mut has_loaded_remote = use_signal(|| false);
-    let gens = hooks::db_reactivity::use_generations();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let playlists_res = use_playlists();
-    let cover_for = hooks::use_db_queries::use_cover_resolver(512);
 
-    // Seed = the stored playlist's track refs, resolved from the ACTIVE source's
-    // partition (the store only holds the active source's playlists).
-    let pid_for_seed = playlist_id.clone();
-    let seed_refs = use_memo(move || {
+    // The playlist's track refs, resolved from the library. One query, live:
+    // the daemon's refresh invalidates as each page lands, so this is both the
+    // instant cached view and the progressive one.
+    let pid_for_refs = playlist_id.clone();
+    let track_refs = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
         store
             .playlists
             .iter()
-            .find(|p| p.id == pid_for_seed)
-            .map(|p| p.tracks.clone())
+            .find(|playlist| playlist.id == pid_for_refs)
+            .map(|playlist| playlist.track_keys.clone())
             .unwrap_or_default()
     });
     let active_partition = use_memo(move || config.read().active_source.clone());
-    let seed_tracks_res = use_tracks_by_keys(active_partition, seed_refs);
+    let tracks_res = use_tracks_by_keys(active_partition, track_refs);
 
     // Affordances are capability-driven, not source-kind-driven: tag-edit and
     // delete-from-disk are local-only, downloads server-only, reorder per the
-    // playlists cap (YT's InnerTube has no reorder mutation). Reading the caps is
+    // playlists cap, since not every source can reorder. Reading the caps is
     // also more correct than `is_server` — e.g. a creds-less offline server has
     // downloads=false.
-    let caps = active_source.read().capabilities();
-    let can_reorder = caps.playlists == ::server::source::PlaylistOps::Reorder;
+    let caps = *hooks::sources::use_capabilities().read();
+    let can_reorder = caps.playlists == api::PlaylistCapability::Reorder;
 
-    // Initial tracks with no network round-trip: resolve the playlist's refs from
-    // the active source's cached/local rows. A server's live entries (below)
-    // replace this once they arrive; local has no remote entries, so this stands.
+    // A server playlist's contents are refreshed by the daemon, a page at a
+    // time, and every page invalidates -- so the list fills in as it arrives
+    // through the query hook above, without this component owning a copy of
+    // it or knowing the walk exists. The daemon gates the staleness.
+    let pid_for_refresh = playlist_id.clone();
     use_effect(move || {
-        if !*has_loaded_remote.read() {
-            tracks.set(seed_tracks_res.read().clone().unwrap_or_default());
-        }
-    });
-
-    let pid = playlist_id.clone();
-    // Only sources with remote entries reconcile; a local playlist's tracks live
-    // entirely in the seed, and the end-of-walk sweep would wipe them.
-    let remote_entries = caps.sync;
-    use_effect(move || {
-        if *has_loaded_remote.read() {
+        if !caps.sync {
             return;
         }
-        if !remote_entries {
-            return;
-        }
-        let pid_clone = pid.clone();
-        let load_span = tracing::info_span!("playlist.reconcile", playlist_id = %pid_clone);
-        let source = active_source.peek().clone();
-        let read_db = consume_context::<hooks::ReadDb>();
-        spawn(
-            async move {
-                // Staleness gate (mirrors the favorites pull): the cached seed shows
-                // instantly; only re-walk the remote when the last reconcile is
-                // older than 15 min. First visit (last_pull == 0) always pulls.
-                let now = unix_secs();
-                let last_pull: u64 = read_db
-                    .meta_get("pl_pull", &pid_clone)
-                    .await
-                    .ok()
-                    .flatten()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
-                if last_pull <= now && now - last_pull < 15 * 60 {
-                    return;
-                }
-
-                // Stream the entries page by page under one epoch. Each page upserts
-                // its tracks + positions into the cache (and grows the visible list);
-                // the end sweep drops entries the remote no longer has. The visible
-                // list only grows mid-walk, so re-reconciling an already-cached
-                // playlist never blinks shorter — removals/reorders land at the end.
-                let epoch = unix_millis();
-                let mut cursor: Option<String> = None;
-                let mut seen: HashSet<String> = HashSet::new();
-                let mut acc: Vec<reader::models::Track> = Vec::new();
-                let mut position: i64 = 0;
-                let mut completed = true;
-                loop {
-                    let (src, id, cur) = (source.clone(), pid_clone.clone(), cursor.clone());
-                    let page = match utils::offload(
-                        async move { src.fetch_playlist_entries_page(&id, cur).await }
-                            .instrument(tracing::Span::current()),
-                    )
-                    .await
-                    {
-                        Ok(p) => p,
-                        Err(e) => {
-                            tracing::warn!(error = %e, "playlist page fetch failed");
-                            completed = false;
-                            break;
-                        }
-                    };
-                    let next = page.next.clone();
-                    // YT repeats tracks at page boundaries — dedup across the walk.
-                    let fresh: Vec<reader::models::Track> = page
-                        .tracks
-                        .into_iter()
-                        .filter(|t| {
-                            let k = t.id.key().to_string();
-                            !k.is_empty() && seen.insert(k)
-                        })
-                        .collect();
-                    if fresh.is_empty() {
-                        match next {
-                            Some(n) => {
-                                cursor = Some(n);
-                                continue;
-                            }
-                            None => break,
-                        }
-                    }
-                    let page_refs: Vec<String> =
-                        fresh.iter().map(|t| t.id.key().to_string()).collect();
-                    let start = position;
-                    position += fresh.len() as i64;
-                    let (src, id) = (source.clone(), pid_clone.clone());
-                    let fresh = utils::offload(
-                        async move {
-                            for chunk in fresh.chunks(100) {
-                                let _ = src.upsert_tracks(chunk).await;
-                            }
-                            let _ = src
-                                .upsert_playlist_tracks_page(&id, &page_refs, start, epoch)
-                                .await;
-                            fresh
-                        }
-                        .instrument(tracing::Span::current()),
-                    )
-                    .await;
-                    acc.extend(fresh);
-                    // Grow-only: never shrink the visible list mid-walk.
-                    if acc.len() > tracks.peek().len() {
-                        tracks.set(acc.clone());
-                    }
-                    has_loaded_remote.set(true);
-                    gens.bump_coalesced(Table::Tracks);
-                    match next {
-                        Some(n) => cursor = Some(n),
-                        None => break,
-                    }
-                }
-                if completed {
-                    tracing::debug!(count = acc.len(), "playlist reconciled");
-                    tracks.set(acc);
-                    let (src, id) = (source.clone(), pid_clone.clone());
-                    utils::offload(
-                        async move {
-                            let _ = src.sweep_playlist_tracks(&id, epoch).await;
-                            let _ = src.set_meta("pl_pull", &id, &unix_secs().to_string()).await;
-                        }
-                        .instrument(tracing::Span::current()),
-                    )
-                    .await;
-                    gens.bump(Table::Playlists);
-                    gens.bump(Table::Tracks);
-                }
+        let api = hooks::consume_api();
+        let id = pid_for_refresh.clone();
+        spawn(async move {
+            if let Err(error) = api.refresh_playlist(id).await {
+                tracing::debug!(%error, "playlist refresh failed");
             }
-            .instrument(load_span),
-        );
+        });
     });
 
     let store_loading = playlists_res.read().is_none();
     let store = playlists_res.read().clone().unwrap_or_default();
-    let (playlist_name, playlist_custom_cover, playlist_image_tag) =
+    // The daemon already walked the picked cover, the server's image tag and
+    // the first track's art, so the ref it hands back is the whole answer.
+    let (playlist_name, playlist_cover) =
         if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
-            (p.name.clone(), p.cover_path.clone(), p.image_tag.clone())
+            (
+                p.name.clone(),
+                hooks::artwork::url(p.artwork.as_ref(), hooks::artwork::Size::Full),
+            )
         } else if store_loading {
             return rsx! { div {} };
         } else {
             return rsx! { div { "{i18n::t(\"playlist_not_found\")}" } };
         };
 
-    let tracks_val = tracks.read().clone();
-
-    // A custom (locally-picked) cover wins; then a server playlist's remote image
-    // tag; then the first track's cover via the source-agnostic seam.
-    let playlist_cover = playlist_custom_cover
-        .as_ref()
-        .and_then(|p| utils::format_artwork_url(Some(p)))
-        .or_else(|| {
-            let tag = playlist_image_tag.as_ref()?;
-            let conf = config.read();
-            let server = conf.server.as_ref()?;
-            server::cover::resolve(
-                &conf,
-                reader::CoverRef::remote_item(server.service, &playlist_id, Some(tag.as_str())),
-                512,
-            )
-        })
-        .or_else(|| tracks_val.first().and_then(&cover_for));
+    let tracks_val = tracks_res.read().clone().unwrap_or_default();
+    let track_count = tracks_val.len();
+    let tracks_for_delete = tracks_val.clone();
 
     let start_radio = crate::radio_actions::playlist_radio_handler(playlist_id.clone());
 
@@ -236,8 +83,6 @@ pub fn PlaylistDetail(
     let pid_for_move_up = playlist_id.clone();
     let pid_for_move_down = playlist_id.clone();
     let pid_for_cover = playlist_id.clone();
-    let name_for_cover = playlist_name.clone();
-    let tag_for_cover = playlist_image_tag.clone();
 
     rsx! {
         crate::track_list_view::TrackListView {
@@ -250,154 +95,59 @@ pub fn PlaylistDetail(
             enable_metadata: caps.edit_tags,
             on_cover_click: move |_| {
                 let _ = &pid_for_cover;
-                let _ = &name_for_cover;
-                let _ = &tag_for_cover;
                 #[cfg(not(target_os = "android"))]
                 {
                     let pid = pid_for_cover.clone();
-                    let pl_name = name_for_cover.clone();
-                    let pl_tag = tag_for_cover.clone();
-                    let source = active_source.peek().clone();
+                    // The daemon decides what "set a cover" means -- a server
+                    // pushes the image upstream, everyone else records it --
+                    // so the bytes go across and the policy stays there.
                     spawn(async move {
-                        let file = AsyncFileDialog::new()
+                        let Some(file) = AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
                             .pick_file()
-                            .await;
-                        if let Some(file) = file {
-                            let path = file.path().to_path_buf();
-                            // The source decides what "set a cover" means — Jellyfin
-                            // pushes the image upstream, everyone else just records
-                            // the local path.
-                            if source
-                                .set_playlist_cover(&pid, &pl_name, &path, pl_tag.as_deref())
-                                .await
-                                .is_ok()
-                            {
-                                gens.bump(Table::Playlists);
-                            }
-                        }
+                            .await
+                        else {
+                            return;
+                        };
+                        let path = file.path().to_path_buf();
+                        let Ok(bytes) = tokio::fs::read(&path).await else {
+                            return;
+                        };
+                        hooks::library_actions::upload_artwork(
+                            api::ArtworkTarget::Playlist(pid),
+                            hooks::library_actions::content_type_for(&path),
+                            bytes,
+                        );
                     });
                 }
             },
             on_delete_track: move |idx: usize| {
-                if caps.delete_from_disk
-                    && let Some(t) = tracks.read().get(idx).cloned()
-                    && let Some(del_path) = t.id.local_path()
-                    && std::fs::remove_file(del_path).is_ok()
-                {
-                    let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                    let key = t.id.key().into_owned();
-                    spawn(async move {
-                        if source.delete_tracks(&[key]).await.is_ok() {
-                            gens.bump(Table::Tracks);
-                        }
-                    });
+                if let Some(track) = tracks_for_delete.get(idx) {
+                    hooks::library_actions::delete_tracks(
+                        vec![track.key.clone()],
+                        caps.delete_from_disk,
+                    );
                 }
             },
-            on_selection_delete: move |paths: Vec<PathBuf>| {
-                if caps.delete_from_disk {
-                    {
-                        let mut keys = Vec::new();
-                        for path in &paths {
-                            if std::fs::remove_file(path).is_ok() {
-                                keys.push(path.to_string_lossy().into_owned());
-                            }
-                        }
-                        if !keys.is_empty() {
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            spawn(async move {
-                                if source.delete_tracks(&keys).await.is_ok() {
-                                    gens.bump(Table::Tracks);
-                                }
-                            });
-                        }
-                    }
-                }
+            on_selection_delete: move |keys: Vec<String>| {
+                hooks::library_actions::delete_tracks(keys, caps.delete_from_disk);
             },
+            // No optimistic edit: the daemon invalidates as it writes, and the
+            // query hook's coalescing window is shorter than the round trip
+            // that produced it.
             on_remove_from_playlist: move |idx: usize| {
-                if let Some(t) = tracks.read().get(idx).cloned() {
-                    let pid = pid_for_remove.clone();
-                    let source = active_source.peek().clone();
-                    spawn(async move {
-                        if source.remove_from_playlist(&pid, &t, idx).await.is_ok() {
-                            let mut tw = tracks.write();
-                            if idx < tw.len() {
-                                tw.remove(idx);
-                            }
-                            gens.bump(Table::Playlists);
-                        }
-                    });
-                }
+                hooks::playlist_actions::remove_track(pid_for_remove.clone(), idx);
             },
             is_reorderable: can_reorder,
             on_move_up: move |idx: usize| {
-                if idx == 0 || !can_reorder {
-                    return;
+                if idx > 0 && can_reorder {
+                    hooks::playlist_actions::reorder(pid_for_move_up.clone(), idx, idx - 1);
                 }
-                tracks.write().swap(idx - 1, idx);
-                let mut refs = {
-                    let store = playlists_res.read();
-                    let Some(pl) = store
-                        .as_ref()
-                        .and_then(|s| s.playlists.iter().find(|p| p.id == pid_for_move_up))
-                    else {
-                        return;
-                    };
-                    if idx >= pl.tracks.len() {
-                        return;
-                    }
-                    pl.tracks.clone()
-                };
-                refs.swap(idx - 1, idx);
-                let Some(moved) = tracks.read().get(idx - 1).cloned() else {
-                    return;
-                };
-                let pid = pid_for_move_up.clone();
-                let source = active_source.peek().clone();
-                spawn(async move {
-                    if source
-                        .reorder_playlist(&pid, &refs, &moved, idx - 1)
-                        .await
-                        .is_ok()
-                    {
-                        gens.bump(Table::Playlists);
-                    }
-                });
             },
             on_move_down: move |idx: usize| {
-                let len = tracks.read().len();
-                if idx + 1 >= len || !can_reorder {
-                    return;
+                if can_reorder && idx + 1 < track_count {
+                    hooks::playlist_actions::reorder(pid_for_move_down.clone(), idx, idx + 1);
                 }
-                tracks.write().swap(idx, idx + 1);
-                let mut refs = {
-                    let store = playlists_res.read();
-                    let Some(pl) = store
-                        .as_ref()
-                        .and_then(|s| s.playlists.iter().find(|p| p.id == pid_for_move_down))
-                    else {
-                        return;
-                    };
-                    if idx + 1 >= pl.tracks.len() {
-                        return;
-                    }
-                    pl.tracks.clone()
-                };
-                refs.swap(idx, idx + 1);
-                let Some(moved) = tracks.read().get(idx + 1).cloned() else {
-                    return;
-                };
-                let pid = pid_for_move_down.clone();
-                let source = active_source.peek().clone();
-                spawn(async move {
-                    if source
-                        .reorder_playlist(&pid, &refs, &moved, idx + 1)
-                        .await
-                        .is_ok()
-                    {
-                        gens.bump(Table::Playlists);
-                    }
-                });
             },
             on_download_all: if caps.downloads { on_download_all } else { None },
             on_download_track: if caps.downloads { on_download_track } else { None },

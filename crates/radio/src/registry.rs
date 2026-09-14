@@ -16,7 +16,7 @@ pub struct RegistryStationRef {
     pub manifest_url: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct StationRegistry {
     stations: HashMap<String, StationManifest>,
     /// Runtime inserts; kept out of the curated listing.

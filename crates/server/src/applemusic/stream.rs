@@ -366,7 +366,7 @@ pub async fn resolve_and_decrypt(
     media_user_token: &str,
     storefront: &str,
     language: &str,
-    progress: Option<utils::stream_buffer::BufferProgressCallback>,
+    progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
 ) -> Result<super::progressive::ProgressiveTrack, String> {
     let bearer_token = auth::get_bearer_token().await?;
     // Resolve the id to a catalog Adam id if needed (library ids don't work with web playback)
@@ -554,7 +554,7 @@ async fn licence_and_decrypt(
     key: &CachedKeyInfo,
     bearer_token: &str,
     media_user_token: &str,
-    progress: Option<utils::stream_buffer::BufferProgressCallback>,
+    progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
 ) -> Result<super::progressive::ProgressiveTrack, String> {
     let key_id = STANDARD
         .decode(&key.kid_base64)
@@ -601,7 +601,7 @@ pub async fn download_decrypted(
     media_user_token: &str,
     storefront: &str,
     language: &str,
-    progress: Option<utils::stream_buffer::BufferProgressCallback>,
+    progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
 ) -> Result<Vec<u8>, String> {
     let track = resolve_and_decrypt(adam_id, media_user_token, storefront, language, progress)
         .await

@@ -1,0 +1,38 @@
+[package]
+name = "kopuz-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "proto"
+
+[lints]
+workspace = true
+
+[dependencies]
+api = { workspace = true }
+config = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+tokio = { workspace = true, features = ["net", "time"] }
+futures-util = { workspace = true }
+windows = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_Threading",
+] }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+protox = { workspace = true }
+prost = { workspace = true }

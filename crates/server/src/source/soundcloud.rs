@@ -42,6 +42,8 @@ impl MediaSource for SoundcloudSource {
             delete_from_disk: false,
             scan_folders: false,
             folders: false,
+            browse_folders: false,
+            external_devices: false,
             sync: true,
             downloads: false,
             discover: false,

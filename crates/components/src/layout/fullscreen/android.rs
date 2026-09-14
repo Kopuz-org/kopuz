@@ -4,11 +4,9 @@ use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, Volu
 use crate::queue_list_view::QueueListView;
 use config::AppConfig;
 use dioxus::prelude::*;
-use player::player::Player;
 
 #[component]
 pub(crate) fn FullscreenAndroid(
-    player: Signal<Player>,
     is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
     config: Signal<AppConfig>,
@@ -18,9 +16,8 @@ pub(crate) fn FullscreenAndroid(
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
     current_song_bitrate: Signal<u16>,
-    current_song_cover_url: Signal<String>,
     current_queue_index: Signal<usize>,
-    items: Vec<reader::Track>,
+    items: Vec<api::TrackInfo>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
     volume: Signal<f32>,
     persisted_volume: Signal<f32>,
@@ -141,7 +138,6 @@ pub(crate) fn FullscreenAndroid(
                         class: "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]",
                         TrackMetadata {
                             is_fullscreen,
-                            current_song_cover_url,
                             current_song_title,
                             current_song_artist,
                             current_song_album,
@@ -149,7 +145,7 @@ pub(crate) fn FullscreenAndroid(
                         }
                         SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Fullscreen }
                         TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
-                        VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
+                        VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
                     }
                 } else if tab == 1 {
                     QueueListView {

@@ -9,7 +9,7 @@
 //! read); the active row is highlighted. Styling matches the sidebar's flat,
 //! single-line nav items rather than a glassy stand-alone widget.
 
-use config::{AppConfig, MusicService, Source};
+use config::Source;
 use dioxus::prelude::*;
 use hooks::source_switch::ConnStatus;
 
@@ -68,82 +68,44 @@ const SWITCHER_CSS: &str = r#"
 /// their fixed brand colours).
 const LOCAL_ACCENT: &str = "var(--color-indigo-500)";
 
-/// One selectable source: key, label, icon class, accent colour, mono subline.
-fn entries(config: &AppConfig) -> Vec<(Source, String, &'static str, &'static str, String)> {
-    let mut v = vec![(
-        Source::Local,
-        i18n::t("local").to_string(),
-        "fa-solid fa-hard-drive",
-        LOCAL_ACCENT,
-        i18n::t("source_on_this_device").to_string(),
-    )];
-    for local in &config.local_sources {
-        v.push((
-            Source::LocalLibrary(local.id.clone()),
-            local.name.clone(),
-            "fa-solid fa-folder-tree",
-            LOCAL_ACCENT,
-            i18n::t("source_on_this_device").to_string(),
-        ));
-    }
-    for s in &config.servers {
-        let (icon, accent) = service_style(s.service);
-        v.push((
-            Source::Server(s.id.clone()),
-            s.name.clone(),
-            icon,
-            accent,
-            s.service.display_name().to_uppercase(),
-        ));
-    }
-    v
-}
-
-/// Icon + accent colour per service, so each source reads at a glance.
-fn service_style(service: MusicService) -> (&'static str, &'static str) {
-    match service {
-        MusicService::YtMusic => ("fa-brands fa-youtube", "#ff3355"),
-        MusicService::SoundCloud => ("fa-brands fa-soundcloud", "#ff7a33"),
-        MusicService::AppleMusic => ("fa-brands fa-apple", "#ffffff"),
-        MusicService::Spotify => ("fa-brands fa-spotify", "#1DB954"),
-        MusicService::Jellyfin => ("fa-solid fa-server", "#b277ee"),
-        MusicService::Subsonic | MusicService::Custom => ("fa-solid fa-compact-disc", "#f0a84b"),
-        MusicService::Nextcloud => (NEXTCLOUD_ICON, "#0082c9"),
-    }
-}
-
-/// Stands in for a Font Awesome class where the brand mark has to be drawn
-/// instead: the vendored Font Awesome 6 Free carries no Nextcloud glyph.
-const NEXTCLOUD_ICON: &str = "brand-nextcloud";
-
-/// The Nextcloud mark, from the Simple Icons set (CC0). Sized in `em` and
-/// filled with `currentColor`, so it takes the accent and scale of the font
-/// glyph it stands in for.
-const NEXTCLOUD_PATH: &str = "M12.018 6.537c-2.5 0-4.6 1.712-5.241 4.015-.56-1.232-1.793-2.105-3.225-2.105A3.569 3.569 0 0 0 0 12a3.569 3.569 0 0 0 3.552 3.553c1.432 0 2.664-.874 3.224-2.106.641 2.304 2.742 4.016 5.242 4.016 2.487 0 4.576-1.693 5.231-3.977.569 1.21 1.783 2.067 3.198 2.067A3.568 3.568 0 0 0 24 12a3.569 3.569 0 0 0-3.553-3.553c-1.416 0-2.63.858-3.199 2.067-.654-2.284-2.743-3.978-5.23-3.977zm0 2.085c1.878 0 3.378 1.5 3.378 3.378 0 1.878-1.5 3.378-3.378 3.378A3.362 3.362 0 0 1 8.641 12c0-1.878 1.5-3.378 3.377-3.378zm-8.466 1.91c.822 0 1.467.645 1.467 1.468s-.644 1.467-1.467 1.468A1.452 1.452 0 0 1 2.085 12c0-.823.644-1.467 1.467-1.467zm16.895 0c.823 0 1.468.645 1.468 1.468s-.645 1.468-1.468 1.468A1.452 1.452 0 0 1 18.98 12c0-.823.644-1.467 1.467-1.467z";
-
-/// A service icon: a font glyph, or the drawn mark for brands the font lacks.
-#[component]
-fn ServiceGlyph(icon: &'static str) -> Element {
-    if icon == NEXTCLOUD_ICON {
-        rsx! {
-            svg {
-                class: "ss-svg",
-                view_box: "0 0 24 24",
-                fill: "currentColor",
-                "aria-hidden": "true",
-                path { d: NEXTCLOUD_PATH }
+/// One selectable source: key, label, icon, accent colour, mono subline.
+///
+/// The rows are the daemon's list, and so are the marks: what a service is
+/// called and how it is drawn come with it.
+fn entries(sources: &[api::SourceInfo]) -> Vec<(Source, String, api::Icon, String, String)> {
+    sources
+        .iter()
+        .map(|source| {
+            let on_device = i18n::t("source_on_this_device").to_string();
+            match (source.kind, source.service.as_ref()) {
+                (api::SourceKind::Server, Some(service)) => (
+                    Source::Server(source.id.clone()),
+                    source.name.clone(),
+                    service.icon.clone(),
+                    service.accent.clone(),
+                    crate::forms::text(&service.name).to_uppercase(),
+                ),
+                (api::SourceKind::LocalLibrary, _) => (
+                    Source::LocalLibrary(source.id.clone()),
+                    source.name.clone(),
+                    api::Icon::Class("fa-solid fa-folder-tree".to_string()),
+                    LOCAL_ACCENT.to_string(),
+                    on_device,
+                ),
+                _ => (
+                    Source::Local,
+                    i18n::t("local").to_string(),
+                    api::Icon::Class("fa-solid fa-hard-drive".to_string()),
+                    LOCAL_ACCENT.to_string(),
+                    on_device,
+                ),
             }
-        }
-    } else {
-        rsx! {
-            i { class: "{icon}" }
-        }
-    }
+        })
+        .collect()
 }
 
 #[component]
 pub fn SourceSwitcher(
-    config: Signal<AppConfig>,
     #[props(default = false)] collapsed: bool,
     #[props(default)] on_manage: Option<EventHandler<()>>,
 ) -> Element {
@@ -153,21 +115,31 @@ pub fn SourceSwitcher(
     let switch = hooks::source_switch::use_switch_source();
     // Live auth/connection status of the active source, for the status indicator.
     let conn = hooks::source_switch::use_connection_status();
-    let sources = entries(&config.read());
+    let rows = hooks::sources::use_sources();
+    let rows = rows.read().clone().unwrap_or_default();
+    let active = rows
+        .iter()
+        .find(|source| source.active)
+        .map(|source| match source.kind {
+            api::SourceKind::Server => Source::Server(source.id.clone()),
+            api::SourceKind::LocalLibrary => Source::LocalLibrary(source.id.clone()),
+            _ => Source::Local,
+        })
+        .unwrap_or(Source::Local);
+    let sources = entries(&rows);
     let count = sources.len();
-    let active = config.read().active_source.clone();
     // Follow the active theme palette in both UI styles (the chrome does too), so
     // the switcher harmonises with the theme instead of a fixed dark.
     let surface_vars = "--ss-surface:var(--color-neutral-900);--ss-fg:var(--color-white);";
     let (active_label, active_icon, active_accent) = sources
         .iter()
         .find(|(s, ..)| *s == active)
-        .map(|(_, l, i, a, _)| (l.clone(), *i, *a))
+        .map(|(_, l, i, a, _)| (l.clone(), i.clone(), a.clone()))
         .unwrap_or_else(|| {
             (
                 i18n::t("local").to_string(),
-                "fa-solid fa-hard-drive",
-                LOCAL_ACCENT,
+                api::Icon::Class("fa-solid fa-hard-drive".to_string()),
+                LOCAL_ACCENT.to_string(),
             )
         });
 
@@ -186,7 +158,7 @@ pub fn SourceSwitcher(
                 },
                 title: "{active_label}",
                 onclick: move |_| open.set(!open()),
-                span { class: "ss-ico", ServiceGlyph { icon: active_icon } }
+                span { class: "ss-ico", crate::forms::Glyph { icon: active_icon, class: "ss-svg".to_string() } }
                 if !collapsed {
                     span { class: "ss-stk",
                         span { class: "ss-tname", "{active_label}" }
@@ -224,7 +196,7 @@ pub fn SourceSwitcher(
                                             switch(src.clone());
                                             open.set(false);
                                         },
-                                        span { class: "ss-ico", ServiceGlyph { icon } }
+                                        span { class: "ss-ico", crate::forms::Glyph { icon, class: "ss-svg".to_string() } }
                                         span { class: "ss-meta",
                                             span { class: "ss-rname", "{label}" }
                                             if !collapsed {

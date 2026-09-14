@@ -67,6 +67,13 @@ pub struct Player {
 }
 
 impl Player {
+    fn from_engine(engine: EngineHandle) -> Self {
+        Self {
+            engine,
+            now_playing: None,
+        }
+    }
+
     pub fn try_new() -> Result<Self, PlayerInitError> {
         // Android initialises the JNI media session + classloader cache here; the desktop
         // platforms set up their system integration from the app entry point instead.
@@ -86,10 +93,14 @@ impl Player {
             .map(|sink| Box::new(sink) as Box<dyn AudioSink>)
         })?;
 
-        Ok(Self {
-            engine,
-            now_playing: None,
-        })
+        Ok(Self::from_engine(engine))
+    }
+
+    /// Start a player around an injected sink. Daemon and engine tests use
+    /// this to run the real actor/decoder state machine without requiring an
+    /// output device.
+    pub fn try_with_sink(sink: Box<dyn AudioSink>) -> Result<Self, PlayerInitError> {
+        EngineHandle::spawn(move |_| Ok(sink)).map(Self::from_engine)
     }
 
     pub fn new() -> Self {

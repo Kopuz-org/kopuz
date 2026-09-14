@@ -4,11 +4,9 @@ use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, Volu
 use crate::titlebar::Titlebar;
 use config::AppConfig;
 use dioxus::prelude::*;
-use player::player::Player;
 
 #[component]
 pub(crate) fn FullscreenDesktop(
-    player: Signal<Player>,
     is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
     mut config: Signal<AppConfig>,
@@ -18,9 +16,8 @@ pub(crate) fn FullscreenDesktop(
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
     current_song_bitrate: Signal<u16>,
-    current_song_cover_url: Signal<String>,
     current_queue_index: Signal<usize>,
-    items: Vec<reader::Track>,
+    items: Vec<api::TrackInfo>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
     volume: Signal<f32>,
     persisted_volume: Signal<f32>,
@@ -66,7 +63,6 @@ pub(crate) fn FullscreenDesktop(
 
                     TrackMetadata {
                         is_fullscreen,
-                        current_song_cover_url,
                         current_song_title,
                         current_song_artist,
                         current_song_album,
@@ -82,7 +78,7 @@ pub(crate) fn FullscreenDesktop(
 
                         TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
 
-                        VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
+                        VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
                     }
                 }
 

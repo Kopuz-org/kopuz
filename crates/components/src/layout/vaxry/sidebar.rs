@@ -78,8 +78,8 @@ const SECTIONS: &[(&str, &[NavItem])] = &[
 #[cfg(not(target_os = "android"))]
 const TOOL_ITEMS: &[NavItem] = &[
     NavItem {
-        key: "ytdlp",
-        route: Route::Ytdlp,
+        key: "downloader",
+        route: Route::Downloader,
         icon: "fa-solid fa-download",
     },
     NavItem {
@@ -139,9 +139,9 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
     };
     let onmouseup = move |_| is_resizing.set(false);
 
-    // Discover is a capability of the active source (YT), not a config flag.
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let has_discover = use_memo(move || active_source.read().capabilities().discover);
+    // Discover is a capability of the active source, not a config flag.
+    let caps = hooks::sources::use_capabilities();
+    let has_discover = use_memo(move || caps().discover);
     let collapsed = if is_android {
         false
     } else {
@@ -233,7 +233,6 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
 
             if config.read().show_source_toggle {
                 crate::source_switcher::SourceSwitcher {
-                    config,
                     collapsed,
                     on_manage: move |_| props.on_navigate.call(Route::Settings),
                 }

@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 mod backend;
+pub mod legacy;
 
 pub use backend::{QueuedScrobbleRow, ScrobbleService};
 
@@ -80,6 +81,10 @@ pub struct TrackFilter {
     pub source: Source,
     pub sort: TrackSort,
     pub search: String,
+    /// Restrict to favorites (`Some(true)`) or non-favorites (`Some(false)`).
+    /// Matched against the local favorites mirror, which every source keeps
+    /// under its own `source.as_str()` key.
+    pub favorite: Option<bool>,
 }
 
 impl TrackFilter {
@@ -221,6 +226,13 @@ pub trait ReadStore: Send + Sync {
     /// Distinct artists for a source with their track counts, A→Z.
     async fn artists(&self, source: &Source) -> Result<Vec<(String, u32)>, DbError>;
 
+    /// One album cover per credited artist, keyed by trimmed lowercase
+    /// name -- the picture an artist with no photo of their own renders.
+    async fn artist_album_covers(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+
     /// Distinct non-empty album genres for a source, A→Z.
     async fn genres(&self, source: &Source) -> Result<Vec<String>, DbError>;
 
@@ -259,6 +271,15 @@ pub trait ReadStore: Send + Sync {
     /// Hydrate one server row (creds included) into the in-memory shape — used
     /// by server switching so stored creds are reused instead of re-prompting.
     async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
+
+    /// Store one server's credentials on their own. `save_config` writes
+    /// only the active server's, so signing into another one needs this.
+    async fn set_server_credentials(
+        &self,
+        id: &str,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<(), DbError>;
 
     /// Generic metadata-cache read (`metadata_cache` table): the `payload` for
     /// `(cache_key, kind)`, if cached.
@@ -682,4 +703,22 @@ fn android_files_dir() -> Option<std::path::PathBuf> {
         .ok()?;
     let path: String = env.get_string(&JString::from(path)).ok()?.into();
     Some(std::path::PathBuf::from(path))
+}
+
+/// The process-wide database handle, for the read-through caches that live in
+/// crates below the daemon (Discord cover art). Registered once at boot; a
+/// cache with no handle degrades to fetch-only, which is what tests and early
+/// boot get.
+pub mod cache {
+    use std::sync::OnceLock;
+
+    static DB: OnceLock<super::Db> = OnceLock::new();
+
+    pub fn init(handle: super::Db) {
+        let _ = DB.set(handle);
+    }
+
+    pub fn get() -> Option<&'static super::Db> {
+        DB.get()
+    }
 }

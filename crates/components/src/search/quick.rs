@@ -17,14 +17,14 @@ const SHOWN_RESULTS: usize = 8;
 #[component]
 pub fn QuickSearch(
     mut show: Signal<bool>,
-    on_play: EventHandler<(reader::Track, Vec<reader::Track>)>,
+    on_play: EventHandler<(api::TrackInfo, Vec<api::TrackInfo>)>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
     let mut input_text = use_signal(String::new);
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
     let mut pending_play = use_signal(|| false);
-    let mut cached: Signal<Vec<(reader::Track, Option<utils::CoverUrl>)>> = use_signal(Vec::new);
+    let mut cached: Signal<Vec<api::TrackInfo>> = use_signal(Vec::new);
     let mut results_ready = use_signal(|| false);
     let debounce_gen = use_hook(|| Arc::new(AtomicU64::new(0)));
     let search_data = hooks::use_search_data(query, config);
@@ -45,7 +45,7 @@ pub fn QuickSearch(
     });
 
     let play_track = use_callback(
-        move |(track, fallback): (reader::Track, Vec<reader::Track>)| {
+        move |(track, fallback): (api::TrackInfo, Vec<api::TrackInfo>)| {
             show.set(false);
             on_play.call((track, fallback));
         },
@@ -54,10 +54,7 @@ pub fn QuickSearch(
     let play_index = use_callback(move |index: usize| {
         let (track, fallback) = {
             let list = cached.peek();
-            (
-                list.get(index).map(|(t, _)| t.clone()),
-                list.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(),
-            )
+            (list.get(index).cloned(), list.to_vec())
         };
         if let Some(track) = track {
             play_track.call((track, fallback));
@@ -78,8 +75,7 @@ pub fn QuickSearch(
         }
     });
 
-    let top: Vec<(reader::Track, Option<utils::CoverUrl>)> =
-        cached.read().iter().take(SHOWN_RESULTS).cloned().collect();
+    let top: Vec<api::TrackInfo> = cached.read().iter().take(SHOWN_RESULTS).cloned().collect();
     let has_query = !query.read().trim().is_empty();
     let sel = (*selected.read()).min(top.len().saturating_sub(1));
 
@@ -164,11 +160,11 @@ pub fn QuickSearch(
                 if !top.is_empty() {
                     div {
                         class: "py-2 max-h-96 overflow-y-auto",
-                        for (i, (track, cover_url)) in top.iter().enumerate() {
+                        for (i, track) in top.iter().enumerate() {
                             {
                                 rsx! {
                                     div {
-                                        key: "{track.id.uid()}",
+                                        key: "{track.uid}",
                                         class: if i == sel {
                                             "flex items-center gap-3 px-4 py-2 bg-white/10 cursor-pointer"
                                         } else {
@@ -179,7 +175,7 @@ pub fn QuickSearch(
                                         if config.read().show_row_images {
                                             div {
                                                 class: "w-9 h-9 bg-white/5 rounded overflow-hidden shrink-0 flex items-center justify-center",
-                                                if let Some(url) = cover_url {
+                                                if let Some(url) = hooks::artwork::for_track(track, hooks::artwork::Size::Thumb) {
                                                     img {
                                                         src: "{url.as_ref()}",
                                                         class: "w-full h-full object-cover",
@@ -196,7 +192,7 @@ pub fn QuickSearch(
                                             span { class: "text-sm text-white/90 truncate", "{track.title}" }
                                             span { class: "text-xs text-slate-400 truncate", "{track.artist}" }
                                         }
-                                        span { class: "text-xs text-slate-500 font-mono shrink-0", "{fmt_time(track.duration)}" }
+                                        span { class: "text-xs text-slate-500 font-mono shrink-0", "{fmt_time(track.duration_secs().unwrap_or_default())}" }
                                     }
                                 }
                             }

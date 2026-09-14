@@ -88,9 +88,16 @@ pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<Vec<Track>
     let mut req = super::innertube::http_client()
         .clone()
         .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
+        // The same header set every other InnerTube call sends. This one was
+        // missing the User-Agent and the API format version, which is what
+        // YouTube started answering with a bare 403 -- browse and player, which
+        // send them, kept working from the same session and cookies.
+        .header("User-Agent", client.user_agent)
         .header("Content-Type", "application/json")
+        .header("X-Goog-Api-Format-Version", "1")
         .header("X-YouTube-Client-Name", client.client_id)
         .header("X-YouTube-Client-Version", client.client_version)
+        .header("X-Origin", ORIGIN)
         .header("Origin", ORIGIN)
         .header("Referer", format!("{ORIGIN}/"));
     if let Some(c) = cookies_opt {
@@ -303,9 +310,16 @@ pub async fn artist_channel_for_video(
     let mut req = super::innertube::http_client()
         .clone()
         .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
+        // The same header set every other InnerTube call sends. This one was
+        // missing the User-Agent and the API format version, which is what
+        // YouTube started answering with a bare 403 -- browse and player, which
+        // send them, kept working from the same session and cookies.
+        .header("User-Agent", client.user_agent)
         .header("Content-Type", "application/json")
+        .header("X-Goog-Api-Format-Version", "1")
         .header("X-YouTube-Client-Name", client.client_id)
         .header("X-YouTube-Client-Version", client.client_version)
+        .header("X-Origin", ORIGIN)
         .header("Origin", ORIGIN)
         .header("Referer", format!("{ORIGIN}/"));
     if let Some(c) = cookies_opt {

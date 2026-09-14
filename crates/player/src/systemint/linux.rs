@@ -2,10 +2,8 @@ use mpris_server::{
     LoopStatus, Metadata, PlaybackStatus, PlayerInterface, Property, RootInterface, Server, Time,
     zbus::fdo,
 };
-use std::sync::{
-    Arc, Mutex, OnceLock,
-    mpsc::{self, Receiver, Sender},
-};
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepeatMode {
@@ -57,15 +55,15 @@ struct MprisState {
     repeat: RepeatMode,
 }
 
-static TX: OnceLock<Sender<SystemEvent>> = OnceLock::new();
-static RX: OnceLock<Mutex<Receiver<SystemEvent>>> = OnceLock::new();
+static TX: OnceLock<UnboundedSender<SystemEvent>> = OnceLock::new();
+static RX: OnceLock<tokio::sync::Mutex<UnboundedReceiver<SystemEvent>>> = OnceLock::new();
 static STATE: OnceLock<Arc<Mutex<MprisState>>> = OnceLock::new();
 static NOTIFY: OnceLock<tokio::sync::mpsc::UnboundedSender<bool>> = OnceLock::new();
 
-fn tx() -> Sender<SystemEvent> {
+fn tx() -> UnboundedSender<SystemEvent> {
     TX.get_or_init(|| {
-        let (tx, rx) = mpsc::channel();
-        RX.set(Mutex::new(rx)).ok();
+        let (tx, rx) = unbounded_channel();
+        RX.set(tokio::sync::Mutex::new(rx)).ok();
         tx
     })
     .clone()
@@ -91,7 +89,7 @@ fn notify() {
     }
 }
 
-struct P(Arc<Mutex<MprisState>>, Sender<SystemEvent>);
+struct P(Arc<Mutex<MprisState>>, UnboundedSender<SystemEvent>);
 
 impl RootInterface for P {
     async fn raise(&self) -> fdo::Result<()> {
@@ -280,46 +278,84 @@ pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
     }
 }
 
+/// Take the shared bus name, or the spec's per-instance one when another
+/// player already holds it. zbus asks with `DoNotQueue`, so a taken name never
+/// becomes ours by waiting, and a second instance is legitimate anyway.
+async fn register(
+    st: &Arc<Mutex<MprisState>>,
+    events: &UnboundedSender<SystemEvent>,
+) -> Option<Server<P>> {
+    let taken = match Server::new("kopuz", P(st.clone(), events.clone())).await {
+        Ok(server) => {
+            tracing::info!(name = "kopuz", "MPRIS registered");
+            return Some(server);
+        }
+        Err(error) => error,
+    };
+    let instance = format!("kopuz.instance{}", std::process::id());
+    match Server::new(&instance, P(st.clone(), events.clone())).await {
+        Ok(server) => {
+            tracing::info!(name = %instance, "MPRIS registered");
+            Some(server)
+        }
+        Err(error) => {
+            tracing::warn!(
+                %taken,
+                %error,
+                "MPRIS registration failed; media keys are off for this process"
+            );
+            None
+        }
+    }
+}
+
 fn setup() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
         let (ntx, mut nrx) = tokio::sync::mpsc::unbounded_channel();
         NOTIFY.set(ntx).ok();
         let st = state();
+        // Before the thread, not inside it: the caller reads RX the moment
+        // this returns, and a reader that finds it missing takes that for
+        // "the channel is closed" and stops listening for good.
+        let events = tx();
         std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .unwrap()
                 .block_on(async {
-                    if let Ok(srv) = Server::new("kopuz", P(st.clone(), tx())).await {
-                        while let Some(seeked) = nrx.recv().await {
-                            if seeked {
-                                let (metadata, status, position, shuffle, repeat) = match st.lock()
-                                {
-                                    Ok(s) => (
-                                        s.metadata.clone(),
-                                        s.status,
-                                        s.position,
-                                        s.shuffle,
-                                        s.repeat.to_mpris(),
-                                    ),
-                                    Err(_) => continue,
-                                };
-                                srv.properties_changed([
-                                    Property::Metadata(metadata),
-                                    Property::PlaybackStatus(status),
-                                    Property::Shuffle(shuffle),
-                                    Property::LoopStatus(repeat),
-                                ])
+                    let Some(srv) = register(&st, &events).await else {
+                        return;
+                    };
+                    while let Some(seeked) = nrx.recv().await {
+                        if seeked {
+                            let (metadata, status, position, shuffle, repeat) = match st.lock() {
+                                Ok(s) => (
+                                    s.metadata.clone(),
+                                    s.status,
+                                    s.position,
+                                    s.shuffle,
+                                    s.repeat.to_mpris(),
+                                ),
+                                Err(_) => continue,
+                            };
+                            srv.properties_changed([
+                                Property::Metadata(metadata),
+                                Property::PlaybackStatus(status),
+                                Property::Shuffle(shuffle),
+                                Property::LoopStatus(repeat),
+                            ])
+                            .await
+                            .ok();
+                            srv.emit(mpris_server::Signal::Seeked { position })
                                 .await
                                 .ok();
-                                srv.emit(mpris_server::Signal::Seeked { position })
-                                    .await
-                                    .ok();
-                            }
                         }
                     }
+                    tracing::warn!(
+                        "MPRIS notifier stopped; this process no longer publishes state"
+                    );
                 });
         });
     });
@@ -327,7 +363,17 @@ fn setup() {
 
 pub fn poll_event() -> Option<SystemEvent> {
     setup();
-    RX.get()?.lock().ok()?.try_recv().ok()
+    RX.get()?.try_lock().ok()?.try_recv().ok()
+}
+
+/// Park until the MPRIS handlers hand over a control event. The zbus
+/// handlers run on their own thread and push into an unbounded channel, so
+/// this never blocks them and a media key needs no timer to be noticed.
+pub async fn wait_event() -> Option<SystemEvent> {
+    setup();
+    let rx = RX.get()?;
+    let mut guard = rx.lock().await;
+    guard.recv().await
 }
 
 pub fn update_now_playing(

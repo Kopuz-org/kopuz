@@ -318,9 +318,12 @@ async fn do_search_raw(
         .post(format!(
             "{ORIGIN_YT_MUSIC}/youtubei/v1/search?prettyPrint=false"
         ))
+        .header("User-Agent", client.user_agent)
         .header("Content-Type", "application/json")
+        .header("X-Goog-Api-Format-Version", "1")
         .header("X-YouTube-Client-Name", client.client_id)
         .header("X-YouTube-Client-Version", client.client_version)
+        .header("X-Origin", ORIGIN_YT_MUSIC)
         .header("Origin", ORIGIN_YT_MUSIC)
         .header("Referer", format!("{ORIGIN_YT_MUSIC}/"))
         .json(&body);

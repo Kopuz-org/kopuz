@@ -1,20 +1,16 @@
-use config::AppConfig;
 use dioxus::prelude::*;
 use tracing::Instrument;
 
-/// Android's YouTube JS engine: the resident WebView. Desktop deciphers on an
-/// in-process `deno_core` V8, but that doesn't build for Android, whose only
-/// capable JS runtime is the WebView already rendering the UI. Registers a
-/// [`server::ytmusic::decipher::ChannelEngine`] and drains its solve requests
-/// through `document::eval`. Without this every YT Music stream resolution
-/// falls through to clients YouTube now gates ("LOGIN_REQUIRED") and playback
-/// fails even for signed-in accounts.
+/// The JS runtime the daemon borrows from this process. Desktop runs its own;
+/// on Android the only capable runtime is the WebView already drawing the UI,
+/// so the daemon's solve requests are drained through `document::eval`. Which
+/// source needed a script, and why, stays behind the seam.
 #[cfg(target_os = "android")]
-pub fn use_webview_decipher_engine() {
+pub fn use_webview_script_engine() {
     use_hook(|| {
-        let (engine, mut rx) = server::ytmusic::decipher::webview_channel();
-        if server::ytmusic::decipher::set_engine(engine).is_err() {
-            tracing::warn!("yt-decipher engine already registered — webview solver not active");
+        let (engine, mut rx) = daemon::script_engine::webview_channel();
+        if daemon::script_engine::set_engine(engine).is_err() {
+            tracing::warn!("a script engine is already registered; the webview one is not active");
         }
         spawn(async move {
             while let Some(req) = rx.recv().await {
@@ -43,13 +39,12 @@ pub fn use_webview_decipher_engine() {
     });
 }
 
-pub fn use_connectivity_probe(
-    config: Signal<AppConfig>,
-    mut network_banner: Signal<Option<bool>>,
-) -> Signal<bool> {
+pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signal<bool> {
     let mut is_offline = use_signal(|| false);
     use_context_provider(|| is_offline);
-
+    // Only a remote source makes reachability a thing worth watching, and
+    // which is active is the daemon's answer.
+    let active = hooks::sources::use_active_source_info();
     use_future(move || async move {
         let Ok(client) = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
@@ -59,7 +54,11 @@ pub fn use_connectivity_probe(
         };
         let mut misses: u8 = 0;
         loop {
-            if config.peek().server.is_none() {
+            if !active
+                .peek()
+                .as_ref()
+                .is_some_and(|source| source.kind == api::SourceKind::Server)
+            {
                 if *is_offline.peek() {
                     is_offline.set(false);
                 }

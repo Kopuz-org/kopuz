@@ -5,30 +5,26 @@ use crate::player_controls::{
 use config::PlayerBarPosition;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
-use player::player::Player;
 
 use hooks::favorites::toggle_favorite;
 
 #[component]
 pub fn BottombarVaxry(
     mut config: Signal<config::AppConfig>,
-    mut player: Signal<Player>,
     mut is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
     mut current_song_duration: Signal<u64>,
     mut current_song_progress: Signal<u64>,
-    queue: Signal<Vec<reader::models::Track>>,
+    queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
-    mut current_song_cover_url: Signal<String>,
     mut volume: Signal<f32>,
     mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
     is_devices_open: Signal<bool>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let nav_ctrl = use_context::<NavigationController>();
     let fav_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_fav = hooks::use_db_queries::use_track_is_favorite(fav_track);
@@ -54,7 +50,9 @@ pub fn BottombarVaxry(
         } else {
             0.0
         };
-        let cover = current_song_cover_url.read().clone();
+        let cover = ctrl
+            .current_cover_url(hooks::artwork::Size::Thumb)
+            .unwrap_or_default();
         let fav = is_fav();
         return rsx! {
             div {
@@ -86,7 +84,7 @@ pub fn BottombarVaxry(
                 div { class: "flex items-center gap-0.5 pr-1", dir: "ltr",
                     button {
                         class: if fav { "w-10 h-10 flex items-center justify-center text-red-400 active:scale-90 transition-transform" } else { "w-10 h-10 flex items-center justify-center text-slate-400 active:scale-90 transition-transform" },
-                        onclick: move |evt| { evt.stop_propagation(); toggle_favorite(ctrl.current_track_snapshot.read().clone()); },
+                        onclick: move |evt| { evt.stop_propagation(); toggle_favorite(hooks::favorites::current(&ctrl)); },
                         i { class: if fav { "fa-solid fa-heart text-sm" } else { "fa-regular fa-heart text-sm" } }
                     }
                     button {
@@ -105,6 +103,9 @@ pub fn BottombarVaxry(
     }
 
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+    let cover = ctrl
+        .current_cover_url(hooks::artwork::Size::Thumb)
+        .unwrap_or_default();
     let is_favorite = is_fav();
     let heart_class = if is_favorite {
         "text-red-400 hover:text-red-300 transition-colors"
@@ -150,10 +151,10 @@ pub fn BottombarVaxry(
             if !bar_as_fullscreen {
                 div {
                     class: "w-11 h-11 rounded overflow-hidden bg-white/5 shrink-0 flex items-center justify-center",
-                    if current_song_cover_url.read().is_empty() {
+                    if cover.is_empty() {
                         i { class: "fa-solid fa-music text-white/20 text-xs" }
                     } else {
-                        img { src: "{current_song_cover_url}", class: "w-full h-full object-cover" }
+                        img { src: "{cover}", class: "w-full h-full object-cover" }
                     }
                 }
             }
@@ -195,16 +196,16 @@ pub fn BottombarVaxry(
                 button {
                     class: "{heart_class} w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
-                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone()),
+                    onclick: move |_| { toggle_favorite(hooks::favorites::current(&ctrl)) },
                     i { class: "{heart_icon} text-xs" }
                 }
-                VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Bar }
+                VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Bar }
                 button {
                     class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
                     i { class: "fa-solid fa-list text-[10px]" }
                 }
-                crate::spotify_devices::SpotifyDevicesButton {
+                crate::external_devices::ExternalDevicesButton {
                     compact: true,
                     is_rightbar_open,
                     is_devices_open,
@@ -214,8 +215,7 @@ pub fn BottombarVaxry(
                     title: i18n::t("share_musicbrainz").to_string(),
                     onclick: move |_| {
                         if let Some(t) = ctrl.current_track_snapshot.read().clone() {
-                            let src = active_source.peek().clone();
-                            crate::track_row::share_track(t, src);
+                            crate::track_row::share_track(t);
                         }
                     },
                     i { class: "fa-solid fa-share-nodes text-[10px]" }

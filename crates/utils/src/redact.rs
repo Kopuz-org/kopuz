@@ -1,7 +1,7 @@
 //! Keeping credentials out of what a URL says when it is logged or shown.
 
-/// `url` with any userinfo replaced by a placeholder. A Nextcloud stream URL
-/// carries the app password there, so the raw string must never reach a log
+/// `url` with any userinfo replaced by a placeholder. A stream URL can
+/// carry a password there, so the raw string must never reach a log
 /// line, an error message, or the UI.
 pub fn redact_url(url: &str) -> String {
     let Some(scheme_end) = url.find("://") else {

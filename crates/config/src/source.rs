@@ -96,6 +96,36 @@ pub enum MusicService {
 }
 
 impl MusicService {
+    pub const ALL: &'static [MusicService] = &[
+        MusicService::Jellyfin,
+        MusicService::Subsonic,
+        MusicService::Custom,
+        MusicService::YtMusic,
+        MusicService::SoundCloud,
+        MusicService::AppleMusic,
+        MusicService::Spotify,
+        MusicService::Nextcloud,
+    ];
+
+    /// The stable slug a client names a service by. Unlike the enum, this
+    /// crosses the wire, so it never changes for an existing service.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Jellyfin => "jellyfin",
+            Self::Subsonic => "subsonic",
+            Self::Custom => "custom",
+            Self::YtMusic => "ytmusic",
+            Self::AppleMusic => "applemusic",
+            Self::SoundCloud => "soundcloud",
+            Self::Spotify => "spotify",
+            Self::Nextcloud => "nextcloud",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|service| service.id() == id)
+    }
+
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Jellyfin => "Jellyfin",

@@ -56,11 +56,20 @@ pub fn resolve_path(configured: &str) -> PathBuf {
     if !configured.is_empty() {
         return PathBuf::from(configured);
     }
-    let matugen = db::config_dir().join(MATUGEN_FILE);
+    let matugen = kopuz_config_dir().join(MATUGEN_FILE);
     if matugen.exists() {
         return matugen;
     }
     pywal_path().filter(|p| p.exists()).unwrap_or(matugen)
+}
+
+/// Where matugen writes for kopuz. A live theme is a desktop palette generator
+/// following the running window manager, so the desktop config dir is the only
+/// place it can be; the database's copy of this answer is not needed here.
+fn kopuz_config_dir() -> PathBuf {
+    directories::ProjectDirs::from("moe", "kopuz", "kopuz")
+        .map(|dirs| dirs.config_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("./config"))
 }
 
 /// Where pywal writes its palette. It follows XDG on every platform it runs on,

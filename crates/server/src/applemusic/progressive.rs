@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use utils::stream_buffer::BufferProgressCallback;
+use crate::stream::stream_buffer::BufferProgressCallback;
 
 use super::cenc::{self, Fmp4Layout};
 use super::widevine::{Cdm, CdmSession};

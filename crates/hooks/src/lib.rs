@@ -1,28 +1,35 @@
 //! Dioxus hooks for Kopuz: player controller, library item management,
 //! search data, and async player task orchestration.
 
+pub mod api;
 pub mod artist_images;
+pub mod artwork;
+pub mod artwork_settings;
+pub mod config_view;
 pub mod db_reactivity;
-pub mod debug_db;
+pub mod downloader;
+pub mod downloads;
 pub mod favorites;
-pub mod playback_ref;
-mod player_controller_queue;
-pub mod scrobble_scheduler;
+pub mod integrations;
+pub mod jobs;
+pub mod library_actions;
+pub mod lyrics;
+pub mod playlist_actions;
+mod session_projector;
+pub mod sort;
 pub mod source_switch;
+pub mod sources;
 pub mod toast;
 pub mod use_db_queries;
 pub mod use_player_controller;
 pub mod use_player_task;
 pub mod use_search_data;
-pub mod use_sync_task;
 
+pub use api::{consume_api, use_api};
 pub use use_player_controller::*;
 pub use use_player_task::*;
 pub use use_search_data::*;
 
-pub use debug_db::debug_db_section;
-
-// The read-facing storage types the UI needs — re-exported here (the query
-// layer) so `pages`/`components` depend on `hooks`, not `db`, and so cannot name
-// the write-capable `db::Db` at all.
-pub use db::{Page, ReadDb, TrackFilter, TrackSort};
+// The query types the UI composes, re-exported here (the query layer) so
+// `pages`/`components` depend on `hooks`, not on the wire crate directly.
+pub use ::api::{JobKind, Page, TrackFilter, TrackSort};

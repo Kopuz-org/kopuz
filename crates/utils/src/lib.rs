@@ -1,20 +1,17 @@
-//! Shared utility crate for Kopuz: color helpers, artwork URLs, lyrics fetching,
-//! and terminal logging.
+//! Shared utility crate for Kopuz: color helpers, artwork URLs, the lyric data
+//! model, and terminal logging.
+//!
+//! The frontend crates link this, so nothing here may reach a media source.
 
 pub mod artist;
+pub mod artwork_image;
 pub mod build_info;
 pub mod color;
-pub mod db_cache;
-pub mod hls_source;
-pub mod icy;
 pub mod live_theme;
 pub mod logs;
 pub mod lyrics;
-pub mod musicbrainz;
 pub mod playlist;
-pub mod range_source;
 pub mod redact;
-pub mod stream_buffer;
 pub mod themes;
 use std::path::Path;
 use std::sync::Arc;
@@ -153,6 +150,40 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
         );
         Some(cover_url_from_string(url))
     }
+}
+
+/// The cover URL for a library entity the daemon resolves, as opposed to a
+/// local file this process can read. `kind` is `track`/`album`/`artist` and
+/// `id` the entity's key; the app's `artwork` protocol handler turns it back
+/// into an API call. Server covers are signed with credentials a frontend
+/// never sees, so this is the only way to show one.
+///
+/// `version` comes from the row's artwork ref and changes when the picture
+/// does, which is what makes the year-long immutable cache correct.
+pub fn format_entity_artwork_url(kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
+    const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'#')
+        .add(b'%')
+        .add(b'&')
+        .add(b'+')
+        .add(b'=')
+        .add(b'?')
+        .add(b'<')
+        .add(b'>')
+        .add(b'`')
+        .add(b'\\')
+        .add(b':');
+
+    let id = percent_encoding::utf8_percent_encode(id, QUERY_VAL);
+    let quality = if hq { "&hq=1" } else { "" };
+    let url = if cfg!(target_os = "windows") {
+        format!("http://artwork.dioxus.localhost/api?{kind}={id}{quality}&v={version}")
+    } else {
+        format!("artwork://api?{kind}={id}{quality}&v={version}")
+    };
+    cover_url_from_string(url)
 }
 
 pub const DEFAULT_COVER_SVG: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%231e1b2e'/%3E%3Ccircle cx='200' cy='180' r='70' fill='none' stroke='%233d3466' stroke-width='6'/%3E%3Cpath d='M155 280 Q200 240 245 280' fill='none' stroke='%233d3466' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E";

@@ -27,6 +27,8 @@ impl MediaSource for LocalSource {
             delete_from_disk: true,
             scan_folders: true,
             folders: true,
+            browse_folders: false,
+            external_devices: false,
             sync: false,
             downloads: false,
             discover: false,

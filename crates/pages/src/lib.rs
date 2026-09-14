@@ -4,13 +4,14 @@
 pub mod activity;
 pub mod album;
 pub mod artist;
+#[cfg(not(target_os = "android"))]
+pub mod downloader;
 pub mod favorites;
 pub mod favorites_body;
 pub mod home;
 pub mod home_body;
 pub mod layout;
 pub mod library;
-mod local_files;
 pub mod playlists;
 pub mod radio;
 pub mod scroll_persist;
@@ -20,7 +21,10 @@ pub mod settings;
 pub mod settings_actions;
 #[cfg(not(target_os = "android"))]
 pub mod theme_editor;
-#[cfg(not(target_os = "android"))]
-pub mod ytdlp;
-#[cfg(not(target_os = "android"))]
-pub mod ytdlp_jobs;
+
+/// A panel the app supplies through context, for surfaces that need something
+/// `pages` deliberately cannot reach. The debug database tools are the only
+/// one: they need a write-capable handle, which lives with the daemon core
+/// the app hosts.
+#[derive(Clone, Copy)]
+pub struct DebugPanel(pub fn() -> dioxus::prelude::Element);

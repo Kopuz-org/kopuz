@@ -142,7 +142,7 @@ pub struct YtdlpHistoryEntry {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CustomTheme {
     pub name: String,
     pub vars: HashMap<String, String>,
@@ -617,7 +617,7 @@ fn default_hero_height() -> u32 {
     300
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub server: Option<MusicServer>,
@@ -889,7 +889,7 @@ pub fn default_sidebar_order() -> Vec<String> {
         "favorites".to_string(),
         "radio".to_string(),
         "activity".to_string(),
-        "ytdlp".to_string(),
+        "downloader".to_string(),
     ]
 }
 
@@ -1114,6 +1114,13 @@ impl AppConfig {
     }
 
     pub fn migrate_sidebar_order(&mut self) {
+        // The downloads entry was keyed by the tool that fetches; a stored
+        // order still names it that way.
+        for key in self.sidebar_order.iter_mut() {
+            if key == "downloader" {
+                *key = "downloader".to_string();
+            }
+        }
         let all_keys = default_sidebar_order();
         for key in &all_keys {
             if !self.sidebar_order.iter().any(|k| k == key) {

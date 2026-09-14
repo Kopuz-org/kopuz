@@ -15,13 +15,12 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let config = use_context::<Signal<AppConfig>>();
     let _nav_ctrl = use_context::<NavigationController>();
 
-    let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
+    let total_seconds: u64 = props.tracks.iter().filter_map(|t| t.duration_secs()).sum();
     let duration_min = total_seconds / 60;
 
     let offline_tracks = config.read().offline_tracks.clone();
     // Per-track cover resolver (source dispatch + local-album lookup live in the
     // source layer; no partition decision here).
-    let cover_for = hooks::use_db_queries::use_cover_resolver(64);
     let _fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let sort_state = use_signal(|| None);
     let indexed_tracks: Vec<_> = props
@@ -47,7 +46,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
         > 1;
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.clone())
+        ctrl.get_track_at(idx).map(|track| track.uid.clone())
     };
 
     let current_song_title = ctrl.current_song_title.read().clone();
@@ -57,7 +56,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let tracks_for_play_all = sorted_tracks.clone();
     let selected_queue_tracks: Vec<_> = sorted_tracks
         .iter()
-        .filter(|track| props.selected_tracks.contains(&track.id))
+        .filter(|track| props.selected_tracks.contains(&track.key))
         .cloned()
         .collect();
     let selected_queue_tracks_arc = std::sync::Arc::new(selected_queue_tracks.clone());
@@ -261,18 +260,18 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                         {
                             {
                                 let idx = *idx;
-                                let matches_current_path = currently_playing_path.as_ref() == Some(&track.id);
+                                let matches_current_path = currently_playing_path.as_ref() == Some(&track.uid);
                                 let matches_current_metadata = currently_playing_path.is_none()
                                     && !current_song_title.is_empty()
                                     && track.title == current_song_title
                                     && track.artist == current_song_artist
                                     && track.album == current_song_album
-                                    && track.duration == current_song_duration;
+                                    && track.duration_secs() == Some(current_song_duration);
                                 let is_currently_playing: bool = matches_current_path
                                     || matches_current_metadata;
                                 let is_selected = props.is_selection_mode
-                                    && props.selected_tracks.contains(&track.id);
-                                let path_str = track.id.uid();
+                                    && props.selected_tracks.contains(&track.key);
+                                let path_str = track.uid.clone();
                                 let item_id_str: String = path_str
                                     .split(':')
                                     .nth(1)
@@ -287,7 +286,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 let is_downloading = false;
                                 let play_queue = std::sync::Arc::clone(&sorted_tracks_arc);
                                 let cover_url: Option<utils::CoverUrl> =
-                                    cover_for(track).or_else(|| Some(utils::default_cover_url()));
+                                    hooks::artwork::for_track(track, hooks::artwork::Size::Thumb).or_else(|| Some(utils::default_cover_url()));
                                 let mut is_new_disc = false;
                                 if track.disc_number != last_disc && sort_state.peek().is_none()
                                     && props.is_album
@@ -298,7 +297,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 }
                                 let columns = if props.is_album { COLUMNS_VAXRY_ALBUM } else { COLUMNS_VAXRY };
                                 rsx! {
-                                    div { key: "{track.id.uid()}", class: "contents",
+                                    div { key: "{track.uid.clone()}", class: "contents",
                                     div { class: "flex items-center group",
                                         if has_multiple_discs && props.is_album && is_new_disc && sort_state.peek().is_none() {
                                             div { class: "flex-1 min-w-0",
@@ -315,9 +314,9 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                         div { class: "flex-1 min-w-0",
                                             TrackRow {
                                                 track: track.clone(),
-                                                on_start_radio: crate::track_row::radio_handler(track.clone()),
+                                                on_start_radio: crate::track_row::radio_handler(track.key.clone()),
                                                 cover_url,
-                                                is_menu_open: props.active_track.as_ref() == Some(&track.id),
+                                                is_menu_open: props.active_track.as_ref() == Some(&track.uid),
                                                 is_album: props.is_album,
                                                 is_selection_mode: props.is_selection_mode,
                                                 is_selected,
@@ -377,8 +376,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                                     }
                                                 },
                                                 on_play: move |_| {
-                                                    ctrl.queue.set((*play_queue).clone());
-                                                    ctrl.play_track(display_idx);
+                                                    ctrl.play_queue_at((*play_queue).clone(), display_idx);
                                                 },
                                             }
                                         }

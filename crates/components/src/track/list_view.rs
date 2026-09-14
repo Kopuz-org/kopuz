@@ -1,9 +1,7 @@
+use api::TrackInfo as Track;
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_player_controller::PlayerController;
-use reader::Track;
 use std::collections::HashSet;
-use std::path::PathBuf;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TrackListViewProps {
@@ -20,7 +18,7 @@ pub struct TrackListViewProps {
     pub on_close: EventHandler<()>,
     pub on_cover_click: Option<EventHandler<()>>,
     pub on_delete_track: Option<EventHandler<usize>>,
-    pub on_selection_delete: Option<EventHandler<Vec<PathBuf>>>,
+    pub on_selection_delete: Option<EventHandler<Vec<String>>>,
     pub on_remove_from_playlist: Option<EventHandler<usize>>,
     pub on_download_all: Option<EventHandler<()>>,
     pub on_delete_all: Option<EventHandler<()>>,
@@ -45,13 +43,12 @@ pub struct TrackListViewProps {
 #[component]
 pub fn TrackListView(props: TrackListViewProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
+    let mut active_menu_track = use_signal(|| None::<String>);
     let mut show_playlist_modal = use_signal(|| false);
-    let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
+    let mut selected_track_for_playlist = use_signal(|| None::<String>);
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
+    let mut selected_tracks = use_signal(HashSet::<String>::new);
     let mut metadata_track = use_signal(|| None::<Track>);
-    let gens = hooks::db_reactivity::use_generations();
 
     let view_metadata_handler = if props.enable_metadata {
         let tracks_meta = props.tracks.clone();
@@ -98,14 +95,14 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 is_selection_mode: is_selection_mode(),
                 selected_tracks: selected_tracks.read().clone(),
                 all_selected: !props.tracks.is_empty()
-                    && props.tracks.iter().all(|t| selected_tracks.read().contains(&t.id)),
+                    && props.tracks.iter().all(|t| selected_tracks.read().contains(&t.key)),
                 on_cover_click: props.on_cover_click,
                 actions: props.actions,
                 on_start_radio: props.on_start_radio,
                 on_select_all: move |selected: bool| {
                     if selected {
                         selected_tracks
-                            .set(tracks_select_all.iter().map(|t| t.id.clone()).collect());
+                            .set(tracks_select_all.iter().map(|t| t.key.clone()).collect());
                         is_selection_mode.set(true);
                     }
                     else {
@@ -116,16 +113,16 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 on_long_press: move |idx: usize| {
                     if let Some(t) = tracks_long_press.get(idx) {
                         is_selection_mode.set(true);
-                        selected_tracks.write().insert(t.id.clone());
+                        selected_tracks.write().insert(t.key.clone());
                     }
                 },
                 on_select: move |(idx, sel): (usize, bool)| {
                     if let Some(t) = tracks_select.get(idx) {
                         if sel {
                             is_selection_mode.set(true);
-                            selected_tracks.write().insert(t.id.clone());
+                            selected_tracks.write().insert(t.key.clone());
                         } else {
-                            selected_tracks.write().remove(&t.id);
+                            selected_tracks.write().remove(&t.key);
                             if selected_tracks.read().is_empty() {
                                 is_selection_mode.set(false);
                             }
@@ -141,12 +138,11 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                     }
                 },
                 on_play: move |idx: usize| {
-                    ctrl.queue.set(tracks_play.clone());
-                    ctrl.play_track(idx);
+                    ctrl.play_queue_at(tracks_play.clone(), idx);
                 },
                 on_add_to_playlist: move |idx: usize| {
                     if let Some(t) = tracks_add.get(idx) {
-                        selected_track_for_playlist.set(Some(t.id.clone()));
+                        selected_track_for_playlist.set(Some(t.key.clone()));
                         show_playlist_modal.set(true);
                         active_menu_track.set(None);
                     }
@@ -160,10 +156,10 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 active_track: active_menu_track.read().clone(),
                 on_click_menu: move |idx: usize| {
                     if let Some(t) = tracks_menu.get(idx) {
-                        if active_menu_track.read().as_ref() == Some(&t.id) {
+                        if active_menu_track.read().as_ref() == Some(&t.uid) {
                             active_menu_track.set(None);
                         } else {
-                            active_menu_track.set(Some(t.id.clone()));
+                            active_menu_track.set(Some(t.uid.clone()));
                         }
                     }
                 },
@@ -191,7 +187,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                         }
                         let tracks: Vec<_> = tracks_sel_queue
                             .iter()
-                            .filter(|t| selected.contains(&t.id))
+                            .filter(|t| selected.contains(&t.key))
                             .cloned()
                             .collect();
                         if !tracks.is_empty() {
@@ -202,13 +198,13 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                     },
                     on_add_to_playlist: move |_| show_playlist_modal.set(true),
                     on_delete: move |_| {
-                        let paths: Vec<PathBuf> = tracks_sel_delete
+                        let keys: Vec<String> = tracks_sel_delete
                             .iter()
-                            .filter(|t| selected_tracks.read().contains(&t.id))
-                            .filter_map(|t| t.id.local_path().map(|p| p.to_path_buf()))
+                            .filter(|t| selected_tracks.read().contains(&t.key))
+                            .map(|t| t.key.clone())
                             .collect();
                         if let Some(ref h) = props.on_selection_delete {
-                            h.call(paths);
+                            h.call(keys);
                         }
                         selected_tracks.write().clear();
                         is_selection_mode.set(false);
@@ -224,40 +220,9 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 crate::metadata_modal::MetadataModal {
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
-                    on_save: move |edits: reader::models::TrackEdits| {
-                        let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
-                            return;
-                        };
-                        match reader::write_tags(&path, &edits) {
-                            Ok(()) => {
-                                let mut t = track.clone();
-                                t.title = edits.title.trim().to_string();
-                                t.artist = edits.artist.trim().to_string();
-                                t.artists = edits
-                                    .artist
-                                    .split([';', ','])
-                                    .map(|a| a.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-                                t.album = edits.album.trim().to_string();
-                                t.track_number = edits.track_number;
-                                t.disc_number = edits.disc_number;
-                                t.album_id = reader::metadata::make_album_id(
-                                    edits.album.trim(),
-                                    edits.artist.trim(),
-                                );
-                                let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                                spawn(async move {
-                                    if source.upsert_tracks(&[t]).await.is_ok() {
-                                        gens.bump(Table::Tracks);
-                                    }
-                                });
-                                metadata_track.set(None);
-                            }
-                            Err(e) => {
-                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
-                            }
-                        }
+                    on_save: move |patch: api::TrackMetadataPatch| {
+                        hooks::library_actions::edit_track(patch);
+                        metadata_track.set(None);
                     },
                 }
             }
@@ -278,18 +243,9 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                         } else if let Some(path) = selected_track_for_playlist.read().clone() {
                             paths.push(path);
                         }
-                        if !paths.is_empty() {
-                            let refs: Vec<String> = paths
-                                .iter()
-                                .map(|p| p.key().into_owned())
-                                .collect();
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            spawn(async move {
-                                if source.add_to_playlist(&playlist_id, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
-                        }
+                        let refs: Vec<String> =
+                            paths.clone();
+                        hooks::playlist_actions::add_tracks(playlist_id, refs);
                         show_playlist_modal.set(false);
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();
@@ -301,18 +257,9 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                         } else if let Some(path) = selected_track_for_playlist.read().clone() {
                             paths.push(path);
                         }
-                        if !paths.is_empty() {
-                            let refs: Vec<String> = paths
-                                .iter()
-                                .map(|p| p.key().into_owned())
-                                .collect();
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            spawn(async move {
-                                if source.create_playlist(&name, &refs).await.is_ok() {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
-                        }
+                        let refs: Vec<String> =
+                            paths.clone();
+                        hooks::playlist_actions::create_with(name, refs);
                         show_playlist_modal.set(false);
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();

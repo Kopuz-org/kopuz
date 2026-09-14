@@ -1,11 +1,5 @@
 use crate::settings_items::MultiDirectoryPicker;
-use config::{Browser, MusicService};
 use dioxus::prelude::*;
-
-const APPLE_MUSIC_STOREFRONTS: &[&str] = &[
-    "us", "gb", "jp", "de", "fr", "au", "br", "mx", "kr", "nl", "it", "es", "ca", "ua", "tr",
-];
-const CUSTOM_APPLE_MUSIC_STOREFRONT: &str = "__custom";
 
 #[component]
 pub fn AddLocalSourcePopup(
@@ -50,60 +44,40 @@ pub fn AddLocalSourcePopup(
     }
 }
 
+/// Add a server: pick a service, fill in whatever form the daemon publishes
+/// for it. Nothing here knows what any of those fields mean.
 #[component]
 pub fn AddServerPopup(
-    server_name: Signal<String>,
-    server_url: Signal<String>,
-    server_service: Signal<MusicService>,
-    /// Selected Chromium-family browser when service is YouTube Music.
-    yt_browser: Signal<Browser>,
-    /// YouTube Music anonymous mode — true = no sign-in, browse + play
-    /// public surfaces only.
-    yt_anonymous: Signal<bool>,
-    /// Apple Music storefront code (e.g. "us", "gb", "jp").
-    apple_music_storefront: Signal<String>,
-    /// Apple Music language code (e.g. "en", "ja", "de").
-    apple_music_language: Signal<String>,
-    /// Apple Music manual media-user-token (when not using browser sign-in).
-    apple_music_manual_token: Signal<String>,
-    /// Apple Music: true = paste token manually, false = browser sign-in.
-    apple_music_use_manual: Signal<bool>,
-    host_access: Signal<bool>,
+    services: Vec<api::ServiceInfo>,
+    service: Signal<String>,
+    name: Signal<String>,
+    values: Signal<Vec<api::FieldValue>>,
+    secrets: Signal<Vec<api::FieldValue>>,
+    check: Option<api::DraftCheck>,
+    host_access: bool,
     error: Signal<Option<String>>,
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
 ) -> Element {
-    let _service_value = match server_service() {
-        MusicService::Jellyfin => "jellyfin",
-        MusicService::Subsonic => "subsonic",
-        MusicService::Custom => "custom",
-        MusicService::YtMusic => "ytmusic",
-        MusicService::SoundCloud => "soundcloud",
-        MusicService::AppleMusic => "applemusic",
-        MusicService::Spotify => "spotify",
-        MusicService::Nextcloud => "nextcloud",
-    };
-
-    let server_name_label = i18n::t("server_name").to_string();
-    let server_url_placeholder = i18n::t("server_url_placeholder").to_string();
-    let nextcloud_url_placeholder = i18n::t("nextcloud_url_placeholder").to_string();
-    let custom_manual = i18n::t("custom_manual").to_string();
-    let cancel_text = i18n::t("cancel").to_string();
-    let save_text = i18n::t("save").to_string();
-
-    // Only a service that will actually launch a browser needs host access.
-    // YouTube Music anonymous and Apple Music manual-token both skip that step,
-    // so blocking them would leave a sandboxed user no way to save at all.
-    let saving_not_supported = {
-        let service = server_service();
-        !host_access()
-            && service.uses_browser_signin()
-            && (service != MusicService::YtMusic || !yt_anonymous())
-            && (service != MusicService::AppleMusic || !apple_music_use_manual())
-    };
-
+    let chosen = services
+        .iter()
+        .find(|offered| offered.id == service())
+        .or_else(|| services.first())
+        .cloned()
+        .unwrap_or_default();
+    let fields = chosen.fields.clone();
+    // A sandboxed daemon cannot open a browser, so a service whose sign-in is
+    // one cannot be saved from here at all.
+    let needs_browser = check
+        .as_ref()
+        .is_some_and(|check| check.sign_in == api::SignInKind::Browser);
+    let blocked = needs_browser && !host_access;
+    let problems = check.map(|check| check.problems).unwrap_or_default();
     let flatpak_access_command =
         "flatpak override --user --talk-name=org.freedesktop.Flatpak moe.kopuz.kopuz";
+
+    let mut answered = values();
+    answered.extend(secrets());
 
     rsx! {
         div {
@@ -120,122 +94,91 @@ pub fn AddServerPopup(
                     p { class: "error", "{err}" }
                 }
 
-                if saving_not_supported {
+                if blocked {
                     div { class: "warning",
-                        p {  "Browser Sign-in requires access to host.",  br {}, "Run the command below and restart kopuz to provide access." }
+                        p { "{i18n::t(\"browser_sign_in_needs_host\")}" }
                         button {
                             class: "flatpak-command",
-                            title: "Click to copy",
-                            aria_label: "Click to copy",
+                            title: i18n::t("copy"),
+                            aria_label: i18n::t("copy"),
                             onclick: move |_| {
-                            let js = format!(
-                                "navigator.clipboard.writeText('{flatpak_access_command}').catch((e) => console.error('clipboard writeText failed', e));"
+                                let js = format!(
+                                    "navigator.clipboard.writeText('{flatpak_access_command}').catch((e) => console.error('clipboard writeText failed', e));"
                                 );
-                            let _ = dioxus::document::eval(&js);
+                                let _ = dioxus::document::eval(&js);
                             },
                             "{flatpak_access_command}"
                         }
                     }
                 }
 
-
                 input {
-                    placeholder: "{server_name_label}",
-                    value: "{server_name()}",
-                    oninput: move |e| server_name.set(e.value()),
+                    placeholder: "{i18n::t(\"server_name\")}",
+                    value: "{name()}",
+                    oninput: move |e| name.set(e.value()),
                     onkeydown: move |e| e.stop_propagation()
-                }
-
-                ServerServiceFields {
-                    server_service,
-                    server_url,
-                    yt_browser,
-                    yt_anonymous,
-                    apple_music_storefront,
-                    apple_music_language,
-                    apple_music_manual_token,
-                    apple_music_use_manual,
-                    server_url_placeholder: server_url_placeholder.clone(),
-                    nextcloud_url_placeholder: nextcloud_url_placeholder.clone(),
                 }
 
                 select {
                     onchange: move |e| {
-                        let service = match e.value().as_str() {
-                            "subsonic" => MusicService::Subsonic,
-                            "custom" => MusicService::Custom,
-                            "ytmusic" => MusicService::YtMusic,
-                            "soundcloud" => MusicService::SoundCloud,
-                            "applemusic" => MusicService::AppleMusic,
-                            "spotify" => MusicService::Spotify,
-                            "nextcloud" => MusicService::Nextcloud,
-                            _ => MusicService::Jellyfin,
-                        };
-                        server_service.set(service);
+                        service.set(e.value());
+                        values.set(Vec::new());
+                        secrets.set(Vec::new());
                     },
                     onkeydown: move |e| e.stop_propagation(),
-                    option {
-                        value: "jellyfin",
-                        selected: server_service() == MusicService::Jellyfin,
-                        "{i18n::t(\"jellyfin\")}"
+                    for offered in services.iter() {
+                        option {
+                            key: "{offered.id}",
+                            value: "{offered.id}",
+                            selected: offered.id == chosen.id,
+                            if offered.experimental {
+                                "{crate::forms::text(&offered.name)} ({i18n::t(\"experimental\")})"
+                            } else {
+                                "{crate::forms::text(&offered.name)}"
+                            }
+                        }
                     }
-                    option {
-                        value: "subsonic",
-                        selected: server_service() == MusicService::Subsonic,
-                        "{i18n::t(\"subsonic\")}"
-                    }
-                    option {
-                        value: "custom",
-                        selected: server_service() == MusicService::Custom,
-                        "{custom_manual}"
-                    }
-                    option {
-                        value: "ytmusic",
-                        selected: server_service() == MusicService::YtMusic,
-                        "YouTube Music"
-                    }
-                    option {
-                        value: "soundcloud",
-                        selected: server_service() == MusicService::SoundCloud,
-                        "SoundCloud"
-                    }
-                    option {
-                        value: "applemusic",
-                        selected: server_service() == MusicService::AppleMusic,
-                        "Apple Music"
-                    }
-                    option {
-                        value: "spotify",
-                        selected: server_service() == MusicService::Spotify,
-                        "Spotify (experimental)"
-                    }
-                    option {
-                        value: "nextcloud",
-                        selected: server_service() == MusicService::Nextcloud,
-                        "Nextcloud"
-                    }
+                }
+
+                crate::forms::schema_form::SchemaForm {
+                    fields: fields.clone(),
+                    values: answered,
+                    problems,
+                    on_change: move |answer: api::FieldValue| {
+                        let secret = fields
+                            .iter()
+                            .any(|field| {
+                                field.key == answer.key
+                                    && matches!(field.kind, api::FieldKind::Secret)
+                            });
+                        let mut held = if secret { secrets } else { values };
+                        let mut held = held.write();
+                        match held.iter_mut().find(|value| value.key == answer.key) {
+                            Some(existing) => existing.value = answer.value,
+                            None => held.push(answer),
+                        }
+                    },
                 }
 
                 div { class: "actions",
                     button {
                         onclick: move |_| on_close.call(()),
-                        "{cancel_text}"
+                        "{i18n::t(\"cancel\")}"
                     }
                     button {
-                        disabled: saving_not_supported,
+                        disabled: blocked,
                         onclick: move |_| on_save.call(()),
-                        "{save_text}"
+                        "{i18n::t(\"save\")}"
                     }
                 }
             }
         }
     }
 }
-
 #[component]
 pub fn LoginPopup(
-    username: Signal<String>,
-    password: Signal<String>,
+    mut username: Signal<String>,
+    mut password: Signal<String>,
     service_name: String,
     error: Signal<Option<String>>,
     loading: Signal<bool>,
@@ -347,239 +290,5 @@ pub fn AddRegistryPopup(
                 }
             }
         }
-    }
-}
-
-#[component]
-fn ServerServiceFields(
-    server_service: Signal<MusicService>,
-    server_url: Signal<String>,
-    yt_browser: Signal<Browser>,
-    yt_anonymous: Signal<bool>,
-    apple_music_storefront: Signal<String>,
-    apple_music_language: Signal<String>,
-    apple_music_manual_token: Signal<String>,
-    apple_music_use_manual: Signal<bool>,
-    server_url_placeholder: String,
-    nextcloud_url_placeholder: String,
-) -> Element {
-    match server_service() {
-        MusicService::YtMusic => {
-            let anon = yt_anonymous();
-            rsx! {
-                // Auth method selector.
-                div { class: "flex flex-col gap-2 mb-2",
-                    label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
-                        input {
-                            r#type: "radio",
-                            name: "yt-auth-method",
-                            checked: !anon,
-                            onchange: move |_| yt_anonymous.set(false),
-                        }
-                        span { "Sign in with a browser" }
-                    }
-                    label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
-                        input {
-                            r#type: "radio",
-                            name: "yt-auth-method",
-                            checked: anon,
-                            onchange: move |_| yt_anonymous.set(true),
-                        }
-                        span { "Continue without signing in (anonymous)" }
-                    }
-                }
-
-                if anon {
-                    p { class: "text-xs text-white/60",
-                        "kopuz will use YouTube Music without signing in. You can browse, search, and play — but Liked Music, your library playlists, and following/liking are disabled."
-                    }
-                } else {
-                    p { class: "text-xs text-white/60",
-                        "Pick which browser kopuz should use for the YouTube Music sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
-                    }
-                    // Windows Chrome keeps the auth cookies in memory until the
-                    // browser closes, so kopuz can only read them after close.
-                    if cfg!(target_os = "windows") {
-                        p { class: "text-xs text-amber-300/90 mt-1",
-                            "After you finish signing in, close the browser window — kopuz completes sign-in once it does."
-                        }
-                    }
-                    select {
-                        onchange: move |e| {
-                            if let Some(b) = Browser::from_id(&e.value()) {
-                                yt_browser.set(b);
-                            }
-                        },
-                        onkeydown: move |e| e.stop_propagation(),
-                        for browser in Browser::ALL.iter().copied() {
-                            option {
-                                value: "{browser.id()}",
-                                selected: yt_browser() == browser,
-                                "{browser.label()}"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        MusicService::SoundCloud => rsx! {
-            // SoundCloud is browser sign-in only (no URL); pick the browser for
-            // the isolated sign-in window.
-            p { class: "text-xs text-white/60",
-                "Pick which browser kopuz should use for the SoundCloud sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
-            }
-            select {
-                onchange: move |e| {
-                    if let Some(b) = Browser::from_id(&e.value()) {
-                        yt_browser.set(b);
-                    }
-                },
-                onkeydown: move |e| e.stop_propagation(),
-                for browser in Browser::ALL.iter().copied() {
-                    option {
-                        value: "{browser.id()}",
-                        selected: yt_browser() == browser,
-                        "{browser.label()}"
-                    }
-                }
-            }
-        },
-        MusicService::AppleMusic => rsx! {
-            // Storefront selector
-            div { class: "mb-2",
-                label { class: "text-xs text-white/60 block mb-1", "Storefront" }
-                select {
-                    onchange: move |e| {
-                        let storefront = e.value();
-                        apple_music_storefront.set(
-                            if storefront == CUSTOM_APPLE_MUSIC_STOREFRONT {
-                                String::new()
-                            } else {
-                                storefront
-                            },
-                        );
-                    },
-                    onkeydown: move |e| e.stop_propagation(),
-                    for code in APPLE_MUSIC_STOREFRONTS {
-                        option {
-                            value: "{code}",
-                            selected: apple_music_storefront() == *code,
-                            "{code}"
-                        }
-                    }
-                    option {
-                        value: CUSTOM_APPLE_MUSIC_STOREFRONT,
-                        selected: !APPLE_MUSIC_STOREFRONTS
-                            .contains(&apple_music_storefront().as_str()),
-                        "Custom…"
-                    }
-                }
-                if !APPLE_MUSIC_STOREFRONTS.contains(&apple_music_storefront().as_str()) {
-                    input {
-                        class: "w-full mt-2",
-                        placeholder: "Storefront ID",
-                        value: "{apple_music_storefront()}",
-                        oninput: move |e| apple_music_storefront.set(e.value()),
-                        onkeydown: move |e| e.stop_propagation(),
-                    }
-                }
-            }
-            // Language selector
-            div { class: "mb-2",
-                label { class: "text-xs text-white/60 block mb-1", "Language" }
-                select {
-                    onchange: move |e| apple_music_language.set(e.value()),
-                    onkeydown: move |e| e.stop_propagation(),
-                    for code in &["en", "ja", "de", "fr", "es", "pt", "it", "nl", "ko", "zh-Hans", "zh-Hant"] {
-                        option {
-                            value: "{code}",
-                            selected: apple_music_language() == *code,
-                            "{code}"
-                        }
-                    }
-                }
-            }
-            // Auth method selector
-            div { class: "flex flex-col gap-2 mb-2",
-                label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
-                    input {
-                        r#type: "radio",
-                        name: "am-auth-method",
-                        checked: !apple_music_use_manual(),
-                        onchange: move |_| apple_music_use_manual.set(false),
-                    }
-                    span { "Sign in with a browser" }
-                }
-                label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
-                    input {
-                        r#type: "radio",
-                        name: "am-auth-method",
-                        checked: apple_music_use_manual(),
-                        onchange: move |_| apple_music_use_manual.set(true),
-                    }
-                    span { "Paste media-user-token manually" }
-                }
-            }
-            if apple_music_use_manual() {
-                input {
-                    class: "w-full",
-                    placeholder: "media-user-token",
-                    value: "{apple_music_manual_token()}",
-                    oninput: move |e| apple_music_manual_token.set(e.value()),
-                    onkeydown: move |e| e.stop_propagation(),
-                }
-            } else {
-                p { class: "text-xs text-white/60",
-                    "Pick which browser kopuz should use for the Apple Music sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
-                }
-                select {
-                    onchange: move |e| {
-                        if let Some(b) = Browser::from_id(&e.value()) {
-                            yt_browser.set(b);
-                        }
-                    },
-                    onkeydown: move |e| e.stop_propagation(),
-                    for browser in Browser::ALL.iter().copied() {
-                        option {
-                            value: "{browser.id()}",
-                            selected: yt_browser() == browser,
-                            "{browser.label()}"
-                        }
-                    }
-                }
-            }
-        },
-        MusicService::Spotify => rsx! {
-            input {
-                placeholder: "Spotify Client ID",
-                value: "{server_url()}",
-                oninput: move |e| server_url.set(e.value()),
-                onkeydown: move |e| e.stop_propagation()
-            }
-            p { class: "text-xs text-white/60",
-                "Create an app at developer.spotify.com, add the redirect URI "
-                code { "http://127.0.0.1:8898/callback" }
-                ", add your Spotify account under User Management, and paste its Client ID above. Saving opens Spotify's sign-in page in your default browser — kopuz never sees your password. Spotify Development Mode is limited to five authorized users and requires the app owner to have Premium. Playback also requires Premium; followed playlists may be listed but Spotify only exposes tracks for playlists you own or collaborate on."
-            }
-        },
-        MusicService::Nextcloud => rsx! {
-            input {
-                placeholder: "{nextcloud_url_placeholder}",
-                value: "{server_url()}",
-                oninput: move |e| server_url.set(e.value()),
-                onkeydown: move |e| e.stop_propagation()
-            }
-            p { class: "text-xs text-white/60",
-                "Sign in with your username and an app password (Nextcloud Settings, Security), which is revocable and works with two-factor auth. After signing in, pick which folders hold your music under this server in Settings; kopuz otherwise looks for a Music folder. If your server runs the Music app, adding it as Subsonic instead gives you real tags and playlists."
-            }
-        },
-        _ => rsx! {
-            input {
-                placeholder: "{server_url_placeholder}",
-                value: "{server_url()}",
-                oninput: move |e| server_url.set(e.value()),
-                onkeydown: move |e| e.stop_propagation()
-            }
-        },
     }
 }

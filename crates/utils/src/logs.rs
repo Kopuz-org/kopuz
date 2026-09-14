@@ -23,6 +23,11 @@ static LOG_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 const LATEST: &str = "latest.log";
 const SESSION_PREFIX: &str = "kopuz-";
+/// The daemon writes its own pair of names in the same directory: it is a
+/// separate process with a separate lifetime, so interleaving both into one
+/// file would make either side's history unreadable.
+pub const DAEMON_LATEST: &str = "daemon-latest.log";
+pub const DAEMON_SESSION_PREFIX: &str = "kopuzd-";
 const SESSION_SUFFIX: &str = ".log";
 const CRASH_PREFIX: &str = "crash-";
 /// How many archived session logs to keep before pruning the oldest.
@@ -63,7 +68,13 @@ fn format_time(t: SystemTime) -> String {
 /// `latest.log`, so the crashing session survives a restart instead of
 /// being overwritten.
 pub fn rotate_session_log(dir: &Path) {
-    let latest = dir.join(LATEST);
+    rotate_session_log_named(dir, LATEST, SESSION_PREFIX)
+}
+
+/// As [`rotate_session_log`], for a caller that owns a different pair of
+/// names -- the daemon's, so the two processes never share a file.
+pub fn rotate_session_log_named(dir: &Path, latest: &str, prefix: &str) {
+    let latest = dir.join(latest);
     if latest.exists() {
         // Name by the previous file's last-modified time (when that session
         // ran) when available, falling back to now. Both sort chronologically.
@@ -71,13 +82,13 @@ pub fn rotate_session_log(dir: &Path) {
             .and_then(|m| m.modified())
             .map(format_time)
             .unwrap_or_else(|_| timestamp());
-        let archive = dir.join(format!("{SESSION_PREFIX}{ts}{SESSION_SUFFIX}"));
+        let archive = dir.join(format!("{prefix}{ts}{SESSION_SUFFIX}"));
         let _ = std::fs::rename(&latest, &archive);
     }
-    prune_old_sessions(dir, KEEP_SESSIONS);
+    prune_old_sessions(dir, prefix, KEEP_SESSIONS);
 }
 
-fn prune_old_sessions(dir: &Path, keep: usize) {
+fn prune_old_sessions(dir: &Path, prefix: &str, keep: usize) {
     let mut sessions: Vec<PathBuf> = match std::fs::read_dir(dir) {
         Ok(rd) => rd
             .flatten()
@@ -85,7 +96,7 @@ fn prune_old_sessions(dir: &Path, keep: usize) {
             .filter(|p| {
                 p.file_name()
                     .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with(SESSION_PREFIX) && n.ends_with(SESSION_SUFFIX))
+                    .is_some_and(|n| n.starts_with(prefix) && n.ends_with(SESSION_SUFFIX))
             })
             .collect(),
         Err(_) => return,

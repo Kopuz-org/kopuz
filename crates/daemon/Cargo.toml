@@ -1,0 +1,46 @@
+[package]
+name = "kopuz-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "daemon"
+
+[lints]
+workspace = true
+
+[dependencies]
+api = { workspace = true }
+db = { workspace = true }
+discord-presence = { workspace = true }
+scrobble = { workspace = true }
+webbrowser = { workspace = true }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
+image = { workspace = true }
+percent-encoding = { workspace = true }
+base64 = { workspace = true }
+config = { workspace = true }
+player = { workspace = true }
+radio = { workspace = true }
+reader = { workspace = true }
+server = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }
+tracing = { workspace = true }
+rand = { workspace = true }
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+utils = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+directories = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

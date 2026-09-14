@@ -33,10 +33,10 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
         .playlists
         .iter()
         .map(|p| {
-            let track_text = if p.tracks.len() == 1 {
+            let track_text = if p.track_keys.len() == 1 {
                 i18n::t("track_count_singular").to_string()
             } else {
-                i18n::t_with("track_count", &[("count", p.tracks.len().to_string())])
+                i18n::t_with("track_count", &[("count", p.track_keys.len().to_string())])
             };
             (p.id.clone(), p.name.clone(), track_text)
         })

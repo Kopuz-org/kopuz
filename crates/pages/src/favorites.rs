@@ -7,15 +7,13 @@ use crate::favorites_body::FavoritesBody;
 #[component]
 pub fn FavoritesPage(
     config: Signal<AppConfig>,
-    player: Signal<player::player::Player>,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
-    mut current_song_cover_url: Signal<String>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
     mut current_song_duration: Signal<u64>,
     mut current_song_progress: Signal<u64>,
-    mut queue: Signal<Vec<reader::models::Track>>,
+    mut queue: Signal<Vec<api::TrackInfo>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
