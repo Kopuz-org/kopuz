@@ -35,17 +35,25 @@ The daemon listens on a Unix domain socket, created `0600`:
 - Linux: `$XDG_RUNTIME_DIR/kopuz/kopuzd.sock`
 - macOS: the user cache dir, `~/Library/Caches/kopuz/kopuzd.sock` (the
   exact path is logged at startup)
+- Windows: a named pipe, `\\.\pipe\kopuz-<user SID>`, in place of the
+  socket. `--socket` accepts a `\\.\pipe\` name as is; any other path is
+  flattened into one.
 
 The path is the whole rendezvous -- there is no discovery file, no port and
 no token. **There is no authentication.** The socket's file mode is the
 access control: the kernel admits your own processes and refuses everyone
 else, which is the same boundary a token over loopback was reconstructing
-in userspace, minus the secret.
+in userspace, minus the secret. On Windows the pipe is created with a DACL
+that admits only the creating user, and a client checks that the pipe it
+opened is owned by the same user before it speaks, since pipe names are one
+global namespace that anyone can claim first.
 
 A leftover socket from a crashed daemon has no listener behind it, so a
-failed connect is what marks it stale; `kopuzd` clears it and takes the
-path. A socket that *is* being served makes a second `kopuzd` exit with
-`AddrInUse` rather than stealing the channel.
+refused connect is what marks it stale; `kopuzd` clears it and takes the
+path. Anything at the path that is not a socket is left alone. A socket that
+*is* being served makes a second `kopuzd` exit with `AddrInUse` rather than
+stealing the channel. A pipe has no leftover to clear: it vanishes with its
+process.
 
 Server reflection (v1 and v1alpha) is registered, so `grpcurl` works out of
 the box:

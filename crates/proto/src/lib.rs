@@ -16,4 +16,6 @@ pub use generated::*;
 pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("kopuz");
 
 pub mod convert;
+#[cfg(windows)]
+pub mod pipe;
 pub mod status;

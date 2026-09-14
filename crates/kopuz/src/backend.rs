@@ -49,17 +49,7 @@ pub fn start() -> Result<&'static Core, String> {
                 let Some(core) = CORE.get() else {
                     return;
                 };
-                // Our own UI is already attached in-process, so failing to
-                // bind costs external clients, not playback.
-                match kopuzd::default_socket_path() {
-                    Some(socket) => {
-                        if let Err(error) = kopuzd::listen(core, &socket).await {
-                            tracing::warn!(%error, "the daemon socket is unavailable");
-                        }
-                        kopuzd::release(&socket);
-                    }
-                    None => tracing::warn!("no runtime directory for the daemon socket"),
-                }
+                serve_socket(core).await;
             });
             // The audio engine owns threads that never finish, so dropping the
             // runtime here would block forever on teardown.
@@ -74,6 +64,22 @@ pub fn start() -> Result<&'static Core, String> {
     }
 }
 
+/// Serve the core to other frontends for the life of the process. Our own
+/// UI is already attached in-process, so a socket that cannot be bound or
+/// stops serving costs external clients, not playback: the core stays up on
+/// this runtime either way.
+async fn serve_socket(core: &Core) {
+    match kopuzd::default_socket_path() {
+        Some(socket) => {
+            if let Err(error) = kopuzd::listen(core, &socket).await {
+                tracing::warn!(%error, "the daemon socket is unavailable");
+            }
+        }
+        None => tracing::warn!("no address for the daemon socket"),
+    }
+    std::future::pending::<()>().await;
+}
+
 pub fn core() -> Option<&'static Core> {
     CORE.get()
 }
@@ -86,7 +92,7 @@ pub fn api() -> std::sync::Arc<dyn api::KopuzApi> {
         .expect("the core is started before anything asks it for something")
 }
 
-/// Flush what the core owns. The socket is unlinked by the same call that
+/// Flush what the core owns. The socket is released with the listener that
 /// bound it, so this only has to make the library durable.
 pub fn shutdown() {
     let Some(core) = CORE.get() else {

@@ -5,8 +5,9 @@
 //! the socket without touching its data layer. The contract tests in the
 //! daemon crate run the same assertions through both implementations.
 //!
-//! The transport is a Unix domain socket in the user's runtime dir. There
-//! are no credentials: the socket's file mode is the access control, so the
+//! The transport is a Unix domain socket in the user's runtime dir, or on
+//! Windows a named pipe (`proto::pipe`). There are no credentials: the
+//! socket's file mode, or the pipe's DACL, is the access control, so the
 //! kernel decides who may connect. The path is stable across daemon
 //! restarts, so `events()` reattaches to it and reports the gap as
 //! [`api::ApiEvent::Resync`].
@@ -23,7 +24,6 @@ use api::{
 use hyper_util::rt::TokioIo;
 use proto::convert;
 use proto::kopuz_client::KopuzClient;
-use tokio::net::UnixStream;
 use tonic::Request;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tower::service_fn;
@@ -37,6 +37,18 @@ pub struct GrpcApi {
 
 fn wire_error(status: tonic::Status) -> ApiError {
     proto::status::from_status(&status)
+}
+
+#[cfg(unix)]
+async fn connect(path: PathBuf) -> std::io::Result<tokio::net::UnixStream> {
+    tokio::net::UnixStream::connect(path).await
+}
+
+#[cfg(windows)]
+async fn connect(
+    path: PathBuf,
+) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+    proto::pipe::connect(&path).await
 }
 
 impl GrpcApi {
@@ -56,7 +68,7 @@ impl GrpcApi {
         let channel = Endpoint::from_static("http://kopuz.invalid").connect_with_connector_lazy(
             service_fn(move |_: Uri| {
                 let dial = dial.clone();
-                async move { UnixStream::connect(dial).await.map(TokioIo::new) }
+                async move { connect(dial).await.map(TokioIo::new) }
             }),
         );
         Ok(Self {

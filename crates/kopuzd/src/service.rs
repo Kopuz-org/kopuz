@@ -1384,21 +1384,54 @@ impl Kopuz for KopuzGrpc {
     }
 }
 
-/// Serve the daemon on `listener` until the future is dropped. Reflection
-/// (v1 and v1alpha) is registered so `grpcurl` works out of the box.
-/// `result_large_err` is tonic's own Status type; nothing to shrink here.
-#[allow(clippy::result_large_err)]
-/// Bind the socket the frontend dials. A leftover file from a crashed
-/// daemon has no listener behind it, so a failed connect is the signal that
-/// it is stale -- clear it and take the path. The mode is the access
-/// control: 0600 means only this user can open the channel.
-pub fn bind_socket(path: &std::path::Path) -> std::io::Result<tokio::net::UnixListener> {
+/// The channel the daemon serves on: a Unix socket, or on Windows a named
+/// pipe. Dropping it releases the address, so only the process that bound
+/// a path ever removes it.
+#[cfg(unix)]
+#[derive(Debug)]
+pub struct Listener {
+    incoming: tokio_stream::wrappers::UnixListenerStream,
+    path: std::path::PathBuf,
+}
+
+#[cfg(unix)]
+impl Drop for Listener {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+#[cfg(unix)]
+impl Stream for Listener {
+    type Item = std::io::Result<tokio::net::UnixStream>;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        Pin::new(&mut self.incoming).poll_next(cx)
+    }
+}
+
+#[cfg(windows)]
+pub type Listener = proto::pipe::Listener;
+
+/// Bind the socket the frontend dials. A leftover socket from a crashed
+/// daemon has no listener behind it, so a refused connect is the signal
+/// that it is stale -- clear it and take the path. Anything at the path
+/// that is not a socket is somebody else's file and stays. The mode is the
+/// access control: 0600 means only this user can open the channel.
+#[cfg(unix)]
+pub fn bind_socket(path: &std::path::Path) -> std::io::Result<Listener> {
+    use std::io::{Error, ErrorKind};
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+
     // sockaddr_un.sun_path is a fixed 108-byte field, and the kernel's error
     // for overrunning it names a constant nobody recognises.
     const SUN_PATH_MAX: usize = 100;
     if path.as_os_str().len() > SUN_PATH_MAX {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
             format!(
                 "socket path is {} bytes; a unix socket cannot exceed {SUN_PATH_MAX}: {}",
                 path.as_os_str().len(),
@@ -1409,30 +1442,54 @@ pub fn bind_socket(path: &std::path::Path) -> std::io::Result<tokio::net::UnixLi
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    if path.exists() {
-        match std::os::unix::net::UnixStream::connect(path) {
-            Ok(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::AddrInUse,
-                    format!("a kopuzd is already serving {}", path.display()),
-                ));
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_socket() => {
+            match std::os::unix::net::UnixStream::connect(path) {
+                Ok(_) => {
+                    return Err(Error::new(
+                        ErrorKind::AddrInUse,
+                        format!("a kopuzd is already serving {}", path.display()),
+                    ));
+                }
+                Err(error) if error.kind() == ErrorKind::ConnectionRefused => {
+                    std::fs::remove_file(path)?;
+                }
+                Err(error) => {
+                    return Err(Error::new(
+                        error.kind(),
+                        format!("cannot tell whether {} is served: {error}", path.display()),
+                    ));
+                }
             }
-            Err(_) => std::fs::remove_file(path)?,
         }
+        Ok(_) => {
+            return Err(Error::new(
+                ErrorKind::AlreadyExists,
+                format!("{} exists and is not a socket", path.display()),
+            ));
+        }
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
     let listener = tokio::net::UnixListener::bind(path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(listener)
+    let guard = Listener {
+        incoming: tokio_stream::wrappers::UnixListenerStream::new(listener),
+        path: path.to_path_buf(),
+    };
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    Ok(guard)
 }
 
-pub async fn serve(
-    listener: tokio::net::UnixListener,
-    state: Arc<GrpcState>,
-) -> std::io::Result<()> {
+/// Bind the pipe the frontend dials; see `proto::pipe` for the access
+/// control it carries.
+#[cfg(windows)]
+pub fn bind_socket(path: &std::path::Path) -> std::io::Result<Listener> {
+    Listener::bind(path)
+}
+
+/// Serve the daemon on `listener` until the future is dropped. Reflection
+/// (v1 and v1alpha) is registered so `grpcurl` works out of the box.
+pub async fn serve(listener: Listener, state: Arc<GrpcState>) -> std::io::Result<()> {
     let reflection_v1 = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build_v1()
@@ -1441,16 +1498,20 @@ pub async fn serve(
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build_v1alpha()
         .map_err(std::io::Error::other)?;
+    #[cfg(unix)]
+    let incoming = listener;
+    #[cfg(windows)]
+    let incoming = listener.incoming();
     tonic::transport::Server::builder()
         .add_service(reflection_v1)
         .add_service(reflection_v1alpha)
         .add_service(KopuzServer::new(KopuzGrpc(state)))
-        .serve_with_incoming(tokio_stream::wrappers::UnixListenerStream::new(listener))
+        .serve_with_incoming(incoming)
         .await
         .map_err(std::io::Error::other)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::bind_socket;
 
@@ -1481,13 +1542,40 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("kopuzd.sock");
 
-        // No listener behind it: a crashed daemon's leftover, take the path.
-        std::fs::write(&path, b"").expect("leftover");
+        // A crashed daemon leaves the socket file with nobody behind it.
+        drop(std::os::unix::net::UnixListener::bind(&path).expect("leftover"));
         let live = bind_socket(&path).expect("stale socket reclaimed");
 
         // Now one is really serving, so a second daemon must refuse.
         let error = bind_socket(&path).expect_err("live socket refused");
         assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
         drop(live);
+    }
+
+    #[tokio::test]
+    async fn releasing_the_listener_unlinks_the_socket_it_bound() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("kopuzd.sock");
+        let listener = bind_socket(&path).expect("bind");
+        assert!(path.exists());
+        drop(listener);
+        assert!(
+            !path.exists(),
+            "the socket is unlinked by the process that bound it"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_file_at_the_path_is_not_deleted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("kopuzd.sock");
+        std::fs::write(&path, b"not a socket").expect("file");
+        let error = bind_socket(&path).expect_err("refused");
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read(&path).expect("still there"),
+            b"not a socket",
+            "a failed connect is not licence to unlink a file"
+        );
     }
 }

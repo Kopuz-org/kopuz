@@ -1,4 +1,5 @@
-//! Serving a [`daemon::boot::Core`] over gRPC on a Unix domain socket.
+//! Serving a [`daemon::boot::Core`] over gRPC on a Unix domain socket, or
+//! on Windows a named pipe.
 //!
 //! The core knows nothing about this crate: it is a library of services with
 //! a `LocalApi` over them. Here it gains a wire (see `proto/kopuz.proto`), a
@@ -6,7 +7,8 @@
 //!
 //! The socket path is the whole rendezvous: a frontend opens it or it does
 //! not exist. Its 0600 mode is the access control, so the channel carries no
-//! credentials. Reflection is on:
+//! credentials; the pipe carries a DACL that draws the same line (see
+//! `proto::pipe`). Reflection is on:
 //!
 //! ```sh
 //! kopuzd
@@ -39,6 +41,12 @@ impl ServeArgs {
     }
 }
 
+#[cfg(windows)]
+pub fn default_socket_path() -> Option<PathBuf> {
+    proto::pipe::default_name().ok().map(PathBuf::from)
+}
+
+#[cfg(not(windows))]
 pub fn default_socket_path() -> Option<PathBuf> {
     let base = directories::BaseDirs::new()?;
     let dir = base
@@ -57,16 +65,13 @@ fn state(core: &Core) -> Arc<GrpcState> {
     })
 }
 
-/// Bind the socket and serve the core on it until the server stops.
+/// Bind the socket and serve the core on it until the server stops. The
+/// address is released with the listener, so a path that could not be
+/// bound is never touched.
 pub async fn listen(core: &Core, socket: &Path) -> std::io::Result<()> {
     let listener = bind_socket(socket)?;
     tracing::info!(path = %socket.display(), "kopuzd listening");
     serve(listener, state(core)).await
-}
-
-/// Release the socket. The core's own flush is [`daemon::boot::shutdown`].
-pub fn release(socket: &Path) {
-    let _ = std::fs::remove_file(socket);
 }
 
 async fn terminate_signal() {
@@ -93,7 +98,7 @@ pub async fn run(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     let core = daemon::boot::assemble(&args.core()).await?;
 
     let Some(socket) = args.socket.clone().or_else(default_socket_path) else {
-        return Err("no usable runtime directory for the daemon socket".into());
+        return Err("no usable address for the daemon socket".into());
     };
 
     let listener = bind_socket(&socket)?;
@@ -112,7 +117,6 @@ pub async fn run(args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
     };
 
     daemon::boot::shutdown(core).await;
-    release(&socket);
     result
 }
 

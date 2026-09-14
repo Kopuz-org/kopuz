@@ -4618,13 +4618,16 @@ dependencies = [
 name = "kopuz-proto"
 version = "0.16.2"
 dependencies = [
+ "futures-util",
  "kopuz-api",
  "kopuz-config",
  "prost",
  "protox",
  "serde_json",
+ "tokio",
  "tonic",
  "tonic-build",
+ "windows 0.62.2",
 ]
 
 [[package]]
