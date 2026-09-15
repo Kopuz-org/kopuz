@@ -168,6 +168,7 @@ view_release = வெளியீட்டைக் காண்
 # UI Actions & Buttons
 add_to_favorites = பிடித்தவைக்குச் சேர்
 remove_from_favorites = பிடித்தவையிலிருந்து அகற்று
+dont_recommend = பரிந்துரைக்க வேண்டாம்
 add_to_queue = வரிசையில் சேர்
 play_next = அடுத்ததை இயக்கு
 add_to_playlist = பிளேலிஸ்ட்டில் சேர்

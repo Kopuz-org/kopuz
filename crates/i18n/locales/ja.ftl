@@ -103,6 +103,7 @@ downloader = ダウンロード
 # UI Actions & Buttons
 add_to_favorites = お気に入りに追加
 remove_from_favorites = お気に入りから削除
+dont_recommend = おすすめに表示しない
 add_to_queue = キューに追加
 play_next = 次に再生
 add_to_playlist = プレイリストに追加

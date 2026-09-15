@@ -103,6 +103,7 @@ downloader = 󱥖 󱤿
 # UI Actions & Buttons
 add_to_favorites = 󱥄󱥌󱥩󱥅
 remove_from_favorites = 󱥄󱥶󱥧󱥅
+dont_recommend = 󱥄󱤙󱤂󱤧󱤑
 add_to_queue = 󱥄󱥌󱥩󱤾󱤕
 play_next = 󱥄󱤕󱤬󱥒
 add_to_playlist = 󱥄󱥌󱥩󱤟󱤕

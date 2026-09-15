@@ -105,6 +105,9 @@ pub(crate) fn TrackMetadata(
                         "aria-hidden": "true",
                     }
                 }
+                crate::dont_recommend::DontRecommendButton {
+                    class: "w-11 h-11 rounded-full flex-shrink-0 flex items-center justify-center bg-white/10 text-white/50 hover:bg-white/15 hover:text-white/80 transition-colors active:scale-95",
+                }
                 if let Some(track) = actions_track {
                     TrackActions { track }
                 }

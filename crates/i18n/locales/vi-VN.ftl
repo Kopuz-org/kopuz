@@ -168,6 +168,7 @@ view_release = Xem bản phát hành
 # UI Actions & Buttons
 add_to_favorites = Thêm vào yêu thích
 remove_from_favorites = Xóa khỏi yêu thích
+dont_recommend = Đừng đề xuất
 add_to_queue = Thêm vào hàng đợi
 play_next = Phát tiếp theo
 add_to_playlist = Thêm vào danh sách phát

@@ -103,6 +103,7 @@ downloader = التنزيلات
 # UI Actions & Buttons
 add_to_favorites = إضافة إلى المفضلة
 remove_from_favorites = إزالة من المفضلة
+dont_recommend = لا توصِ بهذه
 add_to_queue = إضافة إلى قائمة الانتظار
 play_next = تشغيل التالي
 add_to_playlist = إضافة إلى قائمة التشغيل

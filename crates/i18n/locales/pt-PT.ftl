@@ -148,6 +148,7 @@ downloader_status_waiting = A aguardar…
 # UI Actions & Buttons
 add_to_favorites = Adicionar aos favoritos
 remove_from_favorites = Remover dos favoritos
+dont_recommend = Não recomendar
 add_to_queue = Adicionar à fila
 play_next = Tocar a seguir
 add_to_playlist = Adicionar à playlist

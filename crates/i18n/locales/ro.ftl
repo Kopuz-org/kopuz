@@ -103,6 +103,7 @@ downloader = Descărcări
 # UI Actions & Buttons
 add_to_favorites = Adaugă la Favorite
 remove_from_favorites = Elimină de la Favorite
+dont_recommend = Nu recomanda
 add_to_queue = Adaugă la Coadă
 play_next = Redă în continuare
 add_to_playlist = Adaugă la Lista de Redare

@@ -168,6 +168,7 @@ view_release = Release bekijken
 # UI Actions & Buttons
 add_to_favorites = Aan favorieten toevoegen
 remove_from_favorites = Uit favorieten verwijderen
+dont_recommend = Niet aanbevelen
 add_to_queue = Aan wachtrij toevoegen
 play_next = Hierna afspelen
 add_to_playlist = Aan afspeellijst toevoegen

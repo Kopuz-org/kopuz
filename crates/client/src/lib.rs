@@ -594,6 +594,14 @@ impl api::LibraryApi for GrpcApi {
         Ok(())
     }
 
+    async fn dont_recommend(&self, key: String) -> Result<(), ApiError> {
+        self.client()
+            .dont_recommend(Request::new(proto::DontRecommendRequest { key }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
     async fn folder_tracks(&self, prefix: String, page: Page) -> Result<api::TrackPage, ApiError> {
         let tracks = self
             .client()

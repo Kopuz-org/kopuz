@@ -168,6 +168,7 @@ view_release = റിലീസ് കാണുക
 # UI Actions & Buttons
 add_to_favorites = പ്രിയപ്പെട്ടവയിലേക്ക് ചേർക്കുക
 remove_from_favorites = പ്രിയപ്പെട്ടവയിൽ നിന്ന് നീക്കം ചെയ്യുക
+dont_recommend = ശുപാർശ ചെയ്യരുത്
 add_to_queue = ക്യൂവിലേക്ക് ചേർക്കുക
 play_next = അടുത്തത് പ്ലേ ചെയ്യുക
 add_to_playlist = പ്ലേലിസ്റ്റിലേക്ക് ചേർക്കുക

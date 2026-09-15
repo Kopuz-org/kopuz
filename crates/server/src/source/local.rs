@@ -32,6 +32,7 @@ impl MediaSource for LocalSource {
             sync: false,
             downloads: false,
             discover: false,
+            dont_recommend: false,
             radio: RadioSeeds::NONE,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,

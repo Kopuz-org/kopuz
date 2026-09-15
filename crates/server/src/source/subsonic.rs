@@ -238,6 +238,7 @@ impl MediaSource for SubsonicSource {
             sync: true,
             downloads: true,
             discover: false,
+            dont_recommend: false,
             radio: RadioSeeds::TRACK,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,

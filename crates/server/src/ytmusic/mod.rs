@@ -178,6 +178,11 @@ impl YouTubeMusicClient {
         mutations::unlike_video(video_id, cookies).await
     }
 
+    pub async fn dislike_video(&self, video_id: &str) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        mutations::dislike_video(video_id, cookies).await
+    }
+
     pub async fn add_to_playlist(&self, playlist_id: &str, video_id: &str) -> Result<(), String> {
         let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::add_to_playlist(playlist_id, video_id, cookies).await

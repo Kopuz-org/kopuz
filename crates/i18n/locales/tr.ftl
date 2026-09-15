@@ -103,6 +103,7 @@ downloader = İndirmeler
 # UI Actions & Buttons
 add_to_favorites = Favorilere Ekle
 remove_from_favorites = Favorilerden Kaldır
+dont_recommend = Bunu Önerme
 add_to_queue = Sıraya Ekle
 play_next = Sonraki çal
 add_to_playlist = Çalma Listesine Ekle

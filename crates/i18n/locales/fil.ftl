@@ -168,6 +168,7 @@ view_release = Tingnan ang release
 # UI Actions & Buttons
 add_to_favorites = Idagdag sa Paborito
 remove_from_favorites = Alisin sa Paborito
+dont_recommend = Huwag Irekomenda
 add_to_queue = Idagdag sa Queue
 play_next = I-play Susunod
 add_to_playlist = Idagdag sa Playlist

@@ -67,12 +67,23 @@ impl MediaSource for YtSource {
             sync: true,
             downloads: true,
             discover: true,
+            dont_recommend: true,
             radio: RadioSeeds::ALL,
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Remote,
             albums: AlbumType::YtMusic,
             favorites_sync: FavoritesSync::Paginated,
         }
+    }
+
+    async fn dont_recommend(&self, item_id: &str) -> Result<(), SourceError> {
+        if item_id.trim().is_empty() {
+            return Err(SourceError::InvalidInput("track has no video id".into()));
+        }
+        self.client
+            .dislike_video(item_id)
+            .await
+            .map_err(SourceError::from)
     }
 
     async fn start_radio(&self, seed_ref: &str) -> Result<Vec<reader::Track>, SourceError> {

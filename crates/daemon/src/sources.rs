@@ -50,6 +50,7 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
         sync: caps.sync,
         downloads: caps.downloads,
         discover: caps.discover,
+        dont_recommend: caps.dont_recommend,
         track_radio: caps.radio.track,
         playlist_radio: caps.radio.playlist,
         playlists: match caps.playlists {

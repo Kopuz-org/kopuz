@@ -236,6 +236,12 @@ pub trait LibraryApi: Send + Sync {
     /// local state and surfaces the error.
     async fn set_favorite(&self, key: String, favorite: bool) -> Result<(), ApiError>;
 
+    /// Tell the active source to stop recommending this track. Gated by
+    /// [`SourceCapabilities::dont_recommend`]; a source without it answers
+    /// `unsupported`. It is not a favorite -- but the source may clear a like
+    /// it holds for the track, so the local favorite row is cleared with it.
+    async fn dont_recommend(&self, key: String) -> Result<(), ApiError>;
+
     /// Rewrite one track's tags, and its embedded cover with them. Only local
     /// files have tags to edit; a server track answers `unsupported`.
     async fn update_track_metadata(&self, patch: TrackMetadataPatch)

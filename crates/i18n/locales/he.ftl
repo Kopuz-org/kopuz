@@ -103,6 +103,7 @@ downloader = הורדות
 # UI Actions & Buttons
 add_to_favorites = הוספה למועדפים
 remove_from_favorites = הסרה מהמועדפים
+dont_recommend = אל תמליץ על זה
 add_to_queue = הוספה לתור
 play_next = נגן הבא בתור
 add_to_playlist = הוספה לרשימת השמעה

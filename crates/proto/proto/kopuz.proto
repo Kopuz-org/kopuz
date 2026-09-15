@@ -81,6 +81,7 @@ service Kopuz {
   rpc GetExternalDevices(ExternalDevicesRequest) returns (ExternalDeviceList);
   rpc SelectExternalDevice(SelectExternalDeviceRequest) returns (Unit);
   rpc SetFavorite(FavoriteRequest) returns (SetFavoriteResponse);
+  rpc DontRecommend(DontRecommendRequest) returns (Unit);
   rpc UpdateTrackMetadata(TrackMetadataPatch) returns (TrackInfo);
   rpc DeleteTracks(DeleteTracksRequest) returns (Unit);
   rpc DeleteAlbum(DeleteAlbumRequest) returns (Unit);
@@ -145,6 +146,8 @@ message GetJobsRequest {}
 message GetDownloadsRequest {}
 message GetConfigRequest {}
 message SetFavoriteResponse {}
+// Stop recommending one track, by its library key.
+message DontRecommendRequest { string key = 1; }
 message CancelJobResponse {}
 message RemoveDownloadResponse {}
 
@@ -735,6 +738,8 @@ message SourceCapabilities {
   bool browse_folders = 14;
   // It plays on devices of its own, which a client can list and move to.
   bool external_devices = 15;
+  // It takes a "stop recommending this" signal for a track.
+  bool dont_recommend = 16;
 }
 
 // What making a source usable takes.

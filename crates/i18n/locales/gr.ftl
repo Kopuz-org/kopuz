@@ -103,6 +103,7 @@ downloader = Λήψεις
 # UI Actions & Buttons
 add_to_favorites = Προσθήκη στα Αγαπημένα
 remove_from_favorites = Αφαίρεση από τα Αγαπημένα
+dont_recommend = Να μην προτείνεται
 add_to_queue = Προσθήκη στην Ουρά
 play_next = Αναπαραγωγή στη συνέχεια
 add_to_playlist = Προσθήκη στη Λίστα Αναπαραγωγής
