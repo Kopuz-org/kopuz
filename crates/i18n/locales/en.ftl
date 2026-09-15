@@ -169,6 +169,7 @@ view_release = View release
 # UI Actions & Buttons
 add_to_favorites = Add to Favorites
 remove_from_favorites = Remove from Favorites
+dont_recommend = Don't Recommend
 add_to_queue = Add to Queue
 play_next = Play Next
 add_to_playlist = Add to Playlist

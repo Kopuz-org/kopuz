@@ -104,6 +104,7 @@ downloader = kama jo
 # UI Actions & Buttons
 add_to_favorites = o pana tawa olin
 remove_from_favorites = o weka tan olin
+dont_recommend = o toki ala e ni
 add_to_queue = o pana tawa nasin kalama
 play_next = o kalama lon poka
 add_to_playlist = o pana tawa kulupu kalama

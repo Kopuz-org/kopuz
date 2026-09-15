@@ -169,6 +169,7 @@ view_release = Visa version
 # UI Actions & Buttons
 add_to_favorites = Lägg till i favoriter
 remove_from_favorites = Ta bort från favoriter
+dont_recommend = Rekommendera inte
 add_to_queue = Lägg till i kön
 play_next = Spela nästa
 add_to_playlist = Lägg till i spellista

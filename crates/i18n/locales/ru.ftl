@@ -104,6 +104,7 @@ downloader = Загрузки
 # UI Actions & Buttons
 add_to_favorites = Добавить в избранное
 remove_from_favorites = Удалить из избранного
+dont_recommend = Не рекомендовать
 add_to_queue = Добавить в очередь
 play_next = Воспроизвести следующим
 add_to_playlist = Добавить в плейлист

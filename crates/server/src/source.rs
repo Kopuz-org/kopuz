@@ -148,6 +148,14 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("playlist reorder"))
     }
 
+    /// Tell the source to stop recommending `item_id` — YT Music's dislike,
+    /// which is a signal to its recommender rather than a library edit. Only
+    /// sources whose [`Capabilities::dont_recommend`] is set override this; the
+    /// rest inherit the unsupported default.
+    async fn dont_recommend(&self, _item_id: &str) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("don't recommend"))
+    }
+
     /// Start a radio/mix seeded from a track, returning the generated queue. Only
     /// sources whose [`Capabilities::radio`] is set override this; the rest
     /// inherit the unsupported default.

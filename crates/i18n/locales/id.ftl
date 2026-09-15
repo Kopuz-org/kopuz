@@ -169,6 +169,7 @@ view_release = Lihat rilis
 # UI Actions & Buttons
 add_to_favorites = Tambahkan ke Favorit
 remove_from_favorites = Hapus dari Favorit
+dont_recommend = Jangan Rekomendasikan
 add_to_queue = Tambahkan ke Antrian
 play_next = Putar Berikutnya
 add_to_playlist = Tambahkan ke Daftar Putar

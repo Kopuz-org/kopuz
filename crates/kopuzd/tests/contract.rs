@@ -461,6 +461,38 @@ async fn favorites_round_trip_across_transports() {
     assert_eq!(err.code, ErrorCode::NotFound);
 }
 
+/// A local library has no recommender to signal, so the capability is off and
+/// the op refuses. The refusal is the contract: it has to arrive as
+/// `Unsupported` over the wire too, not as a transport failure, because that
+/// is what tells a client the button should never have been drawn.
+#[tokio::test]
+async fn dont_recommend_is_refused_by_a_source_without_it() {
+    let pair = spawn_pair().await;
+    let local = pair
+        .local
+        .dont_recommend("/lib/seed-0.flac".into())
+        .await
+        .expect_err("local source has no recommender");
+    let wire = pair
+        .wire
+        .dont_recommend("/lib/seed-0.flac".into())
+        .await
+        .expect_err("same over the wire");
+    assert_eq!(local.code, ErrorCode::Unsupported);
+    assert_eq!(wire.code, ErrorCode::Unsupported);
+
+    let caps = pair
+        .wire
+        .sources()
+        .await
+        .expect("sources")
+        .into_iter()
+        .find(|source| source.active)
+        .expect("an active source")
+        .capabilities;
+    assert!(!caps.dont_recommend);
+}
+
 #[tokio::test]
 async fn scan_job_indexes_local_files_over_the_wire() {
     let pair = spawn_pair().await;

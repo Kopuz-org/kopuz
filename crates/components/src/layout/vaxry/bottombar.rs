@@ -199,6 +199,9 @@ pub fn BottombarVaxry(
                     onclick: move |_| { toggle_favorite(hooks::favorites::current(&ctrl)) },
                     i { class: "{heart_icon} text-xs" }
                 }
+                crate::dont_recommend::DontRecommendButton {
+                    class: "text-slate-500 hover:text-slate-300 transition-colors text-xs w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95",
+                }
                 VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Bar }
                 button {
                     class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",

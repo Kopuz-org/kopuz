@@ -2772,6 +2772,13 @@
       }
     }
   }
+  .hover\:text-slate-200 {
+    &:hover {
+      @media (hover: hover) {
+        color: var(--color-slate-200);
+      }
+    }
+  }
   .hover\:text-slate-300 {
     &:hover {
       @media (hover: hover) {

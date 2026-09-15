@@ -104,6 +104,7 @@ downloader = Letöltések
 # UI Actions & Buttons
 add_to_favorites = Hozzáadás a kedvencekhez
 remove_from_favorites = Eltávolítás a kedvencekből
+dont_recommend = Ne ajánlja
 add_to_queue = Hozzáadás sorhoz
 play_next = Lejátszás következőként
 add_to_playlist = Hozzáadás lejátszási listához

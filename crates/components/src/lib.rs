@@ -25,7 +25,7 @@ pub use playback::compact::{CompactMode, CompactPlayer};
 pub use playback::cover_background::CoverArtBackground;
 pub use playback::{
     album_play_button, compact as compact_player, controls as player_controls, cover_background,
-    external_devices, lyrics as lyrics_view, radio_actions,
+    dont_recommend, external_devices, lyrics as lyrics_view, radio_actions,
 };
 pub use playlist::{
     detail as playlist_detail, folder_picker, modal as playlist_modal, popups as playlist_popups,

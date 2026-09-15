@@ -71,6 +71,8 @@ pub struct SourceCapabilities {
     pub sync: bool,
     pub downloads: bool,
     pub discover: bool,
+    /// It takes a "stop recommending this" signal for a track.
+    pub dont_recommend: bool,
     pub track_radio: bool,
     pub playlist_radio: bool,
     /// It plays on devices of its own, which a client can list and move to.

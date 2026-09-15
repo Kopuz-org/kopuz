@@ -67,6 +67,25 @@ impl FavoritesService {
         Ok(FavoritesView { refs, generation })
     }
 
+    /// The track behind a key. Live search results are not in the DB yet; the
+    /// materializer resolves them from the library's transient cache so acting
+    /// on one still works (`record_favorite` then upserts the track like the
+    /// old direct path).
+    async fn resolve_track(&self, key: &str) -> Result<reader::Track, ApiError> {
+        let config = self.session.config_watch().borrow().clone();
+        match self
+            .db
+            .tracks_by_keys(&config.active_source, &[key.to_string()])
+            .await
+            .map_err(|error| ApiError::internal(format!("database error: {error}")))?
+            .into_iter()
+            .next()
+        {
+            Some(track) => Ok(track),
+            None => self.session.materialize_track(key.to_string()).await,
+        }
+    }
+
     /// Optimistic set, matching the hooks toggle: local write reflected
     /// immediately, remote push follows; a rejected push reverts the local
     /// state, emits a notice, and surfaces the error to the caller.
@@ -75,21 +94,7 @@ impl FavoritesService {
             return Err(ApiError::invalid_input("empty favorite key"));
         }
         let source = self.active_source();
-        let config = self.session.config_watch().borrow().clone();
-        // Live search results are not in the DB yet; the materializer resolves
-        // them from the library's transient cache so hearting them still works
-        // (record_favorite then upserts the track like the old direct path).
-        let track = match self
-            .db
-            .tracks_by_keys(&config.active_source, &[key.to_string()])
-            .await
-            .map_err(|error| ApiError::internal(format!("database error: {error}")))?
-            .into_iter()
-            .next()
-        {
-            Some(track) => track,
-            None => self.session.materialize_track(key.to_string()).await?,
-        };
+        let track = self.resolve_track(key).await?;
 
         if source.is_favorite(key).await == favorite {
             return Ok(());
@@ -115,6 +120,29 @@ impl FavoritesService {
         }
         self.mutation_nudge.store(true, Ordering::Relaxed);
         self.nudge.notify_one();
+        Ok(())
+    }
+
+    /// Tell the source to stop recommending a track. Not a favorite, but it
+    /// lives here because the two are one setting on the remote: YouTube takes
+    /// a dislike by clearing whatever like it held, so the local heart has to
+    /// go with it or it would claim a like the remote no longer has. Pessimistic
+    /// on purpose -- nothing local changes until the remote has taken it.
+    pub async fn dont_recommend(&self, key: &str) -> Result<(), ApiError> {
+        if key.trim().is_empty() {
+            return Err(ApiError::invalid_input("empty track key"));
+        }
+        let source = self.active_source();
+        source.dont_recommend(key).await.map_err(source_error)?;
+        if source.is_favorite(key).await {
+            let track = self.resolve_track(key).await?;
+            source
+                .record_favorite(&track, false)
+                .await
+                .map_err(source_error)?;
+            self.bump(Table::Favorites);
+            self.bump(Table::Tracks);
+        }
         Ok(())
     }
 

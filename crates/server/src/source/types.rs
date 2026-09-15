@@ -136,6 +136,9 @@ pub struct Capabilities {
     pub sync: bool,
     pub downloads: bool,
     pub discover: bool,
+    /// The person can tell it to stop recommending a track — a negative
+    /// signal to the source's recommender, not a library edit.
+    pub dont_recommend: bool,
     pub radio: RadioSeeds,
     pub playlists: PlaylistOps,
     pub artist_view: ArtistView,
