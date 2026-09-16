@@ -33,6 +33,9 @@ pub struct Core {
     pub artwork: Arc<crate::ArtworkService>,
     pub db: db::Db,
     pub config: config::AppConfig,
+    /// The authority on the running config, as opposed to the `config`
+    /// snapshot above. A host needs it to flush the volume on the way out.
+    pub config_service: Arc<ConfigService>,
     pub library: Arc<LibraryService>,
     pub jobs: Arc<JobRunner>,
     pub favorites: Arc<FavoritesService>,
@@ -225,7 +228,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let api = Arc::new(
         LocalApi::new(session.clone())
             .with_library(library.clone())
-            .with_config(config_service)
+            .with_config(config_service.clone())
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
             .with_downloads(downloads)
@@ -249,6 +252,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         artwork,
         db: database,
         config,
+        config_service,
         library,
         jobs,
         favorites,
@@ -284,7 +288,21 @@ fn spawn_volume_persistence(session: &SessionHandle, config: Arc<ConfigService>)
     });
 }
 
+/// Persist the volume the engine is at right now, ahead of the debounce.
+///
+/// [`spawn_volume_persistence`] holds a change for 750 ms so that dragging a
+/// slider is one write instead of fifty, so a close inside that window leaves
+/// the newest value with nothing but the engine holding it. The service is
+/// also where a whole-config write reads volume back from, which is why the
+/// frontend's own copy cannot stand in for this.
+pub async fn flush_volume(session: &SessionHandle, config: &ConfigService) {
+    if let Err(error) = config.set_volume(session.state().volume).await {
+        tracing::warn!(%error, "flushing the volume on shutdown failed");
+    }
+}
+
 /// Flush what the core owns. Callers that bound a socket unlink it themselves.
 pub async fn shutdown(core: Core) {
+    flush_volume(&core.session, &core.config_service).await;
     core.session.persist_now().await;
 }

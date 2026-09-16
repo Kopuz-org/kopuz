@@ -1669,3 +1669,62 @@ async fn refreshing_a_local_playlist_keeps_its_entries() {
         .expect("the playlist survives its own refresh");
     assert_eq!(playlist.track_keys, keys);
 }
+
+/// The core debounces a volume change by 750 ms so that a slider drag is one
+/// database write. Closing inside that window leaves the newest value held
+/// only by the engine, and the config service is what a whole-config write
+/// reads volume back from, so the shutdown flush is what has to carry it.
+#[tokio::test]
+async fn the_shutdown_flush_persists_the_volume_the_debounce_still_holds() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("volume.db")).await.expect("db");
+    let service = crate::ConfigService::new(
+        database.clone(),
+        dir.path().join("settings.toml"),
+        config::AppConfig {
+            volume: 0.8,
+            ..Default::default()
+        },
+    );
+    let sink = FakeSinkHandle::default();
+    let player =
+        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        PlaybackServices::default(),
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    service
+        .mutate_state(|_| {})
+        .await
+        .expect("seed the database");
+    LocalApi::new(session.clone())
+        .player_command(api::PlayerCommand::SetVolume { volume: 0.2 })
+        .await
+        .expect("set volume");
+
+    session.persist_now().await;
+    assert_eq!(
+        stored_volume(&database).await,
+        0.8,
+        "the queue flush alone leaves the debounced volume behind"
+    );
+
+    crate::boot::flush_volume(&session, &service).await;
+
+    assert_eq!(
+        stored_volume(&database).await,
+        0.2,
+        "the engine's volume reaches the database"
+    );
+}
+
+async fn stored_volume(database: &db::Db) -> f32 {
+    database
+        .load_config()
+        .await
+        .expect("load")
+        .expect("stored config")
+        .volume
+}
