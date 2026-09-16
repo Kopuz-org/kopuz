@@ -220,6 +220,22 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
     ))
 }
 
+/// Name the client that spoke, so the combined report says which path
+/// failed.
+///
+/// Google's abuse page is passed through unlabelled, because that identity
+/// lives in the prefix the transport writes and
+/// [`innertube::is_google_block`] reads it back with `starts_with`. Labelling
+/// it hid the block from the caller, which then paid for a token mint that
+/// could not change the answer.
+fn labelled(error: String) -> String {
+    if innertube::is_google_block(&error) {
+        error
+    } else {
+        format!("{}: {error}", VISIONOS.client_name)
+    }
+}
+
 /// One anonymous `/player` call, reported as a stream or as the reason it
 /// is not one.
 async fn anonymous_attempt(
@@ -228,7 +244,7 @@ async fn anonymous_attempt(
 ) -> Result<YtStreamInfo, String> {
     let json = innertube::player(VISIONOS, video_id, None, extras)
         .await
-        .map_err(|error| format!("{}: {error}", VISIONOS.client_name))?;
+        .map_err(labelled)?;
     let status = PlayabilityStatus::from_response(&json);
     if !status.is_attemptable() {
         return Err(format!(
@@ -664,6 +680,20 @@ mod tests {
     fn a_skipped_signed_in_path_says_so_rather_than_looking_like_a_success() {
         let message = all_paths_failed(None, "VISIONOS: nope", "PO mint: minter unavailable");
         assert!(message.contains("signed-in: not attempted"), "{message}");
+    }
+
+    /// The anonymous path decides whether to mint a content token by asking
+    /// `is_google_block` about the error it just got, and that answer is a
+    /// `starts_with` on the transport's own prefix. A client label in front of
+    /// it made the block unrecognisable and bought a pointless mint.
+    #[test]
+    fn the_abuse_page_stays_recognisable_through_the_client_label() {
+        let block = labelled(format!("{}: HTTP 403", innertube::GOOGLE_BLOCK));
+        assert!(innertube::is_google_block(&block), "{block}");
+
+        let other = labelled("returned no plain audio format".to_string());
+        assert!(!innertube::is_google_block(&other), "{other}");
+        assert_eq!(other, "VISIONOS: returned no plain audio format");
     }
 
     #[test]
