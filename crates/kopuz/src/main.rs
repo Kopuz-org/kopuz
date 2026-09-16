@@ -302,6 +302,14 @@ fn main() -> std::process::ExitCode {
         // OnceLock), but doing it up front means the session exists before first playback.
         player::systemint::init();
 
+        // `App` reads the core out of `backend` while it renders, so it has to
+        // exist before the UI launches, exactly as on desktop. Only the socket
+        // is desktop-only; the core itself is what every hook reads through.
+        if let Err(error) = backend::start() {
+            tracing::error!(%error, "the daemon core failed to start");
+            return std::process::ExitCode::FAILURE;
+        }
+
         /// Dioxus gates all task polling on the webview acknowledging the previous
         /// edit batch, and the stock interpreter only sends that ack from a
         /// `requestAnimationFrame` callback — which Chromium suspends while the

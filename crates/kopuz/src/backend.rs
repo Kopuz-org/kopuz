@@ -68,6 +68,7 @@ pub fn start() -> Result<&'static Core, String> {
 /// UI is already attached in-process, so a socket that cannot be bound or
 /// stops serving costs external clients, not playback: the core stays up on
 /// this runtime either way.
+#[cfg(not(target_os = "android"))]
 async fn serve_socket(core: &Core) {
     match kopuzd::default_socket_path() {
         Some(socket) => {
@@ -77,6 +78,15 @@ async fn serve_socket(core: &Core) {
         }
         None => tracing::warn!("no address for the daemon socket"),
     }
+    std::future::pending::<()>().await;
+}
+
+/// Android hosts the core without serving it: `kopuzd` is a desktop-only
+/// dependency, and nothing on the device attaches to the app's core the way
+/// `kopuzctl` does. The thread still parks here, because the runtime it owns
+/// has to outlive every service the core spawned on it.
+#[cfg(target_os = "android")]
+async fn serve_socket(_core: &Core) {
     std::future::pending::<()>().await;
 }
 
