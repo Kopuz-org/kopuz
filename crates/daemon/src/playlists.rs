@@ -214,9 +214,14 @@ impl PlaylistService {
     /// long playlist fills in as it arrives rather than appearing all at once
     /// at the end -- and it does so for every frontend watching, not just the
     /// one that asked. A staleness gate keeps revisiting a playlist free.
+    ///
+    /// Gated on `sync`, not on the playlist ops. A local playlist has no
+    /// remote to pull from: the default entry fetch answers with an empty
+    /// page, and the closing sweep then takes the rows that *are* its
+    /// contents. Local advertises `Reorder`, so gating on the ops let it in.
     pub async fn refresh(&self, id: &str) -> Result<(), ApiError> {
         let source = self.active_source();
-        if source.capabilities().playlists == server::source::PlaylistOps::None {
+        if !source.capabilities().sync {
             return Ok(());
         }
         let now = std::time::SystemTime::now()

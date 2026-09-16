@@ -1635,3 +1635,37 @@ async fn a_track_list_row_repins_the_shuffle_around_itself() {
 
     assert_eq!(play_order(&harness.api).await[0], "track-6");
 }
+
+/// A local playlist has no remote listing, so refreshing one must not reach
+/// the epoch sweep that drops whatever the remote no longer lists -- for
+/// Local that is every entry it has. Reachable from any client: the gRPC
+/// surface exposes the call with no capability guard of its own.
+#[tokio::test]
+async fn refreshing_a_local_playlist_keeps_its_entries() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("playlists.db"))
+        .await
+        .expect("db");
+    let sink = FakeSinkHandle::default();
+    let player =
+        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        PlaybackServices::default(),
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let playlists = crate::PlaylistService::new(database, session);
+    let keys = vec!["song-a".to_string(), "song-b".to_string()];
+    let id = playlists.create("mix", &keys).await.expect("create");
+
+    playlists.refresh(&id).await.expect("refresh");
+
+    let catalog = playlists.catalog().await.expect("catalog");
+    let playlist = catalog
+        .playlists
+        .iter()
+        .find(|playlist| playlist.id == id)
+        .expect("the playlist survives its own refresh");
+    assert_eq!(playlist.track_keys, keys);
+}
