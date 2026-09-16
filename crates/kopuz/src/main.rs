@@ -585,7 +585,11 @@ fn App() -> Element {
                 // already committed as a targeted write when it happened. The
                 // queue is the core's: it owns the store and persists on the
                 // way out, so only the config surface is ours to push.
-                let cfg = (*config_loaded_ok.peek()).then(|| config.peek().clone());
+                let cfg = (*config_loaded_ok.peek()).then(|| {
+                    let mut cfg = config.peek().clone();
+                    cfg.volume = *volume.peek();
+                    cfg
+                });
                 exit_flush::persist_on_fresh_thread(cfg);
             }
             backend::shutdown();

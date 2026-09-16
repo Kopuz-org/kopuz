@@ -252,10 +252,15 @@ impl ConfigService {
 /// Keep what the daemon owns: the credentials, and the settings it publishes
 /// as field lists of its own. Both are absent from the surface a caller reads,
 /// so a caller writing that surface back must not be able to blank them.
+///
+/// `volume` is here for the same reason even though it is on the wire: the
+/// session owns it and [`Self::set_volume`] is how it moves, so a whole-config
+/// write carrying a frontend's older copy must not roll the engine back.
 fn with_daemon_owned_fields(
     mut incoming: config::AppConfig,
     current: &config::AppConfig,
 ) -> config::AppConfig {
+    incoming.volume = current.volume;
     incoming.server = current.server.clone();
     incoming.servers = current.servers.clone();
     incoming.musicbrainz_token = current.musicbrainz_token.clone();
@@ -285,9 +290,14 @@ fn with_daemon_owned_fields(
 /// `offline_tracks` is deliberately not blanked. It is not a secret: it is
 /// which tracks have a local copy, which is exactly what a download indicator
 /// renders. Blanking it made every one of those read empty.
+///
+/// `volume` is restored for the same reason: it is daemon-owned on the way in,
+/// so the helper above would hand back the default here, and a frontend reads
+/// this to place its slider at startup.
 fn stripped(config: &config::AppConfig) -> config::AppConfig {
     let mut view = with_daemon_owned_fields(config.clone(), &config::AppConfig::default());
     view.offline_tracks = config.offline_tracks.clone();
+    view.volume = config.volume;
     view
 }
 
@@ -334,10 +344,10 @@ mod tests {
         assert!(view.locked_keys.is_empty());
 
         let mut next = view.config.clone();
-        next.volume = 0.25;
+        next.hero_height = 320;
         next.crossfade_seconds = 4;
         let (view, updated, changed) = service.set(next).await.expect("set");
-        assert_eq!(view.config.volume, 0.25);
+        assert_eq!(view.config.hero_height, 320);
         assert_eq!(updated.crossfade_seconds, 4);
         assert_eq!(changed.len(), 2, "only the two edited keys are reported");
         assert_eq!(
@@ -427,5 +437,36 @@ mod tests {
         assert_eq!(stored.crossfade_seconds, 7);
         assert_eq!(stored.lastfm_session_key, "secret");
         assert_eq!(service.view().await.expect("view").config.volume, 0.42);
+    }
+
+    /// A frontend reads the whole settings surface once and writes it back on
+    /// every change, while volume moves separately through `set_volume`. Its
+    /// copy is therefore stale by design, and must not roll the engine back.
+    #[tokio::test]
+    async fn a_whole_config_write_cannot_roll_the_volume_back() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("vol-stale.db"))
+            .await
+            .expect("db");
+        let seeded = config::AppConfig {
+            volume: 0.8,
+            ..Default::default()
+        };
+        let service =
+            ConfigService::new(database.clone(), dir.path().join("settings.toml"), seeded);
+        let snapshot = service.view().await.expect("view").config;
+
+        service.set_volume(0.2).await.expect("set volume");
+        let (view, updated, changed) = service.set(snapshot).await.expect("set");
+
+        assert_eq!(view.config.volume, 0.2, "the view reports the live volume");
+        assert_eq!(updated.volume, 0.2);
+        assert!(!changed.iter().any(|key| key == "volume"));
+        let stored = database
+            .load_config()
+            .await
+            .expect("load")
+            .expect("stored config");
+        assert_eq!(stored.volume, 0.2);
     }
 }
