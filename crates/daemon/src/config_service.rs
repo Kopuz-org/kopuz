@@ -255,12 +255,17 @@ impl ConfigService {
 ///
 /// `volume` is here for the same reason even though it is on the wire: the
 /// session owns it and [`Self::set_volume`] is how it moves, so a whole-config
-/// write carrying a frontend's older copy must not roll the engine back.
+/// write carrying a frontend's older copy must not roll the engine back. The
+/// two cover-lookup keys follow the same rule: `ArtworkApi` publishes them as
+/// a field list and writes them through `mutate_state`, so a frontend that
+/// changed one never saw it in the settings surface it holds.
 fn with_daemon_owned_fields(
     mut incoming: config::AppConfig,
     current: &config::AppConfig,
 ) -> config::AppConfig {
     incoming.volume = current.volume;
+    incoming.auto_fetch_covers = current.auto_fetch_covers;
+    incoming.cover_fetch_strategy = current.cover_fetch_strategy;
     incoming.server = current.server.clone();
     incoming.servers = current.servers.clone();
     incoming.musicbrainz_token = current.musicbrainz_token.clone();
@@ -291,13 +296,17 @@ fn with_daemon_owned_fields(
 /// which tracks have a local copy, which is exactly what a download indicator
 /// renders. Blanking it made every one of those read empty.
 ///
-/// `volume` is restored for the same reason: it is daemon-owned on the way in,
-/// so the helper above would hand back the default here, and a frontend reads
-/// this to place its slider at startup.
+/// `volume` and the cover-lookup keys are restored for the same reason: they
+/// are daemon-owned on the way in, so the helper above would hand back the
+/// default here. A frontend reads this to place its volume slider at startup,
+/// and a read that lied about the others would be a worse surface than one
+/// that simply refuses to take them.
 fn stripped(config: &config::AppConfig) -> config::AppConfig {
     let mut view = with_daemon_owned_fields(config.clone(), &config::AppConfig::default());
     view.offline_tracks = config.offline_tracks.clone();
     view.volume = config.volume;
+    view.auto_fetch_covers = config.auto_fetch_covers;
+    view.cover_fetch_strategy = config.cover_fetch_strategy;
     view
 }
 
@@ -468,5 +477,44 @@ mod tests {
             .expect("load")
             .expect("stored config");
         assert_eq!(stored.volume, 0.2);
+    }
+
+    /// `ArtworkApi` publishes the cover-lookup keys as a field list of its own
+    /// and writes them through `mutate_state`, exactly as this test does, so a
+    /// frontend holding the settings surface never sees them move. Saving that
+    /// surface for an unrelated reason must not undo them.
+    #[tokio::test]
+    async fn a_stale_settings_surface_cannot_undo_the_cover_settings() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("covers.db")).await.expect("db");
+        let seeded = config::AppConfig {
+            auto_fetch_covers: true,
+            ..Default::default()
+        };
+        let service =
+            ConfigService::new(database.clone(), dir.path().join("settings.toml"), seeded);
+        let mut snapshot = service.view().await.expect("view").config;
+        assert!(
+            snapshot.auto_fetch_covers,
+            "the view reports the live value"
+        );
+
+        service
+            .mutate_state(|config| {
+                config.auto_fetch_covers = false;
+                config.cover_fetch_strategy = config::FetchStrategy::LastFmOnly;
+            })
+            .await
+            .expect("cover settings");
+
+        snapshot.theme = "nord".to_string();
+        let (view, updated, changed) = service.set(snapshot).await.expect("set");
+
+        assert!(!view.config.auto_fetch_covers, "automatic covers stay off");
+        assert_eq!(
+            updated.cover_fetch_strategy,
+            config::FetchStrategy::LastFmOnly
+        );
+        assert_eq!(changed, vec!["theme".to_string()]);
     }
 }
