@@ -4487,6 +4487,7 @@ dependencies = [
  "jni 0.21.1",
  "kopuz-config",
  "kopuz-reader",
+ "kopuz-utils",
  "ndk-context",
  "serde",
  "serde_json",
@@ -4651,6 +4652,7 @@ name = "kopuz-reader"
 version = "0.17.0"
 dependencies = [
  "kopuz-config",
+ "kopuz-utils",
  "lofty",
  "reqwest 0.13.4",
  "serde",

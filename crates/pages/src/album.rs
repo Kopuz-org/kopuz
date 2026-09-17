@@ -3,7 +3,6 @@
 //! affordances (tag/cover edit + delete-from-disk for local, downloads for a
 //! server) gate on [`api::SourceCapabilities`] — no `is_server()`.
 
-use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::sort_control::SortControl;
 use components::track_list_view::TrackListView;
@@ -11,9 +10,7 @@ use components::view_mode_toggle::ViewModeToggle;
 use config::{AlbumViewMode, AppConfig};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{
-    use_active_source, use_album, use_album_tracks, use_albums, use_tracks_by_keys,
-};
+use hooks::use_db_queries::{use_active_source, use_album, use_albums, use_tracks_by_keys};
 use std::collections::HashSet;
 
 /// Copy a link to the clipboard and flash a small toast. Used by the catalog album
@@ -34,16 +31,6 @@ fn copy_album_link(url: String) {
     let _ = dioxus::document::eval(&js);
 }
 
-/// One album-card menu entry, tagged so dispatch survives capability gating.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum AlbumAction {
-    Queue,
-    Playlist,
-    /// Local: delete the files + DB rows. Server: drop the cached rows (a re-sync
-    /// re-adds them) — there's no remote album delete.
-    Remove,
-}
-
 #[component]
 pub fn Album(
     config: Signal<AppConfig>,
@@ -56,8 +43,6 @@ pub fn Album(
     let nav_ctrl = use_context::<components::NavigationController>();
 
     let open_album_menu = use_signal(|| None::<String>);
-    let mut show_album_playlist_modal = use_signal(|| false);
-    let pending_album_id_for_playlist = use_signal(|| None::<String>);
 
     let albums_res = use_albums(source);
 
@@ -75,14 +60,6 @@ pub fn Album(
         }
     });
 
-    let pending_album_id = use_memo(move || {
-        pending_album_id_for_playlist
-            .read()
-            .clone()
-            .unwrap_or_default()
-    });
-    let pending_tracks_res = use_album_tracks(source, pending_album_id);
-
     rsx! {
         div {
             class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
@@ -97,41 +74,8 @@ pub fn Album(
                         config,
                         album_id,
                         open_album_menu,
-                        show_album_playlist_modal,
-                        pending_album_id_for_playlist,
                     }
 
-                    if *show_album_playlist_modal.read() {
-                        PlaylistModal {
-                            on_close: move |_| show_album_playlist_modal.set(false),
-                            on_add_to_playlist: move |playlist_id: String| {
-                                if pending_album_id_for_playlist.read().is_some() {
-                                    let refs: Vec<String> = pending_tracks_res
-                                        .read()
-                                        .clone()
-                                        .unwrap_or_default()
-                                        .iter()
-                                        .map(|t| t.key.clone())
-                                        .collect();
-                                    hooks::playlist_actions::add_tracks(playlist_id, refs);
-                                }
-                                show_album_playlist_modal.set(false);
-                            },
-                            on_create_playlist: move |name: String| {
-                                if pending_album_id_for_playlist.read().is_some() {
-                                    let refs: Vec<String> = pending_tracks_res
-                                        .read()
-                                        .clone()
-                                        .unwrap_or_default()
-                                        .iter()
-                                        .map(|t| t.key.clone())
-                                        .collect();
-                                    hooks::playlist_actions::create_with(name, refs);
-                                }
-                                show_album_playlist_modal.set(false);
-                            },
-                        }
-                    }
                 }
             } else {
                 AlbumDetail {
@@ -151,13 +95,10 @@ fn AlbumGrid(
     mut config: Signal<AppConfig>,
     mut album_id: Signal<String>,
     mut open_album_menu: Signal<Option<String>>,
-    mut show_album_playlist_modal: Signal<bool>,
-    mut pending_album_id_for_playlist: Signal<Option<String>>,
 ) -> Element {
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
-    let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let albums_res = use_albums(source);
 
     let album_sort = use_signal(|| config.peek().album_sort.clone());
@@ -267,12 +208,6 @@ fn AlbumGrid(
                             } else {
                                 i18n::t("remove_from_cache").to_string()
                             };
-                            let actions = vec![
-                                MenuAction::new(i18n::t("add_all_to_queue").as_str(), "fa-solid fa-list-ul"),
-                                MenuAction::new(i18n::t("add_all_to_playlist").as_str(), "fa-solid fa-plus"),
-                                MenuAction::new(remove_label.as_str(), "fa-solid fa-trash").destructive(),
-                            ];
-                            let tags = [AlbumAction::Queue, AlbumAction::Playlist, AlbumAction::Remove];
                             rsx! {
                                 div {
                                     key: "{album.id}",
@@ -282,6 +217,7 @@ fn AlbumGrid(
                                         let id = id_for_menu.clone();
                                         move |evt| {
                                             evt.prevent_default();
+                                            components::dots_menu::open_at_pointer(&evt);
                                             open_album_menu.set(Some(id.clone()));
                                         }
                                     },
@@ -309,48 +245,36 @@ fn AlbumGrid(
                                     }
 
                                     div { class: "vcard-menu absolute bottom-3 right-3",
-                                        DotsMenu {
-                                            actions,
-                                            is_open,
+                                        components::album_actions::AlbumActionsMenu {
+                                            album_id: id_for_menu.clone(),
+                                            album_title: album.title.clone(),
+                                            artist: album.artist.clone(),
+                                            is_open: Some(is_open),
                                             on_open: {
                                                 let id = id_for_menu.clone();
-                                                move |_| open_album_menu.set(Some(id.clone()))
+                                                Some(EventHandler::new(move |_| open_album_menu.set(Some(id.clone()))))
                                             },
-                                            on_close: move |_| open_album_menu.set(None),
+                                            on_close: Some(EventHandler::new(move |_| open_album_menu.set(None))),
                                             button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100 bg-black/40".to_string(),
                                             anchor: "right".to_string(),
-                                            on_action: {
+                                            delete_label: Some(remove_label.clone()),
+                                            on_delete: {
                                                 let id = id_for_menu.clone();
                                                 let title = album.title.clone();
-                                                move |idx: usize| {
+                                                Some(EventHandler::new(move |_| {
                                                     open_album_menu.set(None);
-                                                    let Some(tag) = tags.get(idx).copied() else { return };
-                                                    match tag {
-                                                        AlbumAction::Queue => {
-                                                            hooks::library_actions::with_album_keys(id.clone(), move |keys| {
-                                                                let mut ctrl = ctrl;
-                                                                ctrl.set_queue_keys(keys, api::QueueMode::Append, None);
-                                                            });
-                                                        }
-                                                        AlbumAction::Playlist => {
-                                                            pending_album_id_for_playlist.set(Some(id.clone()));
-                                                            show_album_playlist_modal.set(true);
-                                                        }
-                                                        AlbumAction::Remove => {
-                                                            if cap.delete_from_disk {
-                                                                hooks::library_actions::delete_album(id.clone(), true);
-                                                            } else {
-                                                                // A server splits one release across
-                                                                // same-titled albums, so dropping the
-                                                                // cache means dropping all of them.
-                                                                let all = albums_res.read().clone().unwrap_or_default();
-                                                                for album in all.iter().filter(|album| album.title == title) {
-                                                                    hooks::library_actions::delete_album(album.id.clone(), false);
-                                                                }
-                                                            }
+                                                    if cap.delete_from_disk {
+                                                        hooks::library_actions::delete_album(id.clone(), true);
+                                                    } else {
+                                                        // A server splits one release across
+                                                        // same-titled albums, so dropping the
+                                                        // cache means dropping all of them.
+                                                        let all = albums_res.read().clone().unwrap_or_default();
+                                                        for album in all.iter().filter(|album| album.title == title) {
+                                                            hooks::library_actions::delete_album(album.id.clone(), false);
                                                         }
                                                     }
-                                                }
+                                                }))
                                             },
                                         }
                                     }
@@ -912,7 +836,6 @@ fn YtAlbumDetail(
                             let menu_id = track.uid.clone();
                             let pl_id = track.uid.clone();
                             let dl_track = track.clone();
-                            let q_track = track.clone();
                             rsx! {
                                 components::track_row::TrackRow {
                                     key: "{track.uid}",
@@ -928,14 +851,9 @@ fn YtAlbumDetail(
                                     is_menu_open,
                                     is_currently_playing: is_current,
                                     is_downloaded,
-                                    on_start_radio: components::track_row::radio_handler(track.key.clone()),
                                     on_play: move |_| {
                                         ctrl.play_queue_at(row_tracks.clone(), idx);
                                     },
-                                    on_queue: Some(EventHandler::new(move |_| {
-                                        ctrl.add_to_queue(vec![q_track.clone()]);
-                                        active_menu.set(None);
-                                    })),
                                     on_click_menu: move |_| {
                                         let open = active_menu.read().as_ref() == Some(&menu_id);
                                         active_menu.set((!open).then(|| menu_id.clone()));

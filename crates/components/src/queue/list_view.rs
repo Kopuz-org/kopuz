@@ -44,6 +44,8 @@ pub fn QueueRow(
         }
         LayoutMode::Rightbar => rightbar_queue_row_class(is_reorder_source),
     };
+    let mut ctrl = use_context::<PlayerController>();
+    let mut menu_open = use_signal(|| false);
     let row_class = if is_active {
         format!("{base_class} {layout}__active-queue-item")
     } else {
@@ -61,13 +63,22 @@ pub fn QueueRow(
             class: "{row_class}",
             style: match layout {
                 LayoutMode::Fullscreen => "",
-                LayoutMode::Rightbar => {
-                    "content-visibility: auto; contain-intrinsic-size: 0 52px;"
-                }
+                // content-visibility applies paint containment, which makes the
+                // row a containing block for the menu's fixed-position panel and
+                // clips it to a 52px box, so the menu opens invisibly. Drop the
+                // containment for as long as the menu is up, as the album and
+                // artist cards do.
+                LayoutMode::Rightbar if menu_open() => "content-visibility: visible; contain: none;",
+                LayoutMode::Rightbar => "content-visibility: auto; contain-intrinsic-size: 0 52px;",
             },
             onmousedown: move |evt| on_row_mouse_down.call(evt),
             onmousemove: move |evt| on_row_mouse_move.call(evt),
             ondoubleclick: move |_| on_play.call(()),
+            oncontextmenu: move |evt| {
+                evt.prevent_default();
+                crate::dots_menu::open_at_pointer(&evt);
+                menu_open.set(true);
+            },
 
             div { class: "w-4 flex justify-center items-end shrink-0",
 
@@ -134,6 +145,26 @@ pub fn QueueRow(
                     can_move_down,
                     on_move_up,
                     on_move_down,
+                }
+            }
+
+            div {
+                class: "shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity",
+                crate::track_actions::TrackActionsMenu {
+                    track: track.clone(),
+                    is_open: Some(menu_open()),
+                    on_open: Some(EventHandler::new(move |_| menu_open.set(true))),
+                    on_close: Some(EventHandler::new(move |_| menu_open.set(false))),
+                    // Queueing a track that is already in the queue would just
+                    // duplicate it; reordering is what this surface offers.
+                    show_queue_actions: false,
+                    on_remove_from_queue: (!is_active).then(|| EventHandler::new(move |_| {
+                        ctrl.remove_queue_item(queue_idx);
+                    })),
+                    button_class: match layout {
+                        LayoutMode::Fullscreen => "w-8 h-8".to_string(),
+                        LayoutMode::Rightbar => "w-7 h-7".to_string(),
+                    },
                 }
             }
         }
