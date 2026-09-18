@@ -1,6 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use config::Browser;
+use config::{Browser, BrowserEngine};
 use tokio::process::Command;
 
 /// How to invoke the browser. The two shapes must not be conflated: a `Path`
@@ -35,6 +35,10 @@ pub(crate) fn browser_candidates(browser: Browser) -> &'static [&'static str] {
         ],
         Browser::Vivaldi => &["vivaldi", "vivaldi-stable"],
         Browser::Helium => &["helium-browser", "helium"],
+        Browser::Firefox => &["firefox", "firefox-esr", "firefox-bin"],
+        Browser::LibreWolf => &["librewolf"],
+        Browser::Zen => &["zen-browser", "zen"],
+        Browser::Floorp => &["floorp"],
     }
 }
 
@@ -47,6 +51,10 @@ pub(crate) fn browser_flatpak_ids(browser: Browser) -> &'static [&'static str] {
         Browser::Vivaldi => &["com.vivaldi.Vivaldi"],
         // Helium ships .deb/AppImage/tarball upstream, no flatpak.
         Browser::Helium => &[],
+        Browser::Firefox => &["org.mozilla.firefox"],
+        Browser::LibreWolf => &["io.gitlab.librewolf-community"],
+        Browser::Zen => &["app.zen_browser.zen"],
+        Browser::Floorp => &["one.ablaze.floorp"],
     }
 }
 
@@ -59,6 +67,13 @@ fn macos_app_paths(browser: Browser) -> &'static [&'static str] {
         Browser::Edge => &["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
         Browser::Vivaldi => &["/Applications/Vivaldi.app/Contents/MacOS/Vivaldi"],
         Browser::Helium => &["/Applications/Helium.app/Contents/MacOS/Helium"],
+        Browser::Firefox => &["/Applications/Firefox.app/Contents/MacOS/firefox"],
+        Browser::LibreWolf => &["/Applications/LibreWolf.app/Contents/MacOS/librewolf"],
+        Browser::Zen => &[
+            "/Applications/Zen.app/Contents/MacOS/zen",
+            "/Applications/Zen Browser.app/Contents/MacOS/zen",
+        ],
+        Browser::Floorp => &["/Applications/Floorp.app/Contents/MacOS/floorp"],
     }
 }
 
@@ -104,6 +119,27 @@ fn windows_install_paths(browser: Browser) -> Vec<PathBuf> {
             add(&pf, r"imput\Helium\Application\chrome.exe");
             add(&pf86, r"imput\Helium\Application\chrome.exe");
             add(&local, r"imput\Helium\Application\chrome.exe");
+        }
+        Browser::Firefox => {
+            add(&pf, r"Mozilla Firefox\firefox.exe");
+            add(&pf86, r"Mozilla Firefox\firefox.exe");
+            add(&local, r"Mozilla Firefox\firefox.exe");
+        }
+        Browser::LibreWolf => {
+            add(&pf, r"LibreWolf\librewolf.exe");
+            add(&pf86, r"LibreWolf\librewolf.exe");
+            add(&local, r"LibreWolf\librewolf.exe");
+        }
+        Browser::Zen => {
+            add(&pf, r"Zen Browser\zen.exe");
+            add(&pf86, r"Zen Browser\zen.exe");
+            add(&local, r"Zen Browser\zen.exe");
+            add(&local, r"Zen\zen.exe");
+        }
+        Browser::Floorp => {
+            add(&pf, r"Floorp\floorp.exe");
+            add(&pf86, r"Floorp\floorp.exe");
+            add(&local, r"Floorp\floorp.exe");
         }
     }
     out
@@ -248,6 +284,229 @@ pub(crate) fn browser_command_with(bin: &BrowserBin, watch_bus: bool) -> Command
     }
 }
 
+/// Seed the freshly wiped profile with whatever the engine needs before its
+/// first run.
+pub(crate) fn prepare_profile(browser: Browser, profile: &Path) {
+    match browser.engine() {
+        BrowserEngine::Chromium => prepare_chromium_profile(browser, profile),
+        BrowserEngine::Gecko => prepare_gecko_profile(profile),
+    }
+}
+
+/// Windows: seed a NONE-protected app-bound key into the fresh profile before
+/// launch, so v20 cookies stay decryptable if Google's Finch-gated App-Bound
+/// rollout flips on. Best-effort — today's cookies are v10 (DPAPI). No-op
+/// elsewhere.
+#[cfg(target_os = "windows")]
+fn prepare_chromium_profile(browser: Browser, profile: &Path) {
+    if let Err(e) = super::windows_native::plant_app_bound_key(browser, profile) {
+        tracing::warn!(error = %e, "app-bound key plant failed — v20 cookies (if any) won't decrypt; v10 still works");
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn prepare_chromium_profile(_browser: Browser, _profile: &Path) {}
+
+/// Gecko has no `--app` window and no "skip the tour" flag, so a fresh profile
+/// otherwise opens onboarding tabs over the sign-in page. `user.js` is read at
+/// every startup, before anything is drawn.
+fn prepare_gecko_profile(profile: &Path) {
+    const PREFS: &str = concat!(
+        "user_pref(\"browser.aboutwelcome.enabled\", false);\n",
+        "user_pref(\"browser.startup.homepage_override.mstone\", \"ignore\");\n",
+        "user_pref(\"browser.shell.checkDefaultBrowser\", false);\n",
+        "user_pref(\"datareporting.policy.dataSubmissionEnabled\", false);\n",
+        "user_pref(\"browser.sessionstore.resume_from_crash\", false);\n",
+    );
+    if let Err(e) = std::fs::write(profile.join("user.js"), PREFS) {
+        tracing::warn!(error = %e, "could not seed user.js — the sign-in window may open onboarding tabs");
+    }
+}
+
+/// The command that opens `url` in a throwaway profile under `profile`. The
+/// two engines share nothing here: Chromium takes one `--user-data-dir` and
+/// can open a chromeless `--app` window, Gecko takes `--profile` and needs
+/// `--no-remote` or it hands the URL to the user's own running browser — and
+/// signs them in there, outside the profile kopuz reads back.
+pub(crate) fn signin_command(
+    browser: Browser,
+    bin: &BrowserBin,
+    profile: &Path,
+    url: &str,
+) -> Command {
+    let mut cmd = browser_command(bin);
+    match browser.engine() {
+        BrowserEngine::Chromium => {
+            cmd.arg("--no-first-run")
+                .arg("--no-default-browser-check")
+                .arg("--password-store=basic")
+                .arg(format!("--user-data-dir={}", profile.display()))
+                .arg(format!("--app={url}"));
+        }
+        BrowserEngine::Gecko => {
+            cmd.arg("--no-remote")
+                .arg("--profile")
+                .arg(profile)
+                .arg("--new-window")
+                .arg(url);
+        }
+    }
+    // Windows: kopuz's WebView2 UI runs us inside a job object whose sandbox
+    // quota (1 active process) stops a spawned browser from creating the nested
+    // jobs its renderer/GPU need — the window opens but the content is dead.
+    // CREATE_BREAKAWAY_FROM_JOB detaches the child so its own sandbox works.
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x0100_0000);
+    cmd.stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    cmd
+}
+
+/// Run a command and hand back its stdout, through the host when sandboxed.
+async fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
+    let mut command = if in_flatpak() {
+        let mut c = Command::new("flatpak-spawn");
+        c.arg("--host").arg(program);
+        c
+    } else {
+        Command::new(program)
+    };
+    let out = command
+        .args(args)
+        .stderr(std::process::Stdio::null())
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Map whatever the OS calls its default handler — a desktop file id, a bundle
+/// id, a Windows ProgId — onto a browser kopuz can drive. Matched on substrings
+/// because each platform spells the same browser differently, most specific
+/// first so `chromium` is never read as Chrome.
+fn browser_from_handler(handler: &str) -> Option<Browser> {
+    const KEYS: &[(&str, Browser)] = &[
+        ("librewolf", Browser::LibreWolf),
+        ("floorp", Browser::Floorp),
+        ("zen", Browser::Zen),
+        ("firefox", Browser::Firefox),
+        ("chromium", Browser::Chromium),
+        ("chrome", Browser::Chrome),
+        ("brave", Browser::Brave),
+        ("edge", Browser::Edge),
+        ("vivaldi", Browser::Vivaldi),
+        ("helium", Browser::Helium),
+    ];
+    let handler = handler.to_ascii_lowercase();
+    KEYS.iter()
+        .find(|(key, _)| handler.contains(key))
+        .map(|(_, browser)| *browser)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+async fn default_handler() -> Option<String> {
+    if let Some(out) = command_stdout("xdg-settings", &["get", "default-web-browser"]).await
+        && !out.trim().is_empty()
+    {
+        return Some(out);
+    }
+    command_stdout("xdg-mime", &["query", "default", "x-scheme-handler/https"]).await
+}
+
+/// macOS keeps the URL handlers in a binary plist, so read it through `plutil`
+/// rather than linking LaunchServices.
+#[cfg(target_os = "macos")]
+async fn default_handler() -> Option<String> {
+    let home = std::env::var_os("HOME")?;
+    let plist = PathBuf::from(home)
+        .join("Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist");
+    let json = command_stdout(
+        "plutil",
+        &["-convert", "json", "-o", "-", &plist.to_string_lossy()],
+    )
+    .await?;
+    let parsed: serde_json::Value = serde_json::from_str(&json).ok()?;
+    parsed
+        .get("LSHandlers")?
+        .as_array()?
+        .iter()
+        .find(|handler| handler.get("LSHandlerURLScheme").and_then(|s| s.as_str()) == Some("https"))
+        .and_then(|handler| {
+            handler
+                .get("LSHandlerRoleAll")
+                .or_else(|| handler.get("LSHandlerRoleViewer"))
+        })
+        .and_then(|role| role.as_str())
+        .map(str::to_owned)
+}
+
+#[cfg(target_os = "windows")]
+async fn default_handler() -> Option<String> {
+    let out = command_stdout(
+        "reg",
+        &[
+            "query",
+            r"HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
+            "/v",
+            "ProgId",
+        ],
+    )
+    .await?;
+    out.lines()
+        .find(|line| line.contains("ProgId"))
+        .and_then(|line| line.split_whitespace().next_back())
+        .map(str::to_owned)
+}
+
+/// The system's default browser, when it is one kopuz knows how to drive.
+pub async fn detect_default_browser() -> Option<Browser> {
+    let handler = default_handler().await?;
+    let browser = browser_from_handler(handler.trim());
+    tracing::debug!(handler = handler.trim(), resolved = ?browser.map(Browser::id), "read the system default browser");
+    browser
+}
+
+async fn is_installed(browser: Browser) -> bool {
+    find_browser_bin(browser, None).await.is_some()
+}
+
+/// Which browser a sign-in actually opens. A stored choice is honoured as-is;
+/// without one kopuz follows the system default, which is the only answer that
+/// is right for a Firefox user without them having to say so. The scan is the
+/// last resort — and its first hit, not Chrome, because an unconfigured
+/// machine should still sign in rather than report Chrome missing.
+pub async fn resolve_browser(preferred: Option<Browser>) -> Browser {
+    if let Some(browser) = preferred {
+        return browser;
+    }
+    let detected = detect_default_browser().await;
+    if let Some(browser) = detected
+        && is_installed(browser).await
+    {
+        tracing::info!(
+            browser = browser.id(),
+            "signing in with the system default browser"
+        );
+        return browser;
+    }
+    for browser in Browser::ALL.iter().copied() {
+        if is_installed(browser).await {
+            tracing::info!(
+                browser = browser.id(),
+                "no usable system default browser; using the first one installed"
+            );
+            return browser;
+        }
+    }
+    // Nothing is installed. Name the default anyway, so the launch failure
+    // names the browser the user actually set.
+    detected.unwrap_or(Browser::Firefox)
+}
+
 pub async fn has_host_spawn() -> bool {
     if !in_flatpak() {
         return true;
@@ -290,5 +549,62 @@ mod tests {
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
         assert_eq!(args, ["run", "com.google.Chrome"]);
+    }
+
+    fn signin_args(browser: Browser) -> Vec<String> {
+        let bin = BrowserBin::Path("browser".to_string());
+        signin_command(
+            browser,
+            &bin,
+            std::path::Path::new("/tmp/kopuz-profile"),
+            "https://example.test/signin",
+        )
+        .as_std()
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect()
+    }
+
+    #[test]
+    fn a_gecko_sign_in_is_isolated_from_the_running_browser() {
+        let args = signin_args(Browser::Firefox);
+        // Without --no-remote the URL is handed to the user's own Firefox,
+        // which signs them in outside the profile kopuz reads back.
+        assert!(args.contains(&"--no-remote".to_string()));
+        assert!(args.contains(&"--profile".to_string()));
+        assert!(args.contains(&"/tmp/kopuz-profile".to_string()));
+        assert!(args.contains(&"https://example.test/signin".to_string()));
+        assert!(!args.iter().any(|a| a.starts_with("--user-data-dir")));
+    }
+
+    #[test]
+    fn a_chromium_sign_in_keeps_its_own_profile_flags() {
+        let args = signin_args(Browser::Chrome);
+        assert!(args.contains(&"--user-data-dir=/tmp/kopuz-profile".to_string()));
+        assert!(args.contains(&"--app=https://example.test/signin".to_string()));
+        assert!(!args.contains(&"--no-remote".to_string()));
+    }
+
+    #[test]
+    fn a_default_handler_names_the_browser_it_belongs_to() {
+        // Desktop ids, bundle ids and Windows ProgIds for the same browser.
+        for handler in ["firefox.desktop", "org.mozilla.firefox", "FirefoxURL"] {
+            assert_eq!(browser_from_handler(handler), Some(Browser::Firefox));
+        }
+        assert_eq!(
+            browser_from_handler("io.gitlab.librewolf-community.desktop"),
+            Some(Browser::LibreWolf)
+        );
+        // "chromium" must not read as Chrome.
+        assert_eq!(
+            browser_from_handler("org.chromium.Chromium"),
+            Some(Browser::Chromium)
+        );
+        assert_eq!(
+            browser_from_handler("google-chrome.desktop"),
+            Some(Browser::Chrome)
+        );
+        assert_eq!(browser_from_handler("MSEdgeHTM"), Some(Browser::Edge));
+        assert_eq!(browser_from_handler("com.apple.safari"), None);
     }
 }

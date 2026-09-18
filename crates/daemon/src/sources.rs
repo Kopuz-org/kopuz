@@ -767,7 +767,10 @@ impl SourceService {
                 .await
                 .map_err(db_error)?
                 .ok_or_else(|| ApiError::not_found("no such server"))?;
-            let browser = server.yt_browser.unwrap_or(config::Browser::Chrome);
+            // No stored choice means "the system default", resolved here and
+            // persisted with the credential below, so a later cookie read goes
+            // back to the browser that actually holds the session.
+            let browser = server::cookies::resolve_browser(server.yt_browser).await;
             let (secret, user_id) = match server.service {
                 config::MusicService::YtMusic => {
                     let secret = ensure_ytmusic_signed_in(server.access_token.clone(), browser, id)

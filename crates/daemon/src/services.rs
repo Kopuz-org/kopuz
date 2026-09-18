@@ -144,8 +144,8 @@ fn text_field(key: &str, label: &str, kind: FieldKind) -> FieldSpec {
     }
 }
 
-fn browser_options() -> Vec<ChoiceOption> {
-    Browser::ALL
+fn options_for(browsers: &[Browser]) -> Vec<ChoiceOption> {
+    browsers
         .iter()
         .map(|browser| ChoiceOption {
             value: browser.id().to_string(),
@@ -154,15 +154,23 @@ fn browser_options() -> Vec<ChoiceOption> {
         .collect()
 }
 
+/// Which browser opens the sign-in window. The system default leads and is
+/// what an unanswered field means, so a Firefox user signs in through Firefox
+/// without having to find this option first.
 fn browser_field(value: Option<&str>, show_when: Option<FieldValue>) -> FieldSpec {
+    let mut options = vec![ChoiceOption {
+        value: AUTOMATIC.to_string(),
+        label: Text::key("sign_in_browser_auto"),
+    }];
+    options.extend(options_for(Browser::ALL));
     FieldSpec {
         key: BROWSER.to_string(),
         label: Text::key("sign_in_browser"),
         kind: FieldKind::Choice {
-            options: browser_options(),
+            options,
             custom: false,
         },
-        value: Some(value.unwrap_or(Browser::Chrome.id()).to_string()),
+        value: Some(value.unwrap_or(AUTOMATIC).to_string()),
         show_when,
         ..Default::default()
     }
@@ -343,11 +351,14 @@ pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
             browser_field(browser.as_deref(), None),
         ],
         MusicService::Spotify => {
+            // Spotify hosts playback in a browser rather than signing in
+            // through one, and its Web Playback SDK only works on Chromium —
+            // so this list stays narrower than the sign-in one.
             let mut hosts = vec![ChoiceOption {
                 value: AUTOMATIC.to_string(),
                 label: Text::key("playback_browser_auto"),
             }];
-            hosts.extend(browser_options());
+            hosts.extend(options_for(Browser::CHROMIUM_FAMILY));
             vec![
                 FieldSpec {
                     value: Some(

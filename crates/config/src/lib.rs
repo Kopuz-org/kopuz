@@ -9,7 +9,8 @@ mod source;
 pub mod store;
 mod views;
 pub use source::{
-    Browser, JellyfinServer, MusicServer, MusicService, SavedLocalSource, SavedServer, Source,
+    Browser, BrowserEngine, JellyfinServer, MusicServer, MusicService, SavedLocalSource,
+    SavedServer, Source,
 };
 pub use views::{IntegrationConfig, LibraryConfig, PlaybackConfig, ServerAuth, UiConfig};
 

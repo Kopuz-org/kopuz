@@ -389,16 +389,10 @@ fn service_str(s: MusicService) -> &'static str {
     }
 }
 
+/// An unknown id (an older row, or one written by a newer build) reads back as
+/// `None`, which the sign-in resolves to the system default browser.
 fn parse_browser(s: Option<&str>) -> Option<Browser> {
-    match s {
-        Some("chrome") => Some(Browser::Chrome),
-        Some("chromium") => Some(Browser::Chromium),
-        Some("brave") => Some(Browser::Brave),
-        Some("edge") => Some(Browser::Edge),
-        Some("vivaldi") => Some(Browser::Vivaldi),
-        Some("helium") => Some(Browser::Helium),
-        _ => None,
-    }
+    s.and_then(Browser::from_id)
 }
 
 fn browser_str(b: Browser) -> String {

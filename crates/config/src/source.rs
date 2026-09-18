@@ -159,7 +159,8 @@ pub struct MusicServer {
     pub user_id: Option<String>,
     #[serde(default)]
     pub id: Option<String>,
-    /// For browser sign-in services: which Chromium-family browser was used.
+    /// For browser sign-in services: which browser was used. `None` means the
+    /// system default, resolved when the sign-in runs.
     #[serde(default)]
     pub yt_browser: Option<Browser>,
     /// For `MusicService::YtMusic` only: anonymous mode.
@@ -225,6 +226,15 @@ impl Default for MusicServer {
     }
 }
 
+/// Which engine a browser is built on. Everything a sign-in does differently
+/// per browser (the launch flags, where the profile keeps its cookies, how
+/// those cookies are encrypted) follows from this and not from the brand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BrowserEngine {
+    Chromium,
+    Gecko,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Browser {
@@ -234,10 +244,30 @@ pub enum Browser {
     Edge,
     Vivaldi,
     Helium,
+    Firefox,
+    LibreWolf,
+    Zen,
+    Floorp,
 }
 
 impl Browser {
     pub const ALL: &'static [Browser] = &[
+        Browser::Firefox,
+        Browser::Chrome,
+        Browser::Chromium,
+        Browser::Brave,
+        Browser::Edge,
+        Browser::Vivaldi,
+        Browser::Helium,
+        Browser::LibreWolf,
+        Browser::Zen,
+        Browser::Floorp,
+    ];
+
+    /// The Chromium family, in the order an automatic choice should try it.
+    /// Spotify playback is limited to these: its Web Playback SDK has a
+    /// long-standing Firefox bug, so a Gecko browser is never offered there.
+    pub const CHROMIUM_FAMILY: &'static [Browser] = &[
         Browser::Chrome,
         Browser::Chromium,
         Browser::Brave,
@@ -256,6 +286,10 @@ impl Browser {
             Browser::Edge => "edge",
             Browser::Vivaldi => "vivaldi",
             Browser::Helium => "helium",
+            Browser::Firefox => "firefox",
+            Browser::LibreWolf => "librewolf",
+            Browser::Zen => "zen",
+            Browser::Floorp => "floorp",
         }
     }
 
@@ -267,6 +301,24 @@ impl Browser {
             Browser::Edge => "Edge",
             Browser::Vivaldi => "Vivaldi",
             Browser::Helium => "Helium",
+            Browser::Firefox => "Firefox",
+            Browser::LibreWolf => "LibreWolf",
+            Browser::Zen => "Zen",
+            Browser::Floorp => "Floorp",
+        }
+    }
+
+    pub fn engine(self) -> BrowserEngine {
+        match self {
+            Browser::Chrome
+            | Browser::Chromium
+            | Browser::Brave
+            | Browser::Edge
+            | Browser::Vivaldi
+            | Browser::Helium => BrowserEngine::Chromium,
+            Browser::Firefox | Browser::LibreWolf | Browser::Zen | Browser::Floorp => {
+                BrowserEngine::Gecko
+            }
         }
     }
 

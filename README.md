@@ -634,8 +634,9 @@ The setup dialog offers two methods:
 - **Sign in with a browser** - kopuz opens the Google sign-in page in an
   **isolated browser profile** (a fresh, separate session; your normal browsing
   is never touched), waits for you to log in, and extracts the session cookies.
-  Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
-  Edge, Vivaldi, or Helium). This unlocks your **library, Liked Music,
+  By default it uses your **system default browser**; pick a specific one
+  (Firefox, Chrome, Chromium, Brave, Edge, Vivaldi, Helium, LibreWolf, Zen, or
+  Floorp) if you would rather. This unlocks your **library, Liked Music,
   playlists, and followed artists**.
 
 - **Continue without signing in (anonymous)** - no sign-in, no cookies. You can
@@ -659,8 +660,9 @@ servers → Add → SoundCloud**.
 There's no URL or password to type. Kopuz opens `soundcloud.com/signin` in an
 **isolated browser profile** (a fresh, separate session; your normal browsing is
 never touched), waits for you to log in, and pulls the session's `oauth_token`.
-Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
-Edge, Vivaldi, or Helium).
+By default it uses your **system default browser**; pick a specific one
+(Firefox, Chrome, Chromium, Brave, Edge, Vivaldi, Helium, LibreWolf, Zen, or
+Floorp) if you would rather.
 
 Once signed in you get search, track playback (progressive MP3 plus Go+ AAC/HLS
 streams), your **Liked tracks** as favorites, read-only access to your

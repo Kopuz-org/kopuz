@@ -61,6 +61,7 @@ sign_in_method = How to sign in
 sign_in_with_browser = Sign in with a browser
 sign_in_anonymously = Continue without signing in
 sign_in_browser = Browser
+sign_in_browser_auto = Sistem varsayılanı
 yt_anonymous_help = Anonymous mode browses and plays public music, but has no library, no liked songs and no Discover.
 soundcloud_sign_in_help = Signing in opens a browser window; kopuz keeps only the session it produces.
 player_settings = Oynatıcı Ayarları

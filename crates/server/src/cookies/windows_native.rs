@@ -26,7 +26,7 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_DEFAULT, RPC_C_AUTHZ_DEFAULT};
 use windows::core::{BSTR, GUID, HRESULT, IUnknown, IUnknown_Vtbl, Interface, interface};
 
-use super::store::Cookie;
+use super::store::{Cookie, host_matches_domain};
 
 // Chrome's elevation-service COM interface. Vtable after IUnknown is
 // RunRecoveryCRXElevated, EncryptData, DecryptData — we only call EncryptData
@@ -62,8 +62,7 @@ const ABE_KEY_FILE: &str = ".kopuz-abe";
 
 /// (elevation CLSID, candidate IElevator IIDs newest-first). Chrome 149 rotated
 /// to IElevator2Chrome (== the elevation typelib GUID); the older IElevatorChrome
-/// IID is kept as a fallback for pre-149. Brands without an elevation service
-/// (Chromium/Vivaldi/Helium) return None — the plant is skipped, v10 still works.
+/// IID is kept as a fallback for pre-149.
 fn brand_elevation(browser: Browser) -> Option<(u128, &'static [u128])> {
     match browser {
         Browser::Chrome => Some((
@@ -81,7 +80,9 @@ fn brand_elevation(browser: Browser) -> Option<(u128, &'static [u128])> {
             0x576B31AF_6369_4B6B_8560_E4B203A97A8B,
             &[0xF396861E_0C8E_4C71_8256_2FAE6D759CE9],
         )),
-        Browser::Chromium | Browser::Vivaldi | Browser::Helium => None,
+        // No elevation service (Chromium/Vivaldi/Helium), or not a Chromium
+        // browser at all — the plant is skipped, v10 still works.
+        _ => None,
     }
 }
 
@@ -278,12 +279,6 @@ fn decrypt_value(enc: &[u8], dpapi: Option<&[u8]>, app_bound: Option<&[u8]>) -> 
         .decrypt(Nonce::from_slice(&enc[3..15]), &enc[15..])
         .ok()?;
     Some(String::from_utf8_lossy(pt.get(32..).unwrap_or(&pt)).into_owned())
-}
-
-/// A cookie `host_key` belongs to `domain` only as the domain itself or a
-/// dot-prefixed subdomain — never a bare substring (`notyoutube.com`).
-fn host_matches_domain(host: &str, domain: &str) -> bool {
-    host == domain || host.ends_with(&format!(".{domain}"))
 }
 
 /// Copy the (possibly browser-locked) cookie store to a temp file and read every

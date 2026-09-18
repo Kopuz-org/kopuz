@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use config::Browser;
+use config::{Browser, BrowserEngine};
 
 /// A decrypted cookie — kopuz's consumers (YT Music + SoundCloud header
 /// builders) only ever read `name`/`value`, so this stays minimal and works on
@@ -12,10 +12,51 @@ pub(crate) struct Cookie {
     pub value: String,
 }
 
+/// A cookie `host_key` belongs to `domain` only as the domain itself or a
+/// dot-prefixed subdomain — never a bare substring (`notyoutube.com`).
+pub(crate) fn host_matches_domain(host: &str, domain: &str) -> bool {
+    let host = host.strip_prefix('.').unwrap_or(host);
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+/// Read every cookie scoped to `domain` out of the isolated profile. Gecko
+/// keeps its store in the clear, so only the Chromium path needs decrypting.
+pub(crate) async fn read_cookies(
+    browser: Browser,
+    profile_root: &Path,
+    domain: &str,
+) -> Result<Vec<Cookie>, String> {
+    match browser.engine() {
+        BrowserEngine::Chromium => read_chromium_cookies(browser, profile_root, domain).await,
+        BrowserEngine::Gecko => read_gecko_cookies(browser, profile_root, domain).await,
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+async fn read_gecko_cookies(
+    browser: Browser,
+    profile_root: &Path,
+    domain: &str,
+) -> Result<Vec<Cookie>, String> {
+    super::mozilla::read_cookies(browser, profile_root, domain).await
+}
+
+#[cfg(target_os = "android")]
+async fn read_gecko_cookies(
+    browser: Browser,
+    _profile_root: &Path,
+    _domain: &str,
+) -> Result<Vec<Cookie>, String> {
+    Err(format!(
+        "browser cookie import is desktop-only ({})",
+        browser.label()
+    ))
+}
+
 /// Decrypt the isolated profile's Chromium cookie store (via `rookie`) and
 /// return every cookie scoped to `domain`.
 #[cfg(not(any(target_os = "windows", target_os = "android")))]
-pub(crate) async fn read_cookies(
+async fn read_chromium_cookies(
     browser: Browser,
     profile_root: &Path,
     domain: &str,
@@ -77,7 +118,7 @@ pub(crate) async fn read_cookies(
 /// Android: the isolated-profile sign-in that fills a Chromium cookie store is
 /// a desktop flow, so there is never a profile here to read.
 #[cfg(target_os = "android")]
-pub(crate) async fn read_cookies(
+async fn read_chromium_cookies(
     browser: Browser,
     _profile_root: &Path,
     _domain: &str,
@@ -91,10 +132,24 @@ pub(crate) async fn read_cookies(
 /// Windows: native v10/v11 (DPAPI) + v20 (planted app-bound) decryption — no
 /// `rookie`/`libesedb`, no admin. See [`super::windows_native`].
 #[cfg(target_os = "windows")]
-pub(crate) async fn read_cookies(
+async fn read_chromium_cookies(
     browser: Browser,
     profile_root: &Path,
     domain: &str,
 ) -> Result<Vec<Cookie>, String> {
     super::windows_native::read_cookies(browser, profile_root, domain).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::host_matches_domain;
+
+    #[test]
+    fn a_domain_cookie_is_not_matched_by_a_lookalike_host() {
+        assert!(host_matches_domain("youtube.com", "youtube.com"));
+        assert!(host_matches_domain(".youtube.com", "youtube.com"));
+        assert!(host_matches_domain("music.youtube.com", "youtube.com"));
+        assert!(!host_matches_domain("notyoutube.com", "youtube.com"));
+        assert!(!host_matches_domain("youtube.com.evil.test", "youtube.com"));
+    }
 }
