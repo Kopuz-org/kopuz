@@ -63,7 +63,7 @@ where
                 browser.id().to_uppercase().replace('-', "_")
             )
         };
-        find_browser_bin(browser, profile.display().to_string())
+        find_browser_bin(browser, Some(profile.as_path()))
             .await
             .ok_or(error)?
     };

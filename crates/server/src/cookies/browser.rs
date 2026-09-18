@@ -139,7 +139,13 @@ pub(crate) async fn check_browser_command(arg: String) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) async fn find_browser_bin(browser: Browser, profile: String) -> Option<BrowserBin> {
+/// Resolve a browser to something spawnable. `profile` is the isolated
+/// user-data dir a cookie import needs exported into the flatpak run; a
+/// caller that just wants the user's own browser opened passes `None`.
+pub(crate) async fn find_browser_bin(
+    browser: Browser,
+    profile: Option<&std::path::Path>,
+) -> Option<BrowserBin> {
     let env_key = format!(
         "KOPUZ_{}_BIN",
         browser.id().to_uppercase().replace('-', "_")
@@ -169,21 +175,23 @@ pub(crate) async fn find_browser_bin(browser: Browser, profile: String) -> Optio
         }
     }
 
+    let export = profile
+        .map(|p| format!(" --filesystem={}", p.display()))
+        .unwrap_or_default();
+
     if let Ok(v) = std::env::var("KOPUZ_BROWSER_FLATPAK_ID")
         && !v.trim().is_empty()
     {
         let id = v.to_string().to_owned();
         if check_browser_command(format!("flatpak info {id}")).await {
-            return Some(BrowserBin::CommandLine(format!(
-                "flatpak run --filesystem={profile} {id}"
-            )));
+            return Some(BrowserBin::CommandLine(format!("flatpak run{export} {id}")));
         }
     }
 
     for cand in browser_flatpak_ids(browser) {
         if check_browser_command(format!("flatpak info {cand}")).await {
             return Some(BrowserBin::CommandLine(format!(
-                "flatpak run --filesystem={profile} {cand}"
+                "flatpak run{export} {cand}"
             )));
         }
     }
@@ -206,6 +214,14 @@ pub(crate) async fn find_browser_bin(browser: Browser, profile: String) -> Optio
 /// Plain `Command` natively; `flatpak-spawn --host --watch-bus` when packaged,
 /// so `child.kill()`/`kill_on_drop` still tears the host browser down.
 pub(crate) fn browser_command(bin: &BrowserBin) -> Command {
+    browser_command_with(bin, true)
+}
+
+/// The same, with `--watch-bus` optional. A cookie import owns the browser it
+/// spawned and wants it gone when kopuz drops the child; the Spotify player
+/// page lands in the user's own browser, which must outlive kopuz's bus
+/// connection.
+pub(crate) fn browser_command_with(bin: &BrowserBin, watch_bus: bool) -> Command {
     let tokens: Vec<&str> = match bin {
         BrowserBin::Path(p) => vec![p.as_str()],
         BrowserBin::CommandLine(c) => {
@@ -219,7 +235,10 @@ pub(crate) fn browser_command(bin: &BrowserBin) -> Command {
     };
     if in_flatpak() {
         let mut c = Command::new("flatpak-spawn");
-        c.args(["--host", "--watch-bus"]);
+        c.arg("--host");
+        if watch_bus {
+            c.arg("--watch-bus");
+        }
         c.args(&tokens);
         c
     } else {

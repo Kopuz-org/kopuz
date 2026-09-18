@@ -735,6 +735,8 @@ message SourceCapabilities {
   bool browse_folders = 14;
   // It plays on devices of its own, which a client can list and move to.
   bool external_devices = 15;
+  // It plays through a browser on the host, not the engine.
+  bool browser_playback = 16;
 }
 
 // What making a source usable takes.

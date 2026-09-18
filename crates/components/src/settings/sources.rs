@@ -204,6 +204,8 @@ pub fn ServerSettings(
     /// Folder picker for the active server, when it browses a folder tree. Only
     /// the active server has its creds hydrated, so only it can be browsed.
     remote_folders: Option<crate::settings_remote_folders::RemoteFolderSettings>,
+    /// Whether the daemon can start a program on the host.
+    host_access: bool,
 ) -> Element {
     let login_text = i18n::t("login");
     let delete_text = i18n::t("delete");
@@ -234,6 +236,7 @@ pub fn ServerSettings(
                     // picker sits on the card the way it does for a local
                     // library, not behind a separate dialog.
                     let picker = is_active.then(|| remote_folders.clone()).flatten();
+                    let needs_host = srv.capabilities.browser_playback && !host_access;
                     rsx! {
                         div { key: "{srv.id}",
                             class: "flex flex-col gap-2 bg-white/5 p-2 rounded w-full",
@@ -289,6 +292,11 @@ pub fn ServerSettings(
                                 div { class: "flex flex-col gap-2 border-t border-white/10 pt-2",
                                     p { class: "text-xs text-white/60", "{i18n::t(\"remote_music_folders\")}" }
                                     crate::settings_remote_folders::RemoteFolderPicker { settings: picker }
+                                }
+                            }
+                            if needs_host {
+                                crate::settings_popups::HostAccessWarning {
+                                    message: i18n::t("browser_playback_needs_host").to_string(),
                                 }
                             }
                             if !settings.is_empty() {

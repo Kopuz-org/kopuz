@@ -131,6 +131,8 @@ pub struct Capabilities {
     pub browse_folders: bool,
     /// It plays on devices of its own, which a client can list and move to.
     pub external_devices: bool,
+    /// It plays through a browser on the host, not the engine.
+    pub browser_playback: bool,
     pub sync: bool,
     pub downloads: bool,
     pub discover: bool,

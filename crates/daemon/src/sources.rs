@@ -47,6 +47,7 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
         folders: caps.folders,
         browse_folders: caps.browse_folders,
         external_devices: caps.external_devices,
+        browser_playback: caps.browser_playback,
         sync: caps.sync,
         downloads: caps.downloads,
         discover: caps.discover,

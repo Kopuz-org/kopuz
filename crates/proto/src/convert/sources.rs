@@ -33,6 +33,7 @@ pub fn capabilities_to_proto(value: &api::SourceCapabilities) -> SourceCapabilit
         playlist_radio: value.playlist_radio,
         browse_folders: value.browse_folders,
         external_devices: value.external_devices,
+        browser_playback: value.browser_playback,
         playlists: match value.playlists {
             PlaylistCapability::None => crate::PlaylistCapability::None,
             PlaylistCapability::AddRemove => crate::PlaylistCapability::AddRemove,
@@ -69,6 +70,7 @@ pub fn capabilities_from_proto(value: Option<&SourceCapabilities>) -> api::Sourc
         playlist_radio: value.playlist_radio,
         browse_folders: value.browse_folders,
         external_devices: value.external_devices,
+        browser_playback: value.browser_playback,
         playlists: match crate::PlaylistCapability::try_from(value.playlists) {
             Ok(crate::PlaylistCapability::AddRemove) => api::PlaylistCapability::AddRemove,
             Ok(crate::PlaylistCapability::Reorder) => api::PlaylistCapability::Reorder,

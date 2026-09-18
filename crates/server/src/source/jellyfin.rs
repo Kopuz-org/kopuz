@@ -239,6 +239,7 @@ impl MediaSource for JellyfinSource {
             folders: false,
             browse_folders: false,
             external_devices: false,
+            browser_playback: false,
             sync: true,
             downloads: true,
             discover: false,

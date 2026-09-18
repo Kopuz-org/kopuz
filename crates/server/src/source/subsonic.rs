@@ -235,6 +235,7 @@ impl MediaSource for SubsonicSource {
             folders: false,
             browse_folders: false,
             external_devices: false,
+            browser_playback: false,
             sync: true,
             downloads: true,
             discover: false,

@@ -10,8 +10,8 @@ use config::AppConfig;
 use dioxus::prelude::*;
 use tracing::Instrument;
 
-/// Whether the daemon can open a browser for a sign-in. A sandboxed daemon
-/// cannot, and the add-server dialog says so instead of failing later.
+/// Whether the daemon can open a browser on the host. A sandboxed daemon
+/// cannot, and settings say so before a sign-in or playback fails on it.
 pub(crate) async fn ensure_host_access(mut host_access: Signal<bool>) -> Option<()> {
     let api = hooks::consume_api();
     host_access.set(api.can_open_browser().await.unwrap_or(true));

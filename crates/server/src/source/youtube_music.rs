@@ -64,6 +64,7 @@ impl MediaSource for YtSource {
             folders: false,
             browse_folders: false,
             external_devices: false,
+            browser_playback: false,
             sync: true,
             downloads: true,
             discover: true,

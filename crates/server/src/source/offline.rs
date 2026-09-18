@@ -29,6 +29,7 @@ impl MediaSource for OfflineServerSource {
             folders: false,
             browse_folders: false,
             external_devices: false,
+            browser_playback: false,
             sync: false,
             downloads: false,
             discover: false,

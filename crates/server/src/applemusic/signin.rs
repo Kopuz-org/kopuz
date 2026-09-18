@@ -58,7 +58,7 @@ pub async fn launch_signin_and_extract(
 
     // One lookup for both cases — it resolves a host-spawn command line itself
     // when running under Flatpak.
-    let bin = ip::find_browser_bin(browser, profile.display().to_string())
+    let bin = ip::find_browser_bin(browser, Some(profile.as_path()))
         .await
         .ok_or_else(|| {
             if ip::in_flatpak() {

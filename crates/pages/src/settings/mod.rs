@@ -105,7 +105,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let registry_loading = use_signal(|| false);
     let mut registry_toggle_error = use_signal(|| Option::<String>::None);
 
-    let host_access = use_signal(|| false);
+    let host_access = use_signal(|| true);
 
     use_effect(move || {
         spawn(async move {
@@ -590,6 +590,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         on_switch: handle_switch_server,
                                         on_login: move |_| sign_in_again(),
                                         remote_folders: remote_folder_settings(active_server()),
+                                        host_access: host_access(),
                                     }
                                 }
                             }

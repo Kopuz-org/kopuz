@@ -63,6 +63,7 @@ impl MediaSource for SpotifySource {
             folders: false,
             browse_folders: false,
             external_devices: true,
+            browser_playback: true,
             sync: true,
             downloads: false,
             discover: true,

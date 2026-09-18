@@ -110,7 +110,7 @@ impl SpotifyHost {
             })
         };
         let url = format!("http://127.0.0.1:{port}/?k={nonce}");
-        open_player_page(&url, browser.as_deref())?;
+        open_player_page(&url, browser.as_deref()).await?;
 
         let accept_loop = tokio::spawn(accept_loop(
             listener,
@@ -250,49 +250,54 @@ const BROWSERS: &[(PlayerBrowser, &str, &str)] = &[
     ),
 ];
 
+/// Paired with the cookie importer's [`config::Browser`], which is what knows
+/// how to find a browser: its binary names, a host lookup through
+/// `flatpak-spawn` when kopuz itself is packaged, a `flatpak run <app-id>` for
+/// a browser that is packaged, and the `$KOPUZ_*_BIN` override. The ids match
+/// `Browser::id`, so a persisted `spotify_browser` addresses both.
 #[cfg(all(unix, not(target_os = "macos")))]
-const BROWSERS: &[(PlayerBrowser, &[&str])] = &[
+const BROWSERS: &[(PlayerBrowser, config::Browser)] = &[
     (
         PlayerBrowser {
             id: "chrome",
             label: "Google Chrome",
         },
-        &["google-chrome-stable", "google-chrome"],
+        config::Browser::Chrome,
     ),
     (
         PlayerBrowser {
             id: "chromium",
             label: "Chromium",
         },
-        &["chromium", "chromium-browser"],
+        config::Browser::Chromium,
     ),
     (
         PlayerBrowser {
             id: "brave",
             label: "Brave",
         },
-        &["brave-browser", "brave"],
+        config::Browser::Brave,
     ),
     (
         PlayerBrowser {
             id: "edge",
             label: "Microsoft Edge",
         },
-        &["microsoft-edge", "microsoft-edge-stable"],
+        config::Browser::Edge,
     ),
     (
         PlayerBrowser {
             id: "vivaldi",
             label: "Vivaldi",
         },
-        &["vivaldi"],
+        config::Browser::Vivaldi,
     ),
     (
         PlayerBrowser {
             id: "helium",
             label: "Helium",
         },
-        &["helium"],
+        config::Browser::Helium,
     ),
 ];
 
@@ -313,15 +318,9 @@ fn browser_installed(app_name: &str) -> bool {
     })
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-fn command_in_path(cmd: &str) -> bool {
-    std::env::var_os("PATH")
-        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(cmd).exists()))
-}
-
 /// The playback-capable browsers installed on this machine, in the order the
 /// automatic choice tries them.
-pub fn available_browsers() -> Vec<PlayerBrowser> {
+pub async fn available_browsers() -> Vec<PlayerBrowser> {
     #[cfg(target_os = "macos")]
     {
         BROWSERS
@@ -332,11 +331,16 @@ pub fn available_browsers() -> Vec<PlayerBrowser> {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        BROWSERS
-            .iter()
-            .filter(|(_, cmds)| cmds.iter().any(|c| command_in_path(c)))
-            .map(|(b, _)| *b)
-            .collect()
+        let mut found = Vec::new();
+        for (browser, kind) in BROWSERS {
+            if crate::cookies::browser::find_browser_bin(*kind, None)
+                .await
+                .is_some()
+            {
+                found.push(*browser);
+            }
+        }
+        found
     }
     #[cfg(target_os = "windows")]
     {
@@ -355,7 +359,7 @@ pub fn available_browsers() -> Vec<PlayerBrowser> {
     }
 }
 
-fn launch_browser(id: &str, url: &str) -> bool {
+async fn launch_browser(id: &str, url: &str) -> bool {
     #[cfg(target_os = "macos")]
     {
         let Some((_, bundle, _)) = BROWSERS.iter().find(|(b, _, _)| b.id == id) else {
@@ -369,11 +373,18 @@ fn launch_browser(id: &str, url: &str) -> bool {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let Some((_, cmds)) = BROWSERS.iter().find(|(b, _)| b.id == id) else {
+        let Some((_, kind)) = BROWSERS.iter().find(|(b, _)| b.id == id) else {
             return false;
         };
-        cmds.iter()
-            .any(|cmd| std::process::Command::new(cmd).arg(url).spawn().is_ok())
+        let Some(bin) = crate::cookies::browser::find_browser_bin(*kind, None).await else {
+            return false;
+        };
+        // No `--watch-bus`: the page opens in the user's own browser, which
+        // has to outlive kopuz's bus connection rather than die with it.
+        crate::cookies::browser::browser_command_with(&bin, false)
+            .arg(url)
+            .spawn()
+            .is_ok()
     }
     #[cfg(target_os = "windows")]
     {
@@ -393,9 +404,9 @@ fn launch_browser(id: &str, url: &str) -> bool {
 /// one — deliberately never the system default: the SDK is only reliable in
 /// Chromium-family browsers and Safari (Firefox has a long-standing playback
 /// bug, spotify/web-playback-sdk#116, and ignores media-session metadata).
-fn open_player_page(url: &str, preferred: Option<&str>) -> Result<(), String> {
+async fn open_player_page(url: &str, preferred: Option<&str>) -> Result<(), String> {
     if let Some(id) = preferred {
-        if launch_browser(id, url) {
+        if launch_browser(id, url).await {
             tracing::info!(browser = id, "spotify player page opened");
             return Ok(());
         }
@@ -404,14 +415,26 @@ fn open_player_page(url: &str, preferred: Option<&str>) -> Result<(), String> {
             "chosen spotify browser unavailable; trying others"
         );
     }
-    for browser in available_browsers() {
+    for browser in available_browsers().await {
         if preferred == Some(browser.id) {
             continue;
         }
-        if launch_browser(browser.id, url) {
+        if launch_browser(browser.id, url).await {
             tracing::info!(browser = browser.id, "spotify player page opened");
             return Ok(());
         }
+    }
+    // Under Flatpak every browser lives on the host, so a sandbox that cannot
+    // reach `flatpak-spawn --host` finds nothing however much is installed.
+    // Say that instead of telling the user to install a browser they have.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if crate::cookies::browser::in_flatpak() && !crate::cookies::browser::has_host_spawn().await {
+        return Err(
+            "Spotify playback opens a browser on the host, which this Flatpak is not \
+             allowed to do. Grant it with: flatpak override --user \
+             --talk-name=org.freedesktop.Flatpak moe.kopuz.kopuz, then restart kopuz."
+                .to_string(),
+        );
     }
     Err(
         "Spotify playback needs Chrome, Edge, Brave, Chromium, Vivaldi, or Safari — \

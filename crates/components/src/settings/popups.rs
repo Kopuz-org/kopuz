@@ -1,6 +1,30 @@
 use crate::settings_items::MultiDirectoryPicker;
 use dioxus::prelude::*;
 
+/// Flathub does not allow `org.freedesktop.Flatpak` in the manifest, so the
+/// user has to grant it before the daemon can reach a browser on the host.
+#[component]
+pub fn HostAccessWarning(message: String) -> Element {
+    let command = "flatpak override --user --talk-name=org.freedesktop.Flatpak moe.kopuz.kopuz";
+    rsx! {
+        div { class: "host-access-warning",
+            p { "{message}" }
+            button {
+                class: "flatpak-command",
+                title: i18n::t("copy"),
+                aria_label: i18n::t("copy"),
+                onclick: move |_| {
+                    let js = format!(
+                        "navigator.clipboard.writeText('{command}').catch((e) => console.error('clipboard writeText failed', e));"
+                    );
+                    let _ = dioxus::document::eval(&js);
+                },
+                "{command}"
+            }
+        }
+    }
+}
+
 #[component]
 pub fn AddLocalSourcePopup(
     name: Signal<String>,
@@ -73,8 +97,6 @@ pub fn AddServerPopup(
         .is_some_and(|check| check.sign_in == api::SignInKind::Browser);
     let blocked = needs_browser && !host_access;
     let problems = check.map(|check| check.problems).unwrap_or_default();
-    let flatpak_access_command =
-        "flatpak override --user --talk-name=org.freedesktop.Flatpak moe.kopuz.kopuz";
 
     let mut answered = values();
     answered.extend(secrets());
@@ -95,21 +117,7 @@ pub fn AddServerPopup(
                 }
 
                 if blocked {
-                    div { class: "warning",
-                        p { "{i18n::t(\"browser_sign_in_needs_host\")}" }
-                        button {
-                            class: "flatpak-command",
-                            title: i18n::t("copy"),
-                            aria_label: i18n::t("copy"),
-                            onclick: move |_| {
-                                let js = format!(
-                                    "navigator.clipboard.writeText('{flatpak_access_command}').catch((e) => console.error('clipboard writeText failed', e));"
-                                );
-                                let _ = dioxus::document::eval(&js);
-                            },
-                            "{flatpak_access_command}"
-                        }
-                    }
+                    HostAccessWarning { message: i18n::t("browser_sign_in_needs_host").to_string() }
                 }
 
                 input {

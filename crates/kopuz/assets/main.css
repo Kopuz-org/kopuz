@@ -230,7 +230,7 @@ body {
     border: 1px solid rgba(248, 113, 113, 0.3);
 }
 
-.popup .warning {
+.host-access-warning {
     color: var(--color-amber-400, #f8be71);
     font-size: var(--text-xs, 0.75rem);
     margin-top: 3px;
@@ -241,7 +241,7 @@ body {
     text-align: center;
 }
 
-.popup .flatpak-command {
+.host-access-warning .flatpak-command {
     color: var(--color-white, #ffffff);
     background-color: rgba(31, 31, 31, 0.788);
     margin-top: 0;
