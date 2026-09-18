@@ -446,6 +446,46 @@ pub fn equalizer_from_proto(value: Option<&EqualizerSettings>) -> config::Equali
     }
 }
 
+pub fn replay_gain_mode_to_proto(value: config::ReplayGainMode) -> ReplayGainMode {
+    match value {
+        config::ReplayGainMode::Off => ReplayGainMode::Off,
+        config::ReplayGainMode::Track => ReplayGainMode::Track,
+        config::ReplayGainMode::Album => ReplayGainMode::Album,
+        config::ReplayGainMode::Auto => ReplayGainMode::Auto,
+    }
+}
+
+pub fn replay_gain_mode_from_proto(value: i32) -> config::ReplayGainMode {
+    match ReplayGainMode::try_from(value).unwrap_or(ReplayGainMode::Unspecified) {
+        ReplayGainMode::Off => config::ReplayGainMode::Off,
+        ReplayGainMode::Track => config::ReplayGainMode::Track,
+        ReplayGainMode::Album => config::ReplayGainMode::Album,
+        ReplayGainMode::Auto => config::ReplayGainMode::Auto,
+        ReplayGainMode::Unspecified => config::ReplayGainMode::default(),
+    }
+}
+
+pub fn replay_gain_to_proto(value: config::ReplayGainSettings) -> ReplayGainSettings {
+    ReplayGainSettings {
+        mode: replay_gain_mode_to_proto(value.mode) as i32,
+        prevent_clipping: value.prevent_clipping,
+        preamp_db: value.preamp_db,
+        fallback_gain_db: value.fallback_gain_db,
+    }
+}
+
+pub fn replay_gain_from_proto(value: Option<&ReplayGainSettings>) -> config::ReplayGainSettings {
+    let Some(value) = value else {
+        return config::ReplayGainSettings::default();
+    };
+    config::ReplayGainSettings {
+        mode: replay_gain_mode_from_proto(value.mode),
+        prevent_clipping: value.prevent_clipping,
+        preamp_db: value.preamp_db,
+        fallback_gain_db: value.fallback_gain_db,
+    }
+}
+
 pub fn album_sort_criterion_to_proto(
     value: &config::SortCriterion<config::AlbumSortField>,
 ) -> AlbumSortCriterion {
@@ -574,6 +614,7 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
         back_behavior: back_behavior_to_proto(value.back_behavior) as i32,
         channel_mode: channel_mode_to_proto(value.channel_mode) as i32,
         equalizer: Some(equalizer_to_proto(&value.equalizer)),
+        replay_gain: Some(replay_gain_to_proto(value.replay_gain)),
         device_change_behavior: device_change_behavior_to_proto(value.device_change_behavior)
             as i32,
         sample_rate_mode: sample_rate_mode_to_proto(value.sample_rate_mode) as i32,
@@ -683,6 +724,7 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
         back_behavior: back_behavior_from_proto(value.back_behavior),
         channel_mode: channel_mode_from_proto(value.channel_mode),
         equalizer: equalizer_from_proto(value.equalizer.as_ref()),
+        replay_gain: replay_gain_from_proto(value.replay_gain.as_ref()),
         device_change_behavior: device_change_behavior_from_proto(value.device_change_behavior),
         sample_rate_mode: sample_rate_mode_from_proto(value.sample_rate_mode),
         titlebar_mode: titlebar_mode_from_proto(value.titlebar_mode),

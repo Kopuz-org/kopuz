@@ -142,6 +142,7 @@ fn test_track(key: &String) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: vec![],
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 
@@ -1444,6 +1445,7 @@ fn external_track(title: &str) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: Vec::new(),
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 

@@ -252,6 +252,7 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists,
+        replay_gain: config::ReplayGainInfo::default(),
     })
 }
 
