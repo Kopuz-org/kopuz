@@ -29,6 +29,26 @@ pub(crate) fn FullscreenAndroid(
 
     let mut swipe = crate::gestures::use_swipe();
 
+    // The sheet unmounts as soon as `is_fullscreen` clears, so a close has to
+    // hold it on screen for the length of its own animation first.
+    let mut closing = use_signal(|| false);
+    let mut close_from = use_signal(|| 0.0_f64);
+    let mut begin_close = move |from: f64| {
+        if *closing.peek() {
+            return;
+        }
+        if config.peek().reduce_animations {
+            is_fullscreen.set(false);
+            return;
+        }
+        close_from.set(from);
+        closing.set(true);
+        spawn(async move {
+            utils::sleep(std::time::Duration::from_millis(200)).await;
+            is_fullscreen.set(false);
+        });
+    };
+
     let mut pull_armed = use_signal(|| true);
     let scroller_id = match tab {
         1 => Some("fullscreen-queue-list"),
@@ -59,7 +79,14 @@ pub(crate) fn FullscreenAndroid(
     } else {
         0.0
     };
-    let sheet_style = if pull > 0.0 {
+    let is_closing = *closing.read();
+    let sheet_style = if is_closing {
+        format!(
+            "{} --kopuz-sheet-from: {}px;",
+            background_style.read(),
+            close_from.read()
+        )
+    } else if pull > 0.0 {
         format!(
             "{} transform: translateY({pull}px);",
             background_style.read()
@@ -70,13 +97,19 @@ pub(crate) fn FullscreenAndroid(
             background_style.read()
         )
     };
+    let sheet_anim = if is_closing {
+        "kopuz-sheet-out"
+    } else {
+        "kopuz-sheet-in"
+    };
     const DISMISS_AT: f64 = 140.0;
     let on_pull_end = move |evt: TouchEvent| {
         let armed = *pull_armed.peek();
-        let dismissed = armed && swipe.pull_down() >= DISMISS_AT;
+        let travelled = swipe.pull_down();
+        let dismissed = armed && travelled >= DISMISS_AT;
         let swiped_down = swipe.finish(&evt) == Some(crate::gestures::SwipeDirection::Down);
         if armed && (swiped_down || dismissed) {
-            is_fullscreen.set(false);
+            begin_close(travelled);
         }
     };
     let close_text = i18n::t("close").to_string();
@@ -100,7 +133,7 @@ pub(crate) fn FullscreenAndroid(
         div {
             // Above the mobile top bar (z-60) — at z-50 that bar painted over
             // this sheet's own header, hiding the close button and the tabs.
-            class: "fixed inset-0 z-[70] flex flex-col text-white select-none",
+            class: "fixed inset-0 z-[70] flex flex-col text-white select-none {sheet_anim}",
             style: "{sheet_style}",
 
             if let Some(cover) = cover_background() {
@@ -116,7 +149,7 @@ pub(crate) fn FullscreenAndroid(
                 button {
                     class: "w-10 h-10 flex items-center justify-center text-white/60 active:scale-95 transition-all shrink-0",
                     "aria-label": "{close_text}",
-                    onclick: move |_| is_fullscreen.set(false),
+                    onclick: move |_| begin_close(0.0),
                     i { class: "fa-solid fa-chevron-down text-xl", "aria-hidden": "true" }
                 }
                 div { class: "flex flex-1 items-center",

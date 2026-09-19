@@ -521,9 +521,6 @@
   .mb-12 {
     margin-bottom: calc(var(--spacing) * 12);
   }
-  .mb-\[env\(safe-area-inset-bottom\)\] {
-    margin-bottom: env(safe-area-inset-bottom);
-  }
   .ml-0\.5 {
     margin-left: calc(var(--spacing) * 0.5);
   }
@@ -1252,6 +1249,9 @@
   .bg-\[\#0a0a0a\] {
     background-color: #0a0a0a;
   }
+  .bg-\[\#0a0a0a\]\/95 {
+    background-color: color-mix(in oklab, #0a0a0a 95%, transparent);
+  }
   .bg-\[\#0a0a0a\]\/97 {
     background-color: color-mix(in oklab, #0a0a0a 97%, transparent);
   }
@@ -1789,6 +1789,9 @@
   .pb-\[calc\(env\(safe-area-inset-bottom\)_\+_1\.5rem\)\] {
     padding-bottom: calc(env(safe-area-inset-bottom) + 1.5rem);
   }
+  .pb-\[env\(safe-area-inset-bottom\)\] {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
   .pl-1 {
     padding-left: calc(var(--spacing) * 1);
   }
@@ -1883,6 +1886,9 @@
   }
   .text-\[15px\] {
     font-size: 15px;
+  }
+  .text-\[17px\] {
+    font-size: 17px;
   }
   .text-\[28px\] {
     font-size: 28px;
