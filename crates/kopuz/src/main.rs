@@ -1,8 +1,8 @@
 use components::{
     CoverArtBackground, QuickSearch, bottombar::Bottombar, compact_player::CompactPlayer,
     download_overlay::DownloadOverlay, external_devices::ExternalDevicesPanel,
-    fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, titlebar::ResizeHandles,
-    titlebar::Titlebar,
+    fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, tabbar::TabBar,
+    titlebar::ResizeHandles, titlebar::Titlebar,
 };
 #[cfg(not(target_os = "android"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
@@ -2030,6 +2030,21 @@ fn App() -> Element {
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
                     is_devices_open: is_devices_open,
+                }
+            }
+            if cfg!(target_os = "android") {
+                TabBar {
+                    current_route,
+                    on_navigate: move |route| {
+                        if route == Route::Album {
+                            selected_album_id.set(String::new());
+                        }
+                        if route == Route::Artist {
+                            selected_artist_name.set(String::new());
+                            selected_artist_channel_id.set(None);
+                        }
+                        current_route.set(route);
+                    },
                 }
             }
         }

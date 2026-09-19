@@ -40,6 +40,39 @@
     animation: scan-slide 1.4s ease-in-out infinite;
 }
 
+/* The Android now-playing sheet. It is mounted only while it is open, so
+   without these it appeared in place with no travel — a hard cut on the way in
+   even though the drag-to-dismiss followed the finger on the way out. */
+@keyframes kopuz-sheet-in {
+    from {
+        transform: translateY(100%);
+    }
+
+    to {
+        transform: translateY(0);
+    }
+}
+
+@keyframes kopuz-sheet-out {
+    /* Starts wherever the finger left it, so a drag past the dismiss threshold
+       carries on downward instead of snapping back to the top first. */
+    from {
+        transform: translateY(var(--kopuz-sheet-from, 0px));
+    }
+
+    to {
+        transform: translateY(100%);
+    }
+}
+
+.kopuz-sheet-in {
+    animation: kopuz-sheet-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.kopuz-sheet-out {
+    animation: kopuz-sheet-out 200ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+
 @font-face {
     font-family: "nasin-nanpa";
     src: url(fonts/nasin-nanpa-4.0.2-UCSUR.otf);
@@ -335,4 +368,10 @@ body {
 [data-platform="android"] {
     overflow-x: hidden;
     overscroll-behavior-x: none;
+}
+
+/* Hitting the end of a list shouldn't rubber-band the page behind it — on a
+   phone that reads as the whole app coming loose. */
+[data-platform="android"] .overflow-y-auto {
+    overscroll-behavior-y: contain;
 }
