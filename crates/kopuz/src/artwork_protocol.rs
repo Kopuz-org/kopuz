@@ -9,13 +9,13 @@
 //! background someone picked in settings. It is the only path a frontend
 //! still reads from disk itself.
 
+#[cfg(not(target_os = "android"))]
 use tracing::Instrument;
 
 #[cfg(not(target_os = "android"))]
 use dioxus::desktop::RequestAsyncResponder;
-#[cfg(target_os = "android")]
-use dioxus::mobile::RequestAsyncResponder;
 
+#[cfg(not(target_os = "android"))]
 fn mime_for_path(file_path: &str) -> &'static str {
     let extension = std::path::Path::new(file_path)
         .extension()
@@ -42,6 +42,7 @@ fn mime_for_path(file_path: &str) -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 pub fn serve(uri: http::Uri, responder: RequestAsyncResponder) {
     fn resp(
         status: u16,
@@ -131,13 +132,6 @@ pub fn serve(uri: http::Uri, responder: RequestAsyncResponder) {
     };
     tokio::spawn(
         async move {
-            // Wry's Android request bridge panics after ten seconds without a
-            // response. A slow provider must fail the image, not the app.
-            #[cfg(target_os = "android")]
-            let response = tokio::time::timeout(std::time::Duration::from_secs(8), response)
-                .await
-                .unwrap_or_else(|_| resp(504, &[("Cache-Control", "no-store")], Vec::new()));
-            #[cfg(not(target_os = "android"))]
             let response = response.await;
             responder.respond(response);
         }
@@ -145,7 +139,7 @@ pub fn serve(uri: http::Uri, responder: RequestAsyncResponder) {
     );
 }
 
-fn entity_request(uri: &http::Uri) -> Option<api::ArtworkRequest> {
+pub(crate) fn entity_request(uri: &http::Uri) -> Option<api::ArtworkRequest> {
     let query = uri.query()?;
     let target = query.split('&').find_map(|part| {
         let (kind, id) = part.split_once('=')?;
@@ -175,7 +169,7 @@ mod tests {
     #[test]
     fn android_and_desktop_urls_resolve_every_artwork_entity() {
         for origin in [
-            "https://artwork.dioxus.localhost/api",
+            "http://127.0.0.1:49152/session/api",
             "artwork://dioxus.localhost/api",
             "artwork://api",
         ] {
@@ -196,6 +190,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "android"))]
     fn artwork_mime_preserves_common_formats() {
         assert_eq!(mime_for_path("/covers/art.png"), "image/png");
         assert_eq!(mime_for_path("/covers/art.WEBP"), "image/webp");

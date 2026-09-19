@@ -710,17 +710,33 @@ fn patch_manifest(path: &Path) {
         );
     }
 
-    // singleTask: the foreground service + wake lock keep our process alive in the
-    // background, so relaunching from the launcher would otherwise spin up a *second*
-    // MainActivity in the live process and call WryActivity_create twice — which tao
-    // can't survive and aborts with SIGABRT. singleTask reuses the existing instance
-    // (onNewIntent instead of a fresh onCreate) so native init only ever runs once.
-    if !content.contains("android:launchMode=") {
-        content = content.replacen(
-            "<activity ",
-            "<activity android:launchMode=\"singleTask\" ",
-            1,
-        );
+    // Tao/Wry cannot initialize twice in a live process. Reuse the launcher
+    // activity and let its WebView handle configuration changes in place.
+    // singleTask alone does not prevent recreation on theme/density changes.
+    if let Some(name) = content.find("android:name=\"dev.dioxus.main.MainActivity\"")
+        && let Some(start) = content[..name].rfind("<activity ")
+        && let Some(end) = content[name..].find('>')
+    {
+        let end = name + end;
+        let mut activity = content[start..end].to_string();
+        for (key, value) in [
+            ("launchMode", "singleTask"),
+            (
+                "configChanges",
+                include_str!("../../android-src/activity-config-changes.txt").trim(),
+            ),
+        ] {
+            let marker = format!("android:{key}=\"");
+            if let Some(value_start) = activity.find(&marker) {
+                let value_start = value_start + marker.len();
+                if let Some(value_end) = activity[value_start..].find('"') {
+                    activity.replace_range(value_start..value_start + value_end, value);
+                }
+            } else {
+                activity.push_str(&format!(" {marker}{value}\""));
+            }
+        }
+        content.replace_range(start..end, &activity);
     }
 
     if !content.contains("MusicService") {

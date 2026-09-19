@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Patch AndroidManifest.xml and generate mipmap icons after dx build."""
-import sys, os, shutil
+import sys, os, shutil, re
 
 PERMISSIONS = [
     'android.permission.POST_NOTIFICATIONS',
@@ -50,16 +50,20 @@ def patch_manifest(path):
             1
         )
         changed = True
-    # singleTask: our foreground service keeps the process alive in the background, so
-    # relaunching would otherwise create a second MainActivity and call WryActivity_create
-    # twice (tao aborts with SIGABRT). singleTask reuses the existing instance.
-    if 'android:launchMode=' not in content:
-        content = content.replace(
-            '<activity ',
-            '<activity android:launchMode="singleTask" ',
-            1
-        )
-        changed = True
+    # Match build.rs: neither relaunching nor a configuration change may
+    # reinitialize Tao/Wry while the native runtime is still alive.
+    with open(os.path.join(os.path.dirname(__file__), 'activity-config-changes.txt')) as f:
+        config_changes = f.read().strip()
+    activity = re.search(r'<activity\b[^>]*android:name="dev\.dioxus\.main\.MainActivity"[^>]*>', content)
+    if activity:
+        tag = activity.group()
+        for key, value in [('launchMode', 'singleTask'), ('configChanges', config_changes)]:
+            attribute = f'android:{key}="{value}"'
+            pattern = rf'android:{key}="[^"]*"'
+            tag = re.sub(pattern, attribute, tag) if re.search(pattern, tag) else tag[:-1] + ' ' + attribute + '>'
+        if tag != activity.group():
+            content = content[:activity.start()] + tag + content[activity.end():]
+            changed = True
     if 'MusicService' not in content:
         content = content.replace('    </application>', INSIDE_APPLICATION + '\n    </application>', 1)
         changed = True

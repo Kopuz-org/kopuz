@@ -152,19 +152,42 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
     }
 }
 
-/// The cover URL for a library entity the daemon resolves, as opposed to a
-/// local file this process can read. `kind` is `track`/`album`/`artist` and
-/// `id` the entity's key; the app's `artwork` protocol handler turns it back
-/// into an API call. Server covers are signed with credentials a frontend
-/// never sees, so this is the only way to show one.
-///
-/// `version` comes from the row's artwork ref and changes when the picture
-/// does, which is what makes the year-long immutable cache correct.
-pub fn format_entity_artwork_url(kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
-    entity_artwork_url(std::env::consts::OS, kind, id, version, hq)
+static ARTWORK_ENDPOINT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Install the app's loopback artwork endpoint before rendering the Android UI.
+pub fn set_artwork_endpoint(endpoint: String) -> Result<(), String> {
+    ARTWORK_ENDPOINT
+        .set(endpoint)
+        .map_err(|_| "artwork endpoint is already initialized".to_string())
 }
 
-fn entity_artwork_url(platform: &str, kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
+pub fn is_entity_artwork_url(url: &str) -> bool {
+    ARTWORK_ENDPOINT.get().is_some_and(|endpoint| {
+        url.strip_prefix(endpoint)
+            .is_some_and(|rest| rest.starts_with('?'))
+    })
+}
+
+/// The cover URL for a library entity the daemon resolves. The app serves
+/// these through loopback HTTP on Android and a custom protocol on desktop;
+/// credentials used to fetch a provider's images never reach the frontend.
+/// `version` changes with the picture, allowing an immutable response cache.
+pub fn format_entity_artwork_url(kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
+    let origin = if cfg!(target_os = "android") {
+        let Some(endpoint) = ARTWORK_ENDPOINT.get() else {
+            tracing::error!("artwork requested before the loopback server was started");
+            return default_cover_url();
+        };
+        endpoint.as_str()
+    } else if cfg!(target_os = "windows") {
+        "http://artwork.dioxus.localhost/api"
+    } else {
+        "artwork://api"
+    };
+    entity_artwork_url(origin, kind, id, version, hq)
+}
+
+fn entity_artwork_url(origin: &str, kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
     const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
         .add(b' ')
         .add(b'"')
@@ -182,13 +205,6 @@ fn entity_artwork_url(platform: &str, kind: &str, id: &str, version: u64, hq: bo
 
     let id = percent_encoding::utf8_percent_encode(id, QUERY_VAL);
     let quality = if hq { "&hq=1" } else { "" };
-    // Dioxus enables Wry's HTTPS protocol shim on Android. Custom-scheme
-    // subresources are not rewritten automatically by the WebView.
-    let origin = match platform {
-        "android" => "https://artwork.dioxus.localhost/api",
-        "windows" => "http://artwork.dioxus.localhost/api",
-        _ => "artwork://api",
-    };
     let url = format!("{origin}?{kind}={id}{quality}&v={version}");
     cover_url_from_string(url)
 }
@@ -202,24 +218,38 @@ pub fn default_cover_url() -> CoverUrl {
 #[cfg(test)]
 mod artwork_url_tests {
     #[test]
-    fn android_entity_images_use_the_https_webview_protocol() {
-        for kind in ["track", "album", "artist", "playlist", "catalog", "station"] {
-            let url = super::entity_artwork_url("android", kind, "source:a&b +c", 42, true);
-            assert_eq!(
-                url.as_ref(),
-                format!(
-                    "https://artwork.dioxus.localhost/api?{kind}=source%3Aa%26b%20%2Bc&hq=1&v=42"
-                )
-            );
+    fn entity_images_encode_ids_and_quality_for_each_transport() {
+        for endpoint in [
+            "http://127.0.0.1:49152/session/api",
+            "http://artwork.dioxus.localhost/api",
+            "artwork://api",
+        ] {
+            for kind in ["track", "album", "artist", "playlist", "catalog", "station"] {
+                let url = super::entity_artwork_url(endpoint, kind, "source:a&b +c", 42, true);
+                assert_eq!(
+                    url.as_ref(),
+                    format!("{endpoint}?{kind}=source%3Aa%26b%20%2Bc&hq=1&v=42")
+                );
+            }
         }
-        assert!(
-            super::entity_artwork_url("windows", "album", "a", 1, false)
-                .starts_with("http://artwork.dioxus.localhost/api?")
-        );
-        assert!(
-            super::entity_artwork_url("linux", "album", "a", 1, false)
-                .starts_with("artwork://api?")
-        );
+    }
+
+    #[test]
+    fn only_the_registered_endpoint_is_ours() {
+        let endpoint = "http://127.0.0.1:49152/session/api";
+        super::set_artwork_endpoint(endpoint.into()).unwrap();
+        assert!(super::is_entity_artwork_url(&format!(
+            "{endpoint}?track=a&v=1"
+        )));
+        assert!(!super::is_entity_artwork_url(
+            "http://127.0.0.1:49152/other/api?track=a"
+        ));
+        assert!(!super::is_entity_artwork_url(&format!(
+            "{endpoint}-other?track=a"
+        )));
+        assert!(!super::is_entity_artwork_url(
+            "https://example.com/api?track=a"
+        ));
     }
 
     #[test]

@@ -23,6 +23,8 @@ use webkit2gtk::{SettingsExt, WebViewExt};
 use windows::Win32::Foundation::HWND;
 
 mod app_lifecycle;
+#[cfg(any(target_os = "android", test))]
+mod artwork_http;
 mod artwork_protocol;
 mod backend;
 #[cfg(not(target_os = "android"))]
@@ -357,10 +359,7 @@ fn main() -> std::process::ExitCode {
 
         let config = dioxus::mobile::Config::new()
             .with_custom_head(APPLY_EDITS_WITHOUT_RAF.to_string())
-            .with_background_color((0, 0, 0, 255))
-            .with_asynchronous_custom_protocol("artwork", |_id, request, responder| {
-                artwork_protocol::serve(request.uri().clone(), responder);
-            });
+            .with_background_color((0, 0, 0, 255));
 
         dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
     }
