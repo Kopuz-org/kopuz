@@ -174,6 +174,9 @@ fn init_android_tls() -> Result<(), String> {
 
 fn main() -> std::process::ExitCode {
     #[cfg(target_os = "android")]
+    dioxus::logger::initialize_default();
+
+    #[cfg(target_os = "android")]
     if let Err(e) = init_android_tls() {
         panic!("android certificate verifier failed to initialize: {e}");
     }
