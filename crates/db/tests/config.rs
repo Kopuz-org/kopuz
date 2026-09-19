@@ -24,38 +24,72 @@ fn unique_db() -> PathBuf {
 }
 
 #[tokio::test]
-async fn browser_app_credentials_survive_config_saves_and_follow_server_deletion() {
+async fn webview_upgrade_removes_registered_sessions_and_keeps_cookie_sessions() {
     let path = unique_db();
+    let pool = sqlx::SqlitePool::connect_with(
+        SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true),
+    )
+    .await
+    .unwrap();
+    let mut previous =
+        sqlx::migrate::Migrator::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+            .await
+            .unwrap();
+    previous
+        .migrations
+        .to_mut()
+        .retain(|migration| migration.version <= 20260919000000);
+    previous.run(&pool).await.unwrap();
+    let sessions = [
+        ("yt-oauth", "YtMusic", "kopuz:youtube:oauth:v1", false),
+        ("sc-oauth", "SoundCloud", "kopuz:soundcloud:oauth:v1", false),
+        (
+            "am-kit",
+            "AppleMusic",
+            "kopuz:musickit:v1:{\"music_user_token\":\"old\"}",
+            false,
+        ),
+        ("yt-webview", "YtMusic", "SAPISID=keep; SID=session", true),
+        ("sc-webview", "SoundCloud", "keep-sc-token", true),
+        ("am-webview", "AppleMusic", "keep-am-token", true),
+        ("spotify", "Spotify", "access\nrefresh", true),
+    ];
+    for (id, service, token, _) in sessions {
+        sqlx::query("INSERT INTO servers (id, name, url, service, access_token, user_id, auth_state) VALUES (?1, ?1, '', ?2, ?3, 'user', 'active')")
+            .bind(id).bind(service).bind(token).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO browser_auth (server_id, credentials) VALUES (?1, ?2)")
+            .bind(id)
+            .bind(r#"{"client_secret":"discard-me"}"#)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool.close().await;
     let db = db::init(&path).await.unwrap();
-    let saved = SavedServer::new(
-        "Registered app".into(),
-        String::new(),
-        MusicService::SoundCloud,
-    );
-    let mut config = AppConfig {
-        servers: vec![saved.clone()],
-        ..Default::default()
-    };
-    db.save_config(&config).await.unwrap();
-    assert!(db.browser_auth(&saved.id).await.unwrap().is_none());
-    let credentials =
-        r#"{"client_secret":"APP_SECRET","soundcloud_token":{"refresh_token":"REFRESH_SECRET"}}"#;
-    db.set_browser_auth(&saved.id, credentials).await.unwrap();
-    config.theme = "midnight".into();
-    db.save_config(&config).await.unwrap();
-    assert_eq!(
-        db.browser_auth(&saved.id).await.unwrap().as_deref(),
-        Some(credentials)
-    );
-    let public_config = serde_json::to_string(&db.load_config().await.unwrap()).unwrap();
-    assert!(!public_config.contains("APP_SECRET"));
-    assert!(!public_config.contains("REFRESH_SECRET"));
-    let settings =
-        std::fs::read_to_string(config::store::settings_path_for(path.parent().unwrap())).unwrap();
-    assert!(!settings.contains("APP_SECRET"));
-    config.servers.clear();
-    db.save_config(&config).await.unwrap();
-    assert!(db.browser_auth(&saved.id).await.unwrap().is_none());
+    for (id, _, token, keep) in sessions {
+        let source = db.load_server(id).await.unwrap().unwrap();
+        assert_eq!(source.access_token.as_deref(), keep.then_some(token));
+        assert_eq!(source.user_id.as_deref(), keep.then_some("user"));
+    }
+    let mut connection = SqliteConnectOptions::new()
+        .filename(&path)
+        .connect()
+        .await
+        .unwrap();
+    let tables: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE name = 'browser_auth'")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+    assert_eq!(tables, 0);
+    let signed_out: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM servers WHERE auth_state = 'unauthenticated'")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+    assert_eq!(signed_out, 3);
 }
 
 #[tokio::test]

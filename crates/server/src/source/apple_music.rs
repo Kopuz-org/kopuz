@@ -40,14 +40,10 @@ impl MediaSource for AppleMusicSource {
             external_devices: false,
             browser_playback: false,
             sync: true,
-            downloads: !self.client.uses_musickit(),
+            downloads: true,
             discover: false,
             dont_recommend: false,
-            radio: if self.client.uses_musickit() {
-                RadioSeeds::NONE
-            } else {
-                RadioSeeds::ALL
-            },
+            radio: RadioSeeds::ALL,
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
@@ -147,11 +143,6 @@ impl MediaSource for AppleMusicSource {
         item_id: &str,
         progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
     ) -> Result<Vec<u8>, SourceError> {
-        if self.client.uses_musickit() {
-            return Err(SourceError::unsupported(
-                "MusicKit authorizes library access; downloads require a separate supported playback integration",
-            ));
-        }
         let token = self
             .client
             .media_user_token()
@@ -168,11 +159,6 @@ impl MediaSource for AppleMusicSource {
     }
 
     async fn resolve_stream(&self, _item_id: &str) -> Result<StreamInfo, SourceError> {
-        if self.client.uses_musickit() {
-            return Err(SourceError::unsupported(
-                "Playback for registered Apple Music accounts requires a MusicKit player, which is not integrated yet",
-            ));
-        }
         let token = self.client.media_user_token().unwrap_or("");
         let encoded_token =
             base64::Engine::encode(&base64::engine::general_purpose::STANDARD, token.as_bytes());

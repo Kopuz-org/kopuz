@@ -122,7 +122,6 @@ fn carry_query_forward(next: &str, original: &str) -> String {
 pub struct AppleMusicApi {
     http: Client,
     media_user_token: Option<String>,
-    developer_token: Option<String>,
     storefront: String,
     language: String,
 }
@@ -133,16 +132,6 @@ impl AppleMusicApi {
         storefront: impl Into<String>,
         language: impl Into<String>,
     ) -> Self {
-        let registered = media_user_token
-            .as_deref()
-            .and_then(super::musickit::Session::unpack);
-        let (media_user_token, developer_token) = match registered {
-            Some(session) => (
-                Some(session.music_user_token),
-                Some(session.developer_token),
-            ),
-            None => (media_user_token, None),
-        };
         let sf = storefront.into();
         let lang = language.into();
         tracing::debug!(
@@ -152,7 +141,6 @@ impl AppleMusicApi {
         Self {
             http: Client::new(),
             media_user_token,
-            developer_token,
             storefront: sf,
             language: lang,
         }
@@ -170,56 +158,24 @@ impl AppleMusicApi {
         self.media_user_token.as_deref()
     }
 
-    fn base(&self) -> &'static str {
-        if self.uses_musickit() {
-            "https://api.music.apple.com"
-        } else {
-            BASE
-        }
-    }
-
-    pub fn uses_musickit(&self) -> bool {
-        self.developer_token.is_some()
-    }
-
-    async fn bearer_token(&self) -> Result<String, String> {
-        match &self.developer_token {
-            Some(token) => Ok(token.clone()),
-            None => auth::get_bearer_token().await,
-        }
-    }
-
-    fn authenticate(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        let origin = if self.uses_musickit() {
-            super::musickit::ORIGIN
-        } else {
-            "https://music.apple.com"
-        };
-        let request = request
-            .header("Origin", origin)
-            .header("Referer", format!("{origin}/"));
-        let Some(token) = &self.media_user_token else {
-            return request;
-        };
-        if self.uses_musickit() {
-            request.header("Music-User-Token", token)
-        } else {
-            request
-                .header("Media-User-Token", token)
-                .header("Cookie", format!("media-user-token={token}"))
-        }
-    }
-
     async fn get(&self, path: &str) -> Result<reqwest::Response, String> {
-        let bearer = self.bearer_token().await?;
-        let url = format!("{}{path}", self.base());
+        let bearer = auth::get_bearer_token().await?;
+        let url = format!("{BASE}{path}");
         let mut req = self
             .http
             .get(&url)
             .header("Authorization", format!("Bearer {bearer}"))
-            .header("User-Agent", USER_AGENT);
+            .header("User-Agent", USER_AGENT)
+            .header("Origin", "https://music.apple.com")
+            .header("Referer", "https://music.apple.com/");
 
-        req = self.authenticate(req);
+        if let Some(token) = &self.media_user_token {
+            // Both, as Apple's own client does: `Media-User-Token` is what the
+            // API documents, the cookie is what the web player carries.
+            req = req
+                .header("Media-User-Token", token)
+                .header("Cookie", format!("media-user-token={token}"));
+        }
 
         tracing::debug!("am.get: {url}");
         let resp = req.send().await.map_err(|e| format!("GET {path}: {e}"))?;
@@ -236,17 +192,25 @@ impl AppleMusicApi {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<reqwest::Response, String> {
-        let bearer = self.bearer_token().await?;
-        let url = format!("{}{path}", self.base());
+        let bearer = auth::get_bearer_token().await?;
+        let url = format!("{BASE}{path}");
         let mut req = self
             .http
             .post(&url)
             .header("Authorization", format!("Bearer {bearer}"))
             .header("User-Agent", USER_AGENT)
+            .header("Origin", "https://music.apple.com")
+            .header("Referer", "https://music.apple.com/")
             .header("Content-Type", "application/json")
             .json(body);
 
-        req = self.authenticate(req);
+        if let Some(token) = &self.media_user_token {
+            // Both, as Apple's own client does: `Media-User-Token` is what the
+            // API documents, the cookie is what the web player carries.
+            req = req
+                .header("Media-User-Token", token)
+                .header("Cookie", format!("media-user-token={token}"));
+        }
 
         tracing::debug!("am.post: {url}");
         let resp = req.send().await.map_err(|e| format!("POST {path}: {e}"))?;
@@ -261,16 +225,22 @@ impl AppleMusicApi {
     /// POST with no body. The library and favorites mutations take their
     /// arguments as query parameters and reject a JSON payload.
     async fn post_empty(&self, path: &str) -> Result<reqwest::Response, String> {
-        let bearer = self.bearer_token().await?;
-        let url = format!("{}{path}", self.base());
+        let bearer = auth::get_bearer_token().await?;
+        let url = format!("{BASE}{path}");
         let mut req = self
             .http
             .post(&url)
             .header("Authorization", format!("Bearer {bearer}"))
             .header("User-Agent", USER_AGENT)
+            .header("Origin", "https://music.apple.com")
+            .header("Referer", "https://music.apple.com/")
             .header("Content-Length", "0");
 
-        req = self.authenticate(req);
+        if let Some(token) = &self.media_user_token {
+            req = req
+                .header("Media-User-Token", token)
+                .header("Cookie", format!("media-user-token={token}"));
+        }
 
         tracing::debug!("am.post_empty: {url}");
         let resp = req.send().await.map_err(|e| format!("POST {path}: {e}"))?;
@@ -283,15 +253,23 @@ impl AppleMusicApi {
     }
 
     async fn delete(&self, path: &str) -> Result<reqwest::Response, String> {
-        let bearer = self.bearer_token().await?;
-        let url = format!("{}{path}", self.base());
+        let bearer = auth::get_bearer_token().await?;
+        let url = format!("{BASE}{path}");
         let mut req = self
             .http
             .delete(&url)
             .header("Authorization", format!("Bearer {bearer}"))
-            .header("User-Agent", USER_AGENT);
+            .header("User-Agent", USER_AGENT)
+            .header("Origin", "https://music.apple.com")
+            .header("Referer", "https://music.apple.com/");
 
-        req = self.authenticate(req);
+        if let Some(token) = &self.media_user_token {
+            // Both, as Apple's own client does: `Media-User-Token` is what the
+            // API documents, the cookie is what the web player carries.
+            req = req
+                .header("Media-User-Token", token)
+                .header("Cookie", format!("media-user-token={token}"));
+        }
 
         tracing::debug!("am.delete: {url}");
         let resp = req
@@ -469,7 +447,7 @@ impl AppleMusicApi {
                 .get("next")
                 .and_then(|n| n.as_str())
                 .filter(|s| !s.is_empty())
-                .map(|s| s.strip_prefix(self.base()).unwrap_or(s).to_string())
+                .map(|s| s.strip_prefix(BASE).unwrap_or(s).to_string())
                 .map(|s| carry_query_forward(&s, initial_path))
                 .filter(|s| *s != path);
             if next.is_none() {
@@ -580,7 +558,7 @@ impl AppleMusicApi {
             // Strip absolute prefix so self.get() adds auth headers. The cursor
             // carries only `l` and `offset`, so the relationships have to be
             // asked for again or every page but the first arrives bare.
-            let path = next_path.strip_prefix(self.base()).unwrap_or(&next_path);
+            let path = next_path.strip_prefix(BASE).unwrap_or(&next_path);
             let separator = if path.contains('?') { '&' } else { '?' };
             let path = format!("{path}{separator}{PLAYLIST_TRACK_PAGE_INCLUDE}");
             tracing::info!("am.get_library_playlist_tracks: page {page_num}, path={path}");
@@ -1002,13 +980,36 @@ impl AppleMusicApi {
     }
 
     pub async fn validate(&self) -> Result<(), String> {
-        if self.media_user_token.is_none() {
+        let Some(token) = self.media_user_token.as_deref() else {
             tracing::warn!("am.validate: no media user token stored");
             return Err("no media user token".to_string());
-        }
+        };
+        let bearer = match auth::get_bearer_token().await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("am.validate: bearer token fetch failed: {e}");
+                return Err(e);
+            }
+        };
+        tracing::debug!(
+            "am.validate: token_len={}, bearer_len={}",
+            token.len(),
+            bearer.len()
+        );
         let resp = self
-            .get(&format!("/v1/me/library/songs?l={}&limit=1", self.language))
-            .await?;
+            .http
+            .get(format!(
+                "{BASE}/v1/me/library/songs?l={}&limit=1&platform=web",
+                self.language
+            ))
+            .header("Authorization", format!("Bearer {bearer}"))
+            .header("User-Agent", USER_AGENT)
+            .header("Origin", "https://music.apple.com")
+            .header("Referer", "https://music.apple.com/")
+            .header("Cookie", format!("media-user-token={token}"))
+            .send()
+            .await
+            .map_err(|e| format!("validate: {e}"))?;
         let status = resp.status();
         if status.is_success() {
             tracing::debug!("am.validate: OK");
@@ -1124,42 +1125,6 @@ impl AppleMusicApi {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn musickit_requests_use_the_registered_pair_and_public_api() {
-        let packed = crate::applemusic::musickit::Session {
-            developer_token: "own-developer-token".into(),
-            music_user_token: "own-user-token".into(),
-        }
-        .pack()
-        .unwrap();
-        let api = AppleMusicApi::new(Some(packed), "us", "en");
-        assert_eq!(api.base(), "https://api.music.apple.com");
-        assert_eq!(api.bearer_token().await.unwrap(), "own-developer-token");
-        let request = api
-            .authenticate(api.http.get(format!("{}/v1/me/storefront", api.base())))
-            .build()
-            .unwrap();
-        let headers = request.headers();
-        assert_eq!(headers["Music-User-Token"], "own-user-token");
-        assert_eq!(headers["Origin"], crate::applemusic::musickit::ORIGIN);
-        assert_eq!(headers.get_all("Origin").iter().count(), 1);
-        assert!(!headers.contains_key("Cookie"));
-        assert!(!headers.contains_key("Media-User-Token"));
-    }
-
-    #[test]
-    fn existing_apple_web_sessions_keep_their_original_headers() {
-        let api = AppleMusicApi::new(Some("existing-session".into()), "us", "en");
-        assert!(!api.uses_musickit());
-        assert_eq!(api.base(), BASE);
-        let request = api.authenticate(api.http.get(BASE)).build().unwrap();
-        assert_eq!(
-            request.headers()["Cookie"],
-            "media-user-token=existing-session"
-        );
-        assert_eq!(request.headers()["Origin"], "https://music.apple.com");
-    }
 
     /// Favouriting is not adding to the library. They're different endpoints
     /// against different sets, and `fetch_favorites` reads the one this writes.

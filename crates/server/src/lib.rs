@@ -3,7 +3,6 @@
 //! stream sources and lyric providers they are read through.
 
 pub mod applemusic;
-pub mod browser_auth;
 pub mod cookies;
 pub mod cover;
 pub mod download_queue;

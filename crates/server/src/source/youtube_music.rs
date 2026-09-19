@@ -26,12 +26,11 @@ pub(super) struct YtSource {
 
 impl YtSource {
     pub(super) fn new(db: Db, source: Source, conn: &ServerConn) -> Self {
-        let client = if conn.token == crate::ytmusic::oauth::SESSION_MARKER {
-            YouTubeMusicClient::with_oauth(db.clone(), source.as_str().to_string())
-        } else {
-            YouTubeMusicClient::with_cookies(conn.token.clone())
-        };
-        Self { db, source, client }
+        Self {
+            db,
+            source,
+            client: YouTubeMusicClient::with_cookies(conn.token.clone()),
+        }
     }
 
     /// The favorites, as playlist entries, in favorite order — `tracks_by_keys`
