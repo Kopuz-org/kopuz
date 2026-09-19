@@ -23,7 +23,6 @@ use webkit2gtk::{SettingsExt, WebViewExt};
 use windows::Win32::Foundation::HWND;
 
 mod app_lifecycle;
-#[cfg(not(target_os = "android"))]
 mod artwork_protocol;
 mod backend;
 #[cfg(not(target_os = "android"))]
@@ -359,79 +358,8 @@ fn main() -> std::process::ExitCode {
         let config = dioxus::mobile::Config::new()
             .with_custom_head(APPLY_EDITS_WITHOUT_RAF.to_string())
             .with_background_color((0, 0, 0, 255))
-            // artwork://local?p=<percent-encoded-absolute-path> — the Android WebView mostly
-            // receives base64 data URLs from utils, but keep a synchronous handler for any
-            // code path that still emits artwork:// URLs.
-            .with_custom_protocol("artwork".to_string(), |_headers, request| {
-                let query = request.uri().query().unwrap_or("");
-                let raw_p = query
-                    .split('&')
-                    .find_map(|kv| {
-                        let mut parts = kv.splitn(2, '=');
-                        if parts.next() == Some("p") {
-                            parts.next()
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or("");
-                let decoded = percent_encoding::percent_decode_str(raw_p).decode_utf8_lossy();
-
-                let mime = if decoded.ends_with(".png") {
-                    "image/png"
-                } else {
-                    "image/jpeg"
-                };
-
-                let mut decoded_path = decoded.to_string();
-                if decoded_path.starts_with("/~") {
-                    if let Ok(home) = std::env::var("HOME") {
-                        decoded_path = decoded_path.replacen("/~", &home, 1);
-                    }
-                } else if decoded_path.starts_with('~') {
-                    if let Ok(home) = std::env::var("HOME") {
-                        decoded_path = decoded_path.replacen('~', &home, 1);
-                    }
-                }
-
-                let read_result =
-                    std::fs::read(std::path::Path::new(&decoded_path)).or_else(|_| {
-                        if decoded_path.strip_prefix('/').is_some() {
-                            std::fs::read(std::path::Path::new(&decoded_path[1..]))
-                        } else {
-                            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
-                        }
-                    });
-
-                fn err_resp(status: u16) -> http::Response<std::borrow::Cow<'static, [u8]>> {
-                    http::Response::builder()
-                        .status(status)
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(std::borrow::Cow::from(Vec::new()))
-                        .unwrap_or_else(|_| {
-                            http::Response::builder()
-                                .status(500)
-                                .header("Access-Control-Allow-Origin", "*")
-                                .body(std::borrow::Cow::from(Vec::new()))
-                                .expect("static fallback response")
-                        })
-                }
-
-                match read_result {
-                    Ok(bytes) => http::Response::builder()
-                        .header("Content-Type", mime)
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(std::borrow::Cow::from(bytes))
-                        .unwrap_or_else(|_| err_resp(500)),
-                    Err(e) => {
-                        let status = if e.kind() == std::io::ErrorKind::NotFound {
-                            404
-                        } else {
-                            500
-                        };
-                        err_resp(status)
-                    }
-                }
+            .with_asynchronous_custom_protocol("artwork", |_id, request, responder| {
+                artwork_protocol::serve(request.uri().clone(), responder);
             });
 
         dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);

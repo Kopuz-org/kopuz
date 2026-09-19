@@ -161,6 +161,10 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
 /// `version` comes from the row's artwork ref and changes when the picture
 /// does, which is what makes the year-long immutable cache correct.
 pub fn format_entity_artwork_url(kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
+    entity_artwork_url(std::env::consts::OS, kind, id, version, hq)
+}
+
+fn entity_artwork_url(platform: &str, kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
     const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
         .add(b' ')
         .add(b'"')
@@ -178,11 +182,14 @@ pub fn format_entity_artwork_url(kind: &str, id: &str, version: u64, hq: bool) -
 
     let id = percent_encoding::utf8_percent_encode(id, QUERY_VAL);
     let quality = if hq { "&hq=1" } else { "" };
-    let url = if cfg!(target_os = "windows") {
-        format!("http://artwork.dioxus.localhost/api?{kind}={id}{quality}&v={version}")
-    } else {
-        format!("artwork://api?{kind}={id}{quality}&v={version}")
+    // Dioxus enables Wry's HTTPS protocol shim on Android. Custom-scheme
+    // subresources are not rewritten automatically by the WebView.
+    let origin = match platform {
+        "android" => "https://artwork.dioxus.localhost/api",
+        "windows" => "http://artwork.dioxus.localhost/api",
+        _ => "artwork://api",
     };
+    let url = format!("{origin}?{kind}={id}{quality}&v={version}");
     cover_url_from_string(url)
 }
 
@@ -194,6 +201,27 @@ pub fn default_cover_url() -> CoverUrl {
 
 #[cfg(test)]
 mod artwork_url_tests {
+    #[test]
+    fn android_entity_images_use_the_https_webview_protocol() {
+        for kind in ["track", "album", "artist", "playlist", "catalog", "station"] {
+            let url = super::entity_artwork_url("android", kind, "source:a&b +c", 42, true);
+            assert_eq!(
+                url.as_ref(),
+                format!(
+                    "https://artwork.dioxus.localhost/api?{kind}=source%3Aa%26b%20%2Bc&hq=1&v=42"
+                )
+            );
+        }
+        assert!(
+            super::entity_artwork_url("windows", "album", "a", 1, false)
+                .starts_with("http://artwork.dioxus.localhost/api?")
+        );
+        assert!(
+            super::entity_artwork_url("linux", "album", "a", 1, false)
+                .starts_with("artwork://api?")
+        );
+    }
+
     #[test]
     fn local_artwork_url_versions_the_webview_cache() {
         let url = super::format_artwork_url(Some(std::path::Path::new("/music/cover.jpg")))
