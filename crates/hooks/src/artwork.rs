@@ -6,7 +6,7 @@
 //! which is why no page builds an image URL and none holds the credentials a
 //! server cover would need.
 //!
-//! On this frontend that rendering is a URL the artwork protocol handler
+//! On this frontend that rendering is a URL the app's artwork transport
 //! answers from the daemon's bytes. A frontend without a webview asks for the
 //! bytes instead, with the same ref.
 
@@ -54,8 +54,10 @@ pub fn for_album(album: &api::AlbumInfo, size: Size) -> Option<CoverUrl> {
 /// The same picture, asked for at the size a large surface wants. Only the
 /// daemon's own URLs carry the flag; anything else is left alone.
 pub fn at_full_size(cover: &str) -> String {
-    let ours =
-        cover.starts_with("artwork://") || cover.starts_with("http://artwork.dioxus.localhost/");
+    let ours = cover.starts_with("artwork://")
+        || cover.starts_with("http://artwork.dioxus.localhost/")
+        || cover.starts_with("https://artwork.dioxus.localhost/")
+        || utils::is_entity_artwork_url(cover);
     match ours && !cover.contains("&hq=1") {
         true => format!("{cover}&hq=1"),
         false => cover.to_string(),
@@ -93,6 +95,15 @@ mod tests {
 
     #[test]
     fn our_own_urls_carry_the_hq_flag() {
+        utils::set_artwork_endpoint("http://127.0.0.1:49152/session/api".into()).unwrap();
+        assert_eq!(
+            at_full_size("http://127.0.0.1:49152/session/api?album=a&v=42"),
+            "http://127.0.0.1:49152/session/api?album=a&v=42&hq=1"
+        );
+        assert_eq!(
+            at_full_size("https://artwork.dioxus.localhost/api?album=a&v=42"),
+            "https://artwork.dioxus.localhost/api?album=a&v=42&hq=1"
+        );
         assert_eq!(
             at_full_size("artwork://local?p=%2Fcover.jpg"),
             "artwork://local?p=%2Fcover.jpg&hq=1"

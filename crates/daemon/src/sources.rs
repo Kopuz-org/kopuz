@@ -219,7 +219,7 @@ impl SourceService {
     pub async fn can_open_browser(&self) -> bool {
         #[cfg(target_os = "android")]
         {
-            false
+            true
         }
         #[cfg(not(target_os = "android"))]
         {
@@ -755,10 +755,22 @@ impl SourceService {
         self.config.ensure_unlocked(&["server", "servers"])?;
         #[cfg(target_os = "android")]
         {
-            let _ = id;
-            Err(ApiError::unsupported(
-                "browser sign-in runs in the app on Android",
-            ))
+            let source = self
+                .db
+                .load_server(id)
+                .await
+                .map_err(db_error)?
+                .ok_or_else(|| ApiError::not_found("no such server"))?;
+            let (secret, user_id) = crate::android_signin::sign_in(source.service, source.url)
+                .await
+                .map_err(ApiError::internal)?;
+            self.provision_credentials(CredentialProvision {
+                server_id: id.to_string(),
+                secret,
+                user_id,
+                browser: None,
+            })
+            .await
         }
         #[cfg(not(target_os = "android"))]
         {

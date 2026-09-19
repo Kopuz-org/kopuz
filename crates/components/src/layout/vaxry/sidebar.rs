@@ -251,7 +251,9 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                             }
                         }
                         for item in *items {
-                            if item.route != Route::Discover || has_discover() {
+                            if (item.route != Route::Discover || has_discover())
+                                && (!is_android || !crate::tabbar::is_tab_route(item.route))
+                            {
                                 VaxryNavItem {
                                     key: "{item.key}",
                                     item: item.clone(),
@@ -267,8 +269,10 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                     }
                 }
 
-                div { class: "mx-3 my-2 h-px", style: "background: color-mix(in oklab, var(--vaxry-sidebar-fg) 6%, transparent);" }
-                for item in TOOL_ITEMS {
+                if !is_android {
+                    div { class: "mx-3 my-2 h-px", style: "background: color-mix(in oklab, var(--vaxry-sidebar-fg) 6%, transparent);" }
+                }
+                for item in TOOL_ITEMS.iter().filter(|item| !is_android || !crate::tabbar::is_tab_route(item.route)) {
                     VaxryNavItem {
                         key: "{item.key}",
                         item: item.clone(),

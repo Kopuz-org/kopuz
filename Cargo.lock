@@ -637,6 +637,8 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "itoa",
  "matchit",
  "memchr",
@@ -646,6 +648,7 @@ dependencies = [
  "rustversion",
  "serde",
  "sync_wrapper",
+ "tokio",
  "tower 0.5.3",
  "tower-layer",
  "tower-service",
@@ -4335,6 +4338,8 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 name = "kopuz"
 version = "0.17.0"
 dependencies = [
+ "async-trait",
+ "axum",
  "base64",
  "block2",
  "ctrlc",
@@ -4372,6 +4377,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tower 0.5.3",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -4464,6 +4470,7 @@ dependencies = [
  "kopuz-scrobble",
  "kopuz-server",
  "kopuz-utils",
+ "libc",
  "percent-encoding",
  "rand 0.10.2",
  "reqwest 0.13.4",

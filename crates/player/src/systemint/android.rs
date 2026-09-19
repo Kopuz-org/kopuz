@@ -801,14 +801,12 @@ pub extern "system" fn Java_moe_kopuz_kopuz_MediaReceiver_nativeOnAction(
 
 /// Open the in-app sign-in browser (`LoginActivity`) at `url`, wiping WebView
 /// cookies first so only the fresh session satisfies the caller's poll.
-pub fn login_open(url: &str) {
+pub fn login_open(url: &str) -> Result<(), String> {
     init();
-    let Some(vm) = JVM.get() else {
-        return;
-    };
-    let Ok(mut env) = vm.attach_current_thread() else {
-        return;
-    };
+    let vm = JVM.get().ok_or("Android sign-in is not initialized")?;
+    let mut env = vm
+        .attach_current_thread()
+        .map_err(|error| error.to_string())?;
     let ctx = ndk_context::android_context();
     let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
     let result: Result<(), jni::errors::Error> = (|env: &mut JNIEnv| {
@@ -826,7 +824,9 @@ pub fn login_open(url: &str) {
     if let Err(e) = result {
         tracing::warn!(error = %e, "LoginActivity.open failed");
         clear_jni_exception(&mut env);
+        return Err("Could not open the sign-in WebView".into());
     }
+    Ok(())
 }
 
 /// The `Cookie:`-header string the WebView holds for `url`, if any.

@@ -98,6 +98,8 @@ let
         fileset = fs.intersection (fs.fromSource (lib.sources.cleanSource s)) (
           fs.unions [
             (s + /.cargo)
+            # build.rs embeds Android configuration even for desktop builds.
+            (s + /android-src)
             (s + /crates)
             (s + /data)
 

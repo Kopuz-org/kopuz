@@ -558,3 +558,6 @@ prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
 settings_managed_notice = Niektóre ustawienia są zarządzane przez konfigurację systemu (Nix/hjem) i nie można ich tutaj zmienić.
 setting_managed_by_system = Zarządzane przez konfigurację systemu
+
+sign_in_with_webview = Sign in within Kopuz
+webview_sign_in_help = Sign-in opens inside Kopuz. Close the sign-in window to cancel.

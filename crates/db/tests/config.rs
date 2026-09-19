@@ -24,6 +24,75 @@ fn unique_db() -> PathBuf {
 }
 
 #[tokio::test]
+async fn webview_upgrade_removes_registered_sessions_and_keeps_cookie_sessions() {
+    let path = unique_db();
+    let pool = sqlx::SqlitePool::connect_with(
+        SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true),
+    )
+    .await
+    .unwrap();
+    let mut previous =
+        sqlx::migrate::Migrator::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+            .await
+            .unwrap();
+    previous
+        .migrations
+        .to_mut()
+        .retain(|migration| migration.version <= 20260919000000);
+    previous.run(&pool).await.unwrap();
+    let sessions = [
+        ("yt-oauth", "YtMusic", "kopuz:youtube:oauth:v1", false),
+        ("sc-oauth", "SoundCloud", "kopuz:soundcloud:oauth:v1", false),
+        (
+            "am-kit",
+            "AppleMusic",
+            "kopuz:musickit:v1:{\"music_user_token\":\"old\"}",
+            false,
+        ),
+        ("yt-webview", "YtMusic", "SAPISID=keep; SID=session", true),
+        ("sc-webview", "SoundCloud", "keep-sc-token", true),
+        ("am-webview", "AppleMusic", "keep-am-token", true),
+        ("spotify", "Spotify", "access\nrefresh", true),
+    ];
+    for (id, service, token, _) in sessions {
+        sqlx::query("INSERT INTO servers (id, name, url, service, access_token, user_id, auth_state) VALUES (?1, ?1, '', ?2, ?3, 'user', 'active')")
+            .bind(id).bind(service).bind(token).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO browser_auth (server_id, credentials) VALUES (?1, ?2)")
+            .bind(id)
+            .bind(r#"{"client_secret":"discard-me"}"#)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool.close().await;
+    let db = db::init(&path).await.unwrap();
+    for (id, _, token, keep) in sessions {
+        let source = db.load_server(id).await.unwrap().unwrap();
+        assert_eq!(source.access_token.as_deref(), keep.then_some(token));
+        assert_eq!(source.user_id.as_deref(), keep.then_some("user"));
+    }
+    let mut connection = SqliteConnectOptions::new()
+        .filename(&path)
+        .connect()
+        .await
+        .unwrap();
+    let tables: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE name = 'browser_auth'")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+    assert_eq!(tables, 0);
+    let signed_out: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM servers WHERE auth_state = 'unauthenticated'")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+    assert_eq!(signed_out, 3);
+}
+
+#[tokio::test]
 async fn config_round_trips_with_creds_in_servers_table() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();

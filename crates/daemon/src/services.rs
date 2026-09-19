@@ -209,7 +209,7 @@ fn url_field(placeholder: &str) -> FieldSpec {
 
 /// The form that adds one of these.
 pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
-    match service {
+    let fields = match service {
         MusicService::YtMusic => vec![
             FieldSpec {
                 required: true,
@@ -315,13 +315,36 @@ pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
         MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom => {
             vec![url_field("server_url_placeholder")]
         }
+    };
+    #[cfg(target_os = "android")]
+    let fields = webview_fields(fields);
+    fields
+}
+
+#[cfg(any(target_os = "android", test))]
+fn webview_fields(mut fields: Vec<FieldSpec>) -> Vec<FieldSpec> {
+    fields.retain(|field| field.key != BROWSER && field.key != PLAYBACK_BROWSER);
+    for field in &mut fields {
+        if field.key == AUTH_METHOD
+            && let FieldKind::Radio { options } = &mut field.kind
+        {
+            for option in options {
+                if option.value == BY_BROWSER {
+                    option.label = Text::key("sign_in_with_webview");
+                }
+            }
+        }
+        if field.help == Some(Text::key("soundcloud_sign_in_help")) {
+            field.help = Some(Text::key("webview_sign_in_help"));
+        }
     }
+    fields
 }
 
 /// The options a configured source has, with the values it currently holds.
 pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
     let browser = server.browser.map(|browser| browser.id().to_string());
-    match server.service {
+    let fields = match server.service {
         MusicService::YtMusic | MusicService::SoundCloud if !server.anonymous => {
             vec![browser_field(browser.as_deref(), None)]
         }
@@ -390,7 +413,10 @@ pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
             ]
         }
         _ => Vec::new(),
-    }
+    };
+    #[cfg(target_os = "android")]
+    let fields = webview_fields(fields);
+    fields
 }
 
 /// The line under a source's name.
@@ -550,5 +576,41 @@ pub fn problem_text(problem: &Problem) -> String {
     match &problem.label {
         Text::Key(key) => key.clone(),
         Text::Literal(text) => text.clone(),
+    }
+}
+
+#[cfg(test)]
+mod webview_tests {
+    use super::*;
+
+    #[test]
+    fn android_forms_have_no_external_browser_or_registered_app_setup() {
+        for service in [
+            MusicService::YtMusic,
+            MusicService::SoundCloud,
+            MusicService::AppleMusic,
+            MusicService::Spotify,
+        ] {
+            let fields = webview_fields(add_fields(service));
+            assert!(
+                fields
+                    .iter()
+                    .all(|field| field.key != BROWSER && field.key != PLAYBACK_BROWSER)
+            );
+            if service != MusicService::Spotify {
+                assert!(fields.iter().all(|field| field.key != CLIENT_ID
+                    && field.key != "client_secret"
+                    && field.key != "developer_token"));
+            }
+            for field in fields {
+                if let FieldKind::Radio { options } = field.kind {
+                    for option in options {
+                        if option.value == BY_BROWSER {
+                            assert_eq!(option.label, Text::key("sign_in_with_webview"));
+                        }
+                    }
+                }
+            }
+        }
     }
 }

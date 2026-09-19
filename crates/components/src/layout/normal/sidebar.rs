@@ -200,6 +200,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
             }
         }
         items.retain(|item| item.route != Route::Discover || has_discover());
+        items.retain(|item| !is_android || !crate::tabbar::is_tab_route(item.route));
         items
     };
 
@@ -319,8 +320,10 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                             },
                         }
                     }
-                    div { class: "h-px bg-white/5 my-4 mx-3" }
-                    for item in BOTTOM_MENU {
+                    if !is_android {
+                        div { class: "h-px bg-white/5 my-4 mx-3" }
+                    }
+                    for item in BOTTOM_MENU.iter().filter(|item| !is_android || !crate::tabbar::is_tab_route(item.route)) {
                         SidebarLink {
                             item: item.clone(),
                             collapsed: is_collapsed,
