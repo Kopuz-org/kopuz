@@ -852,6 +852,18 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::SetFavoriteResponse {}))
     }
 
+    async fn dont_recommend(
+        &self,
+        request: Request<proto::DontRecommendRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .dont_recommend(request.get_ref().key.clone())
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     async fn start_job(
         &self,
         request: Request<proto::StartJobRequest>,

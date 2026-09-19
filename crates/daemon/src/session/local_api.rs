@@ -472,6 +472,15 @@ impl api::LibraryApi for LocalApi {
         }
     }
 
+    async fn dont_recommend(&self, key: String) -> Result<(), ApiError> {
+        match &self.favorites {
+            Some(service) => service.dont_recommend(&key).await,
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a favorites service",
+            )),
+        }
+    }
+
     async fn folder_tracks(&self, prefix: String, page: Page) -> Result<api::TrackPage, ApiError> {
         match &self.library {
             Some(library) => library.folder_tracks(&prefix, page).await,

@@ -104,6 +104,7 @@ downloader = Pobieranie
 # UI Actions & Buttons
 add_to_favorites = Dodaj do ulubionych
 remove_from_favorites = Usuń z ulubionych
+dont_recommend = Nie polecaj
 add_to_queue = Dodaj do Kolejki
 play_next = Odtwórz jako następny
 add_to_playlist = Dodaj do Playlisty

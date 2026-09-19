@@ -1,5 +1,5 @@
-//! Write-side InnerTube endpoints — like/unlike a video, add/remove from
-//! a playlist. All require the user's cookies + SAPISIDHASH auth.
+//! Write-side InnerTube endpoints — like/unlike/dislike a video, add/remove
+//! from a playlist. All require the user's cookies + SAPISIDHASH auth.
 
 use serde_json::{Value, json};
 
@@ -65,6 +65,18 @@ pub async fn unlike_video(video_id: &str, cookies: &str) -> Result<(), String> {
         "target": { "videoId": video_id },
     });
     post("like/removelike", body, cookies).await.map(|_| ())
+}
+
+/// Dislike a video — the "don't recommend" signal. Same endpoint family as
+/// the like, and YouTube drops any existing like as a side effect of taking
+/// it, so a caller holding a favorite row for this video must clear it.
+#[tracing::instrument(name = "yt.dislike", skip(cookies), fields(video_id = %video_id))]
+pub async fn dislike_video(video_id: &str, cookies: &str) -> Result<(), String> {
+    let body = json!({
+        "context": { "client": ytmusic_context()["client"], "user": { "lockedSafetyMode": false } },
+        "target": { "videoId": video_id },
+    });
+    post("like/dislike", body, cookies).await.map(|_| ())
 }
 
 /// Add a video to a user playlist. `playlist_id` is the bare ID (no `VL`

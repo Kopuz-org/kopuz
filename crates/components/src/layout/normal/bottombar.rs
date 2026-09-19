@@ -179,6 +179,9 @@ pub fn BottombarNormal(
                     onclick: move |_| { toggle_favorite(hooks::favorites::current(&ctrl)) },
                     i { class: "{heart_icon}" }
                 }
+                crate::dont_recommend::DontRecommendButton {
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-200 hover:bg-white/10 transition-colors active:scale-95",
+                }
             }
 
             div {

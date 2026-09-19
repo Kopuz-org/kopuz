@@ -104,6 +104,7 @@ downloader = 下载
 # UI Actions & Buttons
 add_to_favorites = 添加到收藏
 remove_from_favorites = 从收藏中移除
+dont_recommend = 不再推荐
 add_to_queue = 添加到播放队列
 play_next = 下一首播放
 add_to_playlist = 添加到播放列表
