@@ -15,6 +15,8 @@ pub struct AppCredentials {
     pub client_secret: String,
     pub developer_token: String,
     pub soundcloud_token: Option<OAuthToken>,
+    pub youtube_token: Option<OAuthToken>,
+    pub youtube_user_id: String,
 }
 
 #[derive(Clone, Deserialize, Serialize)]

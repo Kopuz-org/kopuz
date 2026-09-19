@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Connect YouTube Music to Kopuz</title>
+<style>
+body { color:#eee; background:#141414; font:18px system-ui,sans-serif; max-width:30rem; margin:10vh auto; padding:1.5rem; }
+button,a { display:inline-block; font:inherit; padding:.8rem 1rem; margin:.5rem .5rem .5rem 0; border:0; border-radius:.6rem; cursor:pointer; }
+a { background:#e32d42; color:white; text-decoration:none; }
+code { display:block; font-size:1.8rem; margin:1rem 0; user-select:all; overflow-wrap:anywhere; }
+</style>
+<h1>Connect YouTube Music</h1>
+<p>Copy this code, then continue to Google. Enter the code and approve your registered application.</p>
+<code id="code"></code>
+<button id="copy">Copy code</button>
+<a id="continue" target="_blank" rel="noopener noreferrer">Continue to Google</a>
+<p>After approval, return to Kopuz. Sign-in finishes there automatically.</p>
+<button id="cancel">Cancel</button>
+<p id="status" role="status"></p>
+<script>
+const configuration = __KOPUZ_CONFIGURATION__;
+document.getElementById('code').textContent = configuration.code;
+document.getElementById('continue').href = configuration.url;
+document.getElementById('copy').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(configuration.code);
+    document.getElementById('status').textContent = 'Code copied. Continue to Google.';
+  } catch (_) {
+    document.getElementById('status').textContent = 'Select the code above to copy it.';
+  }
+};
+document.getElementById('cancel').onclick = async () => {
+  try {
+    await fetch('/cancel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({state:configuration.state})});
+  } catch (_) {}
+  document.getElementById('continue').removeAttribute('href');
+  document.getElementById('status').textContent = 'Return to Kopuz to check sign-in status or start again.';
+};
+</script>
+</html>

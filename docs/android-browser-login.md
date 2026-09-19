@@ -57,21 +57,39 @@ developer token in source settings and sign in again.
 
 ## YouTube Music
 
-The current YouTube Music backend requires browser session cookies. Google's
-[registered OAuth API](https://developers.google.com/youtube/v3/guides/auth/installed-apps)
-authorizes the YouTube Data API and does not supply those cookies. Registered
-Google OAuth is therefore not offered as a working login for this backend.
-Anonymous mode remains available on Android.
+Kopuz supports experimental OAuth authorization for YouTube Music, following
+[ytmusicapi's registered-client setup](https://ytmusicapi.readthedocs.io/en/stable/setup/oauth.html).
+In your Google Cloud project, enable the YouTube Data API, configure the consent
+screen (including your account as a test user if the app is in testing), and create
+an OAuth client of type **TVs and Limited Input devices**. Enter its Client ID and
+Client Secret in Kopuz.
+
+Tap sign in. Kopuz opens a temporary page in your selected browser with a device
+code. Copy that code, open the Google authorization link, enter the code and grant
+access, then return to Kopuz. No redirect URI is required. The temporary page uses
+`http://127.0.0.1:8897`; Google authorization itself uses HTTPS.
+
+Kopuz polls Google's token endpoint, checks that YouTube Music accepts the granted
+session, and stores and refreshes the token for account requests. Authorization
+is sent as a Bearer token, without reading or importing browser cookies.
+
+Google documents this flow for [limited-input devices](https://developers.google.com/identity/protocols/oauth2/limited-input-device),
+not as its recommended native Android sign-in integration. Its use here is
+experimental: an actual Google grant and YouTube Music account have not been
+verified on Android. A rejected grant/session reports an error and does not mark
+the source connected. Anonymous browsing remains available.
 
 ## Credential storage and verification
 
-App credentials and SoundCloud's rotating tokens stay in the daemon's database,
+App credentials and SoundCloud/YouTube Music rotating tokens stay in the daemon's database,
 outside `settings.toml` and the settings API. Secret fields are write-only;
 leaving one blank when editing keeps the stored value. Changing app credentials
 requires signing in again. Removing a source deletes its app credentials.
 
-The sign-in listeners bind only to `127.0.0.1` and time out after five minutes.
-If the browser cannot connect after that, return to Kopuz and start sign-in again.
+The sign-in listeners bind only to `127.0.0.1`. Spotify, SoundCloud and Apple
+Music time out after five minutes; YouTube Music follows Google's device-code
+expiry, capped at thirty minutes. If the browser cannot connect after that,
+return to Kopuz and start sign-in again.
 
 Provider account sign-in needs your own registered credentials. Compilation and
 local regression checks do not verify consent, subscription access, or playback

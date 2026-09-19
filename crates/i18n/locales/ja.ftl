@@ -845,7 +845,7 @@ interface_ambient_full = Whole window
 daemon_older = The daemon is older than this app. Rebuild the daemon.
 daemon_newer = The daemon is newer than this app. Rebuild the app.
 
-android_external_signin_unavailable = Registered Google OAuth does not support this YouTube Music backend. Use anonymous mode on Android.
+youtube_oauth_help = Experimental Google OAuth: enter your registered Client ID and Client Secret. Sign-in opens your selected browser with a code to approve on Google. See the Android browser sign-in guide for setup.
 
 registered_app_client_id = App Client ID
 
