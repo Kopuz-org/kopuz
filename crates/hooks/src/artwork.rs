@@ -54,8 +54,9 @@ pub fn for_album(album: &api::AlbumInfo, size: Size) -> Option<CoverUrl> {
 /// The same picture, asked for at the size a large surface wants. Only the
 /// daemon's own URLs carry the flag; anything else is left alone.
 pub fn at_full_size(cover: &str) -> String {
-    let ours =
-        cover.starts_with("artwork://") || cover.starts_with("http://artwork.dioxus.localhost/");
+    let ours = cover.starts_with("artwork://")
+        || cover.starts_with("http://artwork.dioxus.localhost/")
+        || cover.starts_with("https://artwork.dioxus.localhost/");
     match ours && !cover.contains("&hq=1") {
         true => format!("{cover}&hq=1"),
         false => cover.to_string(),
@@ -93,6 +94,10 @@ mod tests {
 
     #[test]
     fn our_own_urls_carry_the_hq_flag() {
+        assert_eq!(
+            at_full_size("https://artwork.dioxus.localhost/api?album=a&v=42"),
+            "https://artwork.dioxus.localhost/api?album=a&v=42&hq=1"
+        );
         assert_eq!(
             at_full_size("artwork://local?p=%2Fcover.jpg"),
             "artwork://local?p=%2Fcover.jpg&hq=1"
