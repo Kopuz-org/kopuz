@@ -5,6 +5,12 @@ use serde::de::DeserializeOwned;
 const SUBSONIC_API_VERSION: &str = "1.16.1";
 const CLIENT_NAME: &str = "kopuz";
 
+/// Whether a `changedBy` on a server-side play queue names this client. Servers
+/// echo back the `c=` parameter verbatim, so the comparison is on that name.
+pub fn is_own_client_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case(CLIENT_NAME)
+}
+
 /// Budget for an ordinary library call, which the server answers out of its own
 /// database.
 const DEFAULT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -209,6 +215,16 @@ struct SimilarSongsContainer {
     song: Vec<SubsonicSong>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubsonicPlayQueue {
+    pub current: Option<String>,
+    pub position: Option<u64>,
+    pub changed_by: Option<String>,
+    #[serde(default)]
+    pub entry: Vec<SubsonicSong>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GetSimilarSongsData {
@@ -251,6 +267,13 @@ struct OpenSubsonicExtension {
 struct GetOpenSubsonicExtensionsData {
     #[serde(default)]
     open_subsonic_extensions: Vec<OpenSubsonicExtension>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GetPlayQueueData {
+    #[serde(default)]
+    play_queue: Option<SubsonicPlayQueue>,
 }
 
 /// Build a Subsonic `getCoverArt` URL without the caller holding a client — the
@@ -616,6 +639,38 @@ impl SubsonicClient {
         Ok(url.to_string())
     }
 
+    /// The server's saved play queue for this user, if it has one.
+    pub async fn get_play_queue(&self) -> Result<Option<SubsonicPlayQueue>, String> {
+        let data = self
+            .call::<GetPlayQueueData>("getPlayQueue.view", vec![])
+            .await?;
+        Ok(data.play_queue)
+    }
+
+    /// Save the play queue: one `id` param per song, `current` the playing
+    /// song's id, `position` its position in milliseconds. An empty `item_ids`
+    /// with no `current` clears the saved queue.
+    pub async fn save_play_queue(
+        &self,
+        item_ids: &[&str],
+        current_id: Option<&str>,
+        position_ms: Option<u64>,
+    ) -> Result<(), String> {
+        let mut params: Vec<(String, String)> = item_ids
+            .iter()
+            .map(|id| ("id".to_string(), (*id).to_string()))
+            .collect();
+        if let Some(current) = current_id {
+            params.push(("current".to_string(), current.to_string()));
+        }
+        if let Some(position) = position_ms {
+            params.push(("position".to_string(), position.to_string()));
+        }
+        self.call::<EmptyData>("savePlayQueue.view", params)
+            .await
+            .map(|_| ())
+    }
+
     fn auth_params(&self) -> Vec<(String, String)> {
         let salt = self.random_salt();
         let token_input = format!("{}{}", self.password, salt);
@@ -795,5 +850,57 @@ mod tests {
                 .iter()
                 .any(|ext| ext.name == SONIC_SIMILARITY_EXTENSION)
         );
+    }
+
+    /// Shape captured from a live Navidrome 0.63.2 (OpenSubsonic) instance,
+    /// trimmed to the fields this crate reads.
+    #[test]
+    fn play_queue_response_parses() {
+        let data: GetPlayQueueData = parse(serde_json::json!({
+            "subsonic-response": {
+                "status": "ok",
+                "version": "1.16.1",
+                "playQueue": {
+                    "entry": [{
+                        "id": "BgdZpTKEu8u6xLGYsZCCXq",
+                        "title": "Expectation",
+                        "album": "Innerspeaker",
+                        "albumId": "7tbDxWiXuAInyHqxBR8ukM",
+                        "artist": "Tame Impala",
+                        "duration": 362,
+                        "bitRate": 901,
+                        "coverArt": "mf-BgdZpTKEu8u6xLGYsZCCXq_6a69cd29"
+                    }],
+                    "current": "BgdZpTKEu8u6xLGYsZCCXq",
+                    "position": 45000,
+                    "username": "someone",
+                    "changed": "2026-08-09T18:08:10.49647068Z",
+                    "changedBy": "Arpeggi"
+                }
+            }
+        }));
+
+        let queue = data.play_queue.expect("playQueue present");
+        assert_eq!(queue.current.as_deref(), Some("BgdZpTKEu8u6xLGYsZCCXq"));
+        assert_eq!(queue.position, Some(45000));
+        assert_eq!(queue.changed_by.as_deref(), Some("Arpeggi"));
+        assert_eq!(queue.entry.len(), 1);
+        assert_eq!(queue.entry[0].title, "Expectation");
+    }
+
+    #[test]
+    fn play_queue_absent_when_nothing_saved() {
+        let data: GetPlayQueueData = parse(serde_json::json!({
+            "subsonic-response": { "status": "ok", "version": "1.16.1" }
+        }));
+
+        assert!(data.play_queue.is_none());
+    }
+
+    #[test]
+    fn own_writes_are_told_apart_from_another_client() {
+        assert!(is_own_client_name("kopuz"));
+        assert!(is_own_client_name("Kopuz"));
+        assert!(!is_own_client_name("Arpeggi"));
     }
 }

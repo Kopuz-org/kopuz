@@ -55,6 +55,7 @@ const CAPABILITIES: Capabilities = Capabilities {
     downloads: true,
     discover: false,
     radio: RadioSeeds::NONE,
+    play_queue: false,
     playlists: PlaylistOps::None, // none over raw WebDAV, the Music app's are Subsonic
     artist_view: ArtistView::Library,
     albums: AlbumType::Standard,

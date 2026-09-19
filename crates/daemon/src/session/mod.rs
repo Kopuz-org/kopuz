@@ -31,6 +31,8 @@ pub const EVENT_BUFFER: usize = 512;
 const POSITION_CORRECTION_INTERVAL: Duration = Duration::from_secs(10);
 const MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 const PERSIST_INTERVAL: Duration = Duration::from_secs(5);
+/// How long the shutdown flush waits for a source to take the queue.
+const REMOTE_PUSH_TIMEOUT: Duration = Duration::from_secs(3);
 const PROGRESS_STEP_SECS: u64 = 5;
 
 /// The embedded frontend's raw view of the queue model.
@@ -78,6 +80,37 @@ impl Default for PlaybackServices {
             queue_store: None,
             recorder: None,
             scrobbler: None,
+        }
+    }
+}
+
+/// What the last mirror to the source's own queue recorded. The periodic
+/// flush is local; only a move to another track or a stop is worth a call out
+/// to the network.
+#[derive(PartialEq, Eq)]
+struct RemoteQueueMark {
+    queue_rev: u64,
+    current_key: Option<String>,
+    playing: bool,
+}
+
+/// A queue mirror, detached from the actor so the call can outlive the tick
+/// that produced it.
+struct RemoteQueuePush {
+    source: server::source::ActiveSource,
+    queue: Vec<Track>,
+    current_index: usize,
+    position_ms: u64,
+}
+
+impl RemoteQueuePush {
+    async fn send(self) {
+        if let Err(error) = self
+            .source
+            .save_play_queue(&self.queue, self.current_index, self.position_ms)
+            .await
+        {
+            tracing::debug!(%error, "play queue push failed");
         }
     }
 }
@@ -194,6 +227,7 @@ impl SessionHandle {
             materializer: materializer.clone(),
             queue_store: services.queue_store,
             queue_dirty: false,
+            last_remote_queue_mark: None,
             recorder: services.recorder,
             scrobbler: services.scrobbler,
             last_recent_key: None,
@@ -496,6 +530,7 @@ struct Session {
     materializer: Arc<dyn QueueMaterializer>,
     queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
     queue_dirty: bool,
+    last_remote_queue_mark: Option<RemoteQueueMark>,
     recorder: Option<Arc<dyn PlaybackRecorder>>,
     scrobbler: Option<Arc<crate::scrobbler::Scrobbler>>,
     last_recent_key: Option<String>,
@@ -545,8 +580,12 @@ impl Session {
                 _ = correction.tick(), if self.phase == ApiPhase::Playing => {
                     self.publish_position_anchor(&state_tx, None, None, true);
                 }
-                _ = persist.tick(), if self.queue_dirty && self.queue_store.is_some() => {
+                _ = persist.tick(), if self.queue_dirty => {
+                    self.queue_dirty = false;
                     self.persist_async();
+                    if let Some(push) = self.remote_queue_push(false) {
+                        tokio::spawn(push.send());
+                    }
                 }
             }
         }
@@ -625,6 +664,11 @@ impl Session {
                     let snapshot = self.snapshot();
                     self.queue_dirty = false;
                     store.save(snapshot).await;
+                }
+                if let Some(push) = self.remote_queue_push(true) {
+                    // A quit waits on this, so a server that has stopped
+                    // answering costs the timeout and not the window.
+                    let _ = tokio::time::timeout(REMOTE_PUSH_TIMEOUT, push.send()).await;
                 }
                 let _ = reply.send(());
             }
@@ -1390,15 +1434,44 @@ impl Session {
 
     /// Fire-and-forget save off the actor thread; overlapping writes are
     /// last-write-wins on one SQLite row.
-    fn persist_async(&mut self) {
+    fn persist_async(&self) {
         let Some(store) = self.queue_store.clone() else {
             return;
         };
         let snapshot = self.snapshot();
-        self.queue_dirty = false;
         tokio::spawn(async move {
             store.save(snapshot).await;
         });
+    }
+
+    /// The queue mirror bound for the active source's own saved queue, when it
+    /// keeps one and playback has moved somewhere worth recording. `force`
+    /// skips the change check, for the flush on the way out.
+    fn remote_queue_push(&mut self, force: bool) -> Option<RemoteQueuePush> {
+        let source = self.active_source.clone()?;
+        if !source.capabilities().play_queue || self.model.is_empty() {
+            return None;
+        }
+        let mark = RemoteQueueMark {
+            queue_rev: self.queue_rev,
+            current_key: self.model.current_track().map(|track| track.id.uid()),
+            playing: self.phase == ApiPhase::Playing,
+        };
+        if !force && self.last_remote_queue_mark.as_ref() == Some(&mark) {
+            return None;
+        }
+        self.last_remote_queue_mark = Some(mark);
+        // Play order, not storage order: another client reading this queue
+        // plays it top to bottom and has no shuffle permutation to apply.
+        let queue: Vec<Track> = (0..self.model.len())
+            .filter_map(|position| self.model.track_at(position).cloned())
+            .collect();
+        Some(RemoteQueuePush {
+            source,
+            queue,
+            current_index: self.model.current_position(),
+            position_ms: self.displayed_position().as_millis() as u64,
+        })
     }
 
     fn commit_transition_model(&mut self, token: u64) -> bool {

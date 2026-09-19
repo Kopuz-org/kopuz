@@ -244,6 +244,7 @@ impl MediaSource for JellyfinSource {
             downloads: true,
             discover: false,
             radio: RadioSeeds::NONE,
+            play_queue: false,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,

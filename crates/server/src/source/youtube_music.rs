@@ -69,6 +69,7 @@ impl MediaSource for YtSource {
             downloads: true,
             discover: true,
             radio: RadioSeeds::ALL,
+            play_queue: false,
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Remote,
             albums: AlbumType::YtMusic,
