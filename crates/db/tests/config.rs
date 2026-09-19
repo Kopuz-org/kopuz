@@ -24,6 +24,41 @@ fn unique_db() -> PathBuf {
 }
 
 #[tokio::test]
+async fn browser_app_credentials_survive_config_saves_and_follow_server_deletion() {
+    let path = unique_db();
+    let db = db::init(&path).await.unwrap();
+    let saved = SavedServer::new(
+        "Registered app".into(),
+        String::new(),
+        MusicService::SoundCloud,
+    );
+    let mut config = AppConfig {
+        servers: vec![saved.clone()],
+        ..Default::default()
+    };
+    db.save_config(&config).await.unwrap();
+    assert!(db.browser_auth(&saved.id).await.unwrap().is_none());
+    let credentials =
+        r#"{"client_secret":"APP_SECRET","soundcloud_token":{"refresh_token":"REFRESH_SECRET"}}"#;
+    db.set_browser_auth(&saved.id, credentials).await.unwrap();
+    config.theme = "midnight".into();
+    db.save_config(&config).await.unwrap();
+    assert_eq!(
+        db.browser_auth(&saved.id).await.unwrap().as_deref(),
+        Some(credentials)
+    );
+    let public_config = serde_json::to_string(&db.load_config().await.unwrap()).unwrap();
+    assert!(!public_config.contains("APP_SECRET"));
+    assert!(!public_config.contains("REFRESH_SECRET"));
+    let settings =
+        std::fs::read_to_string(config::store::settings_path_for(path.parent().unwrap())).unwrap();
+    assert!(!settings.contains("APP_SECRET"));
+    config.servers.clear();
+    db.save_config(&config).await.unwrap();
+    assert!(db.browser_auth(&saved.id).await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn config_round_trips_with_creds_in_servers_table() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();

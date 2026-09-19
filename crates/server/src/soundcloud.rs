@@ -21,6 +21,8 @@ use std::collections::HashSet;
 
 use reader::models::Track;
 use serde_json::Value;
+
+pub mod oauth;
 use tokio::sync::Mutex;
 
 /// SoundCloud's internal web-player API. Keyless apart from the scraped
@@ -327,8 +329,6 @@ fn track_id(t: &Track) -> String {
 }
 
 fn parse_track(item: &Value) -> Option<Track> {
-    let track_id = item.get("id").and_then(|v| v.as_u64())?;
-
     let has_progressive = item
         .get("media")
         .and_then(|m| m.get("transcodings"))
@@ -340,6 +340,12 @@ fn parse_track(item: &Value) -> Option<Track> {
     if !has_progressive {
         return None;
     }
+
+    parse_track_metadata(item)
+}
+
+fn parse_track_metadata(item: &Value) -> Option<Track> {
+    let track_id = oauth::resource_id(item)?;
 
     let title = item
         .get("title")

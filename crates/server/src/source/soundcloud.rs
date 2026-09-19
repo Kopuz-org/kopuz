@@ -15,11 +15,16 @@ pub(super) struct SoundcloudSource {
     /// OAuth token for the signed-in account; `None` = anonymous (search + play
     /// of public tracks still work via the scraped web-player client_id).
     token: Option<String>,
+    registered: Option<crate::soundcloud::oauth::Client>,
 }
 
 impl SoundcloudSource {
     pub(super) fn new(db: Db, source: Source, conn: &ServerConn) -> Self {
+        let registered = (conn.token == crate::soundcloud::oauth::SESSION_MARKER).then(|| {
+            crate::soundcloud::oauth::Client::new(db.clone(), source.as_str().to_string())
+        });
         Self {
+            registered,
             db,
             source,
             token: (!conn.token.is_empty()).then(|| conn.token.clone()),
@@ -59,7 +64,11 @@ impl MediaSource for SoundcloudSource {
     }
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
-        let url = match crate::soundcloud::resolve_stream(item_id, self.token.as_deref()).await? {
+        let stream = match &self.registered {
+            Some(client) => client.stream(item_id).await?,
+            None => crate::soundcloud::resolve_stream(item_id, self.token.as_deref()).await?,
+        };
+        let url = match stream {
             // Progressive MP3 streams straight through the normal HTTP path.
             crate::soundcloud::ResolvedStream::Progressive(u) => u,
             // HLS (Go+ AAC) is tagged so the player assembles its fMP4 segments
@@ -77,6 +86,13 @@ impl MediaSource for SoundcloudSource {
     }
 
     async fn validate(&self) -> AuthOutcome {
+        if let Some(client) = &self.registered {
+            return if client.validate().await.is_ok() {
+                AuthOutcome::Valid
+            } else {
+                AuthOutcome::Unreachable
+            };
+        }
         match self.token.as_deref() {
             // Anonymous mode is always usable (public search + play).
             None => AuthOutcome::Valid,
@@ -96,8 +112,10 @@ impl MediaSource for SoundcloudSource {
         let mut ids = Vec::new();
         let mut cursor: Option<String> = None;
         loop {
-            let (tracks, next) =
-                crate::soundcloud::liked_tracks_page(token, cursor.as_deref()).await?;
+            let (tracks, next) = match &self.registered {
+                Some(client) => client.favorites(cursor.as_deref()).await?,
+                None => crate::soundcloud::liked_tracks_page(token, cursor.as_deref()).await?,
+            };
             ids.extend(tracks.iter().map(|t| t.id.key().into_owned()));
             match next {
                 Some(c) => cursor = Some(c),
@@ -117,12 +135,18 @@ impl MediaSource for SoundcloudSource {
                 next: None,
             });
         };
-        let (tracks, next) = crate::soundcloud::liked_tracks_page(token, cursor.as_deref()).await?;
+        let (tracks, next) = match &self.registered {
+            Some(client) => client.favorites(cursor.as_deref()).await?,
+            None => crate::soundcloud::liked_tracks_page(token, cursor.as_deref()).await?,
+        };
         Ok(FavoritesPage { tracks, next })
     }
 
     async fn push_favorite(&self, item_id: &str, on: bool) -> Result<(), SourceError> {
         let token = self.token.as_deref().ok_or(SourceError::Auth)?;
+        if let Some(client) = &self.registered {
+            return client.like(item_id, on).await.map_err(SourceError::from);
+        }
         crate::soundcloud::set_track_like(item_id, on, token)
             .await
             .map_err(SourceError::from)
@@ -132,7 +156,10 @@ impl MediaSource for SoundcloudSource {
         &self,
         query: &str,
     ) -> Result<(Vec<reader::Track>, Vec<reader::Album>), SourceError> {
-        let tracks = crate::soundcloud::search_tracks(query).await?;
+        let tracks = match &self.registered {
+            Some(client) => client.search(query).await?,
+            None => crate::soundcloud::search_tracks(query).await?,
+        };
         Ok((tracks, Vec::new()))
     }
 
@@ -140,8 +167,11 @@ impl MediaSource for SoundcloudSource {
         let Some(token) = self.token.as_deref() else {
             return Ok(Vec::new());
         };
-        Ok(crate::soundcloud::list_playlists(token)
-            .await?
+        let playlists = match &self.registered {
+            Some(client) => client.playlists().await?,
+            None => crate::soundcloud::list_playlists(token).await?,
+        };
+        Ok(playlists
             .into_iter()
             .map(|p| PlaylistMeta {
                 id: p.id,
@@ -158,6 +188,12 @@ impl MediaSource for SoundcloudSource {
         let Some(token) = self.token.as_deref() else {
             return Ok(Vec::new());
         };
+        if let Some(client) = &self.registered {
+            return client
+                .playlist_tracks(playlist_id)
+                .await
+                .map_err(SourceError::from);
+        }
         crate::soundcloud::get_playlist_entries(playlist_id, token)
             .await
             .map_err(SourceError::from)
