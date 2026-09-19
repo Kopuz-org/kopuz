@@ -596,7 +596,9 @@ impl SourceService {
         use crate::services::{CLIENT_ID, CLIENT_SECRET, DEVELOPER_TOKEN};
         use server::browser_auth::{APP_LOCK, AppCredentials};
         let keys: &[&str] = match service {
-            config::MusicService::SoundCloud => &[CLIENT_ID, CLIENT_SECRET],
+            config::MusicService::SoundCloud | config::MusicService::YtMusic => {
+                &[CLIENT_ID, CLIENT_SECRET]
+            }
             config::MusicService::AppleMusic => &[DEVELOPER_TOKEN],
             _ => return Ok(()),
         };
@@ -629,6 +631,8 @@ impl SourceService {
         }
         if changed {
             app.soundcloud_token = None;
+            app.youtube_token = None;
+            app.youtube_user_id.clear();
             app.save(&self.db, id).await.map_err(ApiError::internal)?;
         }
         drop(guard);
@@ -792,7 +796,10 @@ impl SourceService {
         let mut app = server::browser_auth::AppCredentials::load(&self.db, id)
             .await
             .map_err(ApiError::internal)?;
-        if app.soundcloud_token.take().is_some() {
+        let cleared_soundcloud = app.soundcloud_token.take().is_some();
+        let cleared_youtube = app.youtube_token.take().is_some();
+        app.youtube_user_id.clear();
+        if cleared_soundcloud || cleared_youtube {
             app.save(&self.db, id).await.map_err(ApiError::internal)?;
         }
         let had_credentials = server.access_token.is_some() || server.user_id.is_some();
@@ -894,9 +901,31 @@ impl SourceService {
                     (secret, "me".to_string())
                 }
                 config::MusicService::YtMusic => {
-                    return Err(ApiError::unsupported(
-                        "Registered Google OAuth cannot authenticate this YouTube Music backend. Use anonymous mode on Android.",
-                    ));
+                    use server::browser_auth::{APP_LOCK, AppCredentials};
+                    let app = AppCredentials::load(&self.db, id)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    let (token, user) = server::ytmusic::oauth::sign_in(&app, open)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    let _guard = APP_LOCK.lock().await;
+                    let mut current = AppCredentials::load(&self.db, id)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    if current.client_id != app.client_id
+                        || current.client_secret != app.client_secret
+                    {
+                        return Err(ApiError::invalid_input(
+                            "App credentials changed during sign-in. Please retry.",
+                        ));
+                    }
+                    current.youtube_token = Some(token);
+                    current.youtube_user_id = user.clone();
+                    current
+                        .save(&self.db, id)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    (server::ytmusic::oauth::SESSION_MARKER.to_string(), user)
                 }
                 _ => {
                     return Err(ApiError::unsupported(
@@ -1068,6 +1097,9 @@ impl SourceService {
         ) else {
             return;
         };
+        if cookies == server::ytmusic::oauth::SESSION_MARKER {
+            return;
+        }
         match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
             Ok(Some(rotated)) => {
                 let user = server::ytmusic::derive_user_id(&rotated);

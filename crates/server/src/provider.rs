@@ -69,7 +69,7 @@ impl ProviderClient {
                 })
             }
             MusicService::YtMusic => Err(
-                "YouTube Music uses OAuth device flow; call login_ytmusic_device() instead"
+                "YouTube Music uses browser sign-in; use the sign-in flow instead of username/password login"
                     .to_string(),
             ),
             MusicService::SoundCloud => Err(

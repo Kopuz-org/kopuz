@@ -368,14 +368,25 @@ fn android_signin_fields(service: MusicService, mut fields: Vec<FieldSpec>) -> V
             ]);
         }
         MusicService::YtMusic => {
-            if let Some(index) = fields.iter().position(|field| field.key == BROWSER) {
-                let browser = fields.remove(index);
-                fields.push(FieldSpec {
-                    key: "android_external_signin".to_string(),
-                    help: Some(Text::key("android_external_signin_unavailable")),
-                    show_when: browser.show_when,
-                    ..note_field()
-                });
+            if let Some(browser) = fields.iter().find(|field| field.key == BROWSER) {
+                let show_when = browser.show_when.clone();
+                let mut app_fields = vec![
+                    text_field(CLIENT_ID, "registered_app_client_id", FieldKind::Text),
+                    text_field(
+                        CLIENT_SECRET,
+                        "registered_app_client_secret",
+                        FieldKind::Secret,
+                    ),
+                    FieldSpec {
+                        key: "registered_app_help".into(),
+                        help: Some(Text::key("youtube_oauth_help")),
+                        ..note_field()
+                    },
+                ];
+                for field in &mut app_fields {
+                    field.show_when = show_when.clone();
+                }
+                fields.extend(app_fields);
             }
         }
         _ => {}
@@ -537,7 +548,7 @@ pub fn check(service: MusicService, draft: &ServerDraft) -> (SignInKind, Vec<Pro
     {
         let secret = |key| value_of(&draft.secrets, key).unwrap_or_default().trim();
         match service {
-            MusicService::SoundCloud => {
+            MusicService::SoundCloud | MusicService::YtMusic if !anonymous_draft(draft) => {
                 if value(CLIENT_ID).is_empty() {
                     problems.push(Problem::on(
                         CLIENT_ID,
@@ -557,12 +568,6 @@ pub fn check(service: MusicService, draft: &ServerDraft) -> (SignInKind, Vec<Pro
                 problems.push(Problem::on(
                     DEVELOPER_TOKEN,
                     Text::key("registered_app_credentials_required"),
-                ));
-            }
-            MusicService::YtMusic if !anonymous_draft(draft) => {
-                problems.push(Problem::on(
-                    AUTH_METHOD,
-                    Text::key("android_external_signin_unavailable"),
                 ));
             }
             _ => {}
@@ -663,8 +668,18 @@ mod android_auth_tests {
     use super::*;
 
     #[test]
+    fn anonymous_youtube_settings_do_not_request_oauth_credentials() {
+        assert!(android_signin_fields(MusicService::YtMusic, Vec::new()).is_empty());
+        let browser = browser_field(None, Some(FieldValue::new(AUTH_METHOD, BY_BROWSER)));
+        let condition = browser.show_when.clone();
+        let fields = android_signin_fields(MusicService::YtMusic, vec![browser]);
+        assert!(fields.iter().all(|field| field.show_when == condition));
+    }
+
+    #[test]
     fn registered_providers_keep_browser_choice_and_write_only_app_secrets() {
         for (service, secret) in [
+            (MusicService::YtMusic, CLIENT_SECRET),
             (MusicService::SoundCloud, CLIENT_SECRET),
             (MusicService::AppleMusic, DEVELOPER_TOKEN),
         ] {

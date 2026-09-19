@@ -553,7 +553,7 @@ prefer_active_device_help = When another device is already playing, take it over
 settings_managed_notice = Beberapa pengaturan dikelola oleh konfigurasi sistem (Nix/hjem) dan tidak dapat diubah di sini.
 setting_managed_by_system = Dikelola oleh konfigurasi sistem
 
-android_external_signin_unavailable = Registered Google OAuth does not support this YouTube Music backend. Use anonymous mode on Android.
+youtube_oauth_help = Experimental Google OAuth: enter your registered Client ID and Client Secret. Sign-in opens your selected browser with a code to approve on Google. See the Android browser sign-in guide for setup.
 
 registered_app_client_id = App Client ID
 
