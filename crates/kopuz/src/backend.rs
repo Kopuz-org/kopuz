@@ -44,6 +44,20 @@ pub fn start() -> Result<&'static Core, String> {
                         return;
                     }
                 };
+                #[cfg(target_os = "android")]
+                {
+                    let endpoint = match crate::artwork_http::start(core.api.clone()).await {
+                        Ok(endpoint) => endpoint,
+                        Err(error) => {
+                            let _ = ready_tx.send(Err(format!("artwork server: {error}")));
+                            return;
+                        }
+                    };
+                    if let Err(error) = utils::set_artwork_endpoint(endpoint) {
+                        let _ = ready_tx.send(Err(error));
+                        return;
+                    }
+                }
                 let _ = CORE.set(core);
                 let _ = ready_tx.send(Ok(()));
                 let Some(core) = CORE.get() else {

@@ -3,6 +3,7 @@ package dev.dioxus.main
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -47,6 +48,13 @@ class MainActivity : WryActivity() {
             isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = false
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Android dispatches the new configuration to the existing WebView.
+        // Reapply bar styling after a system theme or display change.
+        enableEdgeToEdge()
     }
 
     // Forward hardware/gesture back to Rust, which pops the in-app router or, at the

@@ -35,6 +35,7 @@ futures-util = { workspace = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 dioxus = { workspace = true, features = ["mobile"] }
+axum = { version = "0.7.9", default-features = false, features = ["http1", "tokio"] }
 # reqwest's rustls stack verifies certificates through the Android trust store,
 # which panics on first use unless it is handed a JVM + Context at startup.
 # Pinned to the jni that rustls-platform-verifier itself builds against, which is
@@ -113,3 +114,8 @@ base64 = "0.22"
 
 [features]
 default = []
+
+[dev-dependencies]
+axum = { version = "0.7.9", default-features = false, features = ["http1", "tokio"] }
+async-trait = { workspace = true }
+tower = { workspace = true }
