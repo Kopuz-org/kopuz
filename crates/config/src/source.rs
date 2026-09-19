@@ -322,18 +322,6 @@ impl Browser {
         }
     }
 
-    pub fn android_package(self) -> Option<&'static str> {
-        match self {
-            Self::Chrome => Some("com.android.chrome"),
-            Self::Chromium => Some("org.chromium.chrome"),
-            Self::Brave => Some("com.brave.browser"),
-            Self::Edge => Some("com.microsoft.emmx"),
-            Self::Vivaldi => Some("com.vivaldi.browser"),
-            Self::Firefox => Some("org.mozilla.firefox"),
-            Self::Helium | Self::LibreWolf | Self::Zen | Self::Floorp => None,
-        }
-    }
-
     pub fn from_id(s: &str) -> Option<Browser> {
         Browser::ALL
             .iter()

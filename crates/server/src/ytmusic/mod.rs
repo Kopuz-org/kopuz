@@ -10,7 +10,6 @@ pub mod innertube;
 pub mod isolated_profile;
 pub mod mix;
 pub mod mutations;
-pub mod oauth;
 pub mod player;
 pub mod playlists;
 pub mod search;
@@ -57,9 +56,6 @@ pub const ANON_AUTH_REQUIRED: &str = "YouTube Music not signed in";
 /// invalidates synced library/favorites state. Never logged.
 pub fn derive_user_id(cookies: &str) -> Option<String> {
     use sha1::{Digest, Sha1};
-    if let Some(bearer) = oauth::decode(cookies) {
-        return Some(bearer.user_id);
-    }
     let sapisid = cookies.split(';').find_map(|p| {
         let (k, v) = p.trim().split_once('=')?;
         (k == "SAPISID" || k == "__Secure-3PAPISID").then(|| v.to_string())
@@ -77,15 +73,11 @@ pub async fn probe_stream(video_id: &str, cookies: Option<&str>) -> Result<YtStr
 
 pub(crate) struct YouTubeMusicClient {
     cookies: Option<String>,
-    oauth: Option<oauth::Client>,
 }
 
 impl YouTubeMusicClient {
     pub fn new() -> Self {
-        Self {
-            cookies: None,
-            oauth: None,
-        }
+        Self { cookies: None }
     }
 
     pub fn with_cookies(cookies: String) -> Self {
@@ -95,39 +87,21 @@ impl YouTubeMusicClient {
         // unwrap_or("") — treats anonymous consistently.
         Self {
             cookies: (!cookies.is_empty()).then_some(cookies),
-            oauth: None,
-        }
-    }
-
-    pub fn with_oauth(db: db::Db, id: String) -> Self {
-        Self {
-            cookies: None,
-            oauth: Some(oauth::Client::new(db, id)),
-        }
-    }
-
-    async fn credentials(&self) -> Result<Option<String>, String> {
-        match &self.oauth {
-            Some(client) => client.credentials().await.map(Some),
-            None => Ok(self.cookies.clone()),
         }
     }
 
     pub async fn search_tracks(&self, query: &str) -> Result<Vec<Track>, String> {
-        let credentials = self.credentials().await?;
-        search::music_search_tracks(query, credentials.as_deref()).await
+        search::music_search_tracks(query, self.cookies.as_deref()).await
     }
 
     pub async fn resolve_artist_channel_id(&self, query: &str) -> Result<Option<String>, String> {
-        let credentials = self.credentials().await?;
-        search::resolve_artist_channel_id(query, credentials.as_deref()).await
+        search::resolve_artist_channel_id(query, self.cookies.as_deref()).await
     }
 
     /// Top YT Music artist-search avatar for `name` — the Artists grid uses this
     /// so its photos are real YT artist images.
     pub async fn resolve_artist_image(&self, name: &str) -> Result<Option<String>, String> {
-        let credentials = self.credentials().await?;
-        search::resolve_artist_image(name, credentials.as_deref()).await
+        search::resolve_artist_image(name, self.cookies.as_deref()).await
     }
 
     /// The artist's channel reconciled from one of their songs' watch-queue
@@ -137,15 +111,13 @@ impl YouTubeMusicClient {
         video_id: &str,
         artist_name: &str,
     ) -> Result<Option<String>, String> {
-        let credentials = self.credentials().await?;
-        mix::artist_channel_for_video(video_id, artist_name, credentials.as_deref().unwrap_or(""))
+        mix::artist_channel_for_video(video_id, artist_name, self.cookies.as_deref().unwrap_or(""))
             .await
     }
 
     /// The channel's square avatar, for grid photos of song-reconciled artists.
     pub async fn artist_avatar(&self, channel_id: &str) -> Result<Option<String>, String> {
-        let credentials = self.credentials().await?;
-        discover::artist_avatar(channel_id, credentials.as_deref().unwrap_or("")).await
+        discover::artist_avatar(channel_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     /// Resolve a saved album (title + artist) back to its YT album browse id
@@ -157,8 +129,7 @@ impl YouTubeMusicClient {
         album: &str,
         artist: &str,
     ) -> Result<Option<String>, String> {
-        let credentials = self.credentials().await?;
-        search::resolve_album_browse_id(album, artist, credentials.as_deref()).await
+        search::resolve_album_browse_id(album, artist, self.cookies.as_deref()).await
     }
 
     /// List the user's saved playlists (everything under Library →
@@ -169,8 +140,7 @@ impl YouTubeMusicClient {
     /// returns Ok(vec![]) in anonymous mode so the playlists tab
     /// just shows empty rather than erroring.
     pub async fn list_playlists(&self) -> Result<Vec<playlists::YtPlaylistSummary>, String> {
-        let credentials = self.credentials().await?;
-        let Some(cookies) = credentials.as_deref() else {
+        let Some(cookies) = self.cookies.as_deref() else {
             return Ok(Vec::new());
         };
         playlists::list_playlists(cookies).await
@@ -179,8 +149,7 @@ impl YouTubeMusicClient {
     /// Playlist contents. Public playlists work anonymously; the
     /// user's personal/private ones obviously won't.
     pub async fn get_playlist_entries(&self, playlist_id: &str) -> Result<Vec<Track>, String> {
-        let credentials = self.credentials().await?;
-        playlists::get_playlist_entries(playlist_id, credentials.as_deref().unwrap_or("")).await
+        playlists::get_playlist_entries(playlist_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn playlist_page(
@@ -188,10 +157,9 @@ impl YouTubeMusicClient {
         playlist_id: &str,
         continuation: Option<&str>,
     ) -> Result<(Vec<Track>, Option<String>), String> {
-        let credentials = self.credentials().await?;
         playlists::playlist_page(
             playlist_id,
-            credentials.as_deref().unwrap_or(""),
+            self.cookies.as_deref().unwrap_or(""),
             continuation,
         )
         .await
@@ -201,26 +169,22 @@ impl YouTubeMusicClient {
     // signed in" error so callers (favorite toggle, add-to-playlist
     // modal) can surface a clear "sign in to enable" message.
     pub async fn like_video(&self, video_id: &str) -> Result<(), String> {
-        let credentials = self.credentials().await?;
-        let cookies = credentials.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::like_video(video_id, cookies).await
     }
 
     pub async fn unlike_video(&self, video_id: &str) -> Result<(), String> {
-        let credentials = self.credentials().await?;
-        let cookies = credentials.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::unlike_video(video_id, cookies).await
     }
 
     pub async fn dislike_video(&self, video_id: &str) -> Result<(), String> {
-        let credentials = self.credentials().await?;
-        let cookies = credentials.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::dislike_video(video_id, cookies).await
     }
 
     pub async fn add_to_playlist(&self, playlist_id: &str, video_id: &str) -> Result<(), String> {
-        let credentials = self.credentials().await?;
-        let cookies = credentials.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::add_to_playlist(playlist_id, video_id, cookies).await
     }
 
@@ -229,14 +193,12 @@ impl YouTubeMusicClient {
         playlist_id: &str,
         video_id: &str,
     ) -> Result<(), String> {
-        let credentials = self.credentials().await?;
-        let cookies = credentials.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::remove_from_playlist(playlist_id, video_id, cookies).await
     }
 
     pub async fn create_playlist(&self, title: &str, video_ids: &[&str]) -> Result<String, String> {
-        let credentials = self.credentials().await?;
-        let cookies = credentials.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::create_playlist(title, video_ids, cookies).await
     }
 
@@ -250,11 +212,10 @@ impl YouTubeMusicClient {
     where
         F: FnMut(Vec<Track>),
     {
-        let credentials = self.credentials().await?;
         // Liked Music is auth-only — anonymous callers get an empty
         // list rather than an error so favorites views render the
         // standard empty state without surfacing a stack trace.
-        let Some(cookies) = credentials.as_deref() else {
+        let Some(cookies) = self.cookies.as_deref() else {
             let _ = &mut on_page;
             return Ok(());
         };
@@ -306,8 +267,7 @@ impl YouTubeMusicClient {
         &self,
         continuation: Option<&str>,
     ) -> Result<(Vec<Track>, Option<String>), String> {
-        let credentials = self.credentials().await?;
-        let Some(cookies) = credentials.as_deref() else {
+        let Some(cookies) = self.cookies.as_deref() else {
             return Ok((Vec::new(), None));
         };
         match continuation {
@@ -329,8 +289,7 @@ impl YouTubeMusicClient {
     /// WEB_REMIX (see `player::resolve`). With cookies this returns Premium
     /// itags; anonymously the ~128 kbps ceiling. No PO token, no yt-dlp.
     pub async fn get_stream(&self, video_id: &str) -> Result<YtStreamInfo, String> {
-        let credentials = self.credentials().await?;
-        player::resolve(video_id, credentials.as_deref()).await
+        player::resolve(video_id, self.cookies.as_deref()).await
     }
 
     // Public surfaces — work anonymously. `cookies.as_deref().unwrap_or("")`
@@ -341,43 +300,38 @@ impl YouTubeMusicClient {
     /// Whether this client has cookies — i.e. the user is signed in rather than
     /// browsing YT anonymously.
     pub fn is_authenticated(&self) -> bool {
-        self.cookies.is_some() || self.oauth.is_some()
+        self.cookies.is_some()
     }
 
     pub async fn start_mix(&self, seed_video_id: &str) -> Result<Vec<Track>, String> {
-        let credentials = self.credentials().await?;
         mix::fetch(
             mix::MixSeed::Video(seed_video_id),
-            credentials.as_deref().unwrap_or(""),
+            self.cookies.as_deref().unwrap_or(""),
         )
         .await
     }
 
     pub async fn start_playlist_mix(&self, playlist_id: &str) -> Result<Vec<Track>, String> {
-        let credentials = self.credentials().await?;
         mix::fetch(
             mix::MixSeed::Playlist(playlist_id),
-            credentials.as_deref().unwrap_or(""),
+            self.cookies.as_deref().unwrap_or(""),
         )
         .await
     }
 
     pub async fn discover_home(&self) -> Result<discover::DiscoverHome, String> {
-        let credentials = self.credentials().await?;
-        discover::fetch_home(credentials.as_deref().unwrap_or("")).await
+        discover::fetch_home(self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn discover_continuation(
         &self,
         token: &str,
     ) -> Result<discover::DiscoverHome, String> {
-        let credentials = self.credentials().await?;
-        discover::fetch_continuation(token, credentials.as_deref().unwrap_or("")).await
+        discover::fetch_continuation(token, self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn fetch_album_tracks(&self, browse_id: &str) -> Result<Vec<Track>, String> {
-        let credentials = self.credentials().await?;
-        discover::fetch_album_tracks(browse_id, credentials.as_deref().unwrap_or("")).await
+        discover::fetch_album_tracks(browse_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     /// The full album (header metadata — title, artist, year, cover — plus every
@@ -385,13 +339,11 @@ impl YouTubeMusicClient {
     /// thinner [`fetch_album_tracks`](Self::fetch_album_tracks) is for callers
     /// that only queue the tracks.
     pub async fn fetch_album(&self, browse_id: &str) -> Result<discover::YtAlbum, String> {
-        let credentials = self.credentials().await?;
-        discover::fetch_album(browse_id, credentials.as_deref().unwrap_or("")).await
+        discover::fetch_album(browse_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn fetch_artist(&self, channel_id: &str) -> Result<discover::YtArtist, String> {
-        let credentials = self.credentials().await?;
-        discover::fetch_artist(channel_id, credentials.as_deref().unwrap_or("")).await
+        discover::fetch_artist(channel_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     /// Confirms the cookie session is actually signed in — InnerTube
@@ -400,10 +352,9 @@ impl YouTubeMusicClient {
     /// callers and real playlist content for signed-in ones.
     #[tracing::instrument(name = "yt.validate", skip_all)]
     pub async fn validate_cookies(&self) -> Result<(), String> {
-        let credentials = self.credentials().await?;
         // Anonymous mode has no cookies to validate — succeed silently
         // so callers (settings probe, keepalive) treat it as healthy.
-        let Some(cookies) = credentials.as_deref() else {
+        let Some(cookies) = self.cookies.as_deref() else {
             return Ok(());
         };
         let json: Value = innertube::browse("VLLM", cookies).await?;

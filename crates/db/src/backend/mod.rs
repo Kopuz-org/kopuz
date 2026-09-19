@@ -294,24 +294,6 @@ impl ReadStore for Native {
         cfg_store::load_server(&self.pool(), id).await
     }
 
-    async fn browser_auth(&self, id: &str) -> Result<Option<String>, DbError> {
-        Ok(
-            sqlx::query_scalar("SELECT credentials FROM browser_auth WHERE server_id = ?1")
-                .bind(id)
-                .fetch_optional(&*self.pool())
-                .await?,
-        )
-    }
-
-    async fn set_browser_auth(&self, id: &str, credentials: &str) -> Result<(), DbError> {
-        sqlx::query("INSERT INTO browser_auth (server_id, credentials) VALUES (?1, ?2) ON CONFLICT(server_id) DO UPDATE SET credentials = excluded.credentials")
-            .bind(id)
-            .bind(credentials)
-            .execute(&*self.pool())
-            .await?;
-        Ok(())
-    }
-
     async fn set_server_credentials(
         &self,
         id: &str,

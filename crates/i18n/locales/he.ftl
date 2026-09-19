@@ -559,16 +559,5 @@ prefer_active_device_help = When another device is already playing, take it over
 settings_managed_notice = חלק מההגדרות מנוהלות על ידי תצורת המערכת (Nix/hjem) ולא ניתן לשנות אותן כאן.
 setting_managed_by_system = מנוהל על ידי תצורת המערכת
 
-youtube_oauth_help = Experimental Google OAuth: enter your registered Client ID and Client Secret. Sign-in opens your selected browser with a code to approve on Google. See the Android browser sign-in guide for setup.
-
-registered_app_client_id = App Client ID
-
-registered_app_client_secret = App Client Secret
-
-registered_app_credentials_required = Enter your registered app credentials first.
-
-soundcloud_oauth_help = Register your own SoundCloud app with redirect URI http://127.0.0.1:8899/callback. Enter its Client ID and Client Secret. Leave the secret blank to keep it when editing.
-
-apple_music_developer_token = MusicKit developer token
-
-apple_music_musickit_help = Use a developer token from your Apple Developer account. If it restricts origins, include http://127.0.0.1:8900. Sign-in connects your library; MusicKit playback is not integrated yet. Leave the token blank to keep it when editing.
+sign_in_with_webview = Sign in within Kopuz
+webview_sign_in_help = Sign-in opens inside Kopuz. Close the sign-in window to cancel.

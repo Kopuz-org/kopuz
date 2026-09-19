@@ -272,11 +272,6 @@ pub trait ReadStore: Send + Sync {
     /// by server switching so stored creds are reused instead of re-prompting.
     async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
 
-    /// Registered app credentials and rotating OAuth tokens, never in settings exports.
-    async fn browser_auth(&self, id: &str) -> Result<Option<String>, DbError>;
-
-    async fn set_browser_auth(&self, id: &str, credentials: &str) -> Result<(), DbError>;
-
     /// Store one server's credentials on their own. `save_config` writes
     /// only the active server's, so signing into another one needs this.
     async fn set_server_credentials(

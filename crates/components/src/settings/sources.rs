@@ -301,7 +301,16 @@ pub fn ServerSettings(
                             }
                             if !settings.is_empty() {
                                 div { class: "border-t border-white/10 pt-2",
-                                    SourceSettingsForm { id: settings_id.clone(), fields: settings.clone() }
+                                    crate::forms::schema_form::SchemaForm {
+                                        fields: settings.clone(),
+                                        values: Vec::new(),
+                                        on_change: move |value: api::FieldValue| {
+                                            hooks::sources::set_source_settings(
+                                                settings_id.clone(),
+                                                vec![value],
+                                            );
+                                        },
+                                    }
                                 }
                             }
                         }
@@ -312,45 +321,6 @@ pub fn ServerSettings(
                 onclick: move |_| on_add.call(()),
                 class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
                 "{i18n::t(\"add_server\")}"
-            }
-        }
-    }
-}
-
-/// Credential forms submit together so a keystroke never replaces a stored
-/// secret or causes the server's blank secret field to erase the next edit.
-#[component]
-fn SourceSettingsForm(id: String, fields: Vec<api::FieldSpec>) -> Element {
-    let buffered = fields
-        .iter()
-        .any(|field| matches!(field.kind, api::FieldKind::Secret));
-    let mut answers = use_signal(Vec::<api::FieldValue>::new);
-    let change_id = id.clone();
-    let save_text = i18n::t("save");
-    rsx! {
-        crate::forms::schema_form::SchemaForm {
-            fields,
-            values: answers(),
-            on_change: move |answer: api::FieldValue| {
-                if buffered {
-                    let mut values = answers.write();
-                    if let Some(existing) = values.iter_mut().find(|value| value.key == answer.key) { *existing = answer; }
-                    else { values.push(answer); }
-                } else {
-                    hooks::sources::set_source_settings(change_id.clone(), vec![answer]);
-                }
-            },
-        }
-        if buffered {
-            button {
-                class: "text-sm bg-white/10 hover:bg-white/20 px-3 py-2 rounded-xl m-2 disabled:opacity-50",
-                disabled: answers.read().is_empty(),
-                onclick: move |_| {
-                    let values = answers.peek().clone();
-                    hooks::sources::set_source_settings(id.clone(), values);
-                    answers.set(Vec::new());
-                },
-                "{save_text}"
             }
         }
     }

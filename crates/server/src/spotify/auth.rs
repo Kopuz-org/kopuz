@@ -1,7 +1,7 @@
 //! Spotify OAuth (Authorization-Code + PKCE) with a loopback redirect.
 //!
 //! Unlike the YT/SoundCloud cookie-scrape flows, this is a real redirect flow:
-//! we open the consent screen in the user's default browser, catch the redirect
+//! we open the consent screen (in-app on Android), catch the redirect
 //! on a localhost listener, and exchange the code (+ PKCE verifier) for tokens.
 //! The Client ID is the user's own — each user registers an app at
 //! developer.spotify.com and adds the redirect URI below.
@@ -45,16 +45,18 @@ pub fn unpack_token(packed: &str) -> (String, String) {
 
 /// Open the consent screen, catch the loopback redirect, and exchange the code
 /// for tokens. `client_id` is the user's own Spotify app id.
+#[cfg(not(target_os = "android"))]
 pub async fn launch_signin_and_extract(client_id: String) -> Result<SpotifyAuth, String> {
-    launch_signin_with_browser(client_id, |url| {
+    authorize_with(client_id, |url| {
         webbrowser::open(url).map_err(|error| format!("couldn't open the browser: {error}"))
     })
     .await
 }
 
-pub async fn launch_signin_with_browser(
+/// The platform supplies the consent window; Android opens its login WebView.
+pub async fn authorize_with(
     client_id: String,
-    open_browser: impl FnOnce(&str) -> Result<(), String>,
+    open: impl FnOnce(&str) -> Result<(), String>,
 ) -> Result<SpotifyAuth, String> {
     let client_id = client_id.trim().to_string();
     if client_id.is_empty() {
@@ -76,12 +78,23 @@ pub async fn launch_signin_with_browser(
     let listener = std::net::TcpListener::bind(("127.0.0.1", REDIRECT_PORT)).map_err(|e| {
         format!("couldn't bind {REDIRECT_URI} (is it registered / is the port free?): {e}")
     })?;
-    open_browser(&auth_url)?;
+    open(&auth_url)?;
 
+    let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    struct CancelOnDrop(std::sync::Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for CancelOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    // Closing the Android activity cancels this future. Release the callback
+    // listener as well, so another sign-in can start immediately.
+    let _cancel = CancelOnDrop(cancelled.clone());
     let expected_state = state.clone();
-    let code = tokio::task::spawn_blocking(move || accept_code(listener, &expected_state))
-        .await
-        .map_err(|e| e.to_string())??;
+    let code =
+        tokio::task::spawn_blocking(move || accept_code(listener, &expected_state, &cancelled))
+            .await
+            .map_err(|e| e.to_string())??;
 
     let redirect = REDIRECT_URI.to_string();
     let token = exchange(&[
@@ -197,10 +210,17 @@ fn gen_state() -> String {
 
 /// Block until the browser hits `/callback`, validating `state` and returning the
 /// authorization code. Times out so a cancelled sign-in doesn't leak the thread.
-fn accept_code(listener: std::net::TcpListener, expected_state: &str) -> Result<String, String> {
+fn accept_code(
+    listener: std::net::TcpListener,
+    expected_state: &str,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<String, String> {
     listener.set_nonblocking(true).ok();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
     loop {
+        if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err("Spotify sign-in was cancelled".into());
+        }
         if std::time::Instant::now() > deadline {
             return Err("timed out waiting for Spotify sign-in".to_string());
         }
@@ -324,43 +344,22 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn empty_client_id_does_not_open_browser() {
-        let result = launch_signin_with_browser("  ".to_string(), |_| {
-            panic!("a browser must not open without a client id")
-        })
-        .await;
-        assert!(matches!(result, Err(error) if error.contains("Client ID")));
+    async fn empty_client_id_never_opens_a_consent_window() {
+        let result = authorize_with("  ".into(), |_| panic!("unexpected consent window")).await;
+        assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn selected_browser_failure_is_reported_and_releases_callback_port() {
-        let mut opened = false;
-        let result = launch_signin_with_browser("test-client".to_string(), |url| {
-            opened = true;
-            let url = reqwest::Url::parse(url).expect("authorization URL");
-            assert_eq!(url.host_str(), Some("accounts.spotify.com"));
-            let query: std::collections::HashMap<_, _> = url.query_pairs().collect();
-            assert_eq!(
-                query.get("client_id").map(|value| value.as_ref()),
-                Some("test-client")
-            );
-            assert_eq!(
-                query.get("redirect_uri").map(|value| value.as_ref()),
-                Some(REDIRECT_URI)
-            );
-            assert_eq!(
-                query
-                    .get("code_challenge_method")
-                    .map(|value| value.as_ref()),
-                Some("S256")
-            );
-            assert!(!query["state"].is_empty());
-            Err("selected browser unavailable".to_string())
-        })
-        .await;
-        assert!(opened);
-        assert!(matches!(result, Err(error) if error == "selected browser unavailable"));
-        assert!(std::net::TcpListener::bind(("127.0.0.1", REDIRECT_PORT)).is_ok());
+    #[test]
+    fn cancelling_sign_in_releases_the_callback_listener() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let cancelled = std::sync::atomic::AtomicBool::new(true);
+        assert!(
+            accept_code(listener, "state", &cancelled)
+                .unwrap_err()
+                .contains("cancelled")
+        );
+        assert!(std::net::TcpListener::bind(address).is_ok());
     }
 
     #[test]

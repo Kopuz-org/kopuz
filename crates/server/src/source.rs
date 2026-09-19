@@ -798,15 +798,18 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         MusicService::YtMusic => Box::new(YtSource::new(db, source, conn)),
         MusicService::SoundCloud => Box::new(SoundcloudSource::new(db, source, conn)),
         MusicService::AppleMusic => {
-            let client = crate::applemusic::AppleMusicApi::new(
-                Some(conn.token.clone()),
-                &conn.apple_music_storefront,
-                &conn.apple_music_language,
-            );
-            if !client.uses_musickit() {
-                crate::applemusic::widevine::fetch::prefetch();
-            }
-            Box::new(AppleMusicSource::new(db, source, client))
+            // Apple Music is configured, so the Widevine CDM will be wanted.
+            // Start fetching now rather than when a track is already waiting.
+            crate::applemusic::widevine::fetch::prefetch();
+            Box::new(AppleMusicSource::new(
+                db,
+                source,
+                crate::applemusic::AppleMusicApi::new(
+                    Some(conn.token.clone()),
+                    &conn.apple_music_storefront,
+                    &conn.apple_music_language,
+                ),
+            ))
         }
         MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
         MusicService::Nextcloud => Box::new(NextcloudSource::new(db, source, conn)),

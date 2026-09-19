@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 
 use super::SOURCE_PREFIX;
 use super::clients::WEB_REMIX;
+use super::innertube::sapisid_hash;
 
 const ORIGIN_YT_MUSIC: &str = "https://music.youtube.com";
 const SONGS_FILTER: &str = "EgWKAQIIAWoMEAMQBBAJEAoQDhAV";
@@ -327,7 +328,10 @@ async fn do_search_raw(
         .header("Referer", format!("{ORIGIN_YT_MUSIC}/"))
         .json(&body);
     if let Some(c) = cookies {
-        req = super::oauth::authenticate(req, c, ORIGIN_YT_MUSIC)?;
+        req = req.header("Cookie", c);
+        if let Some(auth) = sapisid_hash(c, ORIGIN_YT_MUSIC) {
+            req = req.header("Authorization", auth);
+        }
     }
     req.send()
         .await

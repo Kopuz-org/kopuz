@@ -175,7 +175,9 @@ pub async fn player(
     if client.login_supported
         && let Some(c) = cookies
     {
-        req = super::oauth::authenticate(req, c, ORIGIN_YOUTUBE_MUSIC)?;
+        let auth =
+            sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
     }
 
     let resp = match req.json(&body).send().await {
@@ -242,7 +244,9 @@ pub async fn browse_maybe_auth(browse_id: &str, cookies: Option<&str>) -> Result
         .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
         .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
     if let Some(c) = cookies {
-        req = super::oauth::authenticate(req, c, ORIGIN_YOUTUBE_MUSIC)?;
+        let auth =
+            sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
     }
     let resp = req
         .json(&body)
@@ -295,7 +299,9 @@ pub async fn browse_continuation_maybe_auth(
         .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
         .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
     if let Some(c) = cookies {
-        req = super::oauth::authenticate(req, c, ORIGIN_YOUTUBE_MUSIC)?;
+        let auth =
+            sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
     }
     let resp = req
         .json(&body)
@@ -327,7 +333,9 @@ pub async fn visitor_id(cookies: Option<&str>) -> Result<String, String> {
         .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
         .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
     if let Some(c) = cookies {
-        req = super::oauth::authenticate(req, c, ORIGIN_YOUTUBE_MUSIC)?;
+        let auth =
+            sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
     }
     let resp = req
         .json(&body)

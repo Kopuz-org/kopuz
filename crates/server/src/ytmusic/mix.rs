@@ -2,7 +2,7 @@ use reader::models::Track;
 use serde_json::{Value, json};
 
 use super::clients::WEB_REMIX;
-
+use super::innertube::sapisid_hash;
 use super::search::synthesize_album_id;
 
 const ORIGIN: &str = "https://music.youtube.com";
@@ -101,7 +101,8 @@ pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<Vec<Track>
         .header("Origin", ORIGIN)
         .header("Referer", format!("{ORIGIN}/"));
     if let Some(c) = cookies_opt {
-        req = super::oauth::authenticate(req, c, ORIGIN)?;
+        let auth = sapisid_hash(c, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
     }
     let resp: Value = req
         .json(&body)
@@ -322,7 +323,8 @@ pub async fn artist_channel_for_video(
         .header("Origin", ORIGIN)
         .header("Referer", format!("{ORIGIN}/"));
     if let Some(c) = cookies_opt {
-        req = super::oauth::authenticate(req, c, ORIGIN)?;
+        let auth = sapisid_hash(c, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
     }
     let resp: Value = req
         .json(&body)
