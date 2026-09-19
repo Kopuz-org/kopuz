@@ -558,3 +558,17 @@ prefer_active_device = Playback device
 prefer_active_device_help = When another device is already playing, take it over instead of starting playback here.
 settings_managed_notice = 部分设置由系统配置（Nix/hjem）管理，无法在此更改。
 setting_managed_by_system = 由系统配置管理
+
+android_external_signin_unavailable = Registered Google OAuth does not support this YouTube Music backend. Use anonymous mode on Android.
+
+registered_app_client_id = App Client ID
+
+registered_app_client_secret = App Client Secret
+
+registered_app_credentials_required = Enter your registered app credentials first.
+
+soundcloud_oauth_help = Register your own SoundCloud app with redirect URI http://127.0.0.1:8899/callback. Enter its Client ID and Client Secret. Leave the secret blank to keep it when editing.
+
+apple_music_developer_token = MusicKit developer token
+
+apple_music_musickit_help = Use a developer token from your Apple Developer account. If it restricts origins, include http://127.0.0.1:8900. Sign-in connects your library; MusicKit playback is not integrated yet. Leave the token blank to keep it when editing.

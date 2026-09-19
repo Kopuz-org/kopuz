@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub mod musickit;
 
 pub mod cenc;
 pub mod progressive;

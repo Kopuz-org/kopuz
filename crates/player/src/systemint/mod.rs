@@ -29,9 +29,9 @@ mod android;
 pub use android::{
     RepeatMode, SystemEvent, await_media_permission, capture_event_loop, get_android_music_dir,
     get_files_dir, has_media_permission, init, login_close, login_cookies, login_is_open,
-    login_open, move_task_to_back, request_permissions, set_background_handler, set_keepalive,
-    set_tokio_waker, stop_session, take_back_pressed, update_modes, update_now_playing,
-    wake_run_loop,
+    login_open, move_task_to_back, open_browser, request_permissions, set_background_handler,
+    set_keepalive, set_tokio_waker, stop_session, take_back_pressed, update_modes,
+    update_now_playing, wake_run_loop,
 };
 
 #[cfg(not(target_os = "android"))]

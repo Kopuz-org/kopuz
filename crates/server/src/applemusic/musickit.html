@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Connect Apple Music to Kopuz</title>
+<style>
+  body { color: #eee; background: #141414; font: 18px system-ui, sans-serif; max-width: 28rem; margin: 12vh auto; padding: 1.5rem; }
+  button { font: inherit; padding: .8rem 1rem; margin: .5rem .5rem .5rem 0; border: 0; border-radius: .6rem; cursor: pointer; }
+  #connect { background: #fa3757; color: white; }
+  button:disabled { opacity: .5; cursor: wait; }
+</style>
+<h1>Connect Apple Music</h1>
+<p>Allow Kopuz to access your Apple Music library.</p>
+<button id="connect" disabled>Continue with Apple Music</button>
+<button id="cancel">Cancel</button>
+<p id="status" role="status">Loading Apple Music…</p>
+<script>
+const configuration = __KOPUZ_CONFIGURATION__;
+const connect = document.getElementById('connect');
+const status = document.getElementById('status');
+async function callback(value) {
+  const response = await fetch('/callback', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({state: configuration.state, ...value})
+  });
+  if (!response.ok) throw new Error('Kopuz could not receive authorization. Return to the app and retry.');
+}
+document.addEventListener('musickitloaded', async () => {
+  try {
+    const music = await MusicKit.configure({developerToken: configuration.developerToken, app: {name: 'Kopuz', build: '1'}});
+    connect.disabled = false;
+    status.textContent = 'Continue to sign in with your Apple Account.';
+    connect.onclick = async () => {
+      connect.disabled = true;
+      try {
+        // This call stays inside the click handler so browsers allow Apple's popup.
+        const token = await music.authorize();
+        await callback({token});
+        document.getElementById('cancel').disabled = true;
+        status.textContent = 'Authorization received. Return to Kopuz to finish signing in.';
+      } catch (error) {
+        status.textContent = error.message || 'Authorization was cancelled. You can retry.';
+        connect.disabled = false;
+      }
+    };
+  } catch (error) {
+    status.textContent = 'Apple Music could not start. Check your developer token in Kopuz.';
+  }
+});
+document.getElementById('cancel').onclick = async () => {
+  try { await callback({error: 'cancelled'}); } catch (_) {}
+  connect.disabled = true;
+  status.textContent = 'Cancelled. Return to Kopuz.';
+};
+</script>
+<script src="https://js-cdn.music.apple.com/musickit/v3/musickit.js" crossorigin="anonymous" onerror="document.getElementById('status').textContent='Apple Music could not load. Check your connection and return to Kopuz to retry.'"></script>
+</html>

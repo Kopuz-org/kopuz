@@ -24,6 +24,7 @@ use crate::config_service::ConfigService;
 use crate::session::SessionHandle;
 
 /// How long a browser sign-in may sit waiting for a person.
+#[cfg(not(target_os = "android"))]
 const SIGNIN_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub struct SourceService {
@@ -196,6 +197,16 @@ impl SourceService {
                 info.detail = crate::services::detail(&view);
                 info.anonymous = server.yt_anonymous;
                 info.settings = crate::services::settings(&view, &current);
+                if let Some(field) = info
+                    .settings
+                    .iter_mut()
+                    .find(|field| field.key == crate::services::CLIENT_ID)
+                {
+                    let app = server::browser_auth::AppCredentials::load(&self.db, id)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    field.value = Some(app.client_id);
+                }
                 info.directories = resolved.folders_for(server_id);
             }
         }
@@ -219,7 +230,7 @@ impl SourceService {
     pub async fn can_open_browser(&self) -> bool {
         #[cfg(target_os = "android")]
         {
-            false
+            true
         }
         #[cfg(not(target_os = "android"))]
         {
@@ -505,6 +516,9 @@ impl SourceService {
             self.session.reset_playback().await?;
         }
         self.session.invalidate(Table::Servers);
+        let mut app_values = draft.values.clone();
+        app_values.extend(draft.secrets.clone());
+        self.update_browser_app(&id, service, &app_values).await?;
         // A secret answered in the form is stored the same way one obtained
         // any other way is, and never travels back out.
         if let Some(secret) = secret {
@@ -532,6 +546,8 @@ impl SourceService {
         let Some(existing) = current.servers.iter().find(|server| server.id == id) else {
             return Err(ApiError::not_found("no such server"));
         };
+        let service = existing.service;
+        let app_values = values.clone();
         let mut keys = vec!["servers".to_string()];
         keys.extend(
             crate::services::config_keys(existing, &values)
@@ -566,8 +582,60 @@ impl SourceService {
             })
             .await?;
         self.publish(updated, keys);
+        self.update_browser_app(id, service, &app_values).await?;
         self.session.invalidate(Table::Servers);
         self.source_info(id).await
+    }
+
+    async fn update_browser_app(
+        &self,
+        id: &str,
+        service: config::MusicService,
+        values: &[api::FieldValue],
+    ) -> Result<(), ApiError> {
+        use crate::services::{CLIENT_ID, CLIENT_SECRET, DEVELOPER_TOKEN};
+        use server::browser_auth::{APP_LOCK, AppCredentials};
+        let keys: &[&str] = match service {
+            config::MusicService::SoundCloud => &[CLIENT_ID, CLIENT_SECRET],
+            config::MusicService::AppleMusic => &[DEVELOPER_TOKEN],
+            _ => return Ok(()),
+        };
+        if !values
+            .iter()
+            .any(|field| keys.contains(&field.key.as_str()) && !field.value.trim().is_empty())
+        {
+            return Ok(());
+        }
+        let guard = APP_LOCK.lock().await;
+        let mut app = AppCredentials::load(&self.db, id)
+            .await
+            .map_err(ApiError::internal)?;
+        let mut changed = false;
+        for key in keys {
+            if let Some(value) = api::value_of(values, key)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let stored = match *key {
+                    CLIENT_ID => &mut app.client_id,
+                    CLIENT_SECRET => &mut app.client_secret,
+                    _ => &mut app.developer_token,
+                };
+                if stored != value {
+                    *stored = value.to_string();
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            app.soundcloud_token = None;
+            app.save(&self.db, id).await.map_err(ApiError::internal)?;
+        }
+        drop(guard);
+        if changed {
+            self.clear_credentials(id).await?;
+        }
+        Ok(())
     }
 
     pub async fn delete_server(&self, id: &str) -> Result<(), ApiError> {
@@ -720,6 +788,13 @@ impl SourceService {
             .await
             .map_err(db_error)?
             .ok_or_else(|| ApiError::not_found("no such server"))?;
+        let _guard = server::browser_auth::APP_LOCK.lock().await;
+        let mut app = server::browser_auth::AppCredentials::load(&self.db, id)
+            .await
+            .map_err(ApiError::internal)?;
+        if app.soundcloud_token.take().is_some() {
+            app.save(&self.db, id).await.map_err(ApiError::internal)?;
+        }
         let had_credentials = server.access_token.is_some() || server.user_id.is_some();
         server.access_token = None;
         server.user_id = None;
@@ -755,10 +830,87 @@ impl SourceService {
         self.config.ensure_unlocked(&["server", "servers"])?;
         #[cfg(target_os = "android")]
         {
-            let _ = id;
-            Err(ApiError::unsupported(
-                "browser sign-in runs in the app on Android",
-            ))
+            let source = self
+                .db
+                .load_server(id)
+                .await
+                .map_err(db_error)?
+                .ok_or_else(|| ApiError::not_found("no such server"))?;
+            let browser = source.yt_browser;
+            let open = move |url: &str| {
+                if let Some(browser) = browser {
+                    let package = browser.android_package().ok_or_else(|| {
+                        format!("{} is not supported on Android; choose an Android browser or System default", browser.label())
+                    })?;
+                    player::systemint::open_browser(url, package)
+                } else {
+                    webbrowser::open(url)
+                        .map_err(|error| format!("could not open the default browser: {error}"))
+                }
+            };
+            let (secret, user_id) = match source.service {
+                config::MusicService::Spotify => {
+                    let auth = server::spotify::auth::launch_signin_with_browser(source.url, open)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    (
+                        server::spotify::auth::pack_token(&auth.access_token, &auth.refresh_token),
+                        auth.user_id,
+                    )
+                }
+                config::MusicService::SoundCloud => {
+                    use server::browser_auth::{APP_LOCK, AppCredentials};
+                    let app = AppCredentials::load(&self.db, id)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    let (token, user) = server::soundcloud::oauth::sign_in(&app, open)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    let _guard = APP_LOCK.lock().await;
+                    let mut current = AppCredentials::load(&self.db, id)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    if current.client_id != app.client_id
+                        || current.client_secret != app.client_secret
+                    {
+                        return Err(ApiError::invalid_input(
+                            "App credentials changed during sign-in. Please retry.",
+                        ));
+                    }
+                    current.soundcloud_token = Some(token);
+                    current
+                        .save(&self.db, id)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    (server::soundcloud::oauth::SESSION_MARKER.to_string(), user)
+                }
+                config::MusicService::AppleMusic => {
+                    let app = server::browser_auth::AppCredentials::load(&self.db, id)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    let secret = server::applemusic::musickit::sign_in(&app.developer_token, open)
+                        .await
+                        .map_err(ApiError::internal)?;
+                    (secret, "me".to_string())
+                }
+                config::MusicService::YtMusic => {
+                    return Err(ApiError::unsupported(
+                        "Registered Google OAuth cannot authenticate this YouTube Music backend. Use anonymous mode on Android.",
+                    ));
+                }
+                _ => {
+                    return Err(ApiError::unsupported(
+                        "This source signs in with a username and password",
+                    ));
+                }
+            };
+            self.provision_credentials(CredentialProvision {
+                server_id: id.to_string(),
+                secret,
+                user_id: Some(user_id),
+                browser: browser.map(|browser| browser.id().to_string()),
+            })
+            .await
         }
         #[cfg(not(target_os = "android"))]
         {

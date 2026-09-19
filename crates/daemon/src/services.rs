@@ -13,6 +13,8 @@ use config::{AppConfig, Browser, MusicService, SavedServer};
 /// The field keys a form and its answers agree on.
 pub const URL: &str = "url";
 pub const CLIENT_ID: &str = "client_id";
+pub const CLIENT_SECRET: &str = "client_secret";
+pub const DEVELOPER_TOKEN: &str = "developer_token";
 pub const AUTH_METHOD: &str = "auth_method";
 pub const BROWSER: &str = "browser";
 pub const STOREFRONT: &str = "storefront";
@@ -162,7 +164,12 @@ fn browser_field(value: Option<&str>, show_when: Option<FieldValue>) -> FieldSpe
         value: AUTOMATIC.to_string(),
         label: Text::key("sign_in_browser_auto"),
     }];
-    options.extend(options_for(Browser::ALL));
+    let browsers: Vec<_> = Browser::ALL
+        .iter()
+        .copied()
+        .filter(|browser| !cfg!(target_os = "android") || browser.android_package().is_some())
+        .collect();
+    options.extend(options_for(&browsers));
     FieldSpec {
         key: BROWSER.to_string(),
         label: Text::key("sign_in_browser"),
@@ -209,7 +216,7 @@ fn url_field(placeholder: &str) -> FieldSpec {
 
 /// The form that adds one of these.
 pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
-    match service {
+    let fields = match service {
         MusicService::YtMusic => vec![
             FieldSpec {
                 required: true,
@@ -315,13 +322,71 @@ pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
         MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom => {
             vec![url_field("server_url_placeholder")]
         }
+    };
+    #[cfg(target_os = "android")]
+    let fields = android_signin_fields(service, fields);
+    fields
+}
+
+#[cfg(any(target_os = "android", test))]
+fn android_signin_fields(service: MusicService, mut fields: Vec<FieldSpec>) -> Vec<FieldSpec> {
+    match service {
+        MusicService::SoundCloud => {
+            fields.retain(|field| field.key != "note");
+            fields.extend([
+                text_field(CLIENT_ID, "registered_app_client_id", FieldKind::Text),
+                text_field(
+                    CLIENT_SECRET,
+                    "registered_app_client_secret",
+                    FieldKind::Secret,
+                ),
+                FieldSpec {
+                    key: "registered_app_help".into(),
+                    help: Some(Text::key("soundcloud_oauth_help")),
+                    ..note_field()
+                },
+            ]);
+        }
+        MusicService::AppleMusic => {
+            fields.retain(|field| field.key != AUTH_METHOD && field.key != TOKEN);
+            for field in &mut fields {
+                if field.key == BROWSER {
+                    field.show_when = None;
+                }
+            }
+            fields.extend([
+                text_field(
+                    DEVELOPER_TOKEN,
+                    "apple_music_developer_token",
+                    FieldKind::Secret,
+                ),
+                FieldSpec {
+                    key: "registered_app_help".into(),
+                    help: Some(Text::key("apple_music_musickit_help")),
+                    ..note_field()
+                },
+            ]);
+        }
+        MusicService::YtMusic => {
+            if let Some(index) = fields.iter().position(|field| field.key == BROWSER) {
+                let browser = fields.remove(index);
+                fields.push(FieldSpec {
+                    key: "android_external_signin".to_string(),
+                    help: Some(Text::key("android_external_signin_unavailable")),
+                    show_when: browser.show_when,
+                    ..note_field()
+                });
+            }
+        }
+        _ => {}
     }
+    fields
 }
 
 /// The options a configured source has, with the values it currently holds.
 pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
     let browser = server.browser.map(|browser| browser.id().to_string());
-    match server.service {
+    let fields = match server.service {
         MusicService::YtMusic | MusicService::SoundCloud if !server.anonymous => {
             vec![browser_field(browser.as_deref(), None)]
         }
@@ -360,6 +425,8 @@ pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
             }];
             hosts.extend(options_for(Browser::CHROMIUM_FAMILY));
             vec![
+                #[cfg(target_os = "android")]
+                browser_field(browser.as_deref(), None),
                 FieldSpec {
                     value: Some(
                         config
@@ -390,7 +457,10 @@ pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
             ]
         }
         _ => Vec::new(),
-    }
+    };
+    #[cfg(target_os = "android")]
+    let fields = android_signin_fields(server.service, fields);
+    fields
 }
 
 /// The line under a source's name.
@@ -461,6 +531,41 @@ pub fn check(service: MusicService, draft: &ServerDraft) -> (SignInKind, Vec<Pro
             if !value(URL).starts_with("http") {
                 problems.push(Problem::on(URL, Text::key("invalid_server_url")));
             }
+        }
+    }
+    #[cfg(target_os = "android")]
+    {
+        let secret = |key| value_of(&draft.secrets, key).unwrap_or_default().trim();
+        match service {
+            MusicService::SoundCloud => {
+                if value(CLIENT_ID).is_empty() {
+                    problems.push(Problem::on(
+                        CLIENT_ID,
+                        Text::key("registered_app_credentials_required"),
+                    ));
+                }
+                if draft.id.is_none() && secret(CLIENT_SECRET).is_empty() {
+                    problems.push(Problem::on(
+                        CLIENT_SECRET,
+                        Text::key("registered_app_credentials_required"),
+                    ));
+                }
+            }
+            MusicService::AppleMusic
+                if draft.id.is_none() && secret(DEVELOPER_TOKEN).is_empty() =>
+            {
+                problems.push(Problem::on(
+                    DEVELOPER_TOKEN,
+                    Text::key("registered_app_credentials_required"),
+                ));
+            }
+            MusicService::YtMusic if !anonymous_draft(draft) => {
+                problems.push(Problem::on(
+                    AUTH_METHOD,
+                    Text::key("android_external_signin_unavailable"),
+                ));
+            }
+            _ => {}
         }
     }
     (draft_sign_in(service, anonymous_draft(draft)), problems)
@@ -550,5 +655,28 @@ pub fn problem_text(problem: &Problem) -> String {
     match &problem.label {
         Text::Key(key) => key.clone(),
         Text::Literal(text) => text.clone(),
+    }
+}
+
+#[cfg(test)]
+mod android_auth_tests {
+    use super::*;
+
+    #[test]
+    fn registered_providers_keep_browser_choice_and_write_only_app_secrets() {
+        for (service, secret) in [
+            (MusicService::SoundCloud, CLIENT_SECRET),
+            (MusicService::AppleMusic, DEVELOPER_TOKEN),
+        ] {
+            let fields = android_signin_fields(service, vec![browser_field(None, None)]);
+            assert!(
+                fields
+                    .iter()
+                    .any(|field| field.key == BROWSER && field.show_when.is_none())
+            );
+            assert!(fields.iter().any(|field| field.key == secret
+                && matches!(field.kind, FieldKind::Secret)
+                && field.value.is_none()));
+        }
     }
 }

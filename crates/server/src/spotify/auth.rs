@@ -46,6 +46,16 @@ pub fn unpack_token(packed: &str) -> (String, String) {
 /// Open the consent screen, catch the loopback redirect, and exchange the code
 /// for tokens. `client_id` is the user's own Spotify app id.
 pub async fn launch_signin_and_extract(client_id: String) -> Result<SpotifyAuth, String> {
+    launch_signin_with_browser(client_id, |url| {
+        webbrowser::open(url).map_err(|error| format!("couldn't open the browser: {error}"))
+    })
+    .await
+}
+
+pub async fn launch_signin_with_browser(
+    client_id: String,
+    open_browser: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<SpotifyAuth, String> {
     let client_id = client_id.trim().to_string();
     if client_id.is_empty() {
         return Err("Enter your Spotify app Client ID first".to_string());
@@ -66,7 +76,7 @@ pub async fn launch_signin_and_extract(client_id: String) -> Result<SpotifyAuth,
     let listener = std::net::TcpListener::bind(("127.0.0.1", REDIRECT_PORT)).map_err(|e| {
         format!("couldn't bind {REDIRECT_URI} (is it registered / is the port free?): {e}")
     })?;
-    webbrowser::open(&auth_url).map_err(|e| format!("couldn't open the browser: {e}"))?;
+    open_browser(&auth_url)?;
 
     let expected_state = state.clone();
     let code = tokio::task::spawn_blocking(move || accept_code(listener, &expected_state))
@@ -312,6 +322,46 @@ fn urldecode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn empty_client_id_does_not_open_browser() {
+        let result = launch_signin_with_browser("  ".to_string(), |_| {
+            panic!("a browser must not open without a client id")
+        })
+        .await;
+        assert!(matches!(result, Err(error) if error.contains("Client ID")));
+    }
+
+    #[tokio::test]
+    async fn selected_browser_failure_is_reported_and_releases_callback_port() {
+        let mut opened = false;
+        let result = launch_signin_with_browser("test-client".to_string(), |url| {
+            opened = true;
+            let url = reqwest::Url::parse(url).expect("authorization URL");
+            assert_eq!(url.host_str(), Some("accounts.spotify.com"));
+            let query: std::collections::HashMap<_, _> = url.query_pairs().collect();
+            assert_eq!(
+                query.get("client_id").map(|value| value.as_ref()),
+                Some("test-client")
+            );
+            assert_eq!(
+                query.get("redirect_uri").map(|value| value.as_ref()),
+                Some(REDIRECT_URI)
+            );
+            assert_eq!(
+                query
+                    .get("code_challenge_method")
+                    .map(|value| value.as_ref()),
+                Some("S256")
+            );
+            assert!(!query["state"].is_empty());
+            Err("selected browser unavailable".to_string())
+        })
+        .await;
+        assert!(opened);
+        assert!(matches!(result, Err(error) if error == "selected browser unavailable"));
+        assert!(std::net::TcpListener::bind(("127.0.0.1", REDIRECT_PORT)).is_ok());
+    }
 
     #[test]
     fn pack_unpack_roundtrip() {
