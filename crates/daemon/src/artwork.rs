@@ -186,6 +186,30 @@ fn hash_name(input: &str) -> String {
     name
 }
 
+/// Applies the shared resize policy to a fetched remote cover, the way
+/// `local_payload` does to one off disk. A cover that will not decode is
+/// served as it arrived, which is what the local path does too.
+async fn resize_remote(raw: Vec<u8>, hq: bool) -> (Vec<u8>, &'static str) {
+    if hq && raw.len() <= HQ_REENCODE_THRESHOLD {
+        let sniffed = sniff_content_type(&raw);
+        return (raw, sniffed);
+    }
+    let max = if hq { HQ_MAX } else { THUMB_MAX };
+    let quality = if hq { HQ_QUALITY } else { THUMB_QUALITY };
+    let for_shrink = raw.clone();
+    match tokio::task::spawn_blocking(move || shrink_jpeg(&for_shrink, max, quality))
+        .await
+        .ok()
+        .flatten()
+    {
+        Some(shrunk) => (shrunk, "image/jpeg"),
+        None => {
+            let sniffed = sniff_content_type(&raw);
+            (raw, sniffed)
+        }
+    }
+}
+
 impl ArtworkService {
     pub fn new(db: db::Db, session: SessionHandle, cache_dir: PathBuf) -> Arc<Self> {
         Arc::new(Self {
@@ -224,7 +248,7 @@ impl ArtworkService {
         let missing = || ApiError::not_found("no artwork for this entity");
         match server::cover::locate(&config, cover, width).ok_or_else(missing)? {
             Located::File(path) => self.local_payload(&path.to_string_lossy(), hq).await,
-            Located::Url(url) => self.proxied_payload(&url).await,
+            Located::Url(url) => self.proxied_payload(&url, hq).await,
         }
     }
 
@@ -389,8 +413,15 @@ impl ArtworkService {
 
     /// Remote covers are fetched daemon-side (the URL may embed credentials)
     /// and cached on disk keyed by the URL, so a client never sees the origin.
-    async fn proxied_payload(&self, url: &str) -> Result<ArtworkPayload, ApiError> {
-        let cache_path = self.cache_dir.join(format!("remote_{}", hash_name(url)));
+    ///
+    /// The width handed to `locate` is only a hint a service may ignore, so the
+    /// shared resize policy is applied here too rather than trusting the origin.
+    async fn proxied_payload(&self, url: &str, hq: bool) -> Result<ArtworkPayload, ApiError> {
+        let cache_path = self.cache_dir.join(format!(
+            "remote_{}_{}",
+            if hq { "hq" } else { "thumb" },
+            hash_name(url)
+        ));
         if let Ok(bytes) = tokio::fs::read(&cache_path).await {
             let content_type = sniff_content_type(&bytes);
             return Ok(self.payload(bytes, content_type));
@@ -423,11 +454,11 @@ impl ArtworkService {
             }
             bytes.extend_from_slice(&chunk);
         }
+        let (bytes, content_type) = resize_remote(bytes, hq).await;
         if let Some(parent) = cache_path.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
         }
         let _ = tokio::fs::write(&cache_path, &bytes).await;
-        let content_type = sniff_content_type(&bytes);
         Ok(self.payload(bytes, content_type))
     }
 
@@ -442,6 +473,44 @@ impl ArtworkService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn jpeg_of(edge: u32) -> Vec<u8> {
+        let image = image::DynamicImage::new_rgb8(edge, edge);
+        let mut bytes = Vec::new();
+        image
+            .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+                &mut bytes, 90,
+            ))
+            .expect("the encoder writes to a vec");
+        bytes
+    }
+
+    fn edge_of(bytes: &[u8]) -> u32 {
+        image::load_from_memory(bytes)
+            .expect("a decodable cover")
+            .width()
+    }
+
+    #[tokio::test]
+    async fn a_remote_thumbnail_is_capped_like_a_local_one() {
+        let (bytes, content_type) = resize_remote(jpeg_of(THUMB_MAX * 3), false).await;
+        assert_eq!(edge_of(&bytes), THUMB_MAX, "a proxied cover is resized too");
+        assert_eq!(content_type, "image/jpeg");
+    }
+
+    #[tokio::test]
+    async fn a_remote_cover_already_small_is_left_alone() {
+        let small = THUMB_MAX / 4;
+        let (bytes, _) = resize_remote(jpeg_of(small), false).await;
+        assert_eq!(edge_of(&bytes), small, "shrinking only ever goes down");
+    }
+
+    #[tokio::test]
+    async fn a_remote_cover_that_will_not_decode_is_served_as_it_arrived() {
+        let raw = b"\x89PNG\r\n\x1a\nnot an image".to_vec();
+        let (bytes, _) = resize_remote(raw.clone(), false).await;
+        assert_eq!(bytes, raw, "an undecodable cover still reaches the client");
+    }
 
     fn track_with_cover(cover: Option<&str>) -> reader::Track {
         reader::Track {
