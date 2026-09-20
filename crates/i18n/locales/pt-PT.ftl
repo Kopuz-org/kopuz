@@ -833,3 +833,7 @@ library_empty_not_synced_detail = Pull the library from the server to fill it.
 interface_library = Library
 playlist_empty = This playlist is empty
 playlist_empty_detail = Add tracks to it from anywhere in the library.
+
+home_continue = Continue
+home_queue_left = { $count } left
+recently_played = Recently played
