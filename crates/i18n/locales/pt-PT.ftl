@@ -670,3 +670,17 @@ device_change_behavior_description = What playback does when the audio output de
 sample_rate_mode_description = Resample to the system rate, or follow each track's own.
 equalizer_description = A gain curve applied to everything that plays.
 enable_tracing_description = Write a performance trace for diagnosing slowness.
+
+interface_nav = Navigation
+interface_nav_position = Navigation bar
+interface_nav_position_description = Where the destinations sit.
+interface_nav_position_top = Across the top
+interface_nav_position_left = Down the left
+interface_nav_start = Opens on
+interface_nav_start_description = The destination the app shows when it starts.
+interface_panel = Playlists panel
+interface_panel_shown = Show the panel
+interface_panel_shown_description = A column of your playlists and folders, left of the content.
+interface_panel_width = Panel width
+interface_panel_width_description = How wide the panel opens; dragging its edge also sets this.
+toggle_playlists_panel = Playlists panel
