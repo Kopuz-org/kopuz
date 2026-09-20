@@ -786,3 +786,12 @@ interface_sheet_backdrop_description = What is behind the sheet.
 interface_sheet_backdrop_artwork = The cover
 interface_sheet_backdrop_palette = Colour from the cover
 interface_sheet_backdrop_solid = Nothing
+
+discover_search_hint = Search everything
+discover_clear_search = Clear search
+discover_results_for = Results for "{ $query }"
+discover_no_results_hint = Try fewer words, or switch source and look again.
+discover_show_less = Show less
+discover_genre_count = { $count } genres
+discover_read_failed = Couldn't load your library: { $error }
+palette_all_results = All results for "{ $query }" in Discover
