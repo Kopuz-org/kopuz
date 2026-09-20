@@ -794,6 +794,10 @@ message SourceInfo {
   SignInKind sign_in = 15;
   // Its options, with the values it currently has.
   repeated FieldSpec settings = 16;
+  // What signing in AGAIN would take, whatever it holds now. `sign_in` goes
+  // None once a source is authenticated, so it cannot answer for a source
+  // whose stored credentials have gone stale.
+  SignInKind reauth = 17;
 }
 
 message GetSourcesRequest {}

@@ -193,6 +193,8 @@ impl SourceService {
                 // why this is not simply "has a token".
                 info.authenticated = server.access_token.is_some() || server.yt_anonymous;
                 info.sign_in = crate::services::sign_in(&view, info.authenticated);
+                // What signing in again takes, for credentials that went stale.
+                info.reauth = crate::services::sign_in(&view, false);
                 info.detail = crate::services::detail(&view);
                 info.anonymous = server.yt_anonymous;
                 info.settings = crate::services::settings(&view, &current);

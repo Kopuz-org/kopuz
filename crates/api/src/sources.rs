@@ -132,6 +132,10 @@ pub struct SourceInfo {
     pub authenticated: bool,
     /// What signing it in would take, where it is not signed in already.
     pub sign_in: SignInKind,
+    /// What signing in *again* would take, whatever it holds now. Stored
+    /// credentials go stale, and `sign_in` reads `None` once a source has any,
+    /// so it cannot answer for a source that needs re-authenticating.
+    pub reauth: SignInKind,
     pub capabilities: SourceCapabilities,
     /// The line under its name: an address, or whatever else identifies it.
     pub detail: Option<String>,

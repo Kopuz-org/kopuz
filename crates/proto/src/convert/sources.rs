@@ -174,6 +174,7 @@ pub fn source_info_to_proto(value: &api::SourceInfo) -> SourceInfo {
         active: value.active,
         authenticated: value.authenticated,
         sign_in: sign_in_kind_to_proto(value.sign_in) as i32,
+        reauth: sign_in_kind_to_proto(value.reauth) as i32,
         capabilities: Some(capabilities_to_proto(&value.capabilities)),
         detail: value.detail.clone(),
         anonymous: value.anonymous,
@@ -191,6 +192,7 @@ pub fn source_info_from_proto(value: &SourceInfo) -> api::SourceInfo {
         active: value.active,
         authenticated: value.authenticated,
         sign_in: sign_in_kind_from_proto(value.sign_in),
+        reauth: sign_in_kind_from_proto(value.reauth),
         capabilities: capabilities_from_proto(value.capabilities.as_ref()),
         detail: value.detail.clone(),
         anonymous: value.anonymous,
@@ -325,6 +327,9 @@ mod tests {
             active: true,
             authenticated: true,
             sign_in: api::SignInKind::Password,
+            // Signed in already, so `sign_in` would be None on the wire while a
+            // re-sign-in still takes a password: the two are not the same answer.
+            reauth: api::SignInKind::Password,
             capabilities: api::SourceCapabilities {
                 edit_tags: false,
                 delete_from_disk: false,
