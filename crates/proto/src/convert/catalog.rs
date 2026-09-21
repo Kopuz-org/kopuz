@@ -84,6 +84,7 @@ pub fn catalog_detail_request_to_proto(value: &api::CatalogDetailRequest) -> Cat
         kind: catalog_item_kind_to_proto(value.kind) as i32,
         id: value.id.clone(),
         continuation: value.continuation.clone(),
+        name: value.name.clone(),
     }
 }
 
@@ -94,6 +95,7 @@ pub fn catalog_detail_request_from_proto(
         kind: catalog_item_kind_from_proto(value.kind),
         id: value.id.clone(),
         continuation: value.continuation.clone(),
+        name: value.name.clone(),
     }
 }
 

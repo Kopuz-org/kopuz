@@ -404,6 +404,7 @@ fn AlbumDetail(
                     kind: api::CatalogItemKind::Album,
                     id,
                     continuation: None,
+                    name: None,
                 })
                 .await
                 .ok()
@@ -513,6 +514,7 @@ fn AlbumDetail(
                     kind: api::CatalogItemKind::Album,
                     id: album.id,
                     continuation: None,
+                    name: None,
                 })
                 .await
                 .ok()

@@ -278,14 +278,17 @@ impl CatalogService {
                 })
             }
             CatalogItemKind::Artist => {
-                let channel_id = if request.id.starts_with("UC") {
-                    request.id
-                } else {
-                    source
-                        .resolve_artist_channel_id(request.id.trim())
+                // The caller says which it holds. This read a `UC` prefix off the id to guess,
+                // which took any artist named like a channel for one and, on a source whose ids
+                // look nothing like YouTube's, took every id for a name.
+                let channel_id = match request.reference() {
+                    None => return Err(ApiError::not_found("catalog artist not named")),
+                    Some(api::Reference::Id(id)) => id.to_string(),
+                    Some(api::Reference::Name(name)) => source
+                        .resolve_artist_channel_id(name)
                         .await
                         .map_err(source_error)?
-                        .ok_or_else(|| ApiError::not_found("catalog artist not found"))?
+                        .ok_or_else(|| ApiError::not_found("catalog artist not found"))?,
                 };
                 let artist = source
                     .fetch_artist(&channel_id)

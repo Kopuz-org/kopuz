@@ -1011,11 +1011,7 @@ async fn catalog_and_radio_report_absence_identically() {
         pair.wire.catalog(None).await.err().map(|e| e.code),
     );
 
-    let request = api::CatalogDetailRequest {
-        kind: api::CatalogItemKind::Album,
-        id: "MPRE1".into(),
-        continuation: None,
-    };
+    let request = api::CatalogDetailRequest::by_id(api::CatalogItemKind::Album, "MPRE1");
     assert_eq!(
         pair.local
             .catalog_detail(request.clone())

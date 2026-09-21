@@ -1001,8 +1001,13 @@ message CatalogPage {
 
 message CatalogDetailRequest {
   CatalogItemKind kind = 1;
+  // An id the source issued. Empty when the caller only knows a name.
   string id = 2;
   optional string continuation = 3;
+  // What to look the entity up by when no id is held: the daemon asks the
+  // source to resolve it. Said outright rather than posted through `id`,
+  // which left the two telling apart to a guess at the string's shape.
+  optional string name = 4;
 }
 
 message CatalogDetail {
