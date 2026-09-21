@@ -856,3 +856,5 @@ downloader_history = URL downloads
 
 interface_skin = Skin
 interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
+
+home_plays = { $count } plays
