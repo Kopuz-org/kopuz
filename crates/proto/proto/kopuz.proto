@@ -1602,8 +1602,12 @@ enum ArtistSortField {
 
 message DaemonStatus {
   string version = 1;
-  reserved 2; // was api_version; the frontend ships with the daemon
+  reserved 2; // was api_version; the frontend shipped with the daemon
   uint64 uptime_secs = 3;
+  // Bumped whenever this file changes in a way a mismatched peer would misread.
+  // A frontend built from its own checkout is a supported setup again, so it
+  // compares this on connect rather than silently reading the wrong field.
+  uint32 proto_revision = 4;
 }
 
 // Which entity a cover belongs to. Carried on library rows so a client can
