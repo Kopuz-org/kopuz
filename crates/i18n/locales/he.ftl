@@ -859,3 +859,8 @@ interface_skin = Skin
 interface_skin_description = The shape of the interface: how round things are, how tall a row sits.
 
 home_plays = { $count } plays
+
+interface_ambient = Ambient light
+interface_ambient_description = Let the current cover cast its colour across the window.
+interface_ambient_glow = Glow
+interface_ambient_full = Whole window
