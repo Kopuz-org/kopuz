@@ -719,6 +719,15 @@ impl api::ConfigApi for GrpcApi {
             .map_err(wire_error)?;
         Ok(())
     }
+
+    async fn daemon_status(&self) -> Result<api::DaemonStatus, ApiError> {
+        let status = self
+            .client()
+            .get_status(Request::new(proto::GetStatusRequest {}))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::daemon_status_from_proto(status.get_ref()))
+    }
 }
 
 #[async_trait::async_trait]

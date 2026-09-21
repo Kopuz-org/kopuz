@@ -5,6 +5,8 @@ use super::*;
 /// In-process implementation of [`api::KopuzApi`] over a running session.
 pub struct LocalApi {
     pub(super) session: SessionHandle,
+    /// When this surface came up, which is as close to the daemon's start as it has.
+    pub(super) started: std::time::Instant,
     pub(super) library: Option<Arc<crate::library::LibraryService>>,
     pub(super) config: Option<Arc<crate::config_service::ConfigService>>,
     pub(super) jobs: Option<Arc<crate::jobs::JobRunner>>,
@@ -25,6 +27,7 @@ impl LocalApi {
     pub fn new(session: SessionHandle) -> Self {
         Self {
             session,
+            started: std::time::Instant::now(),
             library: None,
             config: None,
             jobs: None,
@@ -586,6 +589,14 @@ impl api::ConfigApi for LocalApi {
         self.session
             .set_config(preview, vec!["equalizer".to_string()]);
         Ok(())
+    }
+
+    async fn daemon_status(&self) -> Result<api::DaemonStatus, ApiError> {
+        Ok(api::DaemonStatus {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            uptime_secs: self.started.elapsed().as_secs(),
+            proto_revision: api::WIRE_REVISION,
+        })
     }
 }
 

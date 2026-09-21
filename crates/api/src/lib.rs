@@ -64,6 +64,24 @@ pub struct ConfigView {
     pub locked_keys: Vec<String>,
 }
 
+/// What this build speaks. Bump it in the same commit as any change to the
+/// wire a mismatched peer would misread: a renumbered field, a changed type, a
+/// retired message. Adding a field nothing older reads needs no bump.
+///
+/// Renumbering `dont_recommend` from 16 to 17 is what this exists to catch: a
+/// frontend built from another checkout read that flag as `browser_playback`,
+/// dropped the button it gates, and nothing anywhere said why.
+pub const WIRE_REVISION: u32 = 1;
+
+/// What a daemon says it is, for a frontend that was not built beside it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DaemonStatus {
+    pub version: String,
+    pub uptime_secs: u64,
+    /// The wire contract it speaks; see `proto::PROTO_REVISION`.
+    pub proto_revision: u32,
+}
+
 /// Returned by every command; `rev` names the state revision that includes
 /// the command's effect, so a client can wait for the event stream to catch
 /// up before trusting its local mirror.
@@ -476,6 +494,10 @@ pub trait ConfigApi: Send + Sync {
     /// live; nothing is written, so cancelling a preview is doing nothing.
     async fn preview_equalizer(&self, equalizer: config::EqualizerSettings)
     -> Result<(), ApiError>;
+
+    /// What this daemon is, including the wire contract it speaks. A frontend
+    /// built from its own checkout asks on connect and says so if they differ.
+    async fn daemon_status(&self) -> Result<DaemonStatus, ApiError>;
 
     // Switching sources lives on `SourceApi`, which is where sources are.
 }
