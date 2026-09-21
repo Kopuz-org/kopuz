@@ -851,3 +851,7 @@ shortcuts_conflict = { $key } is already { $command }.
 theme_unsaved_title = Unsaved theme changes
 theme_unsaved_body = Switching themes now throws away the colours you changed.
 discard_changes = Discard
+
+downloader_add_url = Add a URL…
+downloader_url_title = Download from a URL
+downloader_history = URL downloads
