@@ -840,3 +840,14 @@ playlist_empty_detail = Add tracks to it from anywhere in the library.
 home_continue = Continue
 home_queue_left = { $count } left
 recently_played = Recently played
+
+shortcuts_playback = Playback
+shortcuts_queue = Queue
+shortcuts_app = App
+shortcuts_editor_hint = Choose a shortcut to change it, then press the keys you want. Escape cancels.
+shortcuts_recording = Press a key…
+shortcuts_unbound = Not bound
+shortcuts_conflict = { $key } is already { $command }.
+theme_unsaved_title = Unsaved theme changes
+theme_unsaved_body = Switching themes now throws away the colours you changed.
+discard_changes = Discard
