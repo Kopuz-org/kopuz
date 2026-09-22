@@ -97,8 +97,11 @@ pub fn BottombarNormal(
     }
 
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+    // The snapshot lags when a new track isn't in the queue mirror yet; only
+    // trust its credit while it is the track whose artist is on screen.
     let artist_credit = current_track_snapshot
         .as_ref()
+        .filter(|track| track.artist == *current_song_artist.read())
         .and_then(|track| track.primary_credit())
         .map(|credit| (credit.name.clone(), credit.id.clone()));
     let cover = ctrl
