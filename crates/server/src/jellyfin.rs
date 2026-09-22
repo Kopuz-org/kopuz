@@ -227,7 +227,7 @@ impl JellyfinClient {
         Ok(self
             .http_client
             .request(method, self.build_url(path))
-            .header("X-Emby-Authorization", auth_header))
+            .header("Authorization", auth_header))
     }
 
     async fn ensure_success(
@@ -301,7 +301,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .json(&body)
             .send()
             .await
@@ -416,7 +416,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .json(&body)
             .send()
             .await
@@ -451,7 +451,7 @@ impl JellyfinClient {
             .http_client
             .post(&url)
             .query(&[("Ids", item_id), ("UserId", user_id)])
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -495,7 +495,7 @@ impl JellyfinClient {
             .http_client
             .delete(&url)
             .query(&[("EntryIds", entry_id)])
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -535,7 +535,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .header("Content-Length", "0")
             .send()
             .await
@@ -622,7 +622,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .json(&body)
             .send()
             .await
@@ -666,7 +666,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .json(&body)
             .send()
             .await
@@ -707,7 +707,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .json(&body)
             .send()
             .await
@@ -758,7 +758,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -790,7 +790,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .delete(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .send()
             .await
             .map_err(|e| e.to_string())?;
