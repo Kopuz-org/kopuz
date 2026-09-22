@@ -431,13 +431,13 @@ fn AlbumDetail(
                 });
                 return rsx! {
                     div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
-                        YtAlbumDetail {
+                        RemoteAlbumDetail {
                             config,
                             title: remote.title,
                             artist: remote.subtitle.unwrap_or_default(),
                             artist_id: remote.artist_id,
                             year: remote.year,
-                            browse_id: Some(remote.id),
+                            album_id: Some(remote.id),
                             local_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
                             tracks,
                             on_close,
@@ -609,16 +609,16 @@ fn AlbumDetail(
     // remote album resolves the full listing. Local / other sources keep the
     // standard TrackListView.
     let cover_url_remote = cover_url.clone();
-    let yt_title = album.title.clone();
-    let yt_artist = album.artist.clone();
+    let remote_title = album.title.clone();
+    let remote_artist = album.artist.clone();
     // Prefer the remote album's year once resolved; fall back to the local row.
-    let yt_remote = remote_album_res.read().clone().flatten();
-    let yt_year = yt_remote
+    let remote_album = remote_album_res.read().clone().flatten();
+    let remote_year = remote_album
         .as_ref()
         .and_then(|a| a.year.clone())
         .or_else(|| (album.year > 0).then(|| album.year.to_string()));
-    let yt_browse_id = yt_remote.as_ref().map(|a| a.id.clone());
-    let remote_artist_id = yt_remote
+    let remote_album_id = remote_album.as_ref().map(|a| a.id.clone());
+    let remote_artist_id = remote_album
         .as_ref()
         .and_then(|a| a.artist_id.clone())
         .or_else(|| album.artist_id.clone());
@@ -626,13 +626,13 @@ fn AlbumDetail(
     rsx! {
         div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
             if cap.albums == api::AlbumPresentation::Remote {
-                YtAlbumDetail {
+                RemoteAlbumDetail {
                     config,
-                    title: yt_title,
-                    artist: yt_artist,
+                    title: remote_title,
+                    artist: remote_artist,
                     artist_id: remote_artist_id,
-                    year: yt_year,
-                    browse_id: yt_browse_id,
+                    year: remote_year,
+                    album_id: remote_album_id,
                     local_cover: cover_url_remote,
                     tracks: tracks(),
                     on_close,
@@ -726,19 +726,20 @@ fn AlbumDetail(
     }
 }
 
-/// Catalog-style album page: a left meta column (cover, artist link, title,
-/// "Album", song count · duration · year, play / shuffle / download) beside the
-/// full track list. Shown only for a catalog source once the album
-/// resolved; local/other sources use [`TrackListView`]. Rows reuse [`TrackRow`]
-/// so play / queue / menu / download behave exactly as everywhere else.
+/// The album page a source that presents albums itself gets: a left meta column
+/// (cover, artist link, title, song count · duration · year, and the actions the
+/// source supports) beside the full track list. Chosen by
+/// [`api::AlbumPresentation`]; a source whose albums are a view of the library
+/// uses [`TrackListView`]. Rows reuse [`TrackRow`], so play / queue / menu /
+/// download behave exactly as everywhere else.
 #[component]
-fn YtAlbumDetail(
+fn RemoteAlbumDetail(
     config: Signal<AppConfig>,
     title: String,
     artist: String,
     artist_id: Option<String>,
     year: Option<String>,
-    browse_id: Option<String>,
+    album_id: Option<String>,
     local_cover: Option<utils::CoverUrl>,
     tracks: Vec<api::TrackInfo>,
     on_close: EventHandler<()>,
@@ -746,6 +747,7 @@ fn YtAlbumDetail(
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let nav_ctrl = use_context::<components::NavigationController>();
     let downloads = hooks::downloads::use_downloads();
+    let cap = hooks::sources::use_capabilities();
 
     let mut active_menu = use_signal(|| None::<String>);
     let mut show_playlist_modal = use_signal(|| false);
@@ -785,7 +787,7 @@ fn YtAlbumDetail(
     // The daemon knows which sources have web pages and how they spell them;
     // an id and a key are all that leave here.
     let share_api = hooks::use_api();
-    let share_id = browse_id.clone();
+    let share_id = album_id.clone();
     let share_key = tracks.first().map(|track| track.key.clone());
     let share_url = use_resource(move || {
         let api = share_api.clone();
@@ -848,10 +850,11 @@ fn YtAlbumDetail(
                         }
                     }
                     div { class: "flex items-center gap-3 mt-1",
-                        // Download all / remove downloads.
+                        // Download all / remove downloads, for a source that keeps files.
+                        if cap().downloads {
                         button {
                             class: "w-11 h-11 rounded-full border border-white/15 flex items-center justify-center text-slate-300 hover:text-white hover:border-white/30 transition-colors disabled:opacity-40",
-                            title: if all_downloaded { "Remove download".to_string() } else { "Download".to_string() },
+                            title: if all_downloaded { i18n::t("remove_download").to_string() } else { i18n::t("download_offline").to_string() },
                             disabled: downloads.read().running,
                             onclick: move |_| {
                                 if all_downloaded {
@@ -870,12 +873,15 @@ fn YtAlbumDetail(
                             },
                             i { class: if all_downloaded { "fa-solid fa-trash" } else { "fa-solid fa-download" } }
                         }
-                        // Go to artist.
+                        }
+                        // Go to artist, when the album names one to go to.
+                        if !artist_for_nav_btn.is_empty() {
                         button {
                             class: "w-11 h-11 rounded-full border border-white/15 flex items-center justify-center text-slate-300 hover:text-white hover:border-white/30 transition-colors",
-                            title: "Go to artist".to_string(),
+                            title: i18n::t("go_to_artist").to_string(),
                             onclick: move |_| nav_ctrl.open_artist(artist_for_nav_btn.clone(), artist_id_for_btn.clone()),
                             i { class: "fa-solid fa-user" }
+                        }
                         }
                         // Play (primary).
                         button {
@@ -901,7 +907,7 @@ fn YtAlbumDetail(
                         if let Some(url) = share_url {
                             button {
                                 class: "w-11 h-11 rounded-full border border-white/15 flex items-center justify-center text-slate-300 hover:text-white hover:border-white/30 transition-colors",
-                                title: "Share".to_string(),
+                                title: i18n::t("share").to_string(),
                                 onclick: move |_| copy_album_link(url.clone()),
                                 i { class: "fa-solid fa-arrow-up-from-bracket" }
                             }
