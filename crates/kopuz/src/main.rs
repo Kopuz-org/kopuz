@@ -665,6 +665,9 @@ fn App() -> Element {
     let mut selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_title = use_signal(|| None::<String>);
+    // Set with the id, by whichever click had it: the viewer serves more than
+    // one kind and must not read the id to tell which.
+    let mut discover_selected_playlist_kind = use_signal(|| api::CatalogItemKind::Playlist);
     // The source's own id for `selected_artist_name`, where the click carried
     // one. None leaves the page to resolve the name at render time.
     let mut selected_artist_id = use_signal(|| None::<String>);
@@ -1791,7 +1794,8 @@ fn App() -> Element {
                                     selected_album_id.set(id);
                                     current_route.set(Route::Album);
                                 },
-                                on_select_playlist: move |(id, title): (String, String)| {
+                                on_select_playlist: move |(kind, id, title): (api::CatalogItemKind, String, String)| {
+                                    discover_selected_playlist_kind.set(kind);
                                     discover_selected_playlist_id.set(Some(id));
                                     discover_selected_playlist_title.set(Some(title));
                                     current_route.set(Route::DiscoverPlaylist);
@@ -1807,6 +1811,7 @@ fn App() -> Element {
                             pages::server::discover::DiscoverPlaylistDetail {
                                 selected_playlist_id: discover_selected_playlist_id,
                                 selected_playlist_title: discover_selected_playlist_title,
+                                selected_playlist_kind: discover_selected_playlist_kind,
                                 on_back: move |_| nav_ctrl.go_back(),
                             }
                         },
@@ -1876,7 +1881,8 @@ fn App() -> Element {
                                             selected_album_id.set(id);
                                             current_route.set(Route::Album);
                                         },
-                                        on_select_playlist: move |(id, title): (String, String)| {
+                                        on_select_playlist: move |(kind, id, title): (api::CatalogItemKind, String, String)| {
+                                            discover_selected_playlist_kind.set(kind);
                                             discover_selected_playlist_id.set(Some(id));
                                             discover_selected_playlist_title.set(Some(title));
                                             current_route.set(Route::DiscoverPlaylist);
