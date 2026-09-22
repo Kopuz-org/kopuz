@@ -348,7 +348,13 @@ impl PlaylistService {
     ) -> Result<api::JobRef, ApiError> {
         let service = self.clone();
         runner.start(api::JobKind::PlaylistSync, move |ctx| async move {
-            service.sync(&ctx).await
+            let source = service.config().active_source;
+            let result = service.sync(&ctx).await;
+            if result.is_ok() && !ctx.cancelled() {
+                crate::auto_sync::mark_synced(&service.db, api::JobKind::PlaylistSync, &source)
+                    .await;
+            }
+            result
         })
     }
 
