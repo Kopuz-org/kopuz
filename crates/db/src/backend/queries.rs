@@ -362,25 +362,40 @@ pub async fn artist_ids(
     pool: &SqlitePool,
     source: &Source,
 ) -> Result<std::collections::HashMap<String, String>, DbError> {
+    // Keyed in Rust, not with SQLite's `LOWER`: that folds ASCII only, so "ЛСП"
+    // would sit under a key no lookup through `normalize_artist_key` can reach.
     let rows: Vec<(String, String, i64)> = sqlx::query_as(
         "SELECT name, id, COUNT(*) AS cnt FROM ( \
-             SELECT t.rowid_pk AS track, \
-                    LOWER(TRIM(json_extract(credit.value, '$.name'))) AS name, \
+             SELECT TRIM(json_extract(credit.value, '$.name')) AS name, \
                     json_extract(credit.value, '$.id') AS id \
                FROM tracks t, json_each(t.credits_json) AS credit \
               WHERE t.source = ?1 \
                 AND json_extract(credit.value, '$.id') IS NOT NULL \
                 AND TRIM(json_extract(credit.value, '$.name')) != '' \
-         ) GROUP BY name, id ORDER BY cnt DESC",
+         ) GROUP BY name, id",
     )
     .bind(source.as_str())
     .fetch_all(pool)
     .await?;
-    let mut by_name = std::collections::HashMap::new();
-    for (name, id, _) in rows {
-        by_name.entry(name).or_insert(id);
+    let mut counts: std::collections::HashMap<(String, String), i64> =
+        std::collections::HashMap::new();
+    for (name, id, cnt) in rows {
+        *counts
+            .entry((utils::artist::normalize_artist_key(&name), id))
+            .or_default() += cnt;
     }
-    Ok(by_name)
+    let mut best: std::collections::HashMap<String, (String, i64)> =
+        std::collections::HashMap::new();
+    for ((key, id), cnt) in counts {
+        let wins = match best.get(&key) {
+            None => true,
+            Some((held, held_cnt)) => cnt > *held_cnt || (cnt == *held_cnt && id < *held),
+        };
+        if wins {
+            best.insert(key, (id, cnt));
+        }
+    }
+    Ok(best.into_iter().map(|(key, (id, _))| (key, id)).collect())
 }
 
 /// One album cover per credited artist: the cover of the earliest album
@@ -672,6 +687,29 @@ mod tests {
         let ids = artist_ids(&pool, &source).await.unwrap();
 
         assert_eq!(ids.get("ada").map(String::as_str), Some("UC-real"));
+    }
+
+    /// SQLite's `LOWER` folds ASCII only; the key has to be the one every
+    /// lookup builds, or a Cyrillic or accented name never finds its id.
+    #[tokio::test]
+    async fn a_non_ascii_name_is_keyed_as_every_lookup_keys_it() {
+        let pool = mem_pool().await;
+        let source = Source::Local;
+        let tracks = [
+            linked_track("/a.flac", "ЛСП", &[("ЛСП", Some("UC-lsp"))]),
+            linked_track("/b.flac", "Émilie", &[("Émilie", Some("UC-em"))]),
+            linked_track("/c.flac", "émilie", &[("émilie", Some("UC-em"))]),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let ids = artist_ids(&pool, &source).await.unwrap();
+
+        let key = |name: &str| utils::artist::normalize_artist_key(name);
+        assert_eq!(ids.get(&key("ЛСП")).map(String::as_str), Some("UC-lsp"));
+        assert_eq!(ids.get(&key("ÉMILIE")).map(String::as_str), Some("UC-em"));
+        assert_eq!(ids.len(), 2, "two spellings of one name are one artist");
     }
 
     /// Every row predates the column until a sync rewrites it.

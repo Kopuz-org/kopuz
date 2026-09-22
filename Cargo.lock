@@ -4488,6 +4488,7 @@ dependencies = [
  "jni 0.21.1",
  "kopuz-config",
  "kopuz-reader",
+ "kopuz-utils",
  "ndk-context",
  "serde",
  "serde_json",
