@@ -43,7 +43,6 @@ pub fn DiscoverPage(
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
     on_open_artist: EventHandler<(String, String)>,
-    on_search_artist: EventHandler<String>,
 ) -> Element {
     let api = hooks::use_api();
     let caps = hooks::sources::use_capabilities();
@@ -161,7 +160,6 @@ pub fn DiscoverPage(
                     on_select_album: on_select_album,
                     on_select_playlist: on_select_playlist,
                     on_open_artist: on_open_artist,
-                    on_search_artist: on_search_artist,
                 }
             }
 
@@ -184,7 +182,6 @@ fn ShelfRow(
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
     on_open_artist: EventHandler<(String, String)>,
-    on_search_artist: EventHandler<String>,
 ) -> Element {
     if shelf.list {
         return rsx! { SongListShelf {
@@ -237,7 +234,6 @@ fn ShelfRow(
                         on_select_album: on_select_album,
                         on_select_playlist: on_select_playlist,
                         on_open_artist: on_open_artist,
-                        on_search_artist: on_search_artist,
                     }
                 }
             }
@@ -343,7 +339,6 @@ fn DiscoverTile(
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
     on_open_artist: EventHandler<(String, String)>,
-    on_search_artist: EventHandler<String>,
 ) -> Element {
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
@@ -867,7 +862,6 @@ pub fn DiscoverArtistPage(
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
     on_open_artist: EventHandler<(String, String)>,
-    on_search_artist: EventHandler<String>,
 ) -> Element {
     let api = hooks::use_api();
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
@@ -985,7 +979,6 @@ pub fn DiscoverArtistPage(
                                     on_select_album: on_select_album,
                                     on_select_playlist: on_select_playlist,
                                     on_open_artist: on_open_artist,
-                                    on_search_artist: on_search_artist,
                                 }
                             }
                         }

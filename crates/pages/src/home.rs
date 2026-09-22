@@ -8,7 +8,7 @@ pub fn Home(
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
     on_select_playlist: EventHandler<String>,
-    on_search_artist: EventHandler<String>,
+    on_search_artist: EventHandler<(String, Option<String>)>,
 ) -> Element {
     let mut config = use_context::<Signal<AppConfig>>();
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
