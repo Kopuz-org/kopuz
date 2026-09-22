@@ -27,9 +27,18 @@ fn window<T: Clone>(rows: &[T], page: Page) -> (u32, Vec<T>) {
 }
 
 fn album_info(album: &Album) -> AlbumInfo {
+    album_info_with(album, &std::collections::HashMap::new())
+}
+
+/// `ids` is the map from [`db::ReadStore::artist_ids`]; an album whose artist
+/// no stored credit links keeps `artist_id` empty and opens by name.
+fn album_info_with(album: &Album, ids: &std::collections::HashMap<String, String>) -> AlbumInfo {
     AlbumInfo {
         id: album.id.clone(),
         title: album.title.clone(),
+        artist_id: ids
+            .get(&utils::artist::normalize_artist_key(&album.artist))
+            .cloned(),
         artist: album.artist.clone(),
         genre: album.genre.clone(),
         year: album.year,
@@ -109,9 +118,14 @@ impl LibraryService {
             .albums(&self.query_source())
             .await
             .map_err(db_error)?;
+        let ids = self
+            .db
+            .artist_ids(&self.query_source())
+            .await
+            .map_err(db_error)?;
         let (total, items) = window(&rows, page);
         Ok(AlbumPage {
-            albums: items.iter().map(album_info).collect(),
+            albums: items.iter().map(|a| album_info_with(a, &ids)).collect(),
             total,
         })
     }
@@ -125,9 +139,14 @@ impl LibraryService {
             .albums_recently_added(&self.query_source(), depth)
             .await
             .map_err(db_error)?;
+        let ids = self
+            .db
+            .artist_ids(&self.query_source())
+            .await
+            .map_err(db_error)?;
         let (total, items) = window(&rows, page);
         Ok(AlbumPage {
-            albums: items.iter().map(album_info).collect(),
+            albums: items.iter().map(|a| album_info_with(a, &ids)).collect(),
             total,
         })
     }
@@ -138,7 +157,12 @@ impl LibraryService {
             .album(&self.query_source(), id)
             .await
             .map_err(db_error)?;
-        Ok(album.as_ref().map(album_info))
+        let ids = self
+            .db
+            .artist_ids(&self.query_source())
+            .await
+            .map_err(db_error)?;
+        Ok(album.as_ref().map(|a| album_info_with(a, &ids)))
     }
 
     pub async fn album_tracks(&self, id: &str, page: Page) -> Result<TrackPage, ApiError> {
@@ -183,6 +207,7 @@ impl LibraryService {
         } else {
             std::collections::HashMap::new()
         };
+        let ids = self.db.artist_ids(&source).await.map_err(db_error)?;
         Ok(ArtistPage {
             artists: items
                 .into_iter()
@@ -195,6 +220,9 @@ impl LibraryService {
                             .map(PathBuf::as_path),
                         library_view,
                     ),
+                    id: ids
+                        .get(&utils::artist::normalize_artist_key(&name))
+                        .cloned(),
                     name,
                     track_count,
                 })

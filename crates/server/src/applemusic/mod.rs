@@ -68,8 +68,7 @@ pub fn track_from_song_data(song: &types::TrackData) -> Track {
         song.attributes.artist_name.clone()
     };
 
-    // Some endpoints answer with no relationships at all, so the billed name is
-    // the fallback and an id appears only for a relationship actually sent.
+    // Some endpoints answer with no relationships at all, hence the fallback.
     let credits: Vec<reader::ArtistCredit> = if song.relationships.artists.data.is_empty() {
         vec![reader::ArtistCredit::unlinked(
             song.attributes.artist_name.clone(),
@@ -201,8 +200,7 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
-        // A library song relates to its catalog song and album, never to an
-        // artist, so the billed name is all this shape can offer.
+        // A library song relates to its catalog entry and album, never an artist.
         credits: vec![reader::ArtistCredit::unlinked(
             song.attributes.artistName.clone(),
         )],

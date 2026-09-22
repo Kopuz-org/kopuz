@@ -173,7 +173,6 @@ pub struct RemoteAlbum {
     pub browse_id: String,
     pub title: String,
     pub artist: Option<String>,
-    /// The id the source issued for that artist, where it links one.
     pub artist_id: Option<String>,
     pub year: Option<String>,
     pub thumbnail: Option<String>,

@@ -100,7 +100,6 @@ pub struct YtAlbum {
     pub browse_id: String,
     pub title: String,
     pub artist: Option<String>,
-    /// The channel the header links its artist to, where it links one.
     pub artist_id: Option<String>,
     pub year: Option<String>,
     pub thumbnail: Option<String>,
@@ -400,8 +399,6 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
         .map(|s| normalize_yt_thumbnail(s.to_string()));
 
     let cover = thumbnail.map(|u| u.to_string()).filter(|u| !u.is_empty());
-    // Linked runs name each artist separately; the joined text is one name only
-    // when nothing linked, and `artist`/`album_id` keep it either way.
     let artists: Vec<String> = match credits.is_empty() {
         false => credits.iter().map(|c| c.name.clone()).collect(),
         true if artist.is_empty() => Vec::new(),
@@ -565,8 +562,6 @@ fn find_album_header<'a>(resp: &'a Value, sections: &[&'a Value]) -> Option<&'a 
     None
 }
 
-/// The album's own artist, with the channel the strapline links it to when the
-/// header carries one. Rows with no artist column of their own inherit both.
 fn pick_album_artist(header: Option<&Value>) -> Option<ArtistCredit> {
     let header = header?;
     // New layout splits these: straplineTextOne is the artist (with a
@@ -575,7 +570,6 @@ fn pick_album_artist(header: Option<&Value>) -> Option<ArtistCredit> {
         .pointer("/straplineTextOne/runs")
         .and_then(|v| v.as_array());
     if let Some(runs) = strapline {
-        // The linked run is the artist itself; a bare one still names them.
         if let Some(credit) = linked_credits(runs).into_iter().next() {
             return Some(credit);
         }
@@ -730,8 +724,7 @@ fn parse_album_row(
     let duration = fixed_columns_duration(row).or(flex_duration).unwrap_or(0);
     let track_number = row_index_text(row).and_then(|s| s.parse::<u32>().ok());
 
-    // A track listed under an album with no artist column of its own is the
-    // album artist's, so it inherits their id rather than resolving the name.
+    // A row with no artist column of its own belongs to the album's artist.
     let credits: Vec<ArtistCredit> = match (row_credits.is_empty(), album_artist) {
         (false, _) => row_credits,
         (true, Some(credit)) => vec![credit.clone()],
@@ -1094,9 +1087,7 @@ pub(crate) enum RowColumn {
         playlist_id: Option<String>,
     },
     Artist {
-        /// Every run joined, which is how a two-artist column names itself.
         text: String,
-        /// The same column per run, so each artist keeps the channel it links to.
         credits: Vec<ArtistCredit>,
     },
     Album {
@@ -1115,8 +1106,7 @@ pub(crate) enum RowColumn {
 /// text shape — NOT by position. Critical for artist Top Songs rows
 /// where the column order is title/artist/play-count/album, not the
 /// usual title/artist/album.
-/// Each run that links a channel, as its own credit. A column reading "A & B"
-/// is two artists; joined, it would be one artist nobody is called.
+/// A column reading "A & B" is two artists; joined, it is one nobody is called.
 fn linked_credits(runs: &[Value]) -> Vec<ArtistCredit> {
     runs.iter()
         .filter_map(|run| {
@@ -1296,9 +1286,7 @@ mod credit_tests {
         json!({ "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": runs } } })
     }
 
-    /// The column's text is every run joined, so two artists read as one name.
-    /// Per-run credits are what keep them apart without moving the album id,
-    /// which is synthesized from that joined text.
+    /// The joined text has to stay put: the album id is synthesized from it.
     #[test]
     fn a_two_artist_column_keeps_each_channel_but_one_joined_name() {
         let row = json!({
@@ -1318,8 +1306,7 @@ mod credit_tests {
         }
     }
 
-    /// The album header's strapline links its artist, so every track on the
-    /// album inherits that id instead of resolving the name once per row.
+    /// Every track on the album inherits this rather than resolving a name.
     #[test]
     fn the_album_strapline_names_the_artist_it_links() {
         let header = json!({
@@ -1337,7 +1324,6 @@ mod credit_tests {
         assert_eq!(credit.id.as_deref(), Some("UCada"));
     }
 
-    /// A strapline with no link still names the artist; it just has no id.
     #[test]
     fn an_unlinked_strapline_still_names_the_artist() {
         let header = json!({ "straplineTextOne": { "runs": [{ "text": "Ada" }] } });

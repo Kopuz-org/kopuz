@@ -40,8 +40,8 @@ pub async fn upsert_tracks(
         let disc_number = t.disc_number.map(|n| n as i64);
         let artists_json = serde_json::to_string(&t.artists)?;
         let credits_json = serde_json::to_string(&t.credits)?;
-        // Credits keep what a richer parse found: the same track arrives from paths
-        // that link its artists and paths that only name them, in either order.
+        // The same track arrives from paths that link its artists and paths that
+        // only name them, in either order, so credits keep the richer parse.
         sqlx::query!(
             "INSERT INTO tracks \
                (source, track_key, path, service, source_album_id, title, artist, album, duration, \

@@ -112,6 +112,7 @@ pub fn catalog_detail_to_proto(value: &api::CatalogDetail) -> CatalogDetail {
         tracks: value.tracks.iter().map(track_info_to_proto).collect(),
         shelves: value.shelves.iter().map(catalog_shelf_to_proto).collect(),
         continuation: value.continuation.clone(),
+        artist_id: value.artist_id.clone(),
     }
 }
 
@@ -128,6 +129,7 @@ pub fn catalog_detail_from_proto(value: &CatalogDetail) -> api::CatalogDetail {
         tracks: value.tracks.iter().map(track_info_from_proto).collect(),
         shelves: value.shelves.iter().map(catalog_shelf_from_proto).collect(),
         continuation: value.continuation.clone(),
+        artist_id: value.artist_id.clone(),
     }
 }
 

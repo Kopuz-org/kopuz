@@ -119,6 +119,8 @@ pub struct CatalogDetail {
     pub tracks: Vec<TrackInfo>,
     pub shelves: Vec<CatalogShelf>,
     pub continuation: Option<String>,
+    /// For an album, the artist whose page its header opens.
+    pub artist_id: Option<String>,
 }
 
 #[cfg(test)]
