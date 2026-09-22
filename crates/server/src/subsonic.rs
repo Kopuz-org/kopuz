@@ -74,6 +74,8 @@ pub struct SubsonicSong {
     pub album: Option<String>,
     pub album_id: Option<String>,
     pub artist: Option<String>,
+    /// Sent by Subsonic and OpenSubsonic both; absent on a tagless server.
+    pub artist_id: Option<String>,
     pub duration: Option<u64>,
     pub bit_rate: Option<u32>,
     pub sampling_rate: Option<u32>,

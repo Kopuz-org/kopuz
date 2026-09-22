@@ -15,6 +15,20 @@ pub(super) struct JellyfinSource {
     client: JellyfinClient,
 }
 
+/// `ArtistItems` as credits. Absent when the request did not ask for the field,
+/// in which case the names in `artists` stand alone as they always did.
+fn credits_of(items: Option<&[crate::jellyfin::NamedItem]>) -> Vec<reader::ArtistCredit> {
+    items
+        .unwrap_or_default()
+        .iter()
+        .filter(|item| !item.name.trim().is_empty())
+        .map(|item| match item.id.is_empty() {
+            true => reader::ArtistCredit::unlinked(&item.name),
+            false => reader::ArtistCredit::linked(&item.name, &item.id),
+        })
+        .collect()
+}
+
 impl JellyfinSource {
     pub(super) fn new(db: Db, source: Source, conn: &ServerConn) -> Self {
         Self {
@@ -167,7 +181,7 @@ impl MediaSource for JellyfinSource {
                         musicbrainz_recording_id: None,
                         musicbrainz_track_id: None,
                         playlist_item_id: None,
-                        credits: Vec::new(),
+                        credits: credits_of(item.artist_items.as_deref()),
                         artists: item
                             .artists
                             .unwrap_or_else(|| item.album_artist.into_iter().collect()),
@@ -414,7 +428,7 @@ impl MediaSource for JellyfinSource {
                     musicbrainz_recording_id: None,
                     musicbrainz_track_id: None,
                     playlist_item_id: item.playlist_item_id,
-                    credits: Vec::new(),
+                    credits: credits_of(item.artist_items.as_deref()),
                     artists: item.artists.unwrap_or_default(),
                 }
             })
