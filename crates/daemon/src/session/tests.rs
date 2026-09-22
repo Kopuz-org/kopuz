@@ -141,6 +141,7 @@ fn test_track(key: &String) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: Vec::new(),
         artists: vec![],
     }
 }
@@ -1443,6 +1444,7 @@ fn external_track(title: &str) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: Vec::new(),
         artists: Vec::new(),
     }
 }

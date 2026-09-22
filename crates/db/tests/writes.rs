@@ -38,6 +38,7 @@ fn local(path: &str, title: &str) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: vec!["Artist".into(), "Feat".into()],
+        credits: Vec::new(),
     }
 }
 

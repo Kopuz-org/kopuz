@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM track_credits WHERE track_pk = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "8eb14aa6f9ad24d13fb78797251a396141251a6a38421cdc2a23448b13d53e74"
+}

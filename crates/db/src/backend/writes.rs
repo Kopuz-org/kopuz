@@ -38,19 +38,19 @@ pub async fn upsert_tracks(
         let bitrate = t.bitrate as i64;
         let track_number = t.track_number.map(|n| n as i64);
         let disc_number = t.disc_number.map(|n| n as i64);
-        let artists_json = serde_json::to_string(&t.artists)?;
-        sqlx::query!(
+        let pk = sqlx::query_scalar!(
             "INSERT INTO tracks \
                (source, track_key, path, service, source_album_id, title, artist, album, duration, \
                 khz, bitrate, track_number, disc_number, mb_release_id, mb_recording_id, mb_track_id, \
-                playlist_item_id, artists_json, cover_path) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19) \
+                playlist_item_id, cover_path) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18) \
              ON CONFLICT(source, track_key) DO UPDATE SET \
                path=?3, service=?4, \
                source_album_id=CASE WHEN ?5 != '' THEN ?5 ELSE tracks.source_album_id END, \
                title=?6, artist=?7, album=?8, duration=?9, \
                khz=?10, bitrate=?11, track_number=?12, disc_number=?13, mb_release_id=?14, \
-               mb_recording_id=?15, mb_track_id=?16, playlist_item_id=?17, artists_json=?18, cover_path=?19",
+               mb_recording_id=?15, mb_track_id=?16, playlist_item_id=?17, cover_path=?18 \
+             RETURNING rowid_pk AS \"pk!: i64\"",
             src,
             track_key,
             path,
@@ -68,13 +68,65 @@ pub async fn upsert_tracks(
             t.musicbrainz_recording_id,
             t.musicbrainz_track_id,
             t.playlist_item_id,
-            artists_json,
             t.cover
         )
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await?;
+        write_track_children(&mut tx, pk, t).await?;
     }
     tx.commit().await?;
+    Ok(())
+}
+
+/// The credits a row stores: the source's own, else its names as unlinked credits.
+fn stored_credits(t: &Track) -> Vec<reader::ArtistCredit> {
+    if !t.credits.is_empty() {
+        return t.credits.clone();
+    }
+    let names: Vec<&str> = match t.artists.is_empty() {
+        true => vec![t.artist.as_str()],
+        false => t.artists.iter().map(String::as_str).collect(),
+    };
+    names
+        .into_iter()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(reader::ArtistCredit::unlinked)
+        .collect()
+}
+
+/// Write a track's credits beside its row.
+pub(crate) async fn write_track_children(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    pk: i64,
+    t: &Track,
+) -> Result<(), DbError> {
+    // Some paths only name a row's artists, so bare names never replace a list that carries an id.
+    let linked: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM track_credits WHERE track_pk = ?1 AND artist_id IS NOT NULL",
+        pk
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if !t.credits.is_empty() || linked == 0 {
+        sqlx::query!("DELETE FROM track_credits WHERE track_pk = ?1", pk)
+            .execute(&mut **tx)
+            .await?;
+        for (position, credit) in stored_credits(t).iter().enumerate() {
+            let position = position as i64;
+            let name = credit.name.trim();
+            sqlx::query!(
+                "INSERT INTO track_credits (track_pk, position, name, artist_id) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                pk,
+                position,
+                name,
+                credit.id
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
     Ok(())
 }
 
