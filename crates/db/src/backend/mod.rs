@@ -228,6 +228,13 @@ impl ReadStore for Native {
         queries::artists(&self.pool(), source).await
     }
 
+    async fn artist_ids(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        queries::artist_ids(&self.pool(), source).await
+    }
+
     async fn artist_album_covers(
         &self,
         source: &crate::Source,
@@ -573,8 +580,8 @@ impl Storage for Native {
             let artist = format!("Artist {:03}", i % 100);
             let album = format!("Album {:04}", i % 2000);
             sqlx::query(
-                "INSERT OR IGNORE INTO tracks (source, track_key, path, title, artist, album, artists_json) \
-                 VALUES ('local', ?1, ?1, ?2, ?3, ?4, '[]')",
+                "INSERT OR IGNORE INTO tracks (source, track_key, path, title, artist, album) \
+                 VALUES ('local', ?1, ?1, ?2, ?3, ?4)",
             )
             .bind(&key)
             .bind(&title)

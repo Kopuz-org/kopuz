@@ -167,6 +167,7 @@ impl MediaSource for JellyfinSource {
                         musicbrainz_recording_id: None,
                         musicbrainz_track_id: None,
                         playlist_item_id: None,
+                        credits: Vec::new(),
                         artists: item
                             .artists
                             .unwrap_or_else(|| item.album_artist.into_iter().collect()),
@@ -413,6 +414,7 @@ impl MediaSource for JellyfinSource {
                     musicbrainz_recording_id: None,
                     musicbrainz_track_id: None,
                     playlist_item_id: item.playlist_item_id,
+                    credits: Vec::new(),
                     artists: item.artists.unwrap_or_default(),
                 }
             })

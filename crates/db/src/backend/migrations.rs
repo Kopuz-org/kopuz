@@ -733,13 +733,13 @@ async fn insert_track(
     let bitrate = t.bitrate as i64;
     let track_number = t.track_number.map(|n| n as i64);
     let disc_number = t.disc_number.map(|n| n as i64);
-    let artists_json = serde_json::to_string(&t.artists)?;
-    sqlx::query!(
+    let inserted = sqlx::query_scalar!(
         "INSERT OR IGNORE INTO tracks \
            (source, track_key, path, service, source_album_id, title, artist, album, duration, \
             khz, bitrate, track_number, disc_number, mb_release_id, mb_recording_id, mb_track_id, \
-            playlist_item_id, artists_json, cover_path) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            playlist_item_id, cover_path) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18) \
+         RETURNING rowid_pk AS \"pk!: i64\"",
         source,
         track_key,
         path,
@@ -757,11 +757,13 @@ async fn insert_track(
         t.musicbrainz_recording_id,
         t.musicbrainz_track_id,
         t.playlist_item_id,
-        artists_json,
         t.cover
     )
-    .execute(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await?;
+    if let Some(pk) = inserted {
+        super::writes::write_track_children(tx, pk, t).await?;
+    }
     Ok(())
 }
 
@@ -861,6 +863,8 @@ fn legacy_to_track(l: &LegacyTrack) -> Option<Track> {
         musicbrainz_track_id: l.musicbrainz_track_id.clone(),
         playlist_item_id: l.playlist_item_id.clone(),
         artists: l.artists.clone(),
+        // The legacy store predates artist ids; a re-sync is what fills these in.
+        credits: Vec::new(),
     })
 }
 

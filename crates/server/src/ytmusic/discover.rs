@@ -412,6 +412,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: Vec::new(),
         artists,
     })
 }
@@ -725,6 +726,7 @@ fn parse_album_row(
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: Vec::new(),
         artists,
     })
 }
@@ -976,6 +978,7 @@ fn build_song_track(video_id: &str, title: &str, subtitle: &str, thumbnail: Opti
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: Vec::new(),
         artists,
     }
 }
