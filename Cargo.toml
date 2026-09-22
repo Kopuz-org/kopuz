@@ -115,6 +115,17 @@ time = "0.3"
 # pins deno_core ^0.331, so deno_core must stay on 0.331.x to share one V8 link.
 deno_core = "0.331"
 rustypipe-botguard = "0.1.2"
+# Spotify. librespot speaks the desktop client's own protocol, so audio is
+# fetched and decrypted in-process instead of played by a browser. Same TLS
+# stack as reqwest: rustls with bundled roots, nothing platform-bound.
+librespot-core = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-audio = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-metadata = { version = "0.8.0", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-protocol = { version = "0.8.0", default-features = false }
+protobuf = "3.7"
+bytes = "1"
+# Only to name the crypto backend at boot (see daemon::boot::prepare_thread).
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"] }
 
 # Workspace components
 i18n = { package = "kopuz-i18n", version = "0.17.0", path = "./crates/i18n" }
@@ -170,3 +181,10 @@ strip = "symbols"
 lto = "thin"
 codegen-units = 1
 panic = "unwind"
+
+# librespot-core 0.8.0 as published, minus one `exit(1)`: upstream kills the
+# process when the account is not premium (`Session::check_catalogue`), and
+# a free account should keep its library and be told at play time instead.
+# See vendor/librespot-core/src/session.rs; drop the patch when upstream does.
+[patch.crates-io]
+librespot-core = { path = "vendor/librespot-core" }

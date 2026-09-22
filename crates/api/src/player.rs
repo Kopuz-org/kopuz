@@ -93,7 +93,7 @@ pub struct FadingState {
     pub position_ms: u64,
 }
 
-/// Playback happening outside the engine (Spotify in a browser).
+/// Playback happening outside the engine, on a surface an integration owns.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExternalPlayback {
     pub kind: String,

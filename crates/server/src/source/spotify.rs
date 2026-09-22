@@ -1,38 +1,45 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use config::Source;
 use db::Db;
 
 use crate::server_ops::ServerConn;
+use crate::spotify::catalog;
+use crate::spotify::session::{SessionError, SpotifySession};
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync,
     LibrarySnapshot, MediaSource, PlaylistMeta, PlaylistOps, RadioSeeds, SourceError, StreamInfo,
 };
 
-/// Read-only Spotify Web API source. Playback does NOT flow through this impl:
-/// the player controller intercepts Spotify tracks and drives the Web Playback
-/// SDK in the user's browser (`crate::spotify::host`), so `resolve_stream` is
-/// never reached on the happy path. Everything else — library, liked songs,
-/// playlists, search — comes from the public Web API.
+/// Spotify over a librespot session. Library, liked songs, playlists and
+/// search go through the client's own endpoints on that session; audio is a
+/// stream ref the decode worker opens through the same session
+/// (`crate::spotify::stream`), so a track plays in the engine like any other
+/// remote file.
 pub(super) struct SpotifySource {
     db: Db,
     source: Source,
-    /// The Web API access token, unpacked from the stored `<access>\n<refresh>`.
-    access: String,
+    session: Arc<SpotifySession>,
 }
 
 impl SpotifySource {
     pub(super) fn new(db: Db, source: Source, conn: &ServerConn) -> Self {
-        let access = crate::spotify::auth::unpack_token(&conn.token).0;
-        Self { db, source, access }
+        let session = crate::spotify::session::shared(&conn.token, &conn.device_id);
+        Self {
+            db,
+            source,
+            session,
+        }
     }
 
-    fn token(&self) -> Result<&str, SourceError> {
-        if self.access.is_empty() {
-            Err(SourceError::Auth)
-        } else {
-            Ok(self.access.as_str())
-        }
+    /// The live session, connecting first if need be.
+    async fn live(&self) -> Result<librespot_core::Session, SourceError> {
+        self.session.session().await.map_err(|error| match error {
+            SessionError::Unauthenticated(_) => SourceError::Auth,
+            SessionError::Unavailable(message) => SourceError::Backend(message),
+        })
     }
 }
 
@@ -62,8 +69,8 @@ impl MediaSource for SpotifySource {
             scan_folders: false,
             folders: false,
             browse_folders: false,
-            external_devices: true,
-            browser_playback: true,
+            external_devices: false,
+            browser_playback: false,
             sync: true,
             downloads: false,
             discover: true,
@@ -76,17 +83,28 @@ impl MediaSource for SpotifySource {
         }
     }
 
-    async fn resolve_stream(&self, _item_id: &str) -> Result<StreamInfo, SourceError> {
-        Err(SourceError::unsupported(
-            "Spotify playback (handled by the browser player)",
-        ))
+    /// The stream is opened lazily on the decode worker, which needs a
+    /// connected session: connecting here surfaces a refused login as a
+    /// resolve error instead of a silent decoder failure.
+    async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
+        self.live().await?;
+        Ok(StreamInfo {
+            url: crate::playback_ref::ResolvedStreamRef::spotify_marker(item_id),
+            format: None,
+            user_agent: None,
+            duration_secs: None,
+            bitrate: None,
+            content_length: None,
+        })
     }
 
     async fn validate(&self) -> AuthOutcome {
-        let Ok(token) = self.token() else {
-            return AuthOutcome::Expired;
+        let session = match self.session.session().await {
+            Ok(session) => session,
+            Err(SessionError::Unauthenticated(_)) => return AuthOutcome::Expired,
+            Err(SessionError::Unavailable(_)) => return AuthOutcome::Unreachable,
         };
-        match crate::spotify::api::me(token).await {
+        match catalog::probe(&session).await {
             Ok(()) => AuthOutcome::Valid,
             Err(e) if e.contains("401") || e.contains("403") => AuthOutcome::Expired,
             Err(_) => AuthOutcome::Unreachable,
@@ -94,34 +112,46 @@ impl MediaSource for SpotifySource {
     }
 
     async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
-        let token = self.token()?;
-        let mut ids = Vec::new();
-        let mut cursor: Option<String> = None;
-        loop {
-            let (tracks, next) =
-                crate::spotify::api::saved_tracks_page(token, cursor.as_deref()).await?;
-            ids.extend(tracks.iter().map(|t| t.id.key().into_owned()));
-            match next {
-                Some(c) => cursor = Some(c),
-                None => break,
-            }
-        }
-        Ok(ids)
+        let session = self.live().await?;
+        Ok(catalog::collection(&session)
+            .await?
+            .into_iter()
+            .filter(|item| item.kind == catalog::CollectionKind::Track)
+            .filter_map(|item| item.id.to_base62().ok())
+            .collect())
     }
 
+    /// Liked songs, newest first. The collection is one list, so the
+    /// cursor is an offset into it and each page hydrates its own ids.
     async fn fetch_favorites_page(
         &self,
         cursor: Option<String>,
     ) -> Result<FavoritesPage, SourceError> {
-        let token = self.token()?;
-        let (tracks, next) =
-            crate::spotify::api::saved_tracks_page(token, cursor.as_deref()).await?;
+        const PAGE: usize = 50;
+        let session = self.live().await?;
+        let offset: usize = cursor.and_then(|c| c.parse().ok()).unwrap_or(0);
+        let liked: Vec<String> = catalog::collection(&session)
+            .await?
+            .into_iter()
+            .filter(|item| item.kind == catalog::CollectionKind::Track)
+            .filter_map(|item| item.id.to_base62().ok())
+            .collect();
+        let page: Vec<librespot_core::SpotifyUri> = liked
+            .iter()
+            .skip(offset)
+            .take(PAGE)
+            .filter_map(|id| {
+                librespot_core::SpotifyUri::from_uri(&format!("spotify:track:{id}")).ok()
+            })
+            .collect();
+        let tracks = catalog::tracks(&session, &page).await?;
+        let next = (offset + PAGE < liked.len()).then(|| (offset + PAGE).to_string());
         Ok(FavoritesPage { tracks, next })
     }
 
     async fn push_favorite(&self, item_id: &str, on: bool) -> Result<(), SourceError> {
-        let token = self.token()?;
-        crate::spotify::api::set_saved(token, item_id, on)
+        let session = self.live().await?;
+        catalog::set_liked(&session, item_id, on)
             .await
             .map_err(SourceError::from)
     }
@@ -130,16 +160,17 @@ impl MediaSource for SpotifySource {
         &self,
         query: &str,
     ) -> Result<(Vec<reader::Track>, Vec<reader::Album>), SourceError> {
-        let token = self.token()?;
-        crate::spotify::api::search(token, query)
+        let session = self.live().await?;
+        crate::spotify::search::search(&session, query)
             .await
             .map_err(SourceError::from)
     }
 
     async fn fetch_album_tracks(&self, album_id: &str) -> Result<Vec<reader::Track>, SourceError> {
-        let token = self.token()?;
-        crate::spotify::api::album_tracks_full(token, album_id)
+        let session = self.live().await?;
+        catalog::album(&session, album_id)
             .await
+            .map(|album| album.tracks)
             .map_err(SourceError::from)
     }
 
@@ -147,23 +178,23 @@ impl MediaSource for SpotifySource {
         &self,
         id: &str,
     ) -> Result<Option<super::RemoteAlbum>, SourceError> {
-        let token = self.token()?;
-        crate::spotify::api::album_remote(token, id)
+        let session = self.live().await?;
+        catalog::album(&session, id)
             .await
             .map(|a| (!a.tracks.is_empty()).then_some(a))
             .map_err(SourceError::from)
     }
 
     async fn discover_home(&self) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
-        let token = self.token()?;
-        crate::spotify::api::discover_home(token)
+        let session = self.live().await?;
+        catalog::discover_home(&session)
             .await
             .map_err(SourceError::from)
     }
 
     async fn fetch_library(&self) -> Result<LibrarySnapshot, SourceError> {
-        let token = self.token()?;
-        let (albums, tracks) = crate::spotify::api::saved_albums(token).await?;
+        let session = self.live().await?;
+        let (albums, tracks) = catalog::saved_albums(&session).await?;
         Ok(LibrarySnapshot {
             albums,
             tracks,
@@ -172,8 +203,8 @@ impl MediaSource for SpotifySource {
     }
 
     async fn fetch_playlists(&self) -> Result<Vec<PlaylistMeta>, SourceError> {
-        let token = self.token()?;
-        Ok(crate::spotify::api::list_playlists(token)
+        let session = self.live().await?;
+        Ok(catalog::playlists(&session)
             .await?
             .into_iter()
             .map(|p| PlaylistMeta {
@@ -188,8 +219,8 @@ impl MediaSource for SpotifySource {
         &self,
         playlist_id: &str,
     ) -> Result<Vec<reader::Track>, SourceError> {
-        let token = self.token()?;
-        crate::spotify::api::playlist_entries(token, playlist_id)
+        let session = self.live().await?;
+        catalog::playlist_tracks(&session, playlist_id)
             .await
             .map_err(SourceError::from)
     }

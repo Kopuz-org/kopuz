@@ -1268,8 +1268,8 @@ async fn a_draft_is_checked_identically_across_transports() {
         local
             .problems
             .iter()
-            .any(|problem| problem.field.as_deref() == Some("client_id")),
-        "a Spotify server needs its client id: {local:?}"
+            .any(|problem| problem.field.as_deref() == Some("name")),
+        "a Spotify server needs a name and nothing else: {local:?}"
     );
 
     let good = api::ServerDraft {

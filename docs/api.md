@@ -260,20 +260,22 @@ built its own URL could only ever fetch local files.
 
 ## External playback
 
-Some services do not hand out decodable audio. Spotify plays itself, either
-in a browser tab running its Web Playback SDK or on a Connect device the
-account already owns, and the daemon drives both.
-
-To a client it looks like ordinary playback. `PlayerState.external` names
-the integration and the device when one owns playback; the transport
-commands are the same ones; the queue, the shuffle order and what plays
-next stay the daemon's. When the queue reaches a track only the integration
-can play the daemon hands it over, and when it reaches one the engine can
-play it hands back.
+Some services may not hand out decodable audio and play a track themselves
+instead, on a device of their own or on a surface they own. The daemon
+drives such an integration, and to a client it looks like ordinary
+playback. `PlayerState.external` names the integration and the device when
+one owns playback; the transport commands are the same ones; the queue,
+the shuffle order and what plays next stay the daemon's. When the queue
+reaches a track only the integration can play the daemon hands it over, and
+when it reaches one the engine can play it hands back.
 
 `GetExternalDevices {kind}` lists where an integration can play and
 `SelectExternalDevice {kind, device_id?}` moves it, with an absent id
 meaning this machine's own player.
+
+No source uses this today. Spotify audio goes through the engine since the
+move to librespot, so its capabilities say `external_devices: false` and
+both RPCs answer UNIMPLEMENTED for it.
 ## Minimal client (Python)
 
 ```sh
@@ -308,9 +310,9 @@ print("toggled at rev", stub.Toggle(pb.ToggleRequest()).rev)
   run by the daemon, so they need a machine it can open a browser on. Ask
   `CanOpenBrowser` first: a sandboxed daemon says no. Local files,
   Jellyfin, Subsonic/Navidrome and Nextcloud need nothing but the daemon.
-- Spotify audio comes out of a browser with Widevine, spawned by the
-  daemon, so a headless box with no browser cannot play it -- though it can
-  still drive a Connect device that can.
+- Spotify audio is fetched and decrypted by the daemon through librespot,
+  so a headless box plays it once it has signed in; only the sign-in
+  itself needs a browser.
 ## Settings
 
 `Config` mirrors the app's settings struct field for field. It is a real
