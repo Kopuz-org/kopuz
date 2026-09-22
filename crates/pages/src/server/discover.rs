@@ -41,7 +41,7 @@ fn keys_of(tracks: &[TrackInfo]) -> Vec<String> {
 #[tracing::instrument(name = "render.discover_home", skip_all)]
 pub fn DiscoverPage(
     on_select_album: EventHandler<String>,
-    on_select_playlist: EventHandler<(String, String)>,
+    on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
     on_open_artist: EventHandler<(String, String)>,
 ) -> Element {
     let api = hooks::use_api();
@@ -180,7 +180,7 @@ fn ShelfRow(
     shelf: CatalogShelf,
     scroll_id: String,
     on_select_album: EventHandler<String>,
-    on_select_playlist: EventHandler<(String, String)>,
+    on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
     on_open_artist: EventHandler<(String, String)>,
 ) -> Element {
     if shelf.list {
@@ -247,7 +247,7 @@ fn ShelfRow(
 #[component]
 fn SongListShelf(
     shelf: CatalogShelf,
-    on_select_playlist: EventHandler<(String, String)>,
+    on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
 ) -> Element {
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let mut now_playing = use_context::<DiscoverNowPlaying>().0;
@@ -266,7 +266,12 @@ fn SongListShelf(
                     button {
                         class: "text-xs font-bold text-white/60 hover:text-white cursor-pointer transition-colors",
                         onclick: move |_| {
-                            on_select_playlist.call((more.clone(), title_for_more.clone()))
+                            // A song list's "show all" opens more of the same songs.
+                            on_select_playlist.call((
+                                CatalogItemKind::Playlist,
+                                more.clone(),
+                                title_for_more.clone(),
+                            ))
                         },
                         "{i18n::t(\"discover_show_all\")}"
                     }
@@ -337,7 +342,7 @@ fn SongListShelf(
 fn DiscoverTile(
     item: CatalogItem,
     on_select_album: EventHandler<String>,
-    on_select_playlist: EventHandler<(String, String)>,
+    on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
     on_open_artist: EventHandler<(String, String)>,
 ) -> Element {
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
@@ -366,7 +371,11 @@ fn DiscoverTile(
                         if kind == CatalogItemKind::Album {
                             on_select_album.call(id_for_click.clone());
                         } else {
-                            on_select_playlist.call((id_for_click.clone(), title_for_click.clone()));
+                            on_select_playlist.call((
+                                kind,
+                                id_for_click.clone(),
+                                title_for_click.clone(),
+                            ));
                         }
                     },
                     on_play: EventHandler::new(move |_| {
@@ -723,6 +732,8 @@ fn SongCard(item: CatalogItem, track: TrackInfo) -> Element {
 pub fn DiscoverPlaylistDetail(
     selected_playlist_id: Signal<Option<String>>,
     selected_playlist_title: Signal<Option<String>>,
+    /// What the id names, as the caller that had it knew.
+    selected_playlist_kind: Signal<CatalogItemKind>,
     on_back: EventHandler<()>,
 ) -> Element {
     let api = hooks::use_api();
@@ -754,15 +765,12 @@ pub fn DiscoverPlaylistDetail(
         error.set(None);
         let load_span = tracing::info_span!("playlist.load", playlist_id = %id);
         let api = api.clone();
+        // This read an `MPRE` prefix off the id to tell an album from a playlist,
+        // which is one service's id format decided in a page. The caller that had
+        // the id knew what it was.
+        let kind = *selected_playlist_kind.read();
         spawn(
             async move {
-                // Discover routes albums through this viewer too, and an album
-                // browse id is not a playlist id, so the kind follows the id.
-                let kind = if id.starts_with("MPRE") {
-                    CatalogItemKind::Album
-                } else {
-                    CatalogItemKind::Playlist
-                };
                 let result = api
                     .catalog_detail(CatalogDetailRequest {
                         kind,
@@ -860,7 +868,7 @@ pub fn DiscoverArtistPage(
     selected_artist_name: Signal<String>,
     on_back: EventHandler<()>,
     on_select_album: EventHandler<String>,
-    on_select_playlist: EventHandler<(String, String)>,
+    on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
     on_open_artist: EventHandler<(String, String)>,
 ) -> Element {
     let api = hooks::use_api();
