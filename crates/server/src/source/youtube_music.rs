@@ -70,6 +70,7 @@ impl MediaSource for YtSource {
             discover: true,
             dont_recommend: true,
             radio: RadioSeeds::ALL,
+            play_queue: false,
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Remote,
             albums: AlbumType::YtMusic,

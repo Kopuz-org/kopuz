@@ -140,6 +140,8 @@ pub struct Capabilities {
     /// signal to the source's recommender, not a library edit.
     pub dont_recommend: bool,
     pub radio: RadioSeeds,
+    /// It keeps a play queue of its own that other clients read and write.
+    pub play_queue: bool,
     pub playlists: PlaylistOps,
     pub artist_view: ArtistView,
     pub albums: AlbumType,
@@ -191,4 +193,17 @@ impl From<crate::ytmusic::discover::YtAlbum> for RemoteAlbum {
             tracks: a.tracks,
         }
     }
+}
+
+/// A source's own saved play queue, resolved to tracks.
+pub struct RemotePlayQueue {
+    pub tracks: Vec<reader::Track>,
+    /// The playing track's item id, matched against `tracks[i].id.key()`.
+    pub current_id: Option<String>,
+    pub position_ms: u64,
+    /// The client that last saved it, for display.
+    pub changed_by: Option<String>,
+    /// Whether that client was someone other than us. Only the source knows
+    /// the name it signs its own writes with, so it decides this.
+    pub changed_elsewhere: bool,
 }

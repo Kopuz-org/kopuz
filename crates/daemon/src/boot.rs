@@ -170,7 +170,11 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let playlists = crate::PlaylistService::new(database.clone(), session.clone());
     spawn_volume_persistence(&session, config_service.clone());
     crate::os_media::spawn(&session);
-    crate::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
+    crate::integrations::spawn_jellyfin_reporter(
+        &session,
+        active_source.clone(),
+        session.config_watch(),
+    );
     crate::integrations::spawn_discord_presence(&session, session.config_watch());
     if let Some(snapshot) = queue_store.load().await
         && !snapshot.queue.is_empty()
@@ -184,6 +188,16 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             Ok(_) => tracing::info!(tracks = restored, "queue restored from the last session"),
             Err(error) => tracing::warn!(%error, "queue restore failed"),
         }
+    }
+    // A source that keeps a queue of its own may hold a fresher one than the
+    // snapshot, but asking costs a round trip, so startup does not wait on it.
+    {
+        let session = session.clone();
+        let library = library.clone();
+        let source = active_source.clone();
+        tokio::spawn(async move {
+            crate::persistence::adopt_remote_queue(&session, &library, &source).await;
+        });
     }
     let artwork = crate::ArtworkService::new(
         database.clone(),
