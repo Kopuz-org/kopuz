@@ -702,8 +702,6 @@ fn first_image(images: &Value) -> Option<String> {
 pub fn parse_track(item: &Value) -> Option<Track> {
     let id = item["id"].as_str().filter(|s| !s.is_empty())?;
 
-    // Each artist object carries its own id beside the name, so the read that
-    // took only the name links the credit for free.
     let credits: Vec<reader::ArtistCredit> = item["artists"]
         .as_array()
         .map(|arr| {

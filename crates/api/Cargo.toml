@@ -17,6 +17,7 @@ workspace = true
 
 [dependencies]
 config = { workspace = true }
+utils = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
