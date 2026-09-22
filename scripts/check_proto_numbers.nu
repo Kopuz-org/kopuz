@@ -7,18 +7,29 @@
 
 def fields [text: string] {
   mut out = []
-  mut message = ""
+  # One entry per open block: a message pushes its own name, a `oneof` or enum
+  # inside it pushes the enclosing one, so a field after a nested block is still
+  # attributed to its message instead of being dropped at the first `}`.
+  mut stack = []
   for line in ($text | lines) {
     let trimmed = ($line | str trim)
-    let opened = ($trimmed | parse -r '^message\s+(?<name>\w+)\s*\{')
-    if ($opened | is-not-empty) {
-      $message = ($opened | first | get name)
+    if ($trimmed | str starts-with "}") {
+      $stack = ($stack | drop 1)
       continue
     }
-    if $trimmed == "}" {
-      $message = ""
+    if ($trimmed | str ends-with "{") {
+      let opened = ($trimmed | parse -r '^message\s+(?<name>\w+)\s*\{$')
+      let owner = if ($opened | is-not-empty) {
+        $opened | first | get name
+      } else if ($stack | is-empty) {
+        ""
+      } else {
+        $stack | last
+      }
+      $stack = ($stack | append $owner)
       continue
     }
+    let message = if ($stack | is-empty) { "" } else { $stack | last }
     if $message == "" { continue }
     let field = ($trimmed | parse -r '^(?:repeated\s+|optional\s+)?[\w\.<>, ]+?\s+(?<name>\w+)\s*=\s*(?<number>\d+)\s*;')
     if ($field | is-not-empty) {
