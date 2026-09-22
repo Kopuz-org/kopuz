@@ -210,6 +210,13 @@ impl MediaSource for YtSource {
     }
 
     async fn resolve_artist_channel_id(&self, query: &str) -> Result<Option<String>, SourceError> {
+        // A stored credit already holds the id this source issued for the name,
+        // so a row that arrived linked costs no request and cannot resolve to
+        // somebody else. What follows is for names that arrived bare.
+        let stored = self.db.artist_ids(&self.source).await.unwrap_or_default();
+        if let Some(id) = stored.get(&utils::artist::normalize_artist_key(query)) {
+            return Ok(Some(id.clone()));
+        }
         // A song's watch-queue byline links its artists' channels exactly —
         // including user channels the Artists search can't find at all — so
         // a library artist reconciles from their own song first. The search

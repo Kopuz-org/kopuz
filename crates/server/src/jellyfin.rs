@@ -113,6 +113,9 @@ pub struct Item {
     pub album: Option<String>,
     pub album_id: Option<String>,
     pub artists: Option<Vec<String>>,
+    /// `{Name, Id}` per credited artist, which `artists` gives only the names of.
+    /// Present only where the request asked for the `ArtistItems` field.
+    pub artist_items: Option<Vec<NamedItem>>,
     pub album_artist: Option<String>,
     pub image_tags: Option<std::collections::HashMap<String, String>>,
     pub index_number: Option<u32>,
@@ -122,6 +125,14 @@ pub struct Item {
     pub container: Option<String>,
     pub bitrate: Option<u32>,
     pub sample_rate: Option<u32>,
+}
+
+/// A named entity Jellyfin refers to by id, as `ArtistItems` returns one.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "PascalCase")]
+pub struct NamedItem {
+    pub name: String,
+    pub id: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -355,7 +366,7 @@ impl JellyfinClient {
             ("IncludeItemTypes", "Audio"),
             (
                 "Fields",
-                "DateCreated,DateLastMediaAdded,MediaSources,ImageTags,Genres,ParentIndexNumber,IndexNumber,AlbumId,AlbumArtist,ProductionYear,Container",
+                "DateCreated,DateLastMediaAdded,MediaSources,ImageTags,Genres,ParentIndexNumber,IndexNumber,AlbumId,AlbumArtist,ProductionYear,Container,ArtistItems",
             ),
             ("StartIndex", start.as_str()),
             ("Limit", limit_val.as_str()),
@@ -467,7 +478,7 @@ impl JellyfinClient {
         let user_id = self.user_id()?;
         let path = format!("/Playlists/{}/Items", playlist_id);
 
-        let fields = "DateCreated,DateLastMediaAdded,MediaSources,ImageTags,Genres,ParentIndexNumber,IndexNumber,AlbumId,AlbumArtist,ProductionYear,Container,PlaylistItemId".to_string();
+        let fields = "DateCreated,DateLastMediaAdded,MediaSources,ImageTags,Genres,ParentIndexNumber,IndexNumber,AlbumId,AlbumArtist,ProductionYear,Container,PlaylistItemId,ArtistItems".to_string();
         let query = [("UserId", user_id), ("Fields", fields.as_str())];
         let items_resp: ItemsResponse = self.request_with_query(&path, &query).await?;
         Ok(items_resp.items)

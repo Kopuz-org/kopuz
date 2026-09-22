@@ -1,4 +1,4 @@
-use reader::models::Track;
+use reader::models::{ArtistCredit, Track};
 use serde_json::{Value, json};
 
 use super::SOURCE_PREFIX;
@@ -48,7 +48,8 @@ impl MusicVideoType {
 struct ParsedRow {
     video_id: String,
     title: String,
-    artists: Vec<String>,
+    /// Credits in billing order, linked where the run carried a channel.
+    artists: Vec<ArtistCredit>,
     album: Option<String>,
     album_browse_id: Option<String>,
     duration: u64,
@@ -429,11 +430,13 @@ fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
         .unwrap_or((None, None));
     let artist = subtitle
         .iter()
-        .find(|(_, b)| b.as_deref().is_some_and(|b| b.starts_with("UC")))
-        .map(|(t, _)| t.clone())
+        .find_map(|(t, b)| match b.as_deref() {
+            Some(id) if id.starts_with("UC") => Some(ArtistCredit::linked(t, id)),
+            _ => None,
+        })
         // No channel link: skip the leading kind label, take the next token.
-        .or_else(|| subtitle.get(1).map(|(t, _)| t.clone()))
-        .unwrap_or_default();
+        .or_else(|| subtitle.get(1).map(|(t, _)| ArtistCredit::unlinked(t)))
+        .filter(|credit| !credit.name.is_empty());
 
     let thumbnail_url = card
         .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
@@ -449,11 +452,7 @@ fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
     Some(ParsedRow {
         video_id,
         title,
-        artists: if artist.is_empty() {
-            Vec::new()
-        } else {
-            vec![artist]
-        },
+        artists: artist.into_iter().collect(),
         album,
         album_browse_id,
         duration: 0,
@@ -495,12 +494,23 @@ fn parse_playlist_track(
     mvt: MusicVideoType,
     thumbnail_url: Option<String>,
 ) -> ParsedRow {
-    let primary_artist = pick_run(row, 1, 0);
-    let artists = if primary_artist.is_empty() {
-        Vec::new()
-    } else {
-        vec![primary_artist]
-    };
+    // This is the row the library sync stores, so it is what decides whether an
+    // artist has an id at all. The column links each credit to its channel; the
+    // positional read is the fallback for a row that links none.
+    let mut artists: Vec<ArtistCredit> = pick_runs_with_browse(row, 1)
+        .into_iter()
+        .filter_map(|(text, browse)| match browse.as_deref() {
+            Some(id) if id.starts_with("UC") => Some(ArtistCredit::linked(text, id)),
+            _ => None,
+        })
+        .collect();
+    if artists.is_empty() {
+        let primary_artist = pick_run(row, 1, 0);
+        artists = split_unlinked_artists(&primary_artist)
+            .into_iter()
+            .map(ArtistCredit::unlinked)
+            .collect();
+    }
     let album = if mvt.has_album() {
         let s = pick_run(row, 2, 0);
         if s.is_empty() { None } else { Some(s) }
@@ -558,10 +568,14 @@ fn parse_search_row(
         .find(|(_, b)| b.as_deref().is_some_and(|b| b.starts_with("MPRE")))
         .map(|(t, b)| (Some(t.clone()), b.clone()))
         .unwrap_or((None, None));
-    let mut artists: Vec<String> = runs
+    // The channel the run links to is the artist's own id, so keep it: resolving
+    // this name later costs a search and answers wrong for a shared one.
+    let mut artists: Vec<ArtistCredit> = runs
         .iter()
-        .filter(|(_, b)| b.as_deref().is_some_and(|b| b.starts_with("UC")))
-        .map(|(t, _)| t.clone())
+        .filter_map(|(t, b)| match b.as_deref() {
+            Some(id) if id.starts_with("UC") => Some(ArtistCredit::linked(t, id)),
+            _ => None,
+        })
         .collect();
     if artists.is_empty() {
         // Unlinked artist text (no channel run). Fall back to the first run
@@ -577,6 +591,7 @@ fn parse_search_row(
             .filter(|t| Some(t) != album.as_ref())
             .take(1)
             .flat_map(|t| split_unlinked_artists(&t))
+            .map(ArtistCredit::unlinked)
             .collect();
     }
 
@@ -626,7 +641,11 @@ fn runs_with_browse(runs: Option<&Value>) -> Vec<(String, Option<String>)> {
 }
 
 fn parsed_to_track(p: ParsedRow) -> Track {
-    let primary_artist = p.artists.first().cloned().unwrap_or_default();
+    let primary_artist = p
+        .artists
+        .first()
+        .map(|credit| credit.name.clone())
+        .unwrap_or_default();
     let album = p.album.clone().unwrap_or_default();
     let album_id = match p.album_browse_id {
         Some(id) => format!("{SOURCE_PREFIX}:album:{id}"),
@@ -650,8 +669,8 @@ fn parsed_to_track(p: ParsedRow) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
-        credits: Vec::new(),
-        artists: p.artists,
+        artists: p.artists.iter().map(|c| c.name.clone()).collect(),
+        credits: p.artists,
     }
 }
 
@@ -870,6 +889,117 @@ fn parse_mm_ss(s: &str) -> Option<u64> {
     let mins: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
     let hours: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
     Some(hours * 3600 + mins * 60 + secs)
+}
+
+#[cfg(test)]
+mod credit_tests {
+    use super::{ParsedRow, parse_playlist_track, parse_search_row, parsed_to_track};
+    use serde_json::{Value, json};
+
+    /// A flex column of `(text, browseId)` runs, as a row ships one.
+    fn column(runs: &[(&str, Option<&str>)]) -> Value {
+        let runs: Vec<Value> = runs
+            .iter()
+            .map(|(text, browse)| match browse {
+                Some(id) => json!({
+                    "text": text,
+                    "navigationEndpoint": { "browseEndpoint": { "browseId": id } }
+                }),
+                None => json!({ "text": text }),
+            })
+            .collect();
+        json!({ "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": runs } } })
+    }
+
+    fn search_row(runs: &[(&str, Option<&str>)]) -> ParsedRow {
+        let row = json!({ "flexColumns": [column(&[("Song", None)]), column(runs)] });
+        parse_search_row(&row, "vid".into(), "Song".into(), None)
+    }
+
+    #[test]
+    fn a_linked_run_keeps_the_channel_it_points_at() {
+        let parsed = search_row(&[("Ada", Some("UCada")), ("•", None), ("3:21", None)]);
+
+        assert_eq!(parsed.artists.len(), 1);
+        assert_eq!(parsed.artists[0].name, "Ada");
+        assert_eq!(parsed.artists[0].id.as_deref(), Some("UCada"));
+        assert_eq!(parsed.duration, 201);
+    }
+
+    /// Two linked artists are two credits, not one name nobody is called.
+    #[test]
+    fn each_linked_artist_becomes_its_own_credit() {
+        let parsed = search_row(&[
+            ("Ada", Some("UCada")),
+            ("Boris", Some("UCboris")),
+            ("3:00", None),
+        ]);
+
+        let names: Vec<&str> = parsed.artists.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Ada", "Boris"]);
+        assert_eq!(parsed.artists[1].id.as_deref(), Some("UCboris"));
+    }
+
+    /// An unlinked joined credit still splits, and neither half invents an id.
+    #[test]
+    fn an_unlinked_joined_credit_splits_without_ids() {
+        let parsed = search_row(&[("INABAKUMORI feat. Kaai Yuki", None), ("2:30", None)]);
+
+        let names: Vec<&str> = parsed.artists.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["INABAKUMORI", "Kaai Yuki"]);
+        assert!(parsed.artists.iter().all(|c| c.id.is_none()));
+    }
+
+    /// An album run is not an artist, however much it looks like one.
+    #[test]
+    fn an_album_run_is_not_taken_for_a_credit() {
+        let parsed = search_row(&[
+            ("Ada", Some("UCada")),
+            ("One", Some("MPREalbum")),
+            ("3:00", None),
+        ]);
+
+        assert_eq!(parsed.artists.len(), 1);
+        assert_eq!(parsed.album.as_deref(), Some("One"));
+    }
+
+    /// The row the library sync stores, so it decides whether an artist has an
+    /// id at all. It used to read the name positionally and ignore the link.
+    #[test]
+    fn a_playlist_row_keeps_the_channel_the_sync_stores() {
+        let row = json!({
+            "flexColumns": [column(&[("Song", None)]), column(&[("Ada", Some("UCada"))])],
+            "fixedColumns": [{
+                "musicResponsiveListItemFixedColumnRenderer": {
+                    "text": { "runs": [{ "text": "3:21" }] }
+                }
+            }],
+        });
+
+        let parsed = parse_playlist_track(
+            &row,
+            "vid".into(),
+            "Song".into(),
+            super::MusicVideoType::AlbumTrack,
+            None,
+        );
+
+        assert_eq!(parsed.artists[0].id.as_deref(), Some("UCada"));
+        assert_eq!(parsed.duration, 201);
+    }
+
+    /// `artists` keeps naming every credit, because the grid still reads it.
+    #[test]
+    fn a_track_carries_both_the_names_and_the_credits() {
+        let track = parsed_to_track(search_row(&[
+            ("Ada", Some("UCada")),
+            ("Boris", Some("UCboris")),
+        ]));
+
+        assert_eq!(track.artist, "Ada");
+        assert_eq!(track.artists, ["Ada", "Boris"]);
+        assert_eq!(track.credits[1].id.as_deref(), Some("UCboris"));
+    }
 }
 
 #[cfg(test)]
