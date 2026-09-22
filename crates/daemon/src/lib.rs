@@ -4,6 +4,7 @@
 //! `kopuz-kopuzd` puts it behind gRPC, the app calls it in-process.
 
 pub mod artwork;
+pub mod auto_sync;
 pub mod boot;
 pub mod catalog;
 pub mod config_service;

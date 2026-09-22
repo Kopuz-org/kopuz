@@ -52,7 +52,16 @@ impl LibraryService {
         let service = self.clone();
         runner.start(JobKind::LibrarySync, move |ctx| async move {
             let config = service.current_config();
-            service.run_remote_sync(&ctx, &config).await
+            let result = service.run_remote_sync(&ctx, &config).await;
+            if result.is_ok() && !ctx.cancelled() {
+                crate::auto_sync::mark_synced(
+                    &service.db,
+                    JobKind::LibrarySync,
+                    &config.active_source,
+                )
+                .await;
+            }
+            result
         })
     }
 

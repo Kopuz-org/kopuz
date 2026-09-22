@@ -202,6 +202,14 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let sources =
         crate::SourceService::new(database.clone(), session.clone(), config_service.clone());
     sources.spawn_credential_upkeep();
+    crate::auto_sync::spawn(
+        database.clone(),
+        jobs.clone(),
+        library.clone(),
+        playlists.clone(),
+        favorites.clone(),
+        session.config_watch(),
+    );
     let config_service_for_api = config_service.clone();
     let catalog = crate::CatalogService::new(database.clone(), session.clone(), library.clone());
     let radio_service = crate::RadioService::new(config_service.clone(), library.clone());
