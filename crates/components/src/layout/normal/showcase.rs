@@ -340,7 +340,6 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                      div { class: "flex-1 min-w-0",
                                          TrackRow {
                                              track: track.clone(),
-                                             on_start_radio: crate::track_row::radio_handler(track.key.clone()),
                                              cover_url: cover_url,
                                              is_menu_open: props.active_track.as_ref() == Some(&track.uid),
                                              is_album: props.is_album,
@@ -372,11 +371,6 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              },
                                              on_add_to_playlist: move |_| {
                                                  if let Some(handler) = &props.on_add_to_playlist {
-                                                     handler.call(idx);
-                                                 }
-                                             },
-                                             on_queue: move |_| {
-                                                 if let Some(handler) = &props.on_queue {
                                                      handler.call(idx);
                                                  }
                                              },

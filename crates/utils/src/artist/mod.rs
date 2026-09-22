@@ -1,5 +1,9 @@
 //! Artist-name keying shared by the UI and the photo-fetch pipeline.
 
+mod credit;
+
+pub use credit::*;
+
 /// The key artist caches are stored under (the `artist_images` table's
 /// `artist_norm`, the fetch skip-sets): trimmed, lowercased display name.
 pub fn normalize_artist_key(value: &str) -> String {
