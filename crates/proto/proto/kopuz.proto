@@ -1383,6 +1383,13 @@ message EqualizerSettings {
   float preamp_db = 4;
 }
 
+message ReplayGainSettings {
+  ReplayGainMode mode = 1;
+  bool prevent_clipping = 2;
+  float preamp_db = 3;
+  float fallback_gain_db = 4;
+}
+
 message AlbumSortCriterion {
   AlbumSortField field = 1;
   SortDirection direction = 2;
@@ -1463,6 +1470,7 @@ message Config {
   bool lyrics_offset_auto = 66;
   bool lyrics_depth_blur = 67;
   uint32 lyrics_depth_blur_strength = 68;
+  ReplayGainSettings replay_gain = 69;
 }
 
 enum AlbumViewMode {
@@ -1568,6 +1576,14 @@ enum EqPreset {
   EQ_PRESET_VOCAL_BOOST = 4;
   EQ_PRESET_LOUDNESS = 5;
   EQ_PRESET_CUSTOM = 6;
+}
+
+enum ReplayGainMode {
+  REPLAY_GAIN_MODE_UNSPECIFIED = 0;
+  REPLAY_GAIN_MODE_OFF = 1;
+  REPLAY_GAIN_MODE_TRACK = 2;
+  REPLAY_GAIN_MODE_ALBUM = 3;
+  REPLAY_GAIN_MODE_AUTO = 4;
 }
 
 enum SortDirection {

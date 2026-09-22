@@ -6,7 +6,7 @@
 //! ring halves are shipped back to the actor so no deallocation happens on the
 //! audio thread. The only shared state is atomics: volume, paused, and the
 //! per-ring played-sample counter the actor derives position and drain
-//! completion from.
+//! completion from, plus each session's ReplayGain factor.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -21,6 +21,11 @@ use crate::eq::Equalizer;
 pub(crate) struct RtSession {
     pub consumer: rtrb::Consumer<f32>,
     pub played: Arc<AtomicU64>,
+    /// Linear ReplayGain factor for this session's track, as f32 bits. Shared
+    /// with the actor, which rewrites it when the settings change, so a live
+    /// preamp tweak is heard on the current track without a reload. Per session
+    /// because a crossfade has two tracks in flight, each with its own gain.
+    pub gain: Arc<AtomicU32>,
 }
 
 pub(crate) enum RtCmd {
@@ -124,6 +129,7 @@ impl RtState {
                 .map(|session| {
                     let read = read_into(&mut session.consumer, data);
                     session.played.fetch_add(read as u64, Ordering::Relaxed);
+                    apply_gain(&mut data[..read], session_gain(session));
                     read
                 })
                 .unwrap_or(0)
@@ -204,6 +210,7 @@ impl RtState {
                 .map(|s| {
                     let read = read_into(&mut s.consumer, active_scratch);
                     s.played.fetch_add(read as u64, Ordering::Relaxed);
+                    apply_gain(&mut active_scratch[..read], session_gain(s));
                     read
                 })
                 .unwrap_or(0);
@@ -217,6 +224,7 @@ impl RtState {
                     // session, and a seek-cancelled fade installs a fresh ring.
                     let read = read_into(&mut s.consumer, fading_scratch);
                     s.played.fetch_add(read as u64, Ordering::Relaxed);
+                    apply_gain(&mut fading_scratch[..read], session_gain(s));
                     read
                 })
                 .unwrap_or(0);
@@ -278,6 +286,19 @@ impl RtState {
         }
 
         written
+    }
+}
+
+fn session_gain(session: &RtSession) -> f32 {
+    f32::from_bits(session.gain.load(Ordering::Relaxed))
+}
+
+fn apply_gain(samples: &mut [f32], gain: f32) {
+    if !gain.is_finite() || (gain - 1.0).abs() < f32::EPSILON {
+        return;
+    }
+    for sample in samples.iter_mut() {
+        *sample *= gain;
     }
 }
 

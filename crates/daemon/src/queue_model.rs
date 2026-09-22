@@ -95,6 +95,21 @@ impl QueueModel {
         self.track_at(self.current)
     }
 
+    /// Whether the queue is walking an album at `position`: a neighbour in play
+    /// order belongs to the same album. Shuffle scatters an album, so this
+    /// reads false there, which is what ReplayGain's auto mode wants: a
+    /// shuffled mix should level track to track.
+    pub fn album_context_at(&self, position: usize, album_id: &str) -> bool {
+        if album_id.is_empty() {
+            return false;
+        }
+        let shares_album = |other: usize| {
+            self.track_at(other)
+                .is_some_and(|track| track.album_id == album_id)
+        };
+        position.checked_sub(1).is_some_and(shares_album) || shares_album(position + 1)
+    }
+
     /// Whether advancing from `idx` lands on another track. The crossfade arm
     /// and the actual advance MUST agree on this: if the arm fires when the
     /// advance would hit end-of-queue, playback pauses mid-fade and the song
@@ -608,6 +623,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec![],
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 
