@@ -201,9 +201,7 @@ impl CatalogService {
     }
 
     pub async fn detail(&self, request: CatalogDetailRequest) -> Result<CatalogDetail, ApiError> {
-        if request.id.trim().is_empty() {
-            return Err(ApiError::invalid_input("catalog id is required"));
-        }
+        check_reference(&request)?;
         let config = self.config();
         let source = self.source();
         match request.kind {
@@ -372,6 +370,19 @@ impl CatalogService {
     }
 }
 
+/// What a request has to name to be answerable. An artist is the one kind a
+/// source resolves from a name; an album and a playlist are only ever reached by
+/// the id they were issued, so naming one is malformed rather than unsupported.
+fn check_reference(request: &CatalogDetailRequest) -> Result<(), ApiError> {
+    match request.reference() {
+        None => Err(ApiError::invalid_input("catalog id or name is required")),
+        Some(api::Reference::Name(_)) if !matches!(request.kind, CatalogItemKind::Artist) => {
+            Err(ApiError::invalid_input("this catalog kind is opened by id"))
+        }
+        Some(_) => Ok(()),
+    }
+}
+
 /// Lift the seed out of a mix, if the source put it there. Removing rather
 /// than copying is what keeps it from appearing twice once it is pinned.
 fn take_seed(tracks: &mut Vec<reader::Track>, key: &str) -> Option<reader::Track> {
@@ -381,7 +392,46 @@ fn take_seed(tracks: &mut Vec<reader::Track>, key: &str) -> Option<reader::Track
 
 #[cfg(test)]
 mod tests {
-    use super::take_seed;
+    use super::{check_reference, take_seed};
+    use api::{CatalogDetailRequest, CatalogItemKind, ErrorCode};
+
+    #[test]
+    fn an_artist_is_answerable_by_name_and_an_album_is_not() {
+        let named = |kind| CatalogDetailRequest::by_name(kind, "UCHU CONBINI");
+        let by_id = |kind| CatalogDetailRequest::by_id(kind, "MPRE1");
+
+        assert!(check_reference(&named(CatalogItemKind::Artist)).is_ok());
+        assert!(check_reference(&by_id(CatalogItemKind::Artist)).is_ok());
+        assert!(check_reference(&by_id(CatalogItemKind::Album)).is_ok());
+        assert!(check_reference(&by_id(CatalogItemKind::Playlist)).is_ok());
+
+        for kind in [CatalogItemKind::Album, CatalogItemKind::Playlist] {
+            assert_eq!(
+                check_reference(&named(kind)).unwrap_err().code,
+                ErrorCode::InvalidInput,
+            );
+        }
+    }
+
+    #[test]
+    fn a_request_naming_nothing_is_malformed() {
+        for kind in [
+            CatalogItemKind::Artist,
+            CatalogItemKind::Album,
+            CatalogItemKind::Playlist,
+        ] {
+            // A blank name is no name: `reference()` trims before it decides.
+            for request in [
+                CatalogDetailRequest::by_name(kind, "   "),
+                CatalogDetailRequest::by_id(kind, ""),
+            ] {
+                assert_eq!(
+                    check_reference(&request).unwrap_err().code,
+                    ErrorCode::InvalidInput,
+                );
+            }
+        }
+    }
 
     fn track(key: &str) -> reader::Track {
         reader::Track {
