@@ -83,7 +83,7 @@ impl ProviderClient {
                     .to_string(),
             ),
             MusicService::Spotify => Err(
-                "Spotify uses OAuth browser sign-in; call spotify::auth::launch_signin_and_extract() \
+                "Spotify uses OAuth browser sign-in; call spotify::auth::sign_in() \
                  instead of username/password login"
                     .to_string(),
             ),

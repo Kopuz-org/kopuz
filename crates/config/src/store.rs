@@ -498,8 +498,6 @@ mod tests {
                 },
             ],
             active_source: crate::Source::LocalLibrary("local:two".into()),
-            spotify_browser: Some("brave".into()),
-            spotify_prefer_active_device: false,
             music_directory: vec!["/music".into()],
             theme: "custom-one".into(),
             discord_presence: Some(false),
@@ -580,11 +578,6 @@ mod tests {
 
         assert_eq!(restored.local_sources, cfg.local_sources);
         assert_eq!(restored.active_source, cfg.active_source);
-        assert_eq!(restored.spotify_browser, cfg.spotify_browser);
-        assert_eq!(
-            restored.spotify_prefer_active_device,
-            cfg.spotify_prefer_active_device
-        );
         assert_eq!(restored.music_directory, cfg.music_directory);
         assert_eq!(restored.theme, cfg.theme);
         assert_eq!(restored.discord_presence, cfg.discord_presence);

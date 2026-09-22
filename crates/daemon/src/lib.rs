@@ -26,7 +26,6 @@ pub mod scrobbler;
 pub mod services;
 pub mod session;
 pub mod sources;
-pub mod spotify;
 pub mod url_download;
 mod wire;
 
@@ -49,5 +48,4 @@ pub use radio::RadioService;
 pub use scrobbler::Scrobbler;
 pub use session::{LocalApi, PlaybackServices, QueueMaterializer, SessionHandle};
 pub use sources::SourceService;
-pub use spotify::SpotifySink;
 pub use url_download::UrlDownloadService;

@@ -276,8 +276,6 @@ fn with_daemon_owned_fields(
     incoming.librefm_api_secret = current.librefm_api_secret.clone();
     incoming.librefm_session_key = current.librefm_session_key.clone();
     incoming.offline_tracks = current.offline_tracks.clone();
-    incoming.spotify_browser = current.spotify_browser.clone();
-    incoming.spotify_prefer_active_device = current.spotify_prefer_active_device;
     incoming.discord_presence = current.discord_presence;
     incoming.discord_presence_paused = current.discord_presence_paused;
     incoming.discord_presence_source = current.discord_presence_source;

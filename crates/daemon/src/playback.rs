@@ -5,7 +5,8 @@ use player::engine::SourceFactory;
 use server::playback_ref::ResolvedStreamRef;
 
 /// Factory for a resolved network stream (radio, YT range/sequential,
-/// SoundCloud HLS, Apple Music fMP4, or a plain buffered stream).
+/// SoundCloud HLS, Apple Music fMP4, Spotify via librespot, or a plain
+/// buffered stream).
 ///
 /// The returned closure runs on the decode worker thread, which has no tokio
 /// runtime. Keep the captured runtime handle and its `block_on` calls here;
@@ -74,6 +75,27 @@ pub(crate) fn network_factory(
                 let cursor = std::io::Cursor::new(bytes);
                 let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
                 hint.with_extension("m4a");
+                Ok((source, hint))
+            } else if let ResolvedStreamRef::Spotify(track_id) =
+                ResolvedStreamRef::parse(&stream_url)
+            {
+                // The session is the process's one librespot login; the
+                // source connected it when it resolved the ref.
+                let session = server::spotify::session::current()
+                    .ok_or_else(|| std::io::Error::other("Spotify is not signed in"))?;
+                let track_id = track_id.to_string();
+                let audio = rt_handle
+                    .block_on(async {
+                        let session = session.session().await.map_err(|e| e.to_string())?;
+                        server::spotify::stream::open(&session, &track_id).await
+                    })
+                    .map_err(std::io::Error::other)?;
+                // Decrypts on read and fetches ranges on demand, so the
+                // source stays seekable.
+                let len = Some(audio.len());
+                let extension = audio.extension;
+                let (source, mut hint) = decoder::from_stream_with_len(audio, len);
+                hint.with_extension(extension);
                 Ok((source, hint))
             } else if let ResolvedStreamRef::AppleMusicFmp4(payload) =
                 ResolvedStreamRef::parse(&stream_url)
