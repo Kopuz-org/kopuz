@@ -61,6 +61,17 @@ pub fn Artist(
 
     let albums_res = use_albums(source);
     let artist_counts_res = use_artists(source);
+    // The source's own id per artist, by normalized name, so a tile opens the
+    // artist it names instead of a name the source has to resolve back.
+    let artist_ids = use_memo(move || {
+        artist_counts_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|artist| Some((normalize_artist_key(&artist.name), artist.id.clone()?)))
+            .collect::<HashMap<String, String>>()
+    });
     // Photos, by normalized name: the daemon says which artists have one, and
     // the grid renders its placeholder for the rest without asking.
     let artist_covers = use_memo(move || {
@@ -390,7 +401,13 @@ pub fn Artist(
                                             key: "{artist}",
                                             class: "vcard group cursor-pointer flex flex-col items-center",
                                             style: "content-visibility: auto;",
-                                            onclick: move |_| artist_name.set(art.clone()),
+                                            onclick: move |_| {
+                                                let id = artist_ids
+                                                    .read()
+                                                    .get(&normalize_artist_key(&art))
+                                                    .cloned();
+                                                nav_ctrl.open_artist(art.clone(), id);
+                                            },
                                             div {
                                                 class: "vcard-avatar aspect-square w-full rounded-full bg-stone-800 mb-4 overflow-hidden relative",
                                                 style: "-webkit-user-drag: none;",
