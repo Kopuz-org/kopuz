@@ -67,6 +67,7 @@ fn song_to_track(
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: Vec::new(),
         artists: vec![artist],
     }
 }
@@ -210,6 +211,7 @@ impl MediaSource for SubsonicSource {
                         musicbrainz_recording_id: None,
                         musicbrainz_track_id: None,
                         playlist_item_id: None,
+                        credits: Vec::new(),
                         artists: vec![song.artist.unwrap_or_else(|| album_artist.clone())],
                     });
                 }

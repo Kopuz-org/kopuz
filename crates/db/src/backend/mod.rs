@@ -228,6 +228,13 @@ impl ReadStore for Native {
         queries::artists(&self.pool(), source).await
     }
 
+    async fn artist_ids(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        queries::artist_ids(&self.pool(), source).await
+    }
+
     async fn artist_album_covers(
         &self,
         source: &crate::Source,

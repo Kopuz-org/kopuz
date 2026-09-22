@@ -108,6 +108,7 @@ pub fn track_from_song_data(song: &types::TrackData) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: Vec::new(),
         artists,
     }
 }
@@ -189,6 +190,7 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: Vec::new(),
         artists: vec![song.attributes.artistName.clone()],
     }
 }

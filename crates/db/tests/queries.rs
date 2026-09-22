@@ -208,6 +208,7 @@ fn track(path: &str, album_id: &str) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: Vec::new(),
+        credits: Vec::new(),
     }
 }
 

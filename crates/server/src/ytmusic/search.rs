@@ -650,6 +650,7 @@ fn parsed_to_track(p: ParsedRow) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: Vec::new(),
         artists: p.artists,
     }
 }
