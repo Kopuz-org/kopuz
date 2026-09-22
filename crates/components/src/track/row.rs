@@ -19,6 +19,15 @@ pub(crate) fn copy_to_clipboard(text: &str) {
     );
     let _ = dioxus::document::eval(&js);
 }
+/// What the row's artist cell opens: the credit behind the billed name, with
+/// the billed string itself when no credit matches it.
+pub(crate) fn artist_credit(track: &Track) -> (String, Option<String>) {
+    match track.primary_credit() {
+        Some(credit) => (credit.name.clone(), credit.id.clone()),
+        None => (track.artist.clone(), None),
+    }
+}
+
 #[component]
 pub fn TrackRow(
     track: Track,
@@ -528,11 +537,12 @@ pub fn TrackRow(
                         class: "text-sm truncate cursor-pointer hover:underline",
                         style: "color: var(--color-white); opacity: 0.45;",
                         onclick: {
-                            let artist = track.artist.clone();
+                            let credit = artist_credit(&track);
                             move |evt: MouseEvent| {
                                 evt.stop_propagation();
                                 if !is_selection_mode {
-                                    nav_ctrl.navigate_to_artist(artist.clone());
+                                    let (name, id) = credit.clone();
+                                    nav_ctrl.open_artist(name, id);
                                 }
                             }
                         },
@@ -779,11 +789,12 @@ pub fn TrackRow(
                     class: "text-sm text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
                     style: "color: var(--color-white); opacity: 0.45;",
                     onclick: {
-                        let artist = track.artist.clone();
+                        let credit = artist_credit(&track);
                         move |evt: MouseEvent| {
                             evt.stop_propagation();
                             if !is_selection_mode {
-                                nav_ctrl.navigate_to_artist(artist.clone());
+                                let (name, id) = credit.clone();
+                                nav_ctrl.open_artist(name, id);
                             }
                         }
                     },

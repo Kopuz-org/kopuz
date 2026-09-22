@@ -435,6 +435,7 @@ fn AlbumDetail(
                             config,
                             title: remote.title,
                             artist: remote.subtitle.unwrap_or_default(),
+                            artist_id: remote.artist_id,
                             year: remote.year,
                             browse_id: Some(remote.id),
                             local_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
@@ -566,6 +567,7 @@ fn AlbumDetail(
     let album_title = album.title.clone();
     let album_artist = album.artist.clone();
     let album_artist_for_nav = album_artist.clone();
+    let album_artist_id = album.artist_id.clone();
     let cover_url = hooks::artwork::for_album(&album, hooks::artwork::Size::Thumb);
     let cap = caps();
     let aid = album.id.clone();
@@ -616,6 +618,10 @@ fn AlbumDetail(
         .and_then(|a| a.year.clone())
         .or_else(|| (album.year > 0).then(|| album.year.to_string()));
     let yt_browse_id = yt_remote.as_ref().map(|a| a.id.clone());
+    let remote_artist_id = yt_remote
+        .as_ref()
+        .and_then(|a| a.artist_id.clone())
+        .or_else(|| album.artist_id.clone());
 
     rsx! {
         div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
@@ -624,6 +630,7 @@ fn AlbumDetail(
                     config,
                     title: yt_title,
                     artist: yt_artist,
+                    artist_id: remote_artist_id,
                     year: yt_year,
                     browse_id: yt_browse_id,
                     local_cover: cover_url_remote,
@@ -635,7 +642,8 @@ fn AlbumDetail(
                 name: album_title,
                 description: album_artist,
                 on_description_click: Some(EventHandler::new(move |_| {
-                    nav_ctrl.navigate_to_artist(album_artist_for_nav.clone());
+                    nav_ctrl
+                        .open_artist(album_artist_for_nav.clone(), album_artist_id.clone());
                 })),
                 cover_url,
                 is_album: true,
@@ -728,6 +736,7 @@ fn YtAlbumDetail(
     config: Signal<AppConfig>,
     title: String,
     artist: String,
+    artist_id: Option<String>,
     year: Option<String>,
     browse_id: Option<String>,
     local_cover: Option<utils::CoverUrl>,
@@ -747,6 +756,7 @@ fn YtAlbumDetail(
     let song_count = tracks.len();
     let artist_name = artist;
     let artist_for_nav = artist_name.clone();
+    let artist_id_for_nav = artist_id.clone();
 
     // Current track for the row highlight. Read `current_queue_index`
     // *reactively* (`current_track()` peeks, so the page wouldn't re-render on a
@@ -770,6 +780,7 @@ fn YtAlbumDetail(
     let tracks_play_all = tracks.clone();
     let tracks_download_all = tracks.clone();
     let artist_for_nav_btn = artist_name.clone();
+    let artist_id_for_btn = artist_id.clone();
     // Prefer the provider's album page; fall back to its first track page.
     // The daemon knows which sources have web pages and how they spell them;
     // an id and a key are all that leave here.
@@ -818,7 +829,7 @@ fn YtAlbumDetail(
                     div { class: "flex flex-col gap-2 w-full",
                         button {
                             class: "text-sm font-semibold text-white/60 hover:text-white hover:underline transition-colors truncate max-w-full self-center md:self-start",
-                            onclick: move |_| nav_ctrl.navigate_to_artist(artist_for_nav.clone()),
+                            onclick: move |_| nav_ctrl.open_artist(artist_for_nav.clone(), artist_id_for_nav.clone()),
                             "{artist_name}"
                         }
                         h1 { class: "text-3xl font-semibold tracking-tight text-white leading-[1.1] break-words", "{title}" }
@@ -863,7 +874,7 @@ fn YtAlbumDetail(
                         button {
                             class: "w-11 h-11 rounded-full border border-white/15 flex items-center justify-center text-slate-300 hover:text-white hover:border-white/30 transition-colors",
                             title: "Go to artist".to_string(),
-                            onclick: move |_| nav_ctrl.navigate_to_artist(artist_for_nav_btn.clone()),
+                            onclick: move |_| nav_ctrl.open_artist(artist_for_nav_btn.clone(), artist_id_for_btn.clone()),
                             i { class: "fa-solid fa-user" }
                         }
                         // Play (primary).

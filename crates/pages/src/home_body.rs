@@ -62,7 +62,7 @@ pub fn HomeBody(
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
     on_select_playlist: EventHandler<String>,
-    on_search_artist: EventHandler<String>,
+    on_search_artist: EventHandler<(String, Option<String>)>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
     let mut config = use_context::<Signal<AppConfig>>();
@@ -356,7 +356,10 @@ pub fn HomeBody(
                     .read()
                     .get(&normalize_artist_key(&track.artist))
                     .map(|cover: &utils::CoverUrl| cover.as_ref().to_string());
-                artist_list.push((track.artist.clone(), cover_url));
+                // The row's own credit, so the tile opens the artist the source
+                // named rather than the billed string it happens to show.
+                let id = track.primary_credit().and_then(|credit| credit.id.clone());
+                artist_list.push((track.artist.clone(), cover_url, id));
             }
             if artist_list.len() >= 10 {
                 break;
