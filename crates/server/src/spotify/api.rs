@@ -347,6 +347,12 @@ pub async fn album_remote(
             .and_then(|a| a.first())
             .and_then(|a| a["name"].as_str())
             .map(str::to_string),
+        artist_id: album["artists"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|a| a["id"].as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_string),
         year: album["release_date"]
             .as_str()
             .map(|d| d.chars().take(4).collect()),
@@ -696,14 +702,23 @@ fn first_image(images: &Value) -> Option<String> {
 pub fn parse_track(item: &Value) -> Option<Track> {
     let id = item["id"].as_str().filter(|s| !s.is_empty())?;
 
-    let artists: Vec<String> = item["artists"]
+    // Each artist object carries its own id beside the name, so the read that
+    // took only the name links the credit for free.
+    let credits: Vec<reader::ArtistCredit> = item["artists"]
         .as_array()
         .map(|arr| {
             arr.iter()
-                .filter_map(|a| a["name"].as_str().map(str::to_string))
+                .filter_map(|a| {
+                    let name = a["name"].as_str()?;
+                    Some(match a["id"].as_str().filter(|id| !id.is_empty()) {
+                        Some(id) => reader::ArtistCredit::linked(name, id),
+                        None => reader::ArtistCredit::unlinked(name),
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default();
+    let artists: Vec<String> = credits.iter().map(|c| c.name.clone()).collect();
     let artist = artists.first().cloned().unwrap_or_default();
 
     let album_obj = &item["album"];
@@ -730,8 +745,8 @@ pub fn parse_track(item: &Value) -> Option<Track> {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
-        credits: Vec::new(),
         artists,
+        credits,
     })
 }
 
