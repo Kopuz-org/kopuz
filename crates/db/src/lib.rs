@@ -226,8 +226,7 @@ pub trait ReadStore: Send + Sync {
     /// Distinct artists for a source with their track counts, A→Z.
     async fn artists(&self, source: &Source) -> Result<Vec<(String, u32)>, DbError>;
 
-    /// The source-issued id per credited artist, keyed by trimmed lowercase
-    /// name, for the reads that only know what an artist is called.
+    /// The source-issued id per credited artist, keyed by trimmed lowercase name.
     async fn artist_ids(
         &self,
         source: &Source,

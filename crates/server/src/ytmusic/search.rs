@@ -48,7 +48,6 @@ impl MusicVideoType {
 struct ParsedRow {
     video_id: String,
     title: String,
-    /// Credits in billing order, linked where the run carried a channel.
     artists: Vec<ArtistCredit>,
     album: Option<String>,
     album_browse_id: Option<String>,
@@ -494,9 +493,7 @@ fn parse_playlist_track(
     mvt: MusicVideoType,
     thumbnail_url: Option<String>,
 ) -> ParsedRow {
-    // This is the row the library sync stores, so it is what decides whether an
-    // artist has an id at all. The column links each credit to its channel; the
-    // positional read is the fallback for a row that links none.
+    // The row the library sync stores, so it decides whether an artist has an id.
     let mut artists: Vec<ArtistCredit> = pick_runs_with_browse(row, 1)
         .into_iter()
         .filter_map(|(text, browse)| match browse.as_deref() {
@@ -568,8 +565,6 @@ fn parse_search_row(
         .find(|(_, b)| b.as_deref().is_some_and(|b| b.starts_with("MPRE")))
         .map(|(t, b)| (Some(t.clone()), b.clone()))
         .unwrap_or((None, None));
-    // The channel the run links to is the artist's own id, so keep it: resolving
-    // this name later costs a search and answers wrong for a shared one.
     let mut artists: Vec<ArtistCredit> = runs
         .iter()
         .filter_map(|(t, b)| match b.as_deref() {
@@ -896,7 +891,6 @@ mod credit_tests {
     use super::{ParsedRow, parse_playlist_track, parse_search_row, parsed_to_track};
     use serde_json::{Value, json};
 
-    /// A flex column of `(text, browseId)` runs, as a row ships one.
     fn column(runs: &[(&str, Option<&str>)]) -> Value {
         let runs: Vec<Value> = runs
             .iter()
@@ -926,7 +920,6 @@ mod credit_tests {
         assert_eq!(parsed.duration, 201);
     }
 
-    /// Two linked artists are two credits, not one name nobody is called.
     #[test]
     fn each_linked_artist_becomes_its_own_credit() {
         let parsed = search_row(&[
@@ -940,7 +933,6 @@ mod credit_tests {
         assert_eq!(parsed.artists[1].id.as_deref(), Some("UCboris"));
     }
 
-    /// An unlinked joined credit still splits, and neither half invents an id.
     #[test]
     fn an_unlinked_joined_credit_splits_without_ids() {
         let parsed = search_row(&[("INABAKUMORI feat. Kaai Yuki", None), ("2:30", None)]);
@@ -950,7 +942,6 @@ mod credit_tests {
         assert!(parsed.artists.iter().all(|c| c.id.is_none()));
     }
 
-    /// An album run is not an artist, however much it looks like one.
     #[test]
     fn an_album_run_is_not_taken_for_a_credit() {
         let parsed = search_row(&[
@@ -963,8 +954,6 @@ mod credit_tests {
         assert_eq!(parsed.album.as_deref(), Some("One"));
     }
 
-    /// The row the library sync stores, so it decides whether an artist has an
-    /// id at all. It used to read the name positionally and ignore the link.
     #[test]
     fn a_playlist_row_keeps_the_channel_the_sync_stores() {
         let row = json!({
@@ -988,7 +977,6 @@ mod credit_tests {
         assert_eq!(parsed.duration, 201);
     }
 
-    /// `artists` keeps naming every credit, because the grid still reads it.
     #[test]
     fn a_track_carries_both_the_names_and_the_credits() {
         let track = parsed_to_track(search_row(&[

@@ -237,6 +237,7 @@ impl CatalogService {
                     kind: CatalogItemKind::Album,
                     id: album.browse_id,
                     title: album.title,
+                    artist_id: album.artist_id,
                     subtitle: album.artist,
                     artwork,
                     playback_id: album.audio_playlist_id,
@@ -370,9 +371,8 @@ impl CatalogService {
     }
 }
 
-/// What a request has to name to be answerable. An artist is the one kind a
-/// source resolves from a name; an album and a playlist are only ever reached by
-/// the id they were issued, so naming one is malformed rather than unsupported.
+/// An artist is the one kind a source resolves from a name; an album and a
+/// playlist are only ever reached by the id they were issued.
 fn check_reference(request: &CatalogDetailRequest) -> Result<(), ApiError> {
     match request.reference() {
         None => Err(ApiError::invalid_input("catalog id or name is required")),

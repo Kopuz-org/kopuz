@@ -15,8 +15,6 @@ pub(super) struct JellyfinSource {
     client: JellyfinClient,
 }
 
-/// `ArtistItems` as credits. Absent when the request did not ask for the field,
-/// in which case the names in `artists` stand alone as they always did.
 fn credits_of(items: Option<&[crate::jellyfin::NamedItem]>) -> Vec<reader::ArtistCredit> {
     items
         .unwrap_or_default()

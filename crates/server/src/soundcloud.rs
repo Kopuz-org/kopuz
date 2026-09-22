@@ -352,7 +352,7 @@ fn parse_track(item: &Value) -> Option<Track> {
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
-    // The uploader is the artist, and its own id sits beside the name.
+    // SoundCloud has no artist entity; the uploader is it.
     let artist_id = user
         .and_then(|u| u.get("id"))
         .and_then(|v| v.as_u64())

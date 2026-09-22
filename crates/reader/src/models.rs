@@ -165,15 +165,14 @@ pub struct Track {
     pub playlist_item_id: Option<String>,
     #[serde(default)]
     pub artists: Vec<String>,
-    /// Every credit with the id its source issued, where the source links one.
-    /// `artists` stays the names alone: a queue stored before this has no
-    /// credits, and a build that predates it must still read the names.
+    /// `artists` keeps the names alone beside this: a queue stored before
+    /// credits existed has none, and an older build reads only that.
     #[serde(default)]
     pub credits: Vec<ArtistCredit>,
 }
 
 /// One credited artist. The id is the issuing source's own and means nothing to
-/// another, so it travels no further than that source is the active one.
+/// another.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ArtistCredit {
     pub name: String,
@@ -182,7 +181,6 @@ pub struct ArtistCredit {
 }
 
 impl ArtistCredit {
-    /// A credit the source left unlinked, which opens by name or not at all.
     pub fn unlinked(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -190,7 +188,6 @@ impl ArtistCredit {
         }
     }
 
-    /// A credit the source linked to an artist of its own.
     pub fn linked(name: impl Into<String>, id: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -496,9 +493,8 @@ mod tests {
     use config::MusicService;
     use std::path::PathBuf;
 
-    /// A queue stored before credits existed is read back with `unwrap_or_default`
-    /// on the whole `Vec<Track>`, so a `Track` that will not deserialize does not
-    /// fail loudly -- it comes back as no queue at all.
+    /// The stored queue is read with `unwrap_or_default` over the whole `Vec`,
+    /// so one `Track` that will not parse silently empties it.
     #[test]
     fn a_track_stored_before_credits_still_deserializes() {
         let json = r#"{

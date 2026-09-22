@@ -4390,6 +4390,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "kopuz-config",
+ "kopuz-utils",
  "thiserror 2.0.18",
 ]
 

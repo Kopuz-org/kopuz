@@ -210,9 +210,8 @@ impl MediaSource for YtSource {
     }
 
     async fn resolve_artist_channel_id(&self, query: &str) -> Result<Option<String>, SourceError> {
-        // A stored credit already holds the id this source issued for the name,
-        // so a row that arrived linked costs no request and cannot resolve to
-        // somebody else. What follows is for names that arrived bare.
+        // A row that arrived linked already knows the answer; the rest of this
+        // function is for names that arrived bare.
         let stored = self.db.artist_ids(&self.source).await.unwrap_or_default();
         if let Some(id) = stored.get(&utils::artist::normalize_artist_key(query)) {
             return Ok(Some(id.clone()));

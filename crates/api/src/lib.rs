@@ -31,7 +31,7 @@ pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
 pub use jobs::{DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState};
 pub use library::{
-    AlbumInfo, AlbumPage, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT, LyricChunkView,
+    AlbumInfo, AlbumPage, ArtistCredit, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT, LyricChunkView,
     LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter, TrackInfo, TrackPage,
     TrackSort,
 };
