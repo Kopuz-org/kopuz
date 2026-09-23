@@ -50,6 +50,12 @@ fn synthesize_albums(tracks: &[Track]) -> Vec<Album> {
             year: 0,
             cover_path: track.cover.as_deref().map(std::path::PathBuf::from),
             manual_cover: false,
+            artist_id: track
+                .credits
+                .iter()
+                .find(|credit| credit.name.trim() == track.artist.trim())
+                .or(track.credits.first())
+                .and_then(|credit| credit.id.clone()),
         })
         .collect()
 }
@@ -240,5 +246,65 @@ impl super::FavoritesService {
         self.bump(Table::Tracks);
         self.bump(Table::Albums);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reader::models::{ArtistCredit, Track, TrackId};
+
+    fn track(artist: &str, credits: Vec<ArtistCredit>) -> Track {
+        Track {
+            id: TrackId::Server {
+                service: config::MusicService::YtMusic,
+                item_id: "v1".into(),
+            },
+            cover: None,
+            album_id: "MPRE1".into(),
+            title: "t".into(),
+            artist: artist.into(),
+            album: "Album".into(),
+            duration: 60,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: Vec::new(),
+            credits,
+        }
+    }
+
+    #[test]
+    fn an_album_takes_the_billed_artists_id() {
+        let row = track(
+            "Boris",
+            vec![
+                ArtistCredit::linked("Ada", "UC-ada"),
+                ArtistCredit::linked("Boris", "UC-b"),
+            ],
+        );
+
+        let albums = super::synthesize_albums(&[row]);
+
+        assert_eq!(albums[0].artist_id.as_deref(), Some("UC-b"));
+    }
+
+    #[test]
+    fn a_joined_billing_takes_its_leads_id() {
+        let row = track(
+            "Ada & Boris",
+            vec![
+                ArtistCredit::linked("Ada", "UC-ada"),
+                ArtistCredit::unlinked("Boris"),
+            ],
+        );
+
+        let albums = super::synthesize_albums(&[row]);
+
+        assert_eq!(albums[0].artist_id.as_deref(), Some("UC-ada"));
     }
 }

@@ -239,6 +239,7 @@ impl MediaSource for AppleMusicSource {
                             crate::applemusic::artwork_url(&a.attributes.artwork.url, 600)
                         ))),
                         manual_cover: false,
+                        artist_id: a.relationships.artists.data.first().map(|r| r.id.clone()),
                     })
                     .collect()
             })

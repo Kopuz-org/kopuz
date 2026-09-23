@@ -265,6 +265,7 @@ mod tests {
             year: 0,
             cover_path: None,
             manual_cover: false,
+            artist_id: None,
         }
     }
 

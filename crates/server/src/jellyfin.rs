@@ -139,6 +139,7 @@ pub struct AlbumItem {
     pub name: String,
     pub id: String,
     pub album_artist: Option<String>,
+    pub album_artists: Option<Vec<NamedItem>>,
     pub artists: Option<Vec<String>>,
     pub production_year: Option<u32>,
     pub genres: Option<Vec<String>>,

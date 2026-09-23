@@ -68,6 +68,7 @@ pub struct AlbumRow {
     pub year: i64,
     pub cover_path: Option<String>,
     pub manual_cover: i64,
+    pub artist_id: Option<String>,
 }
 
 impl From<AlbumRow> for Album {
@@ -80,6 +81,7 @@ impl From<AlbumRow> for Album {
             year: r.year.clamp(0, u16::MAX as i64) as u16,
             cover_path: r.cover_path.map(PathBuf::from),
             manual_cover: r.manual_cover != 0,
+            artist_id: r.artist_id,
         }
     }
 }
