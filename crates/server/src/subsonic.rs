@@ -61,6 +61,7 @@ pub struct SubsonicAlbum {
     pub id: String,
     pub name: String,
     pub artist: Option<String>,
+    pub artist_id: Option<String>,
     pub genre: Option<String>,
     pub year: Option<u16>,
     pub cover_art: Option<String>,

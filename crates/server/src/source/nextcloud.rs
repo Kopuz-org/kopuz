@@ -187,6 +187,7 @@ impl MediaSource for NextcloudSource {
                 year: 0,
                 cover_path: cached.as_deref().map(PathBuf::from),
                 manual_cover: false,
+                artist_id: None,
             });
         }
 

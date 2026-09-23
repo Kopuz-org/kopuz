@@ -30,15 +30,15 @@ fn album_info(album: &Album) -> AlbumInfo {
     album_info_with(album, &std::collections::HashMap::new())
 }
 
-/// `ids` is the map from [`db::ReadStore::artist_ids`]; an album whose artist
-/// no stored credit links keeps `artist_id` empty and opens by name.
+/// The album's own artist id, else the credit map's; neither means it opens by name.
 fn album_info_with(album: &Album, ids: &std::collections::HashMap<String, String>) -> AlbumInfo {
     AlbumInfo {
         id: album.id.clone(),
         title: album.title.clone(),
-        artist_id: ids
-            .get(&utils::artist::normalize_artist_key(&album.artist))
-            .cloned(),
+        artist_id: album.artist_id.clone().or_else(|| {
+            ids.get(&utils::artist::normalize_artist_key(&album.artist))
+                .cloned()
+        }),
         artist: album.artist.clone(),
         genre: album.genre.clone(),
         year: album.year,

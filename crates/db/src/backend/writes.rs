@@ -129,12 +129,13 @@ pub async fn upsert_albums(
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned());
         sqlx::query!(
-            "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+            "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
              ON CONFLICT(source, source_album_id) DO UPDATE SET \
                title=?3, artist=?4, genre=?5, year=?6, \
                cover_path=COALESCE(?7, albums.cover_path), \
-               manual_cover=MAX(?8, albums.manual_cover)",
+               manual_cover=MAX(?8, albums.manual_cover), \
+               artist_id=COALESCE(?9, albums.artist_id)",
             src,
             a.id,
             a.title,
@@ -142,7 +143,8 @@ pub async fn upsert_albums(
             a.genre,
             year,
             cover,
-            manual
+            manual,
+            a.artist_id
         )
         .execute(&mut *tx)
         .await?;

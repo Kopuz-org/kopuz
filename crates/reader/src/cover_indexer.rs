@@ -153,6 +153,7 @@ mod tests {
             year: 0,
             cover_path,
             manual_cover,
+            artist_id: None,
         }
     }
 
