@@ -63,31 +63,13 @@ pub struct ArtistCredit {
 }
 
 impl TrackInfo {
-    /// The credit `artist` is about. That string can be a joined billing
-    /// ("A feat. B") naming no single artist, so this gives up rather than
-    /// guess when nothing matches it.
+    /// The credit `artist` names exactly, else the lead: credits come in billing order.
     pub fn primary_credit(&self) -> Option<&ArtistCredit> {
         let billed = self.artist.trim();
-        if let Some(exact) = self
-            .credits
+        self.credits
             .iter()
-            .find(|credit| credit.name.trim().eq_ignore_ascii_case(billed))
-        {
-            return Some(exact);
-        }
-        let normalized = utils::artist::normalize_artist_key(billed);
-        if let Some(primary) = utils::artist::joined_credit_primary(&normalized)
-            && let Some(lead) = self
-                .credits
-                .iter()
-                .find(|credit| utils::artist::normalize_artist_key(&credit.name) == primary)
-        {
-            return Some(lead);
-        }
-        match self.credits.as_slice() {
-            [only] => Some(only),
-            _ => None,
-        }
+            .find(|credit| credit.name.trim() == billed)
+            .or_else(|| self.credits.first())
     }
 }
 
@@ -250,13 +232,15 @@ mod tests {
         assert_eq!(row.primary_credit().unwrap().name, "Ada");
     }
 
-    /// Opening the wrong artist is worse than opening none, so a billing that
-    /// matches nothing and has several candidates gives up.
+    /// No string is parsed to find the lead; the source's own order says who it is.
     #[test]
-    fn an_unmatched_billing_with_several_credits_picks_none() {
-        let row = track("Various Artists", &[("Ada", None), ("Boris", None)]);
+    fn an_unmatched_billing_opens_the_first_credit() {
+        let row = track(
+            "Ada & Boris",
+            &[("Ada", Some("UC-ada")), ("Boris", Some("UC-b"))],
+        );
 
-        assert!(row.primary_credit().is_none());
+        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-ada"));
     }
 
     #[test]
