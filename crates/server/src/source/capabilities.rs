@@ -220,8 +220,12 @@ where
 pub trait LibrarySource: SourceIdentity + Send + Sync {
     async fn fetch_library(&self) -> Result<LibrarySnapshot, SourceError>;
     async fn album_tracks(&self, album_id: &str) -> Result<Vec<reader::Track>, SourceError>;
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError>;
-    async fn fetch_artist_image(&self, name: &str) -> Result<Option<String>, SourceError>;
+    async fn fetch_artist_images(&self)
+    -> Result<Vec<(reader::ArtistCredit, String)>, SourceError>;
+    async fn fetch_artist_image(
+        &self,
+        artist: &reader::ArtistCredit,
+    ) -> Result<Option<String>, SourceError>;
 }
 
 #[async_trait]
@@ -237,12 +241,17 @@ where
         <T as MediaSource>::album_tracks(self, album_id).await
     }
 
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError> {
+    async fn fetch_artist_images(
+        &self,
+    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
         <T as MediaSource>::fetch_artist_images(self).await
     }
 
-    async fn fetch_artist_image(&self, name: &str) -> Result<Option<String>, SourceError> {
-        <T as MediaSource>::fetch_artist_image(self, name).await
+    async fn fetch_artist_image(
+        &self,
+        artist: &reader::ArtistCredit,
+    ) -> Result<Option<String>, SourceError> {
+        <T as MediaSource>::fetch_artist_image(self, artist).await
     }
 }
 

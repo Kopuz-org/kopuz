@@ -275,10 +275,10 @@ impl MutationService {
                 .await
                 .map_err(source_error)
                 .map(|_| Table::Albums),
-            ArtworkTarget::Artist(name) => self
+            ArtworkTarget::Artist(artist) => self
                 .source()
                 .set_artist_image(
-                    &utils::artist::normalize_artist_key(name),
+                    &crate::artwork::artist_image_key(artist, self.config().active_source.as_str()),
                     "custom",
                     Some(&stored),
                 )
@@ -324,9 +324,16 @@ impl MutationService {
                     .map_err(source_error)?;
                 Table::Albums
             }
-            ArtworkTarget::Artist(name) => {
+            ArtworkTarget::Artist(artist) => {
                 self.source()
-                    .set_artist_image(&utils::artist::normalize_artist_key(name), "custom", None)
+                    .set_artist_image(
+                        &crate::artwork::artist_image_key(
+                            artist,
+                            self.config().active_source.as_str(),
+                        ),
+                        "custom",
+                        None,
+                    )
                     .await
                     .map_err(source_error)?;
                 Table::Tracks
@@ -391,13 +398,16 @@ impl MutationService {
                 .await
                 .map_err(db_error)?
                 .and_then(|album| album.cover_path),
-            ArtworkTarget::Artist(name) => self
+            ArtworkTarget::Artist(artist) => self
                 .db
                 .artist_images()
                 .await
                 .map_err(db_error)?
                 .0
-                .get(&utils::artist::normalize_artist_key(name))
+                .get(&crate::artwork::artist_image_key(
+                    artist,
+                    self.config().active_source.as_str(),
+                ))
                 .cloned(),
             ArtworkTarget::Playlist(id) => self.playlist(id).await?.cover_path,
             _ => None,

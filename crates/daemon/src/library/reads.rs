@@ -27,22 +27,46 @@ fn window<T: Clone>(rows: &[T], page: Page) -> (u32, Vec<T>) {
 }
 
 fn album_info(album: &Album) -> AlbumInfo {
-    album_info_with(album, &std::collections::HashMap::new())
-}
-
-/// The album's own artist id, else the credit map's; neither means it opens by name.
-fn album_info_with(album: &Album, ids: &std::collections::HashMap<String, String>) -> AlbumInfo {
     AlbumInfo {
         id: album.id.clone(),
         title: album.title.clone(),
-        artist_id: album.artist_id.clone().or_else(|| {
-            ids.get(&utils::artist::normalize_artist_key(&album.artist))
-                .cloned()
-        }),
+        artist_id: album.artist_id.clone(),
         artist: album.artist.clone(),
         genre: album.genre.clone(),
         year: album.year,
         artwork: crate::artwork::album_ref(album),
+    }
+}
+
+pub(crate) fn domain_credit(artist: &api::ArtistCredit) -> reader::ArtistCredit {
+    reader::ArtistCredit {
+        name: artist.name.clone(),
+        id: artist.id.clone(),
+    }
+}
+
+struct ArtistArt {
+    images: db::ArtistImages,
+    covers: std::collections::HashMap<utils::artist::ArtistKey, PathBuf>,
+    library_view: bool,
+    source: String,
+}
+
+impl ArtistArt {
+    fn info(&self, artist: api::ArtistCredit, track_count: u32) -> ArtistInfo {
+        let key = utils::artist::ArtistKey::of(&artist.name, artist.id.as_deref());
+        ArtistInfo {
+            artwork: crate::artwork::artist_ref(
+                &artist,
+                &self.source,
+                &self.images,
+                self.covers.get(&key).map(PathBuf::as_path),
+                self.library_view,
+            ),
+            name: artist.name,
+            id: artist.id,
+            track_count,
+        }
     }
 }
 
@@ -118,14 +142,9 @@ impl LibraryService {
             .albums(&self.query_source())
             .await
             .map_err(db_error)?;
-        let ids = self
-            .db
-            .artist_ids(&self.query_source())
-            .await
-            .map_err(db_error)?;
         let (total, items) = window(&rows, page);
         Ok(AlbumPage {
-            albums: items.iter().map(|a| album_info_with(a, &ids)).collect(),
+            albums: items.iter().map(album_info).collect(),
             total,
         })
     }
@@ -139,14 +158,9 @@ impl LibraryService {
             .albums_recently_added(&self.query_source(), depth)
             .await
             .map_err(db_error)?;
-        let ids = self
-            .db
-            .artist_ids(&self.query_source())
-            .await
-            .map_err(db_error)?;
         let (total, items) = window(&rows, page);
         Ok(AlbumPage {
-            albums: items.iter().map(|a| album_info_with(a, &ids)).collect(),
+            albums: items.iter().map(album_info).collect(),
             total,
         })
     }
@@ -157,12 +171,7 @@ impl LibraryService {
             .album(&self.query_source(), id)
             .await
             .map_err(db_error)?;
-        let ids = self
-            .db
-            .artist_ids(&self.query_source())
-            .await
-            .map_err(db_error)?;
-        Ok(album.as_ref().map(|a| album_info_with(a, &ids)))
+        Ok(album.as_ref().map(album_info))
     }
 
     pub async fn album_tracks(&self, id: &str, page: Page) -> Result<TrackPage, ApiError> {
@@ -187,55 +196,79 @@ impl LibraryService {
     /// covers", so the covers and photos are loaded once for the page rather
     /// than per row -- the same walk `ArtworkService` does, on bulk data.
     pub async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError> {
-        let source = self.query_source();
-        let rows = self.db.artists(&source).await.map_err(db_error)?;
+        let rows = self
+            .db
+            .artists(&self.query_source())
+            .await
+            .map_err(db_error)?;
         let (total, items) = window(&rows, page);
-        let images = self.db.artist_images().await.map_err(db_error)?;
-        let config = self.current_config();
-        let library_view = server::source::active(self.db.clone(), &config)
-            .capabilities()
-            .artist_view
-            == server::source::ArtistView::Library;
-        let album_covers = if library_view {
-            self.db
-                .artist_album_covers(&source)
-                .await
-                .map_err(db_error)?
-                .into_iter()
-                .map(|(name, cover)| (name, PathBuf::from(cover)))
-                .collect()
-        } else {
-            std::collections::HashMap::new()
-        };
-        let ids = self.db.artist_ids(&source).await.map_err(db_error)?;
+        let art = self.artist_art().await?;
         Ok(ArtistPage {
             artists: items
                 .into_iter()
-                .map(|(name, track_count)| ArtistInfo {
-                    artwork: crate::artwork::artist_ref(
-                        &name,
-                        &images,
-                        album_covers
-                            .get(&name.trim().to_lowercase())
-                            .map(PathBuf::as_path),
-                        library_view,
-                    ),
-                    id: ids
-                        .get(&utils::artist::normalize_artist_key(&name))
-                        .cloned(),
-                    name,
-                    track_count,
-                })
+                .map(|row| art.info(api::ArtistCredit::new(row.name, row.id), row.tracks))
                 .collect(),
             total,
         })
     }
 
-    pub async fn artist_tracks(&self, artist: &str, page: Page) -> Result<TrackPage, ApiError> {
+    /// One artist's header and billed albums, keyed as [`Self::artist_tracks`] keys it.
+    pub async fn artist(&self, artist: &api::ArtistCredit) -> Result<api::ArtistDetail, ApiError> {
+        let source = self.query_source();
+        let key = domain_credit(artist);
+        let tracks = self
+            .db
+            .artist_tracks(&source, &key, None)
+            .await
+            .map_err(db_error)?;
+        let albums = self
+            .db
+            .artist_albums(&source, &key)
+            .await
+            .map_err(db_error)?;
+        let art = self.artist_art().await?;
+        Ok(api::ArtistDetail {
+            info: art.info(artist.clone(), tracks.len() as u32),
+            albums: albums.iter().map(album_info).collect(),
+        })
+    }
+
+    /// The photos and album covers an artist's artwork chain reads, loaded once per call.
+    async fn artist_art(&self) -> Result<ArtistArt, ApiError> {
+        let source = self.query_source();
+        let config = self.current_config();
+        let library_view = server::source::active(self.db.clone(), &config)
+            .capabilities()
+            .artist_view
+            == server::source::ArtistView::Library;
+        let covers = match library_view {
+            true => self
+                .db
+                .artist_album_covers(&source)
+                .await
+                .map_err(db_error)?
+                .into_iter()
+                .map(|(key, cover)| (key, PathBuf::from(cover)))
+                .collect(),
+            false => std::collections::HashMap::new(),
+        };
+        Ok(ArtistArt {
+            images: self.db.artist_images().await.map_err(db_error)?,
+            covers,
+            library_view,
+            source: source.as_str().to_string(),
+        })
+    }
+
+    pub async fn artist_tracks(
+        &self,
+        artist: &api::ArtistCredit,
+        page: Page,
+    ) -> Result<TrackPage, ApiError> {
         let config = self.current_config();
         let rows = self
             .db
-            .artist_tracks(&self.query_source(), artist, None)
+            .artist_tracks(&self.query_source(), &domain_credit(artist), None)
             .await
             .map_err(db_error)?;
         let (total, items) = window(&rows, page);

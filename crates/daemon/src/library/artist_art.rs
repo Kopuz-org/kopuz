@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 
 use api::{ApiError, Table};
 use server::source::{ActiveSource, ArtistView};
-use utils::artist::normalize_artist_key;
+use utils::artist::ArtistKey;
 
 use super::{LibraryService, db_error};
 
@@ -29,17 +29,20 @@ const MISS_TTL_SECS: i64 = 86_400;
 const WORKERS: usize = 6;
 
 impl LibraryService {
-    /// Find photos for `names` that the library does not already have one for.
+    /// Find photos for the artists the library does not already have one for.
     ///
-    /// Names already resolved, and names whose miss is still fresh, are
+    /// Artists already resolved, and those whose miss is still fresh, are
     /// skipped -- so calling this on every page open is cheap once the first
     /// pass has run.
-    pub async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<(), ApiError> {
+    pub async fn refresh_artist_artwork(
+        &self,
+        artists: Vec<api::ArtistCredit>,
+    ) -> Result<(), ApiError> {
         let config = self.current_config();
         let source: ActiveSource = Arc::from(server::source::active(self.db.clone(), &config));
         match source.capabilities().artist_view {
             ArtistView::Library => self.refresh_bulk(&source).await,
-            ArtistView::Remote => self.refresh_each(&source, names).await,
+            ArtistView::Remote => self.refresh_each(&source, artists).await,
         }
     }
 
@@ -49,9 +52,10 @@ impl LibraryService {
         if images.is_empty() {
             return Ok(());
         }
-        for (name, url) in images {
+        let scope = source.source().as_str();
+        for (artist, url) in images {
             let _ = source
-                .set_artist_image(&normalize_artist_key(&name), "server", Some(&url))
+                .set_artist_image(&storage_key(&artist, scope), "server", Some(&url))
                 .await;
         }
         self.invalidate(Table::Tracks);
@@ -62,7 +66,7 @@ impl LibraryService {
     async fn refresh_each(
         &self,
         source: &ActiveSource,
-        names: Vec<String>,
+        artists: Vec<api::ArtistCredit>,
     ) -> Result<(), ApiError> {
         let (_, photos) = self.db.artist_images().await.map_err(db_error)?;
         let fresh_misses: std::collections::HashSet<String> = self
@@ -72,10 +76,15 @@ impl LibraryService {
             .unwrap_or_default()
             .into_iter()
             .collect();
-        let pending: Vec<String> = names
+        let scope = source.source().as_str().to_string();
+        let pending: Vec<reader::ArtistCredit> = artists
             .into_iter()
-            .filter(|name| {
-                let key = normalize_artist_key(name);
+            .map(|artist| reader::ArtistCredit {
+                name: artist.name,
+                id: artist.id,
+            })
+            .filter(|artist| {
+                let key = storage_key(artist, &scope);
                 !photos.contains_key(&key) && !fresh_misses.contains(&key)
             })
             .collect();
@@ -96,8 +105,8 @@ impl LibraryService {
                 let found = found.clone();
                 let session = self.session.get().cloned();
                 async move {
-                    while let Some(name) = queue.lock().ok().and_then(|mut names| names.next()) {
-                        if resolve_one(&source, &name).await {
+                    while let Some(artist) = queue.lock().ok().and_then(|mut queue| queue.next()) {
+                        if resolve_one(&source, &artist).await {
                             found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             if let Some(session) = &session {
                                 session.invalidate(Table::Tracks);
@@ -118,9 +127,9 @@ impl LibraryService {
 }
 
 /// Answers whether a photo was found and stored.
-async fn resolve_one(source: &ActiveSource, name: &str) -> bool {
-    let key = normalize_artist_key(name);
-    match source.fetch_artist_image(name).await {
+async fn resolve_one(source: &ActiveSource, artist: &reader::ArtistCredit) -> bool {
+    let key = storage_key(artist, source.source().as_str());
+    match source.fetch_artist_image(artist).await {
         Ok(Some(url)) => {
             let _ = source.set_artist_image(&key, "server", Some(&url)).await;
             true
@@ -132,8 +141,12 @@ async fn resolve_one(source: &ActiveSource, name: &str) -> bool {
             false
         }
         Err(error) => {
-            tracing::debug!(%error, artist = name, "artist photo lookup failed");
+            tracing::debug!(%error, artist = %artist.name, "artist photo lookup failed");
             false
         }
     }
+}
+
+fn storage_key(artist: &reader::ArtistCredit, source: &str) -> String {
+    ArtistKey::of(&artist.name, artist.id.as_deref()).storage(source)
 }

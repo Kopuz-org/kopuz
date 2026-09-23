@@ -170,10 +170,18 @@ impl ReadStore for Native {
     async fn artist_tracks(
         &self,
         source: &crate::Source,
-        artist: &str,
+        artist: &reader::ArtistCredit,
         limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError> {
         queries::artist_tracks(&self.pool(), source, artist, limit).await
+    }
+
+    async fn artist_albums(
+        &self,
+        source: &crate::Source,
+        artist: &reader::ArtistCredit,
+    ) -> Result<Vec<reader::Album>, DbError> {
+        queries::artist_albums(&self.pool(), source, artist).await
     }
 
     async fn genre_tracks(
@@ -224,7 +232,7 @@ impl ReadStore for Native {
         queries::tracks_by_keys(&self.pool(), source, keys).await
     }
 
-    async fn artists(&self, source: &crate::Source) -> Result<Vec<(String, u32)>, DbError> {
+    async fn artists(&self, source: &crate::Source) -> Result<Vec<crate::ArtistRow>, DbError> {
         queries::artists(&self.pool(), source).await
     }
 
@@ -238,7 +246,7 @@ impl ReadStore for Native {
     async fn artist_album_covers(
         &self,
         source: &crate::Source,
-    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+    ) -> Result<std::collections::HashMap<utils::artist::ArtistKey, String>, DbError> {
         queries::artist_album_covers(&self.pool(), source).await
     }
 
