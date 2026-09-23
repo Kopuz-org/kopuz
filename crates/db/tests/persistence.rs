@@ -563,6 +563,40 @@ async fn queue_round_trips() {
 }
 
 #[tokio::test]
+async fn a_library_prune_keeps_rows_a_playlist_or_favorite_holds() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let active = Source::Server("srv-1".into());
+    db.upsert_tracks(
+        &active,
+        &[
+            server_track("LIB", "In the library"),
+            server_track("PL", "Only in a playlist"),
+            server_track("FAV", "Only a favorite"),
+            server_track("GONE", "Nothing holds it"),
+        ],
+    )
+    .await
+    .unwrap();
+    db.upsert_playlist_meta(&active, "PL1", "Mix", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&active, "PL1", &["PL".into()])
+        .await
+        .unwrap();
+    db.set_favorite("srv-1", "FAV", true).await.unwrap();
+
+    db.prune_source(&active, &["LIB".into()], &[])
+        .await
+        .unwrap();
+
+    let count = db.tracks_count(&TrackFilter::new(active)).await.unwrap();
+    assert_eq!(count, 3);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn active_server_writes_never_touch_other_servers_rows() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();

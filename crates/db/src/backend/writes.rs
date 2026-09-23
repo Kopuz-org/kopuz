@@ -358,7 +358,10 @@ pub async fn prune_source(
     let mut tx = pool.begin().await?;
     sqlx::query!(
         "DELETE FROM tracks WHERE source = ?1 \
-         AND track_key NOT IN (SELECT value FROM json_each(?2))",
+         AND track_key NOT IN (SELECT value FROM json_each(?2)) \
+         AND track_key NOT IN (SELECT pt.track_ref FROM playlist_tracks pt \
+             JOIN playlists p ON p.rowid_pk = pt.playlist_pk WHERE p.source = ?1) \
+         AND track_key NOT IN (SELECT ref FROM favorites WHERE server_id = ?1)",
         src,
         keep_tracks
     )
