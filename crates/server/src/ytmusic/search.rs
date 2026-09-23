@@ -274,21 +274,22 @@ pub(super) fn fold_artist_name(s: &str) -> String {
         .to_lowercase()
 }
 
-/// Split an unlinked artist credit into individual names: "feat."/"ft."
-/// (space-prefixed, any case) and commas separate; a bare "&" does NOT —
-/// "MYTH & ROID" is one artist. Leading "&"s left by a ", & C" tail are
-/// stripped. A plain single name passes through unchanged.
-fn split_unlinked_artists(text: &str) -> Vec<String> {
-    let mut joined = text.to_string();
-    for sep in [" feat.", " Feat.", " FEAT.", " ft.", " Ft.", " FT."] {
-        joined = joined.replace(sep, ",");
-    }
-    joined
-        .split([',', '、'])
-        .map(|part| part.trim().trim_start_matches('&').trim())
-        .filter(|part| !part.is_empty())
-        .map(|part| part.to_string())
-        .collect()
+/// A column's text up to its first " • ", every run joined as displayed.
+fn leading_text(row: &Value, col: usize) -> String {
+    row.get("flexColumns")
+        .and_then(|c| c.as_array())
+        .and_then(|cs| cs.get(col))
+        .and_then(|c| c.pointer("/musicResponsiveListItemFlexColumnRenderer/text/runs"))
+        .and_then(|runs| runs.as_array())
+        .map(|runs| {
+            runs.iter()
+                .filter_map(|run| run.get("text").and_then(|t| t.as_str()))
+                .take_while(|text| *text != " • ")
+                .collect::<String>()
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 async fn do_search_raw(
@@ -502,11 +503,10 @@ fn parse_playlist_track(
         })
         .collect();
     if artists.is_empty() {
-        let primary_artist = pick_run(row, 1, 0);
-        artists = split_unlinked_artists(&primary_artist)
-            .into_iter()
-            .map(ArtistCredit::unlinked)
-            .collect();
+        let name = leading_text(row, 1);
+        if !name.is_empty() {
+            artists.push(ArtistCredit::unlinked(name));
+        }
     }
     let album = if mvt.has_album() {
         let s = pick_run(row, 2, 0);
@@ -573,21 +573,11 @@ fn parse_search_row(
         })
         .collect();
     if artists.is_empty() {
-        // Unlinked artist text (no channel run). Fall back to the first run
-        // that isn't the duration, album, or — for albumless rows — the
-        // view-count tail. The leading run is the artist in every observed
-        // shape. Unlike channel-linked runs, this text can be a joined credit
-        // ("INABAKUMORI feat. Kaai Yuki") — split it, or the whole credit
-        // becomes a phantom artist of its own in the Artists grid.
-        artists = runs
-            .iter()
-            .map(|(t, _)| t.clone())
-            .filter(|t| !looks_like_duration(t))
-            .filter(|t| Some(t) != album.as_ref())
-            .take(1)
-            .flat_map(|t| split_unlinked_artists(&t))
-            .map(ArtistCredit::unlinked)
-            .collect();
+        // No run links a channel: the artist is the leading segment exactly as written, never split.
+        let name = leading_text(row, 1);
+        if !name.is_empty() && !looks_like_duration(&name) && album.as_deref() != Some(&name) {
+            artists.push(ArtistCredit::unlinked(name));
+        }
     }
 
     ParsedRow {
@@ -933,13 +923,47 @@ mod credit_tests {
         assert_eq!(parsed.artists[1].id.as_deref(), Some("UCboris"));
     }
 
+    /// Unlinked text is one credit exactly as written: cutting it guesses at names.
     #[test]
-    fn an_unlinked_joined_credit_splits_without_ids() {
-        let parsed = search_row(&[("INABAKUMORI feat. Kaai Yuki", None), ("2:30", None)]);
+    fn an_unlinked_credit_is_kept_whole() {
+        for name in [
+            "INABAKUMORI feat. Kaai Yuki",
+            "01/P",
+            "____natural / TETO KASANE",
+        ] {
+            let parsed = search_row(&[(name, None), (" • ", None), ("2:30", None)]);
 
-        let names: Vec<&str> = parsed.artists.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, ["INABAKUMORI", "Kaai Yuki"]);
-        assert!(parsed.artists.iter().all(|c| c.id.is_none()));
+            assert_eq!(parsed.artists.len(), 1, "{name}");
+            assert_eq!(parsed.artists[0].name, name);
+            assert!(parsed.artists[0].id.is_none());
+        }
+    }
+
+    /// The runs between names are part of the name; reading only the first dropped them.
+    #[test]
+    fn an_unlinked_playlist_credit_keeps_every_run() {
+        let row = json!({
+            "flexColumns": [
+                column(&[("Song", None)]),
+                column(&[("NIBREZZY", None), (" & ", None), ("Kohei Tanaka", None)]),
+            ],
+            "fixedColumns": [{
+                "musicResponsiveListItemFixedColumnRenderer": {
+                    "text": { "runs": [{ "text": "3:21" }] }
+                }
+            }],
+        });
+
+        let parsed = parse_playlist_track(
+            &row,
+            "vid".into(),
+            "Song".into(),
+            super::MusicVideoType::AlbumTrack,
+            None,
+        );
+
+        assert_eq!(parsed.artists.len(), 1);
+        assert_eq!(parsed.artists[0].name, "NIBREZZY & Kohei Tanaka");
     }
 
     #[test]
@@ -987,35 +1011,5 @@ mod credit_tests {
         assert_eq!(track.artist, "Ada");
         assert_eq!(track.artists, ["Ada", "Boris"]);
         assert_eq!(track.credits[1].id.as_deref(), Some("UCboris"));
-    }
-}
-
-#[cfg(test)]
-mod artist_split_tests {
-    use super::split_unlinked_artists;
-
-    #[test]
-    fn splits_feat_and_commas_keeps_ampersand_names() {
-        assert_eq!(
-            split_unlinked_artists("INABAKUMORI feat. Kaai Yuki"),
-            vec!["INABAKUMORI", "Kaai Yuki"]
-        );
-        // No space after "feat." — as YT actually delivers it.
-        assert_eq!(
-            split_unlinked_artists("かいりきベア feat.缶缶"),
-            vec!["かいりきベア", "缶缶"]
-        );
-        assert_eq!(
-            split_unlinked_artists("塞壬唱片-MSR, 真名辺あや, & TMKJ"),
-            vec!["塞壬唱片-MSR", "真名辺あや", "TMKJ"]
-        );
-        // "&" alone never splits, and "ft." needs its leading space — names
-        // like "Swift." must not be cut mid-word.
-        assert_eq!(split_unlinked_artists("MYTH & ROID"), vec!["MYTH & ROID"]);
-        assert_eq!(
-            split_unlinked_artists("Taylor Swift."),
-            vec!["Taylor Swift."]
-        );
-        assert_eq!(split_unlinked_artists("Reol"), vec!["Reol"]);
     }
 }
