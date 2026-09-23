@@ -6,6 +6,30 @@ pub fn normalize_artist_key(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
+/// Who an artist is: the source's id when it issued one, else the normalized name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ArtistKey {
+    Id(String),
+    Name(String),
+}
+
+impl ArtistKey {
+    pub fn of(name: &str, id: Option<&str>) -> Self {
+        match id.map(str::trim).filter(|id| !id.is_empty()) {
+            Some(id) => Self::Id(id.to_string()),
+            None => Self::Name(normalize_artist_key(name)),
+        }
+    }
+
+    /// The `artist_images` key; an id carries its source because the table spans sources.
+    pub fn storage(&self, source: &str) -> String {
+        match self {
+            Self::Id(id) => format!("id:{source}:{id}"),
+            Self::Name(name) => name.clone(),
+        }
+    }
+}
+
 /// The normalized primary artist of a joined collab credit ("COOL&CREATE,
 /// beatMARIO, & MARON" → "cool&create"), or None for a plain name. Older
 /// synced rows (and album-artist fields) still carry such joined strings as
@@ -26,6 +50,19 @@ mod tests {
     #[test]
     fn normalize_trims_and_lowercases() {
         assert_eq!(normalize_artist_key("  COOL&CREATE "), "cool&create");
+    }
+
+    #[test]
+    fn an_id_outranks_the_name_and_a_blank_id_does_not() {
+        assert_eq!(
+            ArtistKey::of("Ada", Some("ar-1")),
+            ArtistKey::Id("ar-1".into())
+        );
+        assert_eq!(
+            ArtistKey::of(" Ada ", Some(" ")),
+            ArtistKey::Name("ada".into())
+        );
+        assert_eq!(ArtistKey::Id("ar-1".into()).storage("srv"), "id:srv:ar-1");
     }
 
     #[test]

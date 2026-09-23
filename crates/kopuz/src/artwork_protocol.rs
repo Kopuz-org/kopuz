@@ -75,6 +75,10 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
                 .map(&decode)
                 .unwrap_or_default();
             let high_quality = query.split('&').any(|part| part == "hq=1");
+            let artist_id = query
+                .split('&')
+                .find_map(|part| part.strip_prefix("aid="))
+                .map(&decode);
 
             // A library entity: the daemon resolves it, because a server cover
             // is signed with credentials that never leave it.
@@ -84,7 +88,10 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
                 match kind {
                     "track" => Some(api::ArtworkTarget::Track(id)),
                     "album" => Some(api::ArtworkTarget::Album(id)),
-                    "artist" => Some(api::ArtworkTarget::Artist(id)),
+                    "artist" => Some(api::ArtworkTarget::Artist(api::ArtistCredit::new(
+                        id,
+                        artist_id.clone(),
+                    ))),
                     "playlist" => Some(api::ArtworkTarget::Playlist(id)),
                     "catalog" => Some(api::ArtworkTarget::Catalog(id)),
                     "station" => Some(api::ArtworkTarget::Station(id)),

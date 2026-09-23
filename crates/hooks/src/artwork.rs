@@ -28,6 +28,7 @@ pub fn url(artwork: Option<&ArtworkRef>, size: Size) -> Option<CoverUrl> {
     Some(utils::format_entity_artwork_url(
         artwork.target.kind(),
         artwork.target.id(),
+        artwork.target.artist_id(),
         artwork.version,
         size == Size::Full,
     ))

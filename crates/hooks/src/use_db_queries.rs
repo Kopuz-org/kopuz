@@ -147,30 +147,62 @@ pub fn use_album_tracks(
     })
 }
 
-/// Every track credited to an artist.
+/// Every track credited to an artist. No artist resolves to empty without asking.
 pub fn use_artist_tracks(
     source: Memo<Source>,
-    artist: Memo<String>,
+    artist: Memo<api::ArtistCredit>,
 ) -> Resource<Vec<api::TrackInfo>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
-        let (api, s, name) = (api.clone(), source(), artist());
+        let (api, s, artist) = (api.clone(), source(), artist());
         let span = tracing::info_span!(
             "query.artist_tracks",
             source = s.as_str(),
-            artist = %name,
+            artist = %artist.name,
+            artist_id = ?artist.id,
             rows = tracing::field::Empty,
         );
         async move {
+            if artist.is_empty() {
+                tracing::Span::current().record("rows", 0);
+                return Vec::new();
+            }
             let rows = api
-                .artist_tracks(name, all())
+                .artist_tracks(artist, all())
                 .await
                 .map(|page| page.items)
                 .unwrap_or_default();
             tracing::Span::current().record("rows", rows.len());
             rows
+        }
+        .instrument(span)
+    })
+}
+
+/// One artist's photo, track count and billed albums. No artist resolves to `None`.
+pub fn use_artist(
+    source: Memo<Source>,
+    artist: Memo<api::ArtistCredit>,
+) -> Resource<Option<api::ArtistDetail>> {
+    let api = use_api();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let _ = gens.generation(Table::Albums);
+        let (api, s, artist) = (api.clone(), source(), artist());
+        let span = tracing::info_span!(
+            "query.artist",
+            source = s.as_str(),
+            artist = %artist.name,
+            artist_id = ?artist.id,
+        );
+        async move {
+            if artist.is_empty() {
+                return None;
+            }
+            api.artist(artist).await.ok()
         }
         .instrument(span)
     })

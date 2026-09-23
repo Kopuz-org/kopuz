@@ -363,16 +363,28 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::artist_page_from_proto(artists.get_ref()))
     }
 
-    async fn artist_tracks(&self, artist: String, page: Page) -> Result<api::TrackPage, ApiError> {
+    async fn artist_tracks(
+        &self,
+        artist: api::ArtistCredit,
+        page: Page,
+    ) -> Result<api::TrackPage, ApiError> {
         let tracks = self
             .client()
-            .get_artist_tracks(Request::new(proto::ArtistTracksRequest {
-                artist,
-                page: Some(convert::page_to_proto(page)),
-            }))
+            .get_artist_tracks(Request::new(convert::artist_tracks_request_to_proto(
+                &artist, page,
+            )))
             .await
             .map_err(wire_error)?;
         Ok(convert::track_page_from_proto(tracks.get_ref()))
+    }
+
+    async fn artist(&self, artist: api::ArtistCredit) -> Result<api::ArtistDetail, ApiError> {
+        let detail = self
+            .client()
+            .get_artist(Request::new(convert::artist_credit_to_proto(&artist)))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::artist_detail_from_proto(detail.get_ref()))
     }
 
     async fn artist_sample_tracks(&self, page: Page) -> Result<api::TrackPage, ApiError> {
@@ -569,9 +581,12 @@ impl api::LibraryApi for GrpcApi {
         Ok(())
     }
 
-    async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<(), ApiError> {
+    async fn refresh_artist_artwork(
+        &self,
+        artists: Vec<api::ArtistCredit>,
+    ) -> Result<(), ApiError> {
         self.client()
-            .refresh_artist_artwork(Request::new(proto::RefreshArtistArtworkRequest { names }))
+            .refresh_artist_artwork(Request::new(convert::refresh_artists_to_proto(&artists)))
             .await
             .map_err(wire_error)?;
         Ok(())

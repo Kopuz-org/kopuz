@@ -1120,6 +1120,7 @@ fn App() -> Element {
         // on route change (album/artist list and detail are the same Route).
         let album_sel = selected_album_id.read().clone();
         let artist_sel = selected_artist_name.read().clone();
+        let artist_id_sel = selected_artist_id.read().clone().unwrap_or_default();
         // A pending section anchor (peeked, so this effect doesn't subscribe to it)
         // takes over scrolling — skip the saved-scroll restore for this navigation.
         if settings_anchor.peek().is_some() {
@@ -1133,7 +1134,7 @@ fn App() -> Element {
                 .unwrap_or(0.0),
             Route::Artist if !artist_sel.is_empty() => detail_scroll_positions
                 .peek()
-                .get(&format!("artist:{artist_sel}"))
+                .get(&format!("artist:{artist_id_sel}:{artist_sel}"))
                 .copied()
                 .unwrap_or(0.0),
             _ => scroll_positions.peek().get(&route).copied().unwrap_or(0.0),
@@ -1679,6 +1680,7 @@ fn App() -> Element {
                         let route = *current_route.peek();
                         let album_sel = selected_album_id.peek().clone();
                         let artist_sel = selected_artist_name.peek().clone();
+                        let artist_id_sel = selected_artist_id.peek().clone().unwrap_or_default();
                         match route {
                             Route::Album if !album_sel.is_empty() => {
                                 detail_scroll_positions
@@ -1688,7 +1690,7 @@ fn App() -> Element {
                             Route::Artist if !artist_sel.is_empty() => {
                                 detail_scroll_positions
                                     .write()
-                                    .insert(format!("artist:{artist_sel}"), pos);
+                                    .insert(format!("artist:{artist_id_sel}:{artist_sel}"), pos);
                             }
                             _ => {
                                 scroll_positions.write().insert(route, pos);
@@ -1898,6 +1900,7 @@ fn App() -> Element {
                                     pages::artist::Artist {
                                         config: config,
                                         artist_name: selected_artist_name,
+                                        artist_id: selected_artist_id,
                                                             on_navigate: move |album_id| {
                                             selected_album_id.set(album_id);
                                             current_route.set(Route::Album);

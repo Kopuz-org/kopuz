@@ -41,6 +41,7 @@ service Kopuz {
   rpc GetAlbumTracks(AlbumTracksRequest) returns (TrackPage);
   rpc GetArtists(Page) returns (ArtistPage);
   rpc GetArtistTracks(ArtistTracksRequest) returns (TrackPage);
+  rpc GetArtist(ArtistCredit) returns (ArtistDetail);
   rpc GetArtistSampleTracks(Page) returns (TrackPage);
   rpc GetGenres(GetGenresRequest) returns (GenreList);
   rpc GetTopGenre(GetTopGenreRequest) returns (TopGenreResponse);
@@ -381,6 +382,7 @@ message QueueContext {
   oneof kind {
     TrackKeys tracks = 1;
     Id album = 2;
+    // Superseded by artist_ref; still read as a name-keyed artist.
     Name artist = 3;
     Name genre = 4;
     Id playlist = 5;
@@ -390,6 +392,7 @@ message QueueContext {
     // it and pins the seed at the front.
     Key track_radio = 8;
     Id playlist_radio = 9;
+    ArtistCredit artist_ref = 10;
   }
   message TrackKeys {
     repeated string keys = 1;
@@ -472,7 +475,7 @@ message QueueSnapshot {
 
 message TrackFilter {
   optional string search = 1;
-  optional string artist = 2;
+  reserved 2; // was a name-only artist filter; artist_tracks keys by identity
   optional string album = 3;
   optional string genre = 4;
   optional bool favorite = 5;
@@ -557,6 +560,11 @@ message ArtistPage {
 message ArtistTracksRequest {
   string artist = 1;
   Page page = 2;
+  optional string artist_id = 3;
+}
+message ArtistDetail {
+  ArtistInfo info = 1;
+  repeated AlbumInfo albums = 2;
 }
 
 message GetGenresRequest {}
@@ -595,6 +603,7 @@ message WebUrl {
 
 message RefreshArtistArtworkRequest {
   repeated string names = 1;
+  repeated ArtistCredit artists = 2;
 }
 
 message SearchResults {
@@ -1640,6 +1649,7 @@ message ArtworkTarget {
     string playlist = 4;
     string catalog = 5;
     string station = 6;
+    ArtistCredit artist_ref = 7;
   }
 }
 
@@ -1659,6 +1669,7 @@ message ArtworkRequest {
     string playlist = 5;
     string catalog = 6;
     string station = 7;
+    ArtistCredit artist_ref = 8;
   }
   bool hq = 4;
 }
