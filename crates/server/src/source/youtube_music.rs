@@ -222,7 +222,11 @@ impl MediaSource for YtSource {
         // only decides names the library doesn't hold.
         let tracks = self
             .db
-            .artist_tracks(&self.source, query, Some(3))
+            .artist_tracks(
+                &self.source,
+                &reader::ArtistCredit::unlinked(query),
+                Some(3),
+            )
             .await
             .unwrap_or_default();
         for track in tracks.iter() {
@@ -261,7 +265,18 @@ impl MediaSource for YtSource {
             .map_err(SourceError::from)
     }
 
-    async fn fetch_artist_image(&self, name: &str) -> Result<Option<String>, SourceError> {
+    async fn fetch_artist_image(
+        &self,
+        artist: &reader::ArtistCredit,
+    ) -> Result<Option<String>, SourceError> {
+        if let Some(channel) = artist.id.as_deref() {
+            return self
+                .client
+                .artist_avatar(channel)
+                .await
+                .map_err(SourceError::from);
+        }
+        let name = artist.name.as_str();
         if let Some(url) = self
             .client
             .resolve_artist_image(name)
@@ -274,7 +289,7 @@ impl MediaSource for YtSource {
         // reconcile the channel from a library song and use its avatar.
         let tracks = self
             .db
-            .artist_tracks(&self.source, name, Some(3))
+            .artist_tracks(&self.source, artist, Some(3))
             .await
             .unwrap_or_default();
         for track in tracks.iter() {

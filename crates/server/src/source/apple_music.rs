@@ -377,7 +377,9 @@ impl MediaSource for AppleMusicSource {
             .map_err(SourceError::from)
     }
 
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError> {
+    async fn fetch_artist_images(
+        &self,
+    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
         tracing::info!("am.fetch_artist_images: starting");
         let artists = self
             .client
@@ -390,7 +392,8 @@ impl MediaSource for AppleMusicSource {
                 && !artwork.url.is_empty()
             {
                 let url = crate::applemusic::artwork_url(&artwork.url, 300);
-                out.push((a.attributes.name.clone(), url));
+                // A library artist id is not the catalog id a track credits, so only the name matches.
+                out.push((reader::ArtistCredit::unlinked(&a.attributes.name), url));
             }
         }
         tracing::info!("am.fetch_artist_images: {} artists with images", out.len());

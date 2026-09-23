@@ -211,7 +211,10 @@ impl MediaSource for JellyfinSource {
                         512,
                         90,
                     );
-                    artist_images.push((artist.name, url));
+                    artist_images.push((
+                        reader::ArtistCredit::linked(artist.name, artist.id.clone()),
+                        url,
+                    ));
                 }
             }
         }
@@ -439,7 +442,9 @@ impl MediaSource for JellyfinSource {
             .collect())
     }
 
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError> {
+    async fn fetch_artist_images(
+        &self,
+    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
         let artists = self.client.get_artists().await?;
         let mut out = Vec::new();
         for artist in artists {
@@ -447,7 +452,7 @@ impl MediaSource for JellyfinSource {
                 && let Some(tag) = tags.get("Primary")
             {
                 out.push((
-                    artist.name.clone(),
+                    reader::ArtistCredit::linked(&artist.name, &artist.id),
                     crate::cover::jellyfin_item_url(
                         self.client.base_url(),
                         &artist.id,

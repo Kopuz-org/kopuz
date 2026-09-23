@@ -135,6 +135,14 @@ impl From<sqlx::migrate::MigrateError> for DbError {
     }
 }
 
+/// One artist of a source: its most common spelling, its id if the source issued one, and its track count.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtistRow {
+    pub name: String,
+    pub id: Option<String>,
+    pub tracks: u32,
+}
+
 /// Per-artist images, source-agnostic: `(overrides, photos)`. `overrides` are
 /// user-set custom photos (always a local path, highest priority); `photos` are
 /// the synced photo per artist as a uniform [`reader::ArtistImageRef`] (a server
@@ -172,14 +180,20 @@ pub trait ReadStore: Send + Sync {
         album_id: &str,
     ) -> Result<Vec<reader::Track>, DbError>;
 
-    /// One artist's tracks, album/disc/track-ordered. `limit` bounds the query
-    /// SQL-side for callers that only probe a few rows.
+    /// One artist's tracks by [`ArtistKey`](utils::artist::ArtistKey), album/disc/track-ordered.
     async fn artist_tracks(
         &self,
         source: &Source,
-        artist: &str,
+        artist: &reader::ArtistCredit,
         limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// The albums billed to one artist, by the same identity as [`ReadStore::artist_tracks`].
+    async fn artist_albums(
+        &self,
+        source: &Source,
+        artist: &reader::ArtistCredit,
+    ) -> Result<Vec<reader::Album>, DbError>;
 
     /// Tracks whose album has this genre, artist/album-ordered.
     async fn genre_tracks(
@@ -223,21 +237,20 @@ pub trait ReadStore: Send + Sync {
         keys: &[String],
     ) -> Result<Vec<reader::Track>, DbError>;
 
-    /// Distinct artists for a source with their track counts, A→Z.
-    async fn artists(&self, source: &Source) -> Result<Vec<(String, u32)>, DbError>;
+    /// Every credited artist of a source, one per [`ArtistKey`](utils::artist::ArtistKey), A→Z.
+    async fn artists(&self, source: &Source) -> Result<Vec<ArtistRow>, DbError>;
 
-    /// The source-issued id per credited artist, keyed by trimmed lowercase name.
+    /// The most-credited source id per normalized name, for a caller holding only a name.
     async fn artist_ids(
         &self,
         source: &Source,
     ) -> Result<std::collections::HashMap<String, String>, DbError>;
 
-    /// One album cover per credited artist, keyed by trimmed lowercase
-    /// name -- the picture an artist with no photo of their own renders.
+    /// One album cover per credited artist: what an artist with no photo renders.
     async fn artist_album_covers(
         &self,
         source: &Source,
-    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+    ) -> Result<std::collections::HashMap<utils::artist::ArtistKey, String>, DbError>;
 
     /// Distinct non-empty album genres for a source, A→Z.
     async fn genres(&self, source: &Source) -> Result<Vec<String>, DbError>;

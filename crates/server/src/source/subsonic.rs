@@ -137,7 +137,10 @@ impl MediaSource for SubsonicSource {
                 if let Some(cover_art_id) = &artist.cover_art
                     && let Ok(url) = self.client.cover_art_url(cover_art_id, Some(512))
                 {
-                    artist_images.push((artist.name, url));
+                    artist_images.push((
+                        reader::ArtistCredit::linked(artist.name, artist.id.clone()),
+                        url,
+                    ));
                 }
             }
         }
@@ -421,14 +424,16 @@ impl MediaSource for SubsonicSource {
             .collect())
     }
 
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError> {
+    async fn fetch_artist_images(
+        &self,
+    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
         let artists = self.client.get_artists().await?;
         let mut out = Vec::new();
         for artist in artists {
             if let Some(cover_art_id) = &artist.cover_art
                 && let Ok(url) = self.client.cover_art_url(cover_art_id, Some(512))
             {
-                out.push((artist.name.clone(), url));
+                out.push((reader::ArtistCredit::linked(&artist.name, &artist.id), url));
             }
         }
         Ok(out)

@@ -241,13 +241,6 @@ impl LibraryService {
                     .await
                     .map_err(db_error)?,
             )
-        } else if let Some(artist) = filter.artist.as_deref() {
-            Some(
-                self.db
-                    .artist_tracks(&self.query_source(), artist, None)
-                    .await
-                    .map_err(db_error)?,
-            )
         } else if let Some(genre) = filter.genre.as_deref() {
             Some(
                 self.db
@@ -539,9 +532,9 @@ impl QueueMaterializer for LibraryService {
                 .album_tracks(&self.query_source(), id)
                 .await
                 .map_err(db_error),
-            QueueContext::Artist { name } => self
+            QueueContext::Artist { artist } => self
                 .db
-                .artist_tracks(&self.query_source(), name, None)
+                .artist_tracks(&self.query_source(), &reads::domain_credit(artist), None)
                 .await
                 .map_err(db_error),
             QueueContext::Genre { name } => self
@@ -672,13 +665,7 @@ mod tests {
         assert_eq!(page.items[0].title, "song 4");
 
         let page = library
-            .tracks(
-                TrackFilter {
-                    artist: Some("Ada".into()),
-                    ..Default::default()
-                },
-                Page::default(),
-            )
+            .artist_tracks(&api::ArtistCredit::new("Ada", None), Page::default())
             .await
             .expect("artist listing");
         assert_eq!(page.total, 3);

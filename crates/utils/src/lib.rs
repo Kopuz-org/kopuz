@@ -160,7 +160,13 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
 ///
 /// `version` comes from the row's artwork ref and changes when the picture
 /// does, which is what makes the year-long immutable cache correct.
-pub fn format_entity_artwork_url(kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
+pub fn format_entity_artwork_url(
+    kind: &str,
+    id: &str,
+    artist_id: Option<&str>,
+    version: u64,
+    hq: bool,
+) -> CoverUrl {
     const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
         .add(b' ')
         .add(b'"')
@@ -178,10 +184,19 @@ pub fn format_entity_artwork_url(kind: &str, id: &str, version: u64, hq: bool) -
 
     let id = percent_encoding::utf8_percent_encode(id, QUERY_VAL);
     let quality = if hq { "&hq=1" } else { "" };
+    // An artist's `id` is its name; a source id rides beside it.
+    let artist_id = artist_id
+        .map(|aid| {
+            format!(
+                "&aid={}",
+                percent_encoding::utf8_percent_encode(aid, QUERY_VAL)
+            )
+        })
+        .unwrap_or_default();
     let url = if cfg!(target_os = "windows") {
-        format!("http://artwork.dioxus.localhost/api?{kind}={id}{quality}&v={version}")
+        format!("http://artwork.dioxus.localhost/api?{kind}={id}{artist_id}{quality}&v={version}")
     } else {
-        format!("artwork://api?{kind}={id}{quality}&v={version}")
+        format!("artwork://api?{kind}={id}{artist_id}{quality}&v={version}")
     };
     cover_url_from_string(url)
 }
