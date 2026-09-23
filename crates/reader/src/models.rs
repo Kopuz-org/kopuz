@@ -12,6 +12,8 @@ pub struct Album {
     pub cover_path: Option<PathBuf>,
     #[serde(default)]
     pub manual_cover: bool,
+    #[serde(default)]
+    pub artist_id: Option<String>,
 }
 
 /// A source-agnostic artist photo reference: a local file path or a remote URL.

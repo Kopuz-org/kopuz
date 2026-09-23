@@ -187,6 +187,7 @@ fn album(id: &str, title: &str, artist: &str) -> Album {
         year: 2000,
         cover_path: None,
         manual_cover: false,
+        artist_id: None,
     }
 }
 

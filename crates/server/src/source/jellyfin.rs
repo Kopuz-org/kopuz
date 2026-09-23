@@ -113,7 +113,13 @@ impl MediaSource for JellyfinSource {
                         &a.id,
                         image_tag.as_deref(),
                     )));
+                    let artist_id = a
+                        .album_artists
+                        .as_ref()
+                        .and_then(|artists| artists.first())
+                        .map(|artist| artist.id.clone());
                     albums.push(reader::Album {
+                        artist_id,
                         id: format!("jellyfin:{}", a.id),
                         title: a.name,
                         artist: a

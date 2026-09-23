@@ -119,6 +119,7 @@ async fn automatic_cover_update_preserves_concurrent_manual_cover() {
         year: 0,
         cover_path: None,
         manual_cover: false,
+        artist_id: None,
     };
     db.upsert_albums(&Source::Local, &[album]).await.unwrap();
 
@@ -139,6 +140,33 @@ async fn automatic_cover_update_preserves_concurrent_manual_cover() {
     let stored = db.album(&Source::Local, "album").await.unwrap().unwrap();
     assert_eq!(stored.cover_path, Some(PathBuf::from("/manual.jpg")));
     assert!(stored.manual_cover);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn an_album_keeps_its_artist_id_when_a_later_upsert_has_none() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::Server("srv".into());
+    let album = |artist_id: Option<&str>| Album {
+        id: "MPRE1".into(),
+        title: "Album".into(),
+        artist: "Artist".into(),
+        genre: String::new(),
+        year: 0,
+        cover_path: None,
+        manual_cover: false,
+        artist_id: artist_id.map(Into::into),
+    };
+
+    db.upsert_albums(&source, &[album(Some("UC-a"))])
+        .await
+        .unwrap();
+    db.upsert_albums(&source, &[album(None)]).await.unwrap();
+
+    let stored = db.album(&source, "MPRE1").await.unwrap().unwrap();
+    assert_eq!(stored.artist_id.as_deref(), Some("UC-a"));
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

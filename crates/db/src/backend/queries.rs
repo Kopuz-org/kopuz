@@ -456,7 +456,7 @@ pub async fn album(
     let src = source.as_str();
     let row = sqlx::query_as!(
         AlbumRow,
-        "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover \
+        "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_id \
          FROM albums WHERE source = ?1 AND source_album_id = ?2",
         src,
         album_id
@@ -470,7 +470,7 @@ pub async fn albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, Db
     let src = source.as_str();
     let rows = sqlx::query_as!(
         AlbumRow,
-        "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover \
+        "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_id \
          FROM albums WHERE source = ?1 ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE",
         src
     )
@@ -496,7 +496,7 @@ pub async fn albums_recently_added(
     let rows = sqlx::query_as!(
         AlbumRow,
         "SELECT a.source_album_id, a.title, a.artist, a.genre, a.year, a.cover_path, \
-                a.manual_cover \
+                a.manual_cover, a.artist_id \
          FROM albums a JOIN tracks t \
            ON t.source = a.source AND t.source_album_id = a.source_album_id \
          WHERE a.source = ?1 \
@@ -589,6 +589,7 @@ mod tests {
             year: 0,
             cover_path: cover.map(std::path::PathBuf::from),
             manual_cover: false,
+            artist_id: None,
         }
     }
 

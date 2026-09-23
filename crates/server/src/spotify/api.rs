@@ -750,12 +750,15 @@ pub fn parse_track(item: &Value) -> Option<Track> {
 
 fn parse_album(item: &Value) -> Option<reader::Album> {
     let id = item["id"].as_str().filter(|s| !s.is_empty())?;
-    let artist = item["artists"]
-        .as_array()
-        .and_then(|arr| arr.first())
+    let lead = item["artists"].as_array().and_then(|arr| arr.first());
+    let artist = lead
         .and_then(|a| a["name"].as_str())
         .unwrap_or_default()
         .to_string();
+    let artist_id = lead
+        .and_then(|a| a["id"].as_str())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
     let year = item["release_date"]
         .as_str()
         .and_then(|d| d.get(0..4))
@@ -769,6 +772,7 @@ fn parse_album(item: &Value) -> Option<reader::Album> {
         year,
         cover_path: None,
         manual_cover: false,
+        artist_id,
     })
 }
 
