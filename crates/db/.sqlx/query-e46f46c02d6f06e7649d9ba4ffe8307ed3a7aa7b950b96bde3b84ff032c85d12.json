@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO listen_counts (source, track_key, count) VALUES (?1, ?2, ?3) ON CONFLICT(source, track_key) DO UPDATE SET count = count + ?3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "e46f46c02d6f06e7649d9ba4ffe8307ed3a7aa7b950b96bde3b84ff032c85d12"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_id, derived) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) ON CONFLICT(source, source_album_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "62f92533bd82efe8b1d3ced6da00d7e576092871ef4f59a66c86aba0e3f946bf"
+}
