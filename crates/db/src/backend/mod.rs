@@ -500,9 +500,9 @@ impl Storage for Native {
     async fn bump_listen_count(
         &self,
         source: &crate::Source,
-        track_uid: &str,
+        track_key: &str,
     ) -> Result<(), DbError> {
-        cfg_store::bump_listen_count(&self.pool(), source, track_uid).await
+        cfg_store::bump_listen_count(&self.pool(), source, track_key).await
     }
 
     async fn push_recent(&self, source: &crate::Source, track_key: &str) -> Result<(), DbError> {

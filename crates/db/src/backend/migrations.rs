@@ -245,7 +245,7 @@ pub async fn run_json_import(
 
     // --- app_config blob (minus servers/creds/listen_counts) + listen_counts -
     import_config_blob(&mut tx, &cfg_val, &active_server_id, &lib).await?;
-    import_listen_counts(&mut tx, &cfg_val).await?;
+    import_listen_counts(&mut tx, &cfg_val, active_server_id.as_deref()).await?;
     import_recently_played(&mut tx, &cfg_val, &active_server_id).await?;
 
     // The YT sync timestamps ALSO go to the metadata cache — that's where the
@@ -620,18 +620,27 @@ async fn import_config_blob(
 async fn import_listen_counts(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     cfg: &serde_json::Value,
+    active_server: Option<&str>,
 ) -> Result<(), DbError> {
     let Some(map) = cfg.get("listen_counts").and_then(|v| v.as_object()) else {
         return Ok(());
     };
     for (k, v) in map {
-        let key = TrackId::from_legacy_path(k).uid();
+        // Legacy server counts all belong to the one server the file knew.
+        let (source, key) = match TrackId::from_legacy_path(k) {
+            TrackId::Local(path) => ("local", path.to_string_lossy().into_owned()),
+            TrackId::Server { item_id, .. } => match active_server {
+                Some(server) => (server, item_id),
+                None => continue,
+            },
+        };
         let count = v.as_i64().unwrap_or(0);
-        // Accumulate: distinct legacy keys can collapse to one uid (the old
+        // Accumulate: distinct legacy keys can collapse to one track (the old
         // "service:id:cover" form re-keyed when a cover changed).
         sqlx::query!(
-            "INSERT INTO listen_counts (track_key, count) VALUES (?1, ?2) \
-             ON CONFLICT(track_key) DO UPDATE SET count = count + ?2",
+            "INSERT INTO listen_counts (source, track_key, count) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(source, track_key) DO UPDATE SET count = count + ?3",
+            source,
             key,
             count
         )
