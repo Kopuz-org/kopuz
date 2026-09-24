@@ -446,6 +446,7 @@ fn play_catalog(
                     kind,
                     id: id.clone(),
                     continuation: cursor.clone(),
+                    name: None,
                 };
                 let detail = match api.catalog_detail(request).await {
                     Ok(detail) => detail,
@@ -570,6 +571,7 @@ fn Card(
                             kind,
                             id: id.clone(),
                             continuation: cursor.clone(),
+                            name: None,
                         };
                         let Ok(detail) = api.catalog_detail(request).await else {
                             return;
@@ -771,6 +773,7 @@ pub fn DiscoverPlaylistDetail(
                         kind,
                         id,
                         continuation: None,
+                        name: None,
                     })
                     .await;
                 if *fetch_gen.peek() != my_gen {
@@ -877,15 +880,16 @@ pub fn DiscoverArtistPage(
     // Generation guard: drop a late answer when the user has moved on.
     let mut fetch_gen = use_signal(|| 0u64);
     use_effect(move || {
-        // The selection is (id, name): the id wins, the name is the fallback
-        // the daemon resolves.
+        // The selection is (id, name): an id is exact, a name is what the
+        // daemon resolves. Which one this is travels in the request itself.
         let id = selected_artist_id.read().clone();
         let name = selected_artist_name.read().clone();
-        let Some(reference) = id.or_else(|| {
-            let name = name.trim();
-            (!name.is_empty()).then(|| name.to_string())
-        }) else {
-            return;
+        let request = match id.filter(|id| !id.trim().is_empty()) {
+            Some(id) => CatalogDetailRequest::by_id(CatalogItemKind::Artist, id),
+            None => match name.trim() {
+                "" => return,
+                name => CatalogDetailRequest::by_name(CatalogItemKind::Artist, name),
+            },
         };
         let my_gen = fetch_gen.with_mut(|generation| {
             *generation += 1;
@@ -894,17 +898,12 @@ pub fn DiscoverArtistPage(
         artist.set(None);
         loading.set(true);
         error.set(None);
-        let artist_span = tracing::info_span!("artist.load", artist = %reference);
+        let shown = request.name.clone().unwrap_or_else(|| request.id.clone());
+        let artist_span = tracing::info_span!("artist.load", artist = %shown);
         let api = api.clone();
         spawn(
             async move {
-                let result = api
-                    .catalog_detail(CatalogDetailRequest {
-                        kind: CatalogItemKind::Artist,
-                        id: reference,
-                        continuation: None,
-                    })
-                    .await;
+                let result = api.catalog_detail(request).await;
                 if *fetch_gen.peek() != my_gen {
                     return;
                 }
