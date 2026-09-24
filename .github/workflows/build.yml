@@ -24,7 +24,10 @@ jobs:
       - name: Fetch master for the wire comparison
         run: git fetch --depth=1 origin master
 
-      - name: Check no proto field was renumbered
+      - name: Test the proto number check
+        run: nix shell nixpkgs#nushell --command nu scripts/check_proto_numbers.nu test
+
+      - name: Check no proto number changed meaning
         run: nix shell nixpkgs#nushell --command nu scripts/check_proto_numbers.nu
 
   pr-build:
