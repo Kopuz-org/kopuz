@@ -178,6 +178,7 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::DaemonStatus {
             version: env!("CARGO_PKG_VERSION").to_string(),
             uptime_secs: self.0.started.elapsed().as_secs(),
+            proto_revision: proto::WIRE_REVISION,
         }))
     }
 

@@ -15,6 +15,10 @@ pub use generated::*;
 /// `grpcurl` story).
 pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("kopuz");
 
+/// The contract revision this build speaks; it lives in `api` because the
+/// daemon reports it without otherwise knowing the wire exists.
+pub use api::WIRE_REVISION;
+
 pub mod convert;
 #[cfg(windows)]
 pub mod pipe;

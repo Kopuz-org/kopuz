@@ -20,6 +20,16 @@ jobs:
       - name: Check Rust i18n usage against en.ftl
         run: nix shell nixpkgs#nushell --command nu scripts/check_i18n_usage.nu
 
+      # The comparison needs a master to read; a shallow checkout carries none.
+      - name: Fetch master for the wire comparison
+        run: git fetch --depth=1 origin master
+
+      - name: Test the proto number check
+        run: nix shell nixpkgs#nushell --command nu scripts/check_proto_numbers.nu test
+
+      - name: Check no proto number changed meaning
+        run: nix shell nixpkgs#nushell --command nu scripts/check_proto_numbers.nu
+
   pr-build:
     if: github.event_name == 'pull_request'
     strategy:

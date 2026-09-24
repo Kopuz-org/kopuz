@@ -54,3 +54,49 @@ pub fn config_view_from_proto(value: &ConfigView) -> api::ConfigView {
         locked_keys: value.locked_keys.clone(),
     }
 }
+
+pub fn daemon_status_to_proto(value: &api::DaemonStatus) -> DaemonStatus {
+    DaemonStatus {
+        version: value.version.clone(),
+        uptime_secs: value.uptime_secs,
+        proto_revision: value.proto_revision,
+    }
+}
+
+pub fn daemon_status_from_proto(value: &DaemonStatus) -> api::DaemonStatus {
+    api::DaemonStatus {
+        version: value.version.clone(),
+        uptime_secs: value.uptime_secs,
+        proto_revision: value.proto_revision,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_status_survives_the_wire() {
+        let status = api::DaemonStatus {
+            version: "0.16.2".into(),
+            uptime_secs: 42,
+            proto_revision: api::WIRE_REVISION,
+        };
+        assert_eq!(
+            daemon_status_from_proto(&daemon_status_to_proto(&status)),
+            status
+        );
+    }
+
+    /// A daemon too old to know the field sends nothing, which must not read as revision 1.
+    #[test]
+    fn a_silent_daemon_is_revision_zero() {
+        let old = DaemonStatus {
+            version: "0.16.1".into(),
+            uptime_secs: 1,
+            ..Default::default()
+        };
+        assert_eq!(daemon_status_from_proto(&old).proto_revision, 0);
+        assert_ne!(api::WIRE_REVISION, 0);
+    }
+}
