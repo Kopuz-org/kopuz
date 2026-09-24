@@ -91,10 +91,7 @@ pub trait MediaSource: Send + Sync {
         item_refs: &[String],
     ) -> Result<String, SourceError>;
 
-    /// Remove one track from a playlist. The per-service identity differs (YT:
-    /// video id, Jellyfin: entry id, Subsonic: position), so the whole track +
-    /// its current position are passed and each impl takes what it needs; the
-    /// DB cache is kept in sync.
+    /// Remove the entry at `position`; the track carries that entry's own `playlist_item_id`.
     async fn remove_from_playlist(
         &self,
         playlist_id: &str,
@@ -134,14 +131,14 @@ pub trait MediaSource: Send + Sync {
 
     // --- capability-gated ops (default = unsupported) -----------------------
 
-    /// Persist a playlist reorder: `ordered_refs` is the full new membership;
+    /// Persist a playlist reorder: `ordered` is the full new membership, entry ids kept;
     /// `moved`/`new_index` identify the one entry that changed position. Only
     /// sources whose [`Capabilities::playlists`] is [`PlaylistOps::Reorder`]
     /// override this; the rest inherit the unsupported default.
     async fn reorder_playlist(
         &self,
         _playlist_id: &str,
-        _ordered_refs: &[String],
+        _ordered: &[reader::PlaylistEntry],
         _moved: &reader::Track,
         _new_index: usize,
     ) -> Result<(), SourceError> {
@@ -491,10 +488,22 @@ pub trait MediaSource: Send + Sync {
     async fn set_playlist_tracks(
         &self,
         playlist_id: &str,
-        refs: &[String],
+        entries: &[reader::PlaylistEntry],
     ) -> Result<(), SourceError> {
         self.db()
-            .set_playlist_tracks(self.source(), playlist_id, refs)
+            .set_playlist_tracks(self.source(), playlist_id, entries)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Remove the entry at `index` in play order. DB-cache op.
+    async fn remove_playlist_entry(
+        &self,
+        playlist_id: &str,
+        index: usize,
+    ) -> Result<(), SourceError> {
+        self.db()
+            .remove_playlist_entry(self.source(), playlist_id, index)
             .await
             .map_err(SourceError::from)
     }
@@ -714,12 +723,12 @@ pub trait MediaSource: Send + Sync {
     async fn upsert_playlist_tracks_page(
         &self,
         playlist_id: &str,
-        refs: &[String],
+        entries: &[reader::PlaylistEntry],
         start_position: i64,
         epoch: i64,
     ) -> Result<(), SourceError> {
         self.db()
-            .upsert_playlist_tracks_page(self.source(), playlist_id, refs, start_position, epoch)
+            .upsert_playlist_tracks_page(self.source(), playlist_id, entries, start_position, epoch)
             .await
             .map_err(SourceError::from)
     }
@@ -776,7 +785,8 @@ pub(super) async fn mirror_created(
 ) -> Result<(), SourceError> {
     db.upsert_playlist_meta(source, id, name, None, None)
         .await?;
-    db.set_playlist_tracks(source, id, refs)
+    let entries: Vec<reader::PlaylistEntry> = refs.iter().map(|key| key.as_str().into()).collect();
+    db.set_playlist_tracks(source, id, &entries)
         .await
         .map_err(SourceError::from)
 }

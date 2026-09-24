@@ -166,16 +166,13 @@ async fn imports_synthetic_fixture() {
     );
     assert_eq!(row.get::<Option<String>, _>("service"), None);
 
-    // Creds landed on the server row (not in the config blob).
-    let row = sqlx::query("SELECT access_token, auth_state FROM servers WHERE id = 'srv-1'")
-        .fetch_one(&mut conn)
-        .await
-        .unwrap();
-    assert_eq!(
-        row.get::<Option<String>, _>("access_token").as_deref(),
-        Some("SECRET_COOKIE")
-    );
-    assert_eq!(row.get::<String, _>("auth_state"), "active");
+    // Creds landed beside the server row (not in the config blob).
+    let token: String =
+        sqlx::query_scalar("SELECT access_token FROM server_credentials WHERE server_id = 'srv-1'")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!(token, "SECRET_COOKIE");
 
     // Config blob: creds/servers/listen_counts stripped, active_server_id stamped.
     let blob: String = sqlx::query_scalar("SELECT json FROM app_config WHERE id = 1")
@@ -200,14 +197,13 @@ async fn imports_synthetic_fixture() {
         "no token leaked into the blob"
     );
 
-    // YT sync stamps land in the metadata cache (where the runtime reads them —
+    // YT sync stamps land in the kv table (where the runtime reads them —
     // blob-only stamps caused a full YT re-stream on first favorites open).
-    let stamp: Option<String> = sqlx::query_scalar(
-        "SELECT payload FROM metadata_cache WHERE cache_key = 'yt_sync' AND kind = 'timestamps'",
-    )
-    .fetch_optional(&mut conn)
-    .await
-    .unwrap();
+    let stamp: Option<String> =
+        sqlx::query_scalar("SELECT value FROM kv WHERE name = 'yt_sync' AND kind = 'timestamps'")
+            .fetch_optional(&mut conn)
+            .await
+            .unwrap();
     let stamp: serde_json::Value = serde_json::from_str(&stamp.expect("yt_sync stamp")).unwrap();
     assert_eq!(
         stamp.get("last_yt_sync_at").and_then(|v| v.as_u64()),

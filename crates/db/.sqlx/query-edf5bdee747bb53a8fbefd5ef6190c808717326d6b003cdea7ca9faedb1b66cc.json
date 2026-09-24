@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO servers (id, name, url, service) VALUES (?1, ?2, ?3, ?4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "edf5bdee747bb53a8fbefd5ef6190c808717326d6b003cdea7ca9faedb1b66cc"
+}

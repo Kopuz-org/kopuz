@@ -27,15 +27,19 @@ const TRACK_COLUMNS: &str = "t.track_key, t.service, \
     COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS cover_path, \
     t.source_album_id, t.title, \
     t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
-    t.mb_release_id, t.mb_recording_id, t.mb_track_id, t.playlist_item_id, t.artists_json, \
-    t.credits_json";
+    mb.release_id AS mb_release_id, mb.recording_id AS mb_recording_id, mb.track_id AS mb_track_id, \
+    (SELECT json_group_array(c.name ORDER BY c.position) \
+       FROM track_credits c WHERE c.track_pk = t.rowid_pk) AS artists_json, \
+    (SELECT json_group_array(json_object('name', c.name, 'id', c.artist_id) ORDER BY c.position) \
+       FROM track_credits c WHERE c.track_pk = t.rowid_pk) AS credits_json";
 
 /// `FROM tracks t` + the album join that backs the `COALESCE` in [`TRACK_COLUMNS`].
 /// LEFT so a track whose album row is missing still returns (cover → NULL → default).
 /// `albums` shares column names with `tracks` (`artist`/`title`/`cover_path`/…), so
 /// every query using this must `t.`-qualify its WHERE/ORDER BY columns.
 const TRACKS_FROM: &str = "FROM tracks t LEFT JOIN albums a \
-    ON a.source = t.source AND a.source_album_id = t.source_album_id";
+    ON a.source = t.source AND a.source_album_id = t.source_album_id \
+    LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk";
 
 /// SQL for a track row's listen-count key: built-in Local keeps the legacy
 /// path key, named local sources prefix it with their source id, and servers
@@ -167,18 +171,11 @@ pub async fn album_tracks(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
-/// `(track, name, id)` per credit, per bare name of a credit-less row, and per album artist; binds `?1`.
+/// `(track, name, id)` per track credit and per album artist; binds `?1`.
 const CREDIT_ROWS: &str = "\
-    SELECT t.rowid_pk AS track, TRIM(json_extract(c.value, '$.name')) AS name, \
-           json_extract(c.value, '$.id') AS id \
-      FROM tracks t, json_each(t.credits_json) AS c \
-     WHERE t.source = ?1 AND t.credits_json != '[]' \
-    UNION \
-    SELECT t.rowid_pk, TRIM(t.artist), NULL FROM tracks t \
-     WHERE t.source = ?1 AND t.credits_json = '[]' \
-    UNION \
-    SELECT t.rowid_pk, TRIM(v.value), NULL FROM tracks t, json_each(t.artists_json) AS v \
-     WHERE t.source = ?1 AND t.credits_json = '[]' \
+    SELECT c.track_pk AS track, c.name AS name, c.artist_id AS id \
+      FROM track_credits c JOIN tracks t ON t.rowid_pk = c.track_pk \
+     WHERE t.source = ?1 \
     UNION \
     SELECT t.rowid_pk, TRIM(a.artist), a.artist_id FROM tracks t JOIN albums a \
         ON a.source = t.source AND a.source_album_id = t.source_album_id \
@@ -221,8 +218,7 @@ pub async fn artist_tracks(
         utils::artist::ArtistKey::Id(id) => {
             let sql = format!(
                 "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 AND ( \
-                    EXISTS (SELECT 1 FROM json_each(t.credits_json) AS c \
-                             WHERE json_extract(c.value, '$.id') = ?2) \
+                    t.rowid_pk IN (SELECT track_pk FROM track_credits WHERE artist_id = ?2) \
                     OR t.source_album_id IN \
                        (SELECT source_album_id FROM albums WHERE source = ?1 AND artist_id = ?2) \
                  ) {ARTIST_ORDER}{limit_clause}"
@@ -292,6 +288,7 @@ pub async fn genre_tracks(
     let sql = format!(
         "SELECT {TRACK_COLUMNS} FROM tracks t \
          JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id \
+         LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk \
          WHERE t.source = ?1 AND a.genre = ?2 \
          ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_number, t.track_number"
     );
@@ -460,25 +457,17 @@ pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::Ar
     Ok(artists)
 }
 
-/// The source-issued id per credited artist, keyed by normalized name. Where a
-/// name carries several, the most credited wins rather than whichever row came
-/// first. Kept out of [`artists`] because an id-bearing row and a bare one both
-/// survive that UNION, and its `COUNT(*)` would then count the track twice.
+/// The most-credited source id per normalized name, so a row order never picks the answer.
 pub async fn artist_ids(
     pool: &SqlitePool,
     source: &Source,
 ) -> Result<std::collections::HashMap<String, String>, DbError> {
-    // Keyed in Rust, not with SQLite's `LOWER`: that folds ASCII only, so "ЛСП"
-    // would sit under a key no lookup through `normalize_artist_key` can reach.
+    // Keyed in Rust: SQLite's `LOWER` folds ASCII only, so "ЛСП" would miss every lookup.
     let rows: Vec<(String, String, i64)> = sqlx::query_as(
-        "SELECT name, id, COUNT(*) AS cnt FROM ( \
-             SELECT TRIM(json_extract(credit.value, '$.name')) AS name, \
-                    json_extract(credit.value, '$.id') AS id \
-               FROM tracks t, json_each(t.credits_json) AS credit \
-              WHERE t.source = ?1 \
-                AND json_extract(credit.value, '$.id') IS NOT NULL \
-                AND TRIM(json_extract(credit.value, '$.name')) != '' \
-         ) GROUP BY name, id",
+        "SELECT c.name, c.artist_id, COUNT(*) FROM track_credits c \
+           JOIN tracks t ON t.rowid_pk = c.track_pk \
+          WHERE t.source = ?1 AND c.artist_id IS NOT NULL AND c.name != '' \
+          GROUP BY c.name, c.artist_id",
     )
     .bind(source.as_str())
     .fetch_all(pool)

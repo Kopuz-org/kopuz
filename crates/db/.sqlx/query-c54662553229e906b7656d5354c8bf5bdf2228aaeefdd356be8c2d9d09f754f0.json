@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT payload FROM metadata_cache WHERE cache_key = ?1 AND kind = ?2",
+  "query": "SELECT value FROM kv WHERE name = ?1 AND kind = ?2",
   "describe": {
     "columns": [
       {
-        "name": "payload",
+        "name": "value",
         "ordinal": 0,
         "type_info": "Text"
       }
@@ -13,8 +13,8 @@
       "Right": 2
     },
     "nullable": [
-      true
+      false
     ]
   },
-  "hash": "7cdcb72b79c57823022dbce1ac732b5195a9d738da8dcc34b176d2a3a7e87753"
+  "hash": "c54662553229e906b7656d5354c8bf5bdf2228aaeefdd356be8c2d9d09f754f0"
 }

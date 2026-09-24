@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT value FROM kv WHERE name = 'legacy_import' AND kind = 'files'",
+  "describe": {
+    "columns": [
+      {
+        "name": "value",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "38ef5fe4adc0ec6683d3805f13b1dc37d5466b6af44420c1d432b18269207c34"
+}

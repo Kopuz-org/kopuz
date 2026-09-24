@@ -74,23 +74,24 @@ async fn seed(db_path: &std::path::Path) {
     {
         batch.push_str(&format!(
             "INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, \
-             disc_number, track_number, artists_json) VALUES \
-             ({}, 'local', '{key}', '{album_id}', '{title}', '{artist}', '{album}', {disc}, {track}, '[]');\n",
+             disc_number, track_number) VALUES \
+             ({}, 'local', '{key}', '{album_id}', '{title}', '{artist}', '{album}', {disc}, {track});\n",
             i + 1
         ));
     }
     batch.push_str(
-        "INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, artists_json) \
-         VALUES (100, 'srv-1', 'vid1', 'YtMusic', 'al-yt', 'Server Song', 'Cyn', 'Yt Album', '[]');\n\
-         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, artists_json) \
-         VALUES (101, 'local:test', '/music/jazz/b_1.flac', 'al-separate', 'Separate Song', 'Dee', 'Separate Album', '[]');\n\
+        "INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album) \
+         VALUES (100, 'srv-1', 'vid1', 'YtMusic', 'al-yt', 'Server Song', 'Cyn', 'Yt Album');\n\
+         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album) \
+         VALUES (101, 'local:test', '/music/jazz/b_1.flac', 'al-separate', 'Separate Song', 'Dee', 'Separate Album');\n\
          INSERT INTO albums (source, source_album_id, title, artist, genre) VALUES \
            ('local', 'al-rock', 'Rock One', 'Axel', 'Rock'), \
            ('local', 'al-jazz', 'Jazz One', 'Bea', 'Jazz'), \
            ('local:test', 'al-separate', 'Separate Album', 'Dee', 'Other'), \
            ('srv-1', 'al-yt', 'Yt Album', 'Cyn', 'Pop');\n\
          INSERT INTO listen_counts (track_key, count) VALUES \
-           ('/music/rock/a1.flac', 3), ('/music/jazz/b_1.flac', 10), ('ytmusic:vid1', 7);\n",
+           ('/music/rock/a1.flac', 3), ('/music/jazz/b_1.flac', 10), ('ytmusic:vid1', 7);\n\
+         INSERT INTO track_credits (track_pk, position, name) SELECT rowid_pk, 0, artist FROM tracks;\n",
     );
     conn.execute(batch.as_str()).await.unwrap();
 }
@@ -214,12 +215,12 @@ async fn track_cover_projects_from_album_for_local_keeps_own_for_server() {
         "INSERT INTO albums (source, source_album_id, title, artist, genre, cover_path) VALUES \
            ('local', 'al-x', 'X', 'A', 'Rock', '/covers/al-x.jpg'), \
            ('srv-1', 'al-srv', 'SrvAlbum', 'B', 'Pop', '/album/should-not-win.jpg'); \
-         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, artists_json) \
-           VALUES (1, 'local', '/music/x.flac', 'al-x', 'Song', 'A', 'X', '[]'); \
-         INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, cover_path, artists_json) \
-           VALUES (2, 'srv-1', 'vid9', 'YtMusic', 'al-srv', 'SrvSong', 'B', 'SrvAlbum', 'own-ref', '[]'); \
-         INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, artists_json) \
-           VALUES (3, 'srv-1', 'vid10', 'YtMusic', 'al-srv', 'SrvSongNoCover', 'B', 'SrvAlbum', '[]');",
+         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album) \
+           VALUES (1, 'local', '/music/x.flac', 'al-x', 'Song', 'A', 'X'); \
+         INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, cover_path) \
+           VALUES (2, 'srv-1', 'vid9', 'YtMusic', 'al-srv', 'SrvSong', 'B', 'SrvAlbum', 'own-ref'); \
+         INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album) \
+           VALUES (3, 'srv-1', 'vid10', 'YtMusic', 'al-srv', 'SrvSongNoCover', 'B', 'SrvAlbum');",
     )
     .await
     .unwrap();

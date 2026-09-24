@@ -359,7 +359,7 @@ impl MediaSource for AppleMusicSource {
         &self,
         playlist_id: &str,
         track: &reader::Track,
-        _position: usize,
+        position: usize,
     ) -> Result<(), SourceError> {
         // The playlist row's own id, not the catalog id — see
         // `track_from_playlist_entry`.
@@ -371,10 +371,7 @@ impl MediaSource for AppleMusicSource {
             .remove_from_playlist(playlist_id, entry_id)
             .await
             .map_err(SourceError::Backend)?;
-        self.db
-            .remove_playlist_tracks(&self.source, playlist_id, &[track.id.key().into_owned()])
-            .await
-            .map_err(SourceError::from)
+        self.remove_playlist_entry(playlist_id, position).await
     }
 
     async fn fetch_artist_images(

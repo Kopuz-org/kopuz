@@ -287,6 +287,13 @@ pub trait ReadStore: Send + Sync {
     /// caller's in-memory active source.
     async fn load_playlists(&self, source: &Source) -> Result<reader::PlaylistStore, DbError>;
 
+    /// One playlist's entries in play order, each with the id its source gave it.
+    async fn playlist_entries(
+        &self,
+        source: &Source,
+        pl_id: &str,
+    ) -> Result<Vec<reader::PlaylistEntry>, DbError>;
+
     /// Hydrate one server row (creds included) into the in-memory shape — used
     /// by server switching so stored creds are reused instead of re-prompting.
     async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
@@ -300,8 +307,7 @@ pub trait ReadStore: Send + Sync {
         user_id: Option<&str>,
     ) -> Result<(), DbError>;
 
-    /// Generic metadata-cache read (`metadata_cache` table): the `payload` for
-    /// `(cache_key, kind)`, if cached.
+    /// The value stored under `(cache_key, kind)` in the `kv` table, if any.
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
 
     /// Metadata-cache keys of `kind` written within the last `max_age_secs` —
@@ -409,7 +415,7 @@ pub trait Storage: ReadStore {
         &self,
         source: &Source,
         pl_id: &str,
-        refs: &[String],
+        entries: &[reader::PlaylistEntry],
     ) -> Result<(), DbError>;
 
     /// Append refs to one playlist (creating it if absent), skipping any already
@@ -430,6 +436,14 @@ pub trait Storage: ReadStore {
         refs: &[String],
     ) -> Result<(), DbError>;
 
+    /// Remove only the entry at `index` in play order; a track listed twice keeps its other copy.
+    async fn remove_playlist_entry(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        index: usize,
+    ) -> Result<(), DbError>;
+
     /// Streaming upsert of one page of a playlist's entries (creating the playlist
     /// row if absent): each ref is written at `start_position + i` and stamped with
     /// the current walk's `epoch`. On position conflict the ref and epoch are
@@ -439,7 +453,7 @@ pub trait Storage: ReadStore {
         &self,
         source: &Source,
         pl_id: &str,
-        refs: &[String],
+        entries: &[reader::PlaylistEntry],
         start_position: i64,
         epoch: i64,
     ) -> Result<(), DbError>;

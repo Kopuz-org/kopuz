@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO playlist_tracks (playlist_pk, position, track_ref, epoch, item_id) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(playlist_pk, position) DO UPDATE SET track_ref = excluded.track_ref, epoch = excluded.epoch, item_id = excluded.item_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "6694fc4182732e056470ad62f2065aa5e9fdec67dbb80f2923042a1c72a96b45"
+}

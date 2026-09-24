@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT cache_key FROM metadata_cache WHERE kind = ?1 AND fetched_at >= (unixepoch() - ?2)",
+  "query": "SELECT name FROM kv WHERE kind = ?1 AND updated_at >= (unixepoch() - ?2)",
   "describe": {
     "columns": [
       {
-        "name": "cache_key",
+        "name": "name",
         "ordinal": 0,
         "type_info": "Text"
       }
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "479b2b9ff1b043d214f648433f81ca3e86e6c80491950892bcc545ce139218fd"
+  "hash": "47f69a18e37ad2dd065d52e0af91d6c465946997e8aafca6cb0df3f1bbbb4c48"
 }

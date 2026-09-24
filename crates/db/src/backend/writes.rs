@@ -38,23 +38,17 @@ pub async fn upsert_tracks(
         let bitrate = t.bitrate as i64;
         let track_number = t.track_number.map(|n| n as i64);
         let disc_number = t.disc_number.map(|n| n as i64);
-        let artists_json = serde_json::to_string(&t.artists)?;
-        let credits_json = serde_json::to_string(&t.credits)?;
-        // The same track arrives from paths that link its artists and paths that
-        // only name them, in either order, so credits keep the richer parse.
-        sqlx::query!(
+        let pk = sqlx::query_scalar!(
             "INSERT INTO tracks \
                (source, track_key, path, service, source_album_id, title, artist, album, duration, \
-                khz, bitrate, track_number, disc_number, mb_release_id, mb_recording_id, mb_track_id, \
-                playlist_item_id, artists_json, cover_path, credits_json) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20) \
+                khz, bitrate, track_number, disc_number, cover_path) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
              ON CONFLICT(source, track_key) DO UPDATE SET \
                path=?3, service=?4, \
                source_album_id=CASE WHEN ?5 != '' THEN ?5 ELSE tracks.source_album_id END, \
                title=?6, artist=?7, album=?8, duration=?9, \
-               khz=?10, bitrate=?11, track_number=?12, disc_number=?13, mb_release_id=?14, \
-               mb_recording_id=?15, mb_track_id=?16, playlist_item_id=?17, artists_json=?18, cover_path=?19, \
-               credits_json=CASE WHEN ?20 != '[]' THEN ?20 ELSE tracks.credits_json END",
+               khz=?10, bitrate=?11, track_number=?12, disc_number=?13, cover_path=?14 \
+             RETURNING rowid_pk AS \"pk!: i64\"",
             src,
             track_key,
             path,
@@ -68,18 +62,89 @@ pub async fn upsert_tracks(
             bitrate,
             track_number,
             disc_number,
-            t.musicbrainz_release_id,
-            t.musicbrainz_recording_id,
-            t.musicbrainz_track_id,
-            t.playlist_item_id,
-            artists_json,
-            t.cover,
-            credits_json
+            t.cover
         )
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await?;
+        write_track_children(&mut tx, pk, t).await?;
     }
     tx.commit().await?;
+    Ok(())
+}
+
+/// The credits a row stores: the source's own, else its names as unlinked credits.
+fn stored_credits(t: &Track) -> Vec<reader::ArtistCredit> {
+    if !t.credits.is_empty() {
+        return t.credits.clone();
+    }
+    let names: Vec<&str> = match t.artists.is_empty() {
+        true => vec![t.artist.as_str()],
+        false => t.artists.iter().map(String::as_str).collect(),
+    };
+    names
+        .into_iter()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(reader::ArtistCredit::unlinked)
+        .collect()
+}
+
+/// Write a track's credits and MusicBrainz ids beside its row.
+pub(crate) async fn write_track_children(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    pk: i64,
+    t: &Track,
+) -> Result<(), DbError> {
+    // Some paths only name a row's artists, so bare names never replace a list that carries an id.
+    let linked: i64 = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM track_credits WHERE track_pk = ?1 AND artist_id IS NOT NULL",
+        pk
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if !t.credits.is_empty() || linked == 0 {
+        sqlx::query!("DELETE FROM track_credits WHERE track_pk = ?1", pk)
+            .execute(&mut **tx)
+            .await?;
+        for (position, credit) in stored_credits(t).iter().enumerate() {
+            let position = position as i64;
+            let name = credit.name.trim();
+            sqlx::query!(
+                "INSERT INTO track_credits (track_pk, position, name, artist_id) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                pk,
+                position,
+                name,
+                credit.id
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+
+    let (release, recording, track) = (
+        &t.musicbrainz_release_id,
+        &t.musicbrainz_recording_id,
+        &t.musicbrainz_track_id,
+    );
+    if release.is_none() && recording.is_none() && track.is_none() {
+        sqlx::query!("DELETE FROM track_musicbrainz WHERE track_pk = ?1", pk)
+            .execute(&mut **tx)
+            .await?;
+    } else {
+        sqlx::query!(
+            "INSERT INTO track_musicbrainz (track_pk, release_id, recording_id, track_id) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(track_pk) DO UPDATE SET \
+               release_id = ?2, recording_id = ?3, track_id = ?4",
+            pk,
+            release,
+            recording,
+            track
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
     Ok(())
 }
 
@@ -553,12 +618,12 @@ async fn resolve_or_create_pk(
 
 /// Replace ONE playlist's membership (creating the playlist row if absent) —
 /// playlist-scoped, never the whole store. For reorders and full rebuilds.
-#[tracing::instrument(skip_all, fields(count = refs.len(), source = %source.as_str(), pl_id))]
+#[tracing::instrument(skip_all, fields(count = entries.len(), source = %source.as_str(), pl_id))]
 pub async fn set_playlist_tracks(
     pool: &SqlitePool,
     source: &Source,
     pl_id: &str,
-    refs: &[String],
+    entries: &[reader::PlaylistEntry],
 ) -> Result<(), DbError> {
     let src = source.as_str();
     let mut tx = pool.begin().await?;
@@ -566,18 +631,70 @@ pub async fn set_playlist_tracks(
     sqlx::query!("DELETE FROM playlist_tracks WHERE playlist_pk = ?1", pk)
         .execute(&mut *tx)
         .await?;
-    for (pos, r) in refs.iter().enumerate() {
+    for (pos, entry) in entries.iter().enumerate() {
         let pos = pos as i64;
         sqlx::query!(
-            "INSERT INTO playlist_tracks (playlist_pk, position, track_ref) VALUES (?1, ?2, ?3)",
+            "INSERT INTO playlist_tracks (playlist_pk, position, track_ref, item_id) \
+             VALUES (?1, ?2, ?3, ?4)",
             pk,
             pos,
-            r
+            entry.key,
+            entry.item_id
         )
         .execute(&mut *tx)
         .await?;
     }
     tx.commit().await?;
+    Ok(())
+}
+
+/// One playlist's entries in order, each with the id the source gave it.
+pub async fn playlist_entries(
+    pool: &SqlitePool,
+    source: &Source,
+    pl_id: &str,
+) -> Result<Vec<reader::PlaylistEntry>, DbError> {
+    let src = source.as_str();
+    let rows = sqlx::query!(
+        "SELECT pt.track_ref, pt.item_id FROM playlist_tracks pt \
+         JOIN playlists p ON p.rowid_pk = pt.playlist_pk \
+         WHERE p.source = ?1 AND p.source_pl_id = ?2 ORDER BY pt.position",
+        src,
+        pl_id
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| reader::PlaylistEntry {
+            key: row.track_ref,
+            item_id: row.item_id,
+        })
+        .collect())
+}
+
+/// Remove the entry at `index` in play order, so a track listed twice loses only that copy.
+#[tracing::instrument(skip(pool), fields(source = %source.as_str(), pl_id, index))]
+pub async fn remove_playlist_entry(
+    pool: &SqlitePool,
+    source: &Source,
+    pl_id: &str,
+    index: usize,
+) -> Result<(), DbError> {
+    let src = source.as_str();
+    let index = index as i64;
+    sqlx::query!(
+        "DELETE FROM playlist_tracks WHERE rowid = ( \
+           SELECT pt.rowid FROM playlist_tracks pt \
+           JOIN playlists p ON p.rowid_pk = pt.playlist_pk \
+           WHERE p.source = ?1 AND p.source_pl_id = ?2 \
+           ORDER BY pt.position LIMIT 1 OFFSET ?3)",
+        src,
+        pl_id,
+        index
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -664,31 +781,34 @@ pub async fn remove_playlist_tracks(
     Ok(())
 }
 
-#[tracing::instrument(skip(pool, refs), fields(pl_id = %pl_id, count = refs.len(), start = start_position))]
+#[tracing::instrument(skip(pool, entries), fields(pl_id = %pl_id, count = entries.len(), start = start_position))]
 pub async fn upsert_playlist_tracks_page(
     pool: &SqlitePool,
     source: &Source,
     pl_id: &str,
-    refs: &[String],
+    entries: &[reader::PlaylistEntry],
     start_position: i64,
     epoch: i64,
 ) -> Result<(), DbError> {
     let src = source.as_str();
     let mut tx = pool.begin().await?;
     let pk = resolve_or_create_pk(&mut tx, src, pl_id).await?;
-    for (i, r) in refs.iter().enumerate() {
+    for (i, entry) in entries.iter().enumerate() {
         let pos = start_position + i as i64;
         // Overwrite by position: re-walking in order re-stamps positions 0..N with
         // the current epoch; a now-shorter playlist leaves its tail at the old
         // epoch for the sweep. Position is the entry order, so this also applies
         // reorders in place.
         sqlx::query!(
-            "INSERT INTO playlist_tracks (playlist_pk, position, track_ref, epoch) VALUES (?1, ?2, ?3, ?4) \
-             ON CONFLICT(playlist_pk, position) DO UPDATE SET track_ref = excluded.track_ref, epoch = excluded.epoch",
+            "INSERT INTO playlist_tracks (playlist_pk, position, track_ref, epoch, item_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5) \
+             ON CONFLICT(playlist_pk, position) DO UPDATE SET track_ref = excluded.track_ref, \
+               epoch = excluded.epoch, item_id = excluded.item_id",
             pk,
             pos,
-            r,
-            epoch
+            entry.key,
+            epoch,
+            entry.item_id
         )
         .execute(&mut *tx)
         .await?;
@@ -826,13 +946,12 @@ pub async fn meta_get(
     kind: &str,
 ) -> Result<Option<String>, DbError> {
     Ok(sqlx::query_scalar!(
-        "SELECT payload FROM metadata_cache WHERE cache_key = ?1 AND kind = ?2",
+        "SELECT value FROM kv WHERE name = ?1 AND kind = ?2",
         cache_key,
         kind
     )
     .fetch_optional(pool)
-    .await?
-    .flatten())
+    .await?)
 }
 
 /// Metadata-cache keys of `kind` written within the last `max_age_secs` — e.g.
@@ -843,8 +962,7 @@ pub async fn meta_keys_since(
     max_age_secs: i64,
 ) -> Result<Vec<String>, DbError> {
     Ok(sqlx::query_scalar!(
-        "SELECT cache_key FROM metadata_cache \
-         WHERE kind = ?1 AND fetched_at >= (unixepoch() - ?2)",
+        "SELECT name FROM kv WHERE kind = ?1 AND updated_at >= (unixepoch() - ?2)",
         kind,
         max_age_secs
     )
@@ -860,8 +978,8 @@ pub async fn meta_put(
     payload: &str,
 ) -> Result<(), DbError> {
     sqlx::query!(
-        "INSERT INTO metadata_cache (cache_key, kind, payload) VALUES (?1, ?2, ?3) \
-         ON CONFLICT(cache_key, kind) DO UPDATE SET payload = ?3, fetched_at = unixepoch()",
+        "INSERT INTO kv (name, kind, value) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(kind, name) DO UPDATE SET value = ?3, updated_at = unixepoch()",
         cache_key,
         kind,
         payload

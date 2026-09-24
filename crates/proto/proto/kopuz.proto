@@ -1180,7 +1180,7 @@ message TrackInfo {
   optional string musicbrainz_release_id = 17;
   optional string musicbrainz_recording_id = 18;
   optional string musicbrainz_track_id = 19;
-  optional string playlist_item_id = 20;
+  reserved 20; // was playlist_item_id; an entry's id belongs to the entry, not the track
   // Absent when there is no cover.
   optional ArtworkRef artwork = 21;
   // `artists` stays populated beside this: an older client reads only that.

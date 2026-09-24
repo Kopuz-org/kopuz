@@ -73,7 +73,7 @@ pub trait PlaylistSource: SourceIdentity + Send + Sync {
     async fn reorder_playlist(
         &self,
         playlist_id: &str,
-        ordered_refs: &[String],
+        ordered: &[reader::PlaylistEntry],
         moved: &reader::Track,
         new_index: usize,
     ) -> Result<(), SourceError>;
@@ -125,12 +125,11 @@ where
     async fn reorder_playlist(
         &self,
         playlist_id: &str,
-        ordered_refs: &[String],
+        ordered: &[reader::PlaylistEntry],
         moved: &reader::Track,
         new_index: usize,
     ) -> Result<(), SourceError> {
-        <T as MediaSource>::reorder_playlist(self, playlist_id, ordered_refs, moved, new_index)
-            .await
+        <T as MediaSource>::reorder_playlist(self, playlist_id, ordered, moved, new_index).await
     }
 
     async fn fetch_playlist_entries(
