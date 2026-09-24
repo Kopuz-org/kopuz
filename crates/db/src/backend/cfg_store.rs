@@ -62,13 +62,23 @@ pub async fn load_config(
             .map(StoredServer::music_server)
     });
 
-    // Hydrate play counts.
-    let counts = sqlx::query!("SELECT track_key, count FROM listen_counts")
-        .fetch_all(pool)
-        .await?;
+    // Hydrate play counts under the uid keys every reader of the map looks them up by.
+    let counts = sqlx::query!(
+        "SELECT lc.source, lc.track_key, lc.count, s.service \
+           FROM listen_counts lc LEFT JOIN servers s ON s.id = lc.source"
+    )
+    .fetch_all(pool)
+    .await?;
     cfg.listen_counts = counts
         .into_iter()
-        .map(|r| (r.track_key, r.count.max(0) as u64))
+        .map(|r| {
+            let uid = match r.service {
+                Some(service) => format!("{}:{}", service.to_lowercase(), r.track_key),
+                None => r.track_key,
+            };
+            let key = Source::from_column(&r.source).listen_count_key(&uid);
+            (key, r.count.max(0) as u64)
+        })
         .collect();
 
     Ok(Some(cfg))
@@ -145,6 +155,7 @@ pub async fn save_config(
         .await?;
     for id in existing {
         if !keep.contains(id.as_str()) {
+            purge_source(&mut tx, &id).await?;
             sqlx::query!("DELETE FROM servers WHERE id = ?1", id)
                 .execute(&mut *tx)
                 .await?;
@@ -406,13 +417,14 @@ pub(crate) async fn write_server_credentials(
 pub async fn bump_listen_count(
     pool: &SqlitePool,
     source: &Source,
-    track_uid: &str,
+    track_key: &str,
 ) -> Result<(), DbError> {
-    let key = source.listen_count_key(track_uid);
+    let src = source.as_str();
     sqlx::query!(
-        "INSERT INTO listen_counts (track_key, count) VALUES (?1, 1) \
-         ON CONFLICT(track_key) DO UPDATE SET count = count + 1",
-        key
+        "INSERT INTO listen_counts (source, track_key, count) VALUES (?1, ?2, 1) \
+         ON CONFLICT(source, track_key) DO UPDATE SET count = count + 1",
+        src,
+        track_key
     )
     .execute(pool)
     .await?;
@@ -526,6 +538,29 @@ pub async fn set_server_credentials(
 ) -> Result<(), DbError> {
     let mut conn = pool.acquire().await?;
     write_server_credentials(&mut conn, id, access_token, user_id, now_secs()).await
+}
+
+/// Everything a source left behind: its rows name it by text, so nothing cascades from `servers`.
+async fn purge_source(conn: &mut sqlx::SqliteConnection, source: &str) -> Result<(), DbError> {
+    for sql in [
+        "DELETE FROM tracks WHERE source = ?1",
+        "DELETE FROM albums WHERE source = ?1",
+        "DELETE FROM playlists WHERE source = ?1",
+        "DELETE FROM favorites WHERE server_id = ?1",
+        "DELETE FROM recently_played WHERE source = ?1",
+        "DELETE FROM listen_counts WHERE source = ?1",
+        "DELETE FROM kv WHERE kind = ?1",
+    ] {
+        sqlx::query(sql).bind(source).execute(&mut *conn).await?;
+    }
+    let id_keys = format!("id:{source}:%");
+    for sql in [
+        "DELETE FROM kv WHERE name LIKE ?1",
+        "DELETE FROM artist_images WHERE artist_norm LIKE ?1",
+    ] {
+        sqlx::query(sql).bind(&id_keys).execute(&mut *conn).await?;
+    }
+    Ok(())
 }
 
 /// Insert or rename one server's identity row.

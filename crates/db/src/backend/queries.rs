@@ -41,14 +41,6 @@ const TRACKS_FROM: &str = "FROM tracks t LEFT JOIN albums a \
     ON a.source = t.source AND a.source_album_id = t.source_album_id \
     LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk";
 
-/// SQL for a track row's listen-count key: built-in Local keeps the legacy
-/// path key, named local sources prefix it with their source id, and servers
-/// keep the lowercase legacy `service:item_id` uid.
-const UID_EXPR: &str = "(CASE WHEN t.service IS NULL THEN \
-    (CASE WHEN t.source = 'local' THEN t.track_key ELSE t.source || '|' || t.track_key END) ELSE \
-    (CASE t.service WHEN 'YtMusic' THEN 'ytmusic' WHEN 'Subsonic' THEN 'subsonic' \
-     WHEN 'Custom' THEN 'custom' ELSE 'jellyfin' END) || ':' || t.track_key END)";
-
 fn order_by(sort: &TrackSort) -> String {
     match sort {
         TrackSort::ArtistAlbum => {
@@ -130,7 +122,7 @@ pub async fn tracks_page(
     let sql = if filter.sort == TrackSort::PlayCount {
         format!(
             "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
-             LEFT JOIN listen_counts lc ON lc.track_key = {UID_EXPR} \
+             LEFT JOIN listen_counts lc ON lc.source = t.source AND lc.track_key = t.track_key \
              WHERE t.source = ?1{clauses} ORDER BY {} LIMIT ?{limit_n} OFFSET ?{}",
             order_by(&filter.sort),
             limit_n + 1,
@@ -171,7 +163,7 @@ pub async fn album_tracks(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
-/// `(track, name, id)` per track credit and per album artist; binds `?1`.
+/// `(track, name, id)` per track credit and per real album artist; binds `?1`.
 const CREDIT_ROWS: &str = "\
     SELECT c.track_pk AS track, c.name AS name, c.artist_id AS id \
       FROM track_credits c JOIN tracks t ON t.rowid_pk = c.track_pk \
@@ -179,7 +171,7 @@ const CREDIT_ROWS: &str = "\
     UNION \
     SELECT t.rowid_pk, TRIM(a.artist), a.artist_id FROM tracks t JOIN albums a \
         ON a.source = t.source AND a.source_album_id = t.source_album_id \
-     WHERE t.source = ?1";
+     WHERE t.source = ?1 AND a.derived = 0";
 
 const ARTIST_ORDER: &str =
     "ORDER BY t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE";
@@ -220,7 +212,8 @@ pub async fn artist_tracks(
                 "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 AND ( \
                     t.rowid_pk IN (SELECT track_pk FROM track_credits WHERE artist_id = ?2) \
                     OR t.source_album_id IN \
-                       (SELECT source_album_id FROM albums WHERE source = ?1 AND artist_id = ?2) \
+                       (SELECT source_album_id FROM albums \
+                        WHERE source = ?1 AND artist_id = ?2 AND derived = 0) \
                  ) {ARTIST_ORDER}{limit_clause}"
             );
             sqlx::query_as::<_, TrackRow>(&sql)
@@ -345,14 +338,12 @@ pub async fn artist_sample_tracks(
 }
 
 pub async fn top_genre(pool: &SqlitePool, source: &Source) -> Result<Option<String>, DbError> {
-    let sql = format!(
-        "SELECT a.genre FROM tracks t \
+    let sql = "SELECT a.genre FROM tracks t \
          JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id \
-         JOIN listen_counts lc ON lc.track_key = {UID_EXPR} \
+         JOIN listen_counts lc ON lc.source = t.source AND lc.track_key = t.track_key \
          WHERE t.source = ?1 AND TRIM(a.genre) != '' \
-         GROUP BY a.genre ORDER BY SUM(lc.count) DESC LIMIT 1"
-    );
-    Ok(sqlx::query_scalar::<_, String>(&sql)
+         GROUP BY a.genre ORDER BY SUM(lc.count) DESC LIMIT 1";
+    Ok(sqlx::query_scalar::<_, String>(sql)
         .bind(source.as_str())
         .fetch_optional(pool)
         .await?)
@@ -408,6 +399,34 @@ pub async fn tracks_by_keys(
         .collect();
     // get(), not remove(): a playlist can hold the same track twice.
     Ok(keys.iter().filter_map(|k| by_key.get(k).cloned()).collect())
+}
+
+/// Swap each queued track for its library row where one exists, so a restore shows what a sync since wrote.
+pub(crate) async fn refresh_from_library(
+    pool: &SqlitePool,
+    queue: Vec<Track>,
+) -> Result<Vec<Track>, DbError> {
+    if queue.is_empty() {
+        return Ok(queue);
+    }
+    let keys: Vec<String> = queue.iter().map(|t| t.id.key().into_owned()).collect();
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.track_key IN (SELECT value FROM json_each(?1))"
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(serde_json::to_string(&keys)?)
+        .fetch_all(pool)
+        .await?;
+    let library: Vec<Track> = rows.into_iter().map(Into::into).collect();
+    Ok(queue
+        .into_iter()
+        .map(
+            |queued| match library.iter().find(|row| row.id == queued.id) {
+                Some(row) => row.clone(),
+                None => queued,
+            },
+        )
+        .collect())
 }
 
 /// Grouped on the identity [`artist_tracks`] matches, so a tile opens exactly the tracks it counts.
@@ -824,6 +843,7 @@ mod tests {
     async fn homonyms() -> (SqlitePool, Source) {
         let pool = mem_pool().await;
         let source = Source::Server("srv".into());
+        // All four share a track-derived album, whose guessed artist must credit none of them.
         let tracks = [
             linked_track("a", "Ada", &[("Ada", Some("ar-1"))]),
             linked_track("b", "ADA", &[("ADA", Some("ar-1"))]),

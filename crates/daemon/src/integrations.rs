@@ -43,7 +43,7 @@ impl PlaybackRecorder for SourceRecorder {
     }
 
     async fn bump_listen_count(&self, track: &Track) {
-        if let Err(error) = self.source.bump_listen_count(&track.id.uid()).await {
+        if let Err(error) = self.source.bump_listen_count(&track.id.key()).await {
             tracing::warn!(%error, "listen count persist failed");
         }
     }

@@ -12,7 +12,7 @@
 use std::collections::HashSet;
 
 use api::{ApiError, Table};
-use reader::models::{Album, Track};
+use reader::models::Track;
 use server::source::{ActiveSource, FavoritesSync};
 
 use crate::jobs::JobCtx;
@@ -22,42 +22,6 @@ fn unix_now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .unwrap_or_default()
-}
-
-/// A liked track may belong to an album the library has never seen, so the
-/// album row is built from the track itself. The first track's thumbnail is
-/// the cover: a YT track's `cover` is already a self-contained ref that
-/// `CoverRef::parse` reads as-is, so there is no wrapper to add.
-fn synthesize_albums(tracks: &[Track]) -> Vec<Album> {
-    let mut by_album: std::collections::HashMap<String, &Track> = std::collections::HashMap::new();
-    for track in tracks {
-        if track.album_id.is_empty() {
-            continue;
-        }
-        by_album.entry(track.album_id.clone()).or_insert(track);
-    }
-    by_album
-        .into_iter()
-        .map(|(album_id, track)| Album {
-            id: album_id,
-            title: if track.album.is_empty() {
-                "Singles".to_string()
-            } else {
-                track.album.clone()
-            },
-            artist: track.artist.clone(),
-            genre: String::new(),
-            year: 0,
-            cover_path: track.cover.as_deref().map(std::path::PathBuf::from),
-            manual_cover: false,
-            artist_id: track
-                .credits
-                .iter()
-                .find(|credit| credit.name.trim() == track.artist.trim())
-                .or(track.credits.first())
-                .and_then(|credit| credit.id.clone()),
-        })
-        .collect()
 }
 
 impl super::FavoritesService {
@@ -206,7 +170,6 @@ impl super::FavoritesService {
             for chunk in fresh.chunks(100) {
                 let _ = source.upsert_tracks(chunk).await;
             }
-            let _ = source.upsert_albums(&synthesize_albums(&fresh)).await;
             let _ = source
                 .upsert_favorites_page(&page_refs, start_rank, epoch)
                 .await;
@@ -246,65 +209,5 @@ impl super::FavoritesService {
         self.bump(Table::Tracks);
         self.bump(Table::Albums);
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use reader::models::{ArtistCredit, Track, TrackId};
-
-    fn track(artist: &str, credits: Vec<ArtistCredit>) -> Track {
-        Track {
-            id: TrackId::Server {
-                service: config::MusicService::YtMusic,
-                item_id: "v1".into(),
-            },
-            cover: None,
-            album_id: "MPRE1".into(),
-            title: "t".into(),
-            artist: artist.into(),
-            album: "Album".into(),
-            duration: 60,
-            khz: 0,
-            bitrate: 0,
-            track_number: None,
-            disc_number: None,
-            musicbrainz_release_id: None,
-            musicbrainz_recording_id: None,
-            musicbrainz_track_id: None,
-            playlist_item_id: None,
-            artists: Vec::new(),
-            credits,
-        }
-    }
-
-    #[test]
-    fn an_album_takes_the_billed_artists_id() {
-        let row = track(
-            "Boris",
-            vec![
-                ArtistCredit::linked("Ada", "UC-ada"),
-                ArtistCredit::linked("Boris", "UC-b"),
-            ],
-        );
-
-        let albums = super::synthesize_albums(&[row]);
-
-        assert_eq!(albums[0].artist_id.as_deref(), Some("UC-b"));
-    }
-
-    #[test]
-    fn a_joined_billing_takes_its_leads_id() {
-        let row = track(
-            "Ada & Boris",
-            vec![
-                ArtistCredit::linked("Ada", "UC-ada"),
-                ArtistCredit::unlinked("Boris"),
-            ],
-        );
-
-        let albums = super::synthesize_albums(&[row]);
-
-        assert_eq!(albums[0].artist_id.as_deref(), Some("UC-ada"));
     }
 }

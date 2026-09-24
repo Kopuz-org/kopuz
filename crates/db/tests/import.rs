@@ -210,12 +210,13 @@ async fn imports_synthetic_fixture() {
         Some(1_700_000_000)
     );
 
-    // listen_counts keyed by uid (cover dropped from the legacy key).
-    let c: i64 =
-        sqlx::query_scalar("SELECT count FROM listen_counts WHERE track_key = 'ytmusic:VID1'")
-            .fetch_one(&mut conn)
-            .await
-            .unwrap();
+    // listen_counts keyed by source and track (cover dropped from the legacy key).
+    let c: i64 = sqlx::query_scalar(
+        "SELECT count FROM listen_counts WHERE source = 'srv-1' AND track_key = 'VID1'",
+    )
+    .fetch_one(&mut conn)
+    .await
+    .unwrap();
     assert_eq!(c, 5);
 
     // Liked-songs playlist membership preserved.

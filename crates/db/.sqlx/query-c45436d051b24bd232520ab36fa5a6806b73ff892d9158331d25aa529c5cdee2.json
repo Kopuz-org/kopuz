@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM albums WHERE source = ?1 AND source_album_id NOT IN (SELECT value FROM json_each(?2)) AND source_album_id NOT IN (SELECT source_album_id FROM tracks WHERE source = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "c45436d051b24bd232520ab36fa5a6806b73ff892d9158331d25aa529c5cdee2"
+}

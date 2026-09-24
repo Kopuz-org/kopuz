@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT lc.source, lc.track_key, lc.count, s.service FROM listen_counts lc LEFT JOIN servers s ON s.id = lc.source",
+  "describe": {
+    "columns": [
+      {
+        "name": "source",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "track_key",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "count",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "service",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "59cd746920fd48462104d693eccc84641a9f6936f9055fff20c1d7812dc68c18"
+}
