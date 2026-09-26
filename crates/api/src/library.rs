@@ -63,14 +63,20 @@ pub struct ArtistCredit {
 }
 
 impl TrackInfo {
-    /// The credit `artist` names exactly, else the lead: credits come in billing order.
+    /// The credit `artist` names in any case, else the lead: credits come in billing order.
     pub fn primary_credit(&self) -> Option<&ArtistCredit> {
         let billed = self.artist.trim();
         self.credits
             .iter()
-            .find(|credit| credit.name.trim() == billed)
+            .find(|credit| same_name(credit.name.trim(), billed))
             .or_else(|| self.credits.first())
     }
+}
+
+fn same_name(a: &str, b: &str) -> bool {
+    a.chars()
+        .flat_map(char::to_lowercase)
+        .eq(b.chars().flat_map(char::to_lowercase))
 }
 
 pub const DEFAULT_PAGE_LIMIT: u32 = 200;
@@ -222,6 +228,15 @@ mod tests {
         let row = track("Boris", &[("Ada", Some("UC-ada")), ("Boris", Some("UC-b"))]);
 
         assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-b"));
+    }
+
+    #[test]
+    fn the_billed_artist_is_matched_in_any_case() {
+        let row = track("boris", &[("Ada", Some("UC-ada")), ("Boris", Some("UC-b"))]);
+        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-b"));
+
+        let row = track("JÉJA", &[("Cartoon", Some("UC-c")), ("Jéja", Some("UC-j"))]);
+        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-j"));
     }
 
     /// A joined credit names no single artist, so the lead is the one to open.
