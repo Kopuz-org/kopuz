@@ -346,12 +346,17 @@ fn parse_track(item: &Value) -> Option<Track> {
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
-    let artist = item
-        .get("user")
+    let user = item.get("user");
+    let artist = user
         .and_then(|u| u.get("username"))
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
+    // SoundCloud has no artist entity; the uploader is it.
+    let artist_id = user
+        .and_then(|u| u.get("id"))
+        .and_then(|v| v.as_u64())
+        .map(|id| id.to_string());
 
     let artwork = item
         .get("artwork_url")
@@ -393,6 +398,11 @@ fn parse_track(item: &Value) -> Option<Track> {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: match (artist.is_empty(), artist_id) {
+            (true, _) => Vec::new(),
+            (false, Some(id)) => vec![reader::ArtistCredit::linked(&artist, id)],
+            (false, None) => vec![reader::ArtistCredit::unlinked(&artist)],
+        },
         artists: if artist.is_empty() {
             Vec::new()
         } else {

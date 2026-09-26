@@ -27,7 +27,8 @@ const TRACK_COLUMNS: &str = "t.track_key, t.service, \
     COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS cover_path, \
     t.source_album_id, t.title, \
     t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
-    t.mb_release_id, t.mb_recording_id, t.mb_track_id, t.playlist_item_id, t.artists_json";
+    t.mb_release_id, t.mb_recording_id, t.mb_track_id, t.playlist_item_id, t.artists_json, \
+    t.credits_json";
 
 /// `FROM tracks t` + the album join that backs the `COALESCE` in [`TRACK_COLUMNS`].
 /// LEFT so a track whose album row is missing still returns (cover → NULL → default).
@@ -353,6 +354,50 @@ pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<(String, 
         .collect())
 }
 
+/// The source-issued id per credited artist, keyed by normalized name. Where a
+/// name carries several, the most credited wins rather than whichever row came
+/// first. Kept out of [`artists`] because an id-bearing row and a bare one both
+/// survive that UNION, and its `COUNT(*)` would then count the track twice.
+pub async fn artist_ids(
+    pool: &SqlitePool,
+    source: &Source,
+) -> Result<std::collections::HashMap<String, String>, DbError> {
+    // Keyed in Rust, not with SQLite's `LOWER`: that folds ASCII only, so "ЛСП"
+    // would sit under a key no lookup through `normalize_artist_key` can reach.
+    let rows: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT name, id, COUNT(*) AS cnt FROM ( \
+             SELECT TRIM(json_extract(credit.value, '$.name')) AS name, \
+                    json_extract(credit.value, '$.id') AS id \
+               FROM tracks t, json_each(t.credits_json) AS credit \
+              WHERE t.source = ?1 \
+                AND json_extract(credit.value, '$.id') IS NOT NULL \
+                AND TRIM(json_extract(credit.value, '$.name')) != '' \
+         ) GROUP BY name, id",
+    )
+    .bind(source.as_str())
+    .fetch_all(pool)
+    .await?;
+    let mut counts: std::collections::HashMap<(String, String), i64> =
+        std::collections::HashMap::new();
+    for (name, id, cnt) in rows {
+        *counts
+            .entry((utils::artist::normalize_artist_key(&name), id))
+            .or_default() += cnt;
+    }
+    let mut best: std::collections::HashMap<String, (String, i64)> =
+        std::collections::HashMap::new();
+    for ((key, id), cnt) in counts {
+        let wins = match best.get(&key) {
+            None => true,
+            Some((held, held_cnt)) => cnt > *held_cnt || (cnt == *held_cnt && id < *held),
+        };
+        if wins {
+            best.insert(key, (id, cnt));
+        }
+    }
+    Ok(best.into_iter().map(|(key, (id, _))| (key, id)).collect())
+}
+
 /// One album cover per credited artist: the cover of the earliest album
 /// holding a track they are credited on, keyed by the trimmed lowercase name.
 ///
@@ -411,7 +456,7 @@ pub async fn album(
     let src = source.as_str();
     let row = sqlx::query_as!(
         AlbumRow,
-        "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover \
+        "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_id \
          FROM albums WHERE source = ?1 AND source_album_id = ?2",
         src,
         album_id
@@ -425,7 +470,7 @@ pub async fn albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, Db
     let src = source.as_str();
     let rows = sqlx::query_as!(
         AlbumRow,
-        "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover \
+        "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_id \
          FROM albums WHERE source = ?1 ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE",
         src
     )
@@ -451,7 +496,7 @@ pub async fn albums_recently_added(
     let rows = sqlx::query_as!(
         AlbumRow,
         "SELECT a.source_album_id, a.title, a.artist, a.genre, a.year, a.cover_path, \
-                a.manual_cover \
+                a.manual_cover, a.artist_id \
          FROM albums a JOIN tracks t \
            ON t.source = a.source AND t.source_album_id = a.source_album_id \
          WHERE a.source = ?1 \
@@ -517,6 +562,21 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: credits.iter().map(|name| name.to_string()).collect(),
+            credits: Vec::new(),
+        }
+    }
+
+    fn linked_track(key: &str, artist: &str, credits: &[(&str, Option<&str>)]) -> Track {
+        let names: Vec<&str> = credits.iter().map(|(name, _)| *name).collect();
+        Track {
+            credits: credits
+                .iter()
+                .map(|(name, id)| match id {
+                    Some(id) => reader::ArtistCredit::linked(*name, *id),
+                    None => reader::ArtistCredit::unlinked(*name),
+                })
+                .collect(),
+            ..track(key, artist, &names, "al-1")
         }
     }
 
@@ -529,6 +589,7 @@ mod tests {
             year: 0,
             cover_path: cover.map(std::path::PathBuf::from),
             manual_cover: false,
+            artist_id: None,
         }
     }
 
@@ -585,6 +646,83 @@ mod tests {
 
         assert_eq!(counts.get("Boris"), Some(&1), "one collaboration");
         assert_eq!(counts.get("Ada"), Some(&2), "both album tracks");
+    }
+
+    #[tokio::test]
+    async fn a_credited_artist_answers_with_the_id_its_source_issued() {
+        let pool = mem_pool().await;
+        let source = Source::Local;
+        let tracks = [
+            linked_track(
+                "/a.flac",
+                "Ada feat. Boris",
+                &[("Ada", Some("UC-ada")), ("Boris", None)],
+            ),
+            linked_track("/b.flac", "Ada", &[("Ada", Some("UC-ada"))]),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let ids = artist_ids(&pool, &source).await.unwrap();
+
+        assert_eq!(ids.get("ada").map(String::as_str), Some("UC-ada"));
+        assert_eq!(ids.get("boris"), None, "an unlinked credit has no id");
+    }
+
+    /// Answering with whichever row came first would make a tile's target
+    /// depend on row order.
+    #[tokio::test]
+    async fn a_name_two_ids_disagree_on_resolves_to_the_most_credited() {
+        let pool = mem_pool().await;
+        let source = Source::Local;
+        let tracks = [
+            linked_track("/a.flac", "Ada", &[("Ada", Some("UC-real"))]),
+            linked_track("/b.flac", "Ada", &[("Ada", Some("UC-real"))]),
+            linked_track("/c.flac", "Ada", &[("Ada", Some("UC-topic"))]),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let ids = artist_ids(&pool, &source).await.unwrap();
+
+        assert_eq!(ids.get("ada").map(String::as_str), Some("UC-real"));
+    }
+
+    /// SQLite's `LOWER` folds ASCII only; the key has to be the one every
+    /// lookup builds, or a Cyrillic or accented name never finds its id.
+    #[tokio::test]
+    async fn a_non_ascii_name_is_keyed_as_every_lookup_keys_it() {
+        let pool = mem_pool().await;
+        let source = Source::Local;
+        let tracks = [
+            linked_track("/a.flac", "ЛСП", &[("ЛСП", Some("UC-lsp"))]),
+            linked_track("/b.flac", "Émilie", &[("Émilie", Some("UC-em"))]),
+            linked_track("/c.flac", "émilie", &[("émilie", Some("UC-em"))]),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let ids = artist_ids(&pool, &source).await.unwrap();
+
+        let key = |name: &str| utils::artist::normalize_artist_key(name);
+        assert_eq!(ids.get(&key("ЛСП")).map(String::as_str), Some("UC-lsp"));
+        assert_eq!(ids.get(&key("ÉMILIE")).map(String::as_str), Some("UC-em"));
+        assert_eq!(ids.len(), 2, "two spellings of one name are one artist");
+    }
+
+    /// Every row predates the column until a sync rewrites it.
+    #[tokio::test]
+    async fn tracks_stored_without_credits_have_no_ids_and_still_list() {
+        let (pool, source) = seeded().await;
+
+        assert!(artist_ids(&pool, &source).await.unwrap().is_empty());
+
+        let counts: std::collections::HashMap<String, u32> =
+            artists(&pool, &source).await.unwrap().into_iter().collect();
+        assert_eq!(counts.get("Ada"), Some(&2));
     }
 
     /// A ref is versioned on the picture it names, so the fallback the listing

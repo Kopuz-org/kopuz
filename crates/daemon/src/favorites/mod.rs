@@ -165,11 +165,20 @@ impl FavoritesService {
     pub fn spawn_sync(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
         let service = self.clone();
         runner.start(JobKind::FavoritesSync, move |ctx| async move {
+            let source = service
+                .session
+                .config_watch()
+                .borrow()
+                .active_source
+                .clone();
             ctx.progress("reconciling", None, None, None);
             let reconciled = service.reconcile(SyncReason::Manual).await;
             // An explicit sync imports even when the staleness gate would
             // have skipped it; that is what the user asked for.
             service.pull(Some(&ctx), true).await?;
+            if !ctx.cancelled() {
+                crate::auto_sync::mark_synced(&service.db, JobKind::FavoritesSync, &source).await;
+            }
             reconciled
         })
     }

@@ -166,6 +166,7 @@ pub fn extract_metadata(
         title,
         artist,
         artists,
+        credits: Vec::new(),
         album: album_title.unwrap_or_else(|| "Unknown Album".to_string()),
         khz: sample_rate,
         bitrate: bitrate_kbps,
@@ -211,6 +212,7 @@ pub(crate) fn read_metadata(track_path: &Path) -> Option<ScannedTrack> {
         year,
         cover_path: None,
         manual_cover: false,
+        artist_id: None,
     };
 
     Some(ScannedTrack { track, album })
@@ -473,6 +475,7 @@ fn read_with_symphonia(track_path: &Path) -> Option<ScannedTrack> {
         title,
         artist: artist.clone(),
         artists: vec![artist.clone()],
+        credits: Vec::new(),
         album: album_title.unwrap_or_else(|| "Unknown Album".to_string()),
         khz: sample_rate,
         bitrate: bitrate_kbps,
@@ -531,6 +534,7 @@ fn read_with_symphonia(track_path: &Path) -> Option<ScannedTrack> {
         year,
         cover_path: None,
         manual_cover: false,
+        artist_id: None,
     };
 
     Some(ScannedTrack { track, album })

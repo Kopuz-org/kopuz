@@ -44,6 +44,7 @@ fn server_track(id: &str, title: &str) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: vec!["Art".into()],
+        credits: Vec::new(),
     }
 }
 
@@ -557,6 +558,40 @@ async fn queue_round_trips() {
     assert_eq!(q.queue[0].title, "Yt One");
     assert_eq!(q.progress_secs, 42);
     assert!(q.shuffle_enabled);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn a_library_prune_keeps_rows_a_playlist_or_favorite_holds() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let active = Source::Server("srv-1".into());
+    db.upsert_tracks(
+        &active,
+        &[
+            server_track("LIB", "In the library"),
+            server_track("PL", "Only in a playlist"),
+            server_track("FAV", "Only a favorite"),
+            server_track("GONE", "Nothing holds it"),
+        ],
+    )
+    .await
+    .unwrap();
+    db.upsert_playlist_meta(&active, "PL1", "Mix", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&active, "PL1", &["PL".into()])
+        .await
+        .unwrap();
+    db.set_favorite("srv-1", "FAV", true).await.unwrap();
+
+    db.prune_source(&active, &["LIB".into()], &[])
+        .await
+        .unwrap();
+
+    let count = db.tracks_count(&TrackFilter::new(active)).await.unwrap();
+    assert_eq!(count, 3);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

@@ -153,6 +153,7 @@ mod tests {
             year: 0,
             cover_path,
             manual_cover,
+            artist_id: None,
         }
     }
 
@@ -164,6 +165,7 @@ mod tests {
             title: "Track".to_string(),
             artist: "Artist".to_string(),
             artists: vec!["Artist".to_string()],
+            credits: Vec::new(),
             album: album_id.to_string(),
             duration: 1,
             khz: 44_100,

@@ -607,6 +607,7 @@ mod tests {
             musicbrainz_recording_id: None,
             musicbrainz_track_id: None,
             playlist_item_id: None,
+            credits: Vec::new(),
             artists: vec![],
         }
     }

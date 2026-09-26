@@ -665,13 +665,14 @@ fn App() -> Element {
     let mut selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_title = use_signal(|| None::<String>);
-    // YT channel id corresponding to selected_artist_name when known
-    // (Discover tile / mix entry carries it). Left None when the
-    // click only had a name — the YT artist page resolves it via
-    // search at render time.
-    let mut selected_artist_channel_id = use_signal(|| None::<String>);
+    // Set with the id, by whichever click had it: the viewer serves more than
+    // one kind and must not read the id to tell which.
+    let mut discover_selected_playlist_kind = use_signal(|| api::CatalogItemKind::Playlist);
+    // The source's own id for `selected_artist_name`, where the click carried
+    // one. None leaves the page to resolve the name at render time.
+    let mut selected_artist_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
-    let mut search_query = use_signal(String::new);
+    let search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
     let queue = use_signal(Vec::<api::TrackInfo>::new);
@@ -1176,7 +1177,7 @@ fn App() -> Element {
             route: *current_route.read(),
             album_id: selected_album_id.read().clone(),
             artist_name: selected_artist_name.read().clone(),
-            artist_channel_id: selected_artist_channel_id.read().clone(),
+            artist_id: selected_artist_id.read().clone(),
             playlist_id: selected_playlist_id.read().clone(),
             discover_playlist_id: discover_selected_playlist_id.read().clone(),
             discover_playlist_title: discover_selected_playlist_title.read().clone(),
@@ -1200,7 +1201,7 @@ fn App() -> Element {
     let nav_ctrl = components::NavigationController {
         current_route,
         selected_artist_name,
-        selected_artist_channel_id,
+        selected_artist_id,
         selected_album_id,
         selected_playlist_id,
         discover_playlist_id: discover_selected_playlist_id,
@@ -1665,7 +1666,7 @@ fn App() -> Element {
                         }
                         if route == Route::Artist {
                             selected_artist_name.set(String::new());
-                            selected_artist_channel_id.set(None);
+                            selected_artist_id.set(None);
                         }
                         current_route.set(route);
                     }
@@ -1780,9 +1781,9 @@ fn App() -> Element {
                                     selected_playlist_id.set(Some(id));
                                     current_route.set(Route::Playlists);
                                 },
-                                on_search_artist: move |artist: String| {
+                                on_search_artist: move |(artist, id): (String, Option<String>)| {
                                     selected_artist_name.set(artist);
-                                    selected_artist_channel_id.set(None);
+                                    selected_artist_id.set(id);
                                     current_route.set(Route::Artist);
                                 }
                             }
@@ -1793,19 +1794,16 @@ fn App() -> Element {
                                     selected_album_id.set(id);
                                     current_route.set(Route::Album);
                                 },
-                                on_select_playlist: move |(id, title): (String, String)| {
+                                on_select_playlist: move |(kind, id, title): (api::CatalogItemKind, String, String)| {
+                                    discover_selected_playlist_kind.set(kind);
                                     discover_selected_playlist_id.set(Some(id));
                                     discover_selected_playlist_title.set(Some(title));
                                     current_route.set(Route::DiscoverPlaylist);
                                 },
-                                on_open_artist: move |(cid, name): (String, String)| {
-                                    selected_artist_channel_id.set(Some(cid));
+                                on_open_artist: move |(id, name): (String, String)| {
+                                    selected_artist_id.set(Some(id));
                                     selected_artist_name.set(name);
                                     current_route.set(Route::Artist);
-                                },
-                                on_search_artist: move |name: String| {
-                                    search_query.set(name);
-                                    current_route.set(Route::Search);
                                 },
                             }
                         },
@@ -1813,6 +1811,7 @@ fn App() -> Element {
                             pages::server::discover::DiscoverPlaylistDetail {
                                 selected_playlist_id: discover_selected_playlist_id,
                                 selected_playlist_title: discover_selected_playlist_title,
+                                selected_playlist_kind: discover_selected_playlist_kind,
                                 on_back: move |_| nav_ctrl.go_back(),
                             }
                         },
@@ -1871,29 +1870,26 @@ fn App() -> Element {
                             let remote_profile =
                                 active_caps().artists == api::ArtistPresentation::Remote;
                             let has_selection = !selected_artist_name.read().is_empty()
-                                || selected_artist_channel_id.read().is_some();
+                                || selected_artist_id.read().is_some();
                             if remote_profile && has_selection {
                                 rsx! {
                                     pages::server::discover::DiscoverArtistPage {
-                                        selected_artist_id: selected_artist_channel_id,
+                                        selected_artist_id: selected_artist_id,
                                         selected_artist_name: selected_artist_name,
                                         on_back: move |_| nav_ctrl.go_back(),
                                         on_select_album: move |id: String| {
                                             selected_album_id.set(id);
                                             current_route.set(Route::Album);
                                         },
-                                        on_select_playlist: move |(id, title): (String, String)| {
+                                        on_select_playlist: move |(kind, id, title): (api::CatalogItemKind, String, String)| {
+                                            discover_selected_playlist_kind.set(kind);
                                             discover_selected_playlist_id.set(Some(id));
                                             discover_selected_playlist_title.set(Some(title));
                                             current_route.set(Route::DiscoverPlaylist);
                                         },
-                                        on_open_artist: move |(cid, name): (String, String)| {
-                                            selected_artist_channel_id.set(Some(cid));
+                                        on_open_artist: move |(id, name): (String, String)| {
+                                            selected_artist_id.set(Some(id));
                                             selected_artist_name.set(name);
-                                        },
-                                        on_search_artist: move |name: String| {
-                                            search_query.set(name);
-                                            current_route.set(Route::Search);
                                         },
                                     }
                                 }

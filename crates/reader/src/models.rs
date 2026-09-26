@@ -12,6 +12,8 @@ pub struct Album {
     pub cover_path: Option<PathBuf>,
     #[serde(default)]
     pub manual_cover: bool,
+    #[serde(default)]
+    pub artist_id: Option<String>,
 }
 
 /// A source-agnostic artist photo reference: a local file path or a remote URL.
@@ -165,6 +167,35 @@ pub struct Track {
     pub playlist_item_id: Option<String>,
     #[serde(default)]
     pub artists: Vec<String>,
+    /// `artists` keeps the names alone beside this: a queue stored before
+    /// credits existed has none, and an older build reads only that.
+    #[serde(default)]
+    pub credits: Vec<ArtistCredit>,
+}
+
+/// One credited artist. The id is the issuing source's own and means nothing to
+/// another.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ArtistCredit {
+    pub name: String,
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
+impl ArtistCredit {
+    pub fn unlinked(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            id: None,
+        }
+    }
+
+    pub fn linked(name: impl Into<String>, id: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            id: Some(id.into()),
+        }
+    }
 }
 
 impl CoverRef {
@@ -464,6 +495,29 @@ mod tests {
     use config::MusicService;
     use std::path::PathBuf;
 
+    /// The stored queue is read with `unwrap_or_default` over the whole `Vec`,
+    /// so one `Track` that will not parse silently empties it.
+    #[test]
+    fn a_track_stored_before_credits_still_deserializes() {
+        let json = r#"{
+            "id": { "Local": "/music/a.flac" },
+            "album_id": "al-1",
+            "title": "A",
+            "artist": "Ada",
+            "album": "One",
+            "duration": 60,
+            "khz": 44,
+            "track_number": null,
+            "disc_number": null,
+            "artists": ["Ada"]
+        }"#;
+
+        let track: Track = serde_json::from_str(json).expect("an older track still reads");
+
+        assert_eq!(track.artists, vec!["Ada".to_string()]);
+        assert!(track.credits.is_empty());
+    }
+
     #[test]
     fn library_deserializes_legacy_root_path() {
         let json = r#"{
@@ -533,6 +587,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: Vec::new(),
+            credits: Vec::new(),
         }
     }
 

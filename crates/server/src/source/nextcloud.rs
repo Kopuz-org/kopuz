@@ -187,6 +187,7 @@ impl MediaSource for NextcloudSource {
                 year: 0,
                 cover_path: cached.as_deref().map(PathBuf::from),
                 manual_cover: false,
+                artist_id: None,
             });
         }
 
@@ -222,6 +223,7 @@ impl MediaSource for NextcloudSource {
                     musicbrainz_recording_id: None,
                     musicbrainz_track_id: None,
                     playlist_item_id: None,
+                    credits: Vec::new(),
                     artists: vec![track.artist],
                 }
             })

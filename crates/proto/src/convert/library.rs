@@ -66,6 +66,14 @@ pub fn track_info_to_proto(value: &api::TrackInfo) -> TrackInfo {
         musicbrainz_track_id: value.musicbrainz_track_id.clone(),
         playlist_item_id: value.playlist_item_id.clone(),
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
+        credits: value
+            .credits
+            .iter()
+            .map(|credit| ArtistCredit {
+                name: credit.name.clone(),
+                id: credit.id.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -92,6 +100,14 @@ pub fn track_info_from_proto(value: &TrackInfo) -> api::TrackInfo {
         musicbrainz_track_id: value.musicbrainz_track_id.clone(),
         playlist_item_id: value.playlist_item_id.clone(),
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
+        credits: value
+            .credits
+            .iter()
+            .map(|credit| api::ArtistCredit {
+                name: credit.name.clone(),
+                id: credit.id.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -257,6 +273,7 @@ pub fn album_info_to_proto(value: &api::AlbumInfo) -> AlbumInfo {
         artist: value.artist.clone(),
         genre: value.genre.clone(),
         year: value.year as u32,
+        artist_id: value.artist_id.clone(),
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
     }
 }
@@ -268,6 +285,7 @@ pub fn album_info_from_proto(value: &AlbumInfo) -> api::AlbumInfo {
         artist: value.artist.clone(),
         genre: value.genre.clone(),
         year: value.year as u16,
+        artist_id: value.artist_id.clone(),
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
     }
 }
@@ -291,6 +309,7 @@ pub fn artist_info_to_proto(value: &api::ArtistInfo) -> ArtistInfo {
         name: value.name.clone(),
         track_count: value.track_count,
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
+        id: value.id.clone(),
     }
 }
 
@@ -299,6 +318,7 @@ pub fn artist_info_from_proto(value: &ArtistInfo) -> api::ArtistInfo {
         name: value.name.clone(),
         track_count: value.track_count,
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
+        id: value.id.clone(),
     }
 }
 
@@ -363,6 +383,18 @@ mod tests {
                 target: api::ArtworkTarget::Track("k".into()),
                 version: 9,
             }),
+            // One linked and one not: an absent id has to stay absent, not
+            // arrive as an empty string that a caller would take for an id.
+            credits: vec![
+                api::ArtistCredit {
+                    name: "a".into(),
+                    id: Some("UC-a".into()),
+                },
+                api::ArtistCredit {
+                    name: "b".into(),
+                    id: None,
+                },
+            ],
         };
         assert_eq!(track, track_info_from_proto(&track_info_to_proto(&track)));
     }

@@ -55,6 +55,7 @@ mod tests {
             year,
             cover_path: None,
             manual_cover: false,
+            artist_id: None,
         }
     }
 

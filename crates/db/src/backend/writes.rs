@@ -39,18 +39,22 @@ pub async fn upsert_tracks(
         let track_number = t.track_number.map(|n| n as i64);
         let disc_number = t.disc_number.map(|n| n as i64);
         let artists_json = serde_json::to_string(&t.artists)?;
+        let credits_json = serde_json::to_string(&t.credits)?;
+        // The same track arrives from paths that link its artists and paths that
+        // only name them, in either order, so credits keep the richer parse.
         sqlx::query!(
             "INSERT INTO tracks \
                (source, track_key, path, service, source_album_id, title, artist, album, duration, \
                 khz, bitrate, track_number, disc_number, mb_release_id, mb_recording_id, mb_track_id, \
-                playlist_item_id, artists_json, cover_path) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19) \
+                playlist_item_id, artists_json, cover_path, credits_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20) \
              ON CONFLICT(source, track_key) DO UPDATE SET \
                path=?3, service=?4, \
                source_album_id=CASE WHEN ?5 != '' THEN ?5 ELSE tracks.source_album_id END, \
                title=?6, artist=?7, album=?8, duration=?9, \
                khz=?10, bitrate=?11, track_number=?12, disc_number=?13, mb_release_id=?14, \
-               mb_recording_id=?15, mb_track_id=?16, playlist_item_id=?17, artists_json=?18, cover_path=?19",
+               mb_recording_id=?15, mb_track_id=?16, playlist_item_id=?17, artists_json=?18, cover_path=?19, \
+               credits_json=CASE WHEN ?20 != '[]' THEN ?20 ELSE tracks.credits_json END",
             src,
             track_key,
             path,
@@ -69,7 +73,8 @@ pub async fn upsert_tracks(
             t.musicbrainz_track_id,
             t.playlist_item_id,
             artists_json,
-            t.cover
+            t.cover,
+            credits_json
         )
         .execute(&mut *tx)
         .await?;
@@ -124,12 +129,13 @@ pub async fn upsert_albums(
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned());
         sqlx::query!(
-            "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+            "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
              ON CONFLICT(source, source_album_id) DO UPDATE SET \
                title=?3, artist=?4, genre=?5, year=?6, \
                cover_path=COALESCE(?7, albums.cover_path), \
-               manual_cover=MAX(?8, albums.manual_cover)",
+               manual_cover=MAX(?8, albums.manual_cover), \
+               artist_id=COALESCE(?9, albums.artist_id)",
             src,
             a.id,
             a.title,
@@ -137,7 +143,8 @@ pub async fn upsert_albums(
             a.genre,
             year,
             cover,
-            manual
+            manual,
+            a.artist_id
         )
         .execute(&mut *tx)
         .await?;
@@ -353,7 +360,10 @@ pub async fn prune_source(
     let mut tx = pool.begin().await?;
     sqlx::query!(
         "DELETE FROM tracks WHERE source = ?1 \
-         AND track_key NOT IN (SELECT value FROM json_each(?2))",
+         AND track_key NOT IN (SELECT value FROM json_each(?2)) \
+         AND track_key NOT IN (SELECT pt.track_ref FROM playlist_tracks pt \
+             JOIN playlists p ON p.rowid_pk = pt.playlist_pk WHERE p.source = ?1) \
+         AND track_key NOT IN (SELECT ref FROM favorites WHERE server_id = ?1)",
         src,
         keep_tracks
     )

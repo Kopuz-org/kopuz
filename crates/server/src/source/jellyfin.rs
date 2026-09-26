@@ -15,6 +15,18 @@ pub(super) struct JellyfinSource {
     client: JellyfinClient,
 }
 
+fn credits_of(items: Option<&[crate::jellyfin::NamedItem]>) -> Vec<reader::ArtistCredit> {
+    items
+        .unwrap_or_default()
+        .iter()
+        .filter(|item| !item.name.trim().is_empty())
+        .map(|item| match item.id.is_empty() {
+            true => reader::ArtistCredit::unlinked(&item.name),
+            false => reader::ArtistCredit::linked(&item.name, &item.id),
+        })
+        .collect()
+}
+
 impl JellyfinSource {
     pub(super) fn new(db: Db, source: Source, conn: &ServerConn) -> Self {
         Self {
@@ -101,7 +113,13 @@ impl MediaSource for JellyfinSource {
                         &a.id,
                         image_tag.as_deref(),
                     )));
+                    let artist_id = a
+                        .album_artists
+                        .as_ref()
+                        .and_then(|artists| artists.first())
+                        .map(|artist| artist.id.clone());
                     albums.push(reader::Album {
+                        artist_id,
                         id: format!("jellyfin:{}", a.id),
                         title: a.name,
                         artist: a
@@ -167,6 +185,7 @@ impl MediaSource for JellyfinSource {
                         musicbrainz_recording_id: None,
                         musicbrainz_track_id: None,
                         playlist_item_id: None,
+                        credits: credits_of(item.artist_items.as_deref()),
                         artists: item
                             .artists
                             .unwrap_or_else(|| item.album_artist.into_iter().collect()),
@@ -413,6 +432,7 @@ impl MediaSource for JellyfinSource {
                     musicbrainz_recording_id: None,
                     musicbrainz_track_id: None,
                     playlist_item_id: item.playlist_item_id,
+                    credits: credits_of(item.artist_items.as_deref()),
                     artists: item.artists.unwrap_or_default(),
                 }
             })

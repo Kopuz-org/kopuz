@@ -4,7 +4,7 @@
 //! back per page; the section-list-level continuation token feeds the
 //! next three.
 
-use reader::models::Track;
+use reader::models::{ArtistCredit, Track};
 use serde_json::{Value, json};
 
 use super::clients::{ORIGIN_YOUTUBE_MUSIC, WEB_REMIX};
@@ -100,6 +100,7 @@ pub struct YtAlbum {
     pub browse_id: String,
     pub title: String,
     pub artist: Option<String>,
+    pub artist_id: Option<String>,
     pub year: Option<String>,
     pub thumbnail: Option<String>,
     pub audio_playlist_id: Option<String>,
@@ -344,6 +345,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
     let mut video_id: Option<String> = None;
     let mut title = String::new();
     let mut artist = String::new();
+    let mut credits: Vec<ArtistCredit> = Vec::new();
     let mut album = String::new();
     let mut flex_duration: Option<u64> = None;
     for c in &cols {
@@ -362,7 +364,13 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
                     video_id = Some(v.clone());
                 }
             }
-            RowColumn::Artist { text } if artist.is_empty() => artist = text.clone(),
+            RowColumn::Artist {
+                text,
+                credits: linked,
+            } if artist.is_empty() => {
+                artist = text.clone();
+                credits = linked.clone();
+            }
             RowColumn::Album { text } if album.is_empty() => album = text.clone(),
             RowColumn::Duration { secs } if flex_duration.is_none() => {
                 flex_duration = Some(*secs);
@@ -391,10 +399,10 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
         .map(|s| normalize_yt_thumbnail(s.to_string()));
 
     let cover = thumbnail.map(|u| u.to_string()).filter(|u| !u.is_empty());
-    let artists = if artist.is_empty() {
-        Vec::new()
-    } else {
-        vec![artist.clone()]
+    let artists: Vec<String> = match credits.is_empty() {
+        false => credits.iter().map(|c| c.name.clone()).collect(),
+        true if artist.is_empty() => Vec::new(),
+        true => vec![artist.clone()],
     };
     Some(Track {
         id: super::yt_id(video_id.clone()),
@@ -413,6 +421,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists,
+        credits,
     })
 }
 
@@ -470,8 +479,7 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
                     }
                 }
             }
-            if let Some(track) =
-                parse_album_row(row, &title, artist.as_deref(), thumbnail.as_deref())
+            if let Some(track) = parse_album_row(row, &title, artist.as_ref(), thumbnail.as_deref())
             {
                 tracks.push(track);
             }
@@ -481,7 +489,8 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
     YtAlbum {
         browse_id: browse_id.to_string(),
         title,
-        artist,
+        artist_id: artist.as_ref().and_then(|credit| credit.id.clone()),
+        artist: artist.map(|credit| credit.name),
         year,
         thumbnail,
         audio_playlist_id: audio_playlist_id_header.or(audio_pid_from_rows),
@@ -553,22 +562,25 @@ fn find_album_header<'a>(resp: &'a Value, sections: &[&'a Value]) -> Option<&'a 
     None
 }
 
-fn pick_album_artist(header: Option<&Value>) -> Option<String> {
+fn pick_album_artist(header: Option<&Value>) -> Option<ArtistCredit> {
     let header = header?;
     // New layout splits these: straplineTextOne is the artist (with a
     // UC… browseEndpoint), subtitle is "<Kind> • <Year>" with no artist.
-    let from_strapline = header
+    let strapline = header
         .pointer("/straplineTextOne/runs")
-        .and_then(|v| v.as_array())
-        .and_then(|arr| {
-            arr.iter()
-                .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
-                .map(|s| s.trim())
-                .find(|s| !s.is_empty() && *s != "•")
-                .map(|s| s.to_string())
-        });
-    if from_strapline.is_some() {
-        return from_strapline;
+        .and_then(|v| v.as_array());
+    if let Some(runs) = strapline {
+        if let Some(credit) = linked_credits(runs).into_iter().next() {
+            return Some(credit);
+        }
+        let named = runs
+            .iter()
+            .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
+            .map(|s| s.trim())
+            .find(|s| !s.is_empty() && *s != "•");
+        if let Some(name) = named {
+            return Some(ArtistCredit::unlinked(name));
+        }
     }
     // Legacy layout crammed "<Kind> • <Artist> • <Year>" into subtitle.
     // Use `let else continue` instead of `?` so a single empty/structural
@@ -594,7 +606,14 @@ fn pick_album_artist(header: Option<&Value>) -> Option<String> {
         ) {
             continue;
         }
-        return Some(t.to_string());
+        let id = r
+            .pointer("/navigationEndpoint/browseEndpoint/browseId")
+            .and_then(|v| v.as_str())
+            .filter(|id| id.starts_with("UC"));
+        return Some(match id {
+            Some(id) => ArtistCredit::linked(t, id),
+            None => ArtistCredit::unlinked(t),
+        });
     }
     None
 }
@@ -653,13 +672,14 @@ fn best_album_thumbnail(header: Option<&Value>) -> Option<String> {
 fn parse_album_row(
     row: &Value,
     album_title: &str,
-    album_artist: Option<&str>,
+    album_artist: Option<&ArtistCredit>,
     album_thumbnail: Option<&str>,
 ) -> Option<Track> {
     let cols = classify_flex_columns(row);
     let mut video_id: Option<String> = None;
     let mut title = String::new();
     let mut row_artist: Option<String> = None;
+    let mut row_credits: Vec<ArtistCredit> = Vec::new();
     let mut flex_duration: Option<u64> = None;
     for c in &cols {
         match c {
@@ -677,8 +697,12 @@ fn parse_album_row(
                     video_id = Some(v.clone());
                 }
             }
-            RowColumn::Artist { text } if row_artist.is_none() => {
+            RowColumn::Artist {
+                text,
+                credits: linked,
+            } if row_artist.is_none() => {
                 row_artist = Some(text.clone());
+                row_credits = linked.clone();
             }
             RowColumn::Duration { secs } if flex_duration.is_none() => {
                 flex_duration = Some(*secs);
@@ -695,15 +719,21 @@ fn parse_album_row(
         return None;
     }
     let primary_artist = row_artist
-        .or_else(|| album_artist.map(|s| s.to_string()))
+        .or_else(|| album_artist.map(|credit| credit.name.clone()))
         .unwrap_or_default();
     let duration = fixed_columns_duration(row).or(flex_duration).unwrap_or(0);
     let track_number = row_index_text(row).and_then(|s| s.parse::<u32>().ok());
 
-    let artists = if primary_artist.is_empty() {
-        Vec::new()
-    } else {
-        vec![primary_artist.clone()]
+    // A row with no artist column of its own belongs to the album's artist.
+    let credits: Vec<ArtistCredit> = match (row_credits.is_empty(), album_artist) {
+        (false, _) => row_credits,
+        (true, Some(credit)) => vec![credit.clone()],
+        (true, None) => Vec::new(),
+    };
+    let artists: Vec<String> = match credits.is_empty() {
+        false => credits.iter().map(|c| c.name.clone()).collect(),
+        true if primary_artist.is_empty() => Vec::new(),
+        true => vec![primary_artist.clone()],
     };
     let cover = album_thumbnail
         .map(|u| u.to_string())
@@ -726,6 +756,7 @@ fn parse_album_row(
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists,
+        credits,
     })
 }
 
@@ -976,6 +1007,7 @@ fn build_song_track(video_id: &str, title: &str, subtitle: &str, thumbnail: Opti
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: Vec::new(),
         artists,
     }
 }
@@ -1056,6 +1088,7 @@ pub(crate) enum RowColumn {
     },
     Artist {
         text: String,
+        credits: Vec<ArtistCredit>,
     },
     Album {
         text: String,
@@ -1073,6 +1106,19 @@ pub(crate) enum RowColumn {
 /// text shape — NOT by position. Critical for artist Top Songs rows
 /// where the column order is title/artist/play-count/album, not the
 /// usual title/artist/album.
+/// A column reading "A & B" is two artists; joined, it is one nobody is called.
+fn linked_credits(runs: &[Value]) -> Vec<ArtistCredit> {
+    runs.iter()
+        .filter_map(|run| {
+            let name = run.get("text").and_then(|t| t.as_str())?.trim();
+            let id = run
+                .pointer("/navigationEndpoint/browseEndpoint/browseId")
+                .and_then(|v| v.as_str())?;
+            (!name.is_empty() && id.starts_with("UC")).then(|| ArtistCredit::linked(name, id))
+        })
+        .collect()
+}
+
 fn classify_flex_columns(row: &Value) -> Vec<RowColumn> {
     let mut out = Vec::new();
     let Some(cols) = row.get("flexColumns").and_then(|v| v.as_array()) else {
@@ -1136,7 +1182,10 @@ fn classify_flex_columns(row: &Value) -> Vec<RowColumn> {
                 .and_then(|v| v.as_str())
             {
                 if bid.starts_with("UC") {
-                    out.push(RowColumn::Artist { text: text.clone() });
+                    out.push(RowColumn::Artist {
+                        text: text.clone(),
+                        credits: linked_credits(runs),
+                    });
                     classified = true;
                     break;
                 }
@@ -1216,4 +1265,72 @@ fn normalize_yt_thumbnail(url: String) -> String {
         return format!("{}=w544-h544-l90-rj", &url[..idx]);
     }
     url
+}
+
+#[cfg(test)]
+mod credit_tests {
+    use super::{RowColumn, classify_flex_columns, pick_album_artist};
+    use serde_json::{Value, json};
+
+    fn column(runs: &[(&str, Option<&str>)]) -> Value {
+        let runs: Vec<Value> = runs
+            .iter()
+            .map(|(text, browse)| match browse {
+                Some(id) => json!({
+                    "text": text,
+                    "navigationEndpoint": { "browseEndpoint": { "browseId": id } }
+                }),
+                None => json!({ "text": text }),
+            })
+            .collect();
+        json!({ "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": runs } } })
+    }
+
+    /// The joined text has to stay put: the album id is synthesized from it.
+    #[test]
+    fn a_two_artist_column_keeps_each_channel_but_one_joined_name() {
+        let row = json!({
+            "flexColumns": [column(&[("Ada & Boris", Some("UCada")), ("Boris", Some("UCboris"))])]
+        });
+
+        let cols = classify_flex_columns(&row);
+
+        match &cols[0] {
+            RowColumn::Artist { text, credits } => {
+                assert_eq!(text, "Ada & BorisBoris", "joined text is unchanged");
+                let names: Vec<&str> = credits.iter().map(|c| c.name.as_str()).collect();
+                assert_eq!(names, ["Ada & Boris", "Boris"]);
+                assert_eq!(credits[1].id.as_deref(), Some("UCboris"));
+            }
+            other => panic!("expected an artist column, got {other:?}"),
+        }
+    }
+
+    /// Every track on the album inherits this rather than resolving a name.
+    #[test]
+    fn the_album_strapline_names_the_artist_it_links() {
+        let header = json!({
+            "straplineTextOne": {
+                "runs": [{
+                    "text": "Ada",
+                    "navigationEndpoint": { "browseEndpoint": { "browseId": "UCada" } }
+                }]
+            }
+        });
+
+        let credit = pick_album_artist(Some(&header)).expect("a strapline artist");
+
+        assert_eq!(credit.name, "Ada");
+        assert_eq!(credit.id.as_deref(), Some("UCada"));
+    }
+
+    #[test]
+    fn an_unlinked_strapline_still_names_the_artist() {
+        let header = json!({ "straplineTextOne": { "runs": [{ "text": "Ada" }] } });
+
+        let credit = pick_album_artist(Some(&header)).expect("a strapline artist");
+
+        assert_eq!(credit.name, "Ada");
+        assert!(credit.id.is_none());
+    }
 }

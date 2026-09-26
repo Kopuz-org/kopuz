@@ -187,6 +187,7 @@ fn album(id: &str, title: &str, artist: &str) -> Album {
         year: 2000,
         cover_path: None,
         manual_cover: false,
+        artist_id: None,
     }
 }
 
@@ -208,6 +209,7 @@ fn track(path: &str, album_id: &str) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: Vec::new(),
+        credits: Vec::new(),
     }
 }
 

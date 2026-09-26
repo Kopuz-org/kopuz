@@ -48,6 +48,7 @@ fn song_to_track(
         Some(cover_tag.as_deref().unwrap_or(reader::CoverRef::NO_COVER)),
     );
     let artist = item.artist.clone().unwrap_or_default();
+    let artist_id = item.artist_id.clone().filter(|id| !id.is_empty());
     reader::models::Track {
         id: reader::models::TrackId::Server {
             service,
@@ -67,6 +68,10 @@ fn song_to_track(
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        credits: match artist_id {
+            Some(id) => vec![reader::ArtistCredit::linked(&artist, id)],
+            None => vec![reader::ArtistCredit::unlinked(&artist)],
+        },
         artists: vec![artist],
     }
 }
@@ -170,6 +175,7 @@ impl MediaSource for SubsonicSource {
                     year: album.year.unwrap_or(0),
                     cover_path: Some(PathBuf::from(album_id_prefixed.clone())),
                     manual_cover: false,
+                    artist_id: album.artist_id.clone(),
                 });
 
                 let songs = self.client.get_album_songs(&album.id).await.map_err(|e| {
@@ -210,6 +216,13 @@ impl MediaSource for SubsonicSource {
                         musicbrainz_recording_id: None,
                         musicbrainz_track_id: None,
                         playlist_item_id: None,
+                        credits: {
+                            let name = song.artist.clone().unwrap_or_else(|| album_artist.clone());
+                            match song.artist_id.filter(|id| !id.is_empty()) {
+                                Some(id) => vec![reader::ArtistCredit::linked(name, id)],
+                                None => vec![reader::ArtistCredit::unlinked(name)],
+                            }
+                        },
                         artists: vec![song.artist.unwrap_or_else(|| album_artist.clone())],
                     });
                 }

@@ -17,6 +17,13 @@ pub(crate) fn TrackMetadata(
     let favorite_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_favorite = hooks::use_db_queries::use_track_is_favorite(favorite_track)();
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+    // The snapshot lags when a new track isn't in the queue mirror yet; only
+    // trust its credit while it is the track whose artist is on screen.
+    let artist_credit = current_track_snapshot
+        .as_ref()
+        .filter(|track| track.artist == *current_song_artist.read())
+        .and_then(|track| track.primary_credit())
+        .map(|credit| (credit.name.clone(), credit.id.clone()));
     let actions_track = current_track_snapshot.clone();
     let favorite_label = if is_favorite {
         i18n::t("remove_from_favorites").to_string()
@@ -67,7 +74,12 @@ pub(crate) fn TrackMetadata(
                                 return;
                             }
                             is_fullscreen.set(false);
-                            nav_ctrl.navigate_to_artist(artist);
+                            match artist_credit.clone() {
+                                Some((name, id)) => {
+                                    nav_ctrl.open_artist(name, id)
+                                }
+                                None => nav_ctrl.navigate_to_artist(artist),
+                            }
                         },
                         "{current_song_artist}"
                     }

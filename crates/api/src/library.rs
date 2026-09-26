@@ -51,6 +51,32 @@ pub struct TrackInfo {
     /// source distinguishes duplicate entries.
     pub playlist_item_id: Option<String>,
     pub artwork: Option<crate::ArtworkRef>,
+    pub credits: Vec<ArtistCredit>,
+}
+
+/// One credited artist. A present id is always usable: the daemon withholds one
+/// issued by a source other than the active one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistCredit {
+    pub name: String,
+    pub id: Option<String>,
+}
+
+impl TrackInfo {
+    /// The credit `artist` names in any case, else the lead: credits come in billing order.
+    pub fn primary_credit(&self) -> Option<&ArtistCredit> {
+        let billed = self.artist.trim();
+        self.credits
+            .iter()
+            .find(|credit| same_name(credit.name.trim(), billed))
+            .or_else(|| self.credits.first())
+    }
+}
+
+fn same_name(a: &str, b: &str) -> bool {
+    a.chars()
+        .flat_map(char::to_lowercase)
+        .eq(b.chars().flat_map(char::to_lowercase))
 }
 
 pub const DEFAULT_PAGE_LIMIT: u32 = 200;
@@ -131,6 +157,7 @@ pub struct AlbumInfo {
     pub genre: String,
     pub year: u16,
     pub artwork: Option<crate::ArtworkRef>,
+    pub artist_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -145,6 +172,8 @@ pub struct ArtistInfo {
     pub name: String,
     pub track_count: u32,
     pub artwork: Option<crate::ArtworkRef>,
+    /// Absent for a name no stored credit links to an id.
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -173,5 +202,66 @@ impl TrackInfo {
 
     pub fn is_radio(&self) -> bool {
         self.kind == TrackKind::Radio
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ArtistCredit, TrackInfo};
+
+    fn track(artist: &str, credits: &[(&str, Option<&str>)]) -> TrackInfo {
+        TrackInfo {
+            artist: artist.into(),
+            credits: credits
+                .iter()
+                .map(|(name, id)| ArtistCredit {
+                    name: (*name).into(),
+                    id: id.map(Into::into),
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_billed_artist_is_matched_by_name() {
+        let row = track("Boris", &[("Ada", Some("UC-ada")), ("Boris", Some("UC-b"))]);
+
+        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-b"));
+    }
+
+    #[test]
+    fn the_billed_artist_is_matched_in_any_case() {
+        let row = track("boris", &[("Ada", Some("UC-ada")), ("Boris", Some("UC-b"))]);
+        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-b"));
+
+        let row = track("JÉJA", &[("Cartoon", Some("UC-c")), ("Jéja", Some("UC-j"))]);
+        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-j"));
+    }
+
+    /// A joined credit names no single artist, so the lead is the one to open.
+    #[test]
+    fn a_joined_billing_opens_its_lead() {
+        let row = track("Ada, Boris", &[("Ada", Some("UC-ada")), ("Boris", None)]);
+
+        assert_eq!(row.primary_credit().unwrap().name, "Ada");
+    }
+
+    /// No string is parsed to find the lead; the source's own order says who it is.
+    #[test]
+    fn an_unmatched_billing_opens_the_first_credit() {
+        let row = track(
+            "Ada & Boris",
+            &[("Ada", Some("UC-ada")), ("Boris", Some("UC-b"))],
+        );
+
+        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-ada"));
+    }
+
+    #[test]
+    fn a_lone_credit_answers_whatever_the_billing_says() {
+        let row = track("Ada feat. Boris", &[("Ada", Some("UC-ada"))]);
+
+        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-ada"));
     }
 }

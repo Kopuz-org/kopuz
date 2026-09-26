@@ -25,6 +25,7 @@ pub struct TrackRow {
     pub mb_track_id: Option<String>,
     pub playlist_item_id: Option<String>,
     pub artists_json: String,
+    pub credits_json: String,
 }
 
 impl From<TrackRow> for Track {
@@ -53,6 +54,7 @@ impl From<TrackRow> for Track {
             musicbrainz_track_id: r.mb_track_id,
             playlist_item_id: r.playlist_item_id,
             artists: serde_json::from_str(&r.artists_json).unwrap_or_default(),
+            credits: serde_json::from_str(&r.credits_json).unwrap_or_default(),
         }
     }
 }
@@ -66,6 +68,7 @@ pub struct AlbumRow {
     pub year: i64,
     pub cover_path: Option<String>,
     pub manual_cover: i64,
+    pub artist_id: Option<String>,
 }
 
 impl From<AlbumRow> for Album {
@@ -78,6 +81,7 @@ impl From<AlbumRow> for Album {
             year: r.year.clamp(0, u16::MAX as i64) as u16,
             cover_path: r.cover_path.map(PathBuf::from),
             manual_cover: r.manual_cover != 0,
+            artist_id: r.artist_id,
         }
     }
 }

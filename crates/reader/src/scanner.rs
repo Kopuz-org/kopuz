@@ -242,6 +242,7 @@ mod tests {
             title: title.to_string(),
             artist: "Artist".to_string(),
             artists: vec!["Artist".to_string()],
+            credits: Vec::new(),
             album: "Album".to_string(),
             duration: 1,
             khz: 44_100,
@@ -264,6 +265,7 @@ mod tests {
             year: 0,
             cover_path: None,
             manual_cover: false,
+            artist_id: None,
         }
     }
 

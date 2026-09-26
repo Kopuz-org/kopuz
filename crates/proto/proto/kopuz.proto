@@ -520,6 +520,7 @@ message AlbumInfo {
   uint32 year = 5;
   // Absent when the daemon has no cover for the album.
   optional ArtworkRef artwork = 6;
+  optional string artist_id = 7;
 }
 
 message AlbumPage {
@@ -544,6 +545,8 @@ message ArtistInfo {
   string name = 1;
   uint32 track_count = 2;
   optional ArtworkRef artwork = 3;
+  // Absent for a name no stored credit links to an id.
+  optional string id = 4;
 }
 
 message ArtistPage {
@@ -1022,6 +1025,8 @@ message CatalogDetail {
   repeated TrackInfo tracks = 9;
   repeated CatalogShelf shelves = 10;
   optional string continuation = 11;
+  // For an album, the artist whose page its header opens.
+  optional string artist_id = 12;
 }
 
 // ---------------- radio ----------------
@@ -1169,6 +1174,15 @@ message TrackInfo {
   optional string playlist_item_id = 20;
   // Absent when there is no cover.
   optional ArtworkRef artwork = 21;
+  // `artists` stays populated beside this: an older client reads only that.
+  repeated ArtistCredit credits = 23;
+}
+
+// The id is the issuing source's own, so the daemon sends it only while that
+// source is the active one.
+message ArtistCredit {
+  string name = 1;
+  optional string id = 2;
 }
 
 message TrackRef {
