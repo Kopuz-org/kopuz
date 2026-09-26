@@ -12,7 +12,7 @@
 //! commit leaves the DB empty and the JSONs untouched, so it re-runs cleanly.
 //! A file that fails to parse is skipped (and left in place for repair); the
 //! rest import normally. The names actually consumed are recorded in
-//! `metadata_cache`, and [`finalize_migration`] renames exactly those files to
+//! `kv`, and [`finalize_migration`] renames exactly those files to
 //! `*.json.bak` (kept for downgrade; never deleted).
 //!
 //! Legacy `Track.path` was the overloaded `"service:id[:cover]"` string; we
@@ -259,8 +259,8 @@ pub async fn run_json_import(
         })
         .to_string();
         sqlx::query!(
-            "INSERT INTO metadata_cache (cache_key, kind, payload) VALUES ('yt_sync', 'timestamps', ?1) \
-             ON CONFLICT(cache_key, kind) DO UPDATE SET payload = ?1",
+            "INSERT INTO kv (name, kind, value) VALUES ('yt_sync', 'timestamps', ?1) \
+             ON CONFLICT(kind, name) DO UPDATE SET value = ?1",
             stamps
         )
         .execute(&mut *tx)
@@ -376,8 +376,8 @@ pub async fn run_json_import(
         if !favs.jellyfin_favorites.is_empty() {
             let now_s = now.to_string();
             sqlx::query!(
-                "INSERT INTO metadata_cache (cache_key, kind, payload) VALUES ('fav_pull', ?1, ?2) \
-                 ON CONFLICT(cache_key, kind) DO UPDATE SET payload = ?2",
+                "INSERT INTO kv (name, kind, value) VALUES ('fav_pull', ?1, ?2) \
+                 ON CONFLICT(kind, name) DO UPDATE SET value = ?2",
                 sid,
                 now_s
             )
@@ -414,8 +414,8 @@ pub async fn run_json_import(
     // these files, so a skipped corrupt file is never moved aside unimported.
     let consumed_json = serde_json::to_string(&consumed)?;
     sqlx::query!(
-        "INSERT INTO metadata_cache (cache_key, kind, payload) VALUES ('legacy_import', 'files', ?1) \
-         ON CONFLICT(cache_key, kind) DO UPDATE SET payload = ?1",
+        "INSERT INTO kv (name, kind, value) VALUES ('legacy_import', 'files', ?1) \
+         ON CONFLICT(kind, name) DO UPDATE SET value = ?1",
         consumed_json
     )
     .execute(&mut *tx)
@@ -450,12 +450,10 @@ pub async fn run_json_import(
 /// Also drops the obsolete `.db_migrated` sentinel from earlier builds.
 /// Returns how many files were renamed.
 pub async fn finalize_migration(pool: &SqlitePool, config_dir: &Path) -> Result<usize, DbError> {
-    let consumed: Option<String> = sqlx::query_scalar!(
-        "SELECT payload FROM metadata_cache WHERE cache_key = 'legacy_import' AND kind = 'files'"
-    )
-    .fetch_optional(pool)
-    .await?
-    .flatten();
+    let consumed: Option<String> =
+        sqlx::query_scalar!("SELECT value FROM kv WHERE name = 'legacy_import' AND kind = 'files'")
+            .fetch_optional(pool)
+            .await?;
     let Some(consumed) = consumed else {
         return Ok(0);
     };
@@ -497,19 +495,21 @@ async fn import_servers(
             let yt_anon = s
                 .get("yt_anonymous")
                 .and_then(|v| v.as_bool())
-                .unwrap_or(false) as i64;
-            sqlx::query!(
-                "INSERT OR IGNORE INTO servers (id, name, url, service, yt_browser, yt_anonymous) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                .unwrap_or(false);
+            let inserted = sqlx::query!(
+                "INSERT OR IGNORE INTO servers (id, name, url, service) VALUES (?1, ?2, ?3, ?4)",
                 id,
                 name,
                 url,
-                service,
-                yt_browser,
-                yt_anon
+                service
             )
             .execute(&mut **tx)
-            .await?;
+            .await?
+            .rows_affected();
+            if inserted > 0 {
+                let options = legacy_options(yt_browser.as_deref(), yt_anon);
+                super::cfg_store::write_server_options(tx, &id, &options).await?;
+            }
         }
     }
 
@@ -525,7 +525,7 @@ async fn import_servers(
     let yt_anon = srv
         .get("yt_anonymous")
         .and_then(|v| v.as_bool())
-        .unwrap_or(false) as i64;
+        .unwrap_or(false);
 
     // Resolve id: explicit, else match a saved server by (url, service), else synth.
     let resolved = opt_str_at(srv, "id")
@@ -541,32 +541,30 @@ async fn import_servers(
         })
         .unwrap_or_else(|| format!("legacy-{service}"));
 
-    let auth_state = if token.is_some() || yt_anon == 1 {
-        "active"
-    } else {
-        "unauthenticated"
-    };
-    sqlx::query!(
-        "INSERT INTO servers \
-           (id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, auth_state, cred_updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
-         ON CONFLICT(id) DO UPDATE SET name=?2, url=?3, service=?4, access_token=?5, user_id=?6, \
-           yt_browser=?7, yt_anonymous=?8, auth_state=?9, cred_updated_at=?10",
-        resolved,
-        name,
-        url,
-        service,
-        token,
-        user_id,
-        yt_browser,
-        yt_anon,
-        auth_state,
-        now
+    super::cfg_store::upsert_server_row(tx, &resolved, &name, &url, &service, now).await?;
+    let options = legacy_options(yt_browser.as_deref(), yt_anon);
+    super::cfg_store::write_server_options(tx, &resolved, &options).await?;
+    super::cfg_store::write_server_credentials(
+        tx,
+        &resolved,
+        token.as_deref(),
+        user_id.as_deref(),
+        now,
     )
-    .execute(&mut **tx)
     .await?;
 
     Ok(Some(resolved))
+}
+
+/// The legacy file predates Apple Music, so only the YT options can be set.
+fn legacy_options(yt_browser: Option<&str>, yt_anonymous: bool) -> Vec<(&'static str, String)> {
+    let defaults = config::MusicServer::default();
+    super::cfg_store::server_options(
+        yt_browser,
+        yt_anonymous,
+        &defaults.apple_music_storefront,
+        &defaults.apple_music_language,
+    )
 }
 
 /// Store the config JSON blob, stripped of `server`/`servers`/`listen_counts`
@@ -733,13 +731,12 @@ async fn insert_track(
     let bitrate = t.bitrate as i64;
     let track_number = t.track_number.map(|n| n as i64);
     let disc_number = t.disc_number.map(|n| n as i64);
-    let artists_json = serde_json::to_string(&t.artists)?;
-    sqlx::query!(
+    let inserted = sqlx::query_scalar!(
         "INSERT OR IGNORE INTO tracks \
            (source, track_key, path, service, source_album_id, title, artist, album, duration, \
-            khz, bitrate, track_number, disc_number, mb_release_id, mb_recording_id, mb_track_id, \
-            playlist_item_id, artists_json, cover_path) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            khz, bitrate, track_number, disc_number, cover_path) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+         RETURNING rowid_pk AS \"pk!: i64\"",
         source,
         track_key,
         path,
@@ -753,15 +750,13 @@ async fn insert_track(
         bitrate,
         track_number,
         disc_number,
-        t.musicbrainz_release_id,
-        t.musicbrainz_recording_id,
-        t.musicbrainz_track_id,
-        t.playlist_item_id,
-        artists_json,
         t.cover
     )
-    .execute(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await?;
+    if let Some(pk) = inserted {
+        super::writes::write_track_children(tx, pk, t).await?;
+    }
     Ok(())
 }
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO kv (name, kind, value) VALUES ('yt_sync', 'timestamps', ?1) ON CONFLICT(kind, name) DO UPDATE SET value = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "785a23bfd89b8fb1936f42621901b5c4860117ac3d2c44c395edd10fc0d4222b"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO tracks (source, track_key, path, service, source_album_id, title, artist, album, duration, khz, bitrate, track_number, disc_number, cover_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) ON CONFLICT(source, track_key) DO UPDATE SET path=?3, service=?4, source_album_id=CASE WHEN ?5 != '' THEN ?5 ELSE tracks.source_album_id END, title=?6, artist=?7, album=?8, duration=?9, khz=?10, bitrate=?11, track_number=?12, disc_number=?13, cover_path=?14 RETURNING rowid_pk AS \"pk!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a6e0bc8ca34804354dc8bb01a97a591ca7daf17338c66a6acb69ac33842090b8"
+}

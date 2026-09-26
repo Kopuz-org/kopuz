@@ -23,7 +23,6 @@ pub struct TrackRow {
     pub mb_release_id: Option<String>,
     pub mb_recording_id: Option<String>,
     pub mb_track_id: Option<String>,
-    pub playlist_item_id: Option<String>,
     pub artists_json: String,
     pub credits_json: String,
 }
@@ -52,7 +51,7 @@ impl From<TrackRow> for Track {
             musicbrainz_release_id: r.mb_release_id,
             musicbrainz_recording_id: r.mb_recording_id,
             musicbrainz_track_id: r.mb_track_id,
-            playlist_item_id: r.playlist_item_id,
+            playlist_item_id: None,
             artists: serde_json::from_str(&r.artists_json).unwrap_or_default(),
             credits: serde_json::from_str(&r.credits_json).unwrap_or_default(),
         }

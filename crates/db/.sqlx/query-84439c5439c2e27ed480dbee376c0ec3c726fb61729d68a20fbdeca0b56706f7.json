@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM playlist_tracks WHERE rowid = ( SELECT pt.rowid FROM playlist_tracks pt JOIN playlists p ON p.rowid_pk = pt.playlist_pk WHERE p.source = ?1 AND p.source_pl_id = ?2 ORDER BY pt.position LIMIT 1 OFFSET ?3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "84439c5439c2e27ed480dbee376c0ec3c726fb61729d68a20fbdeca0b56706f7"
+}

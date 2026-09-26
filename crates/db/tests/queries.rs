@@ -42,8 +42,8 @@ async fn seed(db_path: &std::path::Path) {
         let artist = format!("Artist {:03}", i % 50);
         let album = format!("Album {:03}", i % 200);
         sqlx::query(
-            "INSERT INTO tracks (source, track_key, title, artist, album, artists_json) \
-             VALUES ('local', ?1, ?2, ?3, ?4, '[]')",
+            "INSERT INTO tracks (source, track_key, title, artist, album) \
+             VALUES ('local', ?1, ?2, ?3, ?4)",
         )
         .bind(&key)
         .bind(&title)

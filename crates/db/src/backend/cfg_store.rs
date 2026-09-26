@@ -52,51 +52,14 @@ pub async fn load_config(
     cfg.migrate_sidebar_order();
     cfg.migrate_registry_paths();
 
-    // Hydrate servers from their table (creds included for the active one).
-    use sqlx::Row;
-    let rows: Vec<sqlx::sqlite::SqliteRow> = sqlx::query(
-        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, \
-         apple_music_storefront, apple_music_language \
-         FROM servers",
-    )
-    .fetch_all(pool)
-    .await?;
-
-    cfg.servers = rows
-        .iter()
-        .map(|r| SavedServer {
-            id: r.get("id"),
-            name: r.get("name"),
-            url: r.get("url"),
-            service: parse_service(r.get::<String, _>("service").as_str()),
-            yt_browser: r
-                .get::<Option<String>, _>("yt_browser")
-                .as_deref()
-                .and_then(|s| parse_browser(Some(s))),
-            yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
-            apple_music_storefront: r.get("apple_music_storefront"),
-            apple_music_language: r.get("apple_music_language"),
-        })
-        .collect();
-
+    // Hydrate servers from their tables (creds included for the active one).
+    let servers = stored_servers(pool, None).await?;
+    cfg.servers = servers.iter().map(StoredServer::saved).collect();
     cfg.server = cfg.active_source.server_id().and_then(|active| {
-        rows.iter()
-            .find(|r| r.get::<String, _>("id") == *active)
-            .map(|r| MusicServer {
-                name: r.get("name"),
-                url: r.get("url"),
-                service: parse_service(r.get::<String, _>("service").as_str()),
-                access_token: r.get("access_token"),
-                user_id: r.get("user_id"),
-                id: Some(r.get("id")),
-                yt_browser: r
-                    .get::<Option<String>, _>("yt_browser")
-                    .as_deref()
-                    .and_then(|s| parse_browser(Some(s))),
-                yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
-                apple_music_storefront: r.get("apple_music_storefront"),
-                apple_music_language: r.get("apple_music_language"),
-            })
+        servers
+            .iter()
+            .find(|server| server.id == *active)
+            .map(StoredServer::music_server)
     });
 
     // Hydrate play counts.
@@ -123,26 +86,15 @@ pub async fn save_config(
     // Sync the saved-servers list (non-cred fields only — never clobber a stored
     // token from the in-memory cache, which doesn't carry other servers' creds).
     for s in &cfg.servers {
-        let service = service_str(s.service);
+        upsert_server_row(&mut tx, &s.id, &s.name, &s.url, service_str(s.service), now).await?;
         let browser = s.yt_browser.map(browser_str);
-        let anon = s.yt_anonymous as i64;
-        sqlx::query(
-            "INSERT INTO servers (id, name, url, service, yt_browser, yt_anonymous, apple_music_storefront, apple_music_language, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
-             ON CONFLICT(id) DO UPDATE SET name=?2, url=?3, service=?4, yt_browser=?5, \
-               yt_anonymous=?6, apple_music_storefront=?7, apple_music_language=?8, updated_at=?9",
-        )
-        .bind(&s.id)
-        .bind(&s.name)
-        .bind(&s.url)
-        .bind(service)
-        .bind(browser)
-        .bind(anon)
-        .bind(&s.apple_music_storefront)
-        .bind(&s.apple_music_language)
-        .bind(now)
-        .execute(&mut *tx)
-        .await?;
+        let options = server_options(
+            browser.as_deref(),
+            s.yt_anonymous,
+            &s.apple_music_storefront,
+            &s.apple_music_language,
+        );
+        write_server_options(&mut tx, &s.id, &options).await?;
     }
 
     // Upsert the active server WITH its creds, and remember its id for the blob.
@@ -153,34 +105,30 @@ pub async fn save_config(
             .clone()
             .or_else(|| cfg.active_source.server_id().map(String::from))
             .unwrap_or_else(|| format!("legacy-{}", service_str(srv.service)));
-        let service = service_str(srv.service);
-        let browser = srv.yt_browser.map(browser_str);
-        let anon = srv.yt_anonymous as i64;
-        let auth = if srv.access_token.is_some() || srv.yt_anonymous {
-            "active"
-        } else {
-            "unauthenticated"
-        };
-        sqlx::query(
-            "INSERT INTO servers \
-               (id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, apple_music_storefront, apple_music_language, auth_state, cred_updated_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12) \
-             ON CONFLICT(id) DO UPDATE SET name=?2, url=?3, service=?4, access_token=?5, \
-               user_id=?6, yt_browser=?7, yt_anonymous=?8, apple_music_storefront=?9, apple_music_language=?10, auth_state=?11, cred_updated_at=?12, updated_at=?12",
+        upsert_server_row(
+            &mut tx,
+            &id,
+            &srv.name,
+            &srv.url,
+            service_str(srv.service),
+            now,
         )
-        .bind(&id)
-        .bind(&srv.name)
-        .bind(&srv.url)
-        .bind(service)
-        .bind(&srv.access_token)
-        .bind(&srv.user_id)
-        .bind(browser)
-        .bind(anon)
-        .bind(&srv.apple_music_storefront)
-        .bind(&srv.apple_music_language)
-        .bind(auth)
-        .bind(now)
-        .execute(&mut *tx)
+        .await?;
+        let browser = srv.yt_browser.map(browser_str);
+        let options = server_options(
+            browser.as_deref(),
+            srv.yt_anonymous,
+            &srv.apple_music_storefront,
+            &srv.apple_music_language,
+        );
+        write_server_options(&mut tx, &id, &options).await?;
+        write_server_credentials(
+            &mut tx,
+            &id,
+            srv.access_token.as_deref(),
+            srv.user_id.as_deref(),
+            now,
+        )
         .await?;
         active_id = Some(id);
     }
@@ -269,30 +217,189 @@ pub async fn save_config(
 /// Hydrate one server row (creds included) — the server-switch path, so stored
 /// creds are reused instead of re-prompting sign-in.
 pub async fn load_server(pool: &SqlitePool, id: &str) -> Result<Option<MusicServer>, DbError> {
+    Ok(stored_servers(pool, Some(id))
+        .await?
+        .first()
+        .map(StoredServer::music_server))
+}
+
+/// A server's identity row with its credentials and the options it set.
+struct StoredServer {
+    id: String,
+    name: String,
+    url: String,
+    service: MusicService,
+    access_token: Option<String>,
+    user_id: Option<String>,
+    options: std::collections::HashMap<String, String>,
+}
+
+impl StoredServer {
+    fn option_or(&self, key: &str, default: String) -> String {
+        self.options.get(key).cloned().unwrap_or(default)
+    }
+
+    fn browser(&self) -> Option<Browser> {
+        parse_browser(self.options.get(OPT_BROWSER).map(String::as_str))
+    }
+
+    fn anonymous(&self) -> bool {
+        self.options
+            .get(OPT_ANONYMOUS)
+            .is_some_and(|value| value == "1")
+    }
+
+    fn saved(&self) -> SavedServer {
+        let defaults = MusicServer::default();
+        SavedServer {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            url: self.url.clone(),
+            service: self.service,
+            yt_browser: self.browser(),
+            yt_anonymous: self.anonymous(),
+            apple_music_storefront: self.option_or(OPT_STOREFRONT, defaults.apple_music_storefront),
+            apple_music_language: self.option_or(OPT_LANGUAGE, defaults.apple_music_language),
+        }
+    }
+
+    fn music_server(&self) -> MusicServer {
+        let defaults = MusicServer::default();
+        MusicServer {
+            name: self.name.clone(),
+            url: self.url.clone(),
+            service: self.service,
+            access_token: self.access_token.clone(),
+            user_id: self.user_id.clone(),
+            id: Some(self.id.clone()),
+            yt_browser: self.browser(),
+            yt_anonymous: self.anonymous(),
+            apple_music_storefront: self.option_or(OPT_STOREFRONT, defaults.apple_music_storefront),
+            apple_music_language: self.option_or(OPT_LANGUAGE, defaults.apple_music_language),
+        }
+    }
+}
+
+const OPT_BROWSER: &str = "yt_browser";
+const OPT_ANONYMOUS: &str = "yt_anonymous";
+const OPT_STOREFRONT: &str = "apple_music_storefront";
+const OPT_LANGUAGE: &str = "apple_music_language";
+
+/// Every server, or the one `id` names, with its credentials and options joined on.
+async fn stored_servers(pool: &SqlitePool, id: Option<&str>) -> Result<Vec<StoredServer>, DbError> {
     use sqlx::Row;
-    let row = sqlx::query(
-        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, \
-         apple_music_storefront, apple_music_language \
-         FROM servers WHERE id = ?1",
+    let rows = sqlx::query(
+        "SELECT s.id, s.name, s.url, s.service, c.access_token, c.user_id \
+           FROM servers s LEFT JOIN server_credentials c ON c.server_id = s.id \
+          WHERE ?1 IS NULL OR s.id = ?1",
     )
     .bind(id)
-    .fetch_optional(pool)
+    .fetch_all(pool)
     .await?;
-    Ok(row.map(|r| MusicServer {
-        name: r.get("name"),
-        url: r.get("url"),
-        service: parse_service(r.get::<String, _>("service").as_str()),
-        access_token: r.get("access_token"),
-        user_id: r.get("user_id"),
-        id: Some(r.get("id")),
-        yt_browser: r
-            .get::<Option<String>, _>("yt_browser")
-            .as_deref()
-            .and_then(|s| parse_browser(Some(s))),
-        yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
-        apple_music_storefront: r.get("apple_music_storefront"),
-        apple_music_language: r.get("apple_music_language"),
-    }))
+    let options: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT server_id, key, value FROM server_settings WHERE ?1 IS NULL OR server_id = ?1",
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    let mut by_server: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, String>,
+    > = std::collections::HashMap::new();
+    for (server, key, value) in options {
+        by_server.entry(server).or_default().insert(key, value);
+    }
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let id: String = row.get("id");
+            StoredServer {
+                options: by_server.remove(&id).unwrap_or_default(),
+                name: row.get("name"),
+                url: row.get("url"),
+                service: parse_service(row.get::<String, _>("service").as_str()),
+                access_token: row.get("access_token"),
+                user_id: row.get("user_id"),
+                id,
+            }
+        })
+        .collect())
+}
+
+/// The options a server stores: only what differs from the defaults, so most servers store none.
+pub(crate) fn server_options(
+    browser: Option<&str>,
+    anonymous: bool,
+    storefront: &str,
+    language: &str,
+) -> Vec<(&'static str, String)> {
+    let defaults = MusicServer::default();
+    let mut rows = Vec::new();
+    if let Some(browser) = browser {
+        rows.push((OPT_BROWSER, browser.to_string()));
+    }
+    if anonymous {
+        rows.push((OPT_ANONYMOUS, "1".to_string()));
+    }
+    if storefront != defaults.apple_music_storefront {
+        rows.push((OPT_STOREFRONT, storefront.to_string()));
+    }
+    if language != defaults.apple_music_language {
+        rows.push((OPT_LANGUAGE, language.to_string()));
+    }
+    rows
+}
+
+pub(crate) async fn write_server_options(
+    conn: &mut sqlx::SqliteConnection,
+    id: &str,
+    options: &[(&str, String)],
+) -> Result<(), DbError> {
+    sqlx::query("DELETE FROM server_settings WHERE server_id = ?1")
+        .bind(id)
+        .execute(&mut *conn)
+        .await?;
+    for (key, value) in options {
+        sqlx::query("INSERT INTO server_settings (server_id, key, value) VALUES (?1, ?2, ?3)")
+            .bind(id)
+            .bind(key)
+            .bind(value)
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Store a server's credentials, or drop them when there is no token to keep.
+pub(crate) async fn write_server_credentials(
+    conn: &mut sqlx::SqliteConnection,
+    id: &str,
+    access_token: Option<&str>,
+    user_id: Option<&str>,
+    now: i64,
+) -> Result<(), DbError> {
+    match access_token {
+        Some(token) => {
+            sqlx::query(
+                "INSERT INTO server_credentials (server_id, access_token, user_id, updated_at) \
+                 SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM servers WHERE id = ?1) \
+                 ON CONFLICT(server_id) DO UPDATE SET access_token = ?2, user_id = ?3, updated_at = ?4",
+            )
+            .bind(id)
+            .bind(token)
+            .bind(user_id)
+            .bind(now)
+            .execute(&mut *conn)
+            .await?;
+        }
+        None => {
+            sqlx::query("DELETE FROM server_credentials WHERE server_id = ?1")
+                .bind(id)
+                .execute(&mut *conn)
+                .await?;
+        }
+    }
+    Ok(())
 }
 
 /// Increment one track's play count (1-row upsert — no whole-blob rewrite).
@@ -417,21 +524,29 @@ pub async fn set_server_credentials(
     access_token: Option<&str>,
     user_id: Option<&str>,
 ) -> Result<(), DbError> {
-    let auth = if access_token.is_some() {
-        "active"
-    } else {
-        "unauthenticated"
-    };
+    let mut conn = pool.acquire().await?;
+    write_server_credentials(&mut conn, id, access_token, user_id, now_secs()).await
+}
+
+/// Insert or rename one server's identity row.
+pub(crate) async fn upsert_server_row(
+    conn: &mut sqlx::SqliteConnection,
+    id: &str,
+    name: &str,
+    url: &str,
+    service: &str,
+    now: i64,
+) -> Result<(), DbError> {
     sqlx::query(
-        "UPDATE servers SET access_token = ?2, user_id = ?3, auth_state = ?4, \
-         cred_updated_at = ?5, updated_at = ?5 WHERE id = ?1",
+        "INSERT INTO servers (id, name, url, service, updated_at) VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(id) DO UPDATE SET name = ?2, url = ?3, service = ?4, updated_at = ?5",
     )
     .bind(id)
-    .bind(access_token)
-    .bind(user_id)
-    .bind(auth)
-    .bind(now_secs())
-    .execute(pool)
+    .bind(name)
+    .bind(url)
+    .bind(service)
+    .bind(now)
+    .execute(conn)
     .await?;
     Ok(())
 }

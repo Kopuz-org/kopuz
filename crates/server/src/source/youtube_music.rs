@@ -355,7 +355,7 @@ impl MediaSource for YtSource {
         &self,
         playlist_id: &str,
         track: &reader::Track,
-        _position: usize,
+        position: usize,
     ) -> Result<(), SourceError> {
         let vid = track.id.key();
         if vid.is_empty() {
@@ -377,10 +377,7 @@ impl MediaSource for YtSource {
                 .map_err(SourceError::from);
         }
         self.client.remove_from_playlist(playlist_id, &vid).await?;
-        self.db
-            .remove_playlist_tracks(&self.source, playlist_id, &[vid.into_owned()])
-            .await
-            .map_err(SourceError::from)
+        self.remove_playlist_entry(playlist_id, position).await
     }
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {

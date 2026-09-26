@@ -110,35 +110,29 @@ impl PlaylistService {
         index: usize,
     ) -> Result<reader::Track, ApiError> {
         let source = self.config().active_source;
-        let store = self.db.load_playlists(&source).await.map_err(db_error)?;
-        let key = store
-            .playlists
-            .iter()
-            .find(|playlist| playlist.id == playlist_id)
-            .and_then(|playlist| playlist.tracks.get(index))
-            .ok_or_else(|| ApiError::not_found("no such playlist entry"))?
-            .clone();
-        self.db
-            .tracks_by_keys(&source, &[key])
+        let entry = self
+            .entries(playlist_id)
+            .await?
+            .into_iter()
+            .nth(index)
+            .ok_or_else(|| ApiError::not_found("no such playlist entry"))?;
+        let mut track = self
+            .db
+            .tracks_by_keys(&source, std::slice::from_ref(&entry.key))
             .await
             .map_err(db_error)?
             .into_iter()
             .next()
-            .ok_or_else(|| ApiError::not_found("the playlist entry names an unknown track"))
+            .ok_or_else(|| ApiError::not_found("the playlist entry names an unknown track"))?;
+        track.playlist_item_id = entry.item_id;
+        Ok(track)
     }
 
-    async fn entries(&self, playlist_id: &str) -> Result<Vec<String>, ApiError> {
-        let store = self
-            .db
-            .load_playlists(&self.config().active_source)
+    async fn entries(&self, playlist_id: &str) -> Result<Vec<reader::PlaylistEntry>, ApiError> {
+        self.db
+            .playlist_entries(&self.config().active_source, playlist_id)
             .await
-            .map_err(db_error)?;
-        store
-            .playlists
-            .into_iter()
-            .find(|playlist| playlist.id == playlist_id)
-            .map(|playlist| playlist.tracks)
-            .ok_or_else(|| ApiError::not_found("no such playlist"))
+            .map_err(db_error)
     }
 
     pub async fn create(&self, name: &str, keys: &[String]) -> Result<String, ApiError> {
@@ -263,11 +257,11 @@ impl PlaylistService {
             if page.tracks.is_empty() {
                 break;
             }
-            let page_refs: Vec<String> = page
+            let page_refs: Vec<reader::PlaylistEntry> = page
                 .tracks
                 .iter()
-                .map(|track| track.id.key().to_string())
-                .filter(|key| !key.is_empty())
+                .map(reader::PlaylistEntry::from_track)
+                .filter(|entry| !entry.key.is_empty())
                 .collect();
             for chunk in page.tracks.chunks(100) {
                 let _ = source.upsert_tracks(chunk).await;
@@ -410,10 +404,10 @@ impl PlaylistService {
                 .fetch_playlist_entries(&meta.id)
                 .await
                 .unwrap_or_default();
-            let track_keys: Vec<String> = entries
+            let track_keys: Vec<reader::PlaylistEntry> = entries
                 .iter()
-                .map(|track| track.id.key().to_string())
-                .filter(|key| !key.is_empty())
+                .map(reader::PlaylistEntry::from_track)
+                .filter(|entry| !entry.key.is_empty())
                 .collect();
             if source
                 .set_playlist_tracks(&meta.id, &track_keys)

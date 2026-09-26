@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO tracks (source, track_key, path, service, source_album_id, title, artist, album, duration, khz, bitrate, track_number, disc_number, cover_path) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) RETURNING rowid_pk AS \"pk!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "pk!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 14
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a16994e97d7268e716e3a2a3c8c69a57f49dbfdb036c6e2695512f3f3cfe53b6"
+}

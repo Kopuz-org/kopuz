@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO kv (name, kind, value) VALUES (?1, ?2, ?3) ON CONFLICT(kind, name) DO UPDATE SET value = ?3, updated_at = unixepoch()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "34a554c264ed62f11be22faab10272c97651edd0d27267a5be07f8b74d4d4471"
+}
