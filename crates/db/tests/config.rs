@@ -73,7 +73,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
     // Play counts are written ONLY through bump_listen_count (a per-play
     // 1-row upsert), never by save_config — but load_config hydrates them.
     for _ in 0..7 {
-        db.bump_listen_count(&Source::Server("srv-b".into()), "ytmusic:VID1")
+        db.bump_listen_count(&Source::Server("srv-b".into()), "VID1")
             .await
             .unwrap();
     }

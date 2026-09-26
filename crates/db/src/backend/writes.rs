@@ -38,11 +38,13 @@ pub async fn upsert_tracks(
         let bitrate = t.bitrate as i64;
         let track_number = t.track_number.map(|n| n as i64);
         let disc_number = t.disc_number.map(|n| n as i64);
+        // A remote row is dated when first seen; a local one takes its file's time from the scan.
         let pk = sqlx::query_scalar!(
             "INSERT INTO tracks \
                (source, track_key, path, service, source_album_id, title, artist, album, duration, \
-                khz, bitrate, track_number, disc_number, cover_path) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
+                khz, bitrate, track_number, disc_number, cover_path, added_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
+                     CASE WHEN ?4 IS NULL THEN 0 ELSE unixepoch() END) \
              ON CONFLICT(source, track_key) DO UPDATE SET \
                path=?3, service=?4, \
                source_album_id=CASE WHEN ?5 != '' THEN ?5 ELSE tracks.source_album_id END, \
@@ -67,8 +69,43 @@ pub async fn upsert_tracks(
         .fetch_one(&mut *tx)
         .await?;
         write_track_children(&mut tx, pk, t).await?;
+        ensure_album(&mut tx, src, t).await?;
     }
     tx.commit().await?;
+    Ok(())
+}
+
+/// The album a track names gets a row, never overwriting one a library sync or scan wrote.
+async fn ensure_album(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    src: &str,
+    t: &Track,
+) -> Result<(), DbError> {
+    if t.album_id.is_empty() {
+        return Ok(());
+    }
+    let title = match t.album.is_empty() {
+        true => "Singles",
+        false => t.album.as_str(),
+    };
+    let artist_id = t
+        .credits
+        .iter()
+        .find(|credit| credit.name.trim() == t.artist.trim())
+        .or(t.credits.first())
+        .and_then(|credit| credit.id.clone());
+    sqlx::query!(
+        "INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_id, derived) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) ON CONFLICT(source, source_album_id) DO NOTHING",
+        src,
+        t.album_id,
+        title,
+        t.artist,
+        t.cover,
+        artist_id
+    )
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -200,7 +237,7 @@ pub async fn upsert_albums(
                title=?3, artist=?4, genre=?5, year=?6, \
                cover_path=COALESCE(?7, albums.cover_path), \
                manual_cover=MAX(?8, albums.manual_cover), \
-               artist_id=COALESCE(?9, albums.artist_id)",
+               artist_id=COALESCE(?9, albums.artist_id), derived=0",
             src,
             a.id,
             a.title,
@@ -436,7 +473,8 @@ pub async fn prune_source(
     .await?;
     sqlx::query!(
         "DELETE FROM albums WHERE source = ?1 \
-         AND source_album_id NOT IN (SELECT value FROM json_each(?2))",
+         AND source_album_id NOT IN (SELECT value FROM json_each(?2)) \
+         AND source_album_id NOT IN (SELECT source_album_id FROM tracks WHERE source = ?1)",
         src,
         keep_albums
     )

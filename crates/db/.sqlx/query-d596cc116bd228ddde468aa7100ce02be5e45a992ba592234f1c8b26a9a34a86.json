@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) ON CONFLICT(source, source_album_id) DO UPDATE SET title=?3, artist=?4, genre=?5, year=?6, cover_path=COALESCE(?7, albums.cover_path), manual_cover=MAX(?8, albums.manual_cover), artist_id=COALESCE(?9, albums.artist_id), derived=0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "d596cc116bd228ddde468aa7100ce02be5e45a992ba592234f1c8b26a9a34a86"
+}

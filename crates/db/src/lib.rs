@@ -485,7 +485,7 @@ pub trait Storage: ReadStore {
     ) -> Result<(), DbError>;
 
     /// Increment one track's play count in its source partition.
-    async fn bump_listen_count(&self, source: &Source, track_uid: &str) -> Result<(), DbError>;
+    async fn bump_listen_count(&self, source: &Source, track_key: &str) -> Result<(), DbError>;
 
     /// Record a play for this source's recently-played history (caps + trims).
     async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;

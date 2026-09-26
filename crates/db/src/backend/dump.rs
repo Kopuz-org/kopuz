@@ -122,9 +122,10 @@ pub async fn load_queue(pool: &SqlitePool) -> Result<QueueSnapshot, DbError> {
     let Some(row) = row else {
         return Ok(QueueSnapshot::default());
     };
+    let saved = serde_json::from_str(&row.queue_json).unwrap_or_default();
     Ok(QueueSnapshot {
         version: row.version.clamp(0, u8::MAX as i64) as u8,
-        queue: serde_json::from_str(&row.queue_json).unwrap_or_default(),
+        queue: super::queries::refresh_from_library(pool, saved).await?,
         current_queue_index: row.current_queue_index.max(0) as usize,
         progress_secs: row.progress_secs.max(0) as u64,
         shuffle_order: serde_json::from_str(&row.shuffle_order_json).unwrap_or_default(),

@@ -89,8 +89,8 @@ async fn seed(db_path: &std::path::Path) {
            ('local', 'al-jazz', 'Jazz One', 'Bea', 'Jazz'), \
            ('local:test', 'al-separate', 'Separate Album', 'Dee', 'Other'), \
            ('srv-1', 'al-yt', 'Yt Album', 'Cyn', 'Pop');\n\
-         INSERT INTO listen_counts (track_key, count) VALUES \
-           ('/music/rock/a1.flac', 3), ('/music/jazz/b_1.flac', 10), ('ytmusic:vid1', 7);\n\
+         INSERT INTO listen_counts (source, track_key, count) VALUES \
+           ('local', '/music/rock/a1.flac', 3), ('local', '/music/jazz/b_1.flac', 10), ('srv-1', 'vid1', 7);\n\
          INSERT INTO track_credits (track_pk, position, name) SELECT rowid_pk, 0, artist FROM tracks;\n",
     );
     conn.execute(batch.as_str()).await.unwrap();
