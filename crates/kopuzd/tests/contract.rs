@@ -655,6 +655,69 @@ async fn artwork_agrees_across_transports() {
 }
 
 #[tokio::test]
+async fn artists_are_keyed_by_identity_on_both_transports() {
+    let pair = spawn_pair().await;
+    let all = Page {
+        offset: 0,
+        limit: 100,
+    };
+    let credited = |key: &str, id: Option<&str>| Track {
+        artist: "Ada".into(),
+        artists: vec!["Ada".into()],
+        credits: vec![reader::ArtistCredit {
+            name: "Ada".into(),
+            id: id.map(Into::into),
+        }],
+        ..track(key)
+    };
+    let tracks = [
+        credited("/lib/ada-1a.flac", Some("ar-1")),
+        credited("/lib/ada-1b.flac", Some("ar-1")),
+        credited("/lib/ada-2.flac", Some("ar-2")),
+        credited("/lib/ada-bare.flac", None),
+    ];
+    pair.database
+        .upsert_tracks(&config::Source::Local, &tracks)
+        .await
+        .expect("seed credited tracks");
+
+    let artists = pair.local.artists(all).await.expect("local");
+    assert_eq!(artists, pair.wire.artists(all).await.expect("wire"));
+    let adas: Vec<(Option<String>, u32)> = artists
+        .artists
+        .iter()
+        .filter(|artist| artist.name == "Ada")
+        .map(|artist| (artist.id.clone(), artist.track_count))
+        .collect();
+    assert_eq!(
+        adas,
+        [
+            (None, 1),
+            (Some("ar-1".into()), 2),
+            (Some("ar-2".into()), 1)
+        ]
+    );
+
+    for id in [Some("ar-1"), Some("ar-2"), None] {
+        let artist = api::ArtistCredit::new("Ada", id.map(Into::into));
+        let local = pair.local.artist_tracks(artist.clone(), all).await;
+        let wire = pair.wire.artist_tracks(artist.clone(), all).await;
+        assert_eq!(local.expect("local"), wire.expect("wire"), "{id:?}");
+        let local = pair.local.artist(artist.clone()).await.expect("local");
+        assert_eq!(local, pair.wire.artist(artist).await.expect("wire"));
+        assert_eq!(local.info.id.as_deref(), id);
+    }
+    let one = pair
+        .wire
+        .artist_tracks(api::ArtistCredit::new("Ada", Some("ar-1".into())), all)
+        .await
+        .expect("wire");
+    let mut keys: Vec<&str> = one.items.iter().map(|t| t.key.as_str()).collect();
+    keys.sort();
+    assert_eq!(keys, ["/lib/ada-1a.flac", "/lib/ada-1b.flac"]);
+}
+
+#[tokio::test]
 async fn library_reads_agree_across_transports() {
     let pair = spawn_pair().await;
     let all = Page {
@@ -709,11 +772,11 @@ async fn library_reads_agree_across_transports() {
     );
     assert_eq!(
         pair.local
-            .artist_tracks(String::new(), all)
+            .artist_tracks(api::ArtistCredit::default(), all)
             .await
             .expect("local"),
         pair.wire
-            .artist_tracks(String::new(), all)
+            .artist_tracks(api::ArtistCredit::default(), all)
             .await
             .expect("wire"),
     );

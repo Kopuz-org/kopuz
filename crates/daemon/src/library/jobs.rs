@@ -363,10 +363,10 @@ impl LibraryService {
             ctx.progress("persisting", Some(done), Some(total), None);
             self.invalidate(Table::Tracks);
         }
-        // Normalized, because that is the key every read looks the photo up
-        // under; storing the display name here wrote rows nothing found.
-        for (name, url) in &snapshot.artist_images {
-            let key = utils::artist::normalize_artist_key(name);
+        // Stored under the key every read builds, never the display name.
+        for (artist, url) in &snapshot.artist_images {
+            let key = utils::artist::ArtistKey::of(&artist.name, artist.id.as_deref())
+                .storage(src.as_str());
             let _ = source.set_artist_image(&key, "server", Some(url)).await;
         }
         let keep_keys: Vec<String> = snapshot

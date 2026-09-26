@@ -54,12 +54,25 @@ pub struct TrackInfo {
     pub credits: Vec<ArtistCredit>,
 }
 
-/// One credited artist. A present id is always usable: the daemon withholds one
-/// issued by a source other than the active one.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// How any artist is referred to; the daemon withholds an id another source issued.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct ArtistCredit {
     pub name: String,
     pub id: Option<String>,
+}
+
+impl ArtistCredit {
+    pub fn new(name: impl Into<String>, id: Option<String>) -> Self {
+        Self {
+            name: name.into(),
+            id: id.filter(|id| !id.trim().is_empty()),
+        }
+    }
+
+    /// Nothing to open: a blank name with no id.
+    pub fn is_empty(&self) -> bool {
+        self.id.is_none() && self.name.trim().is_empty()
+    }
 }
 
 impl TrackInfo {
@@ -99,7 +112,6 @@ impl Default for Page {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TrackFilter {
     pub search: Option<String>,
-    pub artist: Option<String>,
     pub album: Option<String>,
     pub genre: Option<String>,
     pub favorite: Option<bool>,
@@ -174,6 +186,19 @@ pub struct ArtistInfo {
     pub artwork: Option<crate::ArtworkRef>,
     /// Absent for a name no stored credit links to an id.
     pub id: Option<String>,
+}
+
+impl ArtistInfo {
+    pub fn credit(&self) -> ArtistCredit {
+        ArtistCredit::new(self.name.clone(), self.id.clone())
+    }
+}
+
+/// An artist page's header and albums; its tracks page through `artist_tracks`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistDetail {
+    pub info: ArtistInfo,
+    pub albums: Vec<AlbumInfo>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

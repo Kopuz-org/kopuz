@@ -10,21 +10,29 @@
 pub enum ArtworkTarget {
     Track(String),
     Album(String),
-    Artist(String),
+    Artist(crate::ArtistCredit),
     Playlist(String),
     Catalog(String),
     Station(String),
 }
 
 impl ArtworkTarget {
+    /// The entity's key; an artist's is its name, with [`Self::artist_id`] beside it.
     pub fn id(&self) -> &str {
         match self {
+            Self::Artist(artist) => &artist.name,
             Self::Track(id)
             | Self::Album(id)
-            | Self::Artist(id)
             | Self::Playlist(id)
             | Self::Catalog(id)
             | Self::Station(id) => id,
+        }
+    }
+
+    pub fn artist_id(&self) -> Option<&str> {
+        match self {
+            Self::Artist(artist) => artist.id.as_deref(),
+            _ => None,
         }
     }
 

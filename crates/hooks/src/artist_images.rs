@@ -1,4 +1,4 @@
-//! Which artists to look for photos of.
+//! Which artists the grid shows, and asking for their photos.
 //!
 //! The search itself is the daemon's -- it holds the credentials, the miss
 //! cache and the results. What stays here is the one thing the daemon cannot
@@ -14,111 +14,86 @@ use dioxus::prelude::*;
 use utils::artist::{joined_credit_primary, normalize_artist_key};
 
 /// Ask the daemon to fill in missing artist photos for what this grid renders.
-pub fn use_artist_photo_fetch(
-    albums: Resource<Vec<api::AlbumInfo>>,
-    sample_tracks: Resource<Vec<api::TrackInfo>>,
-) {
+pub fn use_artist_photo_fetch(artists: Resource<Vec<api::ArtistInfo>>) {
     // What the last request asked for. The daemon announces what it finds by
-    // dirtying tracks, which is what `sample_tracks` is keyed on -- so without
+    // dirtying tracks, which is what `artists` is keyed on -- so without
     // remembering the ask, every success re-runs this effect and asks again,
     // forever. A changed grid still gets a fresh request.
-    let mut asked_for = use_signal(Vec::<String>::new);
+    let mut asked_for = use_signal(Vec::<api::ArtistCredit>::new);
     use_effect(move || {
-        let albums = albums.read().clone().unwrap_or_default();
-        let sample = sample_tracks.read().clone().unwrap_or_default();
-        // Nothing loaded yet: waiting avoids asking about an empty grid.
-        if albums.is_empty() && sample.is_empty() {
+        let artists = artists.read().clone().unwrap_or_default();
+        let wanted: Vec<api::ArtistCredit> = grid_artists(&artists)
+            .iter()
+            .map(|artist| artist.credit())
+            .collect();
+        if wanted.is_empty() || *asked_for.peek() == wanted {
             return;
         }
-        let names = fetch_queue(&albums, &sample);
-        if names.is_empty() || *asked_for.peek() == names {
-            return;
-        }
-        asked_for.set(names.clone());
+        asked_for.set(wanted.clone());
         let api = crate::api::consume_api();
         spawn(async move {
-            if let Err(error) = api.refresh_artist_artwork(names).await {
+            if let Err(error) = api.refresh_artist_artwork(wanted).await {
                 tracing::debug!(%error, "artist artwork refresh failed");
             }
         });
     });
 }
 
-/// The artists the grid gives a tile to, in its order.
-///
-/// Every album and track-credit artist, minus joined collab credits whose
-/// primary artist is independently present, sorted case-insensitively.
-fn fetch_queue(albums: &[api::AlbumInfo], sample: &[api::TrackInfo]) -> Vec<String> {
-    let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for album in albums {
-        if !album.artist.trim().is_empty() {
-            names.insert(album.artist.clone());
-        }
-    }
-    for track in sample {
-        for artist in &track.artists {
-            if !artist.trim().is_empty() {
-                names.insert(artist.clone());
-            }
-        }
-    }
-    let norms: std::collections::HashSet<String> = names
+/// The tiles in name order: every listed artist but a bare joined credit whose primary has one.
+pub fn grid_artists(artists: &[api::ArtistInfo]) -> Vec<api::ArtistInfo> {
+    let names: std::collections::HashSet<String> = artists
         .iter()
-        .map(|name| normalize_artist_key(name))
+        .map(|artist| normalize_artist_key(&artist.name))
         .collect();
-    let mut names: Vec<String> = names
-        .into_iter()
-        .filter(|name| {
-            let norm = normalize_artist_key(name);
-            !joined_credit_primary(&norm).is_some_and(|primary| norms.contains(primary))
+    let mut shown: Vec<api::ArtistInfo> = artists
+        .iter()
+        .filter(|artist| !artist.name.trim().is_empty())
+        .filter(|artist| {
+            artist.id.is_some()
+                || !joined_credit_primary(&normalize_artist_key(&artist.name))
+                    .is_some_and(|primary| names.contains(primary))
         })
+        .cloned()
         .collect();
-    names.sort_by_key(|name| name.to_lowercase());
-    names
+    shown.sort_by_cached_key(|artist| (artist.name.to_lowercase(), artist.id.clone()));
+    shown
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn album(artist: &str) -> api::AlbumInfo {
-        api::AlbumInfo {
-            id: format!("al-{artist}"),
-            title: "A".into(),
-            artist: artist.into(),
-            ..Default::default()
-        }
-    }
-
-    fn track(artists: &[&str]) -> api::TrackInfo {
-        api::TrackInfo {
-            key: "/music/x.flac".into(),
-            uid: "/music/x.flac".into(),
-            album_id: "al".into(),
-            artist: artists.first().unwrap_or(&"").to_string(),
-            artists: artists.iter().map(|a| a.to_string()).collect(),
+    fn artist(name: &str, id: Option<&str>) -> api::ArtistInfo {
+        api::ArtistInfo {
+            name: name.into(),
+            id: id.map(Into::into),
             ..Default::default()
         }
     }
 
     #[test]
-    fn fetch_queue_drops_credits_with_no_tile_and_orders_case_insensitively() {
-        let albums = [album("Zebra"), album("apple")];
-        let sample = [
-            track(&["Beta", "COOL&CREATE, beatMARIO"]), // joined credit
-            track(&["COOL&CREATE"]),                    // its primary, present
-            track(&["  "]),                             // blank credit dropped
+    fn the_grid_drops_bare_joins_and_keeps_homonyms_apart() {
+        let listed = [
+            artist("Zebra", None),
+            artist("COOL&CREATE, beatMARIO", None),
+            artist("COOL&CREATE", None),
+            artist("Ada", Some("ar-2")),
+            artist("Ada", Some("ar-1")),
+            artist("  ", None),
         ];
 
-        // The joined credit gets no tile because its primary has one of its
-        // own, so searching for it would be wasted. What is already known is
-        // the daemon's business, not this list's.
+        let shown: Vec<(String, Option<String>)> = grid_artists(&listed)
+            .into_iter()
+            .map(|artist| (artist.name, artist.id))
+            .collect();
+
         assert_eq!(
-            fetch_queue(&albums, &sample),
-            vec![
-                "apple".to_string(),
-                "Beta".to_string(),
-                "COOL&CREATE".to_string(),
-                "Zebra".to_string(),
+            shown,
+            [
+                ("Ada".to_string(), Some("ar-1".to_string())),
+                ("Ada".to_string(), Some("ar-2".to_string())),
+                ("COOL&CREATE".to_string(), None),
+                ("Zebra".to_string(), None),
             ]
         );
     }

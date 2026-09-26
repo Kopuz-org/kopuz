@@ -342,13 +342,18 @@ pub trait MediaSource: Send + Sync {
 
     /// Fetch artist → image-URL pairs from the remote (for the "artist photo"
     /// view). Default empty (local reads them from the DB; YT has none).
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError> {
+    async fn fetch_artist_images(
+        &self,
+    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
         Ok(Vec::new())
     }
 
     /// Resolve a single artist's photo URL by name. Default None; the catalog
     /// remote (YT) implements it so the Artists grid can show real YT photos.
-    async fn fetch_artist_image(&self, _name: &str) -> Result<Option<String>, SourceError> {
+    async fn fetch_artist_image(
+        &self,
+        _artist: &reader::ArtistCredit,
+    ) -> Result<Option<String>, SourceError> {
         Ok(None)
     }
 

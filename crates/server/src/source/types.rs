@@ -117,7 +117,7 @@ pub struct PlaylistPage {
 pub struct LibrarySnapshot {
     pub albums: Vec<reader::Album>,
     pub tracks: Vec<reader::Track>,
-    pub artist_images: Vec<(String, String)>,
+    pub artist_images: Vec<(reader::ArtistCredit, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

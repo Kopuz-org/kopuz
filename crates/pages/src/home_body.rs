@@ -9,7 +9,7 @@ use hooks::use_db_queries::{
 use rand::rng;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
-use utils::artist::normalize_artist_key;
+use utils::artist::ArtistKey;
 
 type AlbumCard = (String, String, String, Option<String>);
 
@@ -88,9 +88,9 @@ pub fn HomeBody(
             .filter_map(|artist| {
                 let cover =
                     hooks::artwork::url(artist.artwork.as_ref(), hooks::artwork::Size::Thumb)?;
-                Some((normalize_artist_key(&artist.name), cover))
+                Some((ArtistKey::of(&artist.name, artist.id.as_deref()), cover))
             })
-            .collect::<HashMap<String, utils::CoverUrl>>()
+            .collect::<HashMap<ArtistKey, utils::CoverUrl>>()
     });
     let playlists_res = use_playlists();
     let offline_keys = use_memo(move || -> Vec<String> {
@@ -343,23 +343,23 @@ pub fn HomeBody(
         let mut unique_artists = std::collections::HashSet::new();
         let mut artist_list = Vec::new();
         for track in &tracks {
-            if is_unknown_artist(&track.artist) {
+            // The row's own credit, so the tile is the artist the source named
+            // rather than the billed string it happens to show.
+            let Some(credit) = track.primary_credit() else {
+                continue;
+            };
+            if is_unknown_artist(&credit.name) {
                 continue;
             }
-            if unique_artists.insert(track.artist.clone()) {
-                // The same image chain the Artists grid uses: photo where one
-                // exists, the track's album cover as the Library last resort
+            let key = ArtistKey::of(&credit.name, credit.id.as_deref());
+            if unique_artists.insert(key.clone()) {
                 // The daemon walks override, then photo, then an album cover
-                // for a library source; a missing photo answers 404 and the
-                // tile falls back to its placeholder.
+                // for a library source; no picture renders the placeholder.
                 let cover_url = artist_covers
                     .read()
-                    .get(&normalize_artist_key(&track.artist))
+                    .get(&key)
                     .map(|cover: &utils::CoverUrl| cover.as_ref().to_string());
-                // The row's own credit, so the tile opens the artist the source
-                // named rather than the billed string it happens to show.
-                let id = track.primary_credit().and_then(|credit| credit.id.clone());
-                artist_list.push((track.artist.clone(), cover_url, id));
+                artist_list.push((credit.name.clone(), cover_url, credit.id.clone()));
             }
             if artist_list.len() >= 10 {
                 break;

@@ -31,9 +31,9 @@ pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
 pub use jobs::{DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState};
 pub use library::{
-    AlbumInfo, AlbumPage, ArtistCredit, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT, LyricChunkView,
-    LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter, TrackInfo, TrackPage,
-    TrackSort,
+    AlbumInfo, AlbumPage, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT,
+    LyricChunkView, LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter,
+    TrackInfo, TrackPage, TrackSort,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
@@ -182,7 +182,11 @@ pub trait LibraryApi: Send + Sync {
 
     async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError>;
 
-    async fn artist_tracks(&self, artist: String, page: Page) -> Result<TrackPage, ApiError>;
+    /// One artist's tracks, by id when the credit carries one and by name otherwise.
+    async fn artist_tracks(&self, artist: ArtistCredit, page: Page) -> Result<TrackPage, ApiError>;
+
+    /// One artist's photo, count and billed albums, keyed the way `artist_tracks` keys it.
+    async fn artist(&self, artist: ArtistCredit) -> Result<ArtistDetail, ApiError>;
 
     /// One track per artist, for the artist grid's tiles.
     async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;
@@ -242,7 +246,7 @@ pub trait LibraryApi: Send + Sync {
     /// resolved, and names whose last search definitively found nothing, are
     /// skipped -- so calling it on every visit is cheap. Results arrive as a
     /// `Tracks` invalidation, not in the answer.
-    async fn refresh_artist_artwork(&self, names: Vec<String>) -> Result<(), ApiError>;
+    async fn refresh_artist_artwork(&self, artists: Vec<ArtistCredit>) -> Result<(), ApiError>;
 
     async fn lyrics(&self, key: String) -> Result<LyricsView, ApiError>;
 
