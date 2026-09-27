@@ -123,26 +123,7 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
             // The picture comes with the row rather than being derived from
             // it, so a cover only the daemon can fetch still resolves.
             set_if_changed(&mut ctrl.current_artwork, now.artwork.clone());
-            // Match on uid, not key: key is the bare library ref, which is
-            // the same string as the uid for local tracks but not for server
-            // ones, so matching on it missed every server track and left the
-            // cover and snapshot stale.
-            let key_changed = ctrl
-                .current_track_snapshot
-                .peek()
-                .as_ref()
-                .is_none_or(|snapshot| snapshot.uid != now.uid);
-            if key_changed {
-                let track = ctrl
-                    .queue
-                    .peek()
-                    .iter()
-                    .find(|track| track.uid == now.uid)
-                    .cloned();
-                if let Some(track) = track {
-                    ctrl.current_track_snapshot.set(Some(track));
-                }
-            }
+            set_if_changed(&mut ctrl.current_track_snapshot, Some(now.clone()));
         }
         None => {
             if state.intent == Intent::Stopped && ctrl.current_track_snapshot.peek().is_some() {

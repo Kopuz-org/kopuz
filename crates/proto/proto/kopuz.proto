@@ -276,6 +276,8 @@ message PlayerState {
   optional ExternalPlayback external = 11;
   optional ErrorBody error = 12;
   optional uint64 output_latency_ms = 13;
+  // The whole row behind `track`, which stays filled for a peer that predates this.
+  optional TrackInfo row = 14;
 }
 
 // phase is engine truth; intent is what the daemon is trying to do.
@@ -328,6 +330,8 @@ message FadingState {
   uint64 from_token = 1;
   NowPlaying track = 2;
   uint64 position_ms = 3;
+  // The whole row behind `track`, which stays filled for a peer that predates this.
+  optional TrackInfo row = 4;
 }
 
 message ExternalPlayback {

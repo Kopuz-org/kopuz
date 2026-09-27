@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use api::{
-    ApiError, ApiEvent, BufferedRange, CommandAck, FadingState, Intent, NowPlaying, Page,
-    Phase as ApiPhase, PlayerCommand, PlayerState, PositionAnchor, QueueContext, QueueEdit,
-    QueueItem, QueueMode, QueueSummary, QueueWindow, SetQueueRequest, TrackKind,
+    ApiError, ApiEvent, BufferedRange, CommandAck, FadingState, Intent, Page, Phase as ApiPhase,
+    PlayerCommand, PlayerState, PositionAnchor, QueueContext, QueueEdit, QueueItem, QueueMode,
+    QueueSummary, QueueWindow, SetQueueRequest,
 };
 use player::engine::{Event as EngineEvent, Phase as EnginePhase, SourceFactory, Transition};
 use player::player::{LoadArgs, NowPlayingMeta, Player, PlayerInitError};

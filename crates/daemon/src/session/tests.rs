@@ -7,12 +7,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 
 use api::prelude::*;
-use api::{ErrorCode, LoopMode};
+use api::{ErrorCode, LoopMode, TrackKind};
 use futures_util::StreamExt;
 use player::engine::{AudioSink, DataCallback, DataCallbackFactory, SinkConfig};
 
-use super::state::now_playing_from;
 use super::*;
+use crate::wire::track_info;
 
 const TEST_CONFIG: SinkConfig = SinkConfig {
     channels: 2,
@@ -141,7 +141,14 @@ fn test_track(key: &String) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
-        credits: Vec::new(),
+        credits: if key.contains("credited") {
+            vec![reader::models::ArtistCredit {
+                name: "Ada".into(),
+                id: Some("ar-ada".into()),
+            }]
+        } else {
+            Vec::new()
+        },
         artists: vec![],
     }
 }
@@ -332,6 +339,29 @@ async fn set_queue_then_window_round_trips() {
     assert_eq!(window.total, 3);
     assert_eq!(window.items[0].track.title, "track-0");
     assert_eq!(window.rev, ack.rev);
+}
+
+/// A frontend opens the artist and album off the state's row, so it must be the queue's own.
+#[tokio::test]
+async fn the_playing_row_is_the_one_the_queue_holds() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["credited-0", "track-1"]))
+        .await
+        .expect("set queue");
+    let state = wait_state(&harness.api, "a track to show", |state| {
+        state.track.is_some()
+    })
+    .await;
+    let queue = harness.api.queue_snapshot().await.expect("queue");
+    let playing = state.track.expect("track");
+
+    assert_eq!(
+        playing,
+        queue.items[queue.position.expect("position") as usize]
+    );
+    assert_eq!(playing.credits[0].name, "Ada");
 }
 
 #[tokio::test]
@@ -996,7 +1026,7 @@ async fn radio_tracks_reject_seek_commands() {
 #[test]
 fn radio_sentinel_becomes_wire_kind() {
     let track = test_track(&"radio:station:main".to_string());
-    let now = now_playing_from(&track, &config::AppConfig::default());
+    let now = track_info(&track, &config::AppConfig::default());
     assert_eq!(now.kind, TrackKind::Radio);
     assert_eq!(now.duration_ms, None);
     assert!(!now.seekable);
@@ -1006,7 +1036,7 @@ fn radio_sentinel_becomes_wire_kind() {
 /// matches the wrong one silently works on local tracks (where they are
 /// equal) while missing every server track.
 #[test]
-fn now_playing_carries_both_the_library_ref_and_the_source_qualified_id() {
+fn the_playing_row_carries_both_the_library_ref_and_the_source_qualified_id() {
     let server = Track {
         id: reader::models::TrackId::Server {
             service: config::MusicService::YtMusic,
@@ -1014,14 +1044,14 @@ fn now_playing_carries_both_the_library_ref_and_the_source_qualified_id() {
         },
         ..test_track(&"abc123".to_string())
     };
-    let now = now_playing_from(&server, &config::AppConfig::default());
+    let now = track_info(&server, &config::AppConfig::default());
     assert_eq!(now.key, "abc123", "key is the bare library ref");
     assert_eq!(now.uid, "ytmusic:abc123", "uid is source-qualified");
     assert_ne!(now.key, now.uid, "the two must not be conflated");
 
     // Local tracks are the case that hides the mistake: both are the path.
     let local = test_track(&"/music/a.flac".to_string());
-    let now = now_playing_from(&local, &config::AppConfig::default());
+    let now = track_info(&local, &config::AppConfig::default());
     assert_eq!(now.key, now.uid);
 }
 

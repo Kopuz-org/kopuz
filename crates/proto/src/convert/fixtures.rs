@@ -9,12 +9,13 @@ pub(super) fn sample_state() -> api::PlayerState {
             token: 7,
             from_token: Some(6),
         },
-        track: Some(api::NowPlaying {
+        track: Some(api::TrackInfo {
             key: "k".into(),
             uid: "ytmusic:k".into(),
             title: "t".into(),
             artist: "a".into(),
             album: "al".into(),
+            album_id: "MPRE1".into(),
             duration_ms: Some(223_000),
             khz: 44,
             bitrate: 320,
@@ -24,6 +25,8 @@ pub(super) fn sample_state() -> api::PlayerState {
                 target: api::ArtworkTarget::Track("k".into()),
                 version: 9,
             }),
+            credits: vec![api::ArtistCredit::new("a", Some("UC-a".into()))],
+            ..Default::default()
         }),
         position: Some(api::PositionAnchor {
             ms: 63_210,
@@ -45,7 +48,10 @@ pub(super) fn sample_state() -> api::PlayerState {
         }],
         fading: Some(api::FadingState {
             from_token: 6,
-            track: api::NowPlaying::default(),
+            track: api::TrackInfo {
+                uid: "f".into(),
+                ..Default::default()
+            },
             position_ms: 1000,
         }),
         external: Some(api::ExternalPlayback {

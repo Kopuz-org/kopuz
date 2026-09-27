@@ -28,7 +28,8 @@ pub fn intent_from_proto(value: Option<&Intent>) -> api::Intent {
     }
 }
 
-pub fn now_playing_to_proto(value: &api::NowPlaying) -> NowPlaying {
+/// The summary a peer that predates `row` still reads.
+pub fn now_playing_to_proto(value: &api::TrackInfo) -> NowPlaying {
     NowPlaying {
         key: value.key.clone(),
         uid: value.uid.clone(),
@@ -44,8 +45,9 @@ pub fn now_playing_to_proto(value: &api::NowPlaying) -> NowPlaying {
     }
 }
 
-pub fn now_playing_from_proto(value: &NowPlaying) -> api::NowPlaying {
-    api::NowPlaying {
+/// What a daemon that sends no `row` says: the summary, with every other field empty.
+pub fn now_playing_from_proto(value: &NowPlaying) -> api::TrackInfo {
+    api::TrackInfo {
         key: value.key.clone(),
         uid: value.uid.clone(),
         title: value.title.clone(),
@@ -57,7 +59,16 @@ pub fn now_playing_from_proto(value: &NowPlaying) -> api::NowPlaying {
         kind: track_kind_from_proto(value.kind),
         seekable: value.seekable,
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
+        ..Default::default()
     }
+}
+
+fn playing_from_proto(
+    row: Option<&TrackInfo>,
+    summary: Option<&NowPlaying>,
+) -> Option<api::TrackInfo> {
+    row.map(track_info_from_proto)
+        .or_else(|| summary.map(now_playing_from_proto))
 }
 
 pub fn external_device_to_proto(value: &api::ExternalDevice) -> ExternalDevice {
@@ -140,6 +151,7 @@ pub fn player_state_to_proto(value: &api::PlayerState) -> PlayerState {
         phase: phase_to_proto(value.phase) as i32,
         intent: Some(intent_to_proto(&value.intent)),
         track: value.track.as_ref().map(now_playing_to_proto),
+        row: value.track.as_ref().map(track_info_to_proto),
         position: value.position.as_ref().map(anchor_to_proto),
         queue: Some(queue_summary_to_proto(&value.queue)),
         volume: value.volume,
@@ -147,6 +159,7 @@ pub fn player_state_to_proto(value: &api::PlayerState) -> PlayerState {
         fading: value.fading.as_ref().map(|fading| FadingState {
             from_token: fading.from_token,
             track: Some(now_playing_to_proto(&fading.track)),
+            row: Some(track_info_to_proto(&fading.track)),
             position_ms: fading.position_ms,
         }),
         external: value.external.as_ref().map(|external| ExternalPlayback {
@@ -164,17 +177,14 @@ pub fn player_state_from_proto(value: &PlayerState) -> api::PlayerState {
         now_ms: value.now_ms,
         phase: phase_from_proto(value.phase),
         intent: intent_from_proto(value.intent.as_ref()),
-        track: value.track.as_ref().map(now_playing_from_proto),
+        track: playing_from_proto(value.row.as_ref(), value.track.as_ref()),
         position: value.position.as_ref().map(anchor_from_proto),
         queue: queue_summary_from_proto(value.queue.as_ref()),
         volume: value.volume,
         buffered: value.buffered.iter().map(buffered_from_proto).collect(),
         fading: value.fading.as_ref().map(|fading| api::FadingState {
             from_token: fading.from_token,
-            track: fading
-                .track
-                .as_ref()
-                .map(now_playing_from_proto)
+            track: playing_from_proto(fading.row.as_ref(), fading.track.as_ref())
                 .unwrap_or_default(),
             position_ms: fading.position_ms,
         }),
@@ -200,6 +210,37 @@ mod tests {
         let state = sample_state();
         let back = player_state_from_proto(&player_state_to_proto(&state));
         assert_eq!(state, back);
+    }
+
+    #[test]
+    fn an_older_peer_still_finds_the_summary() {
+        let sent = player_state_to_proto(&sample_state());
+        let summary = sent.track.expect("summary");
+        assert_eq!(
+            (summary.uid.as_str(), summary.artist.as_str()),
+            ("ytmusic:k", "a")
+        );
+        assert_eq!(
+            sent.fading.and_then(|fading| fading.track).map(|t| t.uid),
+            Some("f".into())
+        );
+    }
+
+    #[test]
+    fn a_daemon_without_the_row_is_read_from_its_summary() {
+        let mut sent = player_state_to_proto(&sample_state());
+        sent.row = None;
+        if let Some(fading) = sent.fading.as_mut() {
+            fading.row = None;
+        }
+        let back = player_state_from_proto(&sent);
+        let track = back.track.expect("track");
+        assert_eq!(
+            (track.uid.as_str(), track.artist.as_str()),
+            ("ytmusic:k", "a")
+        );
+        assert!(track.credits.is_empty());
+        assert_eq!(back.fading.map(|fading| fading.track.uid), Some("f".into()));
     }
 
     #[test]

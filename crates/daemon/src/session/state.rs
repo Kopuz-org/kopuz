@@ -100,7 +100,7 @@ impl Session {
             Some(external) => external.track.as_ref(),
             None => self.model.current_track(),
         };
-        let track = shown.map(|track| now_playing_from(track, &self.config));
+        let track = shown.map(|track| crate::wire::track_info(track, &self.config));
         let fading = self.pending_transition.as_ref().and_then(|pending| {
             (pending.stage == TransitionStage::Fading).then(|| FadingState {
                 from_token: pending.from_token,
@@ -148,29 +148,5 @@ pub(super) fn engine_phase(phase: EnginePhase) -> ApiPhase {
         EnginePhase::Playing => ApiPhase::Playing,
         EnginePhase::Paused => ApiPhase::Paused,
         EnginePhase::Ended => ApiPhase::Ended,
-    }
-}
-
-/// Translate the internal track model to the wire summary. The radio duration
-/// sentinel is contained at this boundary.
-pub(super) fn now_playing_from(track: &Track, config: &config::AppConfig) -> NowPlaying {
-    let _ = config;
-    let radio = track.duration == u64::MAX;
-    NowPlaying {
-        key: track.id.key().to_string(),
-        uid: track.id.uid(),
-        title: track.title.clone(),
-        artist: track.artist.clone(),
-        album: track.album.clone(),
-        duration_ms: (!radio).then(|| track.duration.saturating_mul(1000)),
-        khz: track.khz,
-        bitrate: track.bitrate,
-        kind: if radio {
-            TrackKind::Radio
-        } else {
-            TrackKind::Normal
-        },
-        seekable: !radio,
-        artwork: crate::artwork::track_ref(track),
     }
 }

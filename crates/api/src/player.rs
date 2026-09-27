@@ -49,24 +49,6 @@ pub enum TrackKind {
     Radio,
 }
 
-/// Now-playing summary. `key` and `uid` mean exactly what they do on
-/// [`crate::TrackInfo`]: `key` is the library ref, and the entity id
-/// `GetArtwork` takes; `uid` is the source-qualified identity.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct NowPlaying {
-    pub key: String,
-    pub uid: String,
-    pub title: String,
-    pub artist: String,
-    pub album: String,
-    pub duration_ms: Option<u64>,
-    pub khz: u32,
-    pub bitrate: u16,
-    pub kind: TrackKind,
-    pub seekable: bool,
-    pub artwork: Option<crate::ArtworkRef>,
-}
-
 /// Position as an anchor, not a ticker: `ms` was correct at daemon-monotonic
 /// time `at_ms`. Clients compute a clock offset from `PlayerState::now_ms`
 /// once and interpolate locally while `playing` is true.
@@ -89,7 +71,7 @@ pub struct BufferedRange {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FadingState {
     pub from_token: u64,
-    pub track: NowPlaying,
+    pub track: crate::TrackInfo,
     pub position_ms: u64,
 }
 
@@ -130,7 +112,8 @@ pub struct PlayerState {
     pub now_ms: u64,
     pub phase: Phase,
     pub intent: Intent,
-    pub track: Option<NowPlaying>,
+    /// The whole row, the same one the queue holds, so nothing has to be looked up there.
+    pub track: Option<crate::TrackInfo>,
     pub position: Option<PositionAnchor>,
     pub queue: QueueSummary,
     pub volume: f32,

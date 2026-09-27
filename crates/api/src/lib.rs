@@ -37,8 +37,8 @@ pub use library::{
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
-    BufferedRange, ExternalDevice, ExternalPlayback, FadingState, Intent, LoopMode, NowPlaying,
-    Phase, PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
+    BufferedRange, ExternalDevice, ExternalPlayback, FadingState, Intent, LoopMode, Phase,
+    PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
 };
 pub use playlists::{PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder};
 pub use queue::{
