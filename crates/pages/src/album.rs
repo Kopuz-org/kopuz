@@ -404,7 +404,6 @@ fn AlbumDetail(
                     kind: api::CatalogItemKind::Album,
                     id,
                     continuation: None,
-                    name: None,
                 })
                 .await
                 .ok()
@@ -435,7 +434,7 @@ fn AlbumDetail(
                             config,
                             title: remote.title,
                             artist: remote.subtitle.unwrap_or_default(),
-                            artist_id: remote.artist_id,
+                            artist_key: remote.artist_key,
                             year: remote.year,
                             album_id: Some(remote.id),
                             local_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
@@ -515,7 +514,6 @@ fn AlbumDetail(
                     kind: api::CatalogItemKind::Album,
                     id: album.id,
                     continuation: None,
-                    name: None,
                 })
                 .await
                 .ok()
@@ -566,8 +564,7 @@ fn AlbumDetail(
 
     let album_title = album.title.clone();
     let album_artist = album.artist.clone();
-    let album_artist_for_nav = album_artist.clone();
-    let album_artist_id = album.artist_id.clone();
+    let album_artist_key = album.artist_key.clone();
     let cover_url = hooks::artwork::for_album(&album, hooks::artwork::Size::Thumb);
     let cap = caps();
     let aid = album.id.clone();
@@ -618,10 +615,10 @@ fn AlbumDetail(
         .and_then(|a| a.year.clone())
         .or_else(|| (album.year > 0).then(|| album.year.to_string()));
     let remote_album_id = remote_album.as_ref().map(|a| a.id.clone());
-    let remote_artist_id = remote_album
+    let remote_artist_key = remote_album
         .as_ref()
-        .and_then(|a| a.artist_id.clone())
-        .or_else(|| album.artist_id.clone());
+        .and_then(|a| a.artist_key.clone())
+        .or_else(|| album.artist_key.clone());
 
     rsx! {
         div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
@@ -630,7 +627,7 @@ fn AlbumDetail(
                     config,
                     title: remote_title,
                     artist: remote_artist,
-                    artist_id: remote_artist_id,
+                    artist_key: remote_artist_key,
                     year: remote_year,
                     album_id: remote_album_id,
                     local_cover: cover_url_remote,
@@ -642,8 +639,9 @@ fn AlbumDetail(
                 name: album_title,
                 description: album_artist,
                 on_description_click: Some(EventHandler::new(move |_| {
-                    nav_ctrl
-                        .open_artist(album_artist_for_nav.clone(), album_artist_id.clone());
+                    if let Some(artist) = album_artist_key.clone() {
+                        nav_ctrl.open_artist(artist);
+                    }
                 })),
                 cover_url,
                 is_album: true,
@@ -737,7 +735,7 @@ fn RemoteAlbumDetail(
     config: Signal<AppConfig>,
     title: String,
     artist: String,
-    artist_id: Option<String>,
+    artist_key: Option<api::ArtistKey>,
     year: Option<String>,
     album_id: Option<String>,
     local_cover: Option<utils::CoverUrl>,
@@ -757,8 +755,12 @@ fn RemoteAlbumDetail(
     let dur_min = total / 60;
     let song_count = tracks.len();
     let artist_name = artist;
-    let artist_for_nav = artist_name.clone();
-    let artist_id_for_nav = artist_id.clone();
+    let names_artist = artist_key.is_some();
+    let open_artist = move |_| {
+        if let Some(artist) = artist_key.clone() {
+            nav_ctrl.open_artist(artist);
+        }
+    };
 
     // Current track for the row highlight. Read `current_queue_index`
     // *reactively* (`current_track()` peeks, so the page wouldn't re-render on a
@@ -781,8 +783,6 @@ fn RemoteAlbumDetail(
 
     let tracks_play_all = tracks.clone();
     let tracks_download_all = tracks.clone();
-    let artist_for_nav_btn = artist_name.clone();
-    let artist_id_for_btn = artist_id.clone();
     // Prefer the provider's album page; fall back to its first track page.
     // The daemon knows which sources have web pages and how they spell them;
     // an id and a key are all that leave here.
@@ -831,7 +831,7 @@ fn RemoteAlbumDetail(
                     div { class: "flex flex-col gap-2 w-full",
                         button {
                             class: "text-sm font-semibold text-white/60 hover:text-white hover:underline transition-colors truncate max-w-full self-center md:self-start",
-                            onclick: move |_| nav_ctrl.open_artist(artist_for_nav.clone(), artist_id_for_nav.clone()),
+                            onclick: open_artist.clone(),
                             "{artist_name}"
                         }
                         h1 { class: "text-3xl font-semibold tracking-tight text-white leading-[1.1] break-words", "{title}" }
@@ -875,11 +875,11 @@ fn RemoteAlbumDetail(
                         }
                         }
                         // Go to artist, when the album names one to go to.
-                        if !artist_for_nav_btn.is_empty() {
+                        if names_artist {
                         button {
                             class: "w-11 h-11 rounded-full border border-white/15 flex items-center justify-center text-slate-300 hover:text-white hover:border-white/30 transition-colors",
                             title: i18n::t("go_to_artist").to_string(),
-                            onclick: move |_| nav_ctrl.open_artist(artist_for_nav_btn.clone(), artist_id_for_btn.clone()),
+                            onclick: open_artist.clone(),
                             i { class: "fa-solid fa-user" }
                         }
                         }

@@ -74,6 +74,15 @@ fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, 
         .collect()
 }
 
+/// Where a detail page keeps its scroll position; `None` on a route's own list.
+fn detail_scroll_key(route: Route, album: &str, artist: Option<&api::ArtistKey>) -> Option<String> {
+    match route {
+        Route::Album if !album.is_empty() => Some(format!("album:{album}")),
+        Route::Artist => artist.map(|artist| format!("artist:{artist}")),
+        _ => None,
+    }
+}
+
 /// Build the `@font-face` + `body`/`#app-root` override CSS for a user-picked
 /// font file, inlining its bytes as a `data:` URI so no custom protocol handler
 /// is needed. Returns `None` when the path is empty, unreadable, or an
@@ -668,10 +677,7 @@ fn App() -> Element {
     // Set with the id, by whichever click had it: the viewer serves more than
     // one kind and must not read the id to tell which.
     let mut discover_selected_playlist_kind = use_signal(|| api::CatalogItemKind::Playlist);
-    // The source's own id for `selected_artist_name`, where the click carried
-    // one. None leaves the page to resolve the name at render time.
-    let mut selected_artist_id = use_signal(|| None::<String>);
-    let mut selected_artist_name = use_signal(String::new);
+    let mut selected_artist = use_signal(|| None::<api::ArtistKey>);
     let search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
@@ -1119,26 +1125,17 @@ fn App() -> Element {
         // Read detail selections so this re-runs on list<->detail toggle, not just
         // on route change (album/artist list and detail are the same Route).
         let album_sel = selected_album_id.read().clone();
-        let artist_sel = selected_artist_name.read().clone();
-        let artist_id_sel = selected_artist_id.read().clone().unwrap_or_default();
+        let artist_sel = selected_artist.read().clone();
         // A pending section anchor (peeked, so this effect doesn't subscribe to it)
         // takes over scrolling — skip the saved-scroll restore for this navigation.
         if settings_anchor.peek().is_some() {
             return;
         }
-        let pos = match route {
-            Route::Album if !album_sel.is_empty() => detail_scroll_positions
-                .peek()
-                .get(&format!("album:{album_sel}"))
-                .copied()
-                .unwrap_or(0.0),
-            Route::Artist if !artist_sel.is_empty() => detail_scroll_positions
-                .peek()
-                .get(&format!("artist:{artist_id_sel}:{artist_sel}"))
-                .copied()
-                .unwrap_or(0.0),
-            _ => scroll_positions.peek().get(&route).copied().unwrap_or(0.0),
-        };
+        let pos = match detail_scroll_key(route, &album_sel, artist_sel.as_ref()) {
+            Some(key) => detail_scroll_positions.peek().get(&key).copied(),
+            None => scroll_positions.peek().get(&route).copied(),
+        }
+        .unwrap_or(0.0);
         let _ = dioxus::document::eval(&format!(
             "let el = document.getElementById('main-scroll-area'); if (el) el.scrollTop = {pos};"
         ));
@@ -1177,8 +1174,7 @@ fn App() -> Element {
         let snap = components::NavSnapshot {
             route: *current_route.read(),
             album_id: selected_album_id.read().clone(),
-            artist_name: selected_artist_name.read().clone(),
-            artist_id: selected_artist_id.read().clone(),
+            artist: selected_artist.read().clone(),
             playlist_id: selected_playlist_id.read().clone(),
             discover_playlist_id: discover_selected_playlist_id.read().clone(),
             discover_playlist_title: discover_selected_playlist_title.read().clone(),
@@ -1201,8 +1197,7 @@ fn App() -> Element {
 
     let nav_ctrl = components::NavigationController {
         current_route,
-        selected_artist_name,
-        selected_artist_id,
+        selected_artist,
         selected_album_id,
         selected_playlist_id,
         discover_playlist_id: discover_selected_playlist_id,
@@ -1666,8 +1661,7 @@ fn App() -> Element {
                             selected_album_id.set(String::new());
                         }
                         if route == Route::Artist {
-                            selected_artist_name.set(String::new());
-                            selected_artist_id.set(None);
+                            selected_artist.set(None);
                         }
                         current_route.set(route);
                     }
@@ -1679,20 +1673,12 @@ fn App() -> Element {
                         let pos = evt.scroll_top();
                         let route = *current_route.peek();
                         let album_sel = selected_album_id.peek().clone();
-                        let artist_sel = selected_artist_name.peek().clone();
-                        let artist_id_sel = selected_artist_id.peek().clone().unwrap_or_default();
-                        match route {
-                            Route::Album if !album_sel.is_empty() => {
-                                detail_scroll_positions
-                                    .write()
-                                    .insert(format!("album:{album_sel}"), pos);
+                        let artist_sel = selected_artist.peek().clone();
+                        match detail_scroll_key(route, &album_sel, artist_sel.as_ref()) {
+                            Some(key) => {
+                                detail_scroll_positions.write().insert(key, pos);
                             }
-                            Route::Artist if !artist_sel.is_empty() => {
-                                detail_scroll_positions
-                                    .write()
-                                    .insert(format!("artist:{artist_id_sel}:{artist_sel}"), pos);
-                            }
-                            _ => {
+                            None => {
                                 scroll_positions.write().insert(route, pos);
                             }
                         }
@@ -1702,7 +1688,7 @@ fn App() -> Element {
                         {
                             let is_details = match *current_route.read() {
                                 Route::Album => !selected_album_id.read().is_empty(),
-                                Route::Artist => !selected_artist_name.read().is_empty(),
+                                Route::Artist => selected_artist.read().is_some(),
                                 Route::Playlists => selected_playlist_id.read().is_some(),
                                 _ => false,
                             };
@@ -1783,11 +1769,7 @@ fn App() -> Element {
                                     selected_playlist_id.set(Some(id));
                                     current_route.set(Route::Playlists);
                                 },
-                                on_search_artist: move |(artist, id): (String, Option<String>)| {
-                                    selected_artist_name.set(artist);
-                                    selected_artist_id.set(id);
-                                    current_route.set(Route::Artist);
-                                }
+                                on_open_artist: move |artist: api::ArtistKey| nav_ctrl.open_artist(artist),
                             }
                         },
                         Route::Discover => rsx! {
@@ -1802,11 +1784,7 @@ fn App() -> Element {
                                     discover_selected_playlist_title.set(Some(title));
                                     current_route.set(Route::DiscoverPlaylist);
                                 },
-                                on_open_artist: move |(id, name): (String, String)| {
-                                    selected_artist_id.set(Some(id));
-                                    selected_artist_name.set(name);
-                                    current_route.set(Route::Artist);
-                                },
+                                on_open_artist: move |artist: api::ArtistKey| nav_ctrl.open_artist(artist),
                             }
                         },
                         Route::DiscoverPlaylist => rsx! {
@@ -1871,13 +1849,10 @@ fn App() -> Element {
                             // hijack the local artist page.
                             let remote_profile =
                                 active_caps().artists == api::ArtistPresentation::Remote;
-                            let has_selection = !selected_artist_name.read().is_empty()
-                                || selected_artist_id.read().is_some();
-                            if remote_profile && has_selection {
+                            if remote_profile && selected_artist.read().is_some() {
                                 rsx! {
                                     pages::server::discover::DiscoverArtistPage {
-                                        selected_artist_id: selected_artist_id,
-                                        selected_artist_name: selected_artist_name,
+                                        selected_artist,
                                         on_back: move |_| nav_ctrl.go_back(),
                                         on_select_album: move |id: String| {
                                             selected_album_id.set(id);
@@ -1889,18 +1864,14 @@ fn App() -> Element {
                                             discover_selected_playlist_title.set(Some(title));
                                             current_route.set(Route::DiscoverPlaylist);
                                         },
-                                        on_open_artist: move |(id, name): (String, String)| {
-                                            selected_artist_id.set(Some(id));
-                                            selected_artist_name.set(name);
-                                        },
+                                        on_open_artist: move |artist: api::ArtistKey| nav_ctrl.open_artist(artist),
                                     }
                                 }
                             } else {
                                 rsx! {
                                     pages::artist::Artist {
                                         config: config,
-                                        artist_name: selected_artist_name,
-                                        artist_id: selected_artist_id,
+                                        artist: selected_artist,
                                                             on_navigate: move |album_id| {
                                             selected_album_id.set(album_id);
                                             current_route.set(Route::Album);

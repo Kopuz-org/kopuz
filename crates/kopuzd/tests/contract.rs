@@ -683,38 +683,69 @@ async fn artists_are_keyed_by_identity_on_both_transports() {
 
     let artists = pair.local.artists(all).await.expect("local");
     assert_eq!(artists, pair.wire.artists(all).await.expect("wire"));
-    let adas: Vec<(Option<String>, u32)> = artists
+    let adas: Vec<&api::ArtistInfo> = artists
         .artists
         .iter()
         .filter(|artist| artist.name == "Ada")
-        .map(|artist| (artist.id.clone(), artist.track_count))
         .collect();
+    let mut counts: Vec<u32> = adas.iter().map(|artist| artist.track_count).collect();
+    counts.sort();
     assert_eq!(
-        adas,
-        [
-            (None, 1),
-            (Some("ar-1".into()), 2),
-            (Some("ar-2".into()), 1)
-        ]
+        counts,
+        [1, 1, 2],
+        "two ids and an unlinked name are three artists"
     );
 
-    for id in [Some("ar-1"), Some("ar-2"), None] {
-        let artist = api::ArtistCredit::new("Ada", id.map(Into::into));
-        let local = pair.local.artist_tracks(artist.clone(), all).await;
-        let wire = pair.wire.artist_tracks(artist.clone(), all).await;
-        assert_eq!(local.expect("local"), wire.expect("wire"), "{id:?}");
-        let local = pair.local.artist(artist.clone()).await.expect("local");
-        assert_eq!(local, pair.wire.artist(artist).await.expect("wire"));
-        assert_eq!(local.info.id.as_deref(), id);
+    for ada in &adas {
+        let local = pair.local.artist_tracks(ada.key.clone(), all).await;
+        let wire = pair.wire.artist_tracks(ada.key.clone(), all).await;
+        let local = local.expect("local");
+        assert_eq!(local, wire.expect("wire"), "{}", ada.key);
+        assert_eq!(
+            local.total, ada.track_count,
+            "a tile opens the tracks it counts"
+        );
+        let detail = pair.local.artist(ada.key.clone()).await.expect("local");
+        assert_eq!(
+            detail,
+            pair.wire.artist(ada.key.clone()).await.expect("wire")
+        );
+        assert_eq!(
+            detail.info, **ada,
+            "the page names the artist the grid does"
+        );
     }
+    let linked = adas
+        .iter()
+        .find(|artist| artist.track_count == 2)
+        .expect("ar-1");
     let one = pair
         .wire
-        .artist_tracks(api::ArtistCredit::new("Ada", Some("ar-1".into())), all)
+        .artist_tracks(linked.key.clone(), all)
         .await
         .expect("wire");
     let mut keys: Vec<&str> = one.items.iter().map(|t| t.key.as_str()).collect();
     keys.sort();
     assert_eq!(keys, ["/lib/ada-1a.flac", "/lib/ada-1b.flac"]);
+}
+
+#[tokio::test]
+async fn a_key_no_daemon_minted_is_refused_on_both_transports() {
+    let pair = spawn_pair().await;
+    let all = Page {
+        offset: 0,
+        limit: 100,
+    };
+    for (key, code) in [
+        ("", api::ErrorCode::InvalidInput),
+        ("id:some-other-server:ar-1", api::ErrorCode::NotFound),
+    ] {
+        let key = api::ArtistKey::new(key);
+        let local = pair.local.artist_tracks(key.clone(), all).await;
+        let wire = pair.wire.artist_tracks(key.clone(), all).await;
+        assert_eq!(local.err().map(|e| e.code), Some(code), "{key}");
+        assert_eq!(wire.err().map(|e| e.code), Some(code), "{key}");
+    }
 }
 
 #[tokio::test]
@@ -767,16 +798,6 @@ async fn library_reads_agree_across_transports() {
             .expect("local"),
         pair.wire
             .album_tracks("no-such-album".into(), all)
-            .await
-            .expect("wire"),
-    );
-    assert_eq!(
-        pair.local
-            .artist_tracks(api::ArtistCredit::default(), all)
-            .await
-            .expect("local"),
-        pair.wire
-            .artist_tracks(api::ArtistCredit::default(), all)
             .await
             .expect("wire"),
     );
@@ -1075,7 +1096,7 @@ async fn catalog_and_radio_report_absence_identically() {
         pair.wire.catalog(None).await.err().map(|e| e.code),
     );
 
-    let request = api::CatalogDetailRequest::by_id(api::CatalogItemKind::Album, "MPRE1");
+    let request = api::CatalogDetailRequest::new(api::CatalogItemKind::Album, "MPRE1");
     assert_eq!(
         pair.local
             .catalog_detail(request.clone())

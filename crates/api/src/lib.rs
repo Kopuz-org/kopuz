@@ -25,15 +25,14 @@ mod sources;
 pub use artwork::{ArtworkData, ArtworkRef, ArtworkRequest, ArtworkTarget};
 pub use catalog::{
     CatalogDetail, CatalogDetailRequest, CatalogItem, CatalogItemKind, CatalogPage, CatalogShelf,
-    Reference,
 };
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
 pub use jobs::{DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState};
 pub use library::{
-    AlbumInfo, AlbumPage, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT,
-    LyricChunkView, LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter,
-    TrackInfo, TrackPage, TrackSort,
+    AlbumInfo, AlbumPage, ArtistCredit, ArtistDetail, ArtistInfo, ArtistKey, ArtistPage,
+    DEFAULT_PAGE_LIMIT, LyricChunkView, LyricLineView, LyricsView, Page, SearchResults, StatsView,
+    TrackFilter, TrackInfo, TrackPage, TrackSort,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
@@ -72,7 +71,7 @@ pub struct ConfigView {
 /// Renumbering `dont_recommend` from 16 to 17 is what this exists to catch: a
 /// frontend built from another checkout read that flag as `browser_playback`,
 /// dropped the button it gates, and nothing anywhere said why.
-pub const WIRE_REVISION: u32 = 1;
+pub const WIRE_REVISION: u32 = 2;
 
 /// What a daemon says it is, for a frontend that was not built beside it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -182,11 +181,10 @@ pub trait LibraryApi: Send + Sync {
 
     async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError>;
 
-    /// One artist's tracks, by id when the credit carries one and by name otherwise.
-    async fn artist_tracks(&self, artist: ArtistCredit, page: Page) -> Result<TrackPage, ApiError>;
+    async fn artist_tracks(&self, artist: ArtistKey, page: Page) -> Result<TrackPage, ApiError>;
 
-    /// One artist's photo, count and billed albums, keyed the way `artist_tracks` keys it.
-    async fn artist(&self, artist: ArtistCredit) -> Result<ArtistDetail, ApiError>;
+    /// One artist's name, photo, count and billed albums.
+    async fn artist(&self, artist: ArtistKey) -> Result<ArtistDetail, ApiError>;
 
     /// One track per artist, for the artist grid's tiles.
     async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;
@@ -242,11 +240,8 @@ pub trait LibraryApi: Send + Sync {
     /// this is how it can refuse a bad URL without fetching one itself.
     async fn validate_radio_registry(&self, url: String) -> Result<u32, ApiError>;
 
-    /// Look for photos for these artists, storing what it finds. Names already
-    /// resolved, and names whose last search definitively found nothing, are
-    /// skipped -- so calling it on every visit is cheap. Results arrive as a
-    /// `Tracks` invalidation, not in the answer.
-    async fn refresh_artist_artwork(&self, artists: Vec<ArtistCredit>) -> Result<(), ApiError>;
+    /// Look for photos for these artists, skipping found and recently missed ones; results arrive as a `Tracks` invalidation.
+    async fn refresh_artist_artwork(&self, artists: Vec<ArtistKey>) -> Result<(), ApiError>;
 
     async fn lyrics(&self, key: String) -> Result<LyricsView, ApiError>;
 

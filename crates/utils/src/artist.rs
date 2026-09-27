@@ -14,8 +14,9 @@ pub enum ArtistKey {
 }
 
 impl ArtistKey {
+    /// `id` is never blank: the database stores none, so a blank one is a bug upstream.
     pub fn of(name: &str, id: Option<&str>) -> Self {
-        match id.map(str::trim).filter(|id| !id.is_empty()) {
+        match id {
             Some(id) => Self::Id(id.to_string()),
             None => Self::Name(normalize_artist_key(name)),
         }
@@ -53,15 +54,12 @@ mod tests {
     }
 
     #[test]
-    fn an_id_outranks_the_name_and_a_blank_id_does_not() {
+    fn an_id_outranks_the_name() {
         assert_eq!(
             ArtistKey::of("Ada", Some("ar-1")),
             ArtistKey::Id("ar-1".into())
         );
-        assert_eq!(
-            ArtistKey::of(" Ada ", Some(" ")),
-            ArtistKey::Name("ada".into())
-        );
+        assert_eq!(ArtistKey::of(" Ada ", None), ArtistKey::Name("ada".into()));
         assert_eq!(ArtistKey::Id("ar-1".into()).storage("srv"), "id:srv:ar-1");
     }
 

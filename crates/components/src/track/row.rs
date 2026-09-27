@@ -19,13 +19,9 @@ pub(crate) fn copy_to_clipboard(text: &str) {
     );
     let _ = dioxus::document::eval(&js);
 }
-/// What the row's artist cell opens: the credit behind the billed name, with
-/// the billed string itself when no credit matches it.
-pub(crate) fn artist_credit(track: &Track) -> (String, Option<String>) {
-    match track.primary_credit() {
-        Some(credit) => (credit.name.clone(), credit.id.clone()),
-        None => (track.artist.clone(), None),
-    }
+/// The artist the row's artist cell opens; a row crediting nobody opens nothing.
+fn billed_artist(track: &Track) -> Option<api::ArtistKey> {
+    track.primary_credit().map(|credit| credit.key.clone())
 }
 
 #[component]
@@ -537,12 +533,14 @@ pub fn TrackRow(
                         class: "text-sm truncate cursor-pointer hover:underline",
                         style: "color: var(--color-white); opacity: 0.45;",
                         onclick: {
-                            let credit = artist_credit(&track);
+                            let artist = billed_artist(&track);
                             move |evt: MouseEvent| {
                                 evt.stop_propagation();
-                                if !is_selection_mode {
-                                    let (name, id) = credit.clone();
-                                    nav_ctrl.open_artist(name, id);
+                                if is_selection_mode {
+                                    return;
+                                }
+                                if let Some(artist) = artist.clone() {
+                                    nav_ctrl.open_artist(artist);
                                 }
                             }
                         },
@@ -789,12 +787,14 @@ pub fn TrackRow(
                     class: "text-sm text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
                     style: "color: var(--color-white); opacity: 0.45;",
                     onclick: {
-                        let credit = artist_credit(&track);
+                        let artist = billed_artist(&track);
                         move |evt: MouseEvent| {
                             evt.stop_propagation();
-                            if !is_selection_mode {
-                                let (name, id) = credit.clone();
-                                nav_ctrl.open_artist(name, id);
+                            if is_selection_mode {
+                                return;
+                            }
+                            if let Some(artist) = artist.clone() {
+                                nav_ctrl.open_artist(artist);
                             }
                         }
                     },

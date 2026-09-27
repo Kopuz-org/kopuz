@@ -58,14 +58,15 @@ fn ref_for(target: ArtworkTarget, cover: CoverRef) -> Option<ArtworkRef> {
 /// placeholders. A remote catalog never uses it: a liked track's album cover
 /// is not a picture of the artist.
 pub fn artist_cover(
-    artist: &api::ArtistCredit,
+    artist: &utils::artist::ArtistKey,
+    name: &str,
     source: &str,
     images: &db::ArtistImages,
     album_cover: Option<&Path>,
     library_view: bool,
 ) -> CoverRef {
     let (overrides, photos) = images;
-    for key in artist_image_keys(artist, source) {
+    for key in artist_image_keys(artist, name, source) {
         if let Some(path) = overrides.get(&key) {
             return CoverRef::Local(path.clone());
         }
@@ -82,19 +83,14 @@ pub fn artist_cover(
     }
 }
 
-/// Where an artist's own picture is stored in `artist_images`.
-pub fn artist_image_key(artist: &api::ArtistCredit, source: &str) -> String {
-    utils::artist::ArtistKey::of(&artist.name, artist.id.as_deref()).storage(source)
-}
-
 /// Its own key, then for an id artist the name key a photo stored before ids existed sits under.
-fn artist_image_keys(artist: &api::ArtistCredit, source: &str) -> Vec<String> {
-    let own = artist_image_key(artist, source);
-    let name = utils::artist::normalize_artist_key(&artist.name);
-    if own == name {
+fn artist_image_keys(artist: &utils::artist::ArtistKey, name: &str, source: &str) -> Vec<String> {
+    let own = artist.storage(source);
+    let named = utils::artist::normalize_artist_key(name);
+    if own == named {
         vec![own]
     } else {
-        vec![own, name]
+        vec![own, named]
     }
 }
 
@@ -145,15 +141,22 @@ pub fn album_ref(album: &reader::Album) -> Option<ArtworkRef> {
 }
 
 pub fn artist_ref(
-    artist: &api::ArtistCredit,
-    source: &str,
+    artist: &db::ArtistRow,
+    source: &config::Source,
     images: &db::ArtistImages,
     album_cover: Option<&Path>,
     library_view: bool,
 ) -> Option<ArtworkRef> {
     ref_for(
-        ArtworkTarget::Artist(artist.clone()),
-        artist_cover(artist, source, images, album_cover, library_view),
+        ArtworkTarget::Artist(crate::artist_key::mint(source, &artist.key)),
+        artist_cover(
+            &artist.key,
+            &artist.name,
+            source.as_str(),
+            images,
+            album_cover,
+            library_view,
+        ),
     )
 }
 
@@ -290,18 +293,32 @@ impl ArtworkService {
                     .ok_or_else(|| ApiError::not_found("unknown album id"))?;
                 Ok(album_cover(&album))
             }
-            ArtworkTarget::Artist(artist) => {
+            ArtworkTarget::Artist(key) => {
+                let artist = crate::artist_key::within(key, &config.active_source)?;
+                // Only an id artist can have a photo filed under a name, so only it needs one looked up.
+                let name = match &artist {
+                    utils::artist::ArtistKey::Name(name) => name.clone(),
+                    utils::artist::ArtistKey::Id(_) => {
+                        self.db
+                            .artist(&config.active_source, &artist)
+                            .await
+                            .map_err(db_error)?
+                            .ok_or_else(|| ApiError::not_found("unknown artist"))?
+                            .name
+                    }
+                };
                 let images = self.db.artist_images().await.map_err(db_error)?;
                 let source = server::source::active(self.db.clone(), config);
                 let library_view =
                     source.capabilities().artist_view == server::source::ArtistView::Library;
                 let album = if library_view {
-                    self.artist_album_cover(artist, config).await?
+                    self.artist_album_cover(&artist, config).await?
                 } else {
                     None
                 };
                 Ok(artist_cover(
-                    artist,
+                    &artist,
+                    &name,
                     config.active_source.as_str(),
                     &images,
                     album.as_deref(),
@@ -382,16 +399,15 @@ impl ArtworkService {
     /// are the picture the ref was versioned on.
     async fn artist_album_cover(
         &self,
-        artist: &api::ArtistCredit,
+        artist: &utils::artist::ArtistKey,
         config: &config::AppConfig,
     ) -> Result<Option<PathBuf>, ApiError> {
-        let key = utils::artist::ArtistKey::of(&artist.name, artist.id.as_deref());
         Ok(self
             .db
             .artist_album_covers(&config.active_source)
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
-            .remove(&key)
+            .remove(artist)
             .map(PathBuf::from))
     }
 
@@ -606,7 +622,10 @@ mod tests {
     #[test]
     fn artist_art_falls_back_through_override_photo_then_album() {
         let album = std::path::Path::new("/music/band/cover.jpg");
-        let band = api::ArtistCredit::new("Band", None);
+        let band = &utils::artist::ArtistKey::of("Band", None);
+        let artist_cover = |band, images, album, library| {
+            artist_cover(band, "Band", "srv", images, album, library)
+        };
         let mut overrides = std::collections::HashMap::new();
         let mut photos = std::collections::HashMap::new();
         photos.insert(
@@ -615,25 +634,25 @@ mod tests {
         );
         let images: db::ArtistImages = (overrides.clone(), photos.clone());
         assert_eq!(
-            artist_cover(&band, "srv", &images, Some(album), true),
+            artist_cover(band, &images, Some(album), true),
             CoverRef::EmbeddedUrl("https://p/band.jpg".into())
         );
 
         overrides.insert("band".to_string(), PathBuf::from("/pics/band.png"));
         let images: db::ArtistImages = (overrides, photos);
         assert_eq!(
-            artist_cover(&band, "srv", &images, Some(album), true),
+            artist_cover(band, &images, Some(album), true),
             CoverRef::Local(PathBuf::from("/pics/band.png"))
         );
 
         let empty: db::ArtistImages = Default::default();
         assert_eq!(
-            artist_cover(&band, "srv", &empty, Some(album), true),
+            artist_cover(band, &empty, Some(album), true),
             CoverRef::Local(album.to_path_buf()),
             "a library artist may borrow an album cover"
         );
         assert_eq!(
-            artist_cover(&band, "srv", &empty, Some(album), false),
+            artist_cover(band, &empty, Some(album), false),
             CoverRef::None,
             "a remote catalog never renders an album as the artist"
         );
@@ -647,8 +666,8 @@ mod tests {
         photos.insert("id:srv:ar-1".to_string(), photo("https://p/ar-1.jpg"));
         let images: db::ArtistImages = (Default::default(), photos);
         let cover = |id: Option<&str>| {
-            let artist = api::ArtistCredit::new("Ada", id.map(Into::into));
-            artist_cover(&artist, "srv", &images, None, true)
+            let artist = utils::artist::ArtistKey::of("Ada", id);
+            artist_cover(&artist, "Ada", "srv", &images, None, true)
         };
 
         assert_eq!(

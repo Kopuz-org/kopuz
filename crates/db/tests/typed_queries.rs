@@ -111,17 +111,12 @@ async fn typed_queries_smoke() {
         "album_tracks orders by disc/track"
     );
 
-    let bea = db
-        .artist_tracks(&local, &reader::ArtistCredit::unlinked("Bea"), None)
-        .await
-        .unwrap();
+    let bea_key = utils::artist::ArtistKey::of("Bea", None);
+    let bea = db.artist_tracks(&local, &bea_key, None).await.unwrap();
     assert_eq!(bea.len(), 2);
     assert!(bea.iter().all(|t| t.artist == "Bea"));
 
-    let bounded = db
-        .artist_tracks(&local, &reader::ArtistCredit::unlinked("Bea"), Some(1))
-        .await
-        .unwrap();
+    let bounded = db.artist_tracks(&local, &bea_key, Some(1)).await.unwrap();
     assert_eq!(bounded.len(), 1, "limit bounds the query SQL-side");
 
     let jazz = db.genre_tracks(&local, "Jazz").await.unwrap();

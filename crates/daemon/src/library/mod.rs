@@ -534,7 +534,7 @@ impl QueueMaterializer for LibraryService {
                 .map_err(db_error),
             QueueContext::Artist { artist } => self
                 .db
-                .artist_tracks(&self.query_source(), &reads::domain_credit(artist), None)
+                .artist_tracks(&self.query_source(), &self.artist_of(artist)?, None)
                 .await
                 .map_err(db_error),
             QueueContext::Genre { name } => self
@@ -665,7 +665,10 @@ mod tests {
         assert_eq!(page.items[0].title, "song 4");
 
         let page = library
-            .artist_tracks(&api::ArtistCredit::new("Ada", None), Page::default())
+            .artist_tracks(
+                &crate::artist_key::of(&library.query_source(), "Ada", None),
+                Page::default(),
+            )
             .await
             .expect("artist listing");
         assert_eq!(page.total, 3);

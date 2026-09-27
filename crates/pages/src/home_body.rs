@@ -9,7 +9,6 @@ use hooks::use_db_queries::{
 use rand::rng;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
-use utils::artist::ArtistKey;
 
 type AlbumCard = (String, String, String, Option<String>);
 
@@ -62,7 +61,7 @@ pub fn HomeBody(
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
     on_select_playlist: EventHandler<String>,
-    on_search_artist: EventHandler<(String, Option<String>)>,
+    on_open_artist: EventHandler<api::ArtistKey>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
     let mut config = use_context::<Signal<AppConfig>>();
@@ -77,8 +76,7 @@ pub fn HomeBody(
     let albums_res = use_albums(source);
     let recently_added_res = use_recently_added_albums(source, RECENTLY_ADDED_WINDOW);
     let artists_res = use_artists(source);
-    // Photos by normalized name, so the Top Artists row renders exactly the
-    // ones the daemon actually holds a picture for.
+    // Photos by artist key, so the Top Artists row shows the picture the daemon holds for each.
     let artist_covers = use_memo(move || {
         artists_res
             .read()
@@ -88,9 +86,9 @@ pub fn HomeBody(
             .filter_map(|artist| {
                 let cover =
                     hooks::artwork::url(artist.artwork.as_ref(), hooks::artwork::Size::Thumb)?;
-                Some((ArtistKey::of(&artist.name, artist.id.as_deref()), cover))
+                Some((artist.key.clone(), cover))
             })
-            .collect::<HashMap<ArtistKey, utils::CoverUrl>>()
+            .collect::<HashMap<api::ArtistKey, utils::CoverUrl>>()
     });
     let playlists_res = use_playlists();
     let offline_keys = use_memo(move || -> Vec<String> {
@@ -351,15 +349,15 @@ pub fn HomeBody(
             if is_unknown_artist(&credit.name) {
                 continue;
             }
-            let key = ArtistKey::of(&credit.name, credit.id.as_deref());
+            let key = &credit.key;
             if unique_artists.insert(key.clone()) {
                 // The daemon walks override, then photo, then an album cover
                 // for a library source; no picture renders the placeholder.
                 let cover_url = artist_covers
                     .read()
-                    .get(&key)
+                    .get(key)
                     .map(|cover: &utils::CoverUrl| cover.as_ref().to_string());
-                artist_list.push((credit.name.clone(), cover_url, credit.id.clone()));
+                artist_list.push((credit.name.clone(), cover_url, key.clone()));
             }
             if artist_list.len() >= 10 {
                 break;
@@ -532,7 +530,7 @@ pub fn HomeBody(
                                     on_select_album,
                                     on_play_album,
                                     on_select_playlist,
-                                    on_search_artist,
+                                    on_open_artist,
                                     active_card_menu,
                                     scroll_container,
                                 )}

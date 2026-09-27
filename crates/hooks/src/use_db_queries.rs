@@ -150,7 +150,7 @@ pub fn use_album_tracks(
 /// Every track credited to an artist. No artist resolves to empty without asking.
 pub fn use_artist_tracks(
     source: Memo<Source>,
-    artist: Memo<api::ArtistCredit>,
+    artist: Memo<Option<api::ArtistKey>>,
 ) -> Resource<Vec<api::TrackInfo>> {
     let api = use_api();
     let gens = use_generations();
@@ -160,15 +160,14 @@ pub fn use_artist_tracks(
         let span = tracing::info_span!(
             "query.artist_tracks",
             source = s.as_str(),
-            artist = %artist.name,
-            artist_id = ?artist.id,
+            artist = ?artist,
             rows = tracing::field::Empty,
         );
         async move {
-            if artist.is_empty() {
+            let Some(artist) = artist else {
                 tracing::Span::current().record("rows", 0);
                 return Vec::new();
-            }
+            };
             let rows = api
                 .artist_tracks(artist, all())
                 .await
@@ -181,10 +180,10 @@ pub fn use_artist_tracks(
     })
 }
 
-/// One artist's photo, track count and billed albums. No artist resolves to `None`.
+/// One artist's name, photo, track count and billed albums. No artist resolves to `None`.
 pub fn use_artist(
     source: Memo<Source>,
-    artist: Memo<api::ArtistCredit>,
+    artist: Memo<Option<api::ArtistKey>>,
 ) -> Resource<Option<api::ArtistDetail>> {
     let api = use_api();
     let gens = use_generations();
@@ -192,19 +191,8 @@ pub fn use_artist(
         let _ = gens.generation(Table::Tracks);
         let _ = gens.generation(Table::Albums);
         let (api, s, artist) = (api.clone(), source(), artist());
-        let span = tracing::info_span!(
-            "query.artist",
-            source = s.as_str(),
-            artist = %artist.name,
-            artist_id = ?artist.id,
-        );
-        async move {
-            if artist.is_empty() {
-                return None;
-            }
-            api.artist(artist).await.ok()
-        }
-        .instrument(span)
+        let span = tracing::info_span!("query.artist", source = s.as_str(), artist = ?artist);
+        async move { api.artist(artist?).await.ok() }.instrument(span)
     })
 }
 

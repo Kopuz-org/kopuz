@@ -250,6 +250,7 @@ impl MutationService {
                 )));
             }
         };
+        let previous = self.current_artwork_path(&upload.target).await?;
         // Content-addressed, so re-uploading the same picture is idempotent
         // and a different one lands at a different path -- which is what makes
         // the artwork version, and the caches keyed by it, change.
@@ -267,7 +268,6 @@ impl MutationService {
             .map_err(|error| ApiError::internal(format!("artwork write failed: {error}")))?;
         let stored = path.to_string_lossy().into_owned();
 
-        let previous = self.current_artwork_path(&upload.target).await?;
         let result = match &upload.target {
             ArtworkTarget::Album(id) => self
                 .source()
@@ -275,16 +275,15 @@ impl MutationService {
                 .await
                 .map_err(source_error)
                 .map(|_| Table::Albums),
-            ArtworkTarget::Artist(artist) => self
-                .source()
-                .set_artist_image(
-                    &crate::artwork::artist_image_key(artist, self.config().active_source.as_str()),
-                    "custom",
-                    Some(&stored),
-                )
-                .await
-                .map_err(source_error)
-                .map(|_| Table::Tracks),
+            ArtworkTarget::Artist(artist) => match self.artist_image_key(artist) {
+                Ok(key) => self
+                    .source()
+                    .set_artist_image(&key, "custom", Some(&stored))
+                    .await
+                    .map_err(source_error)
+                    .map(|_| Table::Tracks),
+                Err(error) => Err(error),
+            },
             ArtworkTarget::Playlist(id) => {
                 let playlist = self.playlist(id).await?;
                 self.source()
@@ -326,14 +325,7 @@ impl MutationService {
             }
             ArtworkTarget::Artist(artist) => {
                 self.source()
-                    .set_artist_image(
-                        &crate::artwork::artist_image_key(
-                            artist,
-                            self.config().active_source.as_str(),
-                        ),
-                        "custom",
-                        None,
-                    )
+                    .set_artist_image(&self.artist_image_key(artist)?, "custom", None)
                     .await
                     .map_err(source_error)?;
                 Table::Tracks
@@ -386,6 +378,12 @@ impl MutationService {
             .ok_or_else(|| ApiError::not_found("playlist not found"))
     }
 
+    /// Where this artist's own photo is filed in `artist_images`.
+    fn artist_image_key(&self, artist: &api::ArtistKey) -> Result<String, ApiError> {
+        let source = self.config().active_source;
+        Ok(crate::artist_key::within(artist, &source)?.storage(source.as_str()))
+    }
+
     async fn current_artwork_path(
         &self,
         target: &ArtworkTarget,
@@ -398,17 +396,16 @@ impl MutationService {
                 .await
                 .map_err(db_error)?
                 .and_then(|album| album.cover_path),
-            ArtworkTarget::Artist(artist) => self
-                .db
-                .artist_images()
-                .await
-                .map_err(db_error)?
-                .0
-                .get(&crate::artwork::artist_image_key(
-                    artist,
-                    self.config().active_source.as_str(),
-                ))
-                .cloned(),
+            ArtworkTarget::Artist(artist) => {
+                let key = self.artist_image_key(artist)?;
+                self.db
+                    .artist_images()
+                    .await
+                    .map_err(db_error)?
+                    .0
+                    .get(&key)
+                    .cloned()
+            }
             ArtworkTarget::Playlist(id) => self.playlist(id).await?.cover_path,
             _ => None,
         })

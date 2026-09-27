@@ -36,13 +36,35 @@ impl LibraryService {
     /// pass has run.
     pub async fn refresh_artist_artwork(
         &self,
-        artists: Vec<api::ArtistCredit>,
+        artists: Vec<api::ArtistKey>,
     ) -> Result<(), ApiError> {
         let config = self.current_config();
         let source: ActiveSource = Arc::from(server::source::active(self.db.clone(), &config));
         match source.capabilities().artist_view {
             ArtistView::Library => self.refresh_bulk(&source).await,
-            ArtistView::Remote => self.refresh_each(&source, artists).await,
+            ArtistView::Remote => {
+                let wanted = artists
+                    .iter()
+                    .map(|artist| self.artist_of(artist))
+                    .collect::<Result<std::collections::HashSet<_>, _>>()?;
+                // A search wants the name the library calls them, which only the listing holds.
+                let named = self
+                    .db
+                    .artists(source.source())
+                    .await
+                    .map_err(db_error)?
+                    .into_iter()
+                    .filter(|row| wanted.contains(&row.key))
+                    .map(|row| reader::ArtistCredit {
+                        id: match row.key {
+                            ArtistKey::Id(id) => Some(id),
+                            ArtistKey::Name(_) => None,
+                        },
+                        name: row.name,
+                    })
+                    .collect();
+                self.refresh_each(&source, named).await
+            }
         }
     }
 
@@ -66,7 +88,7 @@ impl LibraryService {
     async fn refresh_each(
         &self,
         source: &ActiveSource,
-        artists: Vec<api::ArtistCredit>,
+        artists: Vec<reader::ArtistCredit>,
     ) -> Result<(), ApiError> {
         let (_, photos) = self.db.artist_images().await.map_err(db_error)?;
         let fresh_misses: std::collections::HashSet<String> = self
@@ -79,10 +101,6 @@ impl LibraryService {
         let scope = source.source().as_str().to_string();
         let pending: Vec<reader::ArtistCredit> = artists
             .into_iter()
-            .map(|artist| reader::ArtistCredit {
-                name: artist.name,
-                id: artist.id,
-            })
             .filter(|artist| {
                 let key = storage_key(artist, &scope);
                 !photos.contains_key(&key) && !fresh_misses.contains(&key)

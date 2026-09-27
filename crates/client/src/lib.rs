@@ -365,7 +365,7 @@ impl api::LibraryApi for GrpcApi {
 
     async fn artist_tracks(
         &self,
-        artist: api::ArtistCredit,
+        artist: api::ArtistKey,
         page: Page,
     ) -> Result<api::TrackPage, ApiError> {
         let tracks = self
@@ -378,13 +378,16 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::track_page_from_proto(tracks.get_ref()))
     }
 
-    async fn artist(&self, artist: api::ArtistCredit) -> Result<api::ArtistDetail, ApiError> {
+    async fn artist(&self, artist: api::ArtistKey) -> Result<api::ArtistDetail, ApiError> {
         let detail = self
             .client()
-            .get_artist(Request::new(convert::artist_credit_to_proto(&artist)))
+            .get_artist(Request::new(proto::ArtistRequest {
+                key: artist.to_string(),
+            }))
             .await
             .map_err(wire_error)?;
-        Ok(convert::artist_detail_from_proto(detail.get_ref()))
+        convert::artist_detail_from_proto(detail.get_ref())
+            .ok_or_else(|| ApiError::internal("the daemon sent an artist detail naming no artist"))
     }
 
     async fn artist_sample_tracks(&self, page: Page) -> Result<api::TrackPage, ApiError> {
@@ -581,10 +584,7 @@ impl api::LibraryApi for GrpcApi {
         Ok(())
     }
 
-    async fn refresh_artist_artwork(
-        &self,
-        artists: Vec<api::ArtistCredit>,
-    ) -> Result<(), ApiError> {
+    async fn refresh_artist_artwork(&self, artists: Vec<api::ArtistKey>) -> Result<(), ApiError> {
         self.client()
             .refresh_artist_artwork(Request::new(convert::refresh_artists_to_proto(&artists)))
             .await

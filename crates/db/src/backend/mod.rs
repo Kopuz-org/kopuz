@@ -170,7 +170,7 @@ impl ReadStore for Native {
     async fn artist_tracks(
         &self,
         source: &crate::Source,
-        artist: &reader::ArtistCredit,
+        artist: &utils::artist::ArtistKey,
         limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError> {
         queries::artist_tracks(&self.pool(), source, artist, limit).await
@@ -179,9 +179,17 @@ impl ReadStore for Native {
     async fn artist_albums(
         &self,
         source: &crate::Source,
-        artist: &reader::ArtistCredit,
+        artist: &utils::artist::ArtistKey,
     ) -> Result<Vec<reader::Album>, DbError> {
         queries::artist_albums(&self.pool(), source, artist).await
+    }
+
+    async fn artist(
+        &self,
+        source: &crate::Source,
+        artist: &utils::artist::ArtistKey,
+    ) -> Result<Option<crate::ArtistRow>, DbError> {
+        queries::artist(&self.pool(), source, artist).await
     }
 
     async fn genre_tracks(

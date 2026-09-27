@@ -84,7 +84,6 @@ pub fn catalog_detail_request_to_proto(value: &api::CatalogDetailRequest) -> Cat
         kind: catalog_item_kind_to_proto(value.kind) as i32,
         id: value.id.clone(),
         continuation: value.continuation.clone(),
-        name: value.name.clone(),
     }
 }
 
@@ -95,7 +94,6 @@ pub fn catalog_detail_request_from_proto(
         kind: catalog_item_kind_from_proto(value.kind),
         id: value.id.clone(),
         continuation: value.continuation.clone(),
-        name: value.name.clone(),
     }
 }
 
@@ -112,7 +110,7 @@ pub fn catalog_detail_to_proto(value: &api::CatalogDetail) -> CatalogDetail {
         tracks: value.tracks.iter().map(track_info_to_proto).collect(),
         shelves: value.shelves.iter().map(catalog_shelf_to_proto).collect(),
         continuation: value.continuation.clone(),
-        artist_id: value.artist_id.clone(),
+        artist_key: value.artist_key.as_ref().map(ToString::to_string),
     }
 }
 
@@ -129,7 +127,7 @@ pub fn catalog_detail_from_proto(value: &CatalogDetail) -> api::CatalogDetail {
         tracks: value.tracks.iter().map(track_info_from_proto).collect(),
         shelves: value.shelves.iter().map(catalog_shelf_from_proto).collect(),
         continuation: value.continuation.clone(),
-        artist_id: value.artist_id.clone(),
+        artist_key: value.artist_key.clone().map(api::ArtistKey::new),
     }
 }
 

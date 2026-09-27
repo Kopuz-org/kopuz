@@ -224,7 +224,7 @@ impl MediaSource for YtSource {
             .db
             .artist_tracks(
                 &self.source,
-                &reader::ArtistCredit::unlinked(query),
+                &utils::artist::ArtistKey::of(query, None),
                 Some(3),
             )
             .await
@@ -289,7 +289,11 @@ impl MediaSource for YtSource {
         // reconcile the channel from a library song and use its avatar.
         let tracks = self
             .db
-            .artist_tracks(&self.source, artist, Some(3))
+            .artist_tracks(
+                &self.source,
+                &utils::artist::ArtistKey::of(&artist.name, artist.id.as_deref()),
+                Some(3),
+            )
             .await
             .unwrap_or_default();
         for track in tracks.iter() {

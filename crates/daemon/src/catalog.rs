@@ -169,7 +169,11 @@ impl CatalogService {
             } => CatalogItem {
                 artwork: self.remember_thumbnail(&channel_id, thumbnail.as_deref()),
                 kind: CatalogItemKind::Artist,
-                id: channel_id,
+                id: crate::artist_key::mint(
+                    &config.active_source,
+                    &utils::artist::ArtistKey::Id(channel_id),
+                )
+                .to_string(),
                 title: name,
                 subtitle: None,
                 track: None,
@@ -201,7 +205,11 @@ impl CatalogService {
     }
 
     pub async fn detail(&self, request: CatalogDetailRequest) -> Result<CatalogDetail, ApiError> {
-        check_reference(&request)?;
+        if request.id.is_empty() {
+            return Err(ApiError::invalid_input(
+                "a catalog entity is opened by its id",
+            ));
+        }
         let config = self.config();
         let source = self.source();
         match request.kind {
@@ -233,11 +241,19 @@ impl CatalogService {
                 };
                 self.library.register_transient(&album.tracks);
                 let artwork = self.remember_thumbnail(&album.browse_id, album.thumbnail.as_deref());
+                let source = &config.active_source;
+                let artist_key = match (&album.artist_id, album.artist.as_deref().map(str::trim)) {
+                    (Some(id), _) => Some(crate::artist_key::of(source, "", Some(id))),
+                    (None, Some(name)) if !name.is_empty() => {
+                        Some(crate::artist_key::of(source, name, None))
+                    }
+                    (None, _) => None,
+                };
                 Ok(CatalogDetail {
                     kind: CatalogItemKind::Album,
                     id: album.browse_id,
                     title: album.title,
-                    artist_id: album.artist_id,
+                    artist_key,
                     subtitle: album.artist,
                     artwork,
                     playback_id: album.audio_playlist_id,
@@ -277,14 +293,11 @@ impl CatalogService {
                 })
             }
             CatalogItemKind::Artist => {
-                // The caller says which it holds. This read a `UC` prefix off the id to guess,
-                // which took any artist named like a channel for one and, on a source whose ids
-                // look nothing like YouTube's, took every id for a name.
-                let channel_id = match request.reference() {
-                    None => return Err(ApiError::not_found("catalog artist not named")),
-                    Some(api::Reference::Id(id)) => id.to_string(),
-                    Some(api::Reference::Name(name)) => source
-                        .resolve_artist_channel_id(name)
+                let artist = api::ArtistKey::new(request.id);
+                let channel_id = match crate::artist_key::within(&artist, &config.active_source)? {
+                    utils::artist::ArtistKey::Id(id) => id,
+                    utils::artist::ArtistKey::Name(name) => source
+                        .resolve_artist_channel_id(&name)
                         .await
                         .map_err(source_error)?
                         .ok_or_else(|| ApiError::not_found("catalog artist not found"))?,
@@ -371,18 +384,6 @@ impl CatalogService {
     }
 }
 
-/// An artist is the one kind a source resolves from a name; an album and a
-/// playlist are only ever reached by the id they were issued.
-fn check_reference(request: &CatalogDetailRequest) -> Result<(), ApiError> {
-    match request.reference() {
-        None => Err(ApiError::invalid_input("catalog id or name is required")),
-        Some(api::Reference::Name(_)) if !matches!(request.kind, CatalogItemKind::Artist) => {
-            Err(ApiError::invalid_input("this catalog kind is opened by id"))
-        }
-        Some(_) => Ok(()),
-    }
-}
-
 /// Lift the seed out of a mix, if the source put it there. Removing rather
 /// than copying is what keeps it from appearing twice once it is pinned.
 fn take_seed(tracks: &mut Vec<reader::Track>, key: &str) -> Option<reader::Track> {
@@ -392,46 +393,7 @@ fn take_seed(tracks: &mut Vec<reader::Track>, key: &str) -> Option<reader::Track
 
 #[cfg(test)]
 mod tests {
-    use super::{check_reference, take_seed};
-    use api::{CatalogDetailRequest, CatalogItemKind, ErrorCode};
-
-    #[test]
-    fn an_artist_is_answerable_by_name_and_an_album_is_not() {
-        let named = |kind| CatalogDetailRequest::by_name(kind, "UCHU CONBINI");
-        let by_id = |kind| CatalogDetailRequest::by_id(kind, "MPRE1");
-
-        assert!(check_reference(&named(CatalogItemKind::Artist)).is_ok());
-        assert!(check_reference(&by_id(CatalogItemKind::Artist)).is_ok());
-        assert!(check_reference(&by_id(CatalogItemKind::Album)).is_ok());
-        assert!(check_reference(&by_id(CatalogItemKind::Playlist)).is_ok());
-
-        for kind in [CatalogItemKind::Album, CatalogItemKind::Playlist] {
-            assert_eq!(
-                check_reference(&named(kind)).unwrap_err().code,
-                ErrorCode::InvalidInput,
-            );
-        }
-    }
-
-    #[test]
-    fn a_request_naming_nothing_is_malformed() {
-        for kind in [
-            CatalogItemKind::Artist,
-            CatalogItemKind::Album,
-            CatalogItemKind::Playlist,
-        ] {
-            // A blank name is no name: `reference()` trims before it decides.
-            for request in [
-                CatalogDetailRequest::by_name(kind, "   "),
-                CatalogDetailRequest::by_id(kind, ""),
-            ] {
-                assert_eq!(
-                    check_reference(&request).unwrap_err().code,
-                    ErrorCode::InvalidInput,
-                );
-            }
-        }
-    }
+    use super::take_seed;
 
     fn track(key: &str) -> reader::Track {
         reader::Track {

@@ -320,7 +320,7 @@ impl Kopuz for KopuzGrpc {
     ) -> Result<Response<proto::TrackPage>, Status> {
         let request = request.get_ref();
         let page = convert::page_from_proto(request.page.as_ref());
-        let artist = api::ArtistCredit::new(request.artist.clone(), request.artist_id.clone());
+        let artist = api::ArtistKey::new(request.key.clone());
         let tracks = self
             .0
             .api
@@ -332,9 +332,9 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_artist(
         &self,
-        request: Request<proto::ArtistCredit>,
+        request: Request<proto::ArtistRequest>,
     ) -> Result<Response<proto::ArtistDetail>, Status> {
-        let artist = convert::artist_credit_from_proto(request.get_ref());
+        let artist = api::ArtistKey::new(request.get_ref().key.clone());
         let detail = self.0.api.artist(artist).await.map_err(failed)?;
         Ok(Response::new(convert::artist_detail_to_proto(&detail)))
     }

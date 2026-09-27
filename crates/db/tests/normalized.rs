@@ -410,7 +410,7 @@ async fn only_a_real_album_credits_its_tracks_to_its_artist() {
     .unwrap();
 
     let ada = db
-        .artist_tracks(&source, &ArtistCredit::linked("Ada", "ar-1"), None)
+        .artist_tracks(&source, &utils::artist::ArtistKey::Id("ar-1".into()), None)
         .await
         .unwrap();
 

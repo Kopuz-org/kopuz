@@ -103,10 +103,10 @@ pub fn BottombarVaxry(
     }
 
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
-    let artist_credit = current_track_snapshot
+    let artist = current_track_snapshot
         .as_ref()
         .and_then(|track| track.primary_credit())
-        .map(|credit| (credit.name.clone(), credit.id.clone()));
+        .map(|credit| credit.key.clone());
     let cover = ctrl
         .current_cover_url(hooks::artwork::Size::Thumb)
         .unwrap_or_default();
@@ -183,14 +183,8 @@ pub fn BottombarVaxry(
                         span {
                             class: "text-[11px] text-slate-400 truncate min-w-0 shrink-0 max-w-[40%] cursor-pointer hover:underline hover:text-slate-300",
                             onclick: move |_| {
-                                match artist_credit.clone() {
-                                    Some((name, id)) => {
-                                        nav_ctrl.open_artist(name, id)
-                                    }
-                                    None => {
-                                        nav_ctrl
-                                            .navigate_to_artist(current_song_artist.read().clone())
-                                    }
+                                if let Some(artist) = artist.clone() {
+                                    nav_ctrl.open_artist(artist);
                                 }
                             },
                             "{current_song_artist}"

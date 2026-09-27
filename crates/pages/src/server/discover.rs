@@ -42,7 +42,7 @@ fn keys_of(tracks: &[TrackInfo]) -> Vec<String> {
 pub fn DiscoverPage(
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
-    on_open_artist: EventHandler<(String, String)>,
+    on_open_artist: EventHandler<api::ArtistKey>,
 ) -> Element {
     let api = hooks::use_api();
     let caps = hooks::sources::use_capabilities();
@@ -181,7 +181,7 @@ fn ShelfRow(
     scroll_id: String,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
-    on_open_artist: EventHandler<(String, String)>,
+    on_open_artist: EventHandler<api::ArtistKey>,
 ) -> Element {
     if shelf.list {
         return rsx! { SongListShelf {
@@ -343,7 +343,7 @@ fn DiscoverTile(
     item: CatalogItem,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
-    on_open_artist: EventHandler<(String, String)>,
+    on_open_artist: EventHandler<api::ArtistKey>,
 ) -> Element {
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
@@ -387,15 +387,14 @@ fn DiscoverTile(
             }
         }
         CatalogItemKind::Artist => {
-            let id = item.id.clone();
-            let name = item.title.clone();
+            let artist = api::ArtistKey::new(item.id.clone());
             rsx! {
                 Card {
                     title: item.title.clone(),
                     subtitle: String::new(),
                     thumbnail,
                     rounded_full: true,
-                    onclick: move |_| on_open_artist.call((id.clone(), name.clone())),
+                    onclick: move |_| on_open_artist.call(artist.clone()),
                     on_play: None,
                     kind: CatalogItemKind::Artist,
                     source_id: None,
@@ -450,7 +449,6 @@ fn play_catalog(
                     kind,
                     id: id.clone(),
                     continuation: cursor.clone(),
-                    name: None,
                 };
                 let detail = match api.catalog_detail(request).await {
                     Ok(detail) => detail,
@@ -575,7 +573,6 @@ fn Card(
                             kind,
                             id: id.clone(),
                             continuation: cursor.clone(),
-                            name: None,
                         };
                         let Ok(detail) = api.catalog_detail(request).await else {
                             return;
@@ -776,7 +773,6 @@ pub fn DiscoverPlaylistDetail(
                         kind,
                         id,
                         continuation: None,
-                        name: None,
                     })
                     .await;
                 if *fetch_gen.peek() != my_gen {
@@ -856,20 +852,14 @@ fn BackButton(on_back: EventHandler<()>) -> Element {
     }
 }
 
-/// The source's own artist profile, used wherever the active source presents
-/// artists remotely. Its sections are catalog shelves, so they get the same
-/// tiles, hover-play and scrolling as the browse home.
-///
-/// Callers that know the artist's catalog id pass it; callers that only have a
-/// name pass that, and the daemon resolves it.
+/// The source's own artist profile, for a source that presents artists remotely; its sections are catalog shelves.
 #[component]
 pub fn DiscoverArtistPage(
-    selected_artist_id: Signal<Option<String>>,
-    selected_artist_name: Signal<String>,
+    selected_artist: Signal<Option<api::ArtistKey>>,
     on_back: EventHandler<()>,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
-    on_open_artist: EventHandler<(String, String)>,
+    on_open_artist: EventHandler<api::ArtistKey>,
 ) -> Element {
     let api = hooks::use_api();
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
@@ -882,17 +872,10 @@ pub fn DiscoverArtistPage(
     // Generation guard: drop a late answer when the user has moved on.
     let mut fetch_gen = use_signal(|| 0u64);
     use_effect(move || {
-        // The selection is (id, name): an id is exact, a name is what the
-        // daemon resolves. Which one this is travels in the request itself.
-        let id = selected_artist_id.read().clone();
-        let name = selected_artist_name.read().clone();
-        let request = match id.filter(|id| !id.trim().is_empty()) {
-            Some(id) => CatalogDetailRequest::by_id(CatalogItemKind::Artist, id),
-            None => match name.trim() {
-                "" => return,
-                name => CatalogDetailRequest::by_name(CatalogItemKind::Artist, name),
-            },
+        let Some(selected) = selected_artist.read().clone() else {
+            return;
         };
+        let request = CatalogDetailRequest::artist(&selected);
         let my_gen = fetch_gen.with_mut(|generation| {
             *generation += 1;
             *generation
@@ -900,8 +883,7 @@ pub fn DiscoverArtistPage(
         artist.set(None);
         loading.set(true);
         error.set(None);
-        let shown = request.name.clone().unwrap_or_else(|| request.id.clone());
-        let artist_span = tracing::info_span!("artist.load", artist = %shown);
+        let artist_span = tracing::info_span!("artist.load", artist = %selected);
         let api = api.clone();
         spawn(
             async move {
@@ -919,7 +901,7 @@ pub fn DiscoverArtistPage(
         );
     });
 
-    if selected_artist_id.read().is_none() && selected_artist_name.read().trim().is_empty() {
+    if selected_artist.read().is_none() {
         return rsx! {
             div { class: "p-12 text-white/60", "{i18n::t(\"artist_none_selected\")}" }
         };

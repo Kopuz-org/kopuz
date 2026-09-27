@@ -20,7 +20,7 @@ pub enum QueueContext {
         id: String,
     },
     Artist {
-        artist: crate::ArtistCredit,
+        artist: crate::ArtistKey,
     },
     Genre {
         name: String,

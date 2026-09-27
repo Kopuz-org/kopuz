@@ -201,12 +201,11 @@ async fn unlinked_artist_rowids(
 pub async fn artist_tracks(
     pool: &SqlitePool,
     source: &Source,
-    artist: &reader::ArtistCredit,
+    key: &utils::artist::ArtistKey,
     limit: Option<u32>,
 ) -> Result<Vec<Track>, DbError> {
     let limit_clause = limit.map(|n| format!(" LIMIT {n}")).unwrap_or_default();
-    let key = utils::artist::ArtistKey::of(&artist.name, artist.id.as_deref());
-    let rows = match &key {
+    let rows = match key {
         utils::artist::ArtistKey::Id(id) => {
             let sql = format!(
                 "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 AND ( \
@@ -223,7 +222,7 @@ pub async fn artist_tracks(
                 .await?
         }
         utils::artist::ArtistKey::Name(_) => {
-            let rowids = unlinked_artist_rowids(pool, source, &key).await?;
+            let rowids = unlinked_artist_rowids(pool, source, key).await?;
             let sql = format!(
                 "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 \
                  AND t.rowid_pk IN (SELECT value FROM json_each(?2)) {ARTIST_ORDER}{limit_clause}"
@@ -242,13 +241,12 @@ pub async fn artist_tracks(
 pub async fn artist_albums(
     pool: &SqlitePool,
     source: &Source,
-    artist: &reader::ArtistCredit,
+    key: &utils::artist::ArtistKey,
 ) -> Result<Vec<Album>, DbError> {
     const COLUMNS: &str =
         "source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_id";
     const ORDER: &str = "ORDER BY year DESC, title COLLATE NOCASE";
-    let key = utils::artist::ArtistKey::of(&artist.name, artist.id.as_deref());
-    let rows: Vec<AlbumRow> = match &key {
+    let rows: Vec<AlbumRow> = match key {
         utils::artist::ArtistKey::Id(id) => {
             sqlx::query_as(&format!(
                 "SELECT {COLUMNS} FROM albums WHERE source = ?1 AND artist_id = ?2 {ORDER}"
@@ -266,7 +264,7 @@ pub async fn artist_albums(
             .fetch_all(pool)
             .await?;
             rows.into_iter()
-                .filter(|row| utils::artist::ArtistKey::of(&row.artist, None) == key)
+                .filter(|row| utils::artist::ArtistKey::of(&row.artist, None) == *key)
                 .collect()
         }
     };
@@ -429,51 +427,88 @@ pub(crate) async fn refresh_from_library(
         .collect())
 }
 
-/// Grouped on the identity [`artist_tracks`] matches, so a tile opens exactly the tracks it counts.
-pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::ArtistRow>, DbError> {
+/// Credit rows grouped by who they credit, each named by its most common spelling.
+fn group_artists(rows: Vec<(i64, String, Option<String>)>) -> Vec<crate::ArtistRow> {
     use std::collections::{HashMap, HashSet};
     use utils::artist::ArtistKey;
 
-    #[derive(Default)]
-    struct Group {
-        tracks: HashSet<i64>,
-        spellings: HashMap<String, u32>,
+    let mut groups: HashMap<ArtistKey, (HashSet<i64>, HashMap<String, u32>)> = HashMap::new();
+    for (track, name, id) in rows {
+        let (tracks, spellings) = groups
+            .entry(ArtistKey::of(&name, id.as_deref()))
+            .or_default();
+        tracks.insert(track);
+        *spellings.entry(name).or_default() += 1;
     }
+    groups
+        .into_iter()
+        .filter_map(|(key, (tracks, spellings))| {
+            let (name, _) = spellings
+                .into_iter()
+                .max_by(|(a, a_n), (b, b_n)| a_n.cmp(b_n).then_with(|| b.cmp(a)))?;
+            Some(crate::ArtistRow {
+                key,
+                name,
+                tracks: tracks.len() as u32,
+            })
+        })
+        .collect()
+}
+
+/// Grouped as [`artist_tracks`] matches, minus a joined credit whose lead is listed on its own.
+pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::ArtistRow>, DbError> {
+    use utils::artist::{ArtistKey, joined_credit_primary, normalize_artist_key};
 
     let sql = format!("SELECT track, name, id FROM ({CREDIT_ROWS}) WHERE name != ''");
     let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(&sql)
         .bind(source.as_str())
         .fetch_all(pool)
         .await?;
-    let mut groups: HashMap<ArtistKey, Group> = HashMap::new();
-    for (track, name, id) in rows {
-        let group = groups
-            .entry(ArtistKey::of(&name, id.as_deref()))
-            .or_default();
-        group.tracks.insert(track);
-        *group.spellings.entry(name).or_default() += 1;
-    }
-    let mut artists: Vec<crate::ArtistRow> = groups
-        .into_iter()
-        .map(|(key, group)| {
-            let name = group
-                .spellings
-                .into_iter()
-                .max_by(|(a, a_n), (b, b_n)| a_n.cmp(b_n).then_with(|| b.cmp(a)))
-                .map(|(name, _)| name)
-                .unwrap_or_default();
-            crate::ArtistRow {
-                name,
-                id: match key {
-                    ArtistKey::Id(id) => Some(id),
-                    ArtistKey::Name(_) => None,
-                },
-                tracks: group.tracks.len() as u32,
-            }
-        })
+    let mut artists = group_artists(rows);
+    let names: std::collections::HashSet<String> = artists
+        .iter()
+        .map(|artist| normalize_artist_key(&artist.name))
         .collect();
-    artists.sort_by_cached_key(|artist| (artist.name.to_lowercase(), artist.id.clone()));
+    artists.retain(|artist| match &artist.key {
+        ArtistKey::Id(_) => true,
+        ArtistKey::Name(name) => {
+            !joined_credit_primary(name).is_some_and(|lead| names.contains(lead))
+        }
+    });
+    artists.sort_by_cached_key(|artist| (artist.name.to_lowercase(), artist.key.clone()));
     Ok(artists)
+}
+
+/// One artist as [`artists`] groups it, joined credits included.
+pub async fn artist(
+    pool: &SqlitePool,
+    source: &Source,
+    key: &utils::artist::ArtistKey,
+) -> Result<Option<crate::ArtistRow>, DbError> {
+    let rows: Vec<(i64, String, Option<String>)> = match key {
+        utils::artist::ArtistKey::Id(id) => {
+            let sql =
+                format!("SELECT track, name, id FROM ({CREDIT_ROWS}) WHERE id = ?2 AND name != ''");
+            sqlx::query_as(&sql)
+                .bind(source.as_str())
+                .bind(id)
+                .fetch_all(pool)
+                .await?
+        }
+        utils::artist::ArtistKey::Name(_) => {
+            let sql = format!(
+                "SELECT track, name, id FROM ({CREDIT_ROWS}) WHERE id IS NULL AND name != ''"
+            );
+            let rows: Vec<(i64, String, Option<String>)> = sqlx::query_as(&sql)
+                .bind(source.as_str())
+                .fetch_all(pool)
+                .await?;
+            rows.into_iter()
+                .filter(|(_, name, _)| utils::artist::ArtistKey::of(name, None) == *key)
+                .collect()
+        }
+    };
+    Ok(group_artists(rows).into_iter().next())
 }
 
 /// The most-credited source id per normalized name, so a row order never picks the answer.
@@ -642,6 +677,7 @@ pub async fn is_favorite(pool: &SqlitePool, server_id: &str, ref_: &str) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use utils::artist::ArtistKey;
 
     async fn mem_pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -867,20 +903,20 @@ mod tests {
     async fn two_ids_behind_one_name_are_two_artists_and_an_unlinked_one_a_third() {
         let (pool, source) = homonyms().await;
 
-        let listed: Vec<(Option<String>, u32)> = artists(&pool, &source)
+        let listed: Vec<(ArtistKey, u32)> = artists(&pool, &source)
             .await
             .unwrap()
             .into_iter()
             .filter(|artist| artist.name.eq_ignore_ascii_case("ada"))
-            .map(|artist| (artist.id, artist.tracks))
+            .map(|artist| (artist.key, artist.tracks))
             .collect();
 
         assert_eq!(
             listed,
             vec![
-                (None, 1),
-                (Some("ar-1".into()), 2),
-                (Some("ar-2".into()), 1)
+                (ArtistKey::Id("ar-1".into()), 2),
+                (ArtistKey::Id("ar-2".into()), 1),
+                (ArtistKey::Name("ada".into()), 1),
             ]
         );
     }
@@ -888,23 +924,13 @@ mod tests {
     #[tokio::test]
     async fn an_id_opens_only_the_tracks_that_carry_it() {
         let (pool, source) = homonyms().await;
-        let open = |id: Option<&str>| reader::ArtistCredit {
-            name: "Ada".into(),
-            id: id.map(Into::into),
-        };
+        let found =
+            async |key: ArtistKey| keys(artist_tracks(&pool, &source, &key, None).await.unwrap());
 
-        let found = async |id| {
-            keys(
-                artist_tracks(&pool, &source, &open(id), None)
-                    .await
-                    .unwrap(),
-            )
-        };
-
-        assert_eq!(found(Some("ar-1")).await, ["a", "b"]);
-        assert_eq!(found(Some("ar-2")).await, ["c"]);
+        assert_eq!(found(ArtistKey::Id("ar-1".into())).await, ["a", "b"]);
+        assert_eq!(found(ArtistKey::Id("ar-2".into())).await, ["c"]);
         assert_eq!(
-            found(None).await,
+            found(ArtistKey::of("Ada", None)).await,
             ["d"],
             "a name never reaches a linked credit"
         );
@@ -913,11 +939,69 @@ mod tests {
     #[tokio::test]
     async fn a_name_folds_beyond_ascii() {
         let (pool, source) = homonyms().await;
-        let open = reader::ArtistCredit::unlinked("АДА");
 
-        let found = artist_tracks(&pool, &source, &open, None).await.unwrap();
+        let found = artist_tracks(&pool, &source, &ArtistKey::of("АДА", None), None)
+            .await
+            .unwrap();
 
         assert_eq!(keys(found), ["e"]);
+    }
+
+    #[tokio::test]
+    async fn one_artist_is_named_and_counted_as_the_listing_does() {
+        let (pool, source) = homonyms().await;
+        let one = async |key: ArtistKey| artist(&pool, &source, &key).await.unwrap();
+
+        let linked = one(ArtistKey::Id("ar-1".into())).await.expect("ar-1");
+        assert!(linked.name.eq_ignore_ascii_case("ada"));
+        assert_eq!(linked.tracks, 2);
+        let unlinked = one(ArtistKey::of("АДА", None)).await.expect("Ада");
+        assert_eq!((unlinked.name.as_str(), unlinked.tracks), ("Ада", 1));
+        assert_eq!(one(ArtistKey::Id("ar-9".into())).await, None);
+    }
+
+    #[tokio::test]
+    async fn a_joined_credit_whose_lead_is_listed_gets_no_row() {
+        let pool = mem_pool().await;
+        let source = Source::Server("srv".into());
+        let tracks = [
+            track("a", "COOL&CREATE", &["COOL&CREATE"], "al-1"),
+            track(
+                "b",
+                "COOL&CREATE, beatMARIO",
+                &["COOL&CREATE, beatMARIO"],
+                "al-2",
+            ),
+            track("c", "Tyler, The Creator", &["Tyler, The Creator"], "al-3"),
+        ];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let names: Vec<String> = artists(&pool, &source)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|artist| artist.name)
+            .collect();
+
+        assert_eq!(names, ["COOL&CREATE", "Tyler, The Creator"]);
+        let joined = ArtistKey::of("COOL&CREATE, beatMARIO", None);
+        assert!(artist(&pool, &source, &joined).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_blank_id_is_stored_as_none() {
+        let pool = mem_pool().await;
+        let source = Source::Server("srv".into());
+        let tracks = [linked_track("a", "Ada", &[("Ada", Some("  "))])];
+        super::super::writes::upsert_tracks(&pool, &source, &tracks)
+            .await
+            .unwrap();
+
+        let listed = artists(&pool, &source).await.unwrap();
+
+        assert_eq!(listed[0].key, ArtistKey::Name("ada".into()));
     }
 
     #[tokio::test]
@@ -937,16 +1021,13 @@ mod tests {
             .await
             .unwrap();
 
-        let found = async |artist: reader::ArtistCredit| {
-            let albums = artist_albums(&pool, &source, &artist).await.unwrap();
+        let found = async |key: ArtistKey| {
+            let albums = artist_albums(&pool, &source, &key).await.unwrap();
             albums.into_iter().map(|a| a.id).collect::<Vec<_>>()
         };
 
-        assert_eq!(
-            found(reader::ArtistCredit::linked("Ada", "ar-1")).await,
-            ["x"]
-        );
-        assert_eq!(found(reader::ArtistCredit::unlinked("ada")).await, ["z"]);
+        assert_eq!(found(ArtistKey::Id("ar-1".into())).await, ["x"]);
+        assert_eq!(found(ArtistKey::of("ada", None)).await, ["z"]);
     }
 
     /// A ref is versioned on the picture it names, so the fallback the listing

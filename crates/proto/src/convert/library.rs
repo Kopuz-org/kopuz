@@ -63,14 +63,7 @@ pub fn track_info_to_proto(value: &api::TrackInfo) -> TrackInfo {
         musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
         musicbrainz_track_id: value.musicbrainz_track_id.clone(),
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
-        credits: value
-            .credits
-            .iter()
-            .map(|credit| ArtistCredit {
-                name: credit.name.clone(),
-                id: credit.id.clone(),
-            })
-            .collect(),
+        credits: value.credits.iter().map(artist_credit_to_proto).collect(),
     }
 }
 
@@ -96,14 +89,7 @@ pub fn track_info_from_proto(value: &TrackInfo) -> api::TrackInfo {
         musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
         musicbrainz_track_id: value.musicbrainz_track_id.clone(),
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
-        credits: value
-            .credits
-            .iter()
-            .map(|credit| api::ArtistCredit {
-                name: credit.name.clone(),
-                id: credit.id.clone(),
-            })
-            .collect(),
+        credits: value.credits.iter().map(artist_credit_from_proto).collect(),
     }
 }
 
@@ -192,10 +178,7 @@ pub fn artwork_request_to_proto(value: &api::ArtworkRequest) -> ArtworkRequest {
     let entity = match &value.target {
         api::ArtworkTarget::Track(key) => Entity::Track(key.clone()),
         api::ArtworkTarget::Album(id) => Entity::Album(id.clone()),
-        api::ArtworkTarget::Artist(artist) => match artist.id {
-            Some(_) => Entity::ArtistRef(artist_credit_to_proto(artist)),
-            None => Entity::Artist(artist.name.clone()),
-        },
+        api::ArtworkTarget::Artist(artist) => Entity::ArtistKey(artist.to_string()),
         api::ArtworkTarget::Playlist(id) => Entity::Playlist(id.clone()),
         api::ArtworkTarget::Catalog(id) => Entity::Catalog(id.clone()),
         api::ArtworkTarget::Station(id) => Entity::Station(id.clone()),
@@ -211,10 +194,7 @@ pub fn artwork_request_from_proto(value: &ArtworkRequest) -> Option<api::Artwork
     let target = match value.entity.as_ref()? {
         Entity::Track(key) => api::ArtworkTarget::Track(key.clone()),
         Entity::Album(id) => api::ArtworkTarget::Album(id.clone()),
-        Entity::Artist(name) => {
-            api::ArtworkTarget::Artist(api::ArtistCredit::new(name.clone(), None))
-        }
-        Entity::ArtistRef(artist) => api::ArtworkTarget::Artist(artist_credit_from_proto(artist)),
+        Entity::ArtistKey(key) => api::ArtworkTarget::Artist(api::ArtistKey::new(key.clone())),
         Entity::Playlist(id) => api::ArtworkTarget::Playlist(id.clone()),
         Entity::Catalog(id) => api::ArtworkTarget::Catalog(id.clone()),
         Entity::Station(id) => api::ArtworkTarget::Station(id.clone()),
@@ -230,10 +210,7 @@ pub fn artwork_target_to_proto(value: &api::ArtworkTarget) -> ArtworkTarget {
     let entity = match value {
         api::ArtworkTarget::Track(key) => Entity::Track(key.clone()),
         api::ArtworkTarget::Album(id) => Entity::Album(id.clone()),
-        api::ArtworkTarget::Artist(artist) => match artist.id {
-            Some(_) => Entity::ArtistRef(artist_credit_to_proto(artist)),
-            None => Entity::Artist(artist.name.clone()),
-        },
+        api::ArtworkTarget::Artist(artist) => Entity::ArtistKey(artist.to_string()),
         api::ArtworkTarget::Playlist(id) => Entity::Playlist(id.clone()),
         api::ArtworkTarget::Catalog(id) => Entity::Catalog(id.clone()),
         api::ArtworkTarget::Station(id) => Entity::Station(id.clone()),
@@ -248,10 +225,7 @@ pub fn artwork_target_from_proto(value: &ArtworkTarget) -> Option<api::ArtworkTa
     Some(match value.entity.as_ref()? {
         Entity::Track(key) => api::ArtworkTarget::Track(key.clone()),
         Entity::Album(id) => api::ArtworkTarget::Album(id.clone()),
-        Entity::Artist(name) => {
-            api::ArtworkTarget::Artist(api::ArtistCredit::new(name.clone(), None))
-        }
-        Entity::ArtistRef(artist) => api::ArtworkTarget::Artist(artist_credit_from_proto(artist)),
+        Entity::ArtistKey(key) => api::ArtworkTarget::Artist(api::ArtistKey::new(key.clone())),
         Entity::Playlist(id) => api::ArtworkTarget::Playlist(id.clone()),
         Entity::Catalog(id) => api::ArtworkTarget::Catalog(id.clone()),
         Entity::Station(id) => api::ArtworkTarget::Station(id.clone()),
@@ -281,7 +255,7 @@ pub fn album_info_to_proto(value: &api::AlbumInfo) -> AlbumInfo {
         artist: value.artist.clone(),
         genre: value.genre.clone(),
         year: value.year as u32,
-        artist_id: value.artist_id.clone(),
+        artist_key: value.artist_key.as_ref().map(ToString::to_string),
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
     }
 }
@@ -293,7 +267,7 @@ pub fn album_info_from_proto(value: &AlbumInfo) -> api::AlbumInfo {
         artist: value.artist.clone(),
         genre: value.genre.clone(),
         year: value.year as u16,
-        artist_id: value.artist_id.clone(),
+        artist_key: value.artist_key.clone().map(api::ArtistKey::new),
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
     }
 }
@@ -314,19 +288,19 @@ pub fn album_page_from_proto(value: &AlbumPage) -> api::AlbumPage {
 
 pub fn artist_info_to_proto(value: &api::ArtistInfo) -> ArtistInfo {
     ArtistInfo {
+        key: value.key.to_string(),
         name: value.name.clone(),
         track_count: value.track_count,
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
-        id: value.id.clone(),
     }
 }
 
 pub fn artist_info_from_proto(value: &ArtistInfo) -> api::ArtistInfo {
     api::ArtistInfo {
+        key: api::ArtistKey::new(value.key.clone()),
         name: value.name.clone(),
         track_count: value.track_count,
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
-        id: value.id.clone(),
     }
 }
 
@@ -361,41 +335,39 @@ pub fn search_results_from_proto(value: &SearchResults) -> api::SearchResults {
 pub fn artist_credit_to_proto(value: &api::ArtistCredit) -> ArtistCredit {
     ArtistCredit {
         name: value.name.clone(),
-        id: value.id.clone(),
+        key: value.key.to_string(),
     }
 }
 
 pub fn artist_credit_from_proto(value: &ArtistCredit) -> api::ArtistCredit {
-    api::ArtistCredit::new(value.name.clone(), value.id.clone())
+    api::ArtistCredit {
+        name: value.name.clone(),
+        key: api::ArtistKey::new(value.key.clone()),
+    }
 }
 
-/// `names` carries every artist too, so a daemon that predates `artists` still refreshes.
-pub fn refresh_artists_to_proto(value: &[api::ArtistCredit]) -> RefreshArtistArtworkRequest {
+pub fn refresh_artists_to_proto(value: &[api::ArtistKey]) -> RefreshArtistArtworkRequest {
     RefreshArtistArtworkRequest {
-        names: value.iter().map(|artist| artist.name.clone()).collect(),
-        artists: value.iter().map(artist_credit_to_proto).collect(),
+        keys: value.iter().map(ToString::to_string).collect(),
     }
 }
 
-pub fn refresh_artists_from_proto(value: &RefreshArtistArtworkRequest) -> Vec<api::ArtistCredit> {
-    if value.artists.is_empty() {
-        return value
-            .names
-            .iter()
-            .map(|name| api::ArtistCredit::new(name.clone(), None))
-            .collect();
-    }
-    value.artists.iter().map(artist_credit_from_proto).collect()
+pub fn refresh_artists_from_proto(value: &RefreshArtistArtworkRequest) -> Vec<api::ArtistKey> {
+    value
+        .keys
+        .iter()
+        .cloned()
+        .map(api::ArtistKey::new)
+        .collect()
 }
 
 pub fn artist_tracks_request_to_proto(
-    artist: &api::ArtistCredit,
+    artist: &api::ArtistKey,
     page: api::Page,
 ) -> ArtistTracksRequest {
     ArtistTracksRequest {
-        artist: artist.name.clone(),
+        key: artist.to_string(),
         page: Some(page_to_proto(page)),
-        artist_id: artist.id.clone(),
     }
 }
 
@@ -406,15 +378,12 @@ pub fn artist_detail_to_proto(value: &api::ArtistDetail) -> ArtistDetail {
     }
 }
 
-pub fn artist_detail_from_proto(value: &ArtistDetail) -> api::ArtistDetail {
-    api::ArtistDetail {
-        info: value
-            .info
-            .as_ref()
-            .map(artist_info_from_proto)
-            .unwrap_or_default(),
+/// A detail without its artist is malformed, and says so rather than naming nobody.
+pub fn artist_detail_from_proto(value: &ArtistDetail) -> Option<api::ArtistDetail> {
+    Some(api::ArtistDetail {
+        info: artist_info_from_proto(value.info.as_ref()?),
         albums: value.albums.iter().map(album_info_from_proto).collect(),
-    }
+    })
 }
 
 #[cfg(test)]
@@ -449,16 +418,14 @@ mod tests {
                 target: api::ArtworkTarget::Track("k".into()),
                 version: 9,
             }),
-            // One linked and one not: an absent id has to stay absent, not
-            // arrive as an empty string that a caller would take for an id.
             credits: vec![
                 api::ArtistCredit {
                     name: "a".into(),
-                    id: Some("UC-a".into()),
+                    key: api::ArtistKey::new("id:srv:UC-a"),
                 },
                 api::ArtistCredit {
                     name: "b".into(),
-                    id: None,
+                    key: api::ArtistKey::new("name:srv:b"),
                 },
             ],
         };
@@ -466,36 +433,44 @@ mod tests {
     }
 
     #[test]
-    fn a_name_only_artist_still_travels_in_the_field_older_peers_read() {
-        let bare = api::ArtworkTarget::Artist(api::ArtistCredit::new("Ada", None));
-        let linked = api::ArtworkTarget::Artist(api::ArtistCredit::new("Ada", Some("ar-1".into())));
-
-        let old = artwork_target_to_proto(&bare);
+    fn every_artist_reference_carries_its_key_across() {
+        let key = api::ArtistKey::new("id:srv:ar-1");
+        let target = api::ArtworkTarget::Artist(key.clone());
         assert_eq!(
-            old.entity,
-            Some(artwork_target::Entity::Artist("Ada".into()))
+            artwork_target_from_proto(&artwork_target_to_proto(&target)),
+            Some(target)
         );
-        assert_eq!(artwork_target_from_proto(&old), Some(bare));
+        let keys = [key.clone(), api::ArtistKey::new("name:srv:ada")];
         assert_eq!(
-            artwork_target_from_proto(&artwork_target_to_proto(&linked)),
-            Some(linked)
+            refresh_artists_from_proto(&refresh_artists_to_proto(&keys)),
+            keys
+        );
+
+        let detail = api::ArtistDetail {
+            info: api::ArtistInfo {
+                key: key.clone(),
+                name: "Ada".into(),
+                track_count: 2,
+                artwork: None,
+            },
+            albums: vec![api::AlbumInfo {
+                id: "al".into(),
+                artist_key: Some(key),
+                ..Default::default()
+            }],
+        };
+        assert_eq!(
+            artist_detail_from_proto(&artist_detail_to_proto(&detail)),
+            Some(detail)
         );
     }
 
     #[test]
-    fn a_refresh_from_an_older_client_names_its_artists() {
-        let old = RefreshArtistArtworkRequest {
-            names: vec!["Ada".into()],
-            artists: Vec::new(),
+    fn a_detail_naming_no_artist_is_malformed() {
+        let sent = ArtistDetail {
+            info: None,
+            albums: Vec::new(),
         };
-        assert_eq!(
-            refresh_artists_from_proto(&old),
-            [api::ArtistCredit::new("Ada", None)]
-        );
-
-        let artists = [api::ArtistCredit::new("Ada", Some("ar-1".into()))];
-        let sent = refresh_artists_to_proto(&artists);
-        assert_eq!(sent.names, ["Ada"]);
-        assert_eq!(refresh_artists_from_proto(&sent), artists);
+        assert_eq!(artist_detail_from_proto(&sent), None);
     }
 }

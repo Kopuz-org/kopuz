@@ -51,25 +51,32 @@ pub struct TrackInfo {
     pub credits: Vec<ArtistCredit>,
 }
 
-/// How any artist is referred to; the daemon withholds an id another source issued.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct ArtistCredit {
-    pub name: String,
-    pub id: Option<String>,
+/// Which artist is meant, as the daemon minted it. A frontend compares and passes it back, never reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ArtistKey(String);
+
+impl ArtistKey {
+    /// For the daemon, which mints keys, and the wire, which carries them.
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
-impl ArtistCredit {
-    pub fn new(name: impl Into<String>, id: Option<String>) -> Self {
-        Self {
-            name: name.into(),
-            id: id.filter(|id| !id.trim().is_empty()),
-        }
+impl std::fmt::Display for ArtistKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
+}
 
-    /// Nothing to open: a blank name with no id.
-    pub fn is_empty(&self) -> bool {
-        self.id.is_none() && self.name.trim().is_empty()
-    }
+/// One artist a row credits: what the row calls them, and the key that opens them.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ArtistCredit {
+    pub name: String,
+    pub key: ArtistKey,
 }
 
 impl TrackInfo {
@@ -166,7 +173,8 @@ pub struct AlbumInfo {
     pub genre: String,
     pub year: u16,
     pub artwork: Option<crate::ArtworkRef>,
-    pub artist_id: Option<String>,
+    /// Absent only when the album bills nobody.
+    pub artist_key: Option<ArtistKey>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -176,23 +184,16 @@ pub struct AlbumPage {
 }
 
 /// An artist and how many tracks the library holds for them.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtistInfo {
+    pub key: ArtistKey,
     pub name: String,
     pub track_count: u32,
     pub artwork: Option<crate::ArtworkRef>,
-    /// Absent for a name no stored credit links to an id.
-    pub id: Option<String>,
-}
-
-impl ArtistInfo {
-    pub fn credit(&self) -> ArtistCredit {
-        ArtistCredit::new(self.name.clone(), self.id.clone())
-    }
 }
 
 /// An artist page's header and albums; its tracks page through `artist_tracks`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtistDetail {
     pub info: ArtistInfo,
     pub albums: Vec<AlbumInfo>,
@@ -229,61 +230,67 @@ impl TrackInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::{ArtistCredit, TrackInfo};
+    use super::{ArtistCredit, ArtistKey, TrackInfo};
 
-    fn track(artist: &str, credits: &[(&str, Option<&str>)]) -> TrackInfo {
+    fn track(artist: &str, credits: &[(&str, &str)]) -> TrackInfo {
         TrackInfo {
             artist: artist.into(),
             credits: credits
                 .iter()
-                .map(|(name, id)| ArtistCredit {
+                .map(|(name, key)| ArtistCredit {
                     name: (*name).into(),
-                    id: id.map(Into::into),
+                    key: ArtistKey::new(*key),
                 })
                 .collect(),
             ..Default::default()
         }
     }
 
+    fn primary(row: &TrackInfo) -> Option<&str> {
+        row.primary_credit().map(|credit| credit.key.as_str())
+    }
+
     #[test]
     fn the_billed_artist_is_matched_by_name() {
-        let row = track("Boris", &[("Ada", Some("UC-ada")), ("Boris", Some("UC-b"))]);
+        let row = track("Boris", &[("Ada", "ada"), ("Boris", "b")]);
 
-        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-b"));
+        assert_eq!(primary(&row), Some("b"));
     }
 
     #[test]
     fn the_billed_artist_is_matched_in_any_case() {
-        let row = track("boris", &[("Ada", Some("UC-ada")), ("Boris", Some("UC-b"))]);
-        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-b"));
+        let row = track("boris", &[("Ada", "ada"), ("Boris", "b")]);
+        assert_eq!(primary(&row), Some("b"));
 
-        let row = track("JÉJA", &[("Cartoon", Some("UC-c")), ("Jéja", Some("UC-j"))]);
-        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-j"));
+        let row = track("JÉJA", &[("Cartoon", "c"), ("Jéja", "j")]);
+        assert_eq!(primary(&row), Some("j"));
     }
 
     /// A joined credit names no single artist, so the lead is the one to open.
     #[test]
     fn a_joined_billing_opens_its_lead() {
-        let row = track("Ada, Boris", &[("Ada", Some("UC-ada")), ("Boris", None)]);
+        let row = track("Ada, Boris", &[("Ada", "ada"), ("Boris", "b")]);
 
-        assert_eq!(row.primary_credit().unwrap().name, "Ada");
+        assert_eq!(primary(&row), Some("ada"));
     }
 
     /// No string is parsed to find the lead; the source's own order says who it is.
     #[test]
     fn an_unmatched_billing_opens_the_first_credit() {
-        let row = track(
-            "Ada & Boris",
-            &[("Ada", Some("UC-ada")), ("Boris", Some("UC-b"))],
-        );
+        let row = track("Ada & Boris", &[("Ada", "ada"), ("Boris", "b")]);
 
-        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-ada"));
+        assert_eq!(primary(&row), Some("ada"));
     }
 
     #[test]
     fn a_lone_credit_answers_whatever_the_billing_says() {
-        let row = track("Ada feat. Boris", &[("Ada", Some("UC-ada"))]);
+        let row = track("Ada feat. Boris", &[("Ada", "ada")]);
 
-        assert_eq!(row.primary_credit().unwrap().id.as_deref(), Some("UC-ada"));
+        assert_eq!(primary(&row), Some("ada"));
+    }
+
+    #[test]
+    fn a_row_crediting_nobody_opens_nobody() {
+        assert_eq!(primary(&track("", &[])), None);
     }
 }

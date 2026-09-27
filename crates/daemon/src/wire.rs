@@ -44,10 +44,9 @@ pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo
     }
 }
 
-/// Every credit in billing order, whatever shape the row stored. An id belongs
-/// to the source that issued it, so one from a row another source owns is left
-/// off rather than handed to a frontend that cannot tell the difference.
+/// Every credit in billing order, keyed under the active source; a row another service issued is keyed by name.
 fn credits(track: &Track, config: &config::AppConfig) -> Vec<api::ArtistCredit> {
+    let source = &config.active_source;
     if track.credits.is_empty() {
         let named = match track.artists.is_empty() {
             true => std::slice::from_ref(&track.artist),
@@ -57,18 +56,24 @@ fn credits(track: &Track, config: &config::AppConfig) -> Vec<api::ArtistCredit> 
             .iter()
             .filter(|name| !name.trim().is_empty())
             .map(|name| api::ArtistCredit {
+                key: crate::artist_key::of(source, name, None),
                 name: name.clone(),
-                id: None,
             })
             .collect();
     }
-    let active = track.id.service() == config.active_service();
+    let issued_here = track.id.service() == config.active_service();
     track
         .credits
         .iter()
-        .map(|credit| api::ArtistCredit {
-            name: credit.name.clone(),
-            id: credit.id.clone().filter(|_| active),
+        .map(|credit| {
+            let id = match issued_here {
+                true => credit.id.as_deref(),
+                false => None,
+            };
+            api::ArtistCredit {
+                key: crate::artist_key::of(source, &credit.name, id),
+                name: credit.name.clone(),
+            }
         })
         .collect()
 }
@@ -146,7 +151,11 @@ mod tests {
 
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].name, "Ada");
-        assert_eq!(sent[0].id, None);
+        assert_eq!(sent[0].key, keyed(&config, None));
+    }
+
+    fn keyed(config: &config::AppConfig, id: Option<&str>) -> api::ArtistKey {
+        crate::artist_key::of(&config.active_source, "Ada", id)
     }
 
     #[test]
@@ -162,7 +171,7 @@ mod tests {
 
         let sent = credits(&own, &config);
 
-        assert_eq!(sent[0].id.as_deref(), Some("UC-ada"));
+        assert_eq!(sent[0].key, keyed(&config, Some("UC-ada")));
     }
 
     /// A row stored before the column exists still names its artists, so the
@@ -182,6 +191,6 @@ mod tests {
 
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].name, "Ada");
-        assert_eq!(sent[0].id, None);
+        assert_eq!(sent[0].key, keyed(&config, None));
     }
 }

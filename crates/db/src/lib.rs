@@ -135,11 +135,11 @@ impl From<sqlx::migrate::MigrateError> for DbError {
     }
 }
 
-/// One artist of a source: its most common spelling, its id if the source issued one, and its track count.
+/// One artist of a source: who it is, its most common spelling, and its track count.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArtistRow {
+    pub key: utils::artist::ArtistKey,
     pub name: String,
-    pub id: Option<String>,
     pub tracks: u32,
 }
 
@@ -180,11 +180,11 @@ pub trait ReadStore: Send + Sync {
         album_id: &str,
     ) -> Result<Vec<reader::Track>, DbError>;
 
-    /// One artist's tracks by [`ArtistKey`](utils::artist::ArtistKey), album/disc/track-ordered.
+    /// One artist's tracks, album/disc/track-ordered.
     async fn artist_tracks(
         &self,
         source: &Source,
-        artist: &reader::ArtistCredit,
+        artist: &utils::artist::ArtistKey,
         limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError>;
 
@@ -192,8 +192,15 @@ pub trait ReadStore: Send + Sync {
     async fn artist_albums(
         &self,
         source: &Source,
-        artist: &reader::ArtistCredit,
+        artist: &utils::artist::ArtistKey,
     ) -> Result<Vec<reader::Album>, DbError>;
+
+    /// One artist as [`ReadStore::artists`] lists it, or `None` when the source credits nobody by that key.
+    async fn artist(
+        &self,
+        source: &Source,
+        artist: &utils::artist::ArtistKey,
+    ) -> Result<Option<ArtistRow>, DbError>;
 
     /// Tracks whose album has this genre, artist/album-ordered.
     async fn genre_tracks(

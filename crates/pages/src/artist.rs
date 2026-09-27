@@ -18,11 +18,6 @@ use hooks::use_db_queries::{
     use_active_source, use_albums, use_artist, use_artist_tracks, use_artists, use_tracks_by_keys,
 };
 use std::collections::{HashMap, HashSet};
-use utils::artist::ArtistKey;
-
-fn credit_key(artist: &api::ArtistCredit) -> ArtistKey {
-    ArtistKey::of(&artist.name, artist.id.as_deref())
-}
 
 /// One album-card menu entry, tagged so dispatch survives the entry set being
 /// built dynamically from capabilities (indices shift as entries are gated in).
@@ -37,8 +32,8 @@ enum AlbumAction {
 #[component]
 pub fn Artist(
     config: Signal<AppConfig>,
-    artist_name: Signal<String>,
-    artist_id: Signal<Option<String>>,
+    /// The open artist; `None` shows the grid of them all.
+    artist: Signal<Option<api::ArtistKey>>,
     on_navigate: EventHandler<String>,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
@@ -65,13 +60,9 @@ pub fn Artist(
 
     let albums_res = use_albums(source);
     let artists_res = use_artists(source);
-    let artist_credit = use_memo(move || {
-        api::ArtistCredit::new(artist_name.read().clone(), artist_id.read().clone())
-    });
-    let artist_tracks_res = use_artist_tracks(source, artist_credit);
-    let artist_res = use_artist(source, artist_credit);
-    // Ask the daemon to fill in photos for the artists this grid shows; it
-    // stores what it finds and announces it, so the tiles resolve on re-read.
+    let open_artist = use_memo(move || artist.read().clone());
+    let artist_tracks_res = use_artist_tracks(source, open_artist);
+    let artist_res = use_artist(source, open_artist);
     hooks::artist_images::use_artist_photo_fetch(artists_res);
 
     // Server + offline: keys of tracks downloaded for offline, used to restrict the
@@ -152,42 +143,38 @@ pub fn Artist(
         let albums = albums_res.read().clone().unwrap_or_default();
         let offline = caps().downloads && *is_offline.read();
 
-        let downloaded: HashSet<ArtistKey> = if offline {
+        let downloaded: HashSet<api::ArtistKey> = if offline {
             offline_tracks_res
                 .read()
-                .clone()
-                .unwrap_or_default()
                 .iter()
-                .flat_map(|track| track.credits.iter().map(credit_key))
+                .flatten()
+                .flat_map(|track| track.credits.iter().map(|credit| credit.key.clone()))
                 .collect()
         } else {
             HashSet::new()
         };
-        let mut album_counts: HashMap<ArtistKey, u32> = HashMap::new();
-        for album in &albums {
-            *album_counts
-                .entry(ArtistKey::of(&album.artist, album.artist_id.as_deref()))
-                .or_default() += 1;
+        let mut album_counts: HashMap<api::ArtistKey, u32> = HashMap::new();
+        for artist in albums.iter().filter_map(|album| album.artist_key.clone()) {
+            *album_counts.entry(artist).or_default() += 1;
         }
 
-        let mut shown: Vec<api::ArtistInfo> = hooks::artist_images::grid_artists(&listed)
-            .into_iter()
-            .filter(|artist| !offline || downloaded.contains(&credit_key(&artist.credit())))
-            .collect();
-        // Sort by the stacked criteria; the name, then the id, break remaining ties.
-        let criteria = artist_sort.read().clone();
-        let albums_of = |artist: &api::ArtistInfo| {
-            album_counts
-                .get(&credit_key(&artist.credit()))
-                .copied()
-                .unwrap_or(0)
+        let mut shown: Vec<api::ArtistInfo> = match offline {
+            true => listed
+                .into_iter()
+                .filter(|artist| downloaded.contains(&artist.key))
+                .collect(),
+            false => listed,
         };
+        // Sort by the stacked criteria; the name, then the key, break remaining ties.
+        let criteria = artist_sort.read().clone();
+        let albums_of =
+            |artist: &api::ArtistInfo| album_counts.get(&artist.key).copied().unwrap_or(0);
         shown.sort_by(|a, b| {
             let by_name = || {
                 a.name
                     .to_lowercase()
                     .cmp(&b.name.to_lowercase())
-                    .then_with(|| a.id.cmp(&b.id))
+                    .then_with(|| a.key.cmp(&b.key))
             };
             for c in &criteria {
                 let ord = match c.field {
@@ -213,7 +200,7 @@ pub fn Artist(
     // don't keep yanking the view back to the saved offset.
     let mut scroll_restored = use_signal(|| false);
     use_effect(move || {
-        if *scroll_restored.read() || !artist_name.peek().is_empty() {
+        if *scroll_restored.read() || artist.peek().is_some() {
             return;
         }
         if artists().is_empty() {
@@ -227,7 +214,7 @@ pub fn Artist(
     });
 
     let artist_tracks = use_memo(move || {
-        if artist_credit.read().is_empty() {
+        if open_artist.read().is_none() {
             return Vec::new();
         }
         let tracks = artist_tracks_res.read().clone().unwrap_or_default();
@@ -285,7 +272,14 @@ pub fn Artist(
         fields
     });
 
-    let name = artist_name.read().clone();
+    let detail_open = open_artist.read().is_some();
+    // Blank until the daemon names the artist; the key carries no display name.
+    let name = artist_res
+        .read()
+        .clone()
+        .flatten()
+        .map(|detail| detail.info.name)
+        .unwrap_or_default();
     let page_container_class = crate::layout::page_container_class(&config.read().ui_style);
 
     // The refs (item ids / local paths) of the currently-selected tracks — derived
@@ -302,7 +296,7 @@ pub fn Artist(
         div {
             class: page_container_class,
 
-            if name.is_empty() {
+            if !detail_open {
                 div { class: "flex-1 min-h-0 flex flex-col",
                     if !cfg!(target_os = "android") {
                         h1 { class: "text-3xl font-semibold tracking-tight text-white mb-6 shrink-0", "{i18n::t(\"artists\")}" }
@@ -329,14 +323,14 @@ pub fn Artist(
                             for artist in artists() {
                                 {
                                     let cover_url = hooks::artwork::url(artist.artwork.as_ref(), hooks::artwork::Size::Thumb);
-                                    let tile_key = format!("{}\u{1f}{}", artist.id.as_deref().unwrap_or_default(), artist.name);
-                                    let credit = artist.credit();
+                                    let tile_key = artist.key.to_string();
+                                    let opens = artist.key.clone();
                                     rsx! {
                                         div {
                                             key: "{tile_key}",
                                             class: "vcard group cursor-pointer flex flex-col items-center",
                                             style: "content-visibility: auto;",
-                                            onclick: move |_| nav_ctrl.open_artist(credit.name.clone(), credit.id.clone()),
+                                            onclick: move |_| nav_ctrl.open_artist(opens.clone()),
                                             div {
                                                 class: "vcard-avatar aspect-square w-full rounded-full bg-stone-800 mb-4 overflow-hidden relative",
                                                 style: "-webkit-user-drag: none;",
@@ -650,10 +644,9 @@ pub fn Artist(
                                 on_cover_click: move |_| {
                                     #[cfg(not(target_os = "android"))]
                                     {
-                                        let artist = artist_credit.peek().clone();
-                                        if artist.is_empty() {
+                                        let Some(artist) = open_artist.peek().clone() else {
                                             return;
-                                        }
+                                        };
                                         spawn(async move {
                                             let Some(file) = rfd::AsyncFileDialog::new()
                                                 .add_filter("Images", &["jpg", "jpeg", "png", "webp"])

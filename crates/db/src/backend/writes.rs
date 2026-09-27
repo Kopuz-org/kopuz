@@ -88,12 +88,13 @@ async fn ensure_album(
         true => "Singles",
         false => t.album.as_str(),
     };
+    let billed = utils::artist::normalize_artist_key(&t.artist);
     let artist_id = t
         .credits
         .iter()
-        .find(|credit| credit.name.trim() == t.artist.trim())
+        .find(|credit| utils::artist::normalize_artist_key(&credit.name) == billed)
         .or(t.credits.first())
-        .and_then(|credit| credit.id.clone());
+        .and_then(|credit| stored_id(credit.id.as_deref()));
     sqlx::query!(
         "INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_id, derived) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) ON CONFLICT(source, source_album_id) DO NOTHING",
@@ -107,6 +108,11 @@ async fn ensure_album(
     .execute(&mut **tx)
     .await?;
     Ok(())
+}
+
+/// An id as stored: a blank one is no id, so no reader has to check again.
+fn stored_id(id: Option<&str>) -> Option<&str> {
+    id.map(str::trim).filter(|id| !id.is_empty())
 }
 
 /// The credits a row stores: the source's own, else its names as unlinked credits.
@@ -146,13 +152,14 @@ pub(crate) async fn write_track_children(
         for (position, credit) in stored_credits(t).iter().enumerate() {
             let position = position as i64;
             let name = credit.name.trim();
+            let artist_id = stored_id(credit.id.as_deref());
             sqlx::query!(
                 "INSERT INTO track_credits (track_pk, position, name, artist_id) \
                  VALUES (?1, ?2, ?3, ?4)",
                 pk,
                 position,
                 name,
-                credit.id
+                artist_id
             )
             .execute(&mut **tx)
             .await?;
@@ -230,6 +237,7 @@ pub async fn upsert_albums(
             .cover_path
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned());
+        let artist_id = stored_id(a.artist_id.as_deref());
         sqlx::query!(
             "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_id) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
@@ -246,7 +254,7 @@ pub async fn upsert_albums(
             year,
             cover,
             manual,
-            a.artist_id
+            artist_id
         )
         .execute(&mut *tx)
         .await?;

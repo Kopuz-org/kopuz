@@ -41,7 +41,7 @@ service Kopuz {
   rpc GetAlbumTracks(AlbumTracksRequest) returns (TrackPage);
   rpc GetArtists(Page) returns (ArtistPage);
   rpc GetArtistTracks(ArtistTracksRequest) returns (TrackPage);
-  rpc GetArtist(ArtistCredit) returns (ArtistDetail);
+  rpc GetArtist(ArtistRequest) returns (ArtistDetail);
   rpc GetArtistSampleTracks(Page) returns (TrackPage);
   rpc GetGenres(GetGenresRequest) returns (GenreList);
   rpc GetTopGenre(GetTopGenreRequest) returns (TopGenreResponse);
@@ -265,7 +265,7 @@ message PlayerState {
   uint64 now_ms = 2;
   Phase phase = 3;
   Intent intent = 4;
-  optional NowPlaying track = 5;
+  reserved 5; // was a trimmed summary of `row`
   optional PositionAnchor position = 6;
   QueueSummary queue = 7;
   float volume = 8;
@@ -276,7 +276,7 @@ message PlayerState {
   optional ExternalPlayback external = 11;
   optional ErrorBody error = 12;
   optional uint64 output_latency_ms = 13;
-  // The whole row behind `track`, which stays filled for a peer that predates this.
+  // What is playing, the same row the queue holds.
   optional TrackInfo row = 14;
 }
 
@@ -298,22 +298,6 @@ message Intent {
   }
 }
 
-message NowPlaying {
-  // key is the library ref and the GetArtwork entity id; uid is the
-  // source-qualified identity. Same meaning as on TrackInfo.
-  string key = 1;
-  string uid = 10;
-  string title = 2;
-  string artist = 3;
-  string album = 4;
-  optional uint64 duration_ms = 5;
-  uint32 khz = 6;
-  uint32 bitrate = 7;
-  TrackKind kind = 8;
-  bool seekable = 9;
-  optional ArtworkRef artwork = 11;
-}
-
 message PositionAnchor {
   uint64 ms = 1;
   uint64 at_ms = 2;
@@ -327,11 +311,10 @@ message BufferedRange {
 }
 
 message FadingState {
+  reserved 2; // was a trimmed summary of `row`
   uint64 from_token = 1;
-  NowPlaying track = 2;
   uint64 position_ms = 3;
-  // The whole row behind `track`, which stays filled for a peer that predates this.
-  optional TrackInfo row = 4;
+  TrackInfo row = 4;
 }
 
 message ExternalPlayback {
@@ -383,11 +366,10 @@ message SetQueueRequest {
 // Reference-shaped contexts materialize daemon-side, so "play this album"
 // never round-trips a track list through the client.
 message QueueContext {
+  reserved 3, 10; // were a name and a credit, now one key
   oneof kind {
     TrackKeys tracks = 1;
     Id album = 2;
-    // Superseded by artist_ref; still read as a name-keyed artist.
-    Name artist = 3;
     Name genre = 4;
     Id playlist = 5;
     TrackFilter filter = 6;
@@ -396,7 +378,7 @@ message QueueContext {
     // it and pins the seed at the front.
     Key track_radio = 8;
     Id playlist_radio = 9;
-    ArtistCredit artist_ref = 10;
+    string artist_key = 11;
   }
   message TrackKeys {
     repeated string keys = 1;
@@ -527,7 +509,9 @@ message AlbumInfo {
   uint32 year = 5;
   // Absent when the daemon has no cover for the album.
   optional ArtworkRef artwork = 6;
-  optional string artist_id = 7;
+  reserved 7; // was the source's raw artist id, now folded into the key
+  // Absent only when the album bills nobody.
+  optional string artist_key = 8;
 }
 
 message AlbumPage {
@@ -552,8 +536,8 @@ message ArtistInfo {
   string name = 1;
   uint32 track_count = 2;
   optional ArtworkRef artwork = 3;
-  // Absent for a name no stored credit links to an id.
-  optional string id = 4;
+  reserved 4; // was the source's raw id, now folded into the key
+  string key = 5;
 }
 
 message ArtistPage {
@@ -562,9 +546,9 @@ message ArtistPage {
 }
 
 message ArtistTracksRequest {
-  string artist = 1;
+  reserved 1, 3; // were a name and a raw id, now one key
   Page page = 2;
-  optional string artist_id = 3;
+  string key = 4;
 }
 message ArtistDetail {
   ArtistInfo info = 1;
@@ -606,8 +590,8 @@ message WebUrl {
 }
 
 message RefreshArtistArtworkRequest {
-  repeated string names = 1;
-  repeated ArtistCredit artists = 2;
+  reserved 1, 2; // were names and credits, now keys
+  repeated string keys = 3;
 }
 
 message SearchResults {
@@ -1016,14 +1000,11 @@ message CatalogPage {
 }
 
 message CatalogDetailRequest {
+  reserved 4; // was a name to resolve, now carried by an artist key
   CatalogItemKind kind = 1;
-  // An id the source issued. Empty when the caller only knows a name.
+  // What the daemon handed out for the entity: a tile's id, or an artist's key.
   string id = 2;
   optional string continuation = 3;
-  // What to look the entity up by when no id is held: the daemon asks the
-  // source to resolve it. Said outright rather than posted through `id`,
-  // which left the two telling apart to a guess at the string's shape.
-  optional string name = 4;
 }
 
 message CatalogDetail {
@@ -1038,8 +1019,9 @@ message CatalogDetail {
   repeated TrackInfo tracks = 9;
   repeated CatalogShelf shelves = 10;
   optional string continuation = 11;
-  // For an album, the artist whose page its header opens.
-  optional string artist_id = 12;
+  reserved 12; // was the source's raw artist id, now folded into the key
+  // For an album, the artist its header opens; absent when it bills nobody.
+  optional string artist_key = 13;
 }
 
 // ---------------- radio ----------------
@@ -1191,11 +1173,15 @@ message TrackInfo {
   repeated ArtistCredit credits = 23;
 }
 
-// The id is the issuing source's own, so the daemon sends it only while that
-// source is the active one.
+// An artist key is minted by the daemon; a frontend compares and passes it back, never reads it.
 message ArtistCredit {
+  reserved 2; // was the source's raw id, now folded into the key
   string name = 1;
-  optional string id = 2;
+  string key = 3;
+}
+
+message ArtistRequest {
+  string key = 1;
 }
 
 message TrackRef {
@@ -1646,14 +1632,14 @@ message DaemonStatus {
 // ask for the image without knowing how it is stored. catalog and station
 // name things outside the library: a browse tile, a radio station icon.
 message ArtworkTarget {
+  reserved 3, 7; // were a name and a credit, now one key
   oneof entity {
     string track = 1;
     string album = 2;
-    string artist = 3;
     string playlist = 4;
     string catalog = 5;
     string station = 6;
-    ArtistCredit artist_ref = 7;
+    string artist_key = 8;
   }
 }
 
@@ -1666,14 +1652,14 @@ message ArtworkRef {
 }
 
 message ArtworkRequest {
+  reserved 3, 8; // were a name and a credit, now one key
   oneof entity {
     string track = 1;
     string album = 2;
-    string artist = 3;
     string playlist = 5;
     string catalog = 6;
     string station = 7;
-    ArtistCredit artist_ref = 8;
+    string artist_key = 9;
   }
   bool hq = 4;
 }

@@ -25,7 +25,10 @@ pub(super) fn sample_state() -> api::PlayerState {
                 target: api::ArtworkTarget::Track("k".into()),
                 version: 9,
             }),
-            credits: vec![api::ArtistCredit::new("a", Some("UC-a".into()))],
+            credits: vec![api::ArtistCredit {
+                name: "a".into(),
+                key: api::ArtistKey::new("id:srv:UC-a"),
+            }],
             ..Default::default()
         }),
         position: Some(api::PositionAnchor {
