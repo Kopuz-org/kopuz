@@ -39,7 +39,6 @@ pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo
         musicbrainz_release_id: track.musicbrainz_release_id.clone(),
         musicbrainz_recording_id: track.musicbrainz_recording_id.clone(),
         musicbrainz_track_id: track.musicbrainz_track_id.clone(),
-        playlist_item_id: track.playlist_item_id.clone(),
         artwork: crate::artwork::track_ref(track),
         credits: credits(track, config),
     }

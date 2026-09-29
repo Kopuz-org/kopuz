@@ -293,16 +293,13 @@ impl MediaSource for SubsonicSource {
     async fn remove_from_playlist(
         &self,
         playlist_id: &str,
-        track: &reader::Track,
+        _track: &reader::Track,
         position: usize,
     ) -> Result<(), SourceError> {
         self.client
             .remove_from_playlist(playlist_id, position)
             .await?;
-        self.db
-            .remove_playlist_tracks(&self.source, playlist_id, &[track.id.key().into_owned()])
-            .await
-            .map_err(SourceError::from)
+        self.remove_playlist_entry(playlist_id, position).await
     }
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
@@ -349,16 +346,16 @@ impl MediaSource for SubsonicSource {
     async fn reorder_playlist(
         &self,
         playlist_id: &str,
-        ordered_refs: &[String],
+        ordered: &[reader::PlaylistEntry],
         _moved: &reader::Track,
         _new_index: usize,
     ) -> Result<(), SourceError> {
-        let ids: Vec<&str> = ordered_refs.iter().map(String::as_str).collect();
+        let ids: Vec<&str> = ordered.iter().map(|entry| entry.key.as_str()).collect();
         self.client
             .reorder_playlist(playlist_id, &ids, ids.len())
             .await?;
         self.db
-            .set_playlist_tracks(&self.source, playlist_id, ordered_refs)
+            .set_playlist_tracks(&self.source, playlist_id, ordered)
             .await
             .map_err(SourceError::from)
     }

@@ -27,7 +27,7 @@ const TRACK_COLUMNS: &str = "t.track_key, t.service, \
     COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS cover_path, \
     t.source_album_id, t.title, \
     t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
-    t.mb_release_id, t.mb_recording_id, t.mb_track_id, t.playlist_item_id, \
+    mb.release_id AS mb_release_id, mb.recording_id AS mb_recording_id, mb.track_id AS mb_track_id, \
     (SELECT json_group_array(c.name ORDER BY c.position) \
        FROM track_credits c WHERE c.track_pk = t.rowid_pk) AS artists_json, \
     (SELECT json_group_array(json_object('name', c.name, 'id', c.artist_id) ORDER BY c.position) \
@@ -38,7 +38,8 @@ const TRACK_COLUMNS: &str = "t.track_key, t.service, \
 /// `albums` shares column names with `tracks` (`artist`/`title`/`cover_path`/…), so
 /// every query using this must `t.`-qualify its WHERE/ORDER BY columns.
 const TRACKS_FROM: &str = "FROM tracks t LEFT JOIN albums a \
-    ON a.source = t.source AND a.source_album_id = t.source_album_id";
+    ON a.source = t.source AND a.source_album_id = t.source_album_id \
+    LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk";
 
 /// SQL for a track row's listen-count key: built-in Local keeps the legacy
 /// path key, named local sources prefix it with their source id, and servers
@@ -287,6 +288,7 @@ pub async fn genre_tracks(
     let sql = format!(
         "SELECT {TRACK_COLUMNS} FROM tracks t \
          JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id \
+         LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk \
          WHERE t.source = ?1 AND a.genre = ?2 \
          ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_number, t.track_number"
     );
@@ -455,16 +457,12 @@ pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::Ar
     Ok(artists)
 }
 
-/// The source-issued id per credited artist, keyed by normalized name. Where a
-/// name carries several, the most credited wins rather than whichever row came
-/// first. Kept out of [`artists`] because an id-bearing row and a bare one both
-/// survive that UNION, and its `COUNT(*)` would then count the track twice.
+/// The most-credited source id per normalized name, so a row order never picks the answer.
 pub async fn artist_ids(
     pool: &SqlitePool,
     source: &Source,
 ) -> Result<std::collections::HashMap<String, String>, DbError> {
-    // Keyed in Rust, not with SQLite's `LOWER`: that folds ASCII only, so "ЛСП"
-    // would sit under a key no lookup through `normalize_artist_key` can reach.
+    // Keyed in Rust: SQLite's `LOWER` folds ASCII only, so "ЛСП" would miss every lookup.
     let rows: Vec<(String, String, i64)> = sqlx::query_as(
         "SELECT c.name, c.artist_id, COUNT(*) FROM track_credits c \
            JOIN tracks t ON t.rowid_pk = c.track_pk \

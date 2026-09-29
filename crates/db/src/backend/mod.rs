@@ -289,6 +289,14 @@ impl ReadStore for Native {
         dump::load_playlists(&self.pool(), source).await
     }
 
+    async fn playlist_entries(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+    ) -> Result<Vec<reader::PlaylistEntry>, DbError> {
+        writes::playlist_entries(&self.pool(), source, pl_id).await
+    }
+
     async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError> {
         queries::favorites(&self.pool(), server_id).await
     }
@@ -409,9 +417,9 @@ impl Storage for Native {
         &self,
         source: &crate::Source,
         pl_id: &str,
-        refs: &[String],
+        entries: &[reader::PlaylistEntry],
     ) -> Result<(), DbError> {
-        writes::set_playlist_tracks(&self.pool(), source, pl_id, refs).await
+        writes::set_playlist_tracks(&self.pool(), source, pl_id, entries).await
     }
 
     async fn add_playlist_tracks(
@@ -432,11 +440,20 @@ impl Storage for Native {
         writes::remove_playlist_tracks(&self.pool(), source, pl_id, refs).await
     }
 
+    async fn remove_playlist_entry(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        index: usize,
+    ) -> Result<(), DbError> {
+        writes::remove_playlist_entry(&self.pool(), source, pl_id, index).await
+    }
+
     async fn upsert_playlist_tracks_page(
         &self,
         source: &crate::Source,
         pl_id: &str,
-        refs: &[String],
+        entries: &[reader::PlaylistEntry],
         start_position: i64,
         epoch: i64,
     ) -> Result<(), DbError> {
@@ -444,7 +461,7 @@ impl Storage for Native {
             &self.pool(),
             source,
             pl_id,
-            refs,
+            entries,
             start_position,
             epoch,
         )
@@ -618,7 +635,7 @@ impl Storage for Native {
             "playlists",
             "favorites",
             "servers",
-            "metadata_cache",
+            "kv",
         ] {
             let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
                 .fetch_one(&*pool)

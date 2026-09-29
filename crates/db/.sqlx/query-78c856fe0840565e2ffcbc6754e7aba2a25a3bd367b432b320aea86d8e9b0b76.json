@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO kv (name, kind, value) VALUES ('legacy_import', 'files', ?1) ON CONFLICT(kind, name) DO UPDATE SET value = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "78c856fe0840565e2ffcbc6754e7aba2a25a3bd367b432b320aea86d8e9b0b76"
+}

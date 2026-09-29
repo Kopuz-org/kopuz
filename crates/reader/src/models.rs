@@ -163,6 +163,7 @@ pub struct Track {
     pub musicbrainz_recording_id: Option<String>,
     #[serde(default)]
     pub musicbrainz_track_id: Option<String>,
+    /// Only set on a row fetched as a playlist entry; it is stored with the entry, never the track.
     #[serde(default)]
     pub playlist_item_id: Option<String>,
     #[serde(default)]
@@ -773,6 +774,41 @@ pub struct Playlist {
     /// Server cover-version tag (server playlists only; `None` for local).
     pub image_tag: Option<String>,
     pub cover_path: Option<PathBuf>,
+}
+
+/// One playlist entry: its track, and the entry's own id where the source numbers entries.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlaylistEntry {
+    pub key: String,
+    pub item_id: Option<String>,
+}
+
+impl PlaylistEntry {
+    pub fn of(key: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            item_id: None,
+        }
+    }
+
+    pub fn from_track(track: &Track) -> Self {
+        Self {
+            key: track.id.key().into_owned(),
+            item_id: track.playlist_item_id.clone(),
+        }
+    }
+}
+
+impl From<&str> for PlaylistEntry {
+    fn from(key: &str) -> Self {
+        Self::of(key)
+    }
+}
+
+impl From<String> for PlaylistEntry {
+    fn from(key: String) -> Self {
+        Self::of(key)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

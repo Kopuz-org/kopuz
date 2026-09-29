@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO track_musicbrainz (track_pk, release_id, recording_id, track_id) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(track_pk) DO UPDATE SET release_id = ?2, recording_id = ?3, track_id = ?4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "23b7fc524481aec80ed742453ea17e80c602f73a163098acfc8644ab76a8370e"
+}
