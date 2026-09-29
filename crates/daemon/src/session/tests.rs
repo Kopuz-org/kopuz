@@ -142,10 +142,7 @@ fn test_track(key: &String) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         credits: if key.contains("credited") {
-            vec![reader::models::ArtistCredit {
-                name: "Ada".into(),
-                id: Some("ar-ada".into()),
-            }]
+            vec![reader::models::ArtistCredit::linked("Ada", "ar-ada")]
         } else {
             Vec::new()
         },

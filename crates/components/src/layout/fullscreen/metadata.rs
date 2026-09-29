@@ -20,7 +20,7 @@ pub(crate) fn TrackMetadata(
     let artist = current_track_snapshot
         .as_ref()
         .and_then(|track| track.primary_credit())
-        .map(|credit| credit.key.clone());
+        .and_then(|credit| credit.key.clone());
     let actions_track = current_track_snapshot.clone();
     let favorite_label = if is_favorite {
         i18n::t("remove_from_favorites").to_string()

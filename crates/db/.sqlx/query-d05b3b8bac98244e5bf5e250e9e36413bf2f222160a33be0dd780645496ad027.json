@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO track_credits (track_pk, position, artist_pk, name) VALUES (?1, ?2, ?3, ?4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "d05b3b8bac98244e5bf5e250e9e36413bf2f222160a33be0dd780645496ad027"
+}

@@ -273,6 +273,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Hindi natagpuan ang album
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Hindi natagpuan ang playlist
 no_playlists_found = Walang nahanap na playlist
 no_playlists_yet = Wala pang playlist. Magdagdag ng kanta mula sa iyong aklatan!

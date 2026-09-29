@@ -120,6 +120,7 @@ async fn automatic_cover_update_preserves_concurrent_manual_cover() {
         cover_path: None,
         manual_cover: false,
         artist_id: None,
+        library_artist: None,
     };
     db.upsert_albums(&Source::Local, &[album]).await.unwrap();
 
@@ -145,28 +146,39 @@ async fn automatic_cover_update_preserves_concurrent_manual_cover() {
 }
 
 #[tokio::test]
-async fn an_album_keeps_its_artist_id_when_a_later_upsert_has_none() {
+async fn a_rebilled_album_takes_the_new_artist_whole() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
     let source = Source::Server("srv".into());
-    let album = |artist_id: Option<&str>| Album {
+    let album = |artist: &str, artist_id: Option<&str>| Album {
         id: "MPRE1".into(),
         title: "Album".into(),
-        artist: "Artist".into(),
+        artist: artist.into(),
         genre: String::new(),
         year: 0,
         cover_path: None,
         manual_cover: false,
         artist_id: artist_id.map(Into::into),
+        library_artist: None,
     };
 
-    db.upsert_albums(&source, &[album(Some("UC-a"))])
+    db.upsert_albums(&source, &[album("Ada", Some("UC-a"))])
         .await
         .unwrap();
-    db.upsert_albums(&source, &[album(None)]).await.unwrap();
+    db.upsert_albums(&source, &[album("Boris", None)])
+        .await
+        .unwrap();
 
     let stored = db.album(&source, "MPRE1").await.unwrap().unwrap();
-    assert_eq!(stored.artist_id.as_deref(), Some("UC-a"));
+    assert_eq!(stored.artist, "Boris");
+    assert_eq!(
+        stored.artist_id, None,
+        "Ada's id would open the wrong artist"
+    );
+
+    db.upsert_albums(&source, &[album("", None)]).await.unwrap();
+    let stored = db.album(&source, "MPRE1").await.unwrap().unwrap();
+    assert_eq!(stored.library_artist, None, "billed to nobody");
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

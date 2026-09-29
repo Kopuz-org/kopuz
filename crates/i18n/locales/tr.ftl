@@ -203,6 +203,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Albüm bulunamadı
+artist_not_found = Sanatçı bulunamadı
+artist_load_failed = Sanatçı yüklenemedi: { $error }
 playlist_not_found = Çalma listesi bulunamadı
 no_playlists_found = Çalma listesi bulunamadı
 no_playlists_yet = Henüz çalma listesi yok. Kütüphanenize şarkı ekleyin!

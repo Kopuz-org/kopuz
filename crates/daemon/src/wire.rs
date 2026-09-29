@@ -35,7 +35,6 @@ pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo
         seekable: !radio,
         offline,
         format: track_format(track),
-        artists: track.artists.clone(),
         musicbrainz_release_id: track.musicbrainz_release_id.clone(),
         musicbrainz_recording_id: track.musicbrainz_recording_id.clone(),
         musicbrainz_track_id: track.musicbrainz_track_id.clone(),
@@ -44,9 +43,8 @@ pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo
     }
 }
 
-/// Every credit in billing order, keyed under the active source; a row another service issued is keyed by name.
+/// Every credit in billing order, with the artist it opens where the daemon can tell which that is.
 fn credits(track: &Track, config: &config::AppConfig) -> Vec<api::ArtistCredit> {
-    let source = &config.active_source;
     if track.credits.is_empty() {
         let named = match track.artists.is_empty() {
             true => std::slice::from_ref(&track.artist),
@@ -56,24 +54,25 @@ fn credits(track: &Track, config: &config::AppConfig) -> Vec<api::ArtistCredit> 
             .iter()
             .filter(|name| !name.trim().is_empty())
             .map(|name| api::ArtistCredit {
-                key: crate::artist_key::of(source, name, None),
                 name: name.clone(),
+                key: None,
             })
             .collect();
     }
-    let issued_here = track.id.service() == config.active_service();
+    // A row the library never stored is one the active source just listed, unless another service issued it.
+    let listed_here = track.id.service() == config.active_service();
     track
         .credits
         .iter()
-        .map(|credit| {
-            let id = match issued_here {
-                true => credit.id.as_deref(),
-                false => None,
-            };
-            api::ArtistCredit {
-                key: crate::artist_key::of(source, &credit.name, id),
-                name: credit.name.clone(),
-            }
+        .map(|credit| api::ArtistCredit {
+            name: credit.name.clone(),
+            key: match (&credit.library, credit.id.as_deref()) {
+                (Some(filed), id) => Some(crate::artist_key::of_library(filed, id)),
+                (None, Some(id)) if listed_here => {
+                    Some(crate::artist_key::issued(&config.active_source, id))
+                }
+                (None, _) => None,
+            },
         })
         .collect()
 }
@@ -134,10 +133,16 @@ mod tests {
         config
     }
 
-    /// An id means nothing to a source that did not issue it, and a frontend
-    /// cannot tell which source a row came from -- so the daemon decides.
+    fn yt(item_id: &str) -> TrackId {
+        TrackId::Server {
+            service: config::MusicService::YtMusic,
+            item_id: item_id.into(),
+        }
+    }
+
+    /// An id means nothing to a source that did not issue it, and only the daemon can tell whose a row is.
     #[test]
-    fn an_id_from_another_source_is_not_sent() {
+    fn a_listed_id_from_another_service_opens_nothing() {
         let config = yt_config();
         let foreign = track(
             TrackId::Server {
@@ -150,47 +155,62 @@ mod tests {
         let sent = credits(&foreign, &config);
 
         assert_eq!(sent.len(), 1);
-        assert_eq!(sent[0].name, "Ada");
-        assert_eq!(sent[0].key, keyed(&config, None));
-    }
-
-    fn keyed(config: &config::AppConfig, id: Option<&str>) -> api::ArtistKey {
-        crate::artist_key::of(&config.active_source, "Ada", id)
+        assert_eq!((sent[0].name.as_str(), &sent[0].key), ("Ada", &None));
     }
 
     #[test]
-    fn an_id_from_the_active_source_is_sent() {
+    fn a_listed_id_from_the_active_source_opens_its_artist() {
         let config = yt_config();
-        let own = track(
-            TrackId::Server {
-                service: config::MusicService::YtMusic,
-                item_id: "y-1".into(),
-            },
-            vec![ArtistCredit::linked("Ada", "UC-ada")],
-        );
+        let own = track(yt("y-1"), vec![ArtistCredit::linked("Ada", "UC-ada")]);
 
         let sent = credits(&own, &config);
 
-        assert_eq!(sent[0].key, keyed(&config, Some("UC-ada")));
+        let expected = crate::artist_key::issued(&config.active_source, "UC-ada");
+        assert_eq!(sent[0].key, Some(expected));
     }
 
-    /// A row stored before the column exists still names its artists, so the
-    /// wire always carries a complete list and a frontend needs no fallback.
+    /// A stored row says which source filed it, so switching sources never re-keys it under the new one.
     #[test]
-    fn a_row_without_credits_falls_back_to_the_names() {
+    fn a_stored_credit_is_keyed_by_the_row_it_is_filed_under() {
         let config = yt_config();
-        let bare = track(
-            TrackId::Server {
-                service: config::MusicService::YtMusic,
-                item_id: "y-2".into(),
-            },
-            Vec::new(),
+        let filed = |pk: i64| {
+            Some(reader::LibraryArtist {
+                pk,
+                source: "srv-0".into(),
+            })
+        };
+        let stored = track(
+            yt("y-1"),
+            vec![
+                ArtistCredit {
+                    library: filed(3),
+                    ..ArtistCredit::linked("Ada", "UC-ada")
+                },
+                ArtistCredit {
+                    library: filed(4),
+                    ..ArtistCredit::unlinked("Boris")
+                },
+            ],
         );
 
-        let sent = credits(&bare, &config);
+        let sent = credits(&stored, &config);
+
+        let elsewhere = config::Source::Server("srv-0".into());
+        assert_eq!(
+            sent[0].key,
+            Some(crate::artist_key::issued(&elsewhere, "UC-ada"))
+        );
+        assert_eq!(sent[1].key, Some(crate::artist_key::library(4)));
+    }
+
+    /// A row that only names its artists still lists them all; there is nothing to open them by.
+    #[test]
+    fn a_row_without_credits_sends_its_names_unkeyed() {
+        let config = yt_config();
+
+        let sent = credits(&track(yt("y-2"), Vec::new()), &config);
 
         assert_eq!(sent.len(), 1);
-        assert_eq!(sent[0].name, "Ada");
-        assert_eq!(sent[0].key, keyed(&config, None));
+        assert_eq!((sent[0].name.as_str(), &sent[0].key), ("Ada", &None));
     }
 }

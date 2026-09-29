@@ -506,9 +506,9 @@ fn track_matches_filter(track: &api::TrackInfo, query: &str) -> bool {
         || track.artist.to_lowercase().contains(query)
         || track.album.to_lowercase().contains(query)
         || track
-            .artists
+            .credits
             .iter()
-            .any(|artist| artist.to_lowercase().contains(query))
+            .any(|credit| credit.name.to_lowercase().contains(query))
 }
 
 #[cfg(test)]
@@ -527,7 +527,10 @@ mod tests {
             khz: 44_100,
             track_number: Some(11),
             disc_number: Some(1),
-            artists: vec!["Anthony Gonzalez".to_string()],
+            credits: vec![api::ArtistCredit {
+                name: "Anthony Gonzalez".to_string(),
+                key: None,
+            }],
             ..Default::default()
         }
     }

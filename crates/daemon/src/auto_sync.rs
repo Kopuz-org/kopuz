@@ -1,4 +1,4 @@
-//! Syncs a remote source's library, playlists and favorites at startup and on source change when stale or empty.
+//! Syncs a remote source's library, playlists and favorites at startup and on source change once a day has passed.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -54,40 +54,11 @@ async fn last_synced(db: &db::Db, kind: JobKind, source: &config::Source) -> Opt
         .and_then(|raw| raw.parse().ok())
 }
 
-// An emptied or never-synced store may carry no stamp, so age alone cannot see it.
-async fn is_empty(db: &db::Db, kind: JobKind, source: &config::Source) -> bool {
-    match kind {
-        JobKind::LibrarySync => db
-            .tracks_page(
-                &db::TrackFilter::new(source.clone()),
-                db::Page {
-                    offset: 0,
-                    limit: 1,
-                },
-            )
-            .await
-            .map(|rows| rows.is_empty())
-            .unwrap_or(false),
-        JobKind::PlaylistSync => db
-            .load_playlists(source)
-            .await
-            .map(|store| store.playlists.is_empty())
-            .unwrap_or(false),
-        JobKind::FavoritesSync => db
-            .favorites(source.as_str())
-            .await
-            .map(|refs| refs.is_empty())
-            .unwrap_or(false),
-        _ => false,
-    }
-}
-
 async fn is_due(db: &db::Db, kind: JobKind, source: &config::Source) -> bool {
-    let stale = match last_synced(db, kind, source).await {
+    match last_synced(db, kind, source).await {
         Some(at) => unix_now().saturating_sub(at) >= STALE_AFTER.as_secs(),
         None => true,
-    };
-    stale || is_empty(db, kind, source).await
+    }
 }
 
 struct Syncs {
@@ -211,14 +182,6 @@ mod tests {
         stock(&db).await;
         mark_synced(&db, JobKind::LibrarySync, &server()).await;
         assert!(!is_due(&db, JobKind::LibrarySync, &server()).await);
-    }
-
-    /// The cutover migration empties a store its stamp still calls fresh.
-    #[tokio::test]
-    async fn an_empty_store_is_due_however_recent_its_sync() {
-        let (db, _dir) = store().await;
-        mark_synced(&db, JobKind::LibrarySync, &server()).await;
-        assert!(is_due(&db, JobKind::LibrarySync, &server()).await);
     }
 
     #[tokio::test]

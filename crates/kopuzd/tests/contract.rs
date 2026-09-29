@@ -664,9 +664,9 @@ async fn artists_are_keyed_by_identity_on_both_transports() {
     let credited = |key: &str, id: Option<&str>| Track {
         artist: "Ada".into(),
         artists: vec!["Ada".into()],
-        credits: vec![reader::ArtistCredit {
-            name: "Ada".into(),
-            id: id.map(Into::into),
+        credits: vec![match id {
+            Some(id) => reader::ArtistCredit::linked("Ada", id),
+            None => reader::ArtistCredit::unlinked("Ada"),
         }],
         ..track(key)
     };
@@ -727,6 +727,12 @@ async fn artists_are_keyed_by_identity_on_both_transports() {
     let mut keys: Vec<&str> = one.items.iter().map(|t| t.key.as_str()).collect();
     keys.sort();
     assert_eq!(keys, ["/lib/ada-1a.flac", "/lib/ada-1b.flac"]);
+    assert!(
+        one.items
+            .iter()
+            .all(|row| row.credits[0].key.as_ref() == Some(&linked.key)),
+        "a row opens the artist the grid lists"
+    );
 }
 
 #[tokio::test]
@@ -738,7 +744,9 @@ async fn a_key_no_daemon_minted_is_refused_on_both_transports() {
     };
     for (key, code) in [
         ("", api::ErrorCode::InvalidInput),
-        ("id:some-other-server:ar-1", api::ErrorCode::NotFound),
+        ("name:local:ada", api::ErrorCode::InvalidInput),
+        ("src:some-other-server:ar-1", api::ErrorCode::NotFound),
+        ("lib:999999", api::ErrorCode::NotFound),
     ] {
         let key = api::ArtistKey::new(key);
         let local = pair.local.artist_tracks(key.clone(), all).await;
@@ -1650,4 +1658,16 @@ async fn download_statuses_agree_across_transports() {
         pair.wire.downloads().await.expect("wire downloads"),
         "nothing landed offline, and both say so"
     );
+}
+
+#[tokio::test]
+async fn both_transports_shake_hands_on_this_revision() {
+    let pair = spawn_pair().await;
+
+    for handshake in [pair.local.handshake().await, pair.wire.handshake().await] {
+        match handshake.expect("status") {
+            api::Handshake::Ready(status) => assert_eq!(status.proto_revision, api::WIRE_REVISION),
+            mismatched => panic!("{mismatched:?}"),
+        }
+    }
 }

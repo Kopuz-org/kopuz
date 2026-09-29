@@ -41,13 +41,11 @@ pub struct TrackInfo {
     /// The file's container, upper-cased ("FLAC"), for a local track that has
     /// one. A row from a service names no file, so it has none.
     pub format: Option<String>,
-    /// Every credited artist, where the source distinguishes them from the
-    /// single `artist` string.
-    pub artists: Vec<String>,
     pub musicbrainz_release_id: Option<String>,
     pub musicbrainz_recording_id: Option<String>,
     pub musicbrainz_track_id: Option<String>,
     pub artwork: Option<crate::ArtworkRef>,
+    /// Every credited artist in billing order; `artist` is the billing as the source shows it.
     pub credits: Vec<ArtistCredit>,
 }
 
@@ -76,7 +74,8 @@ impl std::fmt::Display for ArtistKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArtistCredit {
     pub name: String,
-    pub key: ArtistKey,
+    /// `None` for a name the daemon cannot tie to one artist, which nothing opens.
+    pub key: Option<ArtistKey>,
 }
 
 impl TrackInfo {
@@ -239,7 +238,7 @@ mod tests {
                 .iter()
                 .map(|(name, key)| ArtistCredit {
                     name: (*name).into(),
-                    key: ArtistKey::new(*key),
+                    key: Some(ArtistKey::new(*key)),
                 })
                 .collect(),
             ..Default::default()
@@ -247,7 +246,7 @@ mod tests {
     }
 
     fn primary(row: &TrackInfo) -> Option<&str> {
-        row.primary_credit().map(|credit| credit.key.as_str())
+        row.primary_credit()?.key.as_ref().map(ArtistKey::as_str)
     }
 
     #[test]

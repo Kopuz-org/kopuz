@@ -2,12 +2,18 @@
 
 use api::{ApiError, ArtistKey as WireKey};
 use config::Source;
-use utils::artist::ArtistKey;
 
-const ID: &str = "id";
-const NAME: &str = "name";
+const ISSUED: &str = "src";
+const LIBRARY: &str = "lib";
 
-/// Escapes only `%` and `:`, so the three parts split back apart whatever a source id or name holds.
+/// Who a key names: the artist a source issued an id for, or a library row for one it issued none for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Artist {
+    Issued { source: Source, id: String },
+    Library(i64),
+}
+
+/// Escapes only `%` and `:`, so the parts split back apart whatever a source id holds.
 fn escape(part: &str) -> String {
     part.replace('%', "%25").replace(':', "%3A")
 }
@@ -19,46 +25,76 @@ fn unescape(part: &str) -> Option<String> {
         .map(|part| part.into_owned())
 }
 
-/// The key naming `artist` within `source`.
-pub(crate) fn mint(source: &Source, artist: &ArtistKey) -> WireKey {
-    let (tag, value) = match artist {
-        ArtistKey::Id(id) => (ID, id),
-        ArtistKey::Name(name) => (NAME, name),
-    };
+/// The artist `source` issued `id` for, whether or not the library holds it.
+pub(crate) fn issued(source: &Source, id: &str) -> WireKey {
     WireKey::new(format!(
-        "{tag}:{}:{}",
+        "{ISSUED}:{}:{}",
         escape(source.as_str()),
-        escape(value)
+        escape(id)
     ))
 }
 
-/// The key a row credits under `source`: its source's id where it has one, else its name.
-pub(crate) fn of(source: &Source, name: &str, id: Option<&str>) -> WireKey {
-    mint(source, &ArtistKey::of(name, id))
+/// A library artist row whose source issued it no id.
+pub(crate) fn library(pk: i64) -> WireKey {
+    WireKey::new(format!("{LIBRARY}:{pk}"))
 }
 
-fn read(key: &WireKey) -> Option<(Source, ArtistKey)> {
+/// A listed artist of `source`: by its id where the source issued one, so a catalog can open it too.
+pub(crate) fn of_row(source: &Source, row: &db::ArtistRow) -> WireKey {
+    match &row.source_id {
+        Some(id) => issued(source, id),
+        None => library(row.pk),
+    }
+}
+
+/// An artist a stored row is filed under, keyed under the row's own source rather than the active one.
+pub(crate) fn of_library(artist: &reader::LibraryArtist, id: Option<&str>) -> WireKey {
+    match id {
+        Some(id) => issued(&Source::from_column(&artist.source), id),
+        None => library(artist.pk),
+    }
+}
+
+pub(crate) fn read(key: &WireKey) -> Result<Artist, ApiError> {
+    let invalid = || ApiError::invalid_input("not an artist key");
     let mut parts = key.as_str().split(':');
-    let (tag, source, value) = (parts.next()?, parts.next()?, parts.next()?);
-    if parts.next().is_some() {
-        return None;
-    }
-    let source = Source::from_column(&unescape(source)?);
-    let value = unescape(value)?;
-    match tag {
-        ID => Some((source, ArtistKey::Id(value))),
-        NAME => Some((source, ArtistKey::Name(value))),
-        _ => None,
+    let artist = match (parts.next(), parts.next(), parts.next()) {
+        (Some(ISSUED), Some(source), Some(id)) => Artist::Issued {
+            source: Source::from_column(&unescape(source).ok_or_else(invalid)?),
+            id: unescape(id).ok_or_else(invalid)?,
+        },
+        (Some(LIBRARY), Some(pk), None) => Artist::Library(pk.parse().map_err(|_| invalid())?),
+        _ => return Err(invalid()),
+    };
+    match parts.next() {
+        Some(_) => Err(invalid()),
+        None => Ok(artist),
     }
 }
 
-/// The artist a key names, which must be one of `active`'s: a key from another source is stale.
-pub(crate) fn within(key: &WireKey, active: &Source) -> Result<ArtistKey, ApiError> {
-    match read(key) {
-        Some((source, artist)) if source == *active => Ok(artist),
-        Some(_) => Err(ApiError::not_found("that artist belongs to another source")),
-        None => Err(ApiError::invalid_input("not an artist key")),
-    }
+/// The library row a key names in `source`; a key minted under another source names nothing here.
+pub(crate) async fn row(
+    db: &db::Db,
+    source: &Source,
+    key: &WireKey,
+) -> Result<db::ArtistRow, ApiError> {
+    let db_error = |error: db::DbError| ApiError::internal(format!("database error: {error}"));
+    let missing = || ApiError::not_found("the library files no such artist");
+    let pk = match read(key)? {
+        Artist::Issued { source: issuer, .. } if issuer != *source => {
+            return Err(ApiError::not_found("that artist belongs to another source"));
+        }
+        Artist::Issued { id, .. } => db
+            .artist_pk(source, &id)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(missing)?,
+        Artist::Library(pk) => pk,
+    };
+    db.artist(source, pk)
+        .await
+        .map_err(db_error)?
+        .ok_or_else(missing)
 }
 
 #[cfg(test)]
@@ -67,35 +103,48 @@ mod tests {
 
     #[test]
     fn a_key_reads_back_as_the_artist_it_was_minted_for() {
-        let sources = [
+        for source in [
             Source::Local,
             Source::Server("3c696f0a".into()),
             Source::LocalLibrary("local:/music:odd%dir".into()),
-        ];
-        let artists = [
-            ArtistKey::Id("UC-a:b%c".into()),
-            ArtistKey::of("Cartoon, Jéja: live", None),
-        ];
-        for source in &sources {
-            for artist in &artists {
-                assert_eq!(within(&mint(source, artist), source).unwrap(), *artist);
-            }
+        ] {
+            let artist = Artist::Issued {
+                source: source.clone(),
+                id: "UC-a:b%c".into(),
+            };
+            assert_eq!(read(&issued(&source, "UC-a:b%c")).unwrap(), artist);
         }
+        assert_eq!(read(&library(42)).unwrap(), Artist::Library(42));
     }
 
     #[test]
-    fn a_key_from_another_source_opens_nothing() {
-        let key = mint(&Source::Server("a".into()), &ArtistKey::Id("ar-12".into()));
+    fn a_stored_row_is_keyed_under_its_own_source() {
+        let filed = reader::LibraryArtist {
+            pk: 7,
+            source: "srv-a".into(),
+        };
 
-        let error = within(&key, &Source::Server("b".into())).unwrap_err();
-
-        assert_eq!(error.code, api::ErrorCode::NotFound);
+        assert_eq!(
+            of_library(&filed, Some("ar-1")),
+            issued(&Source::Server("srv-a".into()), "ar-1")
+        );
+        assert_eq!(of_library(&filed, None), library(7));
     }
 
     #[test]
     fn a_string_no_daemon_minted_is_refused() {
-        for junk in ["", "ar-12", "id:srv", "id:a:b:c", "who:srv:x", "id:srv:%ff"] {
-            let error = within(&WireKey::new(junk), &Source::Server("srv".into())).unwrap_err();
+        for junk in [
+            "",
+            "ar-12",
+            "src:srv",
+            "src:a:b:c",
+            "who:srv:x",
+            "src:srv:%ff",
+            "lib:x",
+            "lib:1:2",
+            "name:srv:ada",
+        ] {
+            let error = read(&WireKey::new(junk)).unwrap_err();
             assert_eq!(error.code, api::ErrorCode::InvalidInput, "{junk}");
         }
     }

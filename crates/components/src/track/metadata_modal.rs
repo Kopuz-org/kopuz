@@ -28,10 +28,16 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
 
     let mut title = use_signal(|| props.track.title.clone());
     let mut artist = use_signal(|| {
-        if props.track.artists.is_empty() {
+        if props.track.credits.is_empty() {
             props.track.artist.clone()
         } else {
-            props.track.artists.join(", ")
+            let names: Vec<&str> = props
+                .track
+                .credits
+                .iter()
+                .map(|credit| credit.name.as_str())
+                .collect();
+            names.join(", ")
         }
     });
     let mut album = use_signal(|| props.track.album.clone());

@@ -273,6 +273,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Không tìm thấy album
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Không tìm thấy danh sách phát
 no_playlists_found = Không tìm thấy danh sách phát
 no_playlists_yet = Chưa có danh sách phát. Hãy thêm bài hát từ thư viện của bạn!

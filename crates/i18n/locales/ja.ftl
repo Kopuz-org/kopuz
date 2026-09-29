@@ -203,6 +203,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = アルバムが見つかりません
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = プレイリストが見つかりません
 no_playlists_found = プレイリストが見つかりません
 no_playlists_yet = プレイリストがまだありません。ライブラリから曲を追加してください！

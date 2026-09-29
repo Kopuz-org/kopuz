@@ -236,6 +236,7 @@ pub fn album_from_library(album: &types::LibraryAlbumResource) -> reader::Album 
             }),
         manual_cover: false,
         artist_id: None,
+        library_artist: None,
     }
 }
 

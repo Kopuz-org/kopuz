@@ -203,6 +203,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = kulupu pi kalama sama li lon ala
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = kulupu kalama li lon ala
 no_playlists_found = kulupu kalama li lon ala
 no_playlists_yet = kulupu kalama li lon ala. o pali!

@@ -907,6 +907,26 @@ pub fn DiscoverArtistPage(
         };
     }
 
+    // An artist the source issued no id for has no page of its own, so the daemon answers with the library's tracks.
+    let loaded = artist.read().clone();
+    if let Some(detail) = loaded
+        && !detail.tracks.is_empty()
+    {
+        let cover_url = hooks::artwork::url(detail.artwork.as_ref(), hooks::artwork::Size::Thumb);
+        return rsx! {
+            div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
+                components::track_list_view::TrackListView {
+                    name: detail.title,
+                    description: String::new(),
+                    cover_url,
+                    tracks: detail.tracks,
+                    is_album: false,
+                    on_close: move |_| on_back.call(()),
+                }
+            }
+        };
+    }
+
     rsx! {
         div { class: "max-w-[1600px] mx-auto",
             button {

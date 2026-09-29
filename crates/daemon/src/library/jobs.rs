@@ -365,8 +365,7 @@ impl LibraryService {
         }
         // Stored under the key every read builds, never the display name.
         for (artist, url) in &snapshot.artist_images {
-            let key = utils::artist::ArtistKey::of(&artist.name, artist.id.as_deref())
-                .storage(src.as_str());
+            let key = utils::artist::image_key(src.as_str(), &artist.name, artist.id.as_deref());
             let _ = source.set_artist_image(&key, "server", Some(url)).await;
         }
         let keep_keys: Vec<String> = snapshot

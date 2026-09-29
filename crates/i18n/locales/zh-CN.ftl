@@ -203,6 +203,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = 未找到专辑
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = 未找到播放列表
 no_playlists_found = 未找到播放列表
 no_playlists_yet = 还没有播放列表。请从媒体库添加歌曲！

@@ -159,13 +159,17 @@ impl MutationService {
 
         track.title = title.trim().to_string();
         track.artist = artist.trim().to_string();
-        // Credits are re-derived rather than patched: the single artist
-        // string is what the user edited, so it is the authority.
+        // The artist string is what the user edited, so the credits are rebuilt from it rather than kept.
         track.artists = artist
             .split([';', ','])
             .map(str::trim)
             .filter(|artist| !artist.is_empty())
             .map(str::to_string)
+            .collect();
+        track.credits = track
+            .artists
+            .iter()
+            .map(reader::ArtistCredit::unlinked)
             .collect();
         track.album = album.trim().to_string();
         track.album_id = reader::metadata::make_album_id(&track.album, &track.artist);
@@ -176,7 +180,9 @@ impl MutationService {
             .await
             .map_err(db_error)?;
         self.session.invalidate(Table::Tracks);
-        Ok(crate::wire::track_info(&track, &config))
+        // Read back, so the row carries the artist rows its new credits were filed under.
+        let stored = self.track(&patch.key).await?;
+        Ok(crate::wire::track_info(&stored, &config))
     }
 
     pub async fn delete_tracks(&self, keys: &[String], from_disk: bool) -> Result<(), ApiError> {
@@ -275,7 +281,7 @@ impl MutationService {
                 .await
                 .map_err(source_error)
                 .map(|_| Table::Albums),
-            ArtworkTarget::Artist(artist) => match self.artist_image_key(artist) {
+            ArtworkTarget::Artist(artist) => match self.artist_image_key(artist).await {
                 Ok(key) => self
                     .source()
                     .set_artist_image(&key, "custom", Some(&stored))
@@ -325,7 +331,7 @@ impl MutationService {
             }
             ArtworkTarget::Artist(artist) => {
                 self.source()
-                    .set_artist_image(&self.artist_image_key(artist)?, "custom", None)
+                    .set_artist_image(&self.artist_image_key(artist).await?, "custom", None)
                     .await
                     .map_err(source_error)?;
                 Table::Tracks
@@ -379,9 +385,14 @@ impl MutationService {
     }
 
     /// Where this artist's own photo is filed in `artist_images`.
-    fn artist_image_key(&self, artist: &api::ArtistKey) -> Result<String, ApiError> {
+    async fn artist_image_key(&self, artist: &api::ArtistKey) -> Result<String, ApiError> {
         let source = self.config().active_source;
-        Ok(crate::artist_key::within(artist, &source)?.storage(source.as_str()))
+        let row = crate::artist_key::row(&self.db, &source, artist).await?;
+        Ok(utils::artist::image_key(
+            source.as_str(),
+            &row.name,
+            row.source_id.as_deref(),
+        ))
     }
 
     async fn current_artwork_path(
@@ -397,7 +408,7 @@ impl MutationService {
                 .map_err(db_error)?
                 .and_then(|album| album.cover_path),
             ArtworkTarget::Artist(artist) => {
-                let key = self.artist_image_key(artist)?;
+                let key = self.artist_image_key(artist).await?;
                 self.db
                     .artist_images()
                     .await

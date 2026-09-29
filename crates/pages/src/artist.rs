@@ -148,7 +148,7 @@ pub fn Artist(
                 .read()
                 .iter()
                 .flatten()
-                .flat_map(|track| track.credits.iter().map(|credit| credit.key.clone()))
+                .flat_map(|track| track.credits.iter().filter_map(|credit| credit.key.clone()))
                 .collect()
         } else {
             HashSet::new()
@@ -217,7 +217,11 @@ pub fn Artist(
         if open_artist.read().is_none() {
             return Vec::new();
         }
-        let tracks = artist_tracks_res.read().clone().unwrap_or_default();
+        let tracks = artist_tracks_res
+            .read()
+            .clone()
+            .and_then(Result::ok)
+            .unwrap_or_default();
         if !(caps().downloads && *is_offline.read()) {
             return tracks;
         }
@@ -234,12 +238,12 @@ pub fn Artist(
     });
 
     let artist_cover = use_memo(move || {
-        let detail = artist_res.read().clone().flatten()?;
+        let detail = artist_res.read().clone().flatten().and_then(Result::ok)?;
         hooks::artwork::url(detail.info.artwork.as_ref(), hooks::artwork::Size::Thumb)
     });
 
     let artist_albums = use_memo(move || {
-        let Some(detail) = artist_res.read().clone().flatten() else {
+        let Some(detail) = artist_res.read().clone().flatten().and_then(Result::ok) else {
             return Vec::new();
         };
         let offline = caps().downloads && *is_offline.read();
@@ -272,15 +276,42 @@ pub fn Artist(
         fields
     });
 
+    // A key the daemon refuses, or a read that failed, is said rather than drawn as an empty artist.
+    let load_error = use_memo(move || {
+        let detail = artist_res.read().clone().flatten().and_then(Result::err);
+        let tracks = artist_tracks_res.read().clone().and_then(Result::err);
+        detail.or(tracks).map(|error| match error.code {
+            api::ErrorCode::NotFound => i18n::t("artist_not_found"),
+            _ => i18n::t_with("artist_load_failed", &[("error", error.to_string())]),
+        })
+    });
+
     let detail_open = open_artist.read().is_some();
     // Blank until the daemon names the artist; the key carries no display name.
     let name = artist_res
         .read()
         .clone()
         .flatten()
+        .and_then(Result::ok)
         .map(|detail| detail.info.name)
         .unwrap_or_default();
     let page_container_class = crate::layout::page_container_class(&config.read().ui_style);
+
+    if let (true, Some(error)) = (detail_open, load_error()) {
+        return rsx! {
+            div {
+                class: page_container_class,
+                div { class: "relative flex-1 min-h-0 flex flex-col w-full max-w-[1600px] mx-auto",
+                    if !cfg!(target_os = "android") {
+                        components::back_button::BackButton {
+                            on_click: move |_| nav_ctrl.go_back(),
+                        }
+                    }
+                    div { class: "py-12 px-6 md:px-10 text-rose-400 text-sm", "{error}" }
+                }
+            }
+        };
+    }
 
     // The refs (item ids / local paths) of the currently-selected tracks — derived
     // from the in-hand `Track`s via the typed id, so it's source-uniform.
@@ -504,7 +535,7 @@ pub fn Artist(
                                             let cover_url = hooks::artwork::for_album(&album, hooks::artwork::Size::Thumb);
                                             // Whether every track of this album is downloaded (servers only).
                                             let downloaded = cap.downloads && {
-                                                let all = artist_tracks_res.read().clone().unwrap_or_default();
+                                                let all = artist_tracks_res.read().clone().and_then(Result::ok).unwrap_or_default();
                                                 let conf = config.read();
                                                 let aid = album.id.clone();
                                                 let tracks: Vec<_> = all.iter().filter(|t| t.album_id == aid).collect();

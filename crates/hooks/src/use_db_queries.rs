@@ -151,7 +151,7 @@ pub fn use_album_tracks(
 pub fn use_artist_tracks(
     source: Memo<Source>,
     artist: Memo<Option<api::ArtistKey>>,
-) -> Resource<Vec<api::TrackInfo>> {
+) -> Resource<Result<Vec<api::TrackInfo>, api::ApiError>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
@@ -166,15 +166,11 @@ pub fn use_artist_tracks(
         async move {
             let Some(artist) = artist else {
                 tracing::Span::current().record("rows", 0);
-                return Vec::new();
+                return Ok(Vec::new());
             };
-            let rows = api
-                .artist_tracks(artist, all())
-                .await
-                .map(|page| page.items)
-                .unwrap_or_default();
+            let rows = api.artist_tracks(artist, all()).await?.items;
             tracing::Span::current().record("rows", rows.len());
-            rows
+            Ok(rows)
         }
         .instrument(span)
     })
@@ -184,7 +180,7 @@ pub fn use_artist_tracks(
 pub fn use_artist(
     source: Memo<Source>,
     artist: Memo<Option<api::ArtistKey>>,
-) -> Resource<Option<api::ArtistDetail>> {
+) -> Resource<Option<Result<api::ArtistDetail, api::ApiError>>> {
     let api = use_api();
     let gens = use_generations();
     use_resource(move || {
@@ -192,7 +188,7 @@ pub fn use_artist(
         let _ = gens.generation(Table::Albums);
         let (api, s, artist) = (api.clone(), source(), artist());
         let span = tracing::info_span!("query.artist", source = s.as_str(), artist = ?artist);
-        async move { api.artist(artist?).await.ok() }.instrument(span)
+        async move { Some(api.artist(artist?).await) }.instrument(span)
     })
 }
 

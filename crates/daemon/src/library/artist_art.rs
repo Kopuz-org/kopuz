@@ -19,7 +19,6 @@ use std::sync::{Arc, Mutex};
 
 use api::{ApiError, Table};
 use server::source::{ActiveSource, ArtistView};
-use utils::artist::ArtistKey;
 
 use super::{LibraryService, db_error};
 
@@ -43,24 +42,23 @@ impl LibraryService {
         match source.capabilities().artist_view {
             ArtistView::Library => self.refresh_bulk(&source).await,
             ArtistView::Remote => {
-                let wanted = artists
-                    .iter()
-                    .map(|artist| self.artist_of(artist))
-                    .collect::<Result<std::collections::HashSet<_>, _>>()?;
+                let wanted: std::collections::HashSet<&api::ArtistKey> = artists.iter().collect();
+                let scope = source.source();
                 // A search wants the name the library calls them, which only the listing holds.
                 let named = self
                     .db
-                    .artists(source.source())
+                    .artists(scope)
                     .await
                     .map_err(db_error)?
                     .into_iter()
-                    .filter(|row| wanted.contains(&row.key))
+                    .filter(|row| wanted.contains(&crate::artist_key::of_row(scope, row)))
                     .map(|row| reader::ArtistCredit {
-                        id: match row.key {
-                            ArtistKey::Id(id) => Some(id),
-                            ArtistKey::Name(_) => None,
-                        },
                         name: row.name,
+                        id: row.source_id,
+                        library: Some(reader::LibraryArtist {
+                            pk: row.pk,
+                            source: scope.as_str().to_string(),
+                        }),
                     })
                     .collect();
                 self.refresh_each(&source, named).await
@@ -166,5 +164,5 @@ async fn resolve_one(source: &ActiveSource, artist: &reader::ArtistCredit) -> bo
 }
 
 fn storage_key(artist: &reader::ArtistCredit, source: &str) -> String {
-    ArtistKey::of(&artist.name, artist.id.as_deref()).storage(source)
+    utils::artist::image_key(source, &artist.name, artist.id.as_deref())
 }

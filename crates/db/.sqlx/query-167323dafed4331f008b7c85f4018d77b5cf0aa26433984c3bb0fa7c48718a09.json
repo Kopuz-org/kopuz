@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id AS \"id!: i64\" FROM artists WHERE source = ?1 AND source_artist_id = ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "167323dafed4331f008b7c85f4018d77b5cf0aa26433984c3bb0fa7c48718a09"
+}

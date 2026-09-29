@@ -273,6 +273,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album tidak ditemukan
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Daftar putar tidak ditemukan
 no_playlists_found = Tidak ada daftar putar ditemukan
 no_playlists_yet = Tidak ada daftar putar. Tambahkan lagu dari pustaka anda!

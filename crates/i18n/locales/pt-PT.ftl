@@ -253,6 +253,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Álbum não encontrado
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Playlist não encontrada
 no_playlists_found = Nenhuma playlist encontrada
 no_playlists_yet = Ainda não tens nenhuma playlist. Adiciona algumas faixas!

@@ -213,6 +213,7 @@ pub(crate) fn read_metadata(track_path: &Path) -> Option<ScannedTrack> {
         cover_path: None,
         manual_cover: false,
         artist_id: None,
+        library_artist: None,
     };
 
     Some(ScannedTrack { track, album })
@@ -535,6 +536,7 @@ fn read_with_symphonia(track_path: &Path) -> Option<ScannedTrack> {
         cover_path: None,
         manual_cover: false,
         artist_id: None,
+        library_artist: None,
     };
 
     Some(ScannedTrack { track, album })

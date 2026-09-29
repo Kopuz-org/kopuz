@@ -1,6 +1,7 @@
 -- Rows of a server that no longer exists: removing one never took its data with it.
 DELETE FROM tracks WHERE source != 'local' AND source NOT LIKE 'local:%' AND source NOT IN (SELECT id FROM servers);
 DELETE FROM albums WHERE source != 'local' AND source NOT LIKE 'local:%' AND source NOT IN (SELECT id FROM servers);
+DELETE FROM artists WHERE source != 'local' AND source NOT LIKE 'local:%' AND source NOT IN (SELECT id FROM servers);
 DELETE FROM playlists WHERE source != 'local' AND source NOT LIKE 'local:%' AND source NOT IN (SELECT id FROM servers);
 DELETE FROM favorites WHERE server_id != 'local' AND server_id NOT LIKE 'local:%' AND server_id NOT IN (SELECT id FROM servers);
 DELETE FROM recently_played WHERE source != 'local' AND source NOT LIKE 'local:%' AND source NOT IN (SELECT id FROM servers);
@@ -15,14 +16,12 @@ UPDATE albums SET derived = 1
  WHERE source IN (SELECT id FROM servers WHERE service IN ('YtMusic', 'SoundCloud'));
 
 -- Every track's album gets a row, the way the favorites import already built them.
-INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_id, derived)
+INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_pk, derived)
 SELECT t.source, t.source_album_id,
        CASE WHEN t.album = '' THEN 'Singles' ELSE t.album END,
        t.artist, t.cover_path,
-       CASE WHEN EXISTS (SELECT 1 FROM track_credits c WHERE c.track_pk = t.rowid_pk AND c.name = TRIM(t.artist))
-            THEN (SELECT c.artist_id FROM track_credits c WHERE c.track_pk = t.rowid_pk AND c.name = TRIM(t.artist) LIMIT 1)
-            ELSE (SELECT c.artist_id FROM track_credits c WHERE c.track_pk = t.rowid_pk ORDER BY c.position LIMIT 1)
-       END,
+       COALESCE((SELECT c.artist_pk FROM track_credits c WHERE c.track_pk = t.rowid_pk AND c.name = TRIM(t.artist) LIMIT 1),
+                (SELECT c.artist_pk FROM track_credits c WHERE c.track_pk = t.rowid_pk ORDER BY c.position LIMIT 1)),
        1
   FROM tracks t
  WHERE t.rowid_pk IN (SELECT MIN(rowid_pk) FROM tracks WHERE source_album_id != '' GROUP BY source, source_album_id)

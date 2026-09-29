@@ -37,14 +37,130 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 /// differently. On a `VersionMismatch` we reconcile and retry; a checksum that
 /// matches neither line ending is a genuine edit and still fails.
 pub(super) async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
-    match MIGRATOR.run(pool).await {
+    if !applied(pool, ARTISTS_FILLED).await? {
+        let mut through = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|m| m.version <= ARTISTS_CREATED)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        through.set_ignore_missing(true);
+        migrate(pool, &through).await?;
+        fill_artists(pool).await?;
+    }
+    migrate(pool, &MIGRATOR).await
+}
+
+/// The migration that creates the artist tables, which the Rust fill step follows.
+const ARTISTS_CREATED: i64 = 20260922000000;
+/// The migration after the fill, which drops the column the artists were filled from.
+const ARTISTS_FILLED: i64 = 20260922000001;
+
+async fn migrate(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> Result<(), DbError> {
+    match migrator.run(pool).await {
         Ok(()) => Ok(()),
         Err(sqlx::migrate::MigrateError::VersionMismatch(_)) => {
             reconcile_eol_checksums(pool).await?;
-            MIGRATOR.run(pool).await.map_err(Into::into)
+            migrator.run(pool).await.map_err(Into::into)
         }
         Err(e) => Err(e.into()),
     }
+}
+
+async fn applied(pool: &SqlitePool, version: i64) -> Result<bool, DbError> {
+    let tracked: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations')",
+    )
+    .fetch_one(pool)
+    .await?;
+    if !tracked {
+        return Ok(false);
+    }
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM _sqlx_migrations WHERE version = ?1 AND success = 1)",
+    )
+    .bind(version)
+    .fetch_one(pool)
+    .await?)
+}
+
+/// Files every stored credit and album artist under an artist row, in Rust because SQLite's `LOWER` folds ASCII only.
+async fn fill_artists(pool: &SqlitePool) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    for sql in [
+        "DELETE FROM track_credits",
+        "UPDATE albums SET artist_pk = NULL",
+        "DELETE FROM artists",
+    ] {
+        sqlx::query(sql).execute(&mut *tx).await?;
+    }
+    let tracks: Vec<(i64, String, String, String)> =
+        sqlx::query_as("SELECT rowid_pk, source, artist, artists_json FROM tracks")
+            .fetch_all(&mut *tx)
+            .await?;
+    for (pk, source, artist, artists_json) in tracks {
+        let listed: Vec<String> = serde_json::from_str(&artists_json).unwrap_or_default();
+        let names = match listed.is_empty() {
+            true => vec![artist],
+            false => listed,
+        };
+        let names = names
+            .iter()
+            .map(|name| name.trim())
+            .filter(|name| !name.is_empty());
+        for (position, name) in names.enumerate() {
+            let artist_pk = file_unlinked(&mut tx, &source, name).await?;
+            sqlx::query(
+                "INSERT INTO track_credits (track_pk, position, artist_pk, name) VALUES (?1, ?2, ?3, ?4)",
+            )
+            .bind(pk)
+            .bind(position as i64)
+            .bind(artist_pk)
+            .bind(name)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    let albums: Vec<(i64, String, String)> =
+        sqlx::query_as("SELECT rowid_pk, source, artist FROM albums")
+            .fetch_all(&mut *tx)
+            .await?;
+    for (pk, source, artist) in albums {
+        let artist = artist.trim();
+        if artist.is_empty() {
+            continue;
+        }
+        let artist_pk = file_unlinked(&mut tx, &source, artist).await?;
+        sqlx::query("UPDATE albums SET artist_pk = ?1 WHERE rowid_pk = ?2")
+            .bind(artist_pk)
+            .bind(pk)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Kept apart from the live writer so a later change to `artists` can't rewrite what this step did.
+async fn file_unlinked(
+    conn: &mut sqlx::SqliteConnection,
+    source: &str,
+    name: &str,
+) -> Result<i64, DbError> {
+    Ok(sqlx::query_scalar(
+        "INSERT INTO artists (source, name, name_key) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(source, name_key) WHERE source_artist_id IS NULL DO UPDATE SET name = artists.name \
+         RETURNING id",
+    )
+    .bind(source)
+    .bind(name)
+    .bind(utils::artist::normalize_artist_key(name))
+    .fetch_one(conn)
+    .await?)
 }
 
 /// Re-stamp `_sqlx_migrations` rows whose checksum differs from this binary's
@@ -709,10 +825,15 @@ async fn insert_album(
     a: &LegacyAlbum,
 ) -> Result<(), DbError> {
     let manual = a.manual_cover as i64;
+    let billed = a.artist.trim();
+    let artist_pk = match billed.is_empty() {
+        true => None,
+        false => Some(super::writes::file_artist(tx, source, billed, None).await?),
+    };
     sqlx::query!(
         "INSERT OR IGNORE INTO albums \
-           (source, source_album_id, title, artist, genre, year, cover_path, manual_cover) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+           (source, source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_pk) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         source,
         a.id,
         a.title,
@@ -720,7 +841,8 @@ async fn insert_album(
         a.genre,
         a.year,
         a.cover_path,
-        manual
+        manual,
+        artist_pk
     )
     .execute(&mut **tx)
     .await?;
@@ -764,7 +886,7 @@ async fn insert_track(
     .fetch_optional(&mut **tx)
     .await?;
     if let Some(pk) = inserted {
-        super::writes::write_track_children(tx, pk, t).await?;
+        super::writes::write_track_children(tx, source, pk, t).await?;
     }
     Ok(())
 }
@@ -1205,5 +1327,85 @@ mod eol_reconcile_tests {
 
         drop(pool);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod artist_fill_tests {
+    use super::*;
+
+    /// A library stored before artist rows existed comes out with each name filed once per source, Unicode-folded.
+    #[tokio::test]
+    async fn stored_names_are_filed_as_artists_on_the_way_up() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let before = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|m| m.version < ARTISTS_CREATED)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        before.run(&pool).await.unwrap();
+        sqlx::raw_sql(
+            "INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, artists_json) VALUES \
+               (1, 'local', '/a', 'al-1', 'a', 'Émilie feat. Ada', 'One', '[\"Émilie\", \" Ada \"]'), \
+               (2, 'local', '/b', 'al-1', 'b', 'ÉMILIE', 'One', '[]'), \
+               (3, 'local:x', 'b', 'al-2', 'c', 'Émilie', 'Two', '[\"Émilie\"]'); \
+             INSERT INTO albums (source, source_album_id, title, artist) VALUES \
+               ('local', 'al-1', 'One', 'émilie'), ('local', 'al-3', 'Three', '  ');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool).await.unwrap();
+
+        let artists: Vec<(String, String)> =
+            sqlx::query_as("SELECT source, name FROM artists ORDER BY source, name")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            artists,
+            [
+                ("local".into(), "Ada".into()),
+                ("local".into(), "Émilie".into()),
+                ("local:x".into(), "Émilie".into()),
+            ]
+        );
+        let credits: Vec<(i64, i64, String, String)> = sqlx::query_as(
+            "SELECT c.track_pk, c.position, c.name, a.name FROM track_credits c \
+               JOIN artists a ON a.id = c.artist_pk ORDER BY c.track_pk, c.position",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            credits,
+            [
+                (1, 0, "Émilie".into(), "Émilie".into()),
+                (1, 1, "Ada".into(), "Ada".into()),
+                (2, 0, "ÉMILIE".into(), "Émilie".into()),
+                (3, 0, "Émilie".into(), "Émilie".into()),
+            ]
+        );
+        let billed: Vec<(String, Option<String>)> = sqlx::query_as(
+            "SELECT al.source_album_id, a.name FROM albums al \
+               LEFT JOIN artists a ON a.id = al.artist_pk ORDER BY al.source_album_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            billed,
+            [
+                ("al-1".into(), Some("Émilie".into())),
+                ("al-2".into(), Some("Émilie".into())),
+                ("al-3".into(), None),
+            ]
+        );
     }
 }

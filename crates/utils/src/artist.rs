@@ -6,28 +6,11 @@ pub fn normalize_artist_key(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
-/// Who an artist is: the source's id when it issued one, else the normalized name.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum ArtistKey {
-    Id(String),
-    Name(String),
-}
-
-impl ArtistKey {
-    /// `id` is never blank: the database stores none, so a blank one is a bug upstream.
-    pub fn of(name: &str, id: Option<&str>) -> Self {
-        match id {
-            Some(id) => Self::Id(id.to_string()),
-            None => Self::Name(normalize_artist_key(name)),
-        }
-    }
-
-    /// The `artist_images` key; an id carries its source because the table spans sources.
-    pub fn storage(&self, source: &str) -> String {
-        match self {
-            Self::Id(id) => format!("id:{source}:{id}"),
-            Self::Name(name) => name.clone(),
-        }
+/// The `artist_images` key: the source's id where it issued one, carrying the source since the table spans them, else the folded name.
+pub fn image_key(source: &str, name: &str, id: Option<&str>) -> String {
+    match id {
+        Some(id) => format!("id:{source}:{id}"),
+        None => normalize_artist_key(name),
     }
 }
 
@@ -55,12 +38,8 @@ mod tests {
 
     #[test]
     fn an_id_outranks_the_name() {
-        assert_eq!(
-            ArtistKey::of("Ada", Some("ar-1")),
-            ArtistKey::Id("ar-1".into())
-        );
-        assert_eq!(ArtistKey::of(" Ada ", None), ArtistKey::Name("ada".into()));
-        assert_eq!(ArtistKey::Id("ar-1".into()).storage("srv"), "id:srv:ar-1");
+        assert_eq!(image_key("srv", "Ada", Some("ar-1")), "id:srv:ar-1");
+        assert_eq!(image_key("srv", " Ada ", None), "ada");
     }
 
     #[test]

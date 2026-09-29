@@ -96,27 +96,6 @@ pub async fn music_search_tracks(query: &str, cookies: Option<&str>) -> Result<V
     Ok(out)
 }
 
-/// Resolve a free-text artist name to a YT Music channel id (`UC…`).
-/// Powers the artist page when navigation only had a name (track row
-/// click, sidebar tag, etc.) and the YT backend is active. Returns
-/// None if the search returned no artist row at all.
-#[tracing::instrument(name = "yt.resolve_artist", skip(cookies), fields(query = %query))]
-pub async fn resolve_artist_channel_id(
-    query: &str,
-    cookies: Option<&str>,
-) -> Result<Option<String>, String> {
-    if query.trim().is_empty() {
-        return Ok(None);
-    }
-    let http = super::innertube::http_client();
-    let resp = do_search_raw(http, query, Some(ARTISTS_FILTER), cookies).await?;
-    Ok(pick_artist_row(&resp, query).and_then(|row| {
-        row.pointer("/navigationEndpoint/browseEndpoint/browseId")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-    }))
-}
-
 /// Resolve an album title + artist to its YT Music album browse id
 /// (`MPRE…`). The local library stores YT albums under a title+artist hash
 /// with no browse id, so the album page resolves it on demand to fetch the

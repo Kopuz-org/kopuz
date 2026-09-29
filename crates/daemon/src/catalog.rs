@@ -19,6 +19,7 @@ use api::{
 };
 use server::ytmusic::discover::{DiscoverHome, DiscoverItem};
 
+use crate::artist_key::Artist;
 use crate::library::LibraryService;
 use crate::session::SessionHandle;
 
@@ -169,11 +170,7 @@ impl CatalogService {
             } => CatalogItem {
                 artwork: self.remember_thumbnail(&channel_id, thumbnail.as_deref()),
                 kind: CatalogItemKind::Artist,
-                id: crate::artist_key::mint(
-                    &config.active_source,
-                    &utils::artist::ArtistKey::Id(channel_id),
-                )
-                .to_string(),
+                id: crate::artist_key::issued(&config.active_source, &channel_id).to_string(),
                 title: name,
                 subtitle: None,
                 track: None,
@@ -241,14 +238,10 @@ impl CatalogService {
                 };
                 self.library.register_transient(&album.tracks);
                 let artwork = self.remember_thumbnail(&album.browse_id, album.thumbnail.as_deref());
-                let source = &config.active_source;
-                let artist_key = match (&album.artist_id, album.artist.as_deref().map(str::trim)) {
-                    (Some(id), _) => Some(crate::artist_key::of(source, "", Some(id))),
-                    (None, Some(name)) if !name.is_empty() => {
-                        Some(crate::artist_key::of(source, name, None))
-                    }
-                    (None, _) => None,
-                };
+                let artist_key = album
+                    .artist_id
+                    .as_deref()
+                    .map(|id| crate::artist_key::issued(&config.active_source, id));
                 Ok(CatalogDetail {
                     kind: CatalogItemKind::Album,
                     id: album.browse_id,
@@ -293,14 +286,13 @@ impl CatalogService {
                 })
             }
             CatalogItemKind::Artist => {
-                let artist = api::ArtistKey::new(request.id);
-                let channel_id = match crate::artist_key::within(&artist, &config.active_source)? {
-                    utils::artist::ArtistKey::Id(id) => id,
-                    utils::artist::ArtistKey::Name(name) => source
-                        .resolve_artist_channel_id(&name)
-                        .await
-                        .map_err(source_error)?
-                        .ok_or_else(|| ApiError::not_found("catalog artist not found"))?,
+                let key = api::ArtistKey::new(request.id);
+                let channel_id = match crate::artist_key::read(&key)? {
+                    Artist::Issued { source, id } if source == config.active_source => id,
+                    Artist::Issued { .. } => {
+                        return Err(ApiError::not_found("that artist belongs to another source"));
+                    }
+                    Artist::Library(_) => return self.library_artist(&key).await,
                 };
                 let artist = source
                     .fetch_artist(&channel_id)
@@ -332,6 +324,24 @@ impl CatalogService {
                 ApiError::unsupported("this catalog kind has no detail page"),
             ),
         }
+    }
+
+    /// An artist the source issued no id for has no catalog page, so it is the tracks the library files under it.
+    async fn library_artist(&self, key: &api::ArtistKey) -> Result<CatalogDetail, ApiError> {
+        let artist = self.library.artist(key).await?.info;
+        let every = api::Page {
+            offset: 0,
+            limit: u32::MAX,
+        };
+        let tracks = self.library.artist_tracks(key, every).await?.items;
+        Ok(CatalogDetail {
+            kind: CatalogItemKind::Artist,
+            id: key.to_string(),
+            title: artist.name,
+            artwork: artist.artwork,
+            tracks,
+            ..Default::default()
+        })
     }
 
     /// A source's mix seeded by one track, with the seed pinned to the front.

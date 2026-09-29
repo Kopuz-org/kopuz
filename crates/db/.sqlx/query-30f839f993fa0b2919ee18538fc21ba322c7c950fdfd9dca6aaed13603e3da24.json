@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_pk) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "30f839f993fa0b2919ee18538fc21ba322c7c950fdfd9dca6aaed13603e3da24"
+}

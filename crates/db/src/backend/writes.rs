@@ -68,8 +68,8 @@ pub async fn upsert_tracks(
         )
         .fetch_one(&mut *tx)
         .await?;
-        write_track_children(&mut tx, pk, t).await?;
-        ensure_album(&mut tx, src, t).await?;
+        write_track_children(&mut tx, src, pk, t).await?;
+        ensure_album(&mut tx, src, pk, t).await?;
     }
     tx.commit().await?;
     Ok(())
@@ -79,6 +79,7 @@ pub async fn upsert_tracks(
 async fn ensure_album(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     src: &str,
+    pk: i64,
     t: &Track,
 ) -> Result<(), DbError> {
     if t.album_id.is_empty() {
@@ -88,59 +89,118 @@ async fn ensure_album(
         true => "Singles",
         false => t.album.as_str(),
     };
+    let credits: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT name, artist_pk FROM track_credits WHERE track_pk = ?1 ORDER BY position",
+    )
+    .bind(pk)
+    .fetch_all(&mut **tx)
+    .await?;
     let billed = utils::artist::normalize_artist_key(&t.artist);
-    let artist_id = t
-        .credits
+    let artist_pk = credits
         .iter()
-        .find(|credit| utils::artist::normalize_artist_key(&credit.name) == billed)
-        .or(t.credits.first())
-        .and_then(|credit| stored_id(credit.id.as_deref()));
+        .find(|(name, _)| utils::artist::normalize_artist_key(name) == billed)
+        .or(credits.first())
+        .map(|(_, artist)| *artist);
     sqlx::query!(
-        "INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_id, derived) \
+        "INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_pk, derived) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) ON CONFLICT(source, source_album_id) DO NOTHING",
         src,
         t.album_id,
         title,
         t.artist,
         t.cover,
-        artist_id
+        artist_pk
     )
     .execute(&mut **tx)
     .await?;
     Ok(())
 }
 
-/// An id as stored: a blank one is no id, so no reader has to check again.
-fn stored_id(id: Option<&str>) -> Option<&str> {
-    id.map(str::trim).filter(|id| !id.is_empty())
+/// The artist row `name` is filed under in `src`: by the id the source issued, else by the folded name.
+pub(crate) async fn file_artist(
+    conn: &mut sqlx::SqliteConnection,
+    src: &str,
+    name: &str,
+    id: Option<&str>,
+) -> Result<i64, DbError> {
+    let name_key = utils::artist::normalize_artist_key(name);
+    let pk = match id.map(str::trim).filter(|id| !id.is_empty()) {
+        Some(id) => {
+            sqlx::query_scalar!(
+                "INSERT INTO artists (source, source_artist_id, name, name_key) VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT(source, source_artist_id) DO UPDATE SET name = ?3, name_key = ?4 \
+                 RETURNING id AS \"id!: i64\"",
+                src,
+                id,
+                name,
+                name_key
+            )
+            .fetch_one(&mut *conn)
+            .await?
+        }
+        None => {
+            // The no-op update is what makes RETURNING answer for a row that already exists.
+            sqlx::query_scalar!(
+                "INSERT INTO artists (source, name, name_key) VALUES (?1, ?2, ?3) \
+                 ON CONFLICT(source, name_key) WHERE source_artist_id IS NULL \
+                 DO UPDATE SET name = artists.name \
+                 RETURNING id AS \"id!: i64\"",
+                src,
+                name,
+                name_key
+            )
+            .fetch_one(&mut *conn)
+            .await?
+        }
+    };
+    Ok(pk)
 }
 
-/// The credits a row stores: the source's own, else its names as unlinked credits.
-fn stored_credits(t: &Track) -> Vec<reader::ArtistCredit> {
-    if !t.credits.is_empty() {
-        return t.credits.clone();
-    }
-    let names: Vec<&str> = match t.artists.is_empty() {
-        true => vec![t.artist.as_str()],
-        false => t.artists.iter().map(String::as_str).collect(),
+/// Drop `src`'s artists nothing credits or bills any more.
+pub(crate) async fn prune_artists(
+    conn: &mut sqlx::SqliteConnection,
+    src: &str,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        "DELETE FROM artists WHERE source = ?1 \
+         AND NOT EXISTS (SELECT 1 FROM track_credits c WHERE c.artist_pk = artists.id) \
+         AND NOT EXISTS (SELECT 1 FROM albums a WHERE a.artist_pk = artists.id)",
+        src
+    )
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// The `(name, id)` credits a row stores: the source's own, else its names unlinked.
+fn stored_credits(t: &Track) -> Vec<(&str, Option<&str>)> {
+    let credits: Vec<(&str, Option<&str>)> = match t.credits.is_empty() {
+        false => t
+            .credits
+            .iter()
+            .map(|credit| (credit.name.as_str(), credit.id.as_deref()))
+            .collect(),
+        true if t.artists.is_empty() => vec![(t.artist.as_str(), None)],
+        true => t.artists.iter().map(|name| (name.as_str(), None)).collect(),
     };
-    names
+    credits
         .into_iter()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(reader::ArtistCredit::unlinked)
+        .map(|(name, id)| (name.trim(), id))
+        .filter(|(name, _)| !name.is_empty())
         .collect()
 }
 
 /// Write a track's credits and MusicBrainz ids beside its row.
 pub(crate) async fn write_track_children(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    src: &str,
     pk: i64,
     t: &Track,
 ) -> Result<(), DbError> {
     // Some paths only name a row's artists, so bare names never replace a list that carries an id.
     let linked: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM track_credits WHERE track_pk = ?1 AND artist_id IS NOT NULL",
+        "SELECT COUNT(*) FROM track_credits c JOIN artists a ON a.id = c.artist_pk \
+         WHERE c.track_pk = ?1 AND a.source_artist_id IS NOT NULL",
         pk
     )
     .fetch_one(&mut **tx)
@@ -149,17 +209,16 @@ pub(crate) async fn write_track_children(
         sqlx::query!("DELETE FROM track_credits WHERE track_pk = ?1", pk)
             .execute(&mut **tx)
             .await?;
-        for (position, credit) in stored_credits(t).iter().enumerate() {
+        for (position, (name, id)) in stored_credits(t).into_iter().enumerate() {
             let position = position as i64;
-            let name = credit.name.trim();
-            let artist_id = stored_id(credit.id.as_deref());
+            let artist_pk = file_artist(tx, src, name, id).await?;
             sqlx::query!(
-                "INSERT INTO track_credits (track_pk, position, name, artist_id) \
+                "INSERT INTO track_credits (track_pk, position, artist_pk, name) \
                  VALUES (?1, ?2, ?3, ?4)",
                 pk,
                 position,
-                name,
-                artist_id
+                artist_pk,
+                name
             )
             .execute(&mut **tx)
             .await?;
@@ -237,15 +296,20 @@ pub async fn upsert_albums(
             .cover_path
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned());
-        let artist_id = stored_id(a.artist_id.as_deref());
+        let billed = a.artist.trim();
+        let artist_pk = match billed.is_empty() {
+            true => None,
+            false => Some(file_artist(&mut tx, src, billed, a.artist_id.as_deref()).await?),
+        };
+        // The artist is replaced with its name, so an album rebilled to nobody drops the old row.
         sqlx::query!(
-            "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_id) \
+            "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_pk) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
              ON CONFLICT(source, source_album_id) DO UPDATE SET \
                title=?3, artist=?4, genre=?5, year=?6, \
                cover_path=COALESCE(?7, albums.cover_path), \
                manual_cover=MAX(?8, albums.manual_cover), \
-               artist_id=COALESCE(?9, albums.artist_id), derived=0",
+               artist_pk=?9, derived=0",
             src,
             a.id,
             a.title,
@@ -254,7 +318,7 @@ pub async fn upsert_albums(
             year,
             cover,
             manual,
-            artist_id
+            artist_pk
         )
         .execute(&mut *tx)
         .await?;
@@ -443,14 +507,17 @@ pub async fn delete_tracks(
     }
     let keys_json = serde_json::to_string(keys)?;
     let src = source.as_str();
+    let mut tx = pool.begin().await?;
     let res = sqlx::query!(
         "DELETE FROM tracks WHERE source = ?1 \
          AND track_key IN (SELECT value FROM json_each(?2))",
         src,
         keys_json
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    prune_artists(&mut tx, src).await?;
+    tx.commit().await?;
     Ok(res.rows_affected())
 }
 
@@ -488,6 +555,7 @@ pub async fn prune_source(
     )
     .execute(&mut *tx)
     .await?;
+    prune_artists(&mut tx, src).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -514,6 +582,7 @@ pub async fn delete_album(
     )
     .execute(&mut *tx)
     .await?;
+    prune_artists(&mut tx, src).await?;
     tx.commit().await?;
     Ok(())
 }

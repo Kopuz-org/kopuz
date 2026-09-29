@@ -209,41 +209,6 @@ impl MediaSource for YtSource {
             .map_err(SourceError::from)
     }
 
-    async fn resolve_artist_channel_id(&self, query: &str) -> Result<Option<String>, SourceError> {
-        // A row that arrived linked already knows the answer; the rest of this
-        // function is for names that arrived bare.
-        let stored = self.db.artist_ids(&self.source).await.unwrap_or_default();
-        if let Some(id) = stored.get(&utils::artist::normalize_artist_key(query)) {
-            return Ok(Some(id.clone()));
-        }
-        // A song's watch-queue byline links its artists' channels exactly —
-        // including user channels the Artists search can't find at all — so
-        // a library artist reconciles from their own song first. The search
-        // only decides names the library doesn't hold.
-        let tracks = self
-            .db
-            .artist_tracks(
-                &self.source,
-                &utils::artist::ArtistKey::of(query, None),
-                Some(3),
-            )
-            .await
-            .unwrap_or_default();
-        for track in tracks.iter() {
-            if let Ok(Some(cid)) = self
-                .client
-                .artist_channel_for_video(&track.id.key(), query)
-                .await
-            {
-                return Ok(Some(cid));
-            }
-        }
-        self.client
-            .resolve_artist_channel_id(query)
-            .await
-            .map_err(SourceError::from)
-    }
-
     async fn resolve_album_browse_id(
         &self,
         album: &str,
@@ -287,13 +252,12 @@ impl MediaSource for YtSource {
         }
         // No artists-search entry (user channels for uploaded content) —
         // reconcile the channel from a library song and use its avatar.
+        let Some(library) = &artist.library else {
+            return Ok(None);
+        };
         let tracks = self
             .db
-            .artist_tracks(
-                &self.source,
-                &utils::artist::ArtistKey::of(&artist.name, artist.id.as_deref()),
-                Some(3),
-            )
+            .artist_tracks(&self.source, library.pk, Some(3))
             .await
             .unwrap_or_default();
         for track in tracks.iter() {

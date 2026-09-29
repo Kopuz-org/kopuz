@@ -203,6 +203,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Albumul nu a fost găsit
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Lista de redare nu a fost găsită
 no_playlists_found = Nu au fost găsite liste de redare
 no_playlists_yet = Încă nu ai liste de redare. Adaugă piese din biblioteca ta!

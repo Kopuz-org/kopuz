@@ -43,6 +43,14 @@ fn track(key: &str, credits: Vec<ArtistCredit>) -> Track {
     }
 }
 
+/// A credit as a source wrote it, without the library row a read files it under.
+fn named(credits: &[ArtistCredit]) -> Vec<(&str, Option<&str>)> {
+    credits
+        .iter()
+        .map(|credit| (credit.name.as_str(), credit.id.as_deref()))
+        .collect()
+}
+
 fn entry(key: &str, item_id: &str) -> PlaylistEntry {
     PlaylistEntry {
         key: key.into(),
@@ -105,7 +113,7 @@ async fn credits_round_trip_in_order_and_names_never_replace_ids() {
         .unwrap()
         .remove(0);
 
-    assert_eq!(stored.credits, linked.credits);
+    assert_eq!(named(&stored.credits), named(&linked.credits));
     assert_eq!(stored.artists, ["Ada", "Boris"]);
 }
 
@@ -125,7 +133,7 @@ async fn a_row_without_credits_stores_its_names_and_follows_a_retag() {
         .unwrap()
         .remove(0);
 
-    assert_eq!(stored.credits, [ArtistCredit::unlinked("Cyd")]);
+    assert_eq!(named(&stored.credits), [("Cyd", None)]);
 }
 
 #[tokio::test]
@@ -291,6 +299,7 @@ async fn a_track_gives_its_album_a_row_without_overwriting_a_real_one() {
             cover_path: None,
             manual_cover: false,
             artist_id: None,
+            library_artist: None,
         }],
     )
     .await
@@ -404,15 +413,14 @@ async fn only_a_real_album_credits_its_tracks_to_its_artist() {
             cover_path: None,
             manual_cover: false,
             artist_id: Some("ar-1".into()),
+            library_artist: None,
         }],
     )
     .await
     .unwrap();
 
-    let ada = db
-        .artist_tracks(&source, &utils::artist::ArtistKey::Id("ar-1".into()), None)
-        .await
-        .unwrap();
+    let ar1 = db.artist_pk(&source, "ar-1").await.unwrap().expect("ar-1");
+    let ada = db.artist_tracks(&source, ar1, None).await.unwrap();
 
     let keys: Vec<String> = ada.iter().map(|t| t.id.key().into_owned()).collect();
     assert_eq!(
@@ -420,4 +428,43 @@ async fn only_a_real_album_credits_its_tracks_to_its_artist() {
         ["t1", "t3"],
         "t2 sits on a guessed album and stays Boris's"
     );
+}
+
+#[tokio::test]
+async fn a_renamed_artist_keeps_its_row_and_a_prune_drops_what_nothing_credits() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let source = Source::Server("jf".into());
+    db.upsert_tracks(
+        &source,
+        &[
+            track("t1", vec![ArtistCredit::linked("Ada", "ar-1")]),
+            track("t2", vec![ArtistCredit::unlinked("Boris")]),
+        ],
+    )
+    .await
+    .unwrap();
+    let ada = db.artist_pk(&source, "ar-1").await.unwrap().unwrap();
+    let boris = db
+        .artists(&source)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|artist| artist.name == "Boris")
+        .unwrap()
+        .pk;
+
+    db.upsert_tracks(
+        &source,
+        &[track(
+            "t1",
+            vec![ArtistCredit::linked("Ada Lovelace", "ar-1")],
+        )],
+    )
+    .await
+    .unwrap();
+    db.prune_source(&source, &["t1".into()], &[]).await.unwrap();
+
+    let renamed = db.artist(&source, ada).await.unwrap().unwrap();
+    assert_eq!((renamed.name.as_str(), renamed.tracks), ("Ada Lovelace", 1));
+    assert_eq!(db.artist(&source, boris).await.unwrap(), None);
 }

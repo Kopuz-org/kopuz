@@ -273,6 +273,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = Album hittades inte
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = Spellistan hittades inte
 no_playlists_found = Inga spellistor hittades
 no_playlists_yet = Inga spellistor ännu. Lägg till låtar från ditt bibliotek.

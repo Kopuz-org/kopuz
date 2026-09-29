@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) FROM track_credits WHERE track_pk = ?1 AND artist_id IS NOT NULL",
+  "query": "SELECT COUNT(*) FROM track_credits c JOIN artists a ON a.id = c.artist_pk WHERE c.track_pk = ?1 AND a.source_artist_id IS NOT NULL",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "3992246012ac48cf0a7bb5fb11db2ed34d9e5da970f51da7f794cb6618caa39b"
+  "hash": "42670ae5fb512fe8e64f997c158712bc25466dd10902db12a077d95b02153707"
 }

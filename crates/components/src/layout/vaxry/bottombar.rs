@@ -106,7 +106,7 @@ pub fn BottombarVaxry(
     let artist = current_track_snapshot
         .as_ref()
         .and_then(|track| track.primary_credit())
-        .map(|credit| credit.key.clone());
+        .and_then(|credit| credit.key.clone());
     let cover = ctrl
         .current_cover_url(hooks::artwork::Size::Thumb)
         .unwrap_or_default();

@@ -94,10 +94,6 @@ impl YouTubeMusicClient {
         search::music_search_tracks(query, self.cookies.as_deref()).await
     }
 
-    pub async fn resolve_artist_channel_id(&self, query: &str) -> Result<Option<String>, String> {
-        search::resolve_artist_channel_id(query, self.cookies.as_deref()).await
-    }
-
     /// Top YT Music artist-search avatar for `name` — the Artists grid uses this
     /// so its photos are real YT artist images.
     pub async fn resolve_artist_image(&self, name: &str) -> Result<Option<String>, String> {

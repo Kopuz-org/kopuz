@@ -349,7 +349,9 @@ pub fn HomeBody(
             if is_unknown_artist(&credit.name) {
                 continue;
             }
-            let key = &credit.key;
+            let Some(key) = &credit.key else {
+                continue;
+            };
             if unique_artists.insert(key.clone()) {
                 // The daemon walks override, then photo, then an album cover
                 // for a library source; no picture renders the placeholder.

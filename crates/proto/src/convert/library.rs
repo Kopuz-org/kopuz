@@ -58,7 +58,6 @@ pub fn track_info_to_proto(value: &api::TrackInfo) -> TrackInfo {
         seekable: value.seekable,
         offline: value.offline,
         format: value.format.clone(),
-        artists: value.artists.clone(),
         musicbrainz_release_id: value.musicbrainz_release_id.clone(),
         musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
         musicbrainz_track_id: value.musicbrainz_track_id.clone(),
@@ -84,7 +83,6 @@ pub fn track_info_from_proto(value: &TrackInfo) -> api::TrackInfo {
         seekable: value.seekable,
         offline: value.offline,
         format: value.format.clone(),
-        artists: value.artists.clone(),
         musicbrainz_release_id: value.musicbrainz_release_id.clone(),
         musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
         musicbrainz_track_id: value.musicbrainz_track_id.clone(),
@@ -335,14 +333,14 @@ pub fn search_results_from_proto(value: &SearchResults) -> api::SearchResults {
 pub fn artist_credit_to_proto(value: &api::ArtistCredit) -> ArtistCredit {
     ArtistCredit {
         name: value.name.clone(),
-        key: value.key.to_string(),
+        key: value.key.as_ref().map(ToString::to_string),
     }
 }
 
 pub fn artist_credit_from_proto(value: &ArtistCredit) -> api::ArtistCredit {
     api::ArtistCredit {
         name: value.name.clone(),
-        key: api::ArtistKey::new(value.key.clone()),
+        key: value.key.clone().map(api::ArtistKey::new),
     }
 }
 
@@ -410,7 +408,6 @@ mod tests {
             seekable: true,
             offline: false,
             format: Some("FLAC".into()),
-            artists: vec!["a".into(), "b".into()],
             musicbrainz_release_id: Some("mbr".into()),
             musicbrainz_recording_id: None,
             musicbrainz_track_id: None,
@@ -421,11 +418,11 @@ mod tests {
             credits: vec![
                 api::ArtistCredit {
                     name: "a".into(),
-                    key: api::ArtistKey::new("id:srv:UC-a"),
+                    key: Some(api::ArtistKey::new("src:srv:UC-a")),
                 },
                 api::ArtistCredit {
                     name: "b".into(),
-                    key: api::ArtistKey::new("name:srv:b"),
+                    key: None,
                 },
             ],
         };
@@ -434,13 +431,13 @@ mod tests {
 
     #[test]
     fn every_artist_reference_carries_its_key_across() {
-        let key = api::ArtistKey::new("id:srv:ar-1");
+        let key = api::ArtistKey::new("src:srv:ar-1");
         let target = api::ArtworkTarget::Artist(key.clone());
         assert_eq!(
             artwork_target_from_proto(&artwork_target_to_proto(&target)),
             Some(target)
         );
-        let keys = [key.clone(), api::ArtistKey::new("name:srv:ada")];
+        let keys = [key.clone(), api::ArtistKey::new("lib:7")];
         assert_eq!(
             refresh_artists_from_proto(&refresh_artists_to_proto(&keys)),
             keys

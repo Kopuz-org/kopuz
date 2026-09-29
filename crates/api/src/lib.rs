@@ -64,21 +64,15 @@ pub struct ConfigView {
     pub locked_keys: Vec<String>,
 }
 
-/// What this build speaks. Bump it in the same commit as any change to the
-/// wire a mismatched peer would misread: a renumbered field, a changed type, a
-/// retired message. Adding a field nothing older reads needs no bump.
-///
-/// Renumbering `dont_recommend` from 16 to 17 is what this exists to catch: a
-/// frontend built from another checkout read that flag as `browser_playback`,
-/// dropped the button it gates, and nothing anywhere said why.
-pub const WIRE_REVISION: u32 = 2;
+/// What this build speaks: bump it with any wire change a mismatched peer would misread, never for an added field.
+pub const WIRE_REVISION: u32 = 1;
 
 /// What a daemon says it is, for a frontend that was not built beside it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DaemonStatus {
     pub version: String,
     pub uptime_secs: u64,
-    /// The wire contract it speaks; see `proto::PROTO_REVISION`.
+    /// The wire contract it speaks; see [`WIRE_REVISION`].
     pub proto_revision: u32,
 }
 
@@ -495,11 +489,29 @@ pub trait ConfigApi: Send + Sync {
     async fn preview_equalizer(&self, equalizer: config::EqualizerSettings)
     -> Result<(), ApiError>;
 
-    /// What this daemon is, including the wire contract it speaks. A frontend
-    /// built from its own checkout asks on connect and says so if they differ.
+    /// What this daemon is, including the wire contract it speaks.
     async fn daemon_status(&self) -> Result<DaemonStatus, ApiError>;
 
+    /// Run on every connect: nothing else may be read from a daemon on another wire revision.
+    async fn handshake(&self) -> Result<Handshake, ApiError> {
+        let status = self.daemon_status().await?;
+        Ok(match status.proto_revision == WIRE_REVISION {
+            true => Handshake::Ready(status),
+            false => Handshake::Mismatched {
+                daemon: status.proto_revision,
+                client: WIRE_REVISION,
+            },
+        })
+    }
+
     // Switching sources lives on `SourceApi`, which is where sources are.
+}
+
+/// What a connect found: a daemon to talk to, or one whose fields this build would misread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Handshake {
+    Ready(DaemonStatus),
+    Mismatched { daemon: u32, client: u32 },
 }
 
 /// Subscribe to the state stream. Every subscriber gets every event from the
@@ -550,4 +562,60 @@ pub mod prelude {
         ArtworkApi, ConfigApi, EventApi, JobApi, KopuzApi, LibraryApi, PlayerApi, PlaylistApi,
         SourceApi,
     };
+}
+
+#[cfg(test)]
+mod handshake_tests {
+    use super::*;
+
+    struct Daemon(Result<u32, ApiError>);
+
+    #[async_trait::async_trait]
+    impl ConfigApi for Daemon {
+        async fn config(&self) -> Result<ConfigView, ApiError> {
+            unreachable!()
+        }
+        async fn set_config(&self, _: config::AppConfig) -> Result<ConfigView, ApiError> {
+            unreachable!()
+        }
+        async fn preview_equalizer(&self, _: config::EqualizerSettings) -> Result<(), ApiError> {
+            unreachable!()
+        }
+        async fn daemon_status(&self) -> Result<DaemonStatus, ApiError> {
+            self.0.clone().map(|proto_revision| DaemonStatus {
+                proto_revision,
+                ..Default::default()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_daemon_on_this_revision_is_ready() {
+        let ready = Daemon(Ok(WIRE_REVISION)).handshake().await.unwrap();
+        assert!(matches!(ready, Handshake::Ready(_)));
+
+        // A daemon that predates the field sends nothing, which reads as revision 0.
+        for daemon in [0, WIRE_REVISION + 1] {
+            assert_eq!(
+                Daemon(Ok(daemon)).handshake().await.unwrap(),
+                Handshake::Mismatched {
+                    daemon,
+                    client: WIRE_REVISION
+                }
+            );
+        }
+    }
+
+    /// A status that never arrived proves nothing, so it is the caller's error, not a match.
+    #[tokio::test]
+    async fn a_failed_status_is_an_error_not_a_match() {
+        let gone = ApiError {
+            code: ErrorCode::DaemonGone,
+            message: "gone".into(),
+        };
+
+        let result = Daemon(Err(gone.clone())).handshake().await;
+
+        assert_eq!(result, Err(gone));
+    }
 }

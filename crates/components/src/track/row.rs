@@ -21,7 +21,7 @@ pub(crate) fn copy_to_clipboard(text: &str) {
 }
 /// The artist the row's artist cell opens; a row crediting nobody opens nothing.
 fn billed_artist(track: &Track) -> Option<api::ArtistKey> {
-    track.primary_credit().map(|credit| credit.key.clone())
+    track.primary_credit().and_then(|credit| credit.key.clone())
 }
 
 #[component]

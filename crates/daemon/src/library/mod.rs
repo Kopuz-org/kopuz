@@ -532,11 +532,13 @@ impl QueueMaterializer for LibraryService {
                 .album_tracks(&self.query_source(), id)
                 .await
                 .map_err(db_error),
-            QueueContext::Artist { artist } => self
-                .db
-                .artist_tracks(&self.query_source(), &self.artist_of(artist)?, None)
-                .await
-                .map_err(db_error),
+            QueueContext::Artist { artist } => {
+                let row = self.artist_row(artist).await?;
+                self.db
+                    .artist_tracks(&self.query_source(), row.pk, None)
+                    .await
+                    .map_err(db_error)
+            }
             QueueContext::Genre { name } => self
                 .db
                 .genre_tracks(&self.query_source(), name)
@@ -664,11 +666,16 @@ mod tests {
         assert_eq!(page.total, 1);
         assert_eq!(page.items[0].title, "song 4");
 
+        let ada = library
+            .artists(Page::default())
+            .await
+            .expect("artist grid")
+            .artists
+            .into_iter()
+            .find(|artist| artist.name == "Ada")
+            .expect("Ada is listed");
         let page = library
-            .artist_tracks(
-                &crate::artist_key::of(&library.query_source(), "Ada", None),
-                Page::default(),
-            )
+            .artist_tracks(&ada.key, Page::default())
             .await
             .expect("artist listing");
         assert_eq!(page.total, 3);

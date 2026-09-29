@@ -270,12 +270,6 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("playlist paging"))
     }
 
-    /// Resolve an artist name to a remote channel id (discover artist links).
-    /// Default unsupported; only catalog remotes (YT) override.
-    async fn resolve_artist_channel_id(&self, _query: &str) -> Result<Option<String>, SourceError> {
-        Err(SourceError::unsupported("artist channel"))
-    }
-
     /// Resolve a saved album's title + artist to a remote album browse id, so
     /// the album page can fetch the album's full track list (the local library
     /// stores YT albums by hash, with no browse id). Default unsupported; only

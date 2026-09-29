@@ -545,6 +545,7 @@ async fn purge_source(conn: &mut sqlx::SqliteConnection, source: &str) -> Result
     for sql in [
         "DELETE FROM tracks WHERE source = ?1",
         "DELETE FROM albums WHERE source = ?1",
+        "DELETE FROM artists WHERE source = ?1",
         "DELETE FROM playlists WHERE source = ?1",
         "DELETE FROM favorites WHERE server_id = ?1",
         "DELETE FROM recently_played WHERE source = ?1",

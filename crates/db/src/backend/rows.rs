@@ -4,10 +4,11 @@
 
 use std::path::PathBuf;
 
-use reader::models::{Album, Track, TrackId};
+use reader::models::{Album, ArtistCredit, LibraryArtist, Track, TrackId};
 
 #[derive(sqlx::FromRow)]
 pub struct TrackRow {
+    pub rowid_pk: i64,
     pub track_key: String,
     pub service: Option<String>,
     pub cover_path: Option<String>,
@@ -23,37 +24,58 @@ pub struct TrackRow {
     pub mb_release_id: Option<String>,
     pub mb_recording_id: Option<String>,
     pub mb_track_id: Option<String>,
-    pub artists_json: String,
-    pub credits_json: String,
 }
 
-impl From<TrackRow> for Track {
-    fn from(r: TrackRow) -> Self {
-        let id = match r.service.as_deref() {
-            None => TrackId::Local(PathBuf::from(&r.track_key)),
+/// One credit of a track, with the artist row it is filed under.
+#[derive(sqlx::FromRow)]
+pub struct CreditRow {
+    pub track_pk: i64,
+    pub name: String,
+    pub artist_pk: i64,
+    pub source: String,
+    pub source_artist_id: Option<String>,
+}
+
+impl From<CreditRow> for ArtistCredit {
+    fn from(r: CreditRow) -> Self {
+        ArtistCredit {
+            name: r.name,
+            id: r.source_artist_id,
+            library: Some(LibraryArtist {
+                pk: r.artist_pk,
+                source: r.source,
+            }),
+        }
+    }
+}
+
+impl TrackRow {
+    pub fn into_track(self, credits: Vec<ArtistCredit>) -> Track {
+        let id = match self.service.as_deref() {
+            None => TrackId::Local(PathBuf::from(&self.track_key)),
             Some(service) => TrackId::Server {
                 service: parse_service(service),
-                item_id: r.track_key,
+                item_id: self.track_key,
             },
         };
         Track {
             id,
-            cover: r.cover_path,
-            album_id: r.source_album_id,
-            title: r.title,
-            artist: r.artist,
-            album: r.album,
-            duration: r.duration.max(0) as u64,
-            khz: r.khz.max(0) as u32,
-            bitrate: r.bitrate.clamp(0, u16::MAX as i64) as u16,
-            track_number: r.track_number.map(|n| n as u32),
-            disc_number: r.disc_number.map(|n| n as u32),
-            musicbrainz_release_id: r.mb_release_id,
-            musicbrainz_recording_id: r.mb_recording_id,
-            musicbrainz_track_id: r.mb_track_id,
+            cover: self.cover_path,
+            album_id: self.source_album_id,
+            title: self.title,
+            artist: self.artist,
+            album: self.album,
+            duration: self.duration.max(0) as u64,
+            khz: self.khz.max(0) as u32,
+            bitrate: self.bitrate.clamp(0, u16::MAX as i64) as u16,
+            track_number: self.track_number.map(|n| n as u32),
+            disc_number: self.disc_number.map(|n| n as u32),
+            musicbrainz_release_id: self.mb_release_id,
+            musicbrainz_recording_id: self.mb_recording_id,
+            musicbrainz_track_id: self.mb_track_id,
             playlist_item_id: None,
-            artists: serde_json::from_str(&r.artists_json).unwrap_or_default(),
-            credits: serde_json::from_str(&r.credits_json).unwrap_or_default(),
+            artists: credits.iter().map(|credit| credit.name.clone()).collect(),
+            credits,
         }
     }
 }
@@ -67,7 +89,9 @@ pub struct AlbumRow {
     pub year: i64,
     pub cover_path: Option<String>,
     pub manual_cover: i64,
-    pub artist_id: Option<String>,
+    pub source: String,
+    pub artist_pk: Option<i64>,
+    pub artist_source_id: Option<String>,
 }
 
 impl From<AlbumRow> for Album {
@@ -80,7 +104,11 @@ impl From<AlbumRow> for Album {
             year: r.year.clamp(0, u16::MAX as i64) as u16,
             cover_path: r.cover_path.map(PathBuf::from),
             manual_cover: r.manual_cover != 0,
-            artist_id: r.artist_id,
+            artist_id: r.artist_source_id,
+            library_artist: r.artist_pk.map(|pk| LibraryArtist {
+                pk,
+                source: r.source,
+            }),
         }
     }
 }

@@ -203,6 +203,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = האלבום לא נמצא
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = רשימת ההשמעה לא נמצאה
 no_playlists_found = לא נמצאו רשימות השמעה
 no_playlists_yet = אין עדיין רשימות השמעה. הוסיפו שירים מהספרייה שלכם!

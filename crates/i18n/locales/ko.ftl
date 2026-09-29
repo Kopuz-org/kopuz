@@ -203,6 +203,8 @@ lastfm_api_secret_label = API secret
 
 # Empty States
 album_not_found = 앨범을 찾을 수 없습니다
+artist_not_found = Artist not found
+artist_load_failed = Couldn't load this artist: { $error }
 playlist_not_found = 재생목록을 찾을 수 없습니다
 no_playlists_found = 재생목록을 찾을 수 없습니다
 no_playlists_yet = 아직 재생목록이 없습니다. 라이브러리에서 곡을 추가하세요!
