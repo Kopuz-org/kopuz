@@ -47,9 +47,6 @@ pub struct TrackInfo {
     pub musicbrainz_release_id: Option<String>,
     pub musicbrainz_recording_id: Option<String>,
     pub musicbrainz_track_id: Option<String>,
-    /// A playlist's own id for this entry, when the row came from one and the
-    /// source distinguishes duplicate entries.
-    pub playlist_item_id: Option<String>,
     pub artwork: Option<crate::ArtworkRef>,
     pub credits: Vec<ArtistCredit>,
 }

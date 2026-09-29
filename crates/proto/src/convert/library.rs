@@ -62,7 +62,6 @@ pub fn track_info_to_proto(value: &api::TrackInfo) -> TrackInfo {
         musicbrainz_release_id: value.musicbrainz_release_id.clone(),
         musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
         musicbrainz_track_id: value.musicbrainz_track_id.clone(),
-        playlist_item_id: value.playlist_item_id.clone(),
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
         credits: value
             .credits
@@ -96,7 +95,6 @@ pub fn track_info_from_proto(value: &TrackInfo) -> api::TrackInfo {
         musicbrainz_release_id: value.musicbrainz_release_id.clone(),
         musicbrainz_recording_id: value.musicbrainz_recording_id.clone(),
         musicbrainz_track_id: value.musicbrainz_track_id.clone(),
-        playlist_item_id: value.playlist_item_id.clone(),
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
         credits: value
             .credits
@@ -447,7 +445,6 @@ mod tests {
             musicbrainz_release_id: Some("mbr".into()),
             musicbrainz_recording_id: None,
             musicbrainz_track_id: None,
-            playlist_item_id: Some("pi-1".into()),
             artwork: Some(api::ArtworkRef {
                 target: api::ArtworkTarget::Track("k".into()),
                 version: 9,

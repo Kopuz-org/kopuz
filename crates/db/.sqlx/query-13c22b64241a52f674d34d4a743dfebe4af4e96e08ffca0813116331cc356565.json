@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO kv (name, kind, value) VALUES ('fav_pull', ?1, ?2) ON CONFLICT(kind, name) DO UPDATE SET value = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "13c22b64241a52f674d34d4a743dfebe4af4e96e08ffca0813116331cc356565"
+}

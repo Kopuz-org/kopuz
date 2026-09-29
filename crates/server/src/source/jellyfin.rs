@@ -304,7 +304,7 @@ impl MediaSource for JellyfinSource {
         &self,
         playlist_id: &str,
         track: &reader::Track,
-        _position: usize,
+        position: usize,
     ) -> Result<(), SourceError> {
         let entry_id = track
             .playlist_item_id
@@ -313,10 +313,7 @@ impl MediaSource for JellyfinSource {
         self.client
             .remove_from_playlist(playlist_id, entry_id)
             .await?;
-        self.db
-            .remove_playlist_tracks(&self.source, playlist_id, &[track.id.key().into_owned()])
-            .await
-            .map_err(SourceError::from)
+        self.remove_playlist_entry(playlist_id, position).await
     }
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
@@ -360,7 +357,7 @@ impl MediaSource for JellyfinSource {
     async fn reorder_playlist(
         &self,
         playlist_id: &str,
-        ordered_refs: &[String],
+        ordered: &[reader::PlaylistEntry],
         moved: &reader::Track,
         new_index: usize,
     ) -> Result<(), SourceError> {
@@ -372,7 +369,7 @@ impl MediaSource for JellyfinSource {
             .move_playlist_item(playlist_id, entry_id, new_index)
             .await?;
         self.db
-            .set_playlist_tracks(&self.source, playlist_id, ordered_refs)
+            .set_playlist_tracks(&self.source, playlist_id, ordered)
             .await
             .map_err(SourceError::from)
     }
