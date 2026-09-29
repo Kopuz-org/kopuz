@@ -175,8 +175,7 @@ impl RadioService {
         Ok(registry.all_stations().len() as u32)
     }
 
-    /// Pin a station, which persists its manifest in config so it survives a
-    /// registry that stops listing it.
+    /// Pin a station, keeping its manifest so it survives a registry that stops listing it.
     pub async fn pin(&self, id: &str, pinned: bool) -> Result<(), ApiError> {
         let manifest = self
             .registry
@@ -191,16 +190,9 @@ impl RadioService {
         let json = serde_json::to_string(&manifest)
             .map_err(|error| ApiError::internal(error.to_string()))?;
 
-        let mut config = self.config.view().await?.config;
-        config.pinned_stations.retain(|existing| {
-            serde_json::from_str::<StationManifest>(existing)
-                .map(|station| station.id != manifest.id)
-                .unwrap_or(true)
-        });
-        if pinned {
-            config.pinned_stations.push(json);
-        }
-        self.config.set(config).await?;
+        self.config
+            .set_pinned_station(&manifest.id, pinned.then_some(json))
+            .await?;
         self.reload().await?;
         if !pinned {
             // Unpinning demotes rather than forgets: the station drops out of

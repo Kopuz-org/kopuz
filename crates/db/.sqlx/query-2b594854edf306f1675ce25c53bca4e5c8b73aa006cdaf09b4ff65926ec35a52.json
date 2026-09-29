@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT position, start_time, end_time, text, parent_line, background, opposite_turn FROM lyric_lines WHERE cache_key = ?1 ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "name": "position",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "start_time",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "end_time",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "text",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "parent_line",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "background",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "opposite_turn",
+        "ordinal": 6,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2b594854edf306f1675ce25c53bca4e5c8b73aa006cdaf09b4ff65926ec35a52"
+}

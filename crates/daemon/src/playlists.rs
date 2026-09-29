@@ -437,26 +437,6 @@ impl PlaylistService {
         {
             let _ = source.delete_playlist(&stale.id).await;
         }
-        // The stamp is what stops the automatic sync running twice; only the
-        // source that gates on it writes one.
-        if source.capabilities().albums == server::source::AlbumType::YtMusic {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|elapsed| elapsed.as_secs())
-                .unwrap_or_default();
-            let mut stamps: serde_json::Value = self
-                .db
-                .meta_get("yt_sync", "timestamps")
-                .await
-                .ok()
-                .flatten()
-                .and_then(|raw| serde_json::from_str(&raw).ok())
-                .unwrap_or_else(|| serde_json::json!({}));
-            stamps["last_yt_playlists_sync_at"] = serde_json::json!(now);
-            let _ = source
-                .set_meta("yt_sync", "timestamps", &stamps.to_string())
-                .await;
-        }
         self.session.invalidate(Table::Tracks);
         self.session.invalidate(Table::Playlists);
         Ok(())

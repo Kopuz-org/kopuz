@@ -1028,35 +1028,56 @@ pub async fn set_playlist_folder(
     Ok(())
 }
 
-/// One `json_set`/`json_remove` on the config blob — the downloads hot path
-/// must not rewrite the whole config per finished song.
-#[tracing::instrument(skip_all, fields(id = %id))]
+/// Register (`Some`) or forget (`None`) one track's downloaded copy.
+#[tracing::instrument(skip_all, fields(item_id = %item_id))]
 pub async fn set_offline_track(
     pool: &SqlitePool,
-    id: &str,
+    item_id: &str,
     path: Option<&str>,
 ) -> Result<(), DbError> {
-    let key = format!("$.offline_tracks.\"{}\"", id.replace('"', ""));
     match path {
-        Some(p) => {
-            // Upsert so a download finishing before the first config save
-            // (fresh DB, no row 1 yet) isn't silently dropped.
+        Some(path) => {
             sqlx::query!(
-                "INSERT INTO app_config (id, json) VALUES (1, json_set('{}', ?1, ?2)) \
-                 ON CONFLICT(id) DO UPDATE SET json = json_set(json, ?1, ?2)",
-                key,
-                p
+                "INSERT INTO offline_tracks (item_id, path) VALUES (?1, ?2) \
+                 ON CONFLICT(item_id) DO UPDATE SET path = ?2",
+                item_id,
+                path
             )
             .execute(pool)
             .await?;
         }
         None => {
+            sqlx::query!("DELETE FROM offline_tracks WHERE item_id = ?1", item_id)
+                .execute(pool)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Pin (`Some` manifest) a station after every other pin, or unpin it (`None`).
+#[tracing::instrument(skip_all, fields(id = %id))]
+pub async fn set_pinned_station(
+    pool: &SqlitePool,
+    id: &str,
+    manifest: Option<&str>,
+) -> Result<(), DbError> {
+    match manifest {
+        Some(manifest) => {
             sqlx::query!(
-                "UPDATE app_config SET json = json_remove(json, ?1) WHERE id = 1",
-                key
+                "INSERT INTO pinned_stations (id, position, manifest) \
+                 SELECT ?1, COALESCE(MAX(position) + 1, 0), ?2 FROM pinned_stations WHERE true \
+                 ON CONFLICT(id) DO UPDATE SET manifest = ?2",
+                id,
+                manifest
             )
             .execute(pool)
             .await?;
+        }
+        None => {
+            sqlx::query!("DELETE FROM pinned_stations WHERE id = ?1", id)
+                .execute(pool)
+                .await?;
         }
     }
     Ok(())
@@ -1111,28 +1132,201 @@ pub async fn meta_put(
     Ok(())
 }
 
-#[tracing::instrument(name = "queue.save", skip_all)]
+/// Replace the whole stored queue: its rows, their credits and the shuffled order.
+#[tracing::instrument(name = "queue.save", skip_all, fields(tracks = snap.queue.len()))]
 pub async fn save_queue(pool: &SqlitePool, snap: &QueueSnapshot) -> Result<(), DbError> {
-    let queue_json = serde_json::to_string(&snap.queue)?;
-    let shuffle_json = serde_json::to_string(&snap.shuffle_order)?;
+    let mut tx = pool.begin().await?;
+    write_queue(&mut tx, snap).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// The queue's rows and where it stands, for a caller already inside a transaction.
+pub(crate) async fn write_queue(
+    conn: &mut sqlx::SqliteConnection,
+    snap: &QueueSnapshot,
+) -> Result<(), DbError> {
+    write_queue_rows(conn, &snap.queue, &snap.shuffle_order).await?;
+    write_queue_position(conn, snap).await
+}
+
+/// Store where the queue stands without rewriting its rows, for a save whose list did not change.
+pub async fn save_queue_position(pool: &SqlitePool, snap: &QueueSnapshot) -> Result<(), DbError> {
+    let mut conn = pool.acquire().await?;
+    write_queue_position(&mut conn, snap).await
+}
+
+async fn write_queue_position(
+    conn: &mut sqlx::SqliteConnection,
+    snap: &QueueSnapshot,
+) -> Result<(), DbError> {
     let version = snap.version as i64;
-    let cqi = snap.current_queue_index as i64;
-    let prog = snap.progress_secs as i64;
+    let current = snap.current_queue_index as i64;
+    let progress = snap.progress_secs as i64;
     let shuffle_on = snap.shuffle_enabled as i64;
     sqlx::query!(
-        "INSERT INTO queue_state \
-           (id, version, queue_json, current_queue_index, progress_secs, shuffle_order_json, shuffle_enabled) \
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6) \
-         ON CONFLICT(id) DO UPDATE SET version=?1, queue_json=?2, current_queue_index=?3, \
-           progress_secs=?4, shuffle_order_json=?5, shuffle_enabled=?6",
+        "INSERT INTO queue_state (id, version, current_queue_index, progress_secs, shuffle_enabled) \
+         VALUES (1, ?1, ?2, ?3, ?4) \
+         ON CONFLICT(id) DO UPDATE SET version = ?1, current_queue_index = ?2, \
+           progress_secs = ?3, shuffle_enabled = ?4",
         version,
-        queue_json,
-        cqi,
-        prog,
-        shuffle_json,
+        current,
+        progress,
         shuffle_on
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await?;
+    Ok(())
+}
+
+/// The queue's rows in play order; a radio stream stores no duration, since it has no end.
+async fn write_queue_rows(
+    conn: &mut sqlx::SqliteConnection,
+    queue: &[Track],
+    shuffle_order: &[usize],
+) -> Result<(), DbError> {
+    // Credits and the shuffle cascade from the rows they point at.
+    sqlx::query!("DELETE FROM queue_tracks")
+        .execute(&mut *conn)
+        .await?;
+    for (position, t) in queue.iter().enumerate() {
+        let position = position as i64;
+        let track_key = t.id.key().into_owned();
+        let service = t.id.service().map(service_str);
+        let duration = (t.duration != u64::MAX).then_some(t.duration as i64);
+        let khz = t.khz as i64;
+        let bitrate = t.bitrate as i64;
+        let track_number = t.track_number.map(|n| n as i64);
+        let disc_number = t.disc_number.map(|n| n as i64);
+        sqlx::query!(
+            "INSERT INTO queue_tracks (position, track_key, service, source_album_id, title, artist, \
+               album, duration, khz, bitrate, track_number, disc_number, cover_path, mb_release_id, \
+               mb_recording_id, mb_track_id, playlist_item_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            position,
+            track_key,
+            service,
+            t.album_id,
+            t.title,
+            t.artist,
+            t.album,
+            duration,
+            khz,
+            bitrate,
+            track_number,
+            disc_number,
+            t.cover,
+            t.musicbrainz_release_id,
+            t.musicbrainz_recording_id,
+            t.musicbrainz_track_id,
+            t.playlist_item_id
+        )
+        .execute(&mut *conn)
+        .await?;
+        // A row that only names its artists keeps those names as unlinked credits, as the library does.
+        let credits: std::borrow::Cow<[reader::ArtistCredit]> = match t.credits.is_empty() {
+            false => t.credits.as_slice().into(),
+            true => t
+                .artists
+                .iter()
+                .map(reader::ArtistCredit::unlinked)
+                .collect(),
+        };
+        for (at, credit) in credits.iter().enumerate() {
+            let at = at as i64;
+            let source = credit.source.as_ref().map(|source| source.as_str());
+            sqlx::query!(
+                "INSERT INTO queue_credits (queue_position, position, name, source_artist_id, source, artist_pk) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                position,
+                at,
+                credit.name,
+                credit.id,
+                source,
+                credit.artist_pk
+            )
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+    for (step, position) in shuffle_order.iter().enumerate() {
+        // An order naming a slot past the end would fail the whole save for one bad entry.
+        if *position >= queue.len() {
+            continue;
+        }
+        let step = step as i64;
+        let position = *position as i64;
+        sqlx::query!(
+            "INSERT INTO queue_shuffle (step, position) VALUES (?1, ?2)",
+            step,
+            position
+        )
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
+/// Store what a lyrics lookup concluded: the words, or (`None`) a miss stamped now so it can expire.
+#[tracing::instrument(skip_all, fields(cache_key = %cache_key))]
+pub async fn cache_lyrics(
+    pool: &SqlitePool,
+    cache_key: &str,
+    lyrics: Option<&utils::lyrics::Lyrics>,
+) -> Result<(), DbError> {
+    use utils::lyrics::Lyrics;
+
+    let (kind, plain_text) = match lyrics {
+        Some(Lyrics::Synced(_)) => ("synced", None),
+        Some(Lyrics::Plain(text)) => ("plain", Some(text.as_str())),
+        None => ("none", None),
+    };
+    let mut tx = pool.begin().await?;
+    sqlx::query!("DELETE FROM lyrics WHERE cache_key = ?1", cache_key)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!(
+        "INSERT INTO lyrics (cache_key, kind, plain_text, fetched_at) VALUES (?1, ?2, ?3, unixepoch())",
+        cache_key,
+        kind,
+        plain_text
+    )
+    .execute(&mut *tx)
+    .await?;
+    if let Some(Lyrics::Synced(lines)) = lyrics {
+        for (position, line) in lines.iter().enumerate() {
+            let position = position as i64;
+            let parent = line.parent_line_index.map(|index| index as i64);
+            sqlx::query!(
+                "INSERT INTO lyric_lines (cache_key, position, start_time, end_time, text, parent_line, \
+                   background, opposite_turn) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                cache_key,
+                position,
+                line.start_time,
+                line.end_time,
+                line.text,
+                parent,
+                line.background,
+                line.opposite_turn
+            )
+            .execute(&mut *tx)
+            .await?;
+            for (at, chunk) in line.chunks.iter().enumerate() {
+                let at = at as i64;
+                sqlx::query!(
+                    "INSERT INTO lyric_chunks (cache_key, line, position, start_time, text) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    cache_key,
+                    position,
+                    at,
+                    chunk.start_time,
+                    chunk.text
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+    }
+    tx.commit().await?;
     Ok(())
 }

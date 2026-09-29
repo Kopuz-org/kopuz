@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT line, start_time, text FROM lyric_chunks WHERE cache_key = ?1 ORDER BY line, position",
+  "describe": {
+    "columns": [
+      {
+        "name": "line",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "start_time",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "text",
+        "ordinal": 2,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d78d917636d456feb80cb09b65cd4cb4d9b6e02f78b220fb53a0270701f771ee"
+}

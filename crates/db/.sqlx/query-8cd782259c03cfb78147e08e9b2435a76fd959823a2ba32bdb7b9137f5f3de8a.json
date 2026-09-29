@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT manifest FROM pinned_stations ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "name": "manifest",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8cd782259c03cfb78147e08e9b2435a76fd959823a2ba32bdb7b9137f5f3de8a"
+}

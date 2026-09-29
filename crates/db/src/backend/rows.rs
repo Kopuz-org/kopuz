@@ -49,13 +49,7 @@ impl From<CreditRow> for ArtistCredit {
 
 impl TrackRow {
     pub fn into_track(self, credits: Vec<ArtistCredit>) -> Track {
-        let id = match self.service.as_deref() {
-            None => TrackId::Local(PathBuf::from(&self.track_key)),
-            Some(service) => TrackId::Server {
-                service: parse_service(service),
-                item_id: self.track_key,
-            },
-        };
+        let id = track_id(self.service.as_deref(), self.track_key);
         Track {
             id,
             cover: self.cover_path,
@@ -102,6 +96,82 @@ impl From<AlbumRow> for Album {
             cover_path: r.cover_path.map(PathBuf::from),
             manual_cover: r.manual_cover != 0,
             artist_id: r.artist_source_id,
+            artist_pk: r.artist_pk,
+        }
+    }
+}
+
+/// A stored row's id: a local path when no service issued it, else that service's item.
+fn track_id(service: Option<&str>, track_key: String) -> TrackId {
+    match service {
+        None => TrackId::Local(PathBuf::from(track_key)),
+        Some(service) => TrackId::Server {
+            service: parse_service(service),
+            item_id: track_key,
+        },
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub struct QueueTrackRow {
+    pub position: i64,
+    pub track_key: String,
+    pub service: Option<String>,
+    pub source_album_id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub duration: Option<i64>,
+    pub khz: i64,
+    pub bitrate: i64,
+    pub track_number: Option<i64>,
+    pub disc_number: Option<i64>,
+    pub cover_path: Option<String>,
+    pub mb_release_id: Option<String>,
+    pub mb_recording_id: Option<String>,
+    pub mb_track_id: Option<String>,
+    pub playlist_item_id: Option<String>,
+}
+
+impl QueueTrackRow {
+    pub fn into_track(self, credits: Vec<ArtistCredit>) -> Track {
+        Track {
+            id: track_id(self.service.as_deref(), self.track_key),
+            cover: self.cover_path,
+            album_id: self.source_album_id,
+            title: self.title,
+            artist: self.artist,
+            album: self.album,
+            duration: self.duration.map_or(u64::MAX, |secs| secs.max(0) as u64),
+            khz: self.khz.max(0) as u32,
+            bitrate: self.bitrate.clamp(0, u16::MAX as i64) as u16,
+            track_number: self.track_number.map(|n| n as u32),
+            disc_number: self.disc_number.map(|n| n as u32),
+            musicbrainz_release_id: self.mb_release_id,
+            musicbrainz_recording_id: self.mb_recording_id,
+            musicbrainz_track_id: self.mb_track_id,
+            playlist_item_id: self.playlist_item_id,
+            artists: credits.iter().map(|credit| credit.name.clone()).collect(),
+            credits,
+        }
+    }
+}
+
+#[derive(sqlx::FromRow)]
+pub struct QueueCreditRow {
+    pub queue_position: i64,
+    pub name: String,
+    pub source_artist_id: Option<String>,
+    pub source: Option<String>,
+    pub artist_pk: Option<i64>,
+}
+
+impl From<QueueCreditRow> for ArtistCredit {
+    fn from(r: QueueCreditRow) -> Self {
+        ArtistCredit {
+            name: r.name,
+            id: r.source_artist_id,
+            source: r.source.as_deref().map(config::Source::from_column),
             artist_pk: r.artist_pk,
         }
     }

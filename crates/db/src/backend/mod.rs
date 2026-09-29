@@ -343,6 +343,10 @@ impl ReadStore for Native {
         cfg_store::set_server_credentials(&self.pool(), id, access_token, user_id).await
     }
 
+    async fn cached_lyrics(&self, cache_key: &str) -> Result<Option<crate::CachedLyrics>, DbError> {
+        dump::cached_lyrics(&self.pool(), cache_key).await
+    }
+
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError> {
         writes::meta_get(&self.pool(), cache_key, kind).await
     }
@@ -532,6 +536,22 @@ impl Storage for Native {
 
     async fn save_queue(&self, snap: &crate::QueueSnapshot) -> Result<(), DbError> {
         writes::save_queue(&self.pool(), snap).await
+    }
+
+    async fn save_queue_position(&self, snap: &crate::QueueSnapshot) -> Result<(), DbError> {
+        writes::save_queue_position(&self.pool(), snap).await
+    }
+
+    async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError> {
+        writes::set_pinned_station(&self.pool(), id, manifest).await
+    }
+
+    async fn cache_lyrics(
+        &self,
+        cache_key: &str,
+        lyrics: Option<&utils::lyrics::Lyrics>,
+    ) -> Result<(), DbError> {
+        writes::cache_lyrics(&self.pool(), cache_key, lyrics).await
     }
 
     async fn scrobble_queue_push(&self, row: &crate::QueuedScrobbleRow) -> Result<(), DbError> {

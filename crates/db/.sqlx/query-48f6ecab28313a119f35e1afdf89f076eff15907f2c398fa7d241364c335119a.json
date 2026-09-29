@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM offline_tracks WHERE item_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "48f6ecab28313a119f35e1afdf89f076eff15907f2c398fa7d241364c335119a"
+}

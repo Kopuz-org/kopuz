@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM queue_tracks",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "42e269cb336f52c1c68b0b97447ccd1e284bcbfa8474a61e4d40a844b71b1420"
+}

@@ -37,12 +37,16 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 /// differently. On a `VersionMismatch` we reconcile and retry; a checksum that
 /// matches neither line ending is a genuine edit and still fails.
 pub(super) async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
-    if !applied(pool, ARTISTS_FILLED).await? {
+    for fill in Fill::ALL {
+        let (made_room, dropped_old) = fill.between();
+        if applied(pool, dropped_old).await? {
+            continue;
+        }
         let mut through = sqlx::migrate::Migrator {
             migrations: std::borrow::Cow::Owned(
                 MIGRATOR
                     .iter()
-                    .filter(|m| m.version <= ARTISTS_CREATED)
+                    .filter(|m| m.version <= made_room)
                     .cloned()
                     .collect(),
             ),
@@ -50,15 +54,39 @@ pub(super) async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
         };
         through.set_ignore_missing(true);
         migrate(pool, &through).await?;
-        fill_artists(pool).await?;
+        fill.run(pool).await?;
     }
     migrate(pool, &MIGRATOR).await
 }
 
-/// The migration that creates the artist tables, which the Rust fill step follows.
+/// Data SQL can't move, filled in Rust after the migration that makes room for it and before the one dropping its old home.
+#[derive(Clone, Copy)]
+enum Fill {
+    Artists,
+    Queue,
+}
+
+impl Fill {
+    const ALL: [Fill; 2] = [Fill::Artists, Fill::Queue];
+
+    /// The migration the fill follows, and the one it must precede.
+    fn between(self) -> (i64, i64) {
+        match self {
+            Fill::Artists => (ARTISTS_CREATED, 20260922000001),
+            Fill::Queue => (QUEUE_ROWS_CREATED, 20260930000001),
+        }
+    }
+
+    async fn run(self, pool: &SqlitePool) -> Result<(), DbError> {
+        match self {
+            Fill::Artists => fill_artists(pool).await,
+            Fill::Queue => fill_queue(pool).await,
+        }
+    }
+}
+
 const ARTISTS_CREATED: i64 = 20260922000000;
-/// The migration after the fill, which drops the column the artists were filled from.
-const ARTISTS_FILLED: i64 = 20260922000001;
+const QUEUE_ROWS_CREATED: i64 = 20260930000000;
 
 async fn migrate(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> Result<(), DbError> {
     match migrator.run(pool).await {
@@ -161,6 +189,91 @@ async fn file_unlinked(
     .bind(utils::artist::normalize_artist_key(name))
     .fetch_one(conn)
     .await?)
+}
+
+/// Moves the stored queue out of its JSON columns into rows, read through the same serde that wrote it.
+async fn fill_queue(pool: &SqlitePool) -> Result<(), DbError> {
+    let stored: Option<(String, String)> =
+        sqlx::query_as("SELECT queue_json, shuffle_order_json FROM queue_state WHERE id = 1")
+            .fetch_optional(pool)
+            .await?;
+    let Some((queue_json, shuffle_json)) = stored else {
+        return Ok(());
+    };
+    let queue: Vec<Track> = serde_json::from_str(&queue_json).unwrap_or_default();
+    let shuffle: Vec<usize> = serde_json::from_str(&shuffle_json).unwrap_or_default();
+    let mut tx = pool.begin().await?;
+    for sql in [
+        "DELETE FROM queue_shuffle",
+        "DELETE FROM queue_credits",
+        "DELETE FROM queue_tracks",
+    ] {
+        sqlx::query(sql).execute(&mut *tx).await?;
+    }
+    for (position, t) in queue.iter().enumerate() {
+        let position = position as i64;
+        sqlx::query(
+            "INSERT INTO queue_tracks (position, track_key, service, source_album_id, title, artist, \
+               album, duration, khz, bitrate, track_number, disc_number, cover_path, mb_release_id, \
+               mb_recording_id, mb_track_id, playlist_item_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        )
+        .bind(position)
+        .bind(t.id.key().into_owned())
+        .bind(t.id.service().map(service_str))
+        .bind(&t.album_id)
+        .bind(&t.title)
+        .bind(&t.artist)
+        .bind(&t.album)
+        .bind((t.duration != u64::MAX).then_some(t.duration as i64))
+        .bind(t.khz as i64)
+        .bind(t.bitrate as i64)
+        .bind(t.track_number.map(|n| n as i64))
+        .bind(t.disc_number.map(|n| n as i64))
+        .bind(&t.cover)
+        .bind(&t.musicbrainz_release_id)
+        .bind(&t.musicbrainz_recording_id)
+        .bind(&t.musicbrainz_track_id)
+        .bind(&t.playlist_item_id)
+        .execute(&mut *tx)
+        .await?;
+        // A row stored before credits existed keeps its names as unlinked credits.
+        let credits: std::borrow::Cow<[reader::ArtistCredit]> = match t.credits.is_empty() {
+            false => t.credits.as_slice().into(),
+            true => t
+                .artists
+                .iter()
+                .map(reader::ArtistCredit::unlinked)
+                .collect(),
+        };
+        for (at, credit) in credits.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO queue_credits (queue_position, position, name, source_artist_id, source, artist_pk) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .bind(position)
+            .bind(at as i64)
+            .bind(&credit.name)
+            .bind(&credit.id)
+            .bind(credit.source.as_ref().map(|source| source.as_str()))
+            .bind(credit.artist_pk)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    let queued = queue.len();
+    for (step, position) in shuffle.into_iter().enumerate() {
+        if position >= queued {
+            continue;
+        }
+        sqlx::query("INSERT INTO queue_shuffle (step, position) VALUES (?1, ?2)")
+            .bind(step as i64)
+            .bind(position as i64)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// Re-stamp `_sqlx_migrations` rows whose checksum differs from this binary's
@@ -360,24 +473,24 @@ pub async fn run_json_import(
     let server_src = active_server_id.clone();
 
     // --- app_config blob (minus servers/creds/listen_counts) + listen_counts -
-    import_config_blob(&mut tx, &cfg_val, &active_server_id, &lib).await?;
+    import_config_blob(&mut tx, &cfg_val, &active_server_id).await?;
     import_listen_counts(&mut tx, &cfg_val, active_server_id.as_deref()).await?;
     import_recently_played(&mut tx, &cfg_val, &active_server_id).await?;
 
-    // The YT sync timestamps ALSO go to the metadata cache — that's where the
-    // runtime reads them ("yt_sync"/"timestamps"); blob keys alone would make
-    // the favorites page think it never synced and re-stream the whole liked
-    // library from YT on first open after a migration.
-    if lib.last_yt_sync_at.is_some() || lib.last_yt_playlists_sync_at.is_some() {
-        let stamps = serde_json::json!({
-            "last_yt_sync_at": lib.last_yt_sync_at,
-            "last_yt_playlists_sync_at": lib.last_yt_playlists_sync_at,
-        })
-        .to_string();
+    // The YT sync times become each YT server's stamps, or its first open would re-stream the whole liked library.
+    let yt_stamps = [
+        ("synced:favorites", lib.last_yt_sync_at),
+        ("synced:playlists", lib.last_yt_playlists_sync_at),
+    ];
+    for (stamp, at) in yt_stamps {
+        let Some(at) = at.map(|at| at.to_string()) else {
+            continue;
+        };
         sqlx::query!(
-            "INSERT INTO kv (name, kind, value) VALUES ('yt_sync', 'timestamps', ?1) \
-             ON CONFLICT(kind, name) DO UPDATE SET value = ?1",
-            stamps
+            "INSERT INTO kv (name, kind, value) SELECT ?1, id, ?2 FROM servers WHERE service = 'YtMusic' \
+             ON CONFLICT(kind, name) DO UPDATE SET value = ?2",
+            stamp,
+            at
         )
         .execute(&mut *tx)
         .await?;
@@ -503,39 +616,26 @@ pub async fn run_json_import(
     }
 
     // --- queue snapshot ----------------------------------------------------
-    let queue_tracks: Vec<Track> = queue.queue.iter().filter_map(legacy_to_track).collect();
-    let queue_json = serde_json::to_string(&queue_tracks)?;
-    let shuffle_json = serde_json::to_string(&queue.shuffle_order)?;
-    let cqi = queue.current_queue_index;
-    let prog = queue.progress_secs;
-    let shuffle_on = queue.shuffle_enabled as i64;
-    let ver = queue.version as i64;
-    sqlx::query!(
-        "INSERT INTO queue_state \
-           (id, version, queue_json, current_queue_index, progress_secs, shuffle_order_json, shuffle_enabled) \
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6) \
-         ON CONFLICT(id) DO UPDATE SET version=?1, queue_json=?2, current_queue_index=?3, \
-           progress_secs=?4, shuffle_order_json=?5, shuffle_enabled=?6",
-        ver,
-        queue_json,
-        cqi,
-        prog,
-        shuffle_json,
-        shuffle_on
-    )
-    .execute(&mut *tx)
-    .await?;
+    let snapshot = crate::QueueSnapshot {
+        version: queue.version.min(u8::MAX as u32) as u8,
+        queue: queue.queue.iter().filter_map(legacy_to_track).collect(),
+        current_queue_index: queue.current_queue_index.max(0) as usize,
+        progress_secs: queue.progress_secs.max(0) as u64,
+        shuffle_order: queue.shuffle_order.iter().map(|&at| at as usize).collect(),
+        shuffle_enabled: queue.shuffle_enabled,
+    };
+    super::writes::write_queue(&mut tx, &snapshot).await?;
 
-    // Record what this import actually consumed — finalize renames exactly
-    // these files, so a skipped corrupt file is never moved aside unimported.
-    let consumed_json = serde_json::to_string(&consumed)?;
-    sqlx::query!(
-        "INSERT INTO kv (name, kind, value) VALUES ('legacy_import', 'files', ?1) \
-         ON CONFLICT(kind, name) DO UPDATE SET value = ?1",
-        consumed_json
-    )
-    .execute(&mut *tx)
-    .await?;
+    // Record what this import actually consumed, so finalize never moves aside a skipped corrupt file.
+    for file in &consumed {
+        sqlx::query!(
+            "INSERT INTO kv (name, kind, value) VALUES (?1, 'legacy_import', '') \
+             ON CONFLICT(kind, name) DO NOTHING",
+            file
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
 
     tx.commit().await?;
 
@@ -566,14 +666,13 @@ pub async fn run_json_import(
 /// Also drops the obsolete `.db_migrated` sentinel from earlier builds.
 /// Returns how many files were renamed.
 pub async fn finalize_migration(pool: &SqlitePool, config_dir: &Path) -> Result<usize, DbError> {
-    let consumed: Option<String> =
-        sqlx::query_scalar!("SELECT value FROM kv WHERE name = 'legacy_import' AND kind = 'files'")
-            .fetch_optional(pool)
+    let consumed: Vec<String> =
+        sqlx::query_scalar!("SELECT name FROM kv WHERE kind = 'legacy_import'")
+            .fetch_all(pool)
             .await?;
-    let Some(consumed) = consumed else {
+    if consumed.is_empty() {
         return Ok(0);
-    };
-    let consumed: Vec<String> = serde_json::from_str(&consumed).unwrap_or_default();
+    }
     let mut renamed = 0;
     for f in LEGACY_FILES {
         let src = config_dir.join(f);
@@ -690,7 +789,6 @@ async fn import_config_blob(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     cfg: &serde_json::Value,
     active_server_id: &Option<String>,
-    lib: &LegacyLibrary,
 ) -> Result<(), DbError> {
     let mut blob = if cfg.is_null() {
         serde_json::json!({})
@@ -710,14 +808,6 @@ async fn import_config_blob(
                 Some(id) => serde_json::json!({ "Server": id }),
                 None => serde_json::json!("Local"),
             },
-        );
-        obj.insert(
-            "last_yt_sync_at".into(),
-            serde_json::json!(lib.last_yt_sync_at),
-        );
-        obj.insert(
-            "last_yt_playlists_sync_at".into(),
-            serde_json::json!(lib.last_yt_playlists_sync_at),
         );
     }
     let blob_str = serde_json::to_string(&blob)?;
@@ -1407,5 +1497,173 @@ mod artist_fill_tests {
                 ("al-3".into(), None),
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod row_fill_tests {
+    use super::*;
+
+    fn queued(key: &str) -> Track {
+        Track {
+            id: TrackId::Server {
+                service: config::MusicService::YtMusic,
+                item_id: key.into(),
+            },
+            cover: None,
+            album_id: String::new(),
+            title: key.into(),
+            artist: "Ada".into(),
+            album: String::new(),
+            duration: u64::MAX,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: vec!["Ada".into()],
+            credits: vec![reader::ArtistCredit::linked("Ada", "UC-ada")],
+        }
+    }
+
+    /// Every document the blob and kv held comes out as rows, and the documents are gone.
+    #[tokio::test]
+    async fn the_stored_documents_become_rows_on_the_way_up() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        run_migrations(&pool).await.unwrap();
+        // Back to just before the new tables, with every document an older build left.
+        for sql in [
+            "DROP TABLE queue_shuffle",
+            "DROP TABLE queue_credits",
+            "DROP TABLE queue_tracks",
+            "DROP TABLE offline_tracks",
+            "DROP TABLE pinned_stations",
+            "DROP TABLE lyric_chunks",
+            "DROP TABLE lyric_lines",
+            "DROP TABLE lyrics",
+            "ALTER TABLE queue_state ADD COLUMN queue_json TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE queue_state ADD COLUMN shuffle_order_json TEXT NOT NULL DEFAULT '[]'",
+            "DELETE FROM _sqlx_migrations WHERE version >= 20260930000000",
+        ] {
+            sqlx::query(sql).execute(&pool).await.unwrap();
+        }
+        let queue = serde_json::to_string(&[queued("a"), queued("b")]).unwrap();
+        sqlx::query(
+            "INSERT INTO queue_state (id, queue_json, current_queue_index, shuffle_order_json) \
+             VALUES (1, ?1, 1, '[1, 0]')",
+        )
+        .bind(queue)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::raw_sql(
+            r#"INSERT INTO app_config (id, json) VALUES (1, '{"theme":"dark","offline_tracks":{"t1":"/c/t1.flac"},"pinned_stations":["{\"id\":\"moe\"}", "not json"]}');
+               INSERT INTO servers (id, name, url, service, updated_at) VALUES ('yt-1', 'yt', '', 'YtMusic', 0);
+               INSERT INTO kv (name, kind, value) VALUES
+                 ('yt_sync', 'timestamps', '{"last_yt_sync_at":1700000000,"last_yt_playlists_sync_at":null}'),
+                 ('legacy_import', 'files', '["config.json","library.json"]'),
+                 ('k1', 'lyrics', '{"kind":"synced2","lines":[{"start_time":1.5,"text":"hi","chunks":[{"start_time":1.5,"text":"h"}],"background":true}]}'),
+                 ('k2', 'lyrics', '{"kind":"plain","text":"words"}'),
+                 ('k3', 'lyrics', '{"kind":"none","ts":42}'),
+                 ('k4', 'lyrics', '{"kind":"synced","lines":[]}');"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool).await.unwrap();
+
+        let queue: Vec<(i64, String, Option<i64>)> = sqlx::query_as(
+            "SELECT position, track_key, duration FROM queue_tracks ORDER BY position",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(queue, [(0, "a".into(), None), (1, "b".into(), None)]);
+        let credit: (String, Option<String>) = sqlx::query_as(
+            "SELECT name, source_artist_id FROM queue_credits WHERE queue_position = 0",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(credit, ("Ada".into(), Some("UC-ada".into())));
+        let shuffle: Vec<i64> =
+            sqlx::query_scalar("SELECT position FROM queue_shuffle ORDER BY step")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(shuffle, [1, 0]);
+
+        let offline: Vec<(String, String)> =
+            sqlx::query_as("SELECT item_id, path FROM offline_tracks")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(offline, [("t1".into(), "/c/t1.flac".into())]);
+        let pins: Vec<String> = sqlx::query_scalar("SELECT id FROM pinned_stations")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(pins, ["moe"], "an unreadable pin is dropped");
+        let blob: String = sqlx::query_scalar("SELECT json FROM app_config WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(blob, r#"{"theme":"dark"}"#);
+
+        let kv: Vec<(String, String, String)> =
+            sqlx::query_as("SELECT name, kind, value FROM kv ORDER BY kind, name")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            kv,
+            [
+                ("config.json".into(), "legacy_import".into(), String::new()),
+                ("library.json".into(), "legacy_import".into(), String::new()),
+                (
+                    "synced:favorites".into(),
+                    "yt-1".into(),
+                    "1700000000".into()
+                ),
+            ]
+        );
+
+        let lyrics: Vec<(String, String, Option<String>)> =
+            sqlx::query_as("SELECT cache_key, kind, plain_text FROM lyrics ORDER BY cache_key")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            lyrics,
+            [
+                ("k1".into(), "synced".into(), None),
+                ("k2".into(), "plain".into(), Some("words".into())),
+                ("k3".into(), "none".into(), None),
+            ],
+            "an entry in a format no build reads any more is dropped"
+        );
+        let line: (f64, String, i64) = sqlx::query_as(
+            "SELECT start_time, text, background FROM lyric_lines WHERE cache_key = 'k1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(line, (1.5, "hi".into(), 1));
+        let chunk: String =
+            sqlx::query_scalar("SELECT text FROM lyric_chunks WHERE cache_key = 'k1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(chunk, "h");
+        let missed_at: i64 =
+            sqlx::query_scalar("SELECT fetched_at FROM lyrics WHERE cache_key = 'k3'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(missed_at, 42);
     }
 }

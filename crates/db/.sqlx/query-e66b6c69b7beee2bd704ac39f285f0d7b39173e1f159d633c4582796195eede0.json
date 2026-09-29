@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO queue_shuffle (step, position) VALUES (?1, ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e66b6c69b7beee2bd704ac39f285f0d7b39173e1f159d633c4582796195eede0"
+}

@@ -1,9 +1,9 @@
 //! Config persistence as a DB-backed cache of the in-memory `AppConfig` (#347,
 //! step 4), layered with the standalone settings file (#530).
 //!
-//! The single-row `app_config` blob holds everything EXCEPT creds and play
-//! counts: `server`/`servers` live in the `servers` table (creds with the
-//! server), `listen_counts` in its own table. [`load_config`] hydrates those
+//! The single-row `app_config` blob holds everything EXCEPT [`TABLE_KEYS`]:
+//! servers with their creds, play counts, offline copies and pinned stations
+//! each live in their own table. [`load_config`] hydrates those
 //! back onto the `AppConfig` the UI reads; [`save_config`] strips them out of
 //! the blob and syncs the tables. Net effect: same `AppConfig` shape in memory,
 //! creds never in the blob.
@@ -27,6 +27,15 @@ use crate::DbError;
 
 /// How many recent entries to keep per source.
 const RECENT_LIMIT: i64 = 50;
+
+/// `AppConfig` fields hydrated from their own tables, and so kept out of the blob and the settings file.
+const TABLE_KEYS: &[&str] = &[
+    "server",
+    "servers",
+    "listen_counts",
+    "offline_tracks",
+    "pinned_stations",
+];
 
 pub async fn load_config(
     pool: &SqlitePool,
@@ -80,6 +89,15 @@ pub async fn load_config(
             (key, r.count.max(0) as u64)
         })
         .collect();
+
+    let offline = sqlx::query!("SELECT item_id, path FROM offline_tracks")
+        .fetch_all(pool)
+        .await?;
+    cfg.offline_tracks = offline.into_iter().map(|r| (r.item_id, r.path)).collect();
+    cfg.pinned_stations =
+        sqlx::query_scalar!("SELECT manifest FROM pinned_stations ORDER BY position")
+            .fetch_all(pool)
+            .await?;
 
     Ok(Some(cfg))
 }
@@ -162,17 +180,15 @@ pub async fn save_config(
         }
     }
 
-    // Play counts are NOT synced here: `bump_listen_count` is their sole writer
-    // (a per-play 1-row upsert). Looping the whole map made every config save
-    // cost hundreds of statements — the downloads-stutter bug.
+    // Play counts, offline copies and pins are NOT synced here: each has one row-at-a-time writer.
 
-    // Store the blob, stripped of creds/servers/counts, stamped with the active id.
+    // Store the blob, stripped of what lives in its own tables, stamped with the active id.
     let layers = config::store::FileLayers::read(settings_path);
     let mut blob = serde_json::to_value(cfg)?;
     if let Some(obj) = blob.as_object_mut() {
-        obj.remove("server");
-        obj.remove("servers");
-        obj.remove("listen_counts");
+        for key in TABLE_KEYS {
+            obj.remove(*key);
+        }
         // Preserve local-library selections; only a server snapshot may need
         // its generated/resolved id stamped into the typed source.
         obj.insert(

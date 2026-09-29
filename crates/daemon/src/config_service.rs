@@ -104,6 +104,33 @@ impl ConfigService {
         Ok(current.clone())
     }
 
+    /// Pin a station's manifest after the other pins (`Some`), or unpin it (`None`), without a whole-config save.
+    pub async fn set_pinned_station(
+        &self,
+        id: &str,
+        manifest: Option<String>,
+    ) -> Result<config::AppConfig, ApiError> {
+        let mut current = self.current.write().await;
+        self.db
+            .set_pinned_station(id, manifest.as_deref())
+            .await
+            .map_err(|error| ApiError::internal(format!("station pin failed: {error}")))?;
+        // Mirrors the row write: a re-pin keeps its place, a new pin goes last.
+        let held = current
+            .pinned_stations
+            .iter()
+            .position(|pinned| manifest_id(pinned).as_deref() == Some(id));
+        match (manifest, held) {
+            (Some(manifest), Some(at)) => current.pinned_stations[at] = manifest,
+            (Some(manifest), None) => current.pinned_stations.push(manifest),
+            (None, Some(at)) => {
+                current.pinned_stations.remove(at);
+            }
+            (None, None) => {}
+        }
+        Ok(current.clone())
+    }
+
     pub async fn snapshot(&self) -> config::AppConfig {
         self.current.read().await.clone()
     }
@@ -276,6 +303,7 @@ fn with_daemon_owned_fields(
     incoming.librefm_api_secret = current.librefm_api_secret.clone();
     incoming.librefm_session_key = current.librefm_session_key.clone();
     incoming.offline_tracks = current.offline_tracks.clone();
+    incoming.pinned_stations = current.pinned_stations.clone();
     incoming.spotify_browser = current.spotify_browser.clone();
     incoming.spotify_prefer_active_device = current.spotify_prefer_active_device;
     incoming.discord_presence = current.discord_presence;
@@ -285,6 +313,12 @@ fn with_daemon_owned_fields(
     incoming.ytdlp_options = current.ytdlp_options.clone();
     incoming.ytdlp_history = current.ytdlp_history.clone();
     incoming
+}
+
+/// The id a pinned manifest names; the registry's document is otherwise opaque here.
+fn manifest_id(manifest: &str) -> Option<String> {
+    let manifest: serde_json::Value = serde_json::from_str(manifest).ok()?;
+    manifest.get("id")?.as_str().map(str::to_string)
 }
 
 /// The credentials blanked for a caller. Not a security boundary on a socket

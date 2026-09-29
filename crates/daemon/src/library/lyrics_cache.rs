@@ -9,63 +9,39 @@
 //! library has no lyrics anywhere, and without the negative entry every open
 //! re-runs the whole provider chain over the network.
 
-use utils::lyrics::{LyricLine, Lyrics};
+use db::CachedLyrics;
+use utils::lyrics::Lyrics;
 
 use super::LibraryService;
 
-const META_KIND: &str = "lyrics";
-const NEGATIVE_TTL_SECS: u64 = 24 * 60 * 60;
+const NEGATIVE_TTL_SECS: i64 = 24 * 60 * 60;
 
-fn now_unix() -> u64 {
+fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_secs())
+        .map(|elapsed| elapsed.as_secs() as i64)
         .unwrap_or(0)
 }
 
-fn to_payload(value: &Option<Lyrics>) -> String {
-    let payload = match value {
-        Some(Lyrics::Synced(lines)) => serde_json::json!({
-            "kind": "synced2",
-            "lines": lines,
-        }),
-        Some(Lyrics::Plain(text)) => serde_json::json!({ "kind": "plain", "text": text }),
-        None => serde_json::json!({ "kind": "none", "ts": now_unix() }),
-    };
-    payload.to_string()
-}
-
-fn from_payload(payload: &str) -> Option<Option<Lyrics>> {
-    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
-    match value.get("kind").and_then(|kind| kind.as_str())? {
-        "synced2" => {
-            let lines: Vec<LyricLine> = serde_json::from_value(value.get("lines")?.clone()).ok()?;
-            Some(Some(Lyrics::Synced(lines)))
-        }
-        "plain" => Some(Some(Lyrics::Plain(
-            value.get("text")?.as_str()?.to_string(),
-        ))),
+/// What a stored entry answers: the words, a known absence, or (`None`) nothing still worth trusting.
+fn answer(cached: CachedLyrics, now: i64) -> Option<Option<Lyrics>> {
+    match cached {
+        CachedLyrics::Found(lyrics) => Some(Some(lyrics)),
         // An expired miss reads as "nothing stored", so the providers run again.
-        "none" => {
-            let stored_at = value.get("ts").and_then(|ts| ts.as_u64()).unwrap_or(0);
-            (now_unix().saturating_sub(stored_at) < NEGATIVE_TTL_SECS).then_some(None)
+        CachedLyrics::Missing { at } => {
+            (now.saturating_sub(at) < NEGATIVE_TTL_SECS).then_some(None)
         }
-        _ => None,
     }
 }
 
 impl LibraryService {
     pub(super) async fn persisted_lyrics(&self, cache_key: &str) -> Option<Option<Lyrics>> {
-        let payload = self.db.meta_get(cache_key, META_KIND).await.ok()??;
-        from_payload(&payload)
+        let cached = self.db.cached_lyrics(cache_key).await.ok()??;
+        answer(cached, now_unix())
     }
 
     pub(super) async fn persist_lyrics(&self, cache_key: &str, value: &Option<Lyrics>) {
-        if let Err(error) = self
-            .db
-            .meta_put(cache_key, META_KIND, &to_payload(value))
-            .await
-        {
+        if let Err(error) = self.db.cache_lyrics(cache_key, value.as_ref()).await {
             tracing::debug!(%error, "storing lyrics failed");
         }
     }
@@ -77,20 +53,23 @@ mod tests {
 
     #[test]
     fn a_fresh_miss_reads_back_as_a_known_absence() {
-        let payload = to_payload(&None);
-        assert_eq!(from_payload(&payload), Some(None));
+        let now = now_unix();
+        assert_eq!(answer(CachedLyrics::Missing { at: now }, now), Some(None));
     }
 
     #[test]
     fn an_expired_miss_reads_as_nothing_stored_so_the_providers_run_again() {
-        let stale = now_unix() - NEGATIVE_TTL_SECS - 1;
-        let payload = serde_json::json!({ "kind": "none", "ts": stale }).to_string();
-        assert_eq!(from_payload(&payload), None);
+        let now = now_unix();
+        let stale = now - NEGATIVE_TTL_SECS - 1;
+        assert_eq!(answer(CachedLyrics::Missing { at: stale }, now), None);
     }
 
     #[test]
-    fn plain_words_round_trip() {
-        let value = Some(Lyrics::Plain("a line".into()));
-        assert_eq!(from_payload(&to_payload(&value)), Some(value));
+    fn found_words_are_the_answer() {
+        let words = Lyrics::Plain("a line".into());
+        assert_eq!(
+            answer(CachedLyrics::Found(words.clone()), now_unix()),
+            Some(Some(words))
+        );
     }
 }

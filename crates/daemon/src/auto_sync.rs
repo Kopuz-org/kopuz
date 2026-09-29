@@ -46,7 +46,11 @@ pub async fn mark_synced(db: &db::Db, kind: JobKind, source: &config::Source) {
     }
 }
 
-async fn last_synced(db: &db::Db, kind: JobKind, source: &config::Source) -> Option<u64> {
+pub(crate) async fn last_synced(
+    db: &db::Db,
+    kind: JobKind,
+    source: &config::Source,
+) -> Option<u64> {
     db.meta_get(stamp_key(kind)?, source.as_str())
         .await
         .ok()

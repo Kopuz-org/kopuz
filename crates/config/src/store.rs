@@ -36,9 +36,9 @@ const NIX_STORE_PREFIX: &str = "/nix/store";
 
 /// Runtime state, not settings: churns constantly or is per-install identity.
 /// Never written to the settings file — it stays in the DB blob, so it keeps
-/// persisting even when the settings file is immutable. (`server`/`servers`/
-/// `listen_counts` additionally live in their own DB tables and are stripped
-/// from every persisted form.)
+/// persisting even when the settings file is immutable. (The fields the DB keeps
+/// in their own tables, `pinned_stations` among them, are stripped from every
+/// persisted form.)
 const STATE_KEYS: &[&str] = &[
     "server",
     "servers",

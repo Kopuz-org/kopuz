@@ -40,8 +40,7 @@ pub struct Page {
     pub limit: u32,
 }
 
-/// The queue/progress snapshot, reconstructed from the `queue_state` row. The
-/// in-memory `PersistedQueueState` (in the app crate) maps directly from this.
+/// The stored queue: its rows, their shuffled order, and where playback stood.
 #[derive(Clone, Debug, Default)]
 pub struct QueueSnapshot {
     pub version: u8,
@@ -50,6 +49,13 @@ pub struct QueueSnapshot {
     pub progress_secs: u64,
     pub shuffle_order: Vec<usize>,
     pub shuffle_enabled: bool,
+}
+
+/// What the lyrics cache holds for a key: the words, or a miss and when it was recorded.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CachedLyrics {
+    Found(utils::lyrics::Lyrics),
+    Missing { at: i64 },
 }
 
 /// Sort order for a track listing — maps to an indexed `ORDER BY`.
@@ -287,7 +293,7 @@ pub trait ReadStore: Send + Sync {
         limit: u32,
     ) -> Result<Vec<reader::Album>, DbError>;
 
-    /// Reconstruct the queue/progress snapshot from the `queue_state` row.
+    /// The stored queue, its library rows refreshed from what a sync since wrote.
     async fn load_queue(&self) -> Result<QueueSnapshot, DbError>;
 
     /// The `PlaylistStore` (the active source's playlists + folders) — the read
@@ -315,6 +321,9 @@ pub trait ReadStore: Send + Sync {
         access_token: Option<&str>,
         user_id: Option<&str>,
     ) -> Result<(), DbError>;
+
+    /// What the lyrics cache holds for `cache_key`.
+    async fn cached_lyrics(&self, cache_key: &str) -> Result<Option<CachedLyrics>, DbError>;
 
     /// The value stored under `(cache_key, kind)` in the `kv` table, if any.
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
@@ -499,13 +508,24 @@ pub trait Storage: ReadStore {
     /// Record a play for this source's recently-played history (caps + trims).
     async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;
 
-    /// Register/unregister one offline download in the config blob (single
-    /// `json_set`/`json_remove` — the downloads hot path must not rewrite the
-    /// whole config per finished song).
+    /// Register (`Some`) or forget (`None`) one track's downloaded copy.
     async fn set_offline_track(&self, id: &str, path: Option<&str>) -> Result<(), DbError>;
 
-    /// Persist the queue/progress snapshot to the single `queue_state` row.
+    /// Replace the stored queue, rows and all.
     async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
+
+    /// Store where the queue stands, for a save whose rows did not change.
+    async fn save_queue_position(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
+
+    /// Pin (`Some` manifest) a station after the others, or unpin it (`None`).
+    async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError>;
+
+    /// Store a lyrics lookup's conclusion; `None` records a miss stamped now.
+    async fn cache_lyrics(
+        &self,
+        cache_key: &str,
+        lyrics: Option<&utils::lyrics::Lyrics>,
+    ) -> Result<(), DbError>;
 
     /// Enqueue a failed scrobble (issue #335). A repeat of the same
     /// `(listen, service)` folds into the existing row; the backlog is capped to

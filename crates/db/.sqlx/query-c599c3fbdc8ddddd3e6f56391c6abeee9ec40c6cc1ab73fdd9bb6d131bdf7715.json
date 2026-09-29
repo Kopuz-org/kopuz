@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO kv (name, kind, value) SELECT ?1, id, ?2 FROM servers WHERE service = 'YtMusic' ON CONFLICT(kind, name) DO UPDATE SET value = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "c599c3fbdc8ddddd3e6f56391c6abeee9ec40c6cc1ab73fdd9bb6d131bdf7715"
+}

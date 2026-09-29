@@ -348,7 +348,14 @@ async fn a_restored_queue_shows_what_the_library_holds_now() {
     let restored = db.load_queue().await.unwrap().queue;
 
     assert_eq!(restored[0].title, "Renamed by a sync");
-    assert_eq!(restored[1], transient);
+    let named = Track {
+        credits: vec![ArtistCredit::unlinked("Ada")],
+        ..transient
+    };
+    assert_eq!(
+        restored[1], named,
+        "its names come back as unlinked credits"
+    );
 }
 
 #[tokio::test]
@@ -467,4 +474,181 @@ async fn a_renamed_artist_keeps_its_row_and_a_prune_drops_what_nothing_credits()
     let renamed = db.artist(&source, ada).await.unwrap().unwrap();
     assert_eq!((renamed.name.as_str(), renamed.tracks), ("Ada Lovelace", 1));
     assert_eq!(db.artist(&source, boris).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn a_queue_round_trips_through_its_rows() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let mut listed = track("t1", Vec::new());
+    listed.credits = vec![ArtistCredit {
+        source: Some(Source::Server("yt".into())),
+        artist_pk: Some(7),
+        ..ArtistCredit::linked("Ada", "UC-ada")
+    }];
+    listed.playlist_item_id = Some("entry-1".into());
+    let mut stream = track("station", vec![ArtistCredit::unlinked("Radio")]);
+    stream.duration = u64::MAX;
+    stream.artists = vec!["Radio".into()];
+    let saved = db::QueueSnapshot {
+        version: 1,
+        queue: vec![listed, stream],
+        current_queue_index: 1,
+        progress_secs: 40,
+        shuffle_order: vec![1, 0, 9],
+        shuffle_enabled: true,
+    };
+
+    db.save_queue(&saved).await.unwrap();
+    let restored = db.load_queue().await.unwrap();
+
+    assert_eq!(restored.queue, saved.queue, "a stream keeps having no end");
+    assert_eq!(
+        restored.shuffle_order,
+        [1, 0],
+        "a slot past the end is dropped"
+    );
+    assert_eq!(
+        (
+            restored.current_queue_index,
+            restored.progress_secs,
+            restored.shuffle_enabled
+        ),
+        (1, 40, true)
+    );
+}
+
+#[tokio::test]
+async fn a_position_save_leaves_the_rows_alone() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let queued = db::QueueSnapshot {
+        version: 1,
+        queue: vec![track("t1", Vec::new()), track("t2", Vec::new())],
+        ..Default::default()
+    };
+    db.save_queue(&queued).await.unwrap();
+
+    db.save_queue_position(&db::QueueSnapshot {
+        current_queue_index: 1,
+        progress_secs: 12,
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+
+    let restored = db.load_queue().await.unwrap();
+    assert_eq!(restored.queue.len(), 2);
+    assert_eq!(
+        (restored.current_queue_index, restored.progress_secs),
+        (1, 12)
+    );
+}
+
+/// Downloads and pins are written a row at a time, so a whole-config save must neither store nor erase them.
+#[tokio::test]
+async fn offline_copies_and_pins_live_in_their_own_tables() {
+    let path = unique_db();
+    let db = db::init(&path).await.unwrap();
+    db.save_config(&AppConfig::default()).await.unwrap();
+    db.set_offline_track("t1", Some("/cache/t1.flac"))
+        .await
+        .unwrap();
+    db.set_pinned_station("moe", Some(r#"{"id":"moe"}"#))
+        .await
+        .unwrap();
+    db.set_pinned_station("jazz", Some(r#"{"id":"jazz"}"#))
+        .await
+        .unwrap();
+    db.set_pinned_station("moe", Some(r#"{"id":"moe","name":"LISTEN.moe"}"#))
+        .await
+        .unwrap();
+
+    let mut stale = db.load_config().await.unwrap().unwrap();
+    stale.offline_tracks.clear();
+    stale.pinned_stations.clear();
+    db.save_config(&stale).await.unwrap();
+
+    let loaded = db.load_config().await.unwrap().unwrap();
+    assert_eq!(
+        loaded.offline_tracks.get("t1").map(String::as_str),
+        Some("/cache/t1.flac")
+    );
+    assert_eq!(
+        loaded.pinned_stations,
+        [r#"{"id":"moe","name":"LISTEN.moe"}"#, r#"{"id":"jazz"}"#],
+        "a re-pin keeps its place"
+    );
+    let blob: String = sqlite(&path, "SELECT json FROM app_config WHERE id = 1").await;
+    assert!(!blob.contains("offline_tracks") && !blob.contains("pinned_stations"));
+
+    db.set_offline_track("t1", None).await.unwrap();
+    db.set_pinned_station("moe", None).await.unwrap();
+    let loaded = db.load_config().await.unwrap().unwrap();
+    assert!(loaded.offline_tracks.is_empty());
+    assert_eq!(loaded.pinned_stations, [r#"{"id":"jazz"}"#]);
+}
+
+async fn sqlite(path: &std::path::Path, sql: &str) -> String {
+    use sqlx::{ConnectOptions, sqlite::SqliteConnectOptions};
+    let mut conn = SqliteConnectOptions::new()
+        .filename(path)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query_scalar(sql).fetch_one(&mut conn).await.unwrap()
+}
+
+#[tokio::test]
+async fn lyrics_round_trip_through_their_rows() {
+    use utils::lyrics::{LyricChunk, LyricLine, Lyrics};
+
+    let db = db::init(&unique_db()).await.unwrap();
+    let synced = Lyrics::Synced(vec![
+        LyricLine {
+            start_time: 1.5,
+            end_time: Some(3.0),
+            text: "first".into(),
+            chunks: vec![
+                LyricChunk {
+                    start_time: 1.5,
+                    text: "fi".into(),
+                },
+                LyricChunk {
+                    start_time: 2.0,
+                    text: "rst".into(),
+                },
+            ],
+            parent_line_index: None,
+            background: false,
+            opposite_turn: true,
+        },
+        LyricLine {
+            start_time: 3.0,
+            end_time: None,
+            text: "echo".into(),
+            chunks: Vec::new(),
+            parent_line_index: Some(0),
+            background: true,
+            opposite_turn: false,
+        },
+    ]);
+    let plain = Lyrics::Plain("words".into());
+
+    db.cache_lyrics("a", Some(&synced)).await.unwrap();
+    db.cache_lyrics("b", Some(&plain)).await.unwrap();
+    db.cache_lyrics("c", None).await.unwrap();
+    db.cache_lyrics("b", None).await.unwrap();
+
+    assert_eq!(
+        db.cached_lyrics("a").await.unwrap(),
+        Some(db::CachedLyrics::Found(synced))
+    );
+    assert!(matches!(
+        db.cached_lyrics("b").await.unwrap(),
+        Some(db::CachedLyrics::Missing { .. })
+    ));
+    assert!(matches!(
+        db.cached_lyrics("c").await.unwrap(),
+        Some(db::CachedLyrics::Missing { .. })
+    ));
+    assert_eq!(db.cached_lyrics("d").await.unwrap(), None);
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO lyrics (cache_key, kind, plain_text, fetched_at) VALUES (?1, ?2, ?3, unixepoch())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "d5f769cd35bc157056afc37056a4c268fd41f92c86957ad942968ad109009cd5"
+}

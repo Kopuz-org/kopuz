@@ -11,7 +11,7 @@
 
 use std::collections::HashSet;
 
-use api::{ApiError, Table};
+use api::{ApiError, JobKind, Table};
 use reader::models::Track;
 use server::source::{ActiveSource, FavoritesSync};
 
@@ -31,15 +31,13 @@ impl super::FavoritesService {
     async fn pull_is_stale(&self, source: &ActiveSource, server_id: &str) -> bool {
         match source.capabilities().favorites_sync {
             FavoritesSync::Paginated => {
-                let stamped = self
-                    .db
-                    .meta_get("yt_sync", "timestamps")
-                    .await
-                    .ok()
-                    .flatten()
-                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                    .and_then(|stamps| stamps.get("last_yt_sync_at").and_then(|at| at.as_u64()))
-                    .is_some();
+                let stamped = crate::auto_sync::last_synced(
+                    &self.db,
+                    JobKind::FavoritesSync,
+                    source.source(),
+                )
+                .await
+                .is_some();
                 // Dirty rows do not count as "already imported": a like made
                 // locally and never pushed must not suppress the first import.
                 let held = self.db.favorites(server_id).await.unwrap_or_default().len();
@@ -194,18 +192,6 @@ impl super::FavoritesService {
         if source.sweep_favorites(epoch).await.is_ok() {
             self.bump(Table::Favorites);
         }
-        let mut stamps: serde_json::Value = self
-            .db
-            .meta_get("yt_sync", "timestamps")
-            .await
-            .ok()
-            .flatten()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        stamps["last_yt_sync_at"] = serde_json::json!(unix_now());
-        let _ = source
-            .set_meta("yt_sync", "timestamps", &stamps.to_string())
-            .await;
         self.bump(Table::Tracks);
         self.bump(Table::Albums);
         Ok(())

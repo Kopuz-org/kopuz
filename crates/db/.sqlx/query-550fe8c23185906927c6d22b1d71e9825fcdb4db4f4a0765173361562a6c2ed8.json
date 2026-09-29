@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO pinned_stations (id, position, manifest) SELECT ?1, COALESCE(MAX(position) + 1, 0), ?2 FROM pinned_stations WHERE true ON CONFLICT(id) DO UPDATE SET manifest = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "550fe8c23185906927c6d22b1d71e9825fcdb4db4f4a0765173361562a6c2ed8"
+}

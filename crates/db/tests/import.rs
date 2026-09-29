@@ -197,18 +197,14 @@ async fn imports_synthetic_fixture() {
         "no token leaked into the blob"
     );
 
-    // YT sync stamps land in the kv table (where the runtime reads them —
-    // blob-only stamps caused a full YT re-stream on first favorites open).
-    let stamp: Option<String> =
-        sqlx::query_scalar("SELECT value FROM kv WHERE name = 'yt_sync' AND kind = 'timestamps'")
-            .fetch_optional(&mut conn)
-            .await
-            .unwrap();
-    let stamp: serde_json::Value = serde_json::from_str(&stamp.expect("yt_sync stamp")).unwrap();
-    assert_eq!(
-        stamp.get("last_yt_sync_at").and_then(|v| v.as_u64()),
-        Some(1_700_000_000)
-    );
+    // The YT sync time becomes the YT server's favorites stamp, or its first open would re-stream the liked library.
+    let stamp: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM kv WHERE name = 'synced:favorites' AND kind = 'srv-1'",
+    )
+    .fetch_optional(&mut conn)
+    .await
+    .unwrap();
+    assert_eq!(stamp.as_deref(), Some("1700000000"));
 
     // listen_counts keyed by source and track (cover dropped from the legacy key).
     let c: i64 = sqlx::query_scalar(
