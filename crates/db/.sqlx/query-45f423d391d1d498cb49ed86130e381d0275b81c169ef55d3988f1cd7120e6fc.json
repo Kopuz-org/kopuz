@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR REPLACE INTO offline_tracks (item_id, path) VALUES (?1, ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "45f423d391d1d498cb49ed86130e381d0275b81c169ef55d3988f1cd7120e6fc"
+}

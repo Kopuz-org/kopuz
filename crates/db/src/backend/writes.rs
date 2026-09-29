@@ -1064,15 +1064,8 @@ pub async fn set_pinned_station(
 ) -> Result<(), DbError> {
     match manifest {
         Some(manifest) => {
-            sqlx::query!(
-                "INSERT INTO pinned_stations (id, position, manifest) \
-                 SELECT ?1, COALESCE(MAX(position) + 1, 0), ?2 FROM pinned_stations WHERE true \
-                 ON CONFLICT(id) DO UPDATE SET manifest = ?2",
-                id,
-                manifest
-            )
-            .execute(pool)
-            .await?;
+            let mut conn = pool.acquire().await?;
+            pin_station(&mut conn, id, manifest).await?;
         }
         None => {
             sqlx::query!("DELETE FROM pinned_stations WHERE id = ?1", id)
@@ -1080,6 +1073,24 @@ pub async fn set_pinned_station(
                 .await?;
         }
     }
+    Ok(())
+}
+
+/// Pin a station after every other pin; a re-pin keeps its place and takes the new manifest.
+pub(crate) async fn pin_station(
+    conn: &mut sqlx::SqliteConnection,
+    id: &str,
+    manifest: &str,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        "INSERT INTO pinned_stations (id, position, manifest) \
+         SELECT ?1, COALESCE(MAX(position) + 1, 0), ?2 FROM pinned_stations WHERE true \
+         ON CONFLICT(id) DO UPDATE SET manifest = ?2",
+        id,
+        manifest
+    )
+    .execute(&mut *conn)
+    .await?;
     Ok(())
 }
 

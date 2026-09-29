@@ -36,7 +36,10 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 /// (Windows) and an LF (Linux/macOS) checkout of an identical migration hash
 /// differently. On a `VersionMismatch` we reconcile and retry; a checksum that
 /// matches neither line ending is a genuine edit and still fails.
-pub(super) async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
+pub(super) async fn run_migrations(
+    pool: &SqlitePool,
+    settings_path: Option<&Path>,
+) -> Result<(), DbError> {
     for fill in Fill::ALL {
         let (made_room, dropped_old) = fill.between();
         if applied(pool, dropped_old).await? {
@@ -54,7 +57,7 @@ pub(super) async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
         };
         through.set_ignore_missing(true);
         migrate(pool, &through).await?;
-        fill.run(pool).await?;
+        fill.run(pool, settings_path).await?;
     }
     migrate(pool, &MIGRATOR).await
 }
@@ -64,29 +67,33 @@ pub(super) async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
 enum Fill {
     Artists,
     Queue,
+    State,
 }
 
 impl Fill {
-    const ALL: [Fill; 2] = [Fill::Artists, Fill::Queue];
+    const ALL: [Fill; 3] = [Fill::Artists, Fill::Queue, Fill::State];
 
     /// The migration the fill follows, and the one it must precede.
     fn between(self) -> (i64, i64) {
         match self {
             Fill::Artists => (ARTISTS_CREATED, 20260922000001),
             Fill::Queue => (QUEUE_ROWS_CREATED, 20260930000001),
+            Fill::State => (STATE_TABLES_CREATED, 20260930000006),
         }
     }
 
-    async fn run(self, pool: &SqlitePool) -> Result<(), DbError> {
+    async fn run(self, pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(), DbError> {
         match self {
             Fill::Artists => fill_artists(pool).await,
             Fill::Queue => fill_queue(pool).await,
+            Fill::State => fill_state(pool, settings_path).await,
         }
     }
 }
 
 const ARTISTS_CREATED: i64 = 20260922000000;
 const QUEUE_ROWS_CREATED: i64 = 20260930000000;
+const STATE_TABLES_CREATED: i64 = 20260930000005;
 
 async fn migrate(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> Result<(), DbError> {
     match migrator.run(pool).await {
@@ -276,6 +283,143 @@ async fn fill_queue(pool: &SqlitePool) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Moves the blob's state, credentials and lists into their tables, and its settings into the settings file.
+async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(), DbError> {
+    let stored: Option<String> = sqlx::query_scalar("SELECT json FROM app_config WHERE id = 1")
+        .fetch_optional(pool)
+        .await?;
+    let Some(stored) = stored else {
+        return Ok(());
+    };
+    let blob: serde_json::Value = serde_json::from_str(&stored)?;
+    let layers = settings_path
+        .map(config::store::FileLayers::read)
+        .unwrap_or_default();
+    // The file's settings win over the blob's mirror of them, as every load already applied them.
+    let cfg: config::AppConfig = layers.merge_and_parse(blob)?;
+    let name = |value: serde_json::Value| match value {
+        serde_json::Value::String(name) => Ok(name),
+        other => Err(DbError::Serde(format!("{other} is not a unit variant"))),
+    };
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO app_state (id, device_id, active_source, source_explicitly_set, volume, \
+           discord_presence_paused, fullscreen_tabs_collapsed, sort_order, album_view_mode, \
+           artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+    )
+    .bind(&cfg.device_id)
+    .bind(cfg.active_source.as_str())
+    .bind(cfg.source_explicitly_set)
+    .bind(f64::from(cfg.volume))
+    .bind(cfg.discord_presence_paused)
+    .bind(cfg.fullscreen_tabs_collapsed)
+    .bind(name(serde_json::to_value(&cfg.sort_order)?)?)
+    .bind(name(serde_json::to_value(cfg.album_view_mode)?)?)
+    .bind(name(serde_json::to_value(cfg.artist_album_view_mode)?)?)
+    .bind(name(serde_json::to_value(cfg.artists_view_mode)?)?)
+    .bind(name(serde_json::to_value(&cfg.artist_view_order)?)?)
+    .bind(name(serde_json::to_value(cfg.listen_now_style)?)?)
+    .bind(i64::from(cfg.hero_height))
+    .execute(&mut *tx)
+    .await?;
+
+    let sorts = [
+        ("albums", serde_json::to_value(&cfg.album_sort)?),
+        ("library", serde_json::to_value(&cfg.library_sort)?),
+        (
+            "artist_albums",
+            serde_json::to_value(&cfg.artist_album_sort)?,
+        ),
+        ("artists", serde_json::to_value(&cfg.artist_sort)?),
+    ];
+    for (view, criteria) in sorts {
+        let criteria = criteria.as_array().cloned().unwrap_or_default();
+        for (position, criterion) in criteria.into_iter().enumerate() {
+            sqlx::query(
+                "INSERT OR REPLACE INTO view_sorts (view, position, field, direction) VALUES (?1, ?2, ?3, ?4)",
+            )
+            .bind(view)
+            .bind(position as i64)
+            .bind(name(criterion["field"].clone())?)
+            .bind(name(criterion["direction"].clone())?)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    for (position, item) in cfg.sidebar_order.iter().enumerate() {
+        sqlx::query("INSERT OR REPLACE INTO sidebar_items (position, item) VALUES (?1, ?2)")
+            .bind(position as i64)
+            .bind(item)
+            .execute(&mut *tx)
+            .await?;
+    }
+    for (position, section) in cfg.home_sections.iter().enumerate() {
+        sqlx::query(
+            "INSERT OR REPLACE INTO home_sections (position, key, enabled) VALUES (?1, ?2, ?3)",
+        )
+        .bind(position as i64)
+        .bind(&section.key)
+        .bind(section.enabled)
+        .execute(&mut *tx)
+        .await?;
+    }
+    let credentials = [
+        ("musicbrainz_token", &cfg.musicbrainz_token),
+        ("lastfm_api_key", &cfg.lastfm_api_key),
+        ("lastfm_api_secret", &cfg.lastfm_api_secret),
+        ("lastfm_session_key", &cfg.lastfm_session_key),
+        ("librefm_api_key", &cfg.librefm_api_key),
+        ("librefm_api_secret", &cfg.librefm_api_secret),
+        ("librefm_session_key", &cfg.librefm_session_key),
+    ];
+    for (key, value) in credentials {
+        if value.is_empty() {
+            continue;
+        }
+        sqlx::query("INSERT OR REPLACE INTO integration_credentials (key, value) VALUES (?1, ?2)")
+            .bind(key)
+            .bind(value)
+            .execute(&mut *tx)
+            .await?;
+    }
+    for (position, entry) in cfg.ytdlp_history.iter().enumerate() {
+        sqlx::query(
+            "INSERT OR REPLACE INTO ytdlp_history (position, url, title, format, status, error) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(position as i64)
+        .bind(&entry.url)
+        .bind(&entry.title)
+        .bind(&entry.format)
+        .bind(&entry.status)
+        .bind(&entry.error)
+        .execute(&mut *tx)
+        .await?;
+    }
+    for (server, paths) in &cfg.server_folders {
+        for (position, path) in paths.iter().enumerate() {
+            sqlx::query(
+                "INSERT OR REPLACE INTO server_folders (server_id, position, path) \
+                 SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM servers WHERE id = ?1)",
+            )
+            .bind(server)
+            .bind(position as i64)
+            .bind(path)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
+
+    if let Some(path) = settings_path {
+        config::store::save_settings_file(path, &serde_json::to_value(&cfg)?, &layers.locked_keys)
+            .map_err(|error| DbError::Io(format!("{}: {error}", path.display())))?;
+    }
+    Ok(())
+}
+
 /// Re-stamp `_sqlx_migrations` rows whose checksum differs from this binary's
 /// only by line endings. `VersionMismatch` reports just the first offender, so
 /// reconcile every applied migration in one pass before retrying.
@@ -396,6 +540,7 @@ fn legacy_source(config_dir: &Path, name: &str) -> Option<std::path::PathBuf> {
 pub async fn run_json_import(
     pool: &SqlitePool,
     config_dir: &Path,
+    settings_path: &Path,
 ) -> Result<ImportReport, DbError> {
     // Gate on THIS database being empty — no shared sentinel, so each DB
     // (debug/release) imports once on its own.
@@ -473,7 +618,7 @@ pub async fn run_json_import(
     let server_src = active_server_id.clone();
 
     // --- app_config blob (minus servers/creds/listen_counts) + listen_counts -
-    import_config_blob(&mut tx, &cfg_val, &active_server_id).await?;
+    let imported_config = import_config(&mut tx, &cfg_val, &active_server_id).await?;
     import_listen_counts(&mut tx, &cfg_val, active_server_id.as_deref()).await?;
     import_recently_played(&mut tx, &cfg_val, &active_server_id).await?;
 
@@ -638,6 +783,7 @@ pub async fn run_json_import(
     }
 
     tx.commit().await?;
+    super::cfg_store::write_settings(&imported_config, settings_path)?;
 
     let report = ImportReport {
         ran: true,
@@ -782,26 +928,22 @@ fn legacy_options(yt_browser: Option<&str>, yt_anonymous: bool) -> Vec<(&'static
     )
 }
 
-/// Store the config JSON blob, stripped of `server`/`servers`/`listen_counts`
-/// (now their own tables) and stamped with `active_server_id` + the YT sync
-/// timestamps carried over from `library.json`.
-async fn import_config_blob(
+/// The legacy config as an `AppConfig`, its state and credentials written to their tables; the caller writes its settings file after commit.
+async fn import_config(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     cfg: &serde_json::Value,
     active_server_id: &Option<String>,
-) -> Result<(), DbError> {
-    let mut blob = if cfg.is_null() {
+) -> Result<config::AppConfig, DbError> {
+    let mut legacy = if cfg.is_null() {
         serde_json::json!({})
     } else {
         cfg.clone()
     };
-    if let Some(obj) = blob.as_object_mut() {
-        obj.remove("server");
-        obj.remove("servers");
-        obj.remove("listen_counts");
-        // Collapse the legacy `active_source` mode + `active_server_id` string
-        // into the new typed `active_source` (`{"Server": id}` or `"Local"`).
-        obj.remove("active_server_id");
+    if let Some(obj) = legacy.as_object_mut() {
+        // Servers, creds and counts were imported into their own tables already.
+        for key in ["server", "servers", "listen_counts", "active_server_id"] {
+            obj.remove(key);
+        }
         obj.insert(
             "active_source".into(),
             match active_server_id {
@@ -810,15 +952,33 @@ async fn import_config_blob(
             },
         );
     }
-    let blob_str = serde_json::to_string(&blob)?;
-    sqlx::query!(
-        "INSERT INTO app_config (id, json) VALUES (1, ?1) \
-         ON CONFLICT(id) DO UPDATE SET json = ?1",
-        blob_str
-    )
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
+    let config: config::AppConfig = match serde_json::from_value(legacy) {
+        Ok(config) => config,
+        Err(error) => {
+            tracing::warn!(%error, "legacy config.json is unreadable; importing defaults");
+            config::AppConfig::default()
+        }
+    };
+    super::cfg_store::write_state(tx, &config, &config.active_source).await?;
+    for (item_id, path) in &config.offline_tracks {
+        sqlx::query!(
+            "INSERT OR REPLACE INTO offline_tracks (item_id, path) VALUES (?1, ?2)",
+            item_id,
+            path
+        )
+        .execute(&mut **tx)
+        .await?;
+    }
+    for manifest in &config.pinned_stations {
+        let id = serde_json::from_str::<serde_json::Value>(manifest)
+            .ok()
+            .and_then(|station| station.get("id")?.as_str().map(str::to_owned));
+        let Some(id) = id else {
+            continue;
+        };
+        super::writes::pin_station(tx, &id, manifest).await?;
+    }
+    Ok(config)
 }
 
 /// `listen_counts` map → its own table, keyed by the source-qualified id
@@ -1132,9 +1292,10 @@ fn service_at(v: &serde_json::Value) -> String {
 }
 
 async fn db_has_data(pool: &SqlitePool) -> Result<bool, DbError> {
-    let has_cfg: Option<i64> = sqlx::query_scalar!("SELECT 1 FROM app_config WHERE id = 1")
-        .fetch_optional(pool)
-        .await?;
+    let has_cfg: Option<i64> =
+        sqlx::query_scalar!("SELECT 1 AS \"configured!: i64\" FROM app_state WHERE id = 1")
+            .fetch_optional(pool)
+            .await?;
     let ntracks: i64 = sqlx::query_scalar!("SELECT COUNT(*) FROM tracks")
         .fetch_one(pool)
         .await?;
@@ -1370,7 +1531,7 @@ mod eol_reconcile_tests {
         }
 
         let pool = open_pool(&db).await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&pool, None).await.unwrap();
 
         // Simulate a DB written by a CRLF build: every stored checksum becomes
         // the CRLF-variant hash of the same migration SQL.
@@ -1385,7 +1546,7 @@ mod eol_reconcile_tests {
         }
 
         // Reopen: the EOL-only mismatch must reconcile, not error.
-        run_migrations(&pool)
+        run_migrations(&pool, None)
             .await
             .expect("CRLF-only checksum mismatch should reconcile");
 
@@ -1411,7 +1572,7 @@ mod eol_reconcile_tests {
         .await
         .unwrap();
         assert!(
-            run_migrations(&pool).await.is_err(),
+            run_migrations(&pool, None).await.is_err(),
             "a real migration edit must still be rejected"
         );
 
@@ -1451,7 +1612,7 @@ mod artist_fill_tests {
         .await
         .unwrap();
 
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&pool, None).await.unwrap();
 
         let artists: Vec<(String, String)> =
             sqlx::query_as("SELECT source, name FROM artists ORDER BY source, name")
@@ -1533,7 +1694,7 @@ mod row_fill_tests {
     #[tokio::test]
     async fn the_stored_documents_become_rows_on_the_way_up() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        run_migrations(&pool).await.unwrap();
+        run_migrations(&pool, None).await.unwrap();
         // Back to just before the new tables, with every document an older build left.
         for sql in [
             "DROP TABLE queue_shuffle",
@@ -1544,6 +1705,14 @@ mod row_fill_tests {
             "DROP TABLE lyric_chunks",
             "DROP TABLE lyric_lines",
             "DROP TABLE lyrics",
+            "DROP TABLE app_state",
+            "DROP TABLE view_sorts",
+            "DROP TABLE sidebar_items",
+            "DROP TABLE home_sections",
+            "DROP TABLE integration_credentials",
+            "DROP TABLE ytdlp_history",
+            "DROP TABLE server_folders",
+            "CREATE TABLE app_config (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL)",
             "ALTER TABLE queue_state ADD COLUMN queue_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE queue_state ADD COLUMN shuffle_order_json TEXT NOT NULL DEFAULT '[]'",
             "DELETE FROM _sqlx_migrations WHERE version >= 20260930000000",
@@ -1560,7 +1729,7 @@ mod row_fill_tests {
         .await
         .unwrap();
         sqlx::raw_sql(
-            r#"INSERT INTO app_config (id, json) VALUES (1, '{"theme":"dark","offline_tracks":{"t1":"/c/t1.flac"},"pinned_stations":["{\"id\":\"moe\"}", "not json"]}');
+            r#"INSERT INTO app_config (id, json) VALUES (1, '{"theme":"dark","volume":0.3,"active_source":{"Server":"yt-1"},"album_sort":[{"field":"Year","direction":"Desc"}],"lastfm_session_key":"sk","offline_tracks":{"t1":"/c/t1.flac"},"pinned_stations":["{\"id\":\"moe\"}", "not json"]}');
                INSERT INTO servers (id, name, url, service, updated_at) VALUES ('yt-1', 'yt', '', 'YtMusic', 0);
                INSERT INTO kv (name, kind, value) VALUES
                  ('yt_sync', 'timestamps', '{"last_yt_sync_at":1700000000,"last_yt_playlists_sync_at":null}'),
@@ -1574,7 +1743,9 @@ mod row_fill_tests {
         .await
         .unwrap();
 
-        run_migrations(&pool).await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join("settings.toml");
+        run_migrations(&pool, Some(&settings)).await.unwrap();
 
         let queue: Vec<(i64, String, Option<i64>)> = sqlx::query_as(
             "SELECT position, track_key, duration FROM queue_tracks ORDER BY position",
@@ -1608,11 +1779,35 @@ mod row_fill_tests {
             .await
             .unwrap();
         assert_eq!(pins, ["moe"], "an unreadable pin is dropped");
-        let blob: String = sqlx::query_scalar("SELECT json FROM app_config WHERE id = 1")
-            .fetch_one(&pool)
-            .await
+        let state: (String, f64) =
+            sqlx::query_as("SELECT active_source, volume FROM app_state WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            state,
+            ("yt-1".into(), f64::from(0.3f32)),
+            "the blob's state is rows now"
+        );
+        let sort: (String, String, String) =
+            sqlx::query_as("SELECT view, field, direction FROM view_sorts")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(sort, ("albums".into(), "Year".into(), "Desc".into()));
+        let secret: String = sqlx::query_scalar(
+            "SELECT value FROM integration_credentials WHERE key = 'lastfm_session_key'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(secret, "sk");
+        let written: toml::Table = std::fs::read_to_string(&settings)
+            .expect("the blob's settings went to the file")
+            .parse()
             .unwrap();
-        assert_eq!(blob, r#"{"theme":"dark"}"#);
+        assert_eq!(written["theme"].as_str(), Some("dark"));
+        assert!(!written.contains_key("volume") && !written.contains_key("lastfm_session_key"));
 
         let kv: Vec<(String, String, String)> =
             sqlx::query_as("SELECT name, kind, value FROM kv ORDER BY kind, name")

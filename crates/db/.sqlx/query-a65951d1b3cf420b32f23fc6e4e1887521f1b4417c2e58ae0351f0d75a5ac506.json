@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO view_sorts (view, position, field, direction) VALUES (?1, ?2, ?3, ?4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "a65951d1b3cf420b32f23fc6e4e1887521f1b4417c2e58ae0351f0d75a5ac506"
+}

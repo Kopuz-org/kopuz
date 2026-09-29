@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT server_id, path FROM server_folders ORDER BY server_id, position",
+  "describe": {
+    "columns": [
+      {
+        "name": "server_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "path",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c66158765e6dfe91d44fa674028325317afe19b6ca8b36d87805a9c6f7e8b4ea"
+}

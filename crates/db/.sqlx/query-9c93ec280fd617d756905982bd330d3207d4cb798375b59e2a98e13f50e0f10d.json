@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM ytdlp_history",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "9c93ec280fd617d756905982bd330d3207d4cb798375b59e2a98e13f50e0f10d"
+}

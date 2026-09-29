@@ -577,24 +577,15 @@ async fn offline_copies_and_pins_live_in_their_own_tables() {
         [r#"{"id":"moe","name":"LISTEN.moe"}"#, r#"{"id":"jazz"}"#],
         "a re-pin keeps its place"
     );
-    let blob: String = sqlite(&path, "SELECT json FROM app_config WHERE id = 1").await;
-    assert!(!blob.contains("offline_tracks") && !blob.contains("pinned_stations"));
+    let settings =
+        std::fs::read_to_string(config::store::settings_path_for(path.parent().unwrap())).unwrap();
+    assert!(!settings.contains("offline_tracks") && !settings.contains("pinned_stations"));
 
     db.set_offline_track("t1", None).await.unwrap();
     db.set_pinned_station("moe", None).await.unwrap();
     let loaded = db.load_config().await.unwrap().unwrap();
     assert!(loaded.offline_tracks.is_empty());
     assert_eq!(loaded.pinned_stations, [r#"{"id":"jazz"}"#]);
-}
-
-async fn sqlite(path: &std::path::Path, sql: &str) -> String {
-    use sqlx::{ConnectOptions, sqlite::SqliteConnectOptions};
-    let mut conn = SqliteConnectOptions::new()
-        .filename(path)
-        .connect()
-        .await
-        .unwrap();
-    sqlx::query_scalar(sql).fetch_one(&mut conn).await.unwrap()
 }
 
 #[tokio::test]

@@ -676,52 +676,6 @@ pub fn default_db_path() -> std::path::PathBuf {
     config_dir().join(name)
 }
 
-/// Blocking pre-boot read of the config — for the few values needed before
-/// the app (and its async runtime/log subscriber) exists: the tracing toggle and
-/// the titlebar mode. Opens the DB read-only without running migrations and
-/// overlays the settings file / drop-ins / env; `None` when neither the blob
-/// nor any file layer exists yet (first launch). Server/creds fields are NOT
-/// hydrated — blob fields only.
-pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
-    let db_dir = match db_path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent,
-        _ => std::path::Path::new("."),
-    };
-    let layers = config::store::FileLayers::read(&config::store::settings_path_for(db_dir));
-
-    let blob: Option<serde_json::Value> = if db_path.exists() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .ok()?;
-        rt.block_on(async {
-            let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(db_path)
-                .create_if_missing(false)
-                .read_only(true);
-            use sqlx::ConnectOptions;
-            let mut conn = opts.connect().await.ok()?;
-            let json: Option<String> =
-                sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-                    .fetch_optional(&mut conn)
-                    .await
-                    .ok()
-                    .flatten();
-            json.and_then(|j| serde_json::from_str(&j).ok())
-        })
-    } else {
-        None
-    };
-
-    // A settings file alone (fresh install on a Nix-configured machine) is
-    // enough to peek at — the blob only appears after the first save.
-    if blob.is_none() && !layers.has_overrides() {
-        return None;
-    }
-    let value = blob.unwrap_or_else(|| serde_json::json!({}));
-    layers.merge_and_parse(value).ok()
-}
-
 /// The RELEASE database path (`kopuz.db`), independent of build profile — the
 /// debug panel's "load release DB" source.
 pub fn release_db_path() -> std::path::PathBuf {

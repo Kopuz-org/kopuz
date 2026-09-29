@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT field, direction FROM view_sorts WHERE view = ?1 ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "name": "field",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "direction",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "419514a50f4d99e988ef5720f4a77ce6a8e23d0521ffb2f26562ef70188afcb6"
+}

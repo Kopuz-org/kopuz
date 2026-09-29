@@ -1,0 +1,92 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT device_id, active_source, source_explicitly_set, volume, discord_presence_paused, fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height FROM app_state WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "device_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "active_source",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_explicitly_set",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "volume",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "discord_presence_paused",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "fullscreen_tabs_collapsed",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "sort_order",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "album_view_mode",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "artist_album_view_mode",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "artists_view_mode",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "artist_view_order",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "listen_now_style",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "hero_height",
+        "ordinal": 12,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e06f58b7c4e4a2b31f99d853ee5f439666e397953d993bdbbee806f3d6446526"
+}

@@ -174,27 +174,16 @@ async fn imports_synthetic_fixture() {
             .unwrap();
     assert_eq!(token, "SECRET_COOKIE");
 
-    // Config blob: creds/servers/listen_counts stripped, active_server_id stamped.
-    let blob: String = sqlx::query_scalar("SELECT json FROM app_config WHERE id = 1")
+    // The legacy config lands as state rows and a settings file that carries no creds.
+    let active: String = sqlx::query_scalar("SELECT active_source FROM app_state WHERE id = 1")
         .fetch_one(&mut conn)
         .await
         .unwrap();
-    let v: serde_json::Value = serde_json::from_str(&blob).unwrap();
-    assert_eq!(
-        v.get("active_source")
-            .and_then(|s| s.get("Server"))
-            .and_then(|x| x.as_str()),
-        Some("srv-1")
-    );
+    assert_eq!(active, "srv-1");
+    let settings = std::fs::read_to_string(config::store::settings_path_for(&dir)).unwrap();
     assert!(
-        v.get("server").is_none(),
-        "creds must not remain in the blob"
-    );
-    assert!(v.get("servers").is_none());
-    assert!(v.get("listen_counts").is_none());
-    assert!(
-        !blob.contains("SECRET_COOKIE"),
-        "no token leaked into the blob"
+        !settings.contains("SECRET_COOKIE"),
+        "no token leaked into the settings file"
     );
 
     // The YT sync time becomes the YT server's favorites stamp, or its first open would re-stream the liked library.
@@ -265,14 +254,12 @@ async fn smoke_real() {
     tracing::info!("real import report: {report:?}");
     assert!(report.ran);
 
-    let mut conn = open(&db_path).await;
-    let leaked: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM app_config WHERE json LIKE '%access_token%' OR json LIKE '%APISID%'",
-    )
-    .fetch_one(&mut conn)
-    .await
-    .unwrap();
-    assert_eq!(leaked, 0, "no creds in the config blob");
+    let settings =
+        std::fs::read_to_string(config::store::settings_path_for(&dir)).unwrap_or_default();
+    assert!(
+        !settings.contains("access_token") && !settings.contains("APISID"),
+        "no creds in the settings file"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

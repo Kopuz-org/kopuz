@@ -37,14 +37,15 @@ impl Native {
         }
         migrations::snapshot_if_pending(path).await;
         let pool = open_pool(path).await?;
-        migrations::run_migrations(&pool).await?;
         let db_dir = match path.parent() {
             Some(parent) if !parent.as_os_str().is_empty() => parent,
             _ => Path::new("."),
         };
+        let settings_path = config::store::settings_path_for(db_dir);
+        migrations::run_migrations(&pool, Some(&settings_path)).await?;
         Ok(Self {
             pool: ArcSwap::from_pointee(pool),
-            settings_path: config::store::settings_path_for(db_dir),
+            settings_path,
         })
     }
 
@@ -367,7 +368,7 @@ impl Storage for Native {
     }
 
     async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {
-        migrations::run_json_import(&self.pool(), config_dir).await
+        migrations::run_json_import(&self.pool(), config_dir, &self.settings_path).await
     }
 
     async fn finalize_migration(&self, config_dir: &Path) -> Result<usize, DbError> {
@@ -606,7 +607,7 @@ impl Storage for Native {
             let _ = std::fs::remove_file(with_ext(db_path, ext));
         }
         let pool = open_pool(db_path).await?;
-        migrations::run_migrations(&pool).await?;
+        migrations::run_migrations(&pool, Some(&self.settings_path)).await?;
         self.swap_pool(pool);
         Ok(())
     }
@@ -628,7 +629,7 @@ impl Storage for Native {
             }
         }
         let pool = open_pool(db_path).await?;
-        migrations::run_migrations(&pool).await?;
+        migrations::run_migrations(&pool, Some(&self.settings_path)).await?;
         self.swap_pool(pool);
         Ok(())
     }
@@ -721,7 +722,9 @@ mod tests {
     async fn file_pool() -> (tempfile::TempDir, SqlitePool) {
         let dir = tempfile::tempdir().expect("tempdir");
         let pool = open_pool(&dir.path().join("t.db")).await.expect("pool");
-        migrations::run_migrations(&pool).await.expect("migrate");
+        migrations::run_migrations(&pool, None)
+            .await
+            .expect("migrate");
         (dir, pool)
     }
 

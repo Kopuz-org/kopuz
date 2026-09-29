@@ -1,21 +1,4 @@
-//! Config persistence as a DB-backed cache of the in-memory `AppConfig` (#347,
-//! step 4), layered with the standalone settings file (#530).
-//!
-//! The single-row `app_config` blob holds everything EXCEPT [`TABLE_KEYS`]:
-//! servers with their creds, play counts, offline copies and pinned stations
-//! each live in their own table. [`load_config`] hydrates those
-//! back onto the `AppConfig` the UI reads; [`save_config`] strips them out of
-//! the blob and syncs the tables. Net effect: same `AppConfig` shape in memory,
-//! creds never in the blob.
-//!
-//! On top of the blob sits the settings file (`settings.toml` + drop-ins +
-//! env, see `config::store`): its keys override the blob on load, and every
-//! save mirrors the settings back into it — unless it is Nix-managed
-//! (immutable), in which case the blob alone keeps persisting runtime state
-//! and the file's keys simply keep winning. Keys a layer the app cannot write
-//! pins (managed file, drop-in, env) are excluded from both persisted forms:
-//! their value belongs to the layer, so saving it as base config would keep it
-//! applying once the layer is removed.
+//! Config persistence: settings in the settings file (`config::store`), and state, credentials and library data in tables, hydrated into one `AppConfig`.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -28,34 +11,93 @@ use crate::DbError;
 /// How many recent entries to keep per source.
 const RECENT_LIMIT: i64 = 50;
 
-/// `AppConfig` fields hydrated from their own tables, and so kept out of the blob and the settings file.
-const TABLE_KEYS: &[&str] = &[
-    "server",
-    "servers",
-    "listen_counts",
-    "offline_tracks",
-    "pinned_stations",
-];
-
 pub async fn load_config(
     pool: &SqlitePool,
     settings_path: &Path,
 ) -> Result<Option<AppConfig>, DbError> {
-    let json: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-        .fetch_optional(pool)
-        .await?;
-
     let layers = config::store::FileLayers::read(settings_path);
-    // First launch with no settings file either: report "never configured".
-    if json.is_none() && !layers.has_overrides() {
+    let state = sqlx::query!(
+        "SELECT device_id, active_source, source_explicitly_set, volume, discord_presence_paused, \
+                fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, \
+                artists_view_mode, artist_view_order, listen_now_style, hero_height \
+           FROM app_state WHERE id = 1"
+    )
+    .fetch_optional(pool)
+    .await?;
+    // Nothing saved and no settings file either: never configured.
+    if state.is_none() && !layers.has_overrides() {
         return Ok(None);
     }
+    let mut cfg: AppConfig = layers.merge_and_parse(serde_json::json!({}))?;
 
-    let value: serde_json::Value = match &json {
-        Some(json) => serde_json::from_str(json)?,
-        None => serde_json::json!({}),
-    };
-    let mut cfg: AppConfig = layers.merge_and_parse(value)?;
+    if let Some(state) = state {
+        cfg.device_id = state.device_id;
+        cfg.active_source = Source::from_column(&state.active_source);
+        cfg.source_explicitly_set = state.source_explicitly_set != 0;
+        cfg.volume = state.volume as f32;
+        cfg.discord_presence_paused = state.discord_presence_paused.map(|paused| paused != 0);
+        cfg.fullscreen_tabs_collapsed = state.fullscreen_tabs_collapsed != 0;
+        read_variant(&state.sort_order, &mut cfg.sort_order);
+        read_variant(&state.album_view_mode, &mut cfg.album_view_mode);
+        read_variant(
+            &state.artist_album_view_mode,
+            &mut cfg.artist_album_view_mode,
+        );
+        read_variant(&state.artists_view_mode, &mut cfg.artists_view_mode);
+        read_variant(&state.artist_view_order, &mut cfg.artist_view_order);
+        read_variant(&state.listen_now_style, &mut cfg.listen_now_style);
+        cfg.hero_height = state.hero_height.clamp(0, u32::MAX as i64) as u32;
+        cfg.album_sort = view_sort(pool, VIEW_ALBUMS).await?;
+        cfg.library_sort = view_sort(pool, VIEW_LIBRARY).await?;
+        cfg.artist_album_sort = view_sort(pool, VIEW_ARTIST_ALBUMS).await?;
+        cfg.artist_sort = view_sort(pool, VIEW_ARTISTS).await?;
+        cfg.sidebar_order = sqlx::query_scalar!("SELECT item FROM sidebar_items ORDER BY position")
+            .fetch_all(pool)
+            .await?;
+        cfg.home_sections =
+            sqlx::query!("SELECT key, enabled FROM home_sections ORDER BY position")
+                .fetch_all(pool)
+                .await?
+                .into_iter()
+                .map(|row| config::HomeSection {
+                    key: row.key,
+                    enabled: row.enabled != 0,
+                })
+                .collect();
+    }
+    let credentials = sqlx::query!("SELECT key, value FROM integration_credentials")
+        .fetch_all(pool)
+        .await?;
+    for row in credentials {
+        if let Some(slot) = credential_mut(&mut cfg, &row.key) {
+            *slot = row.value;
+        }
+    }
+    cfg.ytdlp_history = sqlx::query!(
+        "SELECT url, title, format, status, error FROM ytdlp_history ORDER BY position"
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|row| config::YtdlpHistoryEntry {
+        url: row.url,
+        title: row.title,
+        format: row.format,
+        status: row.status,
+        error: row.error,
+    })
+    .collect();
+    let folders =
+        sqlx::query!("SELECT server_id, path FROM server_folders ORDER BY server_id, position")
+            .fetch_all(pool)
+            .await?;
+    cfg.server_folders = std::collections::HashMap::new();
+    for row in folders {
+        cfg.server_folders
+            .entry(row.server_id)
+            .or_default()
+            .push(row.path);
+    }
     // The in-memory shape migrations the legacy file load used to run.
     cfg.migrate_home_sections();
     cfg.migrate_sidebar_order();
@@ -102,19 +144,99 @@ pub async fn load_config(
     Ok(Some(cfg))
 }
 
+const VIEW_ALBUMS: &str = "albums";
+const VIEW_LIBRARY: &str = "library";
+const VIEW_ARTIST_ALBUMS: &str = "artist_albums";
+const VIEW_ARTISTS: &str = "artists";
+
+/// A unit variant's serde name, which is what a text column stores.
+fn variant<T: serde::Serialize>(value: &T) -> Result<String, DbError> {
+    match serde_json::to_value(value)? {
+        serde_json::Value::String(name) => Ok(name),
+        other => Err(DbError::Serde(format!("{other} is not a unit variant"))),
+    }
+}
+
+fn parse_variant<T: serde::de::DeserializeOwned>(name: String) -> Option<T> {
+    serde_json::from_value(serde_json::Value::String(name)).ok()
+}
+
+/// A variant no build knows any more leaves the default in place rather than failing the load.
+fn read_variant<T: serde::de::DeserializeOwned>(name: &str, slot: &mut T) {
+    if let Some(value) = parse_variant(name.to_owned()) {
+        *slot = value;
+    }
+}
+
+async fn view_sort<F: serde::de::DeserializeOwned>(
+    pool: &SqlitePool,
+    view: &str,
+) -> Result<Vec<config::SortCriterion<F>>, DbError> {
+    let rows = sqlx::query!(
+        "SELECT field, direction FROM view_sorts WHERE view = ?1 ORDER BY position",
+        view
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            Some(config::SortCriterion::new(
+                parse_variant(row.field)?,
+                parse_variant(row.direction)?,
+            ))
+        })
+        .collect())
+}
+
+/// The config field a stored credential fills.
+fn credential_mut<'a>(cfg: &'a mut AppConfig, key: &str) -> Option<&'a mut String> {
+    Some(match key {
+        "musicbrainz_token" => &mut cfg.musicbrainz_token,
+        "lastfm_api_key" => &mut cfg.lastfm_api_key,
+        "lastfm_api_secret" => &mut cfg.lastfm_api_secret,
+        "lastfm_session_key" => &mut cfg.lastfm_session_key,
+        "librefm_api_key" => &mut cfg.librefm_api_key,
+        "librefm_api_secret" => &mut cfg.librefm_api_secret,
+        "librefm_session_key" => &mut cfg.librefm_session_key,
+        _ => return None,
+    })
+}
+
+fn credentials(cfg: &AppConfig) -> [(&'static str, &str); 7] {
+    [
+        ("musicbrainz_token", &cfg.musicbrainz_token),
+        ("lastfm_api_key", &cfg.lastfm_api_key),
+        ("lastfm_api_secret", &cfg.lastfm_api_secret),
+        ("lastfm_session_key", &cfg.lastfm_session_key),
+        ("librefm_api_key", &cfg.librefm_api_key),
+        ("librefm_api_secret", &cfg.librefm_api_secret),
+        ("librefm_session_key", &cfg.librefm_session_key),
+    ]
+}
+
 #[tracing::instrument(name = "config.save", skip_all)]
 pub async fn save_config(
     pool: &SqlitePool,
     cfg: &AppConfig,
     settings_path: &Path,
 ) -> Result<(), DbError> {
-    let now = now_secs();
     let mut tx = pool.begin().await?;
+    let active = sync_servers(&mut tx, cfg).await?;
+    write_state(&mut tx, cfg, &active).await?;
+    tx.commit().await?;
+    write_settings(cfg, settings_path)
+}
 
-    // Sync the saved-servers list (non-cred fields only — never clobber a stored
-    // token from the in-memory cache, which doesn't carry other servers' creds).
+/// Sync the saved servers and the active one's creds; answers the active source with any resolved server id stamped in.
+async fn sync_servers(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    cfg: &AppConfig,
+) -> Result<Source, DbError> {
+    let now = now_secs();
+    // Non-cred fields only: the in-memory config carries no other server's creds to write.
     for s in &cfg.servers {
-        upsert_server_row(&mut tx, &s.id, &s.name, &s.url, service_str(s.service), now).await?;
+        upsert_server_row(tx, &s.id, &s.name, &s.url, service_str(s.service), now).await?;
         let browser = s.yt_browser.map(browser_str);
         let options = server_options(
             browser.as_deref(),
@@ -122,10 +244,9 @@ pub async fn save_config(
             &s.apple_music_storefront,
             &s.apple_music_language,
         );
-        write_server_options(&mut tx, &s.id, &options).await?;
+        write_server_options(tx, &s.id, &options).await?;
     }
 
-    // Upsert the active server WITH its creds, and remember its id for the blob.
     let mut active_id: Option<String> = cfg.active_source.server_id().map(String::from);
     if let Some(srv) = &cfg.server {
         let id = srv
@@ -133,15 +254,7 @@ pub async fn save_config(
             .clone()
             .or_else(|| cfg.active_source.server_id().map(String::from))
             .unwrap_or_else(|| format!("legacy-{}", service_str(srv.service)));
-        upsert_server_row(
-            &mut tx,
-            &id,
-            &srv.name,
-            &srv.url,
-            service_str(srv.service),
-            now,
-        )
-        .await?;
+        upsert_server_row(tx, &id, &srv.name, &srv.url, service_str(srv.service), now).await?;
         let browser = srv.yt_browser.map(browser_str);
         let options = server_options(
             browser.as_deref(),
@@ -149,9 +262,9 @@ pub async fn save_config(
             &srv.apple_music_storefront,
             &srv.apple_music_language,
         );
-        write_server_options(&mut tx, &id, &options).await?;
+        write_server_options(tx, &id, &options).await?;
         write_server_credentials(
-            &mut tx,
+            tx,
             &id,
             srv.access_token.as_deref(),
             srv.user_id.as_deref(),
@@ -169,75 +282,188 @@ pub async fn save_config(
         .chain(active_id.as_deref())
         .collect();
     let existing: Vec<String> = sqlx::query_scalar!("SELECT id FROM servers")
-        .fetch_all(&mut *tx)
+        .fetch_all(&mut **tx)
         .await?;
     for id in existing {
         if !keep.contains(id.as_str()) {
-            purge_source(&mut tx, &id).await?;
+            purge_source(tx, &id).await?;
             sqlx::query!("DELETE FROM servers WHERE id = ?1", id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
         }
     }
+    Ok(match active_id {
+        Some(id) => Source::Server(id),
+        None => cfg.active_source.clone(),
+    })
+}
 
-    // Play counts, offline copies and pins are NOT synced here: each has one row-at-a-time writer.
-
-    // Store the blob, stripped of what lives in its own tables, stamped with the active id.
-    let layers = config::store::FileLayers::read(settings_path);
-    let mut blob = serde_json::to_value(cfg)?;
-    if let Some(obj) = blob.as_object_mut() {
-        for key in TABLE_KEYS {
-            obj.remove(*key);
-        }
-        // Preserve local-library selections; only a server snapshot may need
-        // its generated/resolved id stamped into the typed source.
-        obj.insert(
-            "active_source".into(),
-            match &active_id {
-                Some(id) => serde_json::json!({ "Server": id }),
-                None => serde_json::to_value(&cfg.active_source)?,
-            },
-        );
-    }
-    // A key pinned by an unwritable layer holds that layer's value, merged in
-    // by `load_config` — persisting it would make the override the base config
-    // and keep it applying after the layer is gone. Keep what the blob had.
-    if !layers.locked_keys.is_empty() {
-        let prior: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-            .fetch_optional(&mut *tx)
-            .await?;
-        let prior: serde_json::Value = prior
-            .as_deref()
-            .and_then(|json| serde_json::from_str(json).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        if let Some(obj) = blob.as_object_mut() {
-            for key in &layers.locked_keys {
-                match prior.get(key.as_str()) {
-                    Some(value) => obj.insert(key.clone(), value.clone()),
-                    None => obj.remove(key.as_str()),
-                };
-            }
-        }
-    }
-
-    let blob_str = serde_json::to_string(&blob)?;
+/// State, credentials and the lists the app keeps; play counts, offline copies and pins each have their own writer.
+pub(crate) async fn write_state(
+    conn: &mut sqlx::SqliteConnection,
+    cfg: &AppConfig,
+    active: &Source,
+) -> Result<(), DbError> {
+    let active = active.as_str();
+    let explicit = cfg.source_explicitly_set as i64;
+    let volume = f64::from(cfg.volume);
+    let paused = cfg.discord_presence_paused.map(i64::from);
+    let collapsed = cfg.fullscreen_tabs_collapsed as i64;
+    let sort_order = variant(&cfg.sort_order)?;
+    let album_view_mode = variant(&cfg.album_view_mode)?;
+    let artist_album_view_mode = variant(&cfg.artist_album_view_mode)?;
+    let artists_view_mode = variant(&cfg.artists_view_mode)?;
+    let artist_view_order = variant(&cfg.artist_view_order)?;
+    let listen_now_style = variant(&cfg.listen_now_style)?;
+    let hero_height = i64::from(cfg.hero_height);
     sqlx::query!(
-        "INSERT INTO app_config (id, json) VALUES (1, ?1) \
-         ON CONFLICT(id) DO UPDATE SET json = ?1",
-        blob_str
+        "INSERT INTO app_state (id, device_id, active_source, source_explicitly_set, volume, \
+           discord_presence_paused, fullscreen_tabs_collapsed, sort_order, album_view_mode, \
+           artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+         ON CONFLICT(id) DO UPDATE SET device_id = ?1, active_source = ?2, source_explicitly_set = ?3, \
+           volume = ?4, discord_presence_paused = ?5, fullscreen_tabs_collapsed = ?6, sort_order = ?7, \
+           album_view_mode = ?8, artist_album_view_mode = ?9, artists_view_mode = ?10, \
+           artist_view_order = ?11, listen_now_style = ?12, hero_height = ?13",
+        cfg.device_id,
+        active,
+        explicit,
+        volume,
+        paused,
+        collapsed,
+        sort_order,
+        album_view_mode,
+        artist_album_view_mode,
+        artists_view_mode,
+        artist_view_order,
+        listen_now_style,
+        hero_height
     )
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
 
-    tx.commit().await?;
+    sqlx::query!("DELETE FROM view_sorts")
+        .execute(&mut *conn)
+        .await?;
+    write_view_sort(conn, VIEW_ALBUMS, &cfg.album_sort).await?;
+    write_view_sort(conn, VIEW_LIBRARY, &cfg.library_sort).await?;
+    write_view_sort(conn, VIEW_ARTIST_ALBUMS, &cfg.artist_album_sort).await?;
+    write_view_sort(conn, VIEW_ARTISTS, &cfg.artist_sort).await?;
 
-    // Mirror the settings into the standalone file too (skipped when it is
-    // Nix-managed). Best-effort: the DB save above already succeeded, and a
-    // missing file write only means the blob's values apply on next load.
-    if let Err(e) = config::store::save_settings_file(settings_path, &blob, &layers.locked_keys) {
-        tracing::warn!(path = %settings_path.display(), "failed to write settings file: {e}");
+    sqlx::query!("DELETE FROM sidebar_items")
+        .execute(&mut *conn)
+        .await?;
+    for (position, item) in cfg.sidebar_order.iter().enumerate() {
+        let position = position as i64;
+        sqlx::query!(
+            "INSERT INTO sidebar_items (position, item) VALUES (?1, ?2)",
+            position,
+            item
+        )
+        .execute(&mut *conn)
+        .await?;
     }
 
+    sqlx::query!("DELETE FROM home_sections")
+        .execute(&mut *conn)
+        .await?;
+    for (position, section) in cfg.home_sections.iter().enumerate() {
+        let position = position as i64;
+        let enabled = section.enabled as i64;
+        sqlx::query!(
+            "INSERT INTO home_sections (position, key, enabled) VALUES (?1, ?2, ?3)",
+            position,
+            section.key,
+            enabled
+        )
+        .execute(&mut *conn)
+        .await?;
+    }
+
+    sqlx::query!("DELETE FROM integration_credentials")
+        .execute(&mut *conn)
+        .await?;
+    for (key, value) in credentials(cfg) {
+        if value.is_empty() {
+            continue;
+        }
+        sqlx::query!(
+            "INSERT INTO integration_credentials (key, value) VALUES (?1, ?2)",
+            key,
+            value
+        )
+        .execute(&mut *conn)
+        .await?;
+    }
+
+    sqlx::query!("DELETE FROM ytdlp_history")
+        .execute(&mut *conn)
+        .await?;
+    for (position, entry) in cfg.ytdlp_history.iter().enumerate() {
+        let position = position as i64;
+        sqlx::query!(
+            "INSERT INTO ytdlp_history (position, url, title, format, status, error) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            position,
+            entry.url,
+            entry.title,
+            entry.format,
+            entry.status,
+            entry.error
+        )
+        .execute(&mut *conn)
+        .await?;
+    }
+
+    sqlx::query!("DELETE FROM server_folders")
+        .execute(&mut *conn)
+        .await?;
+    for (server, paths) in &cfg.server_folders {
+        for (position, path) in paths.iter().enumerate() {
+            let position = position as i64;
+            // A folder list for a server the app no longer has would name nothing.
+            sqlx::query!(
+                "INSERT INTO server_folders (server_id, position, path) \
+                 SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM servers WHERE id = ?1)",
+                server,
+                position,
+                path
+            )
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+async fn write_view_sort<F: serde::Serialize>(
+    conn: &mut sqlx::SqliteConnection,
+    view: &str,
+    criteria: &[config::SortCriterion<F>],
+) -> Result<(), DbError> {
+    for (position, criterion) in criteria.iter().enumerate() {
+        let position = position as i64;
+        let field = variant(&criterion.field)?;
+        let direction = variant(&criterion.direction)?;
+        sqlx::query!(
+            "INSERT INTO view_sorts (view, position, field, direction) VALUES (?1, ?2, ?3, ?4)",
+            view,
+            position,
+            field,
+            direction
+        )
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
+/// The settings go to the settings file, which is only rewritten when one of them changed.
+pub(crate) fn write_settings(cfg: &AppConfig, settings_path: &Path) -> Result<(), DbError> {
+    let layers = config::store::FileLayers::read(settings_path);
+    let settings = serde_json::to_value(cfg)?;
+    config::store::save_settings_file(settings_path, &settings, &layers.locked_keys)
+        .map_err(|error| DbError::Io(format!("{}: {error}", settings_path.display())))?;
     Ok(())
 }
 
@@ -616,7 +842,7 @@ mod tests {
         let pool = crate::backend::open_pool(&dir.path().join("t.db"))
             .await
             .expect("pool");
-        crate::backend::migrations::run_migrations(&pool)
+        crate::backend::migrations::run_migrations(&pool, None)
             .await
             .expect("migrate");
         (dir, pool)

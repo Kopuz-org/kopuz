@@ -94,26 +94,23 @@ async fn config_round_trips_with_creds_in_servers_table() {
     assert_eq!(loaded.listen_counts.get("ytmusic:VID1"), Some(&7));
     assert_eq!(loaded.listen_counts.get("/music/a.flac"), Some(&3));
 
-    // The blob must not carry creds, the servers list, or the counts.
+    // The settings file carries settings only: no creds, servers, counts or state.
+    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let written = std::fs::read_to_string(&settings_path).expect("settings file written");
+    assert!(
+        !written.contains("TOPSECRET_COOKIE"),
+        "token leaked into the file"
+    );
+    let written: toml::Table = written.parse().unwrap();
+    for key in ["server", "servers", "listen_counts", "active_source"] {
+        assert!(!written.contains_key(key), "{key} leaked into the file");
+    }
     let mut conn = open(&db_path).await;
-    let blob: String = sqlx::query_scalar("SELECT json FROM app_config WHERE id = 1")
+    let active: String = sqlx::query_scalar("SELECT active_source FROM app_state WHERE id = 1")
         .fetch_one(&mut conn)
         .await
         .unwrap();
-    assert!(
-        !blob.contains("TOPSECRET_COOKIE"),
-        "token leaked into the blob"
-    );
-    let v: serde_json::Value = serde_json::from_str(&blob).unwrap();
-    assert!(v.get("server").is_none());
-    assert!(v.get("servers").is_none());
-    assert!(v.get("listen_counts").is_none());
-    assert_eq!(
-        v.get("active_source")
-            .and_then(|s| s.get("Server"))
-            .and_then(|x| x.as_str()),
-        Some("srv-b")
-    );
+    assert_eq!(active, "srv-b");
 
     // Removing a server from the list drops its row (the active one is kept).
     let mut cfg2 = loaded;
@@ -162,7 +159,7 @@ async fn named_local_source_round_trips_as_active() {
 }
 
 #[tokio::test]
-async fn settings_file_mirrors_saves_and_overrides_the_blob_on_load() {
+async fn a_save_writes_the_settings_file_and_a_hand_edit_wins_on_load() {
     let db_path = unique_db();
     let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
     let db = db::init(&db_path).await.unwrap();
@@ -173,12 +170,11 @@ async fn settings_file_mirrors_saves_and_overrides_the_blob_on_load() {
     };
     db.save_config(&cfg).await.unwrap();
 
-    // The save mirrored the settings into the standalone file.
     let text = std::fs::read_to_string(&settings_path).expect("settings file written");
     let mut written: toml::Table = text.parse().unwrap();
     assert_eq!(written["theme"].as_str(), Some("midnight"));
 
-    // A hand-edit (or hjem-managed value) in the file wins over the blob.
+    // The file is where settings live, so a hand edit is what loads.
     written.insert("theme".into(), "nord".into());
     std::fs::write(&settings_path, written.to_string()).unwrap();
     let loaded = db.load_config().await.unwrap().expect("config present");
@@ -201,28 +197,37 @@ async fn managed_settings_file_is_never_written_but_still_applies() {
 
     let db = db::init(&db_path).await.unwrap();
 
-    // No blob yet: the file layers alone configure the app.
+    // Nothing saved yet: the file alone configures the app, and a state key in it is ignored.
     let loaded = db
         .load_config()
         .await
         .unwrap()
         .expect("file layers present");
     assert_eq!(loaded.theme, "nord");
-    assert_eq!(loaded.volume, 0.25);
+    assert_eq!(loaded.volume, AppConfig::default().volume);
 
-    // Saving persists to the blob and leaves the immutable file untouched;
-    // its keys keep overriding what the UI changed.
+    // The immutable file is left alone; what it leaves unset goes beside it, and state to the DB.
     let mut cfg = loaded;
     cfg.theme = "dracula".into();
     cfg.crossfade_seconds = 4;
+    cfg.volume = 0.25;
     db.save_config(&cfg).await.unwrap();
     assert_eq!(
         std::fs::read_to_string(&settings_path).unwrap(),
         "theme = \"nord\"\nvolume = 0.25\n"
     );
+    let local: toml::Table = std::fs::read_to_string(config::store::local_path_for(&settings_path))
+        .expect("local settings written")
+        .parse()
+        .unwrap();
+    assert!(!local.contains_key("theme") && !local.contains_key("volume"));
     let reloaded = db.load_config().await.unwrap().expect("config present");
-    assert_eq!(reloaded.theme, "nord", "managed key wins over the blob");
-    assert_eq!(reloaded.crossfade_seconds, 4, "unmanaged key persists");
+    assert_eq!(reloaded.theme, "nord", "the managed key wins");
+    assert_eq!(
+        reloaded.crossfade_seconds, 4,
+        "an unmanaged setting persists"
+    );
+    assert_eq!(reloaded.volume, 0.25, "state persists in the DB");
 
     let mut perms = std::fs::metadata(&settings_path).unwrap().permissions();
     perms.set_readonly(false);
@@ -280,11 +285,9 @@ async fn layered_overrides_are_not_persisted_as_base_config() {
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
-/// The hand-written path end to end: a partial `settings.toml` plus a drop-in
-/// over an existing blob, with one unusable value in each. Everything the app
-/// can use applies, in precedence order, and the bad keys cost only themselves.
+/// A partial hand-written `settings.toml` plus a drop-in, one unusable value in each: the rest applies in precedence order.
 #[tokio::test]
-async fn hand_written_layers_apply_over_the_blob_and_survive_bad_keys() {
+async fn hand_written_layers_apply_in_order_and_survive_bad_keys() {
     let db_path = unique_db();
     let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
     let db = db::init(&db_path).await.unwrap();
@@ -313,26 +316,26 @@ async fn hand_written_layers_apply_over_the_blob_and_survive_bad_keys() {
 
     let loaded = db.load_config().await.unwrap().expect("config present");
     assert_eq!(loaded.theme, "dracula", "the drop-in out-ranks the file");
-    assert_eq!(loaded.language, "tr", "the file out-ranks the blob");
-    assert_eq!(loaded.volume, 0.8, "untouched keys come from the blob");
+    assert_eq!(loaded.language, "tr");
+    assert_eq!(loaded.volume, 0.8, "state comes from the DB");
     assert_eq!(
-        loaded.crossfade_seconds, 3,
-        "a bad value falls back to the stored one, not to the default"
+        loaded.crossfade_seconds,
+        AppConfig::default().crossfade_seconds,
+        "a bad value falls back to the default"
     );
     assert_eq!(loaded.ui_style, config::UiStyle::default());
 
-    // Saving on top of that doesn't corrupt the hand-written file: the pinned
-    // drop-in key keeps the file's own value and the rest mirrors normally.
+    // Saving on top of that doesn't corrupt the hand-written file: the pinned drop-in key keeps the file's own value.
     let mut cfg = loaded;
-    cfg.volume = 0.25;
+    cfg.language = "de".into();
     db.save_config(&cfg).await.unwrap();
     let written: toml::Table = std::fs::read_to_string(&settings_path)
         .unwrap()
         .parse()
         .unwrap();
     assert_eq!(written["theme"].as_str(), Some("nord"));
-    assert_eq!(written["language"].as_str(), Some("tr"));
-    assert_eq!(written["volume"].as_float(), Some(0.25));
+    assert_eq!(written["language"].as_str(), Some("de"));
+    assert!(!written.contains_key("volume"));
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

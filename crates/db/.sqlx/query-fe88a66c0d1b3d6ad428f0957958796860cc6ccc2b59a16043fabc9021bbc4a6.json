@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO home_sections (position, key, enabled) VALUES (?1, ?2, ?3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "fe88a66c0d1b3d6ad428f0957958796860cc6ccc2b59a16043fabc9021bbc4a6"
+}
