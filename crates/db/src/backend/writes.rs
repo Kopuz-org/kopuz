@@ -172,13 +172,20 @@ pub(crate) async fn prune_artists(
     Ok(())
 }
 
-/// The `(name, id)` credits a row stores: the source's own, else its names unlinked.
-fn stored_credits(t: &Track) -> Vec<(&str, Option<&str>)> {
+/// The `(name, id)` credits a row stores under `src`: the source's own, else its names unlinked.
+fn stored_credits<'a>(t: &'a Track, src: &str) -> Vec<(&'a str, Option<&'a str>)> {
     let credits: Vec<(&str, Option<&str>)> = match t.credits.is_empty() {
         false => t
             .credits
             .iter()
-            .map(|credit| (credit.name.as_str(), credit.id.as_deref()))
+            .map(|credit| {
+                // An id another source issued names nobody here.
+                let id = match &credit.source {
+                    Some(issuer) if issuer.as_str() != src => None,
+                    _ => credit.id.as_deref(),
+                };
+                (credit.name.as_str(), id)
+            })
             .collect(),
         true if t.artists.is_empty() => vec![(t.artist.as_str(), None)],
         true => t.artists.iter().map(|name| (name.as_str(), None)).collect(),
@@ -209,7 +216,7 @@ pub(crate) async fn write_track_children(
         sqlx::query!("DELETE FROM track_credits WHERE track_pk = ?1", pk)
             .execute(&mut **tx)
             .await?;
-        for (position, (name, id)) in stored_credits(t).into_iter().enumerate() {
+        for (position, (name, id)) in stored_credits(t, src).into_iter().enumerate() {
             let position = position as i64;
             let artist_pk = file_artist(tx, src, name, id).await?;
             sqlx::query!(

@@ -55,10 +55,8 @@ impl LibraryService {
                     .map(|row| reader::ArtistCredit {
                         name: row.name,
                         id: row.source_id,
-                        library: Some(reader::LibraryArtist {
-                            pk: row.pk,
-                            source: scope.as_str().to_string(),
-                        }),
+                        source: Some(scope.clone()),
+                        artist_pk: Some(row.pk),
                     })
                     .collect();
                 self.refresh_each(&source, named).await

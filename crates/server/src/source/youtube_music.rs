@@ -252,12 +252,12 @@ impl MediaSource for YtSource {
         }
         // No artists-search entry (user channels for uploaded content) —
         // reconcile the channel from a library song and use its avatar.
-        let Some(library) = &artist.library else {
+        let Some(pk) = artist.artist_pk else {
             return Ok(None);
         };
         let tracks = self
             .db
-            .artist_tracks(&self.source, library.pk, Some(3))
+            .artist_tracks(&self.source, pk, Some(3))
             .await
             .unwrap_or_default();
         for track in tracks.iter() {

@@ -16,14 +16,7 @@ pub struct Album {
     pub artist_id: Option<String>,
     /// The library row of the billed artist, for an album read back from the library.
     #[serde(skip)]
-    pub library_artist: Option<LibraryArtist>,
-}
-
-/// An artist row in the library: what a stored credit or album points at, and whose it is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LibraryArtist {
-    pub pk: i64,
-    pub source: String,
+    pub artist_pk: Option<i64>,
 }
 
 /// A source-agnostic artist photo reference: a local file path or a remote URL.
@@ -178,22 +171,23 @@ pub struct Track {
     pub playlist_item_id: Option<String>,
     #[serde(default)]
     pub artists: Vec<String>,
-    /// `artists` keeps the names alone beside this: a queue stored before
-    /// credits existed has none, and an older build reads only that.
+    /// Every credit in billing order; a queue stored before credits existed has only `artists`.
     #[serde(default)]
     pub credits: Vec<ArtistCredit>,
 }
 
-/// One credited artist. The id is the issuing source's own and means nothing to
-/// another.
+/// One credited artist, and the source whose listing it came from, since an id means nothing to another.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ArtistCredit {
     pub name: String,
     #[serde(default)]
     pub id: Option<String>,
+    /// The source that listed this credit, stamped as the row leaves it; `None` for one whose origin is unknown.
+    #[serde(default)]
+    pub source: Option<config::Source>,
     /// The library row this credit is filed under, for a credit read back from the library.
-    #[serde(skip)]
-    pub library: Option<LibraryArtist>,
+    #[serde(default)]
+    pub artist_pk: Option<i64>,
 }
 
 impl ArtistCredit {
@@ -201,7 +195,8 @@ impl ArtistCredit {
         Self {
             name: name.into(),
             id: None,
-            library: None,
+            source: None,
+            artist_pk: None,
         }
     }
 
@@ -209,7 +204,8 @@ impl ArtistCredit {
         Self {
             name: name.into(),
             id: Some(id.into()),
-            library: None,
+            source: None,
+            artist_pk: None,
         }
     }
 }

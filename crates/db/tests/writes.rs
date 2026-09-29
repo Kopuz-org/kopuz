@@ -120,7 +120,7 @@ async fn automatic_cover_update_preserves_concurrent_manual_cover() {
         cover_path: None,
         manual_cover: false,
         artist_id: None,
-        library_artist: None,
+        artist_pk: None,
     };
     db.upsert_albums(&Source::Local, &[album]).await.unwrap();
 
@@ -159,7 +159,7 @@ async fn a_rebilled_album_takes_the_new_artist_whole() {
         cover_path: None,
         manual_cover: false,
         artist_id: artist_id.map(Into::into),
-        library_artist: None,
+        artist_pk: None,
     };
 
     db.upsert_albums(&source, &[album("Ada", Some("UC-a"))])
@@ -178,7 +178,7 @@ async fn a_rebilled_album_takes_the_new_artist_whole() {
 
     db.upsert_albums(&source, &[album("", None)]).await.unwrap();
     let stored = db.album(&source, "MPRE1").await.unwrap().unwrap();
-    assert_eq!(stored.library_artist, None, "billed to nobody");
+    assert_eq!(stored.artist_pk, None, "billed to nobody");
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

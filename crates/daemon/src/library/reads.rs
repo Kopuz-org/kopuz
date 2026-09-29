@@ -26,14 +26,14 @@ fn window<T: Clone>(rows: &[T], page: Page) -> (u32, Vec<T>) {
     (total, items)
 }
 
-/// Album rows of `source`, each keyed to the artist it bills.
+/// Album rows `source` holds or just listed, each keyed to the artist it bills.
 fn album_info(source: &config::Source) -> impl Fn(&Album) -> AlbumInfo + '_ {
     move |album| AlbumInfo {
         id: album.id.clone(),
         title: album.title.clone(),
-        artist_key: match (&album.library_artist, album.artist_id.as_deref()) {
-            (Some(filed), id) => Some(crate::artist_key::of_library(filed, id)),
-            (None, Some(id)) => Some(crate::artist_key::issued(source, id)),
+        artist_key: match (album.artist_id.as_deref(), album.artist_pk) {
+            (Some(id), _) => Some(crate::artist_key::issued(source, id)),
+            (None, Some(pk)) => Some(crate::artist_key::library(pk)),
             (None, None) => None,
         },
         artist: album.artist.clone(),
@@ -367,10 +367,11 @@ impl LibraryService {
         // A remote source answers over the network, so search is the one read
         // here that goes through the source rather than straight to the DB.
         let source = server::source::active(self.db.clone(), &config);
-        let (tracks, albums) = source
+        let (mut tracks, albums) = source
             .search(query)
             .await
             .map_err(|error| ApiError::internal(format!("search failed: {error}")))?;
+        crate::wire::listed_by(source.source(), &mut tracks);
         // A remote hit may name a track the library has never stored, so
         // remember it: the caller gets a key, and queueing or hearting that
         // key has to resolve to something.
@@ -380,10 +381,7 @@ impl LibraryService {
                 .iter()
                 .map(|track| crate::wire::track_info(track, &config))
                 .collect(),
-            albums: albums
-                .iter()
-                .map(album_info(&config.active_source))
-                .collect(),
+            albums: albums.iter().map(album_info(source.source())).collect(),
         })
     }
 }

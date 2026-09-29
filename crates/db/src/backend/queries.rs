@@ -63,7 +63,7 @@ async fn with_credits(pool: &SqlitePool, rows: Vec<TrackRow>) -> Result<Vec<Trac
 
 /// Album columns for an `AlbumRow`, read via [`ALBUMS_FROM`].
 const ALBUM_COLUMNS: &str = "al.source_album_id, al.title, al.artist, al.genre, al.year, \
-    al.cover_path, al.manual_cover, al.source, al.artist_pk, ar.source_artist_id AS artist_source_id";
+    al.cover_path, al.manual_cover, al.artist_pk, ar.source_artist_id AS artist_source_id";
 
 const ALBUMS_FROM: &str = "FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk";
 
@@ -665,7 +665,7 @@ mod tests {
             cover_path: cover.map(std::path::PathBuf::from),
             manual_cover: false,
             artist_id: None,
-            library_artist: None,
+            artist_pk: None,
         }
     }
 
@@ -964,7 +964,7 @@ mod tests {
         );
         let x = album_by_id(&pool, &source, "x").await;
         assert_eq!(x.artist_id.as_deref(), Some("ar-1"));
-        assert_eq!(x.library_artist.map(|artist| artist.pk), Some(ar1));
+        assert_eq!(x.artist_pk, Some(ar1));
     }
 
     async fn album_by_id(pool: &SqlitePool, source: &Source, id: &str) -> Album {
@@ -1010,12 +1010,36 @@ mod tests {
         let credits: Vec<(&str, Option<&str>, bool)> = read[0]
             .credits
             .iter()
-            .map(|c| (c.name.as_str(), c.id.as_deref(), c.library.is_some()))
+            .map(|c| (c.name.as_str(), c.id.as_deref(), c.artist_pk.is_some()))
             .collect();
         assert_eq!(
             credits,
             [("Ada", Some("ar-1"), true), ("Boris", None, true)]
         );
         assert_eq!(read[0].artists, ["Ada", "Boris"]);
+        assert!(
+            read[0]
+                .credits
+                .iter()
+                .all(|c| c.source.as_ref() == Some(&source))
+        );
+    }
+
+    /// An id is its issuer's alone, so a credit another source listed is filed here by name.
+    #[tokio::test]
+    async fn an_id_another_source_listed_is_filed_unlinked() {
+        let pool = mem_pool().await;
+        let source = Source::Server("srv".into());
+        let mut foreign = linked_track("a", "Ada", &[("Ada", Some("ar-1"))]);
+        foreign.credits[0].source = Some(Source::Server("elsewhere".into()));
+        super::super::writes::upsert_tracks(&pool, &source, &[foreign])
+            .await
+            .unwrap();
+
+        let listed = artists(&pool, &source).await.unwrap();
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].source_id, None);
+        assert_eq!(artist_pk(&pool, &source, "ar-1").await.unwrap(), None);
     }
 }

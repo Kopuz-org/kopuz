@@ -120,7 +120,7 @@ impl MediaSource for JellyfinSource {
                         .map(|artist| artist.id.clone());
                     albums.push(reader::Album {
                         artist_id,
-                        library_artist: None,
+                        artist_pk: None,
                         id: format!("jellyfin:{}", a.id),
                         title: a.name,
                         artist: a

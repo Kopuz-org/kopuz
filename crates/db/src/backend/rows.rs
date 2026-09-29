@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use reader::models::{Album, ArtistCredit, LibraryArtist, Track, TrackId};
+use reader::models::{Album, ArtistCredit, Track, TrackId};
 
 #[derive(sqlx::FromRow)]
 pub struct TrackRow {
@@ -41,10 +41,8 @@ impl From<CreditRow> for ArtistCredit {
         ArtistCredit {
             name: r.name,
             id: r.source_artist_id,
-            library: Some(LibraryArtist {
-                pk: r.artist_pk,
-                source: r.source,
-            }),
+            source: Some(config::Source::from_column(&r.source)),
+            artist_pk: Some(r.artist_pk),
         }
     }
 }
@@ -89,7 +87,6 @@ pub struct AlbumRow {
     pub year: i64,
     pub cover_path: Option<String>,
     pub manual_cover: i64,
-    pub source: String,
     pub artist_pk: Option<i64>,
     pub artist_source_id: Option<String>,
 }
@@ -105,10 +102,7 @@ impl From<AlbumRow> for Album {
             cover_path: r.cover_path.map(PathBuf::from),
             manual_cover: r.manual_cover != 0,
             artist_id: r.artist_source_id,
-            library_artist: r.artist_pk.map(|pk| LibraryArtist {
-                pk,
-                source: r.source,
-            }),
+            artist_pk: r.artist_pk,
         }
     }
 }

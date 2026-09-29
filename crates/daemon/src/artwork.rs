@@ -579,7 +579,7 @@ mod tests {
                 cover_path: None,
                 manual_cover: false,
                 artist_id: None,
-                library_artist: None,
+                artist_pk: None,
             })
             .is_none()
         );

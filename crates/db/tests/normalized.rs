@@ -299,7 +299,7 @@ async fn a_track_gives_its_album_a_row_without_overwriting_a_real_one() {
             cover_path: None,
             manual_cover: false,
             artist_id: None,
-            library_artist: None,
+            artist_pk: None,
         }],
     )
     .await
@@ -413,7 +413,7 @@ async fn only_a_real_album_credits_its_tracks_to_its_artist() {
             cover_path: None,
             manual_cover: false,
             artist_id: Some("ar-1".into()),
-            library_artist: None,
+            artist_pk: None,
         }],
     )
     .await

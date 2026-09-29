@@ -47,11 +47,12 @@ pub(crate) fn of_row(source: &Source, row: &db::ArtistRow) -> WireKey {
     }
 }
 
-/// An artist a stored row is filed under, keyed under the row's own source rather than the active one.
-pub(crate) fn of_library(artist: &reader::LibraryArtist, id: Option<&str>) -> WireKey {
-    match id {
-        Some(id) => issued(&Source::from_column(&artist.source), id),
-        None => library(artist.pk),
+/// The artist a credit names: by the id its listing source issued, else by the library row it is filed under.
+pub(crate) fn of_credit(credit: &reader::ArtistCredit) -> Option<WireKey> {
+    match (&credit.source, &credit.id, credit.artist_pk) {
+        (Some(source), Some(id), _) => Some(issued(source, id)),
+        (_, _, Some(pk)) => Some(library(pk)),
+        _ => None,
     }
 }
 
@@ -118,17 +119,34 @@ mod tests {
     }
 
     #[test]
-    fn a_stored_row_is_keyed_under_its_own_source() {
-        let filed = reader::LibraryArtist {
-            pk: 7,
-            source: "srv-a".into(),
-        };
+    fn a_credit_is_keyed_by_the_source_that_listed_it_and_nothing_else() {
+        let listed =
+            |source: Option<&str>, id: Option<&str>, pk: Option<i64>| reader::ArtistCredit {
+                name: "Ada".into(),
+                id: id.map(Into::into),
+                source: source.map(|source| Source::Server(source.into())),
+                artist_pk: pk,
+            };
+        let elsewhere = Source::Server("srv-a".into());
 
         assert_eq!(
-            of_library(&filed, Some("ar-1")),
-            issued(&Source::Server("srv-a".into()), "ar-1")
+            of_credit(&listed(Some("srv-a"), Some("ar-1"), Some(7))),
+            Some(issued(&elsewhere, "ar-1"))
         );
-        assert_eq!(of_library(&filed, None), library(7));
+        assert_eq!(
+            of_credit(&listed(Some("srv-a"), None, Some(7))),
+            Some(library(7))
+        );
+        assert_eq!(
+            of_credit(&listed(None, Some("ar-1"), None)),
+            None,
+            "an id from nowhere"
+        );
+        assert_eq!(
+            of_credit(&listed(Some("srv-a"), None, None)),
+            None,
+            "a bare name"
+        );
     }
 
     #[test]
