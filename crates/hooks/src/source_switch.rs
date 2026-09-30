@@ -41,10 +41,18 @@ pub fn use_connection_status() -> Memo<ConnStatus> {
         status.set(ConnStatus::Connecting);
         let api = api.clone();
         spawn(async move {
-            status.set(match api.validate_source(active.id).await {
+            let state = match api.validate_source(active.id.clone()).await {
                 Ok(api::SourceState::Online) => ConnStatus::Online,
                 _ => ConnStatus::Offline,
+            };
+            // A switch away while this was in flight has its own probe; this answer is about a source no longer shown.
+            let still_active = sources.peek().as_ref().is_some_and(|all| {
+                all.iter()
+                    .any(|source| source.active && source.id == active.id)
             });
+            if still_active {
+                status.set(state);
+            }
         });
     });
     use_memo(move || *status.read())
