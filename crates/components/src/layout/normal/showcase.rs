@@ -138,7 +138,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
          div {
              class: "select-none flex-1 min-h-0 flex flex-col w-full",
              div {
-                 class: if cfg!(target_os = "android") { "flex flex-col items-center text-center gap-4 mb-6 shrink-0" } else { "flex flex-col md:flex-row items-end gap-8 mb-12 shrink-0" },
+                 class: if cfg!(target_os = "android") { "flex flex-col items-center text-center gap-4 mb-6 shrink-0" } else { "flex flex-col md:flex-row md:flex-wrap items-end gap-8 mb-12 shrink-0" },
                  div { class: if cfg!(target_os = "android") { "w-44 h-44 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" } else { "w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" },
                      if let Some(url) = &props.cover_url {
                          img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
@@ -159,7 +159,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          }
                      }
                  }
-                 div { class: "flex-1 min-w-0",
+                 div { class: "flex-1 min-w-0 md:min-w-64",
                      if !props.description.is_empty() {
                          if let Some(on_description_click) = props.on_description_click {
                              button {
