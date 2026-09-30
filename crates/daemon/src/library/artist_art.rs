@@ -26,6 +26,8 @@ const MISS_KIND: &str = "artist_photo_miss";
 const MISS_TTL_SECS: i64 = 86_400;
 /// Enough to fill a grid page quickly without hammering the catalog.
 const WORKERS: usize = 6;
+/// Photos found mid-batch show up this often at most.
+const ANNOUNCE_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl LibraryService {
     /// Find photos for the artists the library does not already have one for.
@@ -110,19 +112,24 @@ impl LibraryService {
         // Announce as they land rather than once at the end: a grid of a few
         // hundred artists takes a while to search, and holding every photo
         // until the last one resolves is a page of placeholders for all of it.
-        // The frontend coalesces these, so announcing often is cheap.
+        // Every announcement re-runs every track-keyed read in every frontend, so a
+        // batch that finds a photo every few milliseconds announces on a timer.
         let found = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let last_announced = Arc::new(Mutex::new(std::time::Instant::now()));
         let workers: Vec<_> = (0..WORKERS)
             .map(|_| {
                 let source = source.clone();
                 let queue = queue.clone();
                 let found = found.clone();
+                let last_announced = last_announced.clone();
                 let session = self.session.get().cloned();
                 async move {
                     while let Some(artist) = queue.lock().ok().and_then(|mut queue| queue.next()) {
                         if resolve_one(&source, &artist).await {
                             found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            if let Some(session) = &session {
+                            if let Some(session) = &session
+                                && announce_due(&last_announced)
+                            {
                                 session.invalidate(Table::Tracks);
                             }
                         }
@@ -138,6 +145,18 @@ impl LibraryService {
         }
         Ok(())
     }
+}
+
+/// Whether a batch in progress may announce its photos again, restarting the wait when it may.
+fn announce_due(last: &Mutex<std::time::Instant>) -> bool {
+    let Ok(mut last) = last.lock() else {
+        return false;
+    };
+    if last.elapsed() < ANNOUNCE_EVERY {
+        return false;
+    }
+    *last = std::time::Instant::now();
+    true
 }
 
 /// Answers whether a photo was found and stored.
