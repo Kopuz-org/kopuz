@@ -272,3 +272,40 @@ async fn a_blank_album_id_does_not_erase_a_known_one() {
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
+
+#[tokio::test]
+async fn a_derived_album_follows_its_track_once_the_credit_is_linked() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::Server("srv".into());
+    let track = |credit: reader::ArtistCredit| Track {
+        id: TrackId::Server {
+            service: config::MusicService::YtMusic,
+            item_id: "v1".into(),
+        },
+        artist: "Ada".into(),
+        artists: vec!["Ada".into()],
+        credits: vec![credit],
+        ..local("/unused", "Song")
+    };
+
+    db.upsert_tracks(&source, &[track(reader::ArtistCredit::unlinked("Ada"))])
+        .await
+        .unwrap();
+    db.upsert_tracks(
+        &source,
+        &[track(reader::ArtistCredit::linked("Ada", "UC-ada"))],
+    )
+    .await
+    .unwrap();
+
+    let album = db.album(&source, "alb").await.unwrap().unwrap();
+    let artist = db
+        .artist(&source, album.artist_pk.unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(artist.source_id.as_deref(), Some("UC-ada"));
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}

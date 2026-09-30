@@ -68,10 +68,11 @@ enum Fill {
     Artists,
     Queue,
     State,
+    DerivedAlbums,
 }
 
 impl Fill {
-    const ALL: [Fill; 3] = [Fill::Artists, Fill::Queue, Fill::State];
+    const ALL: [Fill; 4] = [Fill::Artists, Fill::Queue, Fill::State, Fill::DerivedAlbums];
 
     /// The migration the fill follows, and the one it must precede.
     fn between(self) -> (i64, i64) {
@@ -79,6 +80,7 @@ impl Fill {
             Fill::Artists => (ARTISTS_CREATED, 20260922000001),
             Fill::Queue => (QUEUE_ROWS_CREATED, 20260930000001),
             Fill::State => (STATE_TABLES_CREATED, 20260930000006),
+            Fill::DerivedAlbums => (LYRICS_CACHE_DROPPED, 20260930000008),
         }
     }
 
@@ -87,13 +89,48 @@ impl Fill {
             Fill::Artists => fill_artists(pool).await,
             Fill::Queue => fill_queue(pool).await,
             Fill::State => fill_state(pool, settings_path).await,
+            Fill::DerivedAlbums => fill_derived_albums(pool).await,
         }
     }
+}
+
+/// Points each derived album at the artist its tracks credit now, as the writes keep it; before, it kept
+/// whatever row its first track was credited to when the album was made.
+async fn fill_derived_albums(pool: &SqlitePool) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    // Each derived album against the first of its tracks, which is the one that made it.
+    let derived: Vec<(i64, i64, String)> = sqlx::query_as(
+        "SELECT al.rowid_pk, t.rowid_pk, t.artist FROM albums al \
+           JOIN tracks t ON t.rowid_pk = (SELECT MIN(rowid_pk) FROM tracks \
+                WHERE source = al.source AND source_album_id = al.source_album_id) \
+          WHERE al.derived = 1",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    for (album, track, byline) in derived {
+        let credits: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT name, artist_pk FROM track_credits WHERE track_pk = ?1 ORDER BY position",
+        )
+        .bind(track)
+        .fetch_all(&mut *tx)
+        .await?;
+        if let Some(artist) = super::writes::billed_credit(&byline, &credits) {
+            sqlx::query("UPDATE albums SET artist_pk = ?1 WHERE rowid_pk = ?2")
+                .bind(artist)
+                .bind(album)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+
+    tx.commit().await?;
+    Ok(())
 }
 
 const ARTISTS_CREATED: i64 = 20260922000000;
 const QUEUE_ROWS_CREATED: i64 = 20260930000000;
 const STATE_TABLES_CREATED: i64 = 20260930000005;
+const LYRICS_CACHE_DROPPED: i64 = 20260930000007;
 
 async fn migrate(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> Result<(), DbError> {
     match migrator.run(pool).await {
@@ -1657,6 +1694,59 @@ mod artist_fill_tests {
                 ("al-2".into(), Some("Émilie".into())),
                 ("al-3".into(), None),
             ]
+        );
+    }
+
+    /// A derived album follows the artist its track credits now, a synced one keeps its billing, and a row nothing points at goes.
+    #[tokio::test]
+    async fn a_derived_album_follows_its_tracks_credits_on_the_way_up() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let before = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|m| m.version <= LYRICS_CACHE_DROPPED)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        before.run(&pool).await.unwrap();
+        sqlx::raw_sql(
+            "INSERT INTO artists (id, source, source_artist_id, name, name_key) VALUES \
+               (1, 'srv', 'UC-ada', 'Ada', 'ada'), \
+               (2, 'srv', NULL, 'Ada', 'ada'), \
+               (3, 'srv', NULL, 'Boris', 'boris'); \
+             INSERT INTO albums (source, source_album_id, title, artist, artist_pk, derived) VALUES \
+               ('srv', 'al-1', 'One', 'Ada', 2, 1), \
+               ('srv', 'al-2', 'Two', 'Boris', 3, 0); \
+             INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album) VALUES \
+               (10, 'srv', 't1', 'al-1', 'a', 'Ada', 'One'), \
+               (11, 'srv', 't2', 'al-2', 'b', 'Boris', 'Two'); \
+             INSERT INTO track_credits (track_pk, position, artist_pk, name) VALUES \
+               (10, 0, 1, 'Ada'), (11, 0, 1, 'Ada');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool, None).await.unwrap();
+
+        let billed: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT source_album_id, artist_pk FROM albums ORDER BY source_album_id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(billed, [("al-1".into(), 1), ("al-2".into(), 3)]);
+        let rows: Vec<i64> = sqlx::query_scalar("SELECT id FROM artists ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            rows,
+            [1, 3],
+            "the unlinked Ada nothing points at any more is gone"
         );
     }
 }

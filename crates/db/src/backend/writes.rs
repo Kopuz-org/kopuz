@@ -75,6 +75,16 @@ pub async fn upsert_tracks(
     Ok(())
 }
 
+/// The credit a track's byline names, else its first: `(name, artist_pk)` in credit order.
+pub(crate) fn billed_credit(byline: &str, credits: &[(String, i64)]) -> Option<i64> {
+    let billed = utils::artist::normalize_artist_key(byline);
+    credits
+        .iter()
+        .find(|(name, _)| utils::artist::normalize_artist_key(name) == billed)
+        .or(credits.first())
+        .map(|(_, artist)| *artist)
+}
+
 /// The album a track names gets a row, never overwriting one a library sync or scan wrote.
 async fn ensure_album(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
@@ -95,15 +105,12 @@ async fn ensure_album(
     .bind(pk)
     .fetch_all(&mut **tx)
     .await?;
-    let billed = utils::artist::normalize_artist_key(&t.artist);
-    let artist_pk = credits
-        .iter()
-        .find(|(name, _)| utils::artist::normalize_artist_key(name) == billed)
-        .or(credits.first())
-        .map(|(_, artist)| *artist);
+    let artist_pk = billed_credit(&t.artist, &credits);
+    // A derived row follows its tracks' credits as they gain ids; a synced or scanned row stays as written.
     sqlx::query!(
         "INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_pk, derived) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) ON CONFLICT(source, source_album_id) DO NOTHING",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) ON CONFLICT(source, source_album_id) \
+         DO UPDATE SET artist_pk = COALESCE(?6, albums.artist_pk) WHERE albums.derived = 1",
         src,
         t.album_id,
         title,
