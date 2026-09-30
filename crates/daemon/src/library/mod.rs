@@ -27,6 +27,8 @@ pub struct LibraryService {
     session: OnceLock<SessionHandle>,
     catalog: OnceLock<Arc<crate::catalog::CatalogService>>,
     transient: std::sync::Mutex<TransientTracks>,
+    /// Artists a photo lookup is out for, so a grid re-asking mid-batch does not send the same lookups again.
+    artwork_in_flight: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 /// Tracks that exist but the database has never seen: a browse shelf, a
@@ -126,6 +128,7 @@ impl LibraryService {
             session: OnceLock::new(),
             catalog: OnceLock::new(),
             transient: std::sync::Mutex::new(TransientTracks::default()),
+            artwork_in_flight: Arc::default(),
         }
     }
 

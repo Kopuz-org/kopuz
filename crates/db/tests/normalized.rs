@@ -477,6 +477,41 @@ async fn a_renamed_artist_keeps_its_row_and_a_prune_drops_what_nothing_credits()
 }
 
 #[tokio::test]
+async fn once_the_source_names_an_artist_a_credit_no_longer_renames_it() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let source = Source::Server("yt".into());
+    let billed = |text: &str| track("t1", vec![ArtistCredit::linked(text, "UC-4lat")]);
+    db.upsert_tracks(&source, &[billed("4LAT feat. Kasane Teto")])
+        .await
+        .unwrap();
+    let pk = db.artist_pk(&source, "UC-4lat").await.unwrap().unwrap();
+    assert!(
+        db.artists_unnamed_by_source(&source)
+            .await
+            .unwrap()
+            .contains("UC-4lat")
+    );
+
+    assert!(db.name_artist(&source, "UC-4lat", "4LAT").await.unwrap());
+    assert!(
+        !db.name_artist(&source, "UC-4lat", "4LAT").await.unwrap(),
+        "already so"
+    );
+    db.upsert_tracks(&source, &[billed("4LAT feat. Someone Else")])
+        .await
+        .unwrap();
+
+    let row = db.artist(&source, pk).await.unwrap().unwrap();
+    assert_eq!(row.name, "4LAT");
+    assert!(
+        db.artists_unnamed_by_source(&source)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn a_queue_round_trips_through_its_rows() {
     let db = db::init(&unique_db()).await.unwrap();
     let mut listed = track("t1", Vec::new());

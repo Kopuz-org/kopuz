@@ -193,6 +193,13 @@ impl ReadStore for Native {
         queries::artist(&self.pool(), source, artist).await
     }
 
+    async fn artists_unnamed_by_source(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashSet<String>, DbError> {
+        queries::artists_unnamed_by_source(&self.pool(), source).await
+    }
+
     async fn artist_pk(
         &self,
         source: &crate::Source,
@@ -390,6 +397,15 @@ impl Storage for Native {
         keep_album_ids: &[String],
     ) -> Result<(), DbError> {
         writes::prune_source(&self.pool(), source, keep_track_keys, keep_album_ids).await
+    }
+
+    async fn name_artist(
+        &self,
+        source: &crate::Source,
+        id: &str,
+        name: &str,
+    ) -> Result<bool, DbError> {
+        writes::name_artist(&self.pool(), source, id, name).await
     }
 
     async fn set_artist_image(

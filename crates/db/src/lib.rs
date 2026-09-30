@@ -206,6 +206,12 @@ pub trait ReadStore: Send + Sync {
     /// One artist of `source`, or `None` when it has no such row.
     async fn artist(&self, source: &Source, artist: i64) -> Result<Option<ArtistRow>, DbError>;
 
+    /// The ids of `source`'s linked artists still wearing a credit's text, whose name the source has not given yet.
+    async fn artists_unnamed_by_source(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashSet<String>, DbError>;
+
     /// The artist row `source` files under the id it issued.
     async fn artist_pk(&self, source: &Source, source_id: &str) -> Result<Option<i64>, DbError>;
 
@@ -385,6 +391,9 @@ pub trait Storage: ReadStore {
         keep_track_keys: &[String],
         keep_album_ids: &[String],
     ) -> Result<(), DbError>;
+
+    /// Name the artist `source` issued `id` for as the source's own record does; answers whether the name changed.
+    async fn name_artist(&self, source: &Source, id: &str, name: &str) -> Result<bool, DbError>;
 
     /// Set (`Some`) or remove (`None`) one artist image. `kind` is
     /// `"server" | "local" | "custom"`.

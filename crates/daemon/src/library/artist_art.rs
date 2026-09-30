@@ -96,14 +96,35 @@ impl LibraryService {
             .unwrap_or_default()
             .into_iter()
             .collect();
+        // The same lookup names a linked artist, so one wearing a credit's text is looked up though it has a photo.
+        let unnamed = self
+            .db
+            .artists_unnamed_by_source(source.source())
+            .await
+            .map_err(db_error)?;
         let scope = source.source().as_str().to_string();
-        let pending: Vec<reader::ArtistCredit> = artists
-            .into_iter()
-            .filter(|artist| {
-                let key = storage_key(artist, &scope);
-                !photos.contains_key(&key) && !fresh_misses.contains(&key)
-            })
-            .collect();
+        let mut claim = Claim {
+            in_flight: self.artwork_in_flight.clone(),
+            keys: Vec::new(),
+        };
+        let pending: Vec<reader::ArtistCredit> = {
+            let Ok(mut in_flight) = claim.in_flight.lock() else {
+                return Ok(());
+            };
+            artists
+                .into_iter()
+                .filter(|artist| {
+                    let key = storage_key(artist, &scope);
+                    let wants_photo = !photos.contains_key(&key) && !fresh_misses.contains(&key);
+                    let wanted =
+                        wants_photo || artist.id.as_ref().is_some_and(|id| unnamed.contains(id));
+                    wanted && in_flight.insert(key.clone()) && {
+                        claim.keys.push(key);
+                        true
+                    }
+                })
+                .collect()
+        };
         if pending.is_empty() {
             return Ok(());
         }
@@ -147,6 +168,22 @@ impl LibraryService {
     }
 }
 
+/// The artists one batch is looking up, released when it finishes or is dropped part way.
+struct Claim {
+    in_flight: Arc<Mutex<std::collections::HashSet<String>>>,
+    keys: Vec<String>,
+}
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        if let Ok(mut in_flight) = self.in_flight.lock() {
+            for key in &self.keys {
+                in_flight.remove(key);
+            }
+        }
+    }
+}
+
 /// Whether a batch in progress may announce its photos again, restarting the wait when it may.
 fn announce_due(last: &Mutex<std::time::Instant>) -> bool {
     let Ok(mut last) = last.lock() else {
@@ -159,23 +196,29 @@ fn announce_due(last: &Mutex<std::time::Instant>) -> bool {
     true
 }
 
-/// Answers whether a photo was found and stored.
+/// Answers whether the lookup stored anything the grid shows: a photo, or the name the source gives the artist.
 async fn resolve_one(source: &ActiveSource, artist: &reader::ArtistCredit) -> bool {
     let key = storage_key(artist, source.source().as_str());
-    match source.fetch_artist_image(artist).await {
-        Ok(Some(url)) => {
+    let found = match source.fetch_artist_image(artist).await {
+        Ok(found) => found,
+        // A transient error isn't remembered, since a miss would hide the artist for a whole day over a blip.
+        Err(error) => {
+            tracing::debug!(%error, artist = %artist.name, "artist photo lookup failed");
+            return false;
+        }
+    };
+    let renamed = match (artist.id.as_deref(), found.name.as_deref()) {
+        (Some(id), Some(name)) => source.name_artist(id, name).await.unwrap_or(false),
+        _ => false,
+    };
+    match found.image {
+        Some(url) => {
             let _ = source.set_artist_image(&key, "server", Some(&url)).await;
             true
         }
-        // A definitive miss is worth remembering; a transient error is not,
-        // since it would hide the artist for a whole day over a blip.
-        Ok(None) => {
+        None => {
             let _ = source.set_meta(&key, MISS_KIND, "").await;
-            false
-        }
-        Err(error) => {
-            tracing::debug!(%error, artist = %artist.name, "artist photo lookup failed");
-            false
+            renamed
         }
     }
 }

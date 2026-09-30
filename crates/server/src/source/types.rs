@@ -113,6 +113,13 @@ pub struct PlaylistPage {
     pub next: Option<String>,
 }
 
+/// What looking one artist up found: a photo, and the name the source's own record gives when the lookup went by id.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct ArtistLookup {
+    pub image: Option<String>,
+    pub name: Option<String>,
+}
+
 #[derive(Default)]
 pub struct LibrarySnapshot {
     pub albums: Vec<reader::Album>,

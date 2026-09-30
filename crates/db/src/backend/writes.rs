@@ -133,9 +133,12 @@ pub(crate) async fn file_artist(
     let name_key = utils::artist::normalize_artist_key(name);
     let pk = match id.map(str::trim).filter(|id| !id.is_empty()) {
         Some(id) => {
+            // A credit's text names the row until the source's own record has; after that it is one track's billing.
             sqlx::query_scalar!(
                 "INSERT INTO artists (source, source_artist_id, name, name_key) VALUES (?1, ?2, ?3, ?4) \
-                 ON CONFLICT(source, source_artist_id) DO UPDATE SET name = ?3, name_key = ?4 \
+                 ON CONFLICT(source, source_artist_id) DO UPDATE SET \
+                   name = CASE WHEN artists.named_by_source = 1 THEN artists.name ELSE ?3 END, \
+                   name_key = CASE WHEN artists.named_by_source = 1 THEN artists.name_key ELSE ?4 END \
                  RETURNING id AS \"id!: i64\"",
                 src,
                 id,
@@ -599,6 +602,34 @@ pub async fn delete_album(
     prune_artists(&mut tx, src).await?;
     tx.commit().await?;
     Ok(())
+}
+
+#[tracing::instrument(skip_all, fields(source = %source.as_str(), id = %id))]
+pub async fn name_artist(
+    pool: &SqlitePool,
+    source: &Source,
+    id: &str,
+    name: &str,
+) -> Result<bool, DbError> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Ok(false);
+    }
+    let src = source.as_str();
+    let name_key = utils::artist::normalize_artist_key(name);
+    let changed = sqlx::query!(
+        "UPDATE artists SET name = ?3, name_key = ?4, named_by_source = 1 \
+          WHERE source = ?1 AND source_artist_id = ?2 \
+            AND (name IS NOT ?3 OR named_by_source = 0)",
+        src,
+        id,
+        name,
+        name_key
+    )
+    .execute(pool)
+    .await?
+    .rows_affected();
+    Ok(changed > 0)
 }
 
 #[tracing::instrument(skip_all, fields(artist_norm = %artist_norm, kind = %kind))]

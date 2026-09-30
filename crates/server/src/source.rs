@@ -339,13 +339,13 @@ pub trait MediaSource: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// Resolve a single artist's photo URL by name. Default None; the catalog
-    /// remote (YT) implements it so the Artists grid can show real YT photos.
+    /// Look one artist up for its photo, and for its name when the lookup went by the id the source issued.
+    /// Default finds nothing; the catalog remote (YT) implements it so the Artists grid can show real YT photos.
     async fn fetch_artist_image(
         &self,
         _artist: &reader::ArtistCredit,
-    ) -> Result<Option<String>, SourceError> {
-        Ok(None)
+    ) -> Result<ArtistLookup, SourceError> {
+        Ok(ArtistLookup::default())
     }
 
     /// One page of favorites — for [`FavoritesSync::Paginated`] sources (YT). The
@@ -580,6 +580,14 @@ pub trait MediaSource: Send + Sync {
     ) -> Result<(), SourceError> {
         self.db()
             .prune_source(self.source(), keep_track_keys, keep_album_ids)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Name the artist this source issued `id` for as its own record does; answers whether the row changed. DB op.
+    async fn name_artist(&self, id: &str, name: &str) -> Result<bool, SourceError> {
+        self.db()
+            .name_artist(self.source(), id, name)
             .await
             .map_err(SourceError::from)
     }

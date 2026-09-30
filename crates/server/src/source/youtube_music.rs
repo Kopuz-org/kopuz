@@ -5,9 +5,9 @@ use db::Db;
 use crate::{server_ops::ServerConn, ytmusic::YouTubeMusicClient};
 
 use super::{
-    AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync, MediaSource,
-    PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds, RemoteAlbum, SourceError, StreamInfo,
-    mirror_added, mirror_created,
+    AlbumType, ArtistLookup, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync,
+    MediaSource, PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds, RemoteAlbum, SourceError,
+    StreamInfo, mirror_added, mirror_created,
 };
 
 /// YT Music's "Liked Music" auto-playlist. It is not browsed like the user's
@@ -233,13 +233,17 @@ impl MediaSource for YtSource {
     async fn fetch_artist_image(
         &self,
         artist: &reader::ArtistCredit,
-    ) -> Result<Option<String>, SourceError> {
+    ) -> Result<ArtistLookup, SourceError> {
         if let Some(channel) = artist.id.as_deref() {
-            return self
+            let header = self
                 .client
-                .artist_avatar(channel)
+                .artist_header(channel)
                 .await
-                .map_err(SourceError::from);
+                .map_err(SourceError::from)?;
+            return Ok(ArtistLookup {
+                image: header.avatar,
+                name: header.name,
+            });
         }
         let name = artist.name.as_str();
         if let Some(url) = self
@@ -248,12 +252,15 @@ impl MediaSource for YtSource {
             .await
             .map_err(SourceError::from)?
         {
-            return Ok(Some(url));
+            return Ok(ArtistLookup {
+                image: Some(url),
+                name: None,
+            });
         }
         // No artists-search entry (user channels for uploaded content) —
         // reconcile the channel from a library song and use its avatar.
         let Some(pk) = artist.artist_pk else {
-            return Ok(None);
+            return Ok(ArtistLookup::default());
         };
         let tracks = self
             .db
@@ -265,12 +272,16 @@ impl MediaSource for YtSource {
                 .client
                 .artist_channel_for_video(&track.id.key(), name)
                 .await
-                && let Ok(avatar @ Some(_)) = self.client.artist_avatar(&cid).await
+                && let Ok(header) = self.client.artist_header(&cid).await
+                && header.avatar.is_some()
             {
-                return Ok(avatar);
+                return Ok(ArtistLookup {
+                    image: header.avatar,
+                    name: None,
+                });
             }
         }
-        Ok(None)
+        Ok(ArtistLookup::default())
     }
 
     async fn add_to_playlist(

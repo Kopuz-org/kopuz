@@ -446,6 +446,21 @@ pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::Ar
     Ok(artists)
 }
 
+pub async fn artists_unnamed_by_source(
+    pool: &SqlitePool,
+    source: &Source,
+) -> Result<std::collections::HashSet<String>, DbError> {
+    let src = source.as_str();
+    let ids = sqlx::query_scalar!(
+        "SELECT source_artist_id AS \"id!: String\" FROM artists \
+          WHERE source = ?1 AND source_artist_id IS NOT NULL AND named_by_source = 0",
+        src
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(ids.into_iter().collect())
+}
+
 /// One artist of `source`, counted as [`artists`] counts it.
 pub async fn artist(
     pool: &SqlitePool,

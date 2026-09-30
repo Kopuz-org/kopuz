@@ -207,11 +207,16 @@ fn find_artist_header(resp: &Value) -> Option<&Value> {
     None
 }
 
-/// The channel's square avatar — `foregroundThumbnail` on visual/user-channel
-/// headers (their `thumbnail` is the wide banner), plain `thumbnail` on the
-/// immersive artist header. Feeds the Artists grid when a name's channel was
-/// reconciled from a song instead of the artists search.
-pub async fn artist_avatar(channel_id: &str, cookies: &str) -> Result<Option<String>, String> {
+/// A channel as its own header names and pictures it.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct ChannelHeader {
+    pub name: Option<String>,
+    /// The square avatar: `foregroundThumbnail` on visual/user-channel headers (their `thumbnail` is the wide banner), plain `thumbnail` on the immersive artist header.
+    pub avatar: Option<String>,
+}
+
+/// The channel's header, which names the artist and holds the photo the Artists grid shows.
+pub async fn artist_header(channel_id: &str, cookies: &str) -> Result<ChannelHeader, String> {
     let body = build_browse_body(Some(channel_id));
     let resp = post(
         &format!("{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"),
@@ -220,13 +225,16 @@ pub async fn artist_avatar(channel_id: &str, cookies: &str) -> Result<Option<Str
     )
     .await?;
     let Some(header) = find_artist_header(&resp) else {
-        return Ok(None);
+        return Ok(ChannelHeader::default());
     };
-    for ptr in [
+    let name = runs_text(header, "/title/runs").filter(|name| !name.trim().is_empty());
+    let avatar = [
         "/foregroundThumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
         "/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
-    ] {
-        let avatar = header
+    ]
+    .iter()
+    .find_map(|ptr| {
+        header
             .pointer(ptr)
             .and_then(|v| v.as_array())
             .and_then(|arr| {
@@ -234,12 +242,9 @@ pub async fn artist_avatar(channel_id: &str, cookies: &str) -> Result<Option<Str
                     .max_by_key(|t| t.get("width").and_then(|v| v.as_u64()).unwrap_or(0))
             })
             .and_then(|t| t.get("url").and_then(|u| u.as_str()))
-            .map(|s| normalize_yt_thumbnail(s.to_string()));
-        if avatar.is_some() {
-            return Ok(avatar);
-        }
-    }
-    Ok(None)
+            .map(|s| normalize_yt_thumbnail(s.to_string()))
+    });
+    Ok(ChannelHeader { name, avatar })
 }
 
 fn best_artist_banner(header: &Value) -> Option<String> {

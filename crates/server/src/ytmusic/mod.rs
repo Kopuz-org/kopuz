@@ -111,9 +111,9 @@ impl YouTubeMusicClient {
             .await
     }
 
-    /// The channel's square avatar, for grid photos of song-reconciled artists.
-    pub async fn artist_avatar(&self, channel_id: &str) -> Result<Option<String>, String> {
-        discover::artist_avatar(channel_id, self.cookies.as_deref().unwrap_or("")).await
+    /// The channel's own name and square avatar.
+    pub async fn artist_header(&self, channel_id: &str) -> Result<discover::ChannelHeader, String> {
+        discover::artist_header(channel_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     /// Resolve a saved album (title + artist) back to its YT album browse id

@@ -318,6 +318,13 @@ impl CatalogService {
                     .fetch_artist(&channel_id)
                     .await
                     .map_err(source_error)?;
+                if source
+                    .name_artist(&channel_id, &artist.name)
+                    .await
+                    .unwrap_or(false)
+                {
+                    self.session.invalidate(api::Table::Tracks);
+                }
                 let page = self.page(
                     DiscoverHome {
                         shelves: artist.sections,

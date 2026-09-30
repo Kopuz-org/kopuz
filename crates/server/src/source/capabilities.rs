@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use config::Source;
 
 use super::{
-    AuthOutcome, Capabilities, FavoritesPage, LibrarySnapshot, MediaSource, PlaylistMeta,
-    PlaylistPage, RemoteAlbum, SourceError, StreamInfo,
+    ArtistLookup, AuthOutcome, Capabilities, FavoritesPage, LibrarySnapshot, MediaSource,
+    PlaylistMeta, PlaylistPage, RemoteAlbum, SourceError, StreamInfo,
 };
 
 pub trait SourceIdentity {
@@ -224,7 +224,7 @@ pub trait LibrarySource: SourceIdentity + Send + Sync {
     async fn fetch_artist_image(
         &self,
         artist: &reader::ArtistCredit,
-    ) -> Result<Option<String>, SourceError>;
+    ) -> Result<ArtistLookup, SourceError>;
 }
 
 #[async_trait]
@@ -249,7 +249,7 @@ where
     async fn fetch_artist_image(
         &self,
         artist: &reader::ArtistCredit,
-    ) -> Result<Option<String>, SourceError> {
+    ) -> Result<ArtistLookup, SourceError> {
         <T as MediaSource>::fetch_artist_image(self, artist).await
     }
 }
