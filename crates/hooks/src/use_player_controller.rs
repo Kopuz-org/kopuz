@@ -393,6 +393,20 @@ impl PlayerController {
         });
     }
 
+    /// Drop the entry at play-order position `idx`. The daemon refuses the
+    /// playing position, so a caller does not have to guard it.
+    pub fn remove_queue_item(&mut self, idx: usize) {
+        let handle = self.handle();
+        spawn(async move {
+            if let Err(error) = handle
+                .queue_edit(api::QueueEdit::Remove { index: idx as u32 })
+                .await
+            {
+                tracing::warn!(%error, "removing a queue entry failed");
+            }
+        });
+    }
+
     pub fn move_queue_item(&mut self, from: usize, to: usize) {
         let handle = self.handle();
         spawn(async move {

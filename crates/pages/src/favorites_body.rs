@@ -125,7 +125,6 @@ pub fn FavoritesBody(
             let track_path = track.key.clone();
             let track_select = track.key.clone();
             let track_add = track.clone();
-            let track_queue = track.clone();
             let track_meta = track.clone();
             let track_delete = track.clone();
             let queue_source = queue_tracks.clone();
@@ -150,7 +149,6 @@ pub fn FavoritesBody(
                 TrackRow {
                     track: track.clone(),
                     cover_url: cover_url.clone(),
-                    on_start_radio: components::track_row::radio_handler(track.key.clone()),
                     row_num: Some(idx + 1),
                     is_menu_open,
                     is_album: false,
@@ -184,10 +182,6 @@ pub fn FavoritesBody(
                     on_add_to_playlist: move |_| {
                         selected_track_for_playlist.set(Some(track_add.key.clone()));
                         show_playlist_modal.set(true);
-                        active_menu_track.set(None);
-                    },
-                    on_queue: move |_| {
-                        ctrl.add_to_queue(vec![track_queue.clone()]);
                         active_menu_track.set(None);
                     },
                     on_close_menu: move |_| active_menu_track.set(None),

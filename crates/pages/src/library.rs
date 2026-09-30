@@ -153,10 +153,8 @@ pub fn LibraryPage(
                 let idx = row_offset + i;
                 let track_menu = track.clone();
                 let track_add = track.clone();
-                let track_queue = track.clone();
                 let track_meta = track.clone();
                 let track_delete = track.clone();
-                let track_radio = track.clone();
                 let track_path = track.key.clone();
                 let track_select = track.key.clone();
                 let track_key = track.uid.clone();
@@ -225,10 +223,6 @@ pub fn LibraryPage(
                                 show_playlist_modal.set(true);
                                 active_menu_track.set(None);
                             },
-                            on_queue: move |_| {
-                                ctrl.add_to_queue(vec![track_queue.clone()]);
-                                active_menu_track.set(None);
-                            },
                             on_close_menu: move |_| active_menu_track.set(None),
                             on_view_metadata: caps().edit_tags.then(|| EventHandler::new(move |_| {
                                 metadata_track.set(Some(track_meta.clone()));
@@ -249,7 +243,6 @@ pub fn LibraryPage(
                                     );
                                 }
                             })),
-                            on_start_radio: components::track_row::radio_handler(track_radio.key.clone()),
                             on_play: move |_| {
                                 let api = hooks::consume_api();
                                 let f = filter();

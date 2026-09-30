@@ -1,119 +1,27 @@
-use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::metadata_modal::MetadataModal;
-use crate::playlist_modal::PlaylistModal;
 use api::TrackInfo as Track;
 use dioxus::prelude::*;
-use hooks::use_player_controller::PlayerController;
 
+/// The fullscreen player's overflow menu: the shared track-actions menu wearing
+/// this surface's chrome. Metadata stays here because the modal belongs to the
+/// fullscreen overlay, not to the menu.
 #[component]
-pub(crate) fn TrackActions(track: Track) -> Element {
-    let mut ctrl = use_context::<PlayerController>();
-    let capabilities = hooks::sources::use_capabilities();
-    let mut is_open = use_signal(|| false);
-    let mut show_playlist_modal = use_signal(|| false);
+pub(crate) fn TrackActions(track: Track, menu_open: Signal<bool>) -> Element {
+    let mut menu_open = menu_open;
     let mut show_metadata = use_signal(|| false);
 
-    let mut actions = vec![
-        MenuAction::new(i18n::t("play_next").to_string(), "fa-solid fa-forward-step"),
-        MenuAction::new(i18n::t("add_to_queue").to_string(), "fa-solid fa-list-ul"),
-    ];
-    let play_next_idx = 0;
-    let add_to_queue_idx = 1;
-
-    let playlist_idx = if capabilities().playlists != api::PlaylistCapability::None {
-        let idx = actions.len();
-        actions.push(MenuAction::new(
-            i18n::t("add_to_playlist").to_string(),
-            "fa-solid fa-plus",
-        ));
-        Some(idx)
-    } else {
-        None
-    };
-
-    let share_idx = actions.len();
-    actions.push(MenuAction::new(
-        i18n::t("share_musicbrainz").to_string(),
-        "fa-solid fa-share-nodes",
-    ));
-
-    let radio_idx = if capabilities().track_radio {
-        let idx = actions.len();
-        actions.push(MenuAction::new(
-            crate::radio_actions::radio_label(),
-            crate::radio_actions::RADIO_ICON,
-        ));
-        Some(idx)
-    } else {
-        None
-    };
-
-    let metadata_idx = actions.len();
-    actions.push(MenuAction::new(
-        i18n::t("view_metadata").to_string(),
-        "fa-solid fa-circle-info",
-    ));
-
     rsx! {
-        DotsMenu {
-            actions,
-            is_open: is_open(),
-            on_open: move |_| is_open.set(true),
-            on_close: move |_| is_open.set(false),
+        crate::track_actions::TrackActionsMenu {
+            track: track.clone(),
+            is_open: Some(menu_open()),
+            on_open: Some(EventHandler::new(move |_| menu_open.set(true))),
+            on_close: Some(EventHandler::new(move |_| menu_open.set(false))),
             button_class: "w-11 h-11 bg-white/10 text-white/70 hover:bg-white/15 hover:text-white active:scale-95".to_string(),
             anchor: "right".to_string(),
             placement: "top".to_string(),
             icon: "fa-solid fa-ellipsis".to_string(),
-            on_action: {
-                let action_track = track.clone();
-                move |idx: usize| {
-                    is_open.set(false);
-                    if idx == play_next_idx {
-                        ctrl.queue_play_next(vec![action_track.clone()]);
-                    } else if idx == add_to_queue_idx {
-                        ctrl.add_to_queue(vec![action_track.clone()]);
-                    } else if playlist_idx == Some(idx) {
-                        show_playlist_modal.set(true);
-                    } else if idx == share_idx {
-                        crate::track_row::share_track(action_track.clone());
-                    } else if radio_idx == Some(idx) {
-                        if let Some(start) = crate::radio_actions::track_radio_handler(
-                            action_track.key.clone(),
-                        ) {
-                            start.call(());
-                        }
-                    } else if idx == metadata_idx {
-                        show_metadata.set(true);
-                    }
-                }
-            },
-        }
-
-        if *show_playlist_modal.read() {
-            PlaylistModal {
-                overlay_class: Some("overlay".to_string()),
-                on_close: move |_| show_playlist_modal.set(false),
-                on_add_to_playlist: {
-                    let playlist_track = track.clone();
-                    move |playlist_id: String| {
-                        hooks::playlist_actions::add_tracks(
-                            playlist_id,
-                            vec![playlist_track.key.clone()],
-                        );
-                        show_playlist_modal.set(false);
-                    }
-                },
-                on_create_playlist: {
-                    let playlist_track = track.clone();
-                    move |name: String| {
-                        hooks::playlist_actions::create_with(
-                            name,
-                            vec![playlist_track.key.clone()],
-                        );
-                        show_playlist_modal.set(false);
-                    }
-                },
-            }
+            playlist_overlay_class: Some("overlay".to_string()),
+            on_view_metadata: Some(EventHandler::new(move |_| show_metadata.set(true))),
         }
 
         if *show_metadata.read() {

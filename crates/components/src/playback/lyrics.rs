@@ -411,7 +411,7 @@ pub fn LyricsView(
     // Clear functions when the component is dropped
     use_drop(move || {
         let _cleanup = eval(&format!(
-            "for (const key of ['updateLyrics', 'resetLyrics', 'setAutoSync', 'autoSync']) delete window[`__{layout}_${{key}}`];"
+            "for (const [key, type] of [['lineOver', 'mouseover'], ['lineOut', 'mouseout']]) {{ const fn = window[`__{layout}_${{key}}`]; if (fn) document.removeEventListener(type, fn); }} for (const key of ['updateLyrics', 'resetLyrics', 'setAutoSync', 'autoSync', 'lineOver', 'lineOut']) delete window[`__{layout}_${{key}}`];"
         ));
     });
 
@@ -475,6 +475,11 @@ pub fn LyricsView(
                 let lastBlurLit = null;
                 let lastBlurEnabled = null;
                 let lastBlurStrength = null;
+                // An intro before the first line, and any gap between rows, report
+                // no active line. Holding the last anchor keeps the ramp in place
+                // instead of flattening the whole list until the next line lands.
+                let lastAnchorIndex = 0;
+                let hoveredLine = null;
                 const BLUR_STEP_PX = {depth_blur_step_px};
                 const BLUR_MAX_PX = {depth_blur_max_px};
 
@@ -716,24 +721,23 @@ pub fn LyricsView(
                     Math.min(distance * BLUR_STEP_PX * scale, BLUR_MAX_PX * scale);
 
                 // A filter hands the line its own compositing layer and backing
-                // store, so a whole song's lines meant a whole song's layers. Half
-                // pixels land on a device pixel at 2x and a blur under one is not
-                // visible anyway. The reach is measured in pixels, not lines: a
-                // line count cuts off inside a tall panel with small type, leaving
-                // the bottom line sharp under a fully blurred one, while a
-                // viewport's height either way is past what the scroll can show.
+                // store. Half pixels land on a device pixel at 2x and a blur under
+                // one is not visible anyway, so quantise and let the __lyricBlur
+                // guard drop the write once a line has settled on the clamp.
                 // macOS 27 betas paint unpainted backing store as magenta
-                // (WebKit 303157), so the layer count is worth keeping down.
+                // (WebKit 303157), so the write count is worth keeping down.
                 const BLUR_QUANTUM_PX = 0.5;
 
                 // Lit lines (the active one plus any background or overlapping
-                // line) stay sharp. With no main line lit the anchor sits on the
-                // last lit line, so a backing vocal running past its main line
-                // does not fog the whole list and then snap back.
+                // line) stay sharp. Everything else rides distance alone, which
+                // depthBlurPx clamps, so a long list converges on one value at the
+                // far end instead of hitting a cutoff and snapping back to sharp
+                // partway down.
                 const applyDepthBlur = (mainIndex, litIndices, enabled, strengthPercent) => {{
                     const anchorIndex = mainIndex >= 0
                         ? mainIndex
-                        : (litIndices.size ? Math.max(...litIndices) : -1);
+                        : (litIndices.size ? Math.max(...litIndices) : lastAnchorIndex);
+                    lastAnchorIndex = anchorIndex;
                     const litKey = `${{anchorIndex}}:${{[...litIndices].sort((a, b) => a - b).join(',')}}`;
                     if (litKey === lastBlurLit
                         && enabled === lastBlurEnabled
@@ -744,24 +748,63 @@ pub fn LyricsView(
                     const scale = strengthPercent / 100;
                     const container = document.getElementById('{layout}-lyrics-content');
                     if (!container) return;
-                    const anchorEl = document.getElementById(`{layout}-lyrics-${{anchorIndex}}`);
-                    const reach = container.clientHeight;
                     container.querySelectorAll('[data-lyric-line]').forEach((lineEl) => {{
                         const index = Number(lineEl.dataset.lyricIndex);
-                        const inReach = anchorEl
-                            && Math.abs(lineEl.offsetTop - anchorEl.offsetTop) <= reach;
-                        const distance = enabled && inReach && !litIndices.has(index)
+                        const distance = enabled && !litIndices.has(index)
                             ? Math.abs(index - anchorIndex)
                             : 0;
                         const rawBlurPx = distance > 0 ? depthBlurPx(distance, scale) : 0;
                         const blurPx = Math.round(rawBlurPx / BLUR_QUANTUM_PX) * BLUR_QUANTUM_PX;
-                        const nextFilter = blurPx > 0 ? `blur(${{blurPx.toFixed(2)}}px)` : '';
-                        if (lineEl.__lyricBlur !== nextFilter) {{
-                            lineEl.__lyricBlur = nextFilter;
-                            lineEl.style.filter = nextFilter;
-                        }}
+                        // Always an explicit length, never ''. Clearing the
+                        // declaration drops the line back to the computed `none`,
+                        // and `transition: filter` has to interpolate a blur list
+                        // against a keyword; WebKit does that badly and the whole
+                        // ramp reads as unblurred for the length of the switch.
+                        const nextFilter = `blur(${{blurPx.toFixed(2)}}px)`;
+                        if (lineEl.__lyricBlur === nextFilter) return;
+                        lineEl.__lyricBlur = nextFilter;
+                        if (lineEl !== hoveredLine) lineEl.style.filter = nextFilter;
                     }});
                 }};
+
+                // Hover lifts a line clear of the depth of field so it can be read
+                // before it is clicked, and the ramp's own value comes back on
+                // leave. The sweep keeps writing __lyricBlur underneath, so a line
+                // whose distance moved under the cursor leaves on the new value.
+                const setHovered = (lineEl) => {{
+                    if (hoveredLine === lineEl) return;
+                    if (hoveredLine) {{
+                        hoveredLine.style.filter = hoveredLine.__lyricBlur || 'blur(0px)';
+                    }}
+                    hoveredLine = lineEl;
+                    if (lineEl) lineEl.style.filter = 'blur(0px)';
+                }};
+
+                const onLineOver = (event) => {{
+                    const lineEl = event.target?.closest?.('[data-lyric-line]');
+                    if (!lineEl) {{
+                        setHovered(null);
+                        return;
+                    }}
+                    const container = document.getElementById('{layout}-lyrics-content');
+                    setHovered(container?.contains(lineEl) ? lineEl : null);
+                }};
+
+                const onLineOut = (event) => {{
+                    if (!hoveredLine) return;
+                    const to = event.relatedTarget;
+                    if (to && hoveredLine.contains(to)) return;
+                    setHovered(null);
+                }};
+
+                for (const [key, type] of [['lineOver', 'mouseover'], ['lineOut', 'mouseout']]) {{
+                    const prev = window[`__{layout}_${{key}}`];
+                    if (prev) document.removeEventListener(type, prev);
+                }}
+                window.__{layout}_lineOver = onLineOver;
+                window.__{layout}_lineOut = onLineOut;
+                document.addEventListener('mouseover', onLineOver);
+                document.addEventListener('mouseout', onLineOut);
 
                 const deactivateLine = (lineEl) => {{
                     if (!lineEl) return;
@@ -855,6 +898,8 @@ pub fn LyricsView(
                     lastBlurLit = null;
                     lastBlurEnabled = null;
                     lastBlurStrength = null;
+                    lastAnchorIndex = 0;
+                    hoveredLine = null;
                     container?.scrollTo({{ top: 0, left: 0 }});
                 }}
             "#,

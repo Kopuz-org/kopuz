@@ -51,9 +51,9 @@ pub fn use_artist_photo_fetch(
 fn fetch_queue(albums: &[api::AlbumInfo], sample: &[api::TrackInfo]) -> Vec<String> {
     let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for album in albums {
-        if !album.artist.trim().is_empty() {
-            names.insert(album.artist.clone());
-        }
+        // Same split the grid applies, so the queue never burns a search on a
+        // whole collab credit that gets no tile.
+        names.extend(utils::artist::split_credit(&album.artist));
     }
     for track in sample {
         for artist in &track.artists {

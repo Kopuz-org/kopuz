@@ -324,29 +324,45 @@ pub async fn tracks_by_keys(
 
 /// Every artist the library credits, primary and secondary alike.
 ///
-/// Grouping on the `artist` column alone would list "A feat. B" and never
-/// "B", while [`artist_tracks`] happily answers for "B" and the UI gives it a
-/// tile -- so the listing has to enumerate the same credits that one matches
-/// on, or the tile has no row and nothing can hang a picture on it.
+/// Counts run over `artists_json`, the split credit list, so a featured artist
+/// is counted on every track that credits them rather than only on the ones
+/// where they happen to be first. A row whose credit list is empty (nothing was
+/// ever split out of it) still falls back to the joined `artist` column,
+/// trimmed the same way the credit list is so a padded legacy value lands in
+/// the same bucket as its clean spelling rather than becoming its own artist.
+///
+/// Album artists are enumerated too: [`artist_tracks`] answers for them and the
+/// UI gives them a tile, so the listing has to name the same credits that one
+/// matches on, or the tile has no row and nothing can hang a picture on it.
 pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<(String, u32)>, DbError> {
-    let rows: Vec<(String, i64)> = sqlx::query_as(
+    // SQLite's bare TRIM() strips spaces and nothing else, so the other
+    // whitespace has to be named or a tab-only credit survives as its own
+    // artist. Rust trims all of it, and the two have to agree.
+    const WS: &str = "char(32) || char(9) || char(10) || char(13)";
+    let sql = format!(
         "SELECT name, COUNT(*) AS cnt FROM ( \
-             SELECT t.rowid_pk AS id, TRIM(t.artist) AS name FROM tracks t \
-              WHERE t.source = ?1 AND TRIM(t.artist) != '' \
+             SELECT t.rowid_pk AS id, TRIM(j.value, {WS}) AS name \
+               FROM tracks t, \
+                    json_each(CASE WHEN json_valid(t.artists_json) \
+                                   THEN t.artists_json ELSE '[]' END) j \
+              WHERE t.source = ?1 AND TRIM(j.value, {WS}) != '' \
              UNION \
-             SELECT t.rowid_pk AS id, TRIM(credit.value) AS name \
-               FROM tracks t, json_each(t.artists_json) AS credit \
-              WHERE t.source = ?1 AND TRIM(credit.value) != '' \
+             SELECT t.rowid_pk AS id, TRIM(t.artist, {WS}) AS name \
+               FROM tracks t \
+              WHERE t.source = ?1 AND TRIM(t.artist, {WS}) != '' \
+                AND (NOT json_valid(t.artists_json) \
+                     OR json_array_length(t.artists_json) = 0) \
              UNION \
-             SELECT t.rowid_pk AS id, TRIM(a.artist) AS name \
+             SELECT t.rowid_pk AS id, TRIM(a.artist, {WS}) AS name \
                FROM tracks t JOIN albums a \
                  ON a.source = t.source AND a.source_album_id = t.source_album_id \
-              WHERE t.source = ?1 AND TRIM(a.artist) != '' \
-         ) GROUP BY name COLLATE NOCASE ORDER BY name COLLATE NOCASE",
-    )
-    .bind(source.as_str())
-    .fetch_all(pool)
-    .await?;
+              WHERE t.source = ?1 AND TRIM(a.artist, {WS}) != '' \
+         ) GROUP BY name COLLATE NOCASE ORDER BY name COLLATE NOCASE"
+    );
+    let rows: Vec<(String, i64)> = sqlx::query_as(&sql)
+        .bind(source.as_str())
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|(name, count)| (name, count.max(0) as u32))
