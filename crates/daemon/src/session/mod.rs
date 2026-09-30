@@ -1520,7 +1520,16 @@ impl Session {
         let pending = self.pending_resume.as_ref();
         let position = pending.and_then(|pending| {
             (pending.track_key == track.id.uid()).then(|| {
-                Duration::from_millis(pending.position_ms.min(track.duration.saturating_mul(1000)))
+                // Workaround: When the last track gets replayed/resumed after it ended,
+                // it should show progress starting from the start instead of leaving it
+                // at the end of the song, while audio is playing in the background.
+                if self.phase == ApiPhase::Ended {
+                    Duration::ZERO
+                }
+                else {
+                    let duration = track.duration.saturating_mul(1_000);
+                    Duration::from_millis(pending.position_ms.min(duration))
+                }
             })
         });
         (position, pending.is_some())
