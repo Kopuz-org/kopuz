@@ -1525,8 +1525,7 @@ impl Session {
                 // at the end of the song, while audio is playing in the background.
                 if self.phase == ApiPhase::Ended {
                     Duration::ZERO
-                }
-                else {
+                } else {
                     let duration = track.duration.saturating_mul(1_000);
                     Duration::from_millis(pending.position_ms.min(duration))
                 }
