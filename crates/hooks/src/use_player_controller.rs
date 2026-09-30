@@ -469,6 +469,7 @@ impl PlayerController {
         self.current_song_duration.set(0);
         self.current_song_progress.set(0);
         self.buffered_ranges.set(Vec::new());
+        self.current_artwork.set(None);
         self.current_track_snapshot.set(None);
     }
 }
