@@ -197,8 +197,8 @@ pub fn from_path(
 }
 
 /// Session-scoped artist-photo fetch outcomes, keyed by DISPLAY name (the DB
-/// caches are keyed by the normalized name — [`ArtistArt::from_caches`] bridges
-/// the two). A newtype so every state is constructed through a method — the old
+/// caches are keyed by `(source, artist key)` — [`ArtistArt::from_caches`]
+/// bridges the two). A newtype so every state is constructed through a method — the old
 /// `HashMap<String, String>` encoded "resolved, no photo" as an `""` sentinel
 /// that leaked into `img src` at one call site.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -270,7 +270,7 @@ impl FetchedArtistImages {
 }
 
 /// One artist's image candidates, resolved by [`artist`]. Build via
-/// [`from_caches`](Self::from_caches) — the ONE place the normalized-key DB
+/// [`from_caches`](Self::from_caches) — the ONE place the identity-keyed DB
 /// caches and the display-keyed session map meet.
 pub struct ArtistArt<'a> {
     /// User-set custom image — wins in every state.
@@ -290,20 +290,22 @@ pub struct ArtistArt<'a> {
 
 impl<'a> ArtistArt<'a> {
     /// Assemble the candidates for one artist from the app's caches: the DB
-    /// image store (keyed by normalized name) and the session fetch map (keyed
+    /// image store (keyed by source and artist key) and the session fetch map (keyed
     /// by display name).
     pub fn from_caches(
         images: &'a db::ArtistImages,
         fetched: &'a FetchedArtistImages,
-        norm: &str,
+        source: &str,
+        key: &str,
         display: &str,
         album_cover: Option<&'a Path>,
         view: ArtistView,
     ) -> Self {
         let (overrides, photos) = images;
+        let identity = (source.to_string(), key.to_string());
         Self {
-            override_path: overrides.get(norm).map(PathBuf::as_path),
-            photo: photos.get(norm),
+            override_path: overrides.get(&identity).map(PathBuf::as_path),
+            photo: photos.get(&identity),
             fetched: fetched.state(display),
             album_cover,
             view,
@@ -676,15 +678,18 @@ mod tests {
         assert_eq!(&*got, url);
     }
 
-    /// `from_caches` bridges the two key spaces: DB caches are normalized-key,
+    /// `from_caches` bridges the two key spaces: DB caches are identity-keyed,
     /// the session map is display-key.
     #[test]
     fn from_caches_bridges_norm_and_display_keys() {
         let mut overrides = std::collections::HashMap::new();
-        overrides.insert("cool&create".to_string(), PathBuf::from("/pics/cc.png"));
+        overrides.insert(
+            ("local".to_string(), "k1".to_string()),
+            PathBuf::from("/pics/cc.png"),
+        );
         let mut photos = std::collections::HashMap::new();
         photos.insert(
-            "cool&create".to_string(),
+            ("local".to_string(), "k1".to_string()),
             ArtistImageRef::Remote("https://p/cc.jpg".into()),
         );
         let images: db::ArtistImages = (overrides, photos);
@@ -694,7 +699,8 @@ mod tests {
         let art = ArtistArt::from_caches(
             &images,
             &fetched,
-            "cool&create",
+            "local",
+            "k1",
             "COOL&CREATE",
             None,
             ArtistView::Library,
@@ -709,7 +715,15 @@ mod tests {
         // Empty caches → nothing fetches, no candidates.
         let empty: db::ArtistImages = Default::default();
         let no_fetch = FetchedArtistImages::default();
-        let art = ArtistArt::from_caches(&empty, &no_fetch, "x", "X", None, ArtistView::Library);
+        let art = ArtistArt::from_caches(
+            &empty,
+            &no_fetch,
+            "local",
+            "x",
+            "X",
+            None,
+            ArtistView::Library,
+        );
         assert!(art.override_path.is_none() && art.photo.is_none());
         assert_eq!(art.fetched, ArtistFetchState::NotFetching);
     }

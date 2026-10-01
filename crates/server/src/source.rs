@@ -592,15 +592,15 @@ pub trait MediaSource: Send + Sync {
             .map_err(SourceError::from)
     }
 
-    /// Record (or clear) the cached image for an artist. DB-cache op.
+    /// Record (or clear) the cached image for one of this source's artists, by its key. DB-cache op.
     async fn set_artist_image(
         &self,
-        artist_norm: &str,
+        artist_key: &str,
         kind: &str,
         image_ref: Option<&str>,
     ) -> Result<(), SourceError> {
         self.db()
-            .set_artist_image(artist_norm, kind, image_ref)
+            .set_artist_image(self.source(), artist_key, kind, image_ref)
             .await
             .map_err(SourceError::from)
     }

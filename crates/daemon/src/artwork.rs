@@ -59,38 +59,25 @@ fn ref_for(target: ArtworkTarget, cover: CoverRef) -> Option<ArtworkRef> {
 /// is not a picture of the artist.
 pub fn artist_cover(
     source: &str,
-    name: &str,
-    id: Option<&str>,
+    key: &str,
     images: &db::ArtistImages,
     album_cover: Option<&Path>,
     library_view: bool,
 ) -> CoverRef {
     let (overrides, photos) = images;
-    for key in artist_image_keys(source, name, id) {
-        if let Some(path) = overrides.get(&key) {
-            return CoverRef::Local(path.clone());
-        }
-        if let Some(photo) = photos.get(&key) {
-            return match photo {
-                reader::ArtistImageRef::Local(path) => CoverRef::Local(path.clone()),
-                reader::ArtistImageRef::Remote(url) => CoverRef::EmbeddedUrl(url.clone()),
-            };
-        }
+    let identity = (source.to_string(), key.to_string());
+    if let Some(path) = overrides.get(&identity) {
+        return CoverRef::Local(path.clone());
+    }
+    if let Some(photo) = photos.get(&identity) {
+        return match photo {
+            reader::ArtistImageRef::Local(path) => CoverRef::Local(path.clone()),
+            reader::ArtistImageRef::Remote(url) => CoverRef::EmbeddedUrl(url.clone()),
+        };
     }
     match album_cover.filter(|_| library_view) {
         Some(path) => CoverRef::parse(&path.to_string_lossy()),
         None => CoverRef::None,
-    }
-}
-
-/// Its own key, then for an id artist the name key a photo stored before ids existed sits under.
-fn artist_image_keys(source: &str, name: &str, id: Option<&str>) -> Vec<String> {
-    let own = utils::artist::image_key(source, name, id);
-    let named = utils::artist::normalize_artist_key(name);
-    if own == named {
-        vec![own]
-    } else {
-        vec![own, named]
     }
 }
 
@@ -151,8 +138,7 @@ pub fn artist_ref(
         ArtworkTarget::Artist(artist.key.clone()),
         artist_cover(
             source.as_str(),
-            &artist.name,
-            artist.source_id.as_deref(),
+            &artist.key,
             images,
             album_cover,
             library_view,
@@ -316,8 +302,7 @@ impl ArtworkService {
                 };
                 Ok(artist_cover(
                     config.active_source.as_str(),
-                    &artist.name,
-                    artist.source_id.as_deref(),
+                    &artist.key,
                     &images,
                     album.as_deref(),
                     library_view,
@@ -606,11 +591,12 @@ mod tests {
     fn artist_art_falls_back_through_override_photo_then_album() {
         let album = std::path::Path::new("/music/band/cover.jpg");
         let artist_cover =
-            |images, album, library| artist_cover("srv", "Band", None, images, album, library);
+            |images, album, library| artist_cover("srv", "k-band", images, album, library);
+        let identity = ("srv".to_string(), "k-band".to_string());
         let mut overrides = std::collections::HashMap::new();
         let mut photos = std::collections::HashMap::new();
         photos.insert(
-            "band".to_string(),
+            identity.clone(),
             reader::ArtistImageRef::Remote("https://p/band.jpg".into()),
         );
         let images: db::ArtistImages = (overrides.clone(), photos.clone());
@@ -619,7 +605,7 @@ mod tests {
             CoverRef::EmbeddedUrl("https://p/band.jpg".into())
         );
 
-        overrides.insert("band".to_string(), PathBuf::from("/pics/band.png"));
+        overrides.insert(identity, PathBuf::from("/pics/band.png"));
         let images: db::ArtistImages = (overrides, photos);
         assert_eq!(
             artist_cover(&images, Some(album), true),
@@ -640,27 +626,21 @@ mod tests {
     }
 
     #[test]
-    fn an_id_artist_prefers_its_own_photo_over_a_homonyms() {
+    fn a_photo_belongs_to_its_own_artist_and_source() {
         let mut photos = std::collections::HashMap::new();
         let photo = |url: &str| reader::ArtistImageRef::Remote(url.into());
-        photos.insert("ada".to_string(), photo("https://p/by-name.jpg"));
-        photos.insert("id:srv:ar-1".to_string(), photo("https://p/ar-1.jpg"));
+        photos.insert(
+            ("a".to_string(), "k1".to_string()),
+            photo("https://p/a.jpg"),
+        );
         let images: db::ArtistImages = (Default::default(), photos);
-        let cover = |id: Option<&str>| artist_cover("srv", "Ada", id, &images, None, true);
 
         assert_eq!(
-            cover(Some("ar-1")),
-            CoverRef::EmbeddedUrl("https://p/ar-1.jpg".into())
+            artist_cover("a", "k1", &images, None, true),
+            CoverRef::EmbeddedUrl("https://p/a.jpg".into())
         );
-        assert_eq!(
-            cover(None),
-            CoverRef::EmbeddedUrl("https://p/by-name.jpg".into())
-        );
-        assert_eq!(
-            cover(Some("ar-2")),
-            CoverRef::EmbeddedUrl("https://p/by-name.jpg".into()),
-            "a photo stored before ids still shows"
-        );
+        assert_eq!(artist_cover("a", "k2", &images, None, true), CoverRef::None);
+        assert_eq!(artist_cover("b", "k1", &images, None, true), CoverRef::None);
     }
 }
 

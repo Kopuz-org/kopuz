@@ -13,24 +13,25 @@ use sqlx::SqlitePool;
 use crate::{ArtistImages, DbError, QueueSnapshot, Source};
 
 pub async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
-    let rows = sqlx::query!("SELECT artist_norm, kind, image_ref FROM artist_images")
+    let rows = sqlx::query!("SELECT source, artist_key, kind, image_ref FROM artist_images")
         .fetch_all(pool)
         .await?;
     let mut overrides = HashMap::new();
-    let mut photos: HashMap<String, ArtistImageRef> = HashMap::new();
+    let mut photos: HashMap<(String, String), ArtistImageRef> = HashMap::new();
     for r in rows {
+        let identity = (r.source, r.artist_key);
         match r.kind.as_str() {
             "custom" => {
-                overrides.insert(r.artist_norm, PathBuf::from(r.image_ref));
+                overrides.insert(identity, PathBuf::from(r.image_ref));
             }
             // Server photo wins over a local one for the same artist: `insert`
             // always overwrites, `or_insert` for local never clobbers a server.
             "server" => {
-                photos.insert(r.artist_norm, ArtistImageRef::Remote(r.image_ref));
+                photos.insert(identity, ArtistImageRef::Remote(r.image_ref));
             }
             _ => {
                 photos
-                    .entry(r.artist_norm)
+                    .entry(identity)
                     .or_insert_with(|| ArtistImageRef::Local(PathBuf::from(r.image_ref)));
             }
         }

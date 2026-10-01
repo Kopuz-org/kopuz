@@ -282,11 +282,11 @@ impl MutationService {
                 .map_err(source_error)
                 .map(|_| Table::Albums),
             ArtworkTarget::Artist(artist) => match self.artist_image_key(artist).await {
-                Ok(key) => self
-                    .source()
-                    .set_artist_image(&key, "custom", Some(&stored))
+                Ok((source, key)) => self
+                    .db
+                    .set_artist_image(&source, &key, "custom", Some(&stored))
                     .await
-                    .map_err(source_error)
+                    .map_err(db_error)
                     .map(|_| Table::Tracks),
                 Err(error) => Err(error),
             },
@@ -330,10 +330,11 @@ impl MutationService {
                 Table::Albums
             }
             ArtworkTarget::Artist(artist) => {
-                self.source()
-                    .set_artist_image(&self.artist_image_key(artist).await?, "custom", None)
+                let (source, key) = self.artist_image_key(artist).await?;
+                self.db
+                    .set_artist_image(&source, &key, "custom", None)
                     .await
-                    .map_err(source_error)?;
+                    .map_err(db_error)?;
                 Table::Tracks
             }
             ArtworkTarget::Playlist(id) => {
@@ -384,8 +385,8 @@ impl MutationService {
             .ok_or_else(|| ApiError::not_found("playlist not found"))
     }
 
-    /// Where this artist's own photo is filed in `artist_images`.
-    async fn artist_image_key(&self, artist: &str) -> Result<String, ApiError> {
+    /// The key this artist's own photo is filed under in `artist_images`, with its source.
+    async fn artist_image_key(&self, artist: &str) -> Result<(config::Source, String), ApiError> {
         let source = self.config().active_source;
         let row = self
             .db
@@ -393,11 +394,7 @@ impl MutationService {
             .await
             .map_err(db_error)?
             .ok_or_else(|| ApiError::not_found("the library files no such artist"))?;
-        Ok(utils::artist::image_key(
-            source.as_str(),
-            &row.name,
-            row.source_id.as_deref(),
-        ))
+        Ok((source, row.key))
     }
 
     async fn current_artwork_path(
@@ -413,13 +410,13 @@ impl MutationService {
                 .map_err(db_error)?
                 .and_then(|album| album.cover_path),
             ArtworkTarget::Artist(artist) => {
-                let key = self.artist_image_key(artist).await?;
+                let (source, key) = self.artist_image_key(artist).await?;
                 self.db
                     .artist_images()
                     .await
                     .map_err(db_error)?
                     .0
-                    .get(&key)
+                    .get(&(source.as_str().to_string(), key))
                     .cloned()
             }
             ArtworkTarget::Playlist(id) => self.playlist(id).await?.cover_path,

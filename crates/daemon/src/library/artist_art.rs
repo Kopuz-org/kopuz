@@ -22,7 +22,7 @@ use server::source::{ActiveSource, ArtistView};
 
 use super::{LibraryService, db_error};
 
-const MISS_KIND: &str = "artist_photo_miss";
+const MISS_KIND: &str = db::ARTIST_PHOTO_MISS_KIND;
 const MISS_TTL_SECS: i64 = 86_400;
 /// Enough to fill a grid page quickly without hammering the catalog.
 const WORKERS: usize = 6;
@@ -70,11 +70,16 @@ impl LibraryService {
         if images.is_empty() {
             return Ok(());
         }
-        let scope = source.source().as_str();
+        let unlinked = self
+            .db
+            .unlinked_artist_keys(source.source())
+            .await
+            .map_err(db_error)?;
         for (artist, url) in images {
-            let _ = source
-                .set_artist_image(&storage_key(&artist, scope), "server", Some(&url))
-                .await;
+            let Some(key) = credit_key(&artist, &unlinked) else {
+                continue;
+            };
+            let _ = source.set_artist_image(&key, "server", Some(&url)).await;
         }
         self.invalidate(Table::Tracks);
         Ok(())
@@ -100,7 +105,7 @@ impl LibraryService {
             .artist_keys_unnamed_by_source(source.source())
             .await
             .map_err(db_error)?;
-        let scope = source.source().as_str().to_string();
+        let scope = source.source().clone();
         let mut claim = Claim {
             in_flight: self.artwork_in_flight.clone(),
             keys: Vec::new(),
@@ -112,12 +117,17 @@ impl LibraryService {
             artists
                 .into_iter()
                 .filter(|artist| {
-                    let key = storage_key(artist, &scope);
-                    let wants_photo = !photos.contains_key(&key) && !fresh_misses.contains(&key);
+                    let Some(key) = artist.key.as_deref() else {
+                        return false;
+                    };
+                    let miss = db::artist_miss_name(&scope, key);
+                    let has_photo =
+                        photos.contains_key(&(scope.as_str().to_string(), key.to_string()));
+                    let wants_photo = !has_photo && !fresh_misses.contains(&miss);
                     let wanted =
                         wants_photo || artist.id.as_ref().is_some_and(|id| unnamed.contains(id));
-                    wanted && in_flight.insert(key.clone()) && {
-                        claim.keys.push(key);
+                    wanted && in_flight.insert(miss.clone()) && {
+                        claim.keys.push(miss);
                         true
                     }
                 })
@@ -196,7 +206,9 @@ fn announce_due(last: &Mutex<std::time::Instant>) -> bool {
 
 /// Answers whether the lookup stored anything the grid shows: a photo, or the name the source gives the artist.
 async fn resolve_one(source: &ActiveSource, artist: &reader::ArtistCredit) -> bool {
-    let key = storage_key(artist, source.source().as_str());
+    let Some(key) = artist.key.as_deref() else {
+        return false;
+    };
     let found = match source.fetch_artist_image(artist).await {
         Ok(found) => found,
         // A transient error isn't remembered, since a miss would hide the artist for a whole day over a blip.
@@ -211,16 +223,27 @@ async fn resolve_one(source: &ActiveSource, artist: &reader::ArtistCredit) -> bo
     };
     match found.image {
         Some(url) => {
-            let _ = source.set_artist_image(&key, "server", Some(&url)).await;
+            let _ = source.set_artist_image(key, "server", Some(&url)).await;
             true
         }
         None => {
-            let _ = source.set_meta(&key, MISS_KIND, "").await;
+            let miss = db::artist_miss_name(source.source(), key);
+            let _ = source.set_meta(&miss, MISS_KIND, "").await;
             renamed
         }
     }
 }
 
-fn storage_key(artist: &reader::ArtistCredit, source: &str) -> String {
-    utils::artist::image_key(source, &artist.name, artist.id.as_deref())
+/// The key a source's listing credit is filed under: its own id for a linked artist, else its unlinked row by name.
+pub(super) fn credit_key(
+    credit: &reader::ArtistCredit,
+    unlinked: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    match (&credit.key, &credit.id) {
+        (Some(key), _) => Some(key.clone()),
+        (None, Some(id)) => Some(id.clone()),
+        (None, None) => unlinked
+            .get(&utils::artist::normalize_artist_key(&credit.name))
+            .cloned(),
+    }
 }

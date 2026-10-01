@@ -717,9 +717,20 @@ pub async fn run_json_import(
     }
 
     // --- artist images -----------------------------------------------------
-    import_artist_images(&mut tx, "server", &lib.server_artist_images).await?;
-    import_artist_images(&mut tx, "local", &lib.local_artist_images).await?;
-    import_artist_images(&mut tx, "custom", &lib.custom_artist_images).await?;
+    let server_sources: Vec<&str> = server_src.as_deref().into_iter().collect();
+    let both_sources: Vec<&str> = ["local"]
+        .into_iter()
+        .chain(server_sources.clone())
+        .collect();
+    import_artist_images(
+        &mut tx,
+        &server_sources,
+        "server",
+        &lib.server_artist_images,
+    )
+    .await?;
+    import_artist_images(&mut tx, &["local"], "local", &lib.local_artist_images).await?;
+    import_artist_images(&mut tx, &both_sources, "custom", &lib.custom_artist_images).await?;
 
     // --- playlists + membership -------------------------------------------
     for (i, p) in plists.playlists.iter().enumerate() {
@@ -1089,18 +1100,25 @@ async fn import_recently_played(
 
 async fn import_artist_images(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    sources: &[&str],
     kind: &str,
     map: &HashMap<String, String>,
 ) -> Result<(), DbError> {
-    for (artist, image) in map {
-        sqlx::query!(
-            "INSERT OR IGNORE INTO artist_images (artist_norm, kind, image_ref) VALUES (?1, ?2, ?3)",
-            artist,
-            kind,
-            image
-        )
-        .execute(&mut **tx)
-        .await?;
+    // The legacy maps are keyed by folded name, so an artist in `sources` is the unlinked row of that name.
+    for source in sources {
+        for (artist, image) in map {
+            sqlx::query!(
+                "INSERT OR IGNORE INTO artist_images (source, artist_key, kind, image_ref) \
+                 SELECT source, key, ?3, ?4 FROM artists \
+                  WHERE source = ?1 AND source_artist_id IS NULL AND name_key = ?2",
+                source,
+                artist,
+                kind,
+                image
+            )
+            .execute(&mut **tx)
+            .await?;
+        }
     }
     Ok(())
 }
@@ -1804,6 +1822,8 @@ mod row_fill_tests {
             "CREATE TABLE app_config (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL)",
             "ALTER TABLE queue_state ADD COLUMN queue_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE queue_state ADD COLUMN shuffle_order_json TEXT NOT NULL DEFAULT '[]'",
+            "DROP TABLE artist_images",
+            "CREATE TABLE artist_images (artist_norm TEXT NOT NULL, kind TEXT NOT NULL, image_ref TEXT NOT NULL, PRIMARY KEY (artist_norm, kind))",
             "DROP VIEW artist_cover_albums",
             "DROP VIEW artist_credit_rows",
             "DROP TRIGGER artists_key_required",

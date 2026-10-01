@@ -33,6 +33,14 @@ pub struct ImportReport {
 // DB layer is its main consumer (`WHERE source = ?`).
 pub use config::Source;
 
+/// The `kv` kind a remembered "this artist has no photo" is filed under, named by [`artist_miss_name`].
+pub const ARTIST_PHOTO_MISS_KIND: &str = "artist_photo_miss";
+
+/// The `kv` name of one artist's remembered miss: its identity, source first so a source's can be purged.
+pub fn artist_miss_name(source: &Source, artist_key: &str) -> String {
+    format!("{}\u{1f}{artist_key}", source.as_str())
+}
+
 /// A window into a list query (for virtual-scrolled big lists).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Page {
@@ -152,14 +160,14 @@ pub struct ArtistRow {
     pub tracks: u32,
 }
 
-/// Per-artist images, source-agnostic: `(overrides, photos)`. `overrides` are
-/// user-set custom photos (always a local path, highest priority); `photos` are
-/// the synced photo per artist as a uniform [`reader::ArtistImageRef`] (a server
-/// URL or a local path — server wins when both exist), resolved by the cover
-/// seam so callers never branch on origin. Both keyed by normalized artist name.
+/// Per-artist images: `(overrides, photos)`. `overrides` are user-set custom
+/// photos (always a local path, highest priority); `photos` are the synced photo
+/// per artist as a uniform [`reader::ArtistImageRef`] (a server URL or a local
+/// path — server wins when both exist). Both keyed by the artist's identity,
+/// `(source, artist key)`.
 pub type ArtistImages = (
-    std::collections::HashMap<String, std::path::PathBuf>,
-    std::collections::HashMap<String, reader::ArtistImageRef>,
+    std::collections::HashMap<(String, String), std::path::PathBuf>,
+    std::collections::HashMap<(String, String), reader::ArtistImageRef>,
 );
 
 /// The read side of the persistence API — every query, no mutation. Carried as
@@ -212,6 +220,12 @@ pub trait ReadStore: Send + Sync {
         &self,
         source: &Source,
     ) -> Result<std::collections::HashSet<String>, DbError>;
+
+    /// The key of each of `source`'s unlinked artists, by folded name.
+    async fn unlinked_artist_keys(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
 
     /// Tracks whose album has this genre, artist/album-ordered.
     async fn genre_tracks(
@@ -393,11 +407,12 @@ pub trait Storage: ReadStore {
     /// Name the artist `source` issued `id` for as the source's own record does; answers whether the name changed.
     async fn name_artist(&self, source: &Source, id: &str, name: &str) -> Result<bool, DbError>;
 
-    /// Set (`Some`) or remove (`None`) one artist image. `kind` is
+    /// Set (`Some`) or remove (`None`) one artist's image. `kind` is
     /// `"server" | "local" | "custom"`.
     async fn set_artist_image(
         &self,
-        artist_norm: &str,
+        source: &Source,
+        artist_key: &str,
         kind: &str,
         image_ref: Option<&str>,
     ) -> Result<(), DbError>;

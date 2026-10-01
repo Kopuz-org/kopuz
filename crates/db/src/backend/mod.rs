@@ -200,6 +200,13 @@ impl ReadStore for Native {
         queries::artist_keys_unnamed_by_source(&self.pool(), source).await
     }
 
+    async fn unlinked_artist_keys(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        queries::unlinked_artist_keys(&self.pool(), source).await
+    }
+
     async fn genre_tracks(
         &self,
         source: &crate::Source,
@@ -402,11 +409,12 @@ impl Storage for Native {
 
     async fn set_artist_image(
         &self,
-        artist_norm: &str,
+        source: &crate::Source,
+        artist_key: &str,
         kind: &str,
         image_ref: Option<&str>,
     ) -> Result<(), DbError> {
-        writes::set_artist_image(&self.pool(), artist_norm, kind, image_ref).await
+        writes::set_artist_image(&self.pool(), source, artist_key, kind, image_ref).await
     }
 
     async fn update_album_cover(

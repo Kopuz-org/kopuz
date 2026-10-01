@@ -793,16 +793,21 @@ async fn purge_source(conn: &mut sqlx::SqliteConnection, source: &str) -> Result
         "DELETE FROM recently_played WHERE source = ?1",
         "DELETE FROM listen_counts WHERE source = ?1",
         "DELETE FROM kv WHERE kind = ?1",
+        "DELETE FROM artist_images WHERE source = ?1",
     ] {
         sqlx::query(sql).bind(source).execute(&mut *conn).await?;
     }
     let id_keys = format!("id:{source}:%");
-    for sql in [
-        "DELETE FROM kv WHERE name LIKE ?1",
-        "DELETE FROM artist_images WHERE artist_norm LIKE ?1",
-    ] {
-        sqlx::query(sql).bind(&id_keys).execute(&mut *conn).await?;
-    }
+    sqlx::query("DELETE FROM kv WHERE name LIKE ?1")
+        .bind(&id_keys)
+        .execute(&mut *conn)
+        .await?;
+    let miss_prefix = format!("{source}\u{1f}");
+    sqlx::query("DELETE FROM kv WHERE kind = ?1 AND substr(name, 1, length(?2)) = ?2")
+        .bind(crate::ARTIST_PHOTO_MISS_KIND)
+        .bind(&miss_prefix)
+        .execute(&mut *conn)
+        .await?;
     Ok(())
 }
 

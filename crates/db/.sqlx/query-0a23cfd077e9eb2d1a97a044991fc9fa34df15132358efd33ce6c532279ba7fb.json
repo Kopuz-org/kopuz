@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO artist_images (source, artist_key, kind, image_ref) SELECT source, key, ?3, ?4 FROM artists WHERE source = ?1 AND source_artist_id IS NULL AND name_key = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "0a23cfd077e9eb2d1a97a044991fc9fa34df15132358efd33ce6c532279ba7fb"
+}

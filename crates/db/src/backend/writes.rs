@@ -179,6 +179,13 @@ pub(crate) async fn prune_artists(
     )
     .execute(&mut *conn)
     .await?;
+    sqlx::query!(
+        "DELETE FROM artist_images WHERE source = ?1 \
+         AND NOT EXISTS (SELECT 1 FROM artists a WHERE a.source = ?1 AND a.key = artist_images.artist_key)",
+        src
+    )
+    .execute(&mut *conn)
+    .await?;
     Ok(())
 }
 
@@ -632,19 +639,22 @@ pub async fn name_artist(
     Ok(changed > 0)
 }
 
-#[tracing::instrument(skip_all, fields(artist_norm = %artist_norm, kind = %kind))]
+#[tracing::instrument(skip_all, fields(source = %source.as_str(), artist_key = %artist_key, kind = %kind))]
 pub async fn set_artist_image(
     pool: &SqlitePool,
-    artist_norm: &str,
+    source: &Source,
+    artist_key: &str,
     kind: &str,
     image_ref: Option<&str>,
 ) -> Result<(), DbError> {
+    let src = source.as_str();
     match image_ref {
         Some(r) => {
             sqlx::query!(
-                "INSERT INTO artist_images (artist_norm, kind, image_ref) VALUES (?1, ?2, ?3) \
-                 ON CONFLICT(artist_norm, kind) DO UPDATE SET image_ref = ?3",
-                artist_norm,
+                "INSERT INTO artist_images (source, artist_key, kind, image_ref) VALUES (?1, ?2, ?3, ?4) \
+                 ON CONFLICT(source, artist_key, kind) DO UPDATE SET image_ref = ?4",
+                src,
+                artist_key,
                 kind,
                 r
             )
@@ -653,8 +663,9 @@ pub async fn set_artist_image(
         }
         None => {
             sqlx::query!(
-                "DELETE FROM artist_images WHERE artist_norm = ?1 AND kind = ?2",
-                artist_norm,
+                "DELETE FROM artist_images WHERE source = ?1 AND artist_key = ?2 AND kind = ?3",
+                src,
+                artist_key,
                 kind
             )
             .execute(pool)

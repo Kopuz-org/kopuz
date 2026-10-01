@@ -204,16 +204,29 @@ impl LibraryService {
                 .prune_source(&source, &keep_keys, &keep_albums)
                 .await
                 .map_err(db_error)?;
-            for (artist, image) in &library.local_artist_images {
+            // The scanner names a folder's artist by text; here that is the identity of the source's unlinked row.
+            let unlinked = self
+                .db
+                .unlinked_artist_keys(&source)
+                .await
+                .map_err(db_error)?;
+            for (name, image) in &library.local_artist_images {
+                let Some(key) = unlinked.get(name) else {
+                    continue;
+                };
                 let path = image.to_string_lossy().into_owned();
-                let _ = self.db.set_artist_image(artist, "local", Some(&path)).await;
+                let _ = self
+                    .db
+                    .set_artist_image(&source, key, "local", Some(&path))
+                    .await;
             }
             if let Ok((_, photos)) = self.db.artist_images().await {
-                for (artist, photo) in photos {
+                for ((photo_source, key), photo) in photos {
                     if let reader::ArtistImageRef::Local(path) = photo
+                        && photo_source == source.as_str()
                         && !path.exists()
                     {
-                        let _ = self.db.set_artist_image(&artist, "local", None).await;
+                        let _ = self.db.set_artist_image(&source, &key, "local", None).await;
                     }
                 }
             }
@@ -363,9 +376,11 @@ impl LibraryService {
             ctx.progress("persisting", Some(done), Some(total), None);
             self.invalidate(Table::Tracks);
         }
-        // Stored under the key every read builds, never the display name.
+        let unlinked = self.db.unlinked_artist_keys(&src).await.map_err(db_error)?;
         for (artist, url) in &snapshot.artist_images {
-            let key = utils::artist::image_key(src.as_str(), &artist.name, artist.id.as_deref());
+            let Some(key) = super::artist_art::credit_key(artist, &unlinked) else {
+                continue;
+            };
             let _ = source.set_artist_image(&key, "server", Some(url)).await;
         }
         let keep_keys: Vec<String> = snapshot

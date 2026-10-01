@@ -1,17 +1,8 @@
 //! Artist-name keying shared by the UI and the photo-fetch pipeline.
 
-/// The key artist caches are stored under (the `artist_images` table's
-/// `artist_norm`, the fetch skip-sets): trimmed, lowercased display name.
+/// The folded form of an artist's name (`artists.name_key`): trimmed, lowercased.
 pub fn normalize_artist_key(value: &str) -> String {
     value.trim().to_lowercase()
-}
-
-/// The `artist_images` key: the source's id where it issued one, carrying the source since the table spans them, else the folded name.
-pub fn image_key(source: &str, name: &str, id: Option<&str>) -> String {
-    match id {
-        Some(id) => format!("id:{source}:{id}"),
-        None => normalize_artist_key(name),
-    }
 }
 
 /// The normalized primary artist of a joined collab credit ("COOL&CREATE,
@@ -34,12 +25,6 @@ mod tests {
     #[test]
     fn normalize_trims_and_lowercases() {
         assert_eq!(normalize_artist_key("  COOL&CREATE "), "cool&create");
-    }
-
-    #[test]
-    fn an_id_outranks_the_name() {
-        assert_eq!(image_key("srv", "Ada", Some("ar-1")), "id:srv:ar-1");
-        assert_eq!(image_key("srv", " Ada ", None), "ada");
     }
 
     #[test]

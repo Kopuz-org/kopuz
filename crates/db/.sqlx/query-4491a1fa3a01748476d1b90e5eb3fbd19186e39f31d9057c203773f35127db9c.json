@@ -1,21 +1,26 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT artist_norm, kind, image_ref FROM artist_images",
+  "query": "SELECT source, artist_key, kind, image_ref FROM artist_images",
   "describe": {
     "columns": [
       {
-        "name": "artist_norm",
+        "name": "source",
         "ordinal": 0,
         "type_info": "Text"
       },
       {
-        "name": "kind",
+        "name": "artist_key",
         "ordinal": 1,
         "type_info": "Text"
       },
       {
-        "name": "image_ref",
+        "name": "kind",
         "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "image_ref",
+        "ordinal": 3,
         "type_info": "Text"
       }
     ],
@@ -25,8 +30,9 @@
     "nullable": [
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "897f2c0c713a3d612f343ca57c6f7723923fbde08cdbc034dc826cdff7c16ed5"
+  "hash": "4491a1fa3a01748476d1b90e5eb3fbd19186e39f31d9057c203773f35127db9c"
 }
