@@ -78,7 +78,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
             .unwrap();
     }
     for _ in 0..3 {
-        db.bump_listen_count(&Source::Local, "/music/a.flac")
+        db.bump_listen_count(&Source::default(), "/music/a.flac")
             .await
             .unwrap();
     }
@@ -148,7 +148,13 @@ async fn named_local_source_round_trips_as_active() {
     let loaded = db.load_config().await.unwrap().expect("config present");
 
     assert_eq!(loaded.active_source, Source::LocalLibrary(local.id.clone()));
-    assert_eq!(loaded.local_sources, vec![local]);
+    assert_eq!(
+        loaded.local_sources.len(),
+        2,
+        "the default folder source is kept alongside"
+    );
+    assert_eq!(loaded.local_sources[0].id, config::DEFAULT_LOCAL_ID);
+    assert_eq!(loaded.local_sources[1], local);
     assert!(loaded.server.is_none());
     assert_eq!(
         loaded

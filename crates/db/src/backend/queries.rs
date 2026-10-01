@@ -767,7 +767,7 @@ mod tests {
 
     async fn seeded() -> (SqlitePool, Source) {
         let pool = mem_pool().await;
-        let source = Source::Local;
+        let source = Source::default();
         // One collaboration: the artist column carries the joined credit, the credits its two names.
         let tracks = [
             track("/a.flac", "Ada feat. Boris", &["Ada", "Boris"], "al-1"),
@@ -825,7 +825,7 @@ mod tests {
     #[tokio::test]
     async fn a_credited_artist_carries_the_id_its_source_issued() {
         let pool = mem_pool().await;
-        let source = Source::Local;
+        let source = Source::default();
         let tracks = [
             linked_track(
                 "/a.flac",
@@ -853,7 +853,7 @@ mod tests {
     #[tokio::test]
     async fn an_unlinked_name_folds_beyond_ascii() {
         let pool = mem_pool().await;
-        let source = Source::Local;
+        let source = Source::default();
         let tracks = [
             track("/a.flac", "ЛСП", &["ЛСП"], "al-1"),
             track("/b.flac", "Émilie", &["Émilie"], "al-1"),

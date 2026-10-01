@@ -762,7 +762,7 @@ mod tests {
         drop(held);
 
         let started = std::time::Instant::now();
-        cfg_store::push_recent(&pool, &crate::Source::Local, "/after.flac")
+        cfg_store::push_recent(&pool, &crate::Source::default(), "/after.flac")
             .await
             .expect("the lock was released with the connection");
         assert!(

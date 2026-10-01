@@ -9,8 +9,8 @@ mod source;
 pub mod store;
 mod views;
 pub use source::{
-    Browser, BrowserEngine, JellyfinServer, MusicServer, MusicService, SavedLocalSource,
-    SavedServer, Source,
+    Browser, BrowserEngine, DEFAULT_LOCAL_ID, DEFAULT_LOCAL_NAME, JellyfinServer, MusicServer,
+    MusicService, SavedLocalSource, SavedServer, Source,
 };
 pub use views::{IntegrationConfig, LibraryConfig, PlaybackConfig, ServerAuth, UiConfig};
 
@@ -624,11 +624,10 @@ pub struct AppConfig {
     pub server: Option<MusicServer>,
     #[serde(default)]
     pub servers: Vec<SavedServer>,
-    /// Named, isolated filesystem libraries. The legacy `music_directory`
-    /// remains the built-in Local source for backwards compatibility.
+    /// Isolated filesystem libraries; the one under `DEFAULT_LOCAL_ID` is the install's own.
     #[serde(default)]
     pub local_sources: Vec<SavedLocalSource>,
-    /// The active source: built-in Local, a named local library, or Server(id).
+    /// The active source: a folder library or Server(id).
     /// `server` is hydrated only for the active remote source.
     #[serde(default)]
     pub active_source: Source,
@@ -649,8 +648,6 @@ pub struct AppConfig {
     /// playback on this app's in-app device.
     #[serde(default = "default_true")]
     pub spotify_prefer_active_device: bool,
-    #[serde(default, deserialize_with = "deserialize_music_directories")]
-    pub music_directory: Vec<PathBuf>,
     #[serde(default = "default_theme")]
     pub theme: String,
     /// Palette file matugen or pywal writes, polled for changes while the live
@@ -910,22 +907,6 @@ fn default_language() -> String {
     "en".to_string()
 }
 
-fn deserialize_music_directories<'de, D>(deserializer: D) -> Result<Vec<PathBuf>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum OneOrMany {
-        One(PathBuf),
-        Many(Vec<PathBuf>),
-    }
-    match OneOrMany::deserialize(deserializer)? {
-        OneOrMany::One(p) => Ok(vec![p]),
-        OneOrMany::Many(v) => Ok(v),
-    }
-}
-
 /// Slider bound for `lyrics_offset_ms`; also enforced here since config files
 /// and env vars can set it without going through the UI.
 pub const LYRICS_OFFSET_LIMIT_MS: i32 = 1000;
@@ -955,13 +936,12 @@ impl Default for AppConfig {
         Self {
             server: None,
             servers: Vec::new(),
-            local_sources: Vec::new(),
-            active_source: Source::Local,
+            local_sources: vec![SavedLocalSource::default_library(vec![music_directory])],
+            active_source: Source::default(),
             source_explicitly_set: false,
             server_folders: HashMap::new(),
             spotify_browser: None,
             spotify_prefer_active_device: true,
-            music_directory: vec![music_directory],
             theme: default_theme(),
             live_theme_path: String::new(),
             device_id: default_device_id(),
@@ -1185,7 +1165,7 @@ impl AppConfig {
     }
 
     pub fn clear_active_server(&mut self) {
-        self.active_source = Source::Local;
+        self.active_source = Source::default();
         self.server = None;
         self.source_explicitly_set = true;
     }
@@ -1198,7 +1178,7 @@ impl AppConfig {
     }
 
     pub fn set_active_server_snapshot(&mut self, server: MusicServer) {
-        let source = server.id.clone().map_or(Source::Local, Source::Server);
+        let source = server.id.clone().map_or(Source::default(), Source::Server);
         self.active_source = source;
         self.server = Some(server);
         self.source_explicitly_set = true;
@@ -1231,7 +1211,6 @@ mod tests {
         AppConfig, BackBehavior, Browser, EqualizerSettings, MusicServer, ServerAuth,
         SettingsLayout,
     };
-    use std::path::PathBuf;
 
     #[test]
     fn legacy_five_band_custom_eq_migrates_to_nearest_slots() {
@@ -1263,31 +1242,6 @@ mod tests {
         let eq: EqualizerSettings = serde_json::from_str(&json).unwrap();
 
         assert_eq!(eq.bands, bands);
-    }
-
-    #[test]
-    fn config_deserializes_legacy_single_music_directory() {
-        let json = r#"{
-            "music_directory": "/music"
-        }"#;
-
-        let config: AppConfig = serde_json::from_str(json).unwrap();
-
-        assert_eq!(config.music_directory, vec![PathBuf::from("/music")]);
-    }
-
-    #[test]
-    fn config_deserializes_multiple_music_directories() {
-        let json = r#"{
-            "music_directory": ["/music", "/archive"]
-        }"#;
-
-        let config: AppConfig = serde_json::from_str(json).unwrap();
-
-        assert_eq!(
-            config.music_directory,
-            vec![PathBuf::from("/music"), PathBuf::from("/archive")]
-        );
     }
 
     #[test]

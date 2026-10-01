@@ -81,7 +81,7 @@ async fn seed_active_server(db: &db::Db, id: &str) {
 #[tokio::test]
 async fn recently_played_round_trip() {
     let db = db::init(&unique_db()).await.unwrap();
-    let local = Source::Local;
+    let local = Source::default();
 
     for k in ["a", "b", "c"] {
         db.push_recent(&local, k).await.unwrap();
@@ -111,11 +111,11 @@ async fn playlists_round_trip() {
     let db = db::init(&db_path).await.unwrap();
     seed_active_server(&db, "srv-1").await;
 
-    db.upsert_playlist_meta(&Source::Local, "pl-1", "Mine", None, None)
+    db.upsert_playlist_meta(&Source::default(), "pl-1", "Mine", None, None)
         .await
         .unwrap();
     db.set_playlist_tracks(
-        &Source::Local,
+        &Source::default(),
         "pl-1",
         &["/music/a.flac".into(), "/music/b.flac".into()],
     )
@@ -133,7 +133,7 @@ async fn playlists_round_trip() {
     db.create_folder("f1", "Folder").await.unwrap();
     db.set_playlist_folder("pl-1", Some("f1")).await.unwrap();
 
-    let store = db.load_playlists(&Source::Local).await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
     assert_eq!(store.playlists.len(), 1);
     assert_eq!(store.playlists[0].id, "pl-1");
     assert_eq!(store.playlists[0].name, "Mine");
@@ -159,7 +159,7 @@ async fn playlists_round_trip() {
 
 /// Helper: a local playlist's track refs from the loaded store.
 async fn local_playlist_tracks(db: &db::Db, id: &str) -> Vec<String> {
-    db.load_playlists(&Source::Local)
+    db.load_playlists(&Source::default())
         .await
         .unwrap()
         .playlists
@@ -173,21 +173,21 @@ async fn local_playlist_tracks(db: &db::Db, id: &str) -> Vec<String> {
 async fn playlist_add_appends_and_dedups() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
-    db.upsert_playlist_meta(&Source::Local, "pl", "Mine", None, None)
+    db.upsert_playlist_meta(&Source::default(), "pl", "Mine", None, None)
         .await
         .unwrap();
-    db.set_playlist_tracks(&Source::Local, "pl", &["a".into(), "b".into()])
+    db.set_playlist_tracks(&Source::default(), "pl", &["a".into(), "b".into()])
         .await
         .unwrap();
 
     // New tracks append at the end, in order.
-    db.add_playlist_tracks(&Source::Local, "pl", &["c".into(), "d".into()])
+    db.add_playlist_tracks(&Source::default(), "pl", &["c".into(), "d".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "b", "c", "d"]);
 
     // Already-present refs are skipped; only the genuinely new one is appended.
-    db.add_playlist_tracks(&Source::Local, "pl", &["b".into(), "e".into()])
+    db.add_playlist_tracks(&Source::default(), "pl", &["b".into(), "e".into()])
         .await
         .unwrap();
     assert_eq!(
@@ -196,7 +196,7 @@ async fn playlist_add_appends_and_dedups() {
     );
 
     // A batch with an internal duplicate adds that ref only once.
-    db.add_playlist_tracks(&Source::Local, "pl", &["f".into(), "f".into()])
+    db.add_playlist_tracks(&Source::default(), "pl", &["f".into(), "f".into()])
         .await
         .unwrap();
     assert_eq!(
@@ -212,7 +212,7 @@ async fn playlist_add_creates_playlist_if_absent() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
 
-    db.add_playlist_tracks(&Source::Local, "fresh", &["x".into()])
+    db.add_playlist_tracks(&Source::default(), "fresh", &["x".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "fresh").await, ["x"]);
@@ -224,30 +224,30 @@ async fn playlist_add_creates_playlist_if_absent() {
 async fn playlist_remove_keeps_remaining_order() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
-    db.upsert_playlist_meta(&Source::Local, "pl", "Mine", None, None)
+    db.upsert_playlist_meta(&Source::default(), "pl", "Mine", None, None)
         .await
         .unwrap();
     db.set_playlist_tracks(
-        &Source::Local,
+        &Source::default(),
         "pl",
         &["a".into(), "b".into(), "c".into(), "d".into()],
     )
     .await
     .unwrap();
 
-    db.remove_playlist_tracks(&Source::Local, "pl", &["b".into(), "d".into()])
+    db.remove_playlist_tracks(&Source::default(), "pl", &["b".into(), "d".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c"]);
 
     // Removing a non-member is a no-op.
-    db.remove_playlist_tracks(&Source::Local, "pl", &["z".into()])
+    db.remove_playlist_tracks(&Source::default(), "pl", &["z".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c"]);
 
     // A later add still appends after the survivors (no position collision).
-    db.add_playlist_tracks(&Source::Local, "pl", &["e".into()])
+    db.add_playlist_tracks(&Source::default(), "pl", &["e".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c", "e"]);
@@ -257,7 +257,7 @@ async fn playlist_remove_keeps_remaining_order() {
 
 /// Helper: a folder's playlist_ids from the loaded store, or panic if absent.
 async fn folder_members(db: &db::Db, id: &str) -> Vec<String> {
-    db.load_playlists(&Source::Local)
+    db.load_playlists(&Source::default())
         .await
         .unwrap()
         .folders
@@ -273,23 +273,23 @@ async fn folder_create_rename_delete() {
     let db = db::init(&db_path).await.unwrap();
 
     db.create_folder("f1", "Rock").await.unwrap();
-    let store = db.load_playlists(&Source::Local).await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
     assert_eq!(store.folders.len(), 1);
     assert_eq!(store.folders[0].name, "Rock");
 
     // create on the same id is an upsert of the name (idempotent on id).
     db.create_folder("f1", "Metal").await.unwrap();
-    let store = db.load_playlists(&Source::Local).await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
     assert_eq!(store.folders.len(), 1, "no duplicate folder row");
     assert_eq!(store.folders[0].name, "Metal");
 
     db.rename_folder("f1", "Jazz").await.unwrap();
-    let store = db.load_playlists(&Source::Local).await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
     assert_eq!(store.folders[0].name, "Jazz");
 
     db.delete_folder("f1").await.unwrap();
     assert!(
-        db.load_playlists(&Source::Local)
+        db.load_playlists(&Source::default())
             .await
             .unwrap()
             .folders

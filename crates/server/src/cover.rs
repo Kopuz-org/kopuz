@@ -210,7 +210,7 @@ mod tests {
 
     fn local_active() -> AppConfig {
         AppConfig {
-            active_source: config::Source::Local,
+            active_source: config::Source::default(),
             server: None,
             ..Default::default()
         }
@@ -243,7 +243,7 @@ mod tests {
 
     fn subsonic_config(with_creds: bool) -> AppConfig {
         AppConfig {
-            active_source: config::Source::Local,
+            active_source: config::Source::default(),
             server: Some(config::MusicServer {
                 url: "https://sub.example.com".into(),
                 service: MusicService::Subsonic,
@@ -257,7 +257,7 @@ mod tests {
 
     fn jellyfin_config() -> AppConfig {
         AppConfig {
-            active_source: config::Source::Local,
+            active_source: config::Source::default(),
             server: Some(config::MusicServer {
                 url: "https://jelly.example.com".into(),
                 service: MusicService::Jellyfin,

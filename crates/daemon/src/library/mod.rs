@@ -209,13 +209,15 @@ impl LibraryService {
     }
 
     fn scan_roots(config: &config::AppConfig) -> Vec<(config::Source, Vec<PathBuf>)> {
-        std::iter::once((config::Source::Local, config.music_directory.clone()))
-            .chain(config.local_sources.iter().map(|source| {
+        config
+            .local_sources
+            .iter()
+            .map(|source| {
                 (
                     config::Source::LocalLibrary(source.id.clone()),
                     source.directories.clone(),
                 )
-            }))
+            })
             .collect()
     }
 

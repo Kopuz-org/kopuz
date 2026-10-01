@@ -103,7 +103,7 @@ async fn typed_queries_smoke() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
     seed(&db_path).await;
-    let local = Source::Local;
+    let local = Source::default();
     let srv = Source::Server("srv-1".into());
 
     let rock = db.album_tracks(&local, "al-rock").await.unwrap();
@@ -134,7 +134,7 @@ async fn typed_queries_smoke() {
 
     // Prefix with an underscore in a filename must not act as a wildcard.
     let folder = db
-        .folder_tracks(&Source::Local, "/music/jazz/")
+        .folder_tracks(&Source::default(), "/music/jazz/")
         .await
         .unwrap();
     assert_eq!(folder.len(), 2);
@@ -150,7 +150,7 @@ async fn typed_queries_smoke() {
         "named local sources must reconstruct filesystem track ids",
     );
     let none = db
-        .folder_tracks(&Source::Local, "/music/ja_z/")
+        .folder_tracks(&Source::default(), "/music/ja_z/")
         .await
         .unwrap();
     assert!(none.is_empty(), "LIKE metachars are escaped");
@@ -229,7 +229,7 @@ async fn track_cover_projects_from_album_for_local_keeps_own_for_server() {
     .await
     .unwrap();
 
-    let local = db.album_tracks(&Source::Local, "al-x").await.unwrap();
+    let local = db.album_tracks(&Source::default(), "al-x").await.unwrap();
     assert_eq!(local.len(), 1);
     assert_eq!(
         local[0].cover.as_deref(),
@@ -270,7 +270,7 @@ async fn track_filter_selects_favorites_in_sql() {
     let path = unique_db();
     let db = db::init(&path).await.unwrap();
     seed(&path).await;
-    let local = Source::Local;
+    let local = Source::default();
 
     db.set_favorite(local.as_str(), "/music/jazz/b_1.flac", true)
         .await

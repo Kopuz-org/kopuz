@@ -62,7 +62,7 @@ async fn windowed_queries_over_20k_tracks() {
     let db = db::init(&db_path).await.unwrap();
     seed(&db_path).await;
 
-    let local = TrackFilter::new(Source::Local);
+    let local = TrackFilter::new(Source::default());
 
     // Count reflects the whole library.
     assert_eq!(db.tracks_count(&local).await.unwrap(), N as u32);
@@ -226,12 +226,15 @@ async fn recently_added_albums_order_by_date_added() {
     // Written oldest-first, and deliberately neither alphabetical nor its
     // reverse, so neither ordering can pass by accident.
     for (id, artist) in [("bee", "Bea"), ("cee", "Cara"), ("ann", "Ann")] {
-        db.upsert_albums(&Source::Local, &[album(id, id, artist)])
+        db.upsert_albums(&Source::default(), &[album(id, id, artist)])
             .await
             .unwrap();
-        db.upsert_tracks(&Source::Local, &[track(&format!("/music/{id}.flac"), id)])
-            .await
-            .unwrap();
+        db.upsert_tracks(
+            &Source::default(),
+            &[track(&format!("/music/{id}.flac"), id)],
+        )
+        .await
+        .unwrap();
     }
 
     let ids =
@@ -240,35 +243,53 @@ async fn recently_added_albums_order_by_date_added() {
     // Unstamped rows (a library not rescanned since the added_at migration, or
     // any server source) still fall back to insertion order.
     assert_eq!(
-        ids(db.albums_recently_added(&Source::Local, 10).await.unwrap()),
+        ids(db
+            .albums_recently_added(&Source::default(), 10)
+            .await
+            .unwrap()),
         ["ann", "cee", "bee"]
     );
     assert_eq!(
-        ids(db.albums_recently_added(&Source::Local, 2).await.unwrap()),
+        ids(db
+            .albums_recently_added(&Source::default(), 2)
+            .await
+            .unwrap()),
         ["ann", "cee"]
     );
 
     // A stamp outranks insertion order, and it is the album's newest track that
     // decides: stamping the oldest album's track pulls that album to the front.
-    db.stamp_added_at(&Source::Local, &[("/music/bee.flac".into(), 1_700_000_000)])
-        .await
-        .unwrap();
+    db.stamp_added_at(
+        &Source::default(),
+        &[("/music/bee.flac".into(), 1_700_000_000)],
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        ids(db.albums_recently_added(&Source::Local, 10).await.unwrap()),
+        ids(db
+            .albums_recently_added(&Source::default(), 10)
+            .await
+            .unwrap()),
         ["bee", "ann", "cee"]
     );
 
     // Stamps are written once: a rescan after a tag edit bumped the file's
     // mtime must not make old music look new.
-    db.stamp_added_at(&Source::Local, &[("/music/cee.flac".into(), 1_800_000_000)])
-        .await
-        .unwrap();
-    db.stamp_added_at(&Source::Local, &[("/music/cee.flac".into(), 1_900_000_000)])
-        .await
-        .unwrap();
+    db.stamp_added_at(
+        &Source::default(),
+        &[("/music/cee.flac".into(), 1_800_000_000)],
+    )
+    .await
+    .unwrap();
+    db.stamp_added_at(
+        &Source::default(),
+        &[("/music/cee.flac".into(), 1_900_000_000)],
+    )
+    .await
+    .unwrap();
     let filter = TrackFilter {
         sort: TrackSort::DateAdded,
-        ..TrackFilter::new(Source::Local)
+        ..TrackFilter::new(Source::default())
     };
     let by_date = db
         .tracks_page(

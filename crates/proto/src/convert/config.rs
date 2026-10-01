@@ -339,7 +339,9 @@ pub fn artist_sort_field_from_proto(value: i32) -> config::ArtistSortField {
 
 pub fn source_ref_to_proto(value: &config::Source) -> SourceRef {
     let kind = match value {
-        config::Source::Local => source_ref::Kind::Local(Unit {}),
+        config::Source::LocalLibrary(id) if id == config::DEFAULT_LOCAL_ID => {
+            source_ref::Kind::Local(Unit {})
+        }
         config::Source::LocalLibrary(id) => source_ref::Kind::LocalLibrary(id.clone()),
         config::Source::Server(id) => source_ref::Kind::Server(id.clone()),
     };
@@ -350,7 +352,7 @@ pub fn source_ref_from_proto(value: Option<&SourceRef>) -> config::Source {
     match value.and_then(|value| value.kind.as_ref()) {
         Some(source_ref::Kind::LocalLibrary(id)) => config::Source::LocalLibrary(id.clone()),
         Some(source_ref::Kind::Server(id)) => config::Source::Server(id.clone()),
-        Some(source_ref::Kind::Local(_)) | None => config::Source::Local,
+        Some(source_ref::Kind::Local(_)) | None => config::Source::default(),
     }
 }
 
@@ -514,11 +516,6 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
             .iter()
             .map(|(k, v)| (k.clone(), StringList { values: v.clone() }))
             .collect(),
-        music_directory: value
-            .music_directory
-            .iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect(),
         theme: value.theme.clone(),
         live_theme_path: value.live_theme_path.clone(),
         device_id: value.device_id.clone(),
@@ -622,11 +619,6 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
             .server_folders
             .iter()
             .map(|(k, v)| (k.clone(), v.values.clone()))
-            .collect(),
-        music_directory: value
-            .music_directory
-            .iter()
-            .map(std::path::PathBuf::from)
             .collect(),
         theme: value.theme.clone(),
         live_theme_path: value.live_theme_path.clone(),

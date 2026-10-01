@@ -860,7 +860,7 @@ pub fn local(db: Db, source: Source) -> Box<dyn MediaSource> {
 /// the result (the cached [`ActiveSource`]) rather than calling per render.
 pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSource> {
     match source {
-        Source::Local | Source::LocalLibrary(_) => local(db, source.clone()),
+        Source::LocalLibrary(_) => local(db, source.clone()),
         Source::Server(id) => match ServerConn::resolve(config) {
             Some(conn) => remote_source(db, Source::Server(id.clone()), &conn),
             None => Box::new(OfflineServerSource {

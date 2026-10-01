@@ -204,7 +204,7 @@ impl ConfigService {
     ) -> Result<(bool, config::AppConfig, Vec<String>), ApiError> {
         let mut current = self.current.write().await;
         let usable = match &source {
-            config::Source::Local | config::Source::LocalLibrary(_) => {
+            config::Source::LocalLibrary(_) => {
                 current.set_active_local_source(source.clone());
                 true
             }

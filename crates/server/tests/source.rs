@@ -50,7 +50,7 @@ fn unique_db() -> PathBuf {
 #[tokio::test]
 async fn local_create_then_add_playlist_round_trips() {
     let db = db::init(&unique_db()).await.unwrap();
-    let src = source::local(db.clone(), Source::Local);
+    let src = source::local(db.clone(), Source::default());
 
     let id = src
         .create_playlist("Road Trip", &["/music/a.flac".into()])
@@ -58,7 +58,7 @@ async fn local_create_then_add_playlist_round_trips() {
         .unwrap();
 
     // The created playlist is readable with its seed track.
-    let store = db.load_playlists(&Source::Local).await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
     let pl = store
         .playlists
         .iter()
@@ -74,7 +74,7 @@ async fn local_create_then_add_playlist_round_trips() {
         .unwrap();
     assert_eq!(landed.len(), 2);
 
-    let store = db.load_playlists(&Source::Local).await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
     let pl = store.playlists.iter().find(|p| p.id == id).unwrap();
     assert_eq!(
         pl.tracks,
@@ -86,7 +86,7 @@ async fn local_create_then_add_playlist_round_trips() {
 #[tokio::test]
 async fn local_favorite_round_trips() {
     let db = db::init(&unique_db()).await.unwrap();
-    let src = source::local(db.clone(), Source::Local);
+    let src = source::local(db.clone(), Source::default());
 
     assert!(!src.is_favorite("/music/x.flac").await);
 
@@ -106,7 +106,7 @@ async fn local_favorite_round_trips() {
 #[tokio::test]
 async fn record_favorite_writes_a_clean_local_row_and_reverts() {
     let db = db::init(&unique_db()).await.unwrap();
-    let src = source::local(db.clone(), Source::Local);
+    let src = source::local(db.clone(), Source::default());
     let t = track(TrackId::Local("/music/x.flac".into()));
 
     // record_favorite writes the local state as a CLEAN row (no dirty/pending) —

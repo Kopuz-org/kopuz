@@ -58,7 +58,7 @@ fn id(source: &str, key: &str) -> (String, String) {
 #[tokio::test]
 async fn unlinked_homonyms_in_two_sources_keep_their_own_photos() {
     let db = db::init(&unique_db()).await.unwrap();
-    let (local, srv) = (Source::Local, Source::Server("s1".into()));
+    let (local, srv) = (Source::default(), Source::Server("s1".into()));
     db.upsert_tracks(&local, &[track("/a.flac", "Ada", Vec::new())])
         .await
         .unwrap();
@@ -92,7 +92,7 @@ async fn unlinked_homonyms_in_two_sources_keep_their_own_photos() {
 #[tokio::test]
 async fn a_custom_upload_leaves_a_homonym_alone() {
     let db = db::init(&unique_db()).await.unwrap();
-    let (local, srv) = (Source::Local, Source::Server("s1".into()));
+    let (local, srv) = (Source::default(), Source::Server("s1".into()));
     db.upsert_tracks(&local, &[track("/a.flac", "Ada", Vec::new())])
         .await
         .unwrap();
@@ -131,11 +131,11 @@ async fn a_custom_upload_leaves_a_homonym_alone() {
 #[tokio::test]
 async fn unlinked_artist_keys_answer_by_folded_name() {
     let db = db::init(&unique_db()).await.unwrap();
-    db.upsert_tracks(&Source::Local, &[track("/a.flac", "Ada ", Vec::new())])
+    db.upsert_tracks(&Source::default(), &[track("/a.flac", "Ada ", Vec::new())])
         .await
         .unwrap();
-    let row = artist_named(&db, &Source::Local, "Ada").await;
-    let keys = db.unlinked_artist_keys(&Source::Local).await.unwrap();
+    let row = artist_named(&db, &Source::default(), "Ada").await;
+    let keys = db.unlinked_artist_keys(&Source::default()).await.unwrap();
     assert_eq!(keys.get("ada"), Some(&row.key));
     assert!(
         db.unlinked_artist_keys(&Source::Server("s1".into()))
@@ -166,7 +166,7 @@ async fn linked_artist_keys_answer_by_source_id() {
     assert_eq!(keys.len(), 1);
     assert!(keys.contains_key("ar-1"));
     assert!(
-        db.linked_artist_keys(&Source::Local)
+        db.linked_artist_keys(&Source::default())
             .await
             .unwrap()
             .is_empty()

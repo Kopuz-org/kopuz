@@ -854,7 +854,7 @@ mod tests {
     #[tokio::test]
     async fn a_deferred_read_then_write_is_refused_after_a_concurrent_commit() {
         let (_dir, pool) = file_pool().await;
-        let source = Source::Local;
+        let source = Source::default();
 
         let mut reader = pool.begin().await.expect("begin");
         let _: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(played_at), 0) FROM recently_played")
@@ -887,7 +887,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_recents_and_queue_saves_all_land() {
         let (_dir, pool) = file_pool().await;
-        let source = Source::Local;
+        let source = Source::default();
         let snapshot = QueueSnapshot::default();
 
         let recent = |key: &'static str| {

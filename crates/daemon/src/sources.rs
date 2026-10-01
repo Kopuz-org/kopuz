@@ -125,7 +125,6 @@ impl SourceService {
                     .ok_or_else(|| ApiError::not_found("no such server"))?;
                 config.set_active_server_snapshot(server);
             }
-            config::Source::Local => config.set_active_local_source(config::Source::Local),
         }
         let active = Arc::from(server::source::active(self.db.clone(), &config));
         Ok((config, active))
@@ -133,8 +132,10 @@ impl SourceService {
 
     pub async fn sources(&self) -> Result<Vec<SourceInfo>, ApiError> {
         let config = self.current().await;
-        let ids: Vec<String> = std::iter::once("local".to_string())
-            .chain(config.local_sources.iter().map(|source| source.id.clone()))
+        let ids: Vec<String> = config
+            .local_sources
+            .iter()
+            .map(|source| source.id.clone())
             .chain(config.servers.iter().map(|server| server.id.clone()))
             .collect();
         let mut sources = Vec::with_capacity(ids.len());
@@ -155,16 +156,6 @@ impl SourceService {
             ..Default::default()
         };
         match &key {
-            config::Source::Local => {
-                info.name = "Local Library".to_string();
-                info.kind = SourceKind::Local;
-                info.authenticated = true;
-                info.directories = resolved
-                    .music_directory
-                    .iter()
-                    .map(|path| path.to_string_lossy().into_owned())
-                    .collect();
-            }
             config::Source::LocalLibrary(local_id) => {
                 let saved = resolved
                     .local_sources
@@ -172,7 +163,11 @@ impl SourceService {
                     .find(|saved| saved.id == *local_id)
                     .ok_or_else(|| ApiError::not_found("no such local source"))?;
                 info.name = saved.name.clone();
-                info.kind = SourceKind::LocalLibrary;
+                info.kind = if local_id == config::DEFAULT_LOCAL_ID {
+                    SourceKind::Local
+                } else {
+                    SourceKind::LocalLibrary
+                };
                 info.authenticated = true;
                 info.directories = saved
                     .directories
@@ -274,9 +269,7 @@ impl SourceService {
         let updated = self
             .config
             .mutate_state(move |config| match source {
-                config::Source::Local | config::Source::LocalLibrary(_) => {
-                    config.set_active_local_source(source)
-                }
+                config::Source::LocalLibrary(_) => config.set_active_local_source(source),
                 config::Source::Server(_) => {
                     if let Some(server) = server {
                         config.set_active_server_snapshot(server);
@@ -312,7 +305,7 @@ impl SourceService {
         let id = draft
             .id
             .unwrap_or_else(|| format!("local:{}", uuid::Uuid::new_v4()));
-        if !id.starts_with("local:") {
+        if !id.starts_with("local:") && id != config::DEFAULT_LOCAL_ID {
             return Err(ApiError::invalid_input("that is not a local source id"));
         }
         let saved = config::SavedLocalSource {
@@ -381,7 +374,6 @@ impl SourceService {
         }
         let source = config::Source::from_column(id);
         let key = match &source {
-            config::Source::Local => "music_directory",
             config::Source::LocalLibrary(_) => "local_sources",
             config::Source::Server(_) => "server_folders",
         };
@@ -406,9 +398,6 @@ impl SourceService {
         let updated = self
             .config
             .mutate_state(move |config| match source {
-                config::Source::Local => {
-                    config.music_directory = directories.into_iter().map(PathBuf::from).collect();
-                }
                 config::Source::LocalLibrary(local_id) => {
                     if let Some(saved) = config
                         .local_sources

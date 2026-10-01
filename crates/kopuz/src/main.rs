@@ -64,13 +64,15 @@ const LIVE_THEME_POLL_MS: u64 = 400;
 const LIVE_THEME_IDLE_POLL_MS: u64 = 2000;
 
 fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, Vec<PathBuf>)> {
-    std::iter::once((config::Source::Local, config.music_directory.clone()))
-        .chain(config.local_sources.iter().map(|source| {
+    config
+        .local_sources
+        .iter()
+        .map(|source| {
             (
                 config::Source::LocalLibrary(source.id.clone()),
                 source.directories.clone(),
             )
-        }))
+        })
         .collect()
 }
 

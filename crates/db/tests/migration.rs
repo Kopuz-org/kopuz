@@ -53,7 +53,9 @@ async fn migration_imports_recently_played_per_source() {
 
     // Local list → the local partition, newest-first order preserved.
     assert_eq!(
-        db.recently_played(&db::Source::Local, 50).await.unwrap(),
+        db.recently_played(&db::Source::default(), 50)
+            .await
+            .unwrap(),
         vec!["/m/a.flac", "/m/b.flac"]
     );
     // Server list → the active server's partition.

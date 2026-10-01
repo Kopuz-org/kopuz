@@ -1419,9 +1419,8 @@ message Config {
   SourceRef active_source = 2;
   bool source_explicitly_set = 3;
   map<string, StringList> server_folders = 4;
-  // 5, 6, 11-13, 48-50 were the settings the daemon publishes as field lists.
-  reserved 5, 6, 11, 12, 13, 48, 49, 50;
-  repeated string music_directory = 7;
+  // 5-7, 11-13, 48-50 were the settings the daemon publishes as field lists, and the retired music_directory.
+  reserved 5, 6, 7, 11, 12, 13, 48, 49, 50;
   string theme = 8;
   string live_theme_path = 9;
   string device_id = 10;

@@ -109,7 +109,7 @@ async fn spawn_pair() -> Pair {
         .map(|key| track(key))
         .collect();
     database
-        .upsert_tracks(&config::Source::Local, &seeded)
+        .upsert_tracks(&config::Source::default(), &seeded)
         .await
         .expect("seed tracks");
     let config_service = Arc::new(ConfigService::new(
@@ -119,7 +119,7 @@ async fn spawn_pair() -> Pair {
     ));
     let library = Arc::new(LibraryService::new(
         database.clone(),
-        config::Source::Local,
+        config::Source::default(),
         Arc::new(radio::registry::StationRegistry::default()),
         dir.path().join("covers"),
     ));
@@ -503,7 +503,9 @@ async fn scan_job_indexes_local_files_over_the_wire() {
     std::fs::write(music.join("two.wav"), wav_bytes(1)).expect("write wav");
 
     let mut config = pair.wire.config().await.expect("view").config;
-    config.music_directory = vec![music.clone()];
+    config.local_sources = vec![config::SavedLocalSource::default_library(vec![
+        music.clone(),
+    ])];
     pair.wire
         .set_config(config)
         .await
@@ -677,7 +679,7 @@ async fn artists_are_keyed_by_identity_on_both_transports() {
         credited("/lib/ada-bare.flac", None),
     ];
     pair.database
-        .upsert_tracks(&config::Source::Local, &tracks)
+        .upsert_tracks(&config::Source::default(), &tracks)
         .await
         .expect("seed credited tracks");
 
@@ -973,7 +975,7 @@ async fn artwork_refs_agree_across_transports() {
     let mut with_art = track("/lib/seed-0.flac");
     with_art.cover = Some(cover.to_string_lossy().into_owned());
     pair.database
-        .upsert_tracks(&config::Source::Local, &[with_art])
+        .upsert_tracks(&config::Source::default(), &[with_art])
         .await
         .expect("re-seed with a cover");
 

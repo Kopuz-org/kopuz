@@ -93,7 +93,7 @@ fn entries(sources: &[api::SourceInfo]) -> Vec<(Source, String, api::Icon, Strin
                     on_device,
                 ),
                 _ => (
-                    Source::Local,
+                    Source::LocalLibrary(source.id.clone()),
                     i18n::t("local").to_string(),
                     api::Icon::Class("fa-solid fa-hard-drive".to_string()),
                     LOCAL_ACCENT.to_string(),
@@ -122,10 +122,9 @@ pub fn SourceSwitcher(
         .find(|source| source.active)
         .map(|source| match source.kind {
             api::SourceKind::Server => Source::Server(source.id.clone()),
-            api::SourceKind::LocalLibrary => Source::LocalLibrary(source.id.clone()),
-            _ => Source::Local,
+            _ => Source::LocalLibrary(source.id.clone()),
         })
-        .unwrap_or(Source::Local);
+        .unwrap_or_default();
     let sources = entries(&rows);
     let count = sources.len();
     // Follow the active theme palette in both UI styles (the chrome does too), so

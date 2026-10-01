@@ -50,18 +50,18 @@ async fn upsert_then_prune() {
     let a = local("/music/a.flac", "A");
     let b = local("/music/b.flac", "B");
     let c = local("/other/c.flac", "C");
-    db.upsert_tracks(&Source::Local, &[a.clone(), b.clone(), c.clone()])
+    db.upsert_tracks(&Source::default(), &[a.clone(), b.clone(), c.clone()])
         .await
         .unwrap();
 
-    let filter = TrackFilter::new(Source::Local);
+    let filter = TrackFilter::new(Source::default());
     assert_eq!(db.tracks_count(&filter).await.unwrap(), 3);
 
     // Upsert is idempotent on identity: re-inserting "A" with a new title updates
     // the existing row rather than adding one.
     let mut a2 = a.clone();
     a2.title = "A (remastered)".into();
-    db.upsert_tracks(&Source::Local, &[a2]).await.unwrap();
+    db.upsert_tracks(&Source::default(), &[a2]).await.unwrap();
     assert_eq!(db.tracks_count(&filter).await.unwrap(), 3);
 
     // Round-trip preserves the typed fields.
@@ -85,7 +85,9 @@ async fn upsert_then_prune() {
     // Prune the local source keeping "a.flac" + "c.flac" → "b.flac" goes (the
     // scan-reconcile step: anything not in the last scan's keep-set).
     let keep = vec!["/music/a.flac".to_string(), "/other/c.flac".to_string()];
-    db.prune_source(&Source::Local, &keep, &[]).await.unwrap();
+    db.prune_source(&Source::default(), &keep, &[])
+        .await
+        .unwrap();
     assert_eq!(db.tracks_count(&filter).await.unwrap(), 2);
     let remaining: Vec<String> = db
         .tracks_page(
@@ -122,23 +124,29 @@ async fn automatic_cover_update_preserves_concurrent_manual_cover() {
         artist_id: None,
         artist_key: None,
     };
-    db.upsert_albums(&Source::Local, &[album]).await.unwrap();
+    db.upsert_albums(&Source::default(), &[album])
+        .await
+        .unwrap();
 
     assert!(
-        db.update_album_cover_if_not_manual(&Source::Local, "album", "/auto.jpg")
+        db.update_album_cover_if_not_manual(&Source::default(), "album", "/auto.jpg")
             .await
             .unwrap()
     );
-    db.update_album_cover(&Source::Local, "album", Some("/manual.jpg"), true)
+    db.update_album_cover(&Source::default(), "album", Some("/manual.jpg"), true)
         .await
         .unwrap();
     assert!(
-        !db.update_album_cover_if_not_manual(&Source::Local, "album", "/late-auto.jpg")
+        !db.update_album_cover_if_not_manual(&Source::default(), "album", "/late-auto.jpg")
             .await
             .unwrap()
     );
 
-    let stored = db.album(&Source::Local, "album").await.unwrap().unwrap();
+    let stored = db
+        .album(&Source::default(), "album")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(stored.cover_path, Some(PathBuf::from("/manual.jpg")));
     assert!(stored.manual_cover);
 
@@ -232,7 +240,7 @@ async fn a_blank_album_id_does_not_erase_a_known_one() {
 
     let linked = local("/music/a.flac", "A");
     assert_eq!(linked.album_id, "alb");
-    db.upsert_tracks(&Source::Local, std::slice::from_ref(&linked))
+    db.upsert_tracks(&Source::default(), std::slice::from_ref(&linked))
         .await
         .unwrap();
 
@@ -240,11 +248,11 @@ async fn a_blank_album_id_does_not_erase_a_known_one() {
     let mut album_less = linked.clone();
     album_less.album_id = String::new();
     album_less.title = "A (from a playlist)".into();
-    db.upsert_tracks(&Source::Local, &[album_less])
+    db.upsert_tracks(&Source::default(), &[album_less])
         .await
         .unwrap();
 
-    let tracks = db.album_tracks(&Source::Local, "alb").await.unwrap();
+    let tracks = db.album_tracks(&Source::default(), "alb").await.unwrap();
     assert_eq!(
         tracks.len(),
         1,
@@ -258,15 +266,20 @@ async fn a_blank_album_id_does_not_erase_a_known_one() {
     // A non-empty id is still authoritative — this must not become write-once.
     let mut moved = linked.clone();
     moved.album_id = "alb2".into();
-    db.upsert_tracks(&Source::Local, &[moved]).await.unwrap();
+    db.upsert_tracks(&Source::default(), &[moved])
+        .await
+        .unwrap();
     assert!(
-        db.album_tracks(&Source::Local, "alb")
+        db.album_tracks(&Source::default(), "alb")
             .await
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        db.album_tracks(&Source::Local, "alb2").await.unwrap().len(),
+        db.album_tracks(&Source::default(), "alb2")
+            .await
+            .unwrap()
+            .len(),
         1
     );
 

@@ -95,6 +95,47 @@ fn settings_only(
     map
 }
 
+/// Folds the retired `music_directory` key into the default folder source and makes sure that source exists.
+pub(crate) fn fold_legacy_directories(value: &mut JsonValue, force: bool) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    let legacy = obj.remove("music_directory").and_then(|raw| match raw {
+        JsonValue::String(path) => Some(vec![JsonValue::String(path)]),
+        JsonValue::Array(paths) if paths.iter().all(JsonValue::is_string) => Some(paths),
+        _ => {
+            tracing::warn!("ignoring a music_directory that is neither a path nor a list of paths");
+            None
+        }
+    });
+    let sources = obj
+        .entry("local_sources")
+        .or_insert_with(|| JsonValue::Array(Vec::new()));
+    let Some(sources) = sources.as_array_mut() else {
+        return;
+    };
+    let default = sources
+        .iter()
+        .position(|source| source["id"] == crate::DEFAULT_LOCAL_ID);
+    match (default, legacy) {
+        (Some(index), Some(dirs)) => {
+            let existing = &mut sources[index]["directories"];
+            if force || existing.as_array().is_none_or(Vec::is_empty) {
+                *existing = JsonValue::Array(dirs);
+            }
+        }
+        (None, dirs) => sources.insert(
+            0,
+            serde_json::json!({
+                "id": crate::DEFAULT_LOCAL_ID,
+                "name": crate::DEFAULT_LOCAL_NAME,
+                "directories": dirs.unwrap_or_default(),
+            }),
+        ),
+        (Some(_), None) => {}
+    }
+}
+
 /// The settings file for an app whose database lives in `db_dir`:
 /// `KOPUZ_CONFIG_PATH` override, else `<db_dir>/settings.toml` (release) or
 /// `settings-debug.toml` (debug builds, mirroring the `kopuz-debug.db` split
@@ -197,6 +238,11 @@ impl FileLayers {
         locked_keys.extend(env_layer.keys().cloned());
         merge_into(&mut overrides, JsonValue::Object(env_layer));
 
+        // The retired key's value now lives in the default folder source.
+        if locked_keys.contains("music_directory") {
+            locked_keys.insert("local_sources".to_owned());
+        }
+
         Self {
             path: settings_path.to_path_buf(),
             file_exists,
@@ -235,8 +281,11 @@ impl FileLayers {
     /// can't deserialize on its own is still an error: that is the app's own
     /// state, not something a text file caused.
     pub fn merge_and_parse(&self, base: JsonValue) -> Result<crate::AppConfig, serde_json::Error> {
+        let mut base = base;
+        fold_legacy_directories(&mut base, false);
         let mut merged = base.clone();
         self.apply(&mut merged);
+        fold_legacy_directories(&mut merged, true);
         let error = match serde_json::from_value::<crate::AppConfig>(merged) {
             Ok(cfg) => return Ok(cfg),
             Err(error) => error,
@@ -254,6 +303,7 @@ impl FileLayers {
                 &mut candidate,
                 JsonValue::Object(serde_json::Map::from_iter([(key.clone(), value.clone())])),
             );
+            fold_legacy_directories(&mut candidate, true);
             if serde_json::from_value::<crate::AppConfig>(candidate.clone()).is_ok() {
                 kept = candidate;
             } else {
@@ -501,6 +551,125 @@ mod tests {
         std::iter::empty()
     }
 
+    fn default_dirs(cfg: &AppConfig) -> Vec<PathBuf> {
+        cfg.local_sources
+            .iter()
+            .find(|source| source.id == crate::DEFAULT_LOCAL_ID)
+            .map(|source| source.directories.clone())
+            .unwrap_or_default()
+    }
+
+    fn no_layers() -> FileLayers {
+        let dir = tempfile::tempdir().unwrap();
+        FileLayers::read_inner(&dir.path().join("none.toml"), NIX_STORE_PREFIX, empty_env())
+    }
+
+    #[test]
+    fn a_stored_music_directory_becomes_the_default_folder_source() {
+        for (stored, want) in [
+            (serde_json::json!("/music"), vec!["/music"]),
+            (
+                serde_json::json!(["/music", "/archive"]),
+                vec!["/music", "/archive"],
+            ),
+            (serde_json::json!([]), vec![]),
+        ] {
+            let cfg = no_layers()
+                .merge_and_parse(serde_json::json!({ "music_directory": stored }))
+                .unwrap();
+            assert_eq!(
+                default_dirs(&cfg),
+                want.iter().map(PathBuf::from).collect::<Vec<_>>()
+            );
+            assert_eq!(cfg.local_sources[0].id, crate::DEFAULT_LOCAL_ID);
+        }
+    }
+
+    #[test]
+    fn the_default_folder_source_exists_even_when_nothing_was_stored() {
+        let cfg = no_layers().merge_and_parse(serde_json::json!({})).unwrap();
+        assert_eq!(cfg.local_sources.len(), 1);
+        assert!(default_dirs(&cfg).is_empty());
+        assert_eq!(cfg.active_source.as_str(), "local");
+    }
+
+    #[test]
+    fn a_migrated_source_is_not_overwritten_by_a_leftover_key() {
+        let cfg = no_layers()
+            .merge_and_parse(serde_json::json!({
+                "music_directory": ["/old"],
+                "local_sources": [
+                    {"id": "local:x", "name": "X", "directories": ["/x"]},
+                    {"id": "local", "name": "Local Library", "directories": ["/new"]},
+                ],
+            }))
+            .unwrap();
+        assert_eq!(default_dirs(&cfg), vec![PathBuf::from("/new")]);
+        assert_eq!(cfg.local_sources.len(), 2);
+    }
+
+    #[test]
+    fn a_managed_file_with_music_directory_wins_and_locks_the_folder_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "music_directory = [\"/nix/music\"]\n").unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&path, perms).unwrap();
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        assert!(layers.managed);
+        assert!(layers.is_locked("local_sources"));
+
+        let blob = serde_json::json!({
+            "local_sources": [{"id": "local", "name": "Local Library", "directories": ["/db"]}],
+        });
+        let cfg = layers.merge_and_parse(blob).unwrap();
+        assert_eq!(default_dirs(&cfg), vec![PathBuf::from("/nix/music")]);
+    }
+
+    #[test]
+    fn a_managed_empty_music_directory_clears_the_default_folder_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "music_directory = []\n").unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&path, perms).unwrap();
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let blob = serde_json::json!({
+            "local_sources": [{"id": "local", "name": "Local Library", "directories": ["/db"]}],
+        });
+        let cfg = layers.merge_and_parse(blob).unwrap();
+        assert!(default_dirs(&cfg).is_empty());
+    }
+
+    #[test]
+    fn a_malformed_music_directory_is_dropped_not_fatal() {
+        let cfg = no_layers()
+            .merge_and_parse(serde_json::json!({ "music_directory": 7 }))
+            .unwrap();
+        assert!(default_dirs(&cfg).is_empty());
+    }
+
+    #[test]
+    fn every_stored_active_source_spelling_still_loads() {
+        for (stored, column) in [
+            (serde_json::json!("Local"), "local"),
+            (
+                serde_json::json!({"LocalLibrary": "local:abc"}),
+                "local:abc",
+            ),
+            (serde_json::json!({"Server": "srv"}), "srv"),
+        ] {
+            let source: crate::Source = serde_json::from_value(stored.clone()).unwrap();
+            assert_eq!(source.as_str(), column);
+            assert_eq!(serde_json::to_value(&source).unwrap(), stored);
+            assert_eq!(crate::Source::from_column(column), source);
+        }
+    }
+
     #[test]
     fn default_config_round_trips_through_the_settings_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -516,7 +685,7 @@ mod tests {
 
         let defaults = AppConfig::default();
         assert_eq!(restored.theme, defaults.theme);
-        assert_eq!(restored.music_directory, defaults.music_directory);
+        assert_eq!(restored.local_sources, defaults.local_sources);
         assert_eq!(restored.volume, defaults.volume);
         assert_eq!(restored.home_sections, defaults.home_sections);
         assert_eq!(restored.equalizer, defaults.equalizer);
@@ -559,7 +728,6 @@ mod tests {
             active_source: crate::Source::LocalLibrary("local:two".into()),
             spotify_browser: Some("brave".into()),
             spotify_prefer_active_device: false,
-            music_directory: vec!["/music".into()],
             theme: "custom-one".into(),
             discord_presence: Some(false),
             discord_presence_paused: None,
@@ -643,7 +811,6 @@ mod tests {
             restored.spotify_prefer_active_device,
             cfg.spotify_prefer_active_device
         );
-        assert_eq!(restored.music_directory, cfg.music_directory);
         assert_eq!(restored.theme, cfg.theme);
         assert_eq!(restored.discord_presence, cfg.discord_presence);
         assert_eq!(restored.language, cfg.language);

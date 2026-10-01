@@ -120,7 +120,7 @@ async fn credits_round_trip_in_order_and_names_never_replace_ids() {
 #[tokio::test]
 async fn a_row_without_credits_stores_its_names_and_follows_a_retag() {
     let db = db::init(&unique_db()).await.unwrap();
-    let source = Source::Local;
+    let source = Source::default();
     let mut local = track("t1", Vec::new());
     local.id = TrackId::Local("/music/t1.flac".into());
     db.upsert_tracks(&source, &[local.clone()]).await.unwrap();
@@ -258,7 +258,7 @@ async fn removing_a_server_takes_its_rows_with_it() {
 
     cfg.servers.clear();
     cfg.server = None;
-    cfg.active_source = config::Source::Local;
+    cfg.active_source = config::Source::default();
     db.save_config(&cfg).await.unwrap();
 
     assert!(

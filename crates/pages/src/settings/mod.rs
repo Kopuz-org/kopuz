@@ -476,12 +476,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     if active_category() == SettingsCategory::Library {
                         SettingItem {
                             title: i18n::t("local_libraries").to_string(),
-                            config_key: "music_directory",
-                            extra_config_keys: vec!["local_sources"],
+                            config_key: "local_sources",
                             control: rsx! {
                                 LocalSourceSettings {
                                     active_source: config.read().active_source.clone(),
-                                    default_directories: config.read().music_directory.clone(),
                                     sources: config.read().local_sources.clone(),
                                     on_add: move |_| show_add_local_source.set(true),
                                     on_delete: move |id: String| config.write().remove_local_source(&id),
@@ -489,11 +487,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     on_add_folder: move |(source, path): (config::Source, std::path::PathBuf)| {
                                         let mut cfg = config.write();
                                         match source {
-                                            config::Source::Local => {
-                                                if !cfg.music_directory.contains(&path) {
-                                                    cfg.music_directory.push(path);
-                                                }
-                                            }
                                             config::Source::LocalLibrary(id) => {
                                                 if let Some(local) = cfg.local_sources.iter_mut().find(|local| local.id == id)
                                                     && !local.directories.contains(&path)
@@ -507,11 +500,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     on_remove_folder: move |(source, index): (config::Source, usize)| {
                                         let mut cfg = config.write();
                                         match source {
-                                            config::Source::Local => {
-                                                if index < cfg.music_directory.len() {
-                                                    cfg.music_directory.remove(index);
-                                                }
-                                            }
                                             config::Source::LocalLibrary(id) => {
                                                 if let Some(local) = cfg.local_sources.iter_mut().find(|local| local.id == id)
                                                     && index < local.directories.len()

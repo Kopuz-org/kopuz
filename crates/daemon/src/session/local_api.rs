@@ -572,7 +572,7 @@ impl api::ConfigApi for LocalApi {
             && changed.iter().any(|key| {
                 matches!(
                     key.as_str(),
-                    "active_source" | "local_sources" | "music_directory" | "server_folders"
+                    "active_source" | "local_sources" | "server_folders"
                 )
             })
         {

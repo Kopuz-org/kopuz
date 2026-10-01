@@ -44,11 +44,6 @@ fn source_error(error: server::source::SourceError) -> ApiError {
 /// its files are not ours to unlink.
 fn configured_roots(config: &config::AppConfig) -> Vec<&Path> {
     match &config.active_source {
-        config::Source::Local => config
-            .music_directory
-            .iter()
-            .map(PathBuf::as_path)
-            .collect(),
         config::Source::LocalLibrary(id) => config
             .local_sources
             .iter()
@@ -460,8 +455,9 @@ mod tests {
 
     fn config_with_root(root: &Path) -> config::AppConfig {
         config::AppConfig {
-            active_source: config::Source::Local,
-            music_directory: vec![root.to_path_buf()],
+            local_sources: vec![config::SavedLocalSource::default_library(vec![
+                root.to_path_buf(),
+            ])],
             ..Default::default()
         }
     }
