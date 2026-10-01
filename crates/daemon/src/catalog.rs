@@ -298,11 +298,7 @@ impl CatalogService {
             }
             CatalogItemKind::Artist => {
                 let key = request.id;
-                let filed = self
-                    .db
-                    .artist(source.source(), &key)
-                    .await
-                    .map_err(|error| ApiError::internal(format!("database error: {error}")))?;
+                let filed = crate::artist_row::find(&self.db, source.source(), &key).await?;
                 // An artist the library hasn't filed is one the source just listed, by the id it issued.
                 let channel_id = match filed {
                     Some(row) => match row.source_id {

@@ -199,11 +199,7 @@ impl LibraryService {
 
     /// The library row a key names in the source being read.
     pub(crate) async fn artist_row(&self, artist: &str) -> Result<db::ArtistRow, ApiError> {
-        self.db
-            .artist(&self.query_source(), artist)
-            .await
-            .map_err(db_error)?
-            .ok_or_else(|| ApiError::not_found("the library files no such artist"))
+        crate::artist_row::require(&self.db, &self.query_source(), artist).await
     }
 
     /// One artist's header and billed albums.

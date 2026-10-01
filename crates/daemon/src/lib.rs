@@ -3,6 +3,7 @@
 //! wire, no socket. Whoever hosts it decides how (or whether) to serve it:
 //! `kopuz-kopuzd` puts it behind gRPC, the app calls it in-process.
 
+mod artist_row;
 pub mod artwork;
 pub mod auto_sync;
 pub mod boot;

@@ -280,12 +280,8 @@ impl ArtworkService {
                 Ok(album_cover(&album))
             }
             ArtworkTarget::Artist(key) => {
-                let artist = self
-                    .db
-                    .artist(&config.active_source, key)
-                    .await
-                    .map_err(db_error)?
-                    .ok_or_else(|| ApiError::not_found("the library files no such artist"))?;
+                let artist =
+                    crate::artist_row::require(&self.db, &config.active_source, key).await?;
                 let images = self.db.artist_images().await.map_err(db_error)?;
                 let source = server::source::active(self.db.clone(), config);
                 let library_view =
