@@ -221,16 +221,6 @@ fn log_dir() -> Option<PathBuf> {
     Some(directories::BaseDirs::new()?.cache_dir().join("kopuz/logs"))
 }
 
-/// Exit now, skipping the C-library atexit handlers.
-///
-/// Returning from `main` leaves the process parked in `sigsuspend` inside an
-/// exit handler registered by one of the audio/JS dependencies, so a daemon
-/// that has finished its own shutdown would never actually terminate. Every
-/// piece of state we own is already flushed by the time this is called.
-pub fn exit_now(code: i32) -> ! {
-    unsafe { libc::_exit(code) }
-}
-
 /// Build a runtime and run the daemon to completion.
 ///
 /// macOS Now Playing and the media-key command center need the process main

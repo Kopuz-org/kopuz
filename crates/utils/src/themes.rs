@@ -1,4 +1,3 @@
-use serde::Deserialize;
 use std::collections::HashMap;
 
 const VAR_MAP: &[(&str, &str)] = &[
@@ -53,80 +52,6 @@ impl Theme {
         out.push('}');
         out
     }
-}
-
-#[derive(Deserialize)]
-struct RawTheme {
-    name: String,
-    #[serde(flatten)]
-    vars: HashMap<String, String>,
-}
-
-#[derive(Deserialize)]
-struct ThemeFile {
-    dark: HashMap<String, RawTheme>,
-    light: HashMap<String, RawTheme>,
-}
-
-pub fn load_themes() -> Vec<Theme> {
-    let path = std::env::var("KOPUZ_THEMES_PATH")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| {
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.join("assets/themes.json")))
-                .unwrap_or_else(|| std::path::PathBuf::from("assets/themes.json"))
-        });
-    let json = match std::fs::read_to_string(&path) {
-        Ok(j) => j,
-        Err(e) => {
-            tracing::warn!("failed to read themes.json from {}: {e}", path.display());
-            return Vec::new();
-        }
-    };
-    let file: ThemeFile = match serde_json::from_str(&json) {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::warn!("themes.json is malformed: {e}");
-            return Vec::new();
-        }
-    };
-
-    let mut themes = Vec::new();
-
-    for (id, raw) in file.dark {
-        themes.push(Theme {
-            id,
-            name: raw.name,
-            kind: ThemeKind::Dark,
-            vars: raw.vars,
-        });
-    }
-    for (id, raw) in file.light {
-        themes.push(Theme {
-            id,
-            name: raw.name,
-            kind: ThemeKind::Light,
-            vars: raw.vars,
-        });
-    }
-
-    themes
-}
-
-pub fn theme_map() -> HashMap<String, Theme> {
-    load_themes()
-        .into_iter()
-        .map(|t| (t.id.clone(), t))
-        .collect()
-}
-
-pub fn all_themes_css() -> String {
-    load_themes()
-        .iter()
-        .map(|t| t.to_css())
-        .collect::<Vec<_>>()
-        .join("\n\n")
 }
 
 /// Generate a CSS block for a single custom theme given its id and var map.

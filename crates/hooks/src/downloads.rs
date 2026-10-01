@@ -38,10 +38,6 @@ impl Downloads {
     pub fn is_active(&self, key: &str) -> bool {
         self.active.as_deref() == Some(key)
     }
-
-    pub fn stored_keys(&self) -> &[String] {
-        &self.stored
-    }
 }
 
 /// The offline view, re-read when a download lands and while one runs.

@@ -22,10 +22,6 @@ pub fn cover_url_from_string(url: String) -> CoverUrl {
     Arc::from(url)
 }
 
-pub fn map_cover_url(url: Option<String>) -> Option<CoverUrl> {
-    url.map(cover_url_from_string)
-}
-
 /// Cross-platform async sleep backed by tokio.
 pub async fn sleep(duration: std::time::Duration) {
     tokio::time::sleep(duration).await;

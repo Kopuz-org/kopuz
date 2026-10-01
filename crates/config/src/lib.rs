@@ -518,35 +518,6 @@ impl OfflineQuality {
             _ => Self::Original,
         }
     }
-
-    pub fn jellyfin_bitrate_bps(self) -> Option<u32> {
-        match self {
-            Self::Kbps128 => Some(128_000),
-            Self::Kbps160 => Some(160_000),
-            Self::Kbps192 => Some(192_000),
-            Self::Kbps256 => Some(256_000),
-            Self::Kbps320 => Some(320_000),
-            Self::Original => None,
-        }
-    }
-
-    pub fn subsonic_max_bitrate_kbps(self) -> u32 {
-        match self {
-            Self::Kbps128 => 128,
-            Self::Kbps160 => 160,
-            Self::Kbps192 => 192,
-            Self::Kbps256 => 256,
-            Self::Kbps320 => 320,
-            Self::Original => 0,
-        }
-    }
-
-    pub fn file_extension(self) -> &'static str {
-        match self {
-            Self::Original => "bin",
-            _ => "mp3",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
@@ -1035,39 +1006,6 @@ impl AppConfig {
         }
     }
 
-    pub fn migrate_servers(&mut self) {
-        if let Some(server) = self.server.as_mut()
-            && server.id.is_none()
-        {
-            server.id = Some(uuid::Uuid::new_v4().to_string());
-        }
-        if let Some(server) = self.server.clone() {
-            let already = self.servers.iter().any(|s| s.matches(&server));
-            if !already {
-                let id = server
-                    .id
-                    .clone()
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                self.servers.push(SavedServer {
-                    id,
-                    name: server.name.clone(),
-                    url: server.url.clone(),
-                    service: server.service,
-                    yt_browser: server.yt_browser,
-                    yt_anonymous: server.yt_anonymous,
-                    apple_music_storefront: server.apple_music_storefront.clone(),
-                    apple_music_language: server.apple_music_language.clone(),
-                });
-            }
-        }
-    }
-
-    pub fn add_saved_server(&mut self, entry: SavedServer) {
-        if !self.servers.iter().any(|s| s.id == entry.id) {
-            self.servers.push(entry);
-        }
-    }
-
     pub fn remove_saved_server(&mut self, id: &str) {
         self.servers.retain(|s| s.id != id);
         if let Some(active) = &self.server
@@ -1129,25 +1067,6 @@ impl AppConfig {
             .unwrap_or_default()
     }
 
-    /// Library roots of the active source, empty for a local one.
-    pub fn active_server_folders(&self) -> Vec<String> {
-        self.active_source
-            .server_id()
-            .map(|id| self.folders_for(id))
-            .unwrap_or_default()
-    }
-
-    /// Replace the active server's library roots. Does nothing when the active
-    /// source is local, since roots are keyed by server id.
-    pub fn edit_active_server_folders(&mut self, edit: impl FnOnce(&mut Vec<String>)) {
-        let Some(id) = self.active_source.server_id().map(String::from) else {
-            return;
-        };
-        let mut folders = self.folders_for(&id);
-        edit(&mut folders);
-        self.set_folders_for(&id, folders);
-    }
-
     /// Replace a server's library roots, dropping the entry when the list empties
     /// so the backend goes back to auto-detecting.
     pub fn set_folders_for(&mut self, server_id: &str, folders: Vec<String>) {
@@ -1181,21 +1100,6 @@ impl AppConfig {
     pub fn active_service(&self) -> Option<MusicService> {
         self.active_source.server_id()?;
         self.server.as_ref().map(|server| server.service)
-    }
-
-    pub fn uses_jellyfin_server(&self) -> bool {
-        self.active_service() == Some(MusicService::Jellyfin)
-    }
-
-    /// The server to activate when toggling into server mode: the current server
-    /// if already on one, else the first saved server. `None` ⇒ no servers, so
-    /// the toggle is a no-op.
-    pub fn server_toggle_target(&self) -> Option<Source> {
-        self.active_source
-            .server_id()
-            .map(String::from)
-            .or_else(|| self.servers.first().map(|s| s.id.clone()))
-            .map(Source::Server)
     }
 }
 

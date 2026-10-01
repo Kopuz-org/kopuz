@@ -191,10 +191,6 @@ impl Player {
         self.push_now_playing(time, !self.is_paused());
     }
 
-    pub fn is_playback_complete(&self) -> bool {
-        matches!(self.status().phase, Phase::Idle | Phase::Ended)
-    }
-
     pub fn is_paused(&self) -> bool {
         self.status().paused
     }

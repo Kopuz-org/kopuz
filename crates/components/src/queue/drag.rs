@@ -60,10 +60,6 @@ pub fn take_dragged_queue_tracks() -> Vec<Track> {
     tracks
 }
 
-pub fn take_dragged_queue_track() -> Option<Track> {
-    take_dragged_queue_tracks().into_iter().next()
-}
-
 pub fn has_dragged_queue_track() -> bool {
     dragged_queue_tracks()
         .lock()
@@ -110,12 +106,6 @@ pub fn clear_dragged_queue_track() {
         guard.clear();
     }
     hide_queue_drag_preview();
-}
-
-pub fn move_queue_drag_preview(client_x: f64, client_y: f64) {
-    let _ = eval(&format!(
-        "if (window.__kopuzMoveQueueDragPreview) window.__kopuzMoveQueueDragPreview({client_x}, {client_y});"
-    ));
 }
 
 fn show_queue_drag_count_preview(count: usize, client_x: f64, client_y: f64) {

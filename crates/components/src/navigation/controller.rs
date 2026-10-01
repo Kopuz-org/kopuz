@@ -49,10 +49,6 @@ impl NavigationController {
         playlist.set(None);
     }
 
-    pub fn can_go_back(self) -> bool {
-        !self.history.read().is_empty()
-    }
-
     pub fn go_back(self) {
         let mut history = self.history;
         let Some(prev) = history.write().pop() else {

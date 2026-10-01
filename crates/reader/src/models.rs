@@ -845,32 +845,4 @@ pub struct FavoritesStore {
     pub jellyfin_favorites: Vec<String>,
 }
 
-impl FavoritesStore {
-    pub fn is_local_favorite(&self, path: &Path) -> bool {
-        self.local_favorites.iter().any(|p| p == path)
-    }
-
-    pub fn is_jellyfin_favorite(&self, id: &str) -> bool {
-        self.jellyfin_favorites.iter().any(|i| i == id)
-    }
-
-    pub fn toggle_local(&mut self, path: PathBuf) -> bool {
-        if let Some(pos) = self.local_favorites.iter().position(|p| p == &path) {
-            self.local_favorites.remove(pos);
-            false
-        } else {
-            self.local_favorites.push(path);
-            true
-        }
-    }
-
-    pub fn set_jellyfin(&mut self, id: String, is_fav: bool) {
-        if is_fav {
-            if !self.jellyfin_favorites.contains(&id) {
-                self.jellyfin_favorites.push(id);
-            }
-        } else {
-            self.jellyfin_favorites.retain(|i| i != &id);
-        }
-    }
-}
+impl FavoritesStore {}

@@ -113,10 +113,6 @@ impl FieldValue {
             value: value.into(),
         }
     }
-
-    pub fn is_on(&self) -> bool {
-        self.value == "true"
-    }
 }
 
 /// The answer of a [`FieldKind::Directories`] row: a JSON array of strings.

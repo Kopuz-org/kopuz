@@ -271,11 +271,6 @@ impl StationRegistry {
     pub fn get(&self, id: &str) -> Option<&StationManifest> {
         self.stations.get(id)
     }
-
-    pub fn create_provider(&self, station_id: &str) -> Option<crate::provider::DynamicProvider> {
-        let manifest = self.get(station_id)?;
-        Some(crate::provider::DynamicProvider::new(manifest.clone()))
-    }
 }
 
 #[cfg(test)]

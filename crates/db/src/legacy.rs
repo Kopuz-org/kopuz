@@ -51,37 +51,6 @@ fn move_dir(from: &Path, to: &Path) -> Option<String> {
     }
 }
 
-/// Rewrite an absolute path stored under the pre-rename identity onto the
-/// current directory layout.
-pub fn remap_identity_path(path: &str) -> Option<String> {
-    if Path::new(path).exists() {
-        return None;
-    }
-    let (old, new) = (
-        directories::ProjectDirs::from(LEGACY_IDENTITY.0, LEGACY_IDENTITY.1, LEGACY_IDENTITY.2)?,
-        directories::ProjectDirs::from("moe", "kopuz", "kopuz")?,
-    );
-    let pairs = [
-        (old.config_dir(), new.config_dir()),
-        (old.data_dir(), new.data_dir()),
-        (old.data_local_dir(), new.data_local_dir()),
-        (old.cache_dir(), new.cache_dir()),
-    ];
-    remap_across(path, &pairs)
-}
-
-fn remap_across(path: &str, pairs: &[(&Path, &Path)]) -> Option<String> {
-    for (from, to) in pairs {
-        if let Ok(rest) = Path::new(path).strip_prefix(from) {
-            let candidate = to.join(rest);
-            if candidate.is_file() {
-                return Some(candidate.to_string_lossy().into_owned());
-            }
-        }
-    }
-    None
-}
-
 /// Move legacy JSON stores from the old cache location into the config
 /// directory before the one-shot SQLite import runs.
 pub fn migrate_locations() {
@@ -160,7 +129,7 @@ pub async fn migrate_json_store(database: &crate::Db, config_dir: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{move_dir, remap_across};
+    use super::move_dir;
     use std::fs;
 
     fn tmp(name: &str) -> std::path::PathBuf {
@@ -193,26 +162,6 @@ mod tests {
 
         assert!(move_dir(&from, &to).is_none());
         assert_eq!(fs::read(to.join("kopuz.db")).unwrap(), b"live");
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn remap_rewrites_only_paths_that_exist_at_the_new_root() {
-        let root = tmp("remap");
-        let (old_cache, new_cache) = (root.join("old-cache"), root.join("new-cache"));
-        fs::create_dir_all(new_cache.join("covers")).unwrap();
-        fs::write(new_cache.join("covers/a.jpg"), b"img").unwrap();
-        let pairs = [(old_cache.as_path(), new_cache.as_path())];
-
-        let stored = old_cache.join("covers/a.jpg");
-        let remapped = remap_across(&stored.to_string_lossy(), &pairs);
-        assert_eq!(remapped.as_deref(), new_cache.join("covers/a.jpg").to_str());
-
-        let missing = old_cache.join("covers/b.jpg");
-        assert!(remap_across(&missing.to_string_lossy(), &pairs).is_none());
-
-        let unrelated = root.join("elsewhere/c.jpg");
-        assert!(remap_across(&unrelated.to_string_lossy(), &pairs).is_none());
         let _ = fs::remove_dir_all(&root);
     }
 

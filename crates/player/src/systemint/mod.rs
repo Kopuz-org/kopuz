@@ -60,8 +60,3 @@ fn back_notify() -> &'static Notify {
 pub fn back_wake() {
     back_notify().notify_one();
 }
-
-/// Awaited by the back-handling loop's adaptive sleep.
-pub async fn back_wait() {
-    back_notify().notified().await;
-}

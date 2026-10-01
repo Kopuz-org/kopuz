@@ -14,10 +14,6 @@ pub fn text(text: &api::Text) -> String {
     }
 }
 
-pub fn text_or_empty(value: Option<&api::Text>) -> String {
-    value.map(text).unwrap_or_default()
-}
-
 /// A published glyph: a font class, or a mark drawn from a path for the brands
 /// the icon font has none for.
 #[component]

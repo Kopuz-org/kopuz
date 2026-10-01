@@ -95,17 +95,6 @@ pub fn content_type_for(path: &std::path::Path) -> String {
     .to_string()
 }
 
-/// The library keys of the rows a view has picked out. Selections are tracked
-/// by uid, which is what tells two rows apart; a key is what names a row to the
-/// daemon, and only the row itself knows both.
-pub fn keys_for_uids(tracks: &[api::TrackInfo], uids: &[String]) -> Vec<String> {
-    uids.iter()
-        .filter_map(|uid| tracks.iter().find(|track| &track.uid == uid))
-        .map(|track| track.key.clone())
-        .filter(|key| !key.is_empty())
-        .collect()
-}
-
 /// Every track key of an album, in album order, then whatever the caller
 /// wanted with them. The album's own tracks are a daemon read, so an action
 /// menu does not need the list on screen to act on it.

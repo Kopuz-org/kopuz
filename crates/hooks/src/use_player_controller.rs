@@ -91,10 +91,6 @@ impl PlayerController {
         }
     }
 
-    pub fn get_current_track_index(&self) -> Option<usize> {
-        self.get_queue_index(*self.current_queue_index.peek())
-    }
-
     pub fn get_track_at(&self, idx: usize) -> Option<Track> {
         let idx = self.get_queue_index(idx)?;
         self.queue.peek().get(idx).cloned()
@@ -403,10 +399,6 @@ impl PlayerController {
                 })
                 .await;
         });
-    }
-
-    pub fn swap_queue_item(&mut self, from: usize, to: usize) {
-        self.move_queue_item(from, to);
     }
 
     /// Hard reset when the active server changes: stop everything and clear
