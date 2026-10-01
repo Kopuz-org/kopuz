@@ -772,8 +772,8 @@ fn parse_album(item: &Value) -> Option<reader::Album> {
         year,
         cover_path: None,
         manual_cover: false,
+        artist_key: artist_id.clone(),
         artist_id,
-        artist_key: None,
     })
 }
 

@@ -1014,6 +1014,7 @@ mod tests {
         let source = Source::Server("srv".into());
         let billed = |id: &str, artist_id: Option<&str>| Album {
             artist_id: artist_id.map(Into::into),
+            artist_key: artist_id.map(Into::into),
             ..album(id, "Ada", None)
         };
         let albums = [

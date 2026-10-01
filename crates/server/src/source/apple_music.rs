@@ -240,7 +240,7 @@ impl MediaSource for AppleMusicSource {
                         ))),
                         manual_cover: false,
                         artist_id: a.relationships.artists.data.first().map(|r| r.id.clone()),
-                        artist_key: None,
+                        artist_key: a.relationships.artists.data.first().map(|r| r.id.clone()),
                     })
                     .collect()
             })

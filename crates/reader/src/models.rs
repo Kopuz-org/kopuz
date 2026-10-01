@@ -201,17 +201,13 @@ impl ArtistCredit {
     }
 
     pub fn linked(name: impl Into<String>, id: impl Into<String>) -> Self {
+        let id = id.into();
         Self {
             name: name.into(),
-            id: Some(id.into()),
+            id: Some(id.clone()),
             source: None,
-            key: None,
+            key: Some(id),
         }
-    }
-
-    /// The key this artist is opened by: the library's, else the id its source issued, which the library files it under too.
-    pub fn open_key(&self) -> Option<&str> {
-        self.key.as_deref().or(self.id.as_deref())
     }
 }
 

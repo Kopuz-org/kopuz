@@ -31,7 +31,7 @@ fn album_info(album: &Album) -> AlbumInfo {
     AlbumInfo {
         id: album.id.clone(),
         title: album.title.clone(),
-        artist_key: album.artist_key.clone().or_else(|| album.artist_id.clone()),
+        artist_key: album.artist_key.clone(),
         artist: album.artist.clone(),
         genre: album.genre.clone(),
         year: album.year,

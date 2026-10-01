@@ -159,7 +159,7 @@ async fn a_rebilled_album_takes_the_new_artist_whole() {
         cover_path: None,
         manual_cover: false,
         artist_id: artist_id.map(Into::into),
-        artist_key: None,
+        artist_key: artist_id.map(Into::into),
     };
 
     db.upsert_albums(&source, &[album("Ada", Some("UC-a"))])

@@ -420,7 +420,7 @@ async fn only_a_real_album_credits_its_tracks_to_its_artist() {
             cover_path: None,
             manual_cover: false,
             artist_id: Some("ar-1".into()),
-            artist_key: None,
+            artist_key: Some("ar-1".into()),
         }],
     )
     .await

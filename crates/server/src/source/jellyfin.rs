@@ -119,8 +119,8 @@ impl MediaSource for JellyfinSource {
                         .and_then(|artists| artists.first())
                         .map(|artist| artist.id.clone());
                     albums.push(reader::Album {
+                        artist_key: artist_id.clone(),
                         artist_id,
-                        artist_key: None,
                         id: format!("jellyfin:{}", a.id),
                         title: a.name,
                         artist: a

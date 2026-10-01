@@ -64,7 +64,7 @@ fn credits(track: &Track) -> Vec<api::ArtistCredit> {
         .iter()
         .map(|credit| api::ArtistCredit {
             name: credit.name.clone(),
-            key: credit.open_key().map(str::to_string),
+            key: credit.key.clone(),
         })
         .collect()
 }
@@ -128,6 +128,17 @@ mod tests {
             artists: vec!["Ada".into()],
             credits,
         }
+    }
+
+    #[test]
+    fn a_credit_listed_but_never_filed_carries_its_key_to_the_wire() {
+        let credit = ArtistCredit::linked("Ada", "UC-ada");
+        assert_eq!(credit.key.as_deref(), Some("UC-ada"));
+
+        let sent = credits(&track(vec![credit, ArtistCredit::unlinked("Boris")]));
+
+        assert_eq!(sent[0].key.as_deref(), Some("UC-ada"));
+        assert_eq!(sent[1].key, None);
     }
 
     #[test]
