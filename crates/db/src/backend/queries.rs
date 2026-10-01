@@ -465,10 +465,8 @@ pub(crate) async fn refresh_from_library(
         .collect())
 }
 
-/// Every artist a track of `source` credits, minus an unlinked joined credit whose lead is listed on its own.
+/// Every artist a track of `source` credits, one row per artist key.
 pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::ArtistRow>, DbError> {
-    use utils::artist::{joined_credit_primary, normalize_artist_key};
-
     let src = source.as_str();
     let rows = sqlx::query!(
         r#"SELECT ar.key, ar.source_artist_id, ar.name, COUNT(*) AS "tracks!: i64"
@@ -489,15 +487,6 @@ pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::Ar
             tracks: row.tracks.max(0) as u32,
         })
         .collect();
-    let names: std::collections::HashSet<String> = artists
-        .iter()
-        .map(|artist| normalize_artist_key(&artist.name))
-        .collect();
-    artists.retain(|artist| {
-        artist.source_id.is_some()
-            || !joined_credit_primary(&normalize_artist_key(&artist.name))
-                .is_some_and(|lead| names.contains(lead))
-    });
     artists.sort_by_cached_key(|artist| (artist.name.to_lowercase(), artist.key.clone()));
     Ok(artists)
 }
@@ -971,7 +960,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_joined_credit_whose_lead_is_listed_gets_no_row() {
+    async fn an_unlinked_joined_credit_is_its_own_listed_artist() {
         let pool = mem_pool().await;
         let source = Source::Server("srv".into());
         let tracks = [
@@ -995,19 +984,14 @@ mod tests {
             .map(|artist| artist.name)
             .collect();
 
-        assert_eq!(names, ["COOL&CREATE", "Tyler, The Creator"]);
-        let joined = unlinked_row(&pool, &source, "COOL&CREATE, beatMARIO").await;
-        assert!(artist(&pool, &source, &joined).await.unwrap().is_some());
-    }
-
-    /// The row a hidden joined credit is filed under, which the listing leaves out.
-    async fn unlinked_row(pool: &SqlitePool, source: &Source, name: &str) -> String {
-        sqlx::query_scalar("SELECT key FROM artists WHERE source = ?1 AND name = ?2")
-            .bind(source.as_str())
-            .bind(name)
-            .fetch_one(pool)
-            .await
-            .unwrap()
+        assert_eq!(
+            names,
+            [
+                "COOL&CREATE",
+                "COOL&CREATE, beatMARIO",
+                "Tyler, The Creator"
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1054,6 +1038,17 @@ mod tests {
         let x = album_by_id(&pool, &source, "x").await;
         assert_eq!(x.artist_id.as_deref(), Some("ar-1"));
         assert_eq!(x.artist_key.as_deref(), Some("ar-1"));
+    }
+
+    async fn unlinked_row(pool: &SqlitePool, source: &Source, name: &str) -> String {
+        sqlx::query_scalar(
+            "SELECT key FROM artists WHERE source = ?1 AND name = ?2 AND source_artist_id IS NULL",
+        )
+        .bind(source.as_str())
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .unwrap()
     }
 
     async fn album_by_id(pool: &SqlitePool, source: &Source, id: &str) -> Album {
