@@ -10,8 +10,8 @@ use hooks::use_search_data::use_search_data;
 
 /// Source-agnostic search. The data path (`use_search_data`, `use_genre_tracks`)
 /// is already source-scoped; the only per-source bits are the genre-detail cover
-/// (local file vs remote URL), the add-to-playlist ref, and the modal flag — all
-/// keyed off the active source rather than a hardcoded local/server split.
+/// (file vs remote URL), the add-to-playlist ref, and the modal flag — all
+/// keyed off the active source rather than a hardcoded source-kind split.
 #[component]
 pub fn Search(
     config: Signal<AppConfig>,
@@ -26,7 +26,7 @@ pub fn Search(
     current_queue_index: Signal<usize>,
     on_select_album: EventHandler<String>,
 ) -> Element {
-    let data = use_search_data(search_query, config);
+    let data = use_search_data(search_query);
     let mut selected_genre = use_signal(|| None::<String>);
 
     let mut active_menu_track = use_signal(|| None::<String>);

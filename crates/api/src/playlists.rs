@@ -9,8 +9,8 @@ pub struct PlaylistInfo {
     pub artwork: Option<crate::ArtworkRef>,
 }
 
-/// A user-made grouping of playlists. Local organisation only -- no source
-/// has a concept for it -- so the ids here are always local playlist ids.
+/// A user-made grouping of playlists. Organised here only -- no source
+/// has a concept for it -- so the ids here are always plain playlist ids.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlaylistFolderInfo {
     pub id: String,

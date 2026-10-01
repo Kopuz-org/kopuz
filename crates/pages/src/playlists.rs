@@ -1,5 +1,5 @@
 //! Source-agnostic Playlists page (issue #35). The chrome (header, add-playlist,
-//! folder/playlist detail) is shared; the grid renders folders + local management
+//! folder/playlist detail) is shared; the grid renders folders + user management
 //! when the source organises playlists in folders ([`Capabilities::folders`]), or
 //! a flat remote list with per-card downloads + sync otherwise. No `is_server()`
 //! dispatch — every divergence gates on the resolved source's capabilities.
@@ -65,10 +65,13 @@ pub fn PlaylistsPage(
 
     let downloads = hooks::downloads::use_downloads();
 
-    let mut last_source = use_signal(|| config.read().active_source.clone());
-    if *last_source.read() != config.read().active_source {
-        selected_playlist_id.set(None);
-        last_source.set(config.read().active_source.clone());
+    let active_source = hooks::use_db_queries::use_active_source();
+    let mut last_source = use_signal(|| active_source.peek().clone());
+    if *last_source.read() != *active_source.read() {
+        if !last_source.peek().is_empty() {
+            selected_playlist_id.set(None);
+        }
+        last_source.set(active_source.peek().clone());
     }
 
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
@@ -94,7 +97,6 @@ pub fn PlaylistsPage(
                     rsx! {
                         PlaylistDetail {
                             playlist_id: pid,
-                            config,
                             on_close: move |_| nav_ctrl.close_playlist(),
                             is_downloading_all,
                             on_download_all: move |_| {
@@ -247,7 +249,7 @@ enum PlaylistCardAction {
     Delete,
 }
 
-/// The playlists grid: folders + local management when the source organises into
+/// The playlists grid: folders + user management when the source organises into
 /// folders, else a flat remote list with downloads + remote sync. One component,
 /// gated on [`Capabilities`].
 #[component]
@@ -263,7 +265,7 @@ fn PlaylistsGrid(
     let playlists_res = use_playlists();
     // First track of each playlist — the cover-of-last-resort for a playlist with
     // no explicit cover / image tag (resolved through the source cover seam).
-    // Local folder-management state (mutated inside `folders_layout`'s handlers).
+    // Folder-management state (mutated inside `folders_layout`'s handlers).
     let active_menu = use_signal(|| Option::<String>::None);
     let open_folder_id = use_signal(|| Option::<String>::None);
     let move_target_id = use_signal(|| Option::<String>::None);

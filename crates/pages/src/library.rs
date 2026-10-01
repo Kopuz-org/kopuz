@@ -1,5 +1,5 @@
-//! Source-agnostic Library page (issue #35). One component for local and any
-//! server: a windowed track list with stat cards and multi-select. The refresh
+//! Source-agnostic Library page (issue #35). One component for any
+//! source: a windowed track list with stat cards and multi-select. The refresh
 //! action (filesystem rescan vs remote sync), per-row affordances (tag edit,
 //! delete-from-disk, download) and the selection bar all gate on
 //! [`api::SourceCapabilities`] — no `is_server()`.
@@ -91,7 +91,7 @@ pub fn LibraryPage(
         }
     });
 
-    // Remote sync (servers). Local never calls this — its refresh is `on_rescan`.
+    // Remote sync. A source that scans folders never calls this — its refresh is `on_rescan`.
     // The daemon runs it, single-flight, so a second request while one is in
     // flight is its business rather than a generation counter kept here.
     let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::LibrarySync);

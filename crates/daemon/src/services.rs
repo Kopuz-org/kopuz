@@ -136,10 +136,7 @@ pub fn check_folders(draft: &SourceDraft) -> Vec<Problem> {
     }
     let paths = folder_paths(&draft.values);
     if paths.is_empty() || paths.iter().any(|path| path.trim().is_empty()) {
-        problems.push(Problem::on(
-            DIRECTORIES,
-            Text::key("local_library_folder_required"),
-        ));
+        problems.push(Problem::on(DIRECTORIES, Text::key("folder_required")));
     }
     problems
 }

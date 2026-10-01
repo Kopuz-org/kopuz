@@ -38,7 +38,7 @@ pub struct TrackInfo {
     pub kind: TrackKind,
     pub seekable: bool,
     pub offline: bool,
-    /// The file's container, upper-cased ("FLAC"), for a local track that has
+    /// The file's container, upper-cased ("FLAC"), for a track that has
     /// one. A row from a service names no file, so it has none.
     pub format: Option<String>,
     pub musicbrainz_release_id: Option<String>,
@@ -125,7 +125,7 @@ pub struct LyricsView {
     pub synced: Vec<LyricLineView>,
 }
 
-/// Listening stats: play counts keyed by track uid.
+/// Listening stats: the active source's play counts keyed by track uid.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StatsView {
     pub listen_counts: std::collections::HashMap<String, u64>,

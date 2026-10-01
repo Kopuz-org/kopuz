@@ -984,10 +984,6 @@ fn App() -> Element {
                     i18n::set_locale(&loaded.language);
                 }
 
-                // Local is the source of truth: no auto-switch to a server on
-                // startup. An unselected source stays Local (the config default);
-                // the user picks a server explicitly via the sidebar.
-
                 initial_load_done.set(true);
                 // Kick one reconcile shortly after startup so pending offline
                 // likes from the previous session push now, not on the first
@@ -1341,8 +1337,8 @@ fn App() -> Element {
     });
 
     let reduce_animations = use_memo(move || config.read().reduce_animations);
-    let active_source = use_memo(move || config.read().active_source.clone());
     let switch_source = hooks::source_switch::use_switch_source();
+    let all_sources = hooks::sources::use_sources();
     let mut show_quick_search = use_signal(|| false);
     let quick_search_source = hooks::use_db_queries::use_active_source();
     use_effect(move || {
@@ -1442,7 +1438,7 @@ fn App() -> Element {
                 ResizeHandles {}
             }
 
-            if active_source().is_local() {
+            if active_caps().scan_folders {
                 if let Some(file) = scan_current_file.read().clone() {
                     div {
                         class: "flex-shrink-0",
@@ -1510,7 +1506,12 @@ fn App() -> Element {
                                 button {
                                     class: "ml-2 text-xs underline opacity-70 hover:opacity-100 transition-opacity",
                                     onclick: move |_| {
-                                        let target = config.peek().server_toggle_target();
+                                        let rows = all_sources.read().clone().unwrap_or_default();
+                                        let target = rows
+                                            .iter()
+                                            .find(|source| source.needs_network && source.active)
+                                            .or_else(|| rows.iter().find(|source| source.needs_network))
+                                            .map(|source| source.id.clone());
                                         if let Some(s) = target {
                                             switch_source(s);
                                         }
@@ -1788,8 +1789,8 @@ fn App() -> Element {
                             // library-driven page in all cases.
                             // Route on the active source's capability, not the
                             // configured server: a catalog server can be configured while
-                            // Local is active, and the rich remote profile must not
-                            // hijack the local artist page.
+                            // a folder source is active, and the rich remote profile must not
+                            // hijack the library-driven artist page.
                             let remote_profile =
                                 active_caps().artists == api::ArtistPresentation::Remote;
                             if remote_profile && selected_artist.read().is_some() {

@@ -1,6 +1,6 @@
-//! The source switcher: Local + every configured server as a uniform list, pick
-//! one to make it active. Replaces the old binary Local⇄Server toggle — no
-//! local-vs-server branching, and it reaches any number of servers.
+//! The source switcher: every configured source as one uniform list, pick one to
+//! make it active. Each row is drawn from what the daemon says about its service,
+//! so nothing here branches on what a source is.
 //!
 //! A compact trigger (the active source's brand-tinted icon tile + name, with a
 //! small connection dot on the tile corner) opens a flat popover that scrolls
@@ -9,7 +9,6 @@
 //! read); the active row is highlighted. Styling matches the sidebar's flat,
 //! single-line nav items rather than a glassy stand-alone widget.
 
-use config::Source;
 use dioxus::prelude::*;
 use hooks::source_switch::ConnStatus;
 
@@ -64,15 +63,11 @@ const SWITCHER_CSS: &str = r#"
 .ss-foot button .ar{margin-left:auto;font-size:9px}
 "#;
 
-/// Local uses the active theme's accent so it reads as native (servers keep
-/// their fixed brand colours).
-const LOCAL_ACCENT: &str = "var(--color-indigo-500)";
-
-/// One selectable source: key, label, icon, accent colour, mono subline.
+/// One selectable source: id, label, icon, accent colour, mono subline.
 ///
 /// The rows are the daemon's list, and so are the marks: what a service is
 /// called and how it is drawn come with it.
-fn entries(sources: &[api::SourceInfo]) -> Vec<(Source, String, api::Icon, String, String)> {
+fn entries(sources: &[api::SourceInfo]) -> Vec<(String, String, api::Icon, String, String)> {
     sources
         .iter()
         .map(|source| {
@@ -82,7 +77,7 @@ fn entries(sources: &[api::SourceInfo]) -> Vec<(Source, String, api::Icon, Strin
                 i18n::t("source_on_this_device").to_string()
             };
             (
-                Source::from_column(&source.id),
+                source.id.clone(),
                 source.name.clone(),
                 source.service.icon.clone(),
                 source.service.accent.clone(),
@@ -108,7 +103,7 @@ pub fn SourceSwitcher(
     let active = rows
         .iter()
         .find(|source| source.active)
-        .map(|source| Source::from_column(&source.id))
+        .map(|source| source.id.clone())
         .unwrap_or_default();
     let sources = entries(&rows);
     let count = sources.len();
@@ -121,9 +116,9 @@ pub fn SourceSwitcher(
         .map(|(_, l, i, a, _)| (l.clone(), i.clone(), a.clone()))
         .unwrap_or_else(|| {
             (
-                i18n::t("local").to_string(),
-                api::Icon::Class("fa-solid fa-hard-drive".to_string()),
-                LOCAL_ACCENT.to_string(),
+                i18n::t("sources").to_string(),
+                api::Icon::Class("fa-solid fa-music".to_string()),
+                "var(--color-indigo-500)".to_string(),
             )
         });
 
@@ -173,7 +168,7 @@ pub fn SourceSwitcher(
                                 let switch = switch.clone();
                                 rsx! {
                                     button {
-                                        key: "{src.as_str()}",
+                                        key: "{src}",
                                         class: if is_active { "ss-row ss-act" } else { "ss-row" },
                                         style: "--accent:{accent};",
                                         onclick: move |_| {

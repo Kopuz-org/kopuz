@@ -161,6 +161,7 @@ pub fn source_info_to_proto(value: &api::SourceInfo) -> SourceInfo {
         anonymous: value.anonymous,
         settings: value.settings.iter().map(field_spec_to_proto).collect(),
         needs_network: value.needs_network,
+        permanent: value.permanent,
     }
 }
 
@@ -182,6 +183,7 @@ pub fn source_info_from_proto(value: &SourceInfo) -> api::SourceInfo {
         anonymous: value.anonymous,
         settings: value.settings.iter().map(field_spec_from_proto).collect(),
         needs_network: value.needs_network,
+        permanent: value.permanent,
     }
 }
 
@@ -314,6 +316,7 @@ mod tests {
             anonymous: false,
             settings: vec![url_field()],
             needs_network: true,
+            permanent: true,
         };
         assert_eq!(info, source_info_from_proto(&source_info_to_proto(&info)));
     }

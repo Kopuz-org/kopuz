@@ -366,7 +366,7 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
 
 #[path = "sources.rs"]
 mod sources;
-pub use sources::{LocalSourceSettings, MultiDirectoryPicker, ServerSettings};
+pub use sources::{MultiDirectoryPicker, SourceSettings};
 
 #[component]
 pub fn ToggleSetting(enabled: bool, on_change: EventHandler<bool>) -> Element {

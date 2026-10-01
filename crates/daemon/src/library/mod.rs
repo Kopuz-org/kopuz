@@ -328,9 +328,18 @@ impl LibraryService {
     }
 
     pub fn stats(&self) -> api::StatsView {
-        api::StatsView {
-            listen_counts: self.current_config().listen_counts.clone(),
-        }
+        let config = self.current_config();
+        let own = format!("{}|", config.active_source.as_str());
+        let listen_counts = config
+            .listen_counts
+            .iter()
+            .filter_map(|(key, count)| match key.strip_prefix(&own) {
+                Some(uid) => Some((uid.to_owned(), *count)),
+                None if key.starts_with("local:") => None,
+                None => Some((key.clone(), *count)),
+            })
+            .collect();
+        api::StatsView { listen_counts }
     }
 
     /// Lyrics for one library track, through the app's full provider chain

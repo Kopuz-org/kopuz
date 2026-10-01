@@ -1,7 +1,7 @@
 //! Source-agnostic Album page (issue #35). One grid + one detail render any
 //! source: every cover is a reference the daemon resolves, and the divergent
-//! affordances (tag/cover edit + delete-from-disk for local, downloads for a
-//! server) gate on [`api::SourceCapabilities`] — no `is_server()`.
+//! affordances (tag/cover edit + delete-from-disk, downloads) gate on
+//! [`api::SourceCapabilities`] — no `is_server()`.
 
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
@@ -39,7 +39,7 @@ fn copy_album_link(url: String) {
 enum AlbumAction {
     Queue,
     Playlist,
-    /// Local: delete the files + DB rows. Server: drop the cached rows (a re-sync
+    /// Delete the files + DB rows, or for a catalog source drop the cached rows (a re-sync
     /// re-adds them) — there's no remote album delete.
     Remove,
 }
@@ -386,7 +386,7 @@ fn AlbumDetail(
     let albums_res = use_albums(source);
 
     // Discover albums are opened by the source's own browse id and aren't in the
-    // local DB until saved. When the DB has no row for the id, fetch the album
+    // library until saved. When the library has no row for the id, fetch the album
     // straight from the catalog remote by that browse id so every searched /
     // discovered album renders (header + full track list) instead of "not found".
     let direct_remote_res: Resource<Option<api::CatalogDetail>> = {
@@ -415,7 +415,7 @@ fn AlbumDetail(
     let album = match album_res.read().clone().flatten() {
         Some(a) => a,
         None => {
-            // Not saved locally — render the remote album directly if it resolved.
+            // Not saved yet — render the remote album directly if it resolved.
             if let Some(remote) = direct_remote_res.read().clone().flatten() {
                 let mut tracks = remote.tracks;
                 tracks.sort_by(|a, b| {
@@ -437,7 +437,7 @@ fn AlbumDetail(
                             artist_key: remote.artist_key,
                             year: remote.year,
                             album_id: Some(remote.id),
-                            local_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
+                            remote_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
                             tracks,
                             on_close,
                         }
@@ -497,7 +497,7 @@ fn AlbumDetail(
     // browse id, so the library only ever holds the few tracks the user saved —
     // an album page would show 1 of 18 songs. The daemon resolves the saved
     // album to its remote listing (header + every track), the way a catalog
-    // shows it. `None` for local/other sources and while offline; drives both
+    // shows it. `None` for library-backed sources and while offline; drives both
     // the full track list and the catalog-styled header.
     let remote_album_res: Resource<Option<api::CatalogDetail>> = {
         let api = api.clone();
@@ -526,7 +526,7 @@ fn AlbumDetail(
         let conf = config.read();
 
         // Full album from the catalog remote (already in album order). Used
-        // whenever it resolved; the locally-saved subset is the fallback.
+        // whenever it resolved; the saved subset is the fallback.
         if !offline && let Some(remote) = remote_album_res.read().clone().flatten() {
             let mut remote = remote.tracks;
             remote.sort_by(|a, b| {
@@ -601,14 +601,14 @@ fn AlbumDetail(
             .any(|track| downloads.read().is_active(&track.key));
 
     // Catalog-style album page: the whole catalog-remote side renders this,
-    // from the moment the page opens — header built from the local album row so it
-    // shows instantly, track list filling from the locally-saved subset until the
-    // remote album resolves the full listing. Local / other sources keep the
+    // from the moment the page opens — header built from the library's album row so it
+    // shows instantly, track list filling from the already-saved subset until the
+    // remote album resolves the full listing. Other sources keep the
     // standard TrackListView.
     let cover_url_remote = cover_url.clone();
     let remote_title = album.title.clone();
     let remote_artist = album.artist.clone();
-    // Prefer the remote album's year once resolved; fall back to the local row.
+    // Prefer the remote album's year once resolved; fall back to the library row.
     let remote_album = remote_album_res.read().clone().flatten();
     let remote_year = remote_album
         .as_ref()
@@ -630,7 +630,7 @@ fn AlbumDetail(
                     artist_key: remote_artist_key,
                     year: remote_year,
                     album_id: remote_album_id,
-                    local_cover: cover_url_remote,
+                    remote_cover: cover_url_remote,
                     tracks: tracks(),
                     on_close,
                 }
@@ -738,7 +738,7 @@ fn RemoteAlbumDetail(
     artist_key: Option<String>,
     year: Option<String>,
     album_id: Option<String>,
-    local_cover: Option<utils::CoverUrl>,
+    remote_cover: Option<utils::CoverUrl>,
     tracks: Vec<api::TrackInfo>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -820,7 +820,7 @@ fn RemoteAlbumDetail(
                 div { class: "md:w-[320px] shrink-0 flex flex-col items-center md:items-start text-center md:text-left gap-5 md:pt-2",
                     div {
                         class: "w-full max-w-[300px] aspect-square rounded-lg bg-stone-800 overflow-hidden relative shrink-0 shadow-2xl shadow-black/40",
-                        if let Some(url) = &local_cover {
+                        if let Some(url) = &remote_cover {
                             img { src: "{url.as_ref()}", class: "w-full h-full object-cover", decoding: "async" }
                         } else {
                             div { class: "w-full h-full flex items-center justify-center text-white/20",

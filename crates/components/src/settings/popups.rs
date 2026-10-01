@@ -1,4 +1,3 @@
-use crate::settings_items::MultiDirectoryPicker;
 use dioxus::prelude::*;
 
 /// Flathub does not allow `org.freedesktop.Flatpak` in the manifest, so the
@@ -25,53 +24,10 @@ pub fn HostAccessWarning(message: String) -> Element {
     }
 }
 
-#[component]
-pub fn AddLocalSourcePopup(
-    name: Signal<String>,
-    directories: Signal<Vec<std::path::PathBuf>>,
-    error: Signal<Option<String>>,
-    on_close: EventHandler<()>,
-    on_save: EventHandler<()>,
-) -> Element {
-    rsx! {
-        div { class: "overlay", onclick: move |_| on_close.call(()),
-            div { class: "popup", onclick: |e| e.stop_propagation(),
-                h2 { "{i18n::t(\"add_local_library\")}" }
-                if let Some(err) = error() {
-                    p { class: "error", "{err}" }
-                }
-                input {
-                    placeholder: "{i18n::t(\"local_library_name\")}",
-                    value: "{name()}",
-                    oninput: move |e| name.set(e.value()),
-                    onkeydown: move |e| e.stop_propagation(),
-                }
-                MultiDirectoryPicker {
-                    current_paths: directories(),
-                    on_add: move |path| {
-                        if !directories.peek().contains(&path) {
-                            directories.write().push(path);
-                        }
-                    },
-                    on_remove: move |index| {
-                        if index < directories.peek().len() {
-                            directories.write().remove(index);
-                        }
-                    },
-                }
-                div { class: "actions",
-                    button { onclick: move |_| on_close.call(()), "{i18n::t(\"cancel\")}" }
-                    button { onclick: move |_| on_save.call(()), "{i18n::t(\"save\")}" }
-                }
-            }
-        }
-    }
-}
-
 /// Add a server: pick a service, fill in whatever form the daemon publishes
 /// for it. Nothing here knows what any of those fields mean.
 #[component]
-pub fn AddServerPopup(
+pub fn AddSourcePopup(
     services: Vec<api::ServiceInfo>,
     service: Signal<String>,
     name: Signal<String>,

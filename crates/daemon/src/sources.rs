@@ -165,6 +165,7 @@ impl SourceService {
                 info.name = saved.name.clone();
                 info.service = crate::services::folders_ref();
                 info.authenticated = true;
+                info.permanent = saved.id == config::DEFAULT_LOCAL_ID;
                 let paths: Vec<String> = saved
                     .directories
                     .iter()

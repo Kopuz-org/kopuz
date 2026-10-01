@@ -19,7 +19,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let duration_min = total_seconds / 60;
 
     let offline_tracks = config.read().offline_tracks.clone();
-    // Per-track cover resolver (source dispatch + local-album lookup live in the
+    // Per-track cover resolver (source dispatch + album lookup live in the
     // source layer; no partition decision here).
     let _fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let sort_state = use_signal(|| None);

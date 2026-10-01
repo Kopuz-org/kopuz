@@ -4,7 +4,7 @@
 //! credentials into the active snapshot, which a client could not do through
 //! `set_config` -- credential fields are exactly what that refuses to take.
 
-use config::{AppConfig, Source};
+use config::AppConfig;
 use dioxus::prelude::*;
 
 /// Live connection status of the active source, for the switcher's indicator.
@@ -56,9 +56,9 @@ pub fn use_connection_status() -> Memo<ConnStatus> {
 /// Apply a source switch. Answers whether the source is usable without a
 /// sign-in (stored credentials, or a source usable anonymously), so the caller can
 /// launch a sign-in flow otherwise.
-pub async fn apply_source_switch(mut config: Signal<AppConfig>, source: Source) -> bool {
+pub async fn apply_source_switch(mut config: Signal<AppConfig>, id: String) -> bool {
     let api = crate::api::consume_api();
-    match api.switch_source(source.as_str().to_string()).await {
+    match api.switch_source(id).await {
         Ok(info) => {
             let usable = info.authenticated;
             // The daemon owns the config now, so pull its version back rather
@@ -78,11 +78,11 @@ pub async fn apply_source_switch(mut config: Signal<AppConfig>, source: Source) 
 
 /// A fire-and-forget source switcher for the sidebar: switches (loading
 /// credentials) without launching a sign-in flow -- the settings page owns that.
-pub fn use_switch_source() -> impl Fn(Source) + Clone {
+pub fn use_switch_source() -> impl Fn(String) + Clone {
     let config = use_context::<Signal<AppConfig>>();
-    move |source: Source| {
+    move |id: String| {
         spawn(async move {
-            apply_source_switch(config, source).await;
+            apply_source_switch(config, id).await;
         });
     }
 }

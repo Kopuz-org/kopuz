@@ -6,7 +6,6 @@ use rfd::AsyncFileDialog;
 #[tracing::instrument(name = "render.playlist_detail", skip_all)]
 pub fn PlaylistDetail(
     playlist_id: String,
-    config: Signal<config::AppConfig>,
     on_close: EventHandler<()>,
     on_download_all: Option<EventHandler<()>>,
     on_delete_all: Option<EventHandler<()>>,
@@ -28,14 +27,10 @@ pub fn PlaylistDetail(
             .map(|playlist| playlist.track_keys.clone())
             .unwrap_or_default()
     });
-    let active_partition = use_memo(move || config.read().active_source.clone());
+    let active_partition = hooks::use_db_queries::use_active_source();
     let tracks_res = use_tracks_by_keys(active_partition, track_refs);
 
-    // Affordances are capability-driven, not source-kind-driven: tag-edit and
-    // delete-from-disk are local-only, downloads server-only, reorder per the
-    // playlists cap, since not every source can reorder. Reading the caps is
-    // also more correct than `is_server` — e.g. a creds-less offline server has
-    // downloads=false.
+    // Affordances follow the source's capabilities, not what kind of source it is.
     let caps = *hooks::sources::use_capabilities().read();
     let can_reorder = caps.playlists == api::PlaylistCapability::Reorder;
 

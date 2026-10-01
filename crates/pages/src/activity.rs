@@ -1,7 +1,7 @@
 use api::TrackInfo as Track;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
-use hooks::use_db_queries::{use_active_source, use_albums, use_tracks_window};
+use hooks::use_db_queries::{use_active_source, use_albums, use_listen_counts, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
 use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
@@ -16,7 +16,7 @@ fn format_duration(seconds: u64) -> String {
 
 /// Source-agnostic "listening logs" (most-played). The data path
 /// (`use_tracks_window` with a `PlayCount` sort) is already source-scoped; the
-/// only per-source bits are the cover (local file vs remote URL), the track
+/// only per-source bits are the cover (file vs remote URL), the track
 /// origin icon, and the subtitle.
 #[component]
 pub fn Activity(config: Signal<AppConfig>) -> Element {
@@ -24,6 +24,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
 
     let source = use_active_source();
     let albums_res = use_albums(source);
+    let counts_res = use_listen_counts(source);
     let filter = use_memo(move || {
         // The source is the daemon's; naming it here only keeps the memo
         // re-running across a switch.
@@ -87,8 +88,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
     );
 
     let visible_tracks: Vec<(usize, Track, u64, String, Option<CoverUrl>)> = {
-        let conf = config.read();
-        let active_source = source();
+        let counts = counts_res.read().clone().unwrap_or_default();
         let albums = album_map.read();
         let window_rows = window.rows.read().clone().unwrap_or_default();
         let row_offset = window_rows.offset as usize;
@@ -97,8 +97,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             .into_iter()
             .enumerate()
             .map(|(i, track)| {
-                let count_key = active_source.listen_count_key(&track.uid);
-                let plays = conf.listen_counts.get(&count_key).copied().unwrap_or(0);
+                let plays = counts.get(&track.uid).copied().unwrap_or(0);
                 let genre = albums.get(&track.album_id).cloned().unwrap_or_default();
                 let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
                 (row_offset + i, track, plays, genre, cover_url)

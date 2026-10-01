@@ -313,7 +313,7 @@ pub fn Artist(
         };
     }
 
-    // The refs (item ids / local paths) of the currently-selected tracks — derived
+    // The refs (item ids / file paths) of the currently-selected tracks — derived
     // from the in-hand `Track`s via the typed id, so it's source-uniform.
     let refs_for = move |paths: &HashSet<String>| -> Vec<String> {
         artist_tracks()

@@ -131,6 +131,8 @@ pub struct SourceInfo {
     pub settings: Vec<FieldSpec>,
     /// Reachability is worth watching: the library lives across the network.
     pub needs_network: bool,
+    /// Every install has it, so it cannot be deleted.
+    pub permanent: bool,
 }
 
 /// A source to create or update, as the answers to a [`ServiceInfo`]'s form.

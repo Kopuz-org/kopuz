@@ -52,8 +52,8 @@ fn track_cover_url(track: &Track) -> Option<String> {
 /// window has to be wide enough to still fill it.
 const RECENTLY_ADDED_WINDOW: u32 = 64;
 
-/// The source-agnostic Home body (sections + hero). Rendered for local and any
-/// server; the active source decides the data, covers (via the source seam), the
+/// The source-agnostic Home body (sections + hero). Rendered for any
+/// source; the active source decides the data, covers (via the source seam), the
 /// recently-played list, and offline/sync gating.
 #[component]
 pub fn HomeBody(
@@ -109,7 +109,7 @@ pub fn HomeBody(
     let top_genre_res = use_top_genre(source);
     let artist_samples_res = use_artist_sample_tracks(source, 30);
 
-    // Servers fill an empty cache by syncing; local is populated by the scan.
+    // Catalog sources fill an empty cache by syncing; folder sources are populated by the scan.
     let mut fetch_remote = move || {
         has_fetched.set(true);
         hooks::jobs::start(hooks::JobKind::LibrarySync);

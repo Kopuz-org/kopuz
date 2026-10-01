@@ -1,5 +1,5 @@
 //! Folder picker for a source whose library is a directory tree rather than
-//! a catalog. Same list-plus-add shape as a local library, except the file dialog
+//! a catalog. Same list-plus-add shape as the folder list, except the file dialog
 //! is an in-place browser, since the folders live on the server.
 //!
 //! The listing is a daemon call: it holds the server's credentials, so this

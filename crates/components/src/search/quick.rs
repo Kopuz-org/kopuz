@@ -27,7 +27,7 @@ pub fn QuickSearch(
     let mut cached: Signal<Vec<api::TrackInfo>> = use_signal(Vec::new);
     let mut results_ready = use_signal(|| false);
     let debounce_gen = use_hook(|| Arc::new(AtomicU64::new(0)));
-    let search_data = hooks::use_search_data(query, config);
+    let search_data = hooks::use_search_data(query);
 
     use_effect(move || {
         let results = search_data.search_results.read();

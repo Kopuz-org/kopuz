@@ -153,7 +153,7 @@ pub trait PlayerApi: Send + Sync {
 pub trait LibraryApi: Send + Sync {
     async fn tracks(&self, filter: TrackFilter, page: Page) -> Result<TrackPage, ApiError>;
 
-    /// Local tracks under a directory prefix, path-ordered.
+    /// Tracks under a directory prefix, path-ordered.
     async fn folder_tracks(&self, prefix: String, page: Page) -> Result<TrackPage, ApiError>;
 
     /// Rows for specific keys, in the order asked for. Keys the library does
@@ -253,7 +253,7 @@ pub trait LibraryApi: Send + Sync {
     /// it holds for the track, so the local favorite row is cleared with it.
     async fn dont_recommend(&self, key: String) -> Result<(), ApiError>;
 
-    /// Rewrite one track's tags, and its embedded cover with them. Only local
+    /// Rewrite one track's tags, and its embedded cover with them. Only
     /// files have tags to edit; a server track answers `unsupported`.
     async fn update_track_metadata(&self, patch: TrackMetadataPatch)
     -> Result<TrackInfo, ApiError>;
@@ -274,7 +274,7 @@ pub trait LibraryApi: Send + Sync {
 /// Playlists and the folders they sit in.
 ///
 /// Every mutation goes through the active source, so a server playlist is
-/// pushed to the server and a local one is not, without the caller knowing
+/// pushed to the server and one held only here is not, without the caller knowing
 /// which it holds. The daemon reports the change as a `Playlists` (or
 /// `Folders`) invalidation.
 #[async_trait::async_trait]
@@ -296,7 +296,7 @@ pub trait PlaylistApi: Send + Sync {
 
     async fn reorder_playlist(&self, id: String, reorder: PlaylistReorder) -> Result<(), ApiError>;
 
-    /// Pull a server playlist's contents again. A no-op for a local one.
+    /// Pull a server playlist's contents again. A no-op for a playlist held only here.
     async fn refresh_playlist(&self, id: String) -> Result<(), ApiError>;
 
     async fn create_playlist_folder(&self, name: String) -> Result<String, ApiError>;

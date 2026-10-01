@@ -30,7 +30,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let total_seconds: u64 = props.tracks.iter().filter_map(|t| t.duration_secs()).sum();
     let duration_min = total_seconds / 60;
 
-    // Per-track cover resolver (source dispatch + local-album lookup live in the
+    // Per-track cover resolver (source dispatch + album lookup live in the
     // source layer; no partition decision here).
 
     let offline_tracks = config.read().offline_tracks.clone();

@@ -790,6 +790,8 @@ message SourceInfo {
   SignInKind reauth = 17;
   // Reachability is worth watching: the library lives across the network.
   bool needs_network = 18;
+  // Every install has it, so it cannot be deleted.
+  bool permanent = 19;
 }
 
 message GetSourcesRequest {}

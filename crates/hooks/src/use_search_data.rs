@@ -1,6 +1,6 @@
 //! Search, and the genre tiles beside it.
 //!
-//! The source owns search -- a local library filters its own rows, a remote
+//! The source owns search -- a folder library filters its own rows, a remote
 //! catalog answers over the network -- and the daemon owns the source, so this
 //! is one call. It used to reach for the in-process source and resolve every
 //! cover here, which meant a frontend needed both the source layer and the
@@ -16,12 +16,9 @@ pub struct SearchData {
     pub search_query: Signal<String>,
 }
 
-pub fn use_search_data(
-    search_query: Signal<String>,
-    config: Signal<config::AppConfig>,
-) -> SearchData {
+pub fn use_search_data(search_query: Signal<String>) -> SearchData {
     let api = crate::api::use_api();
-    let source = use_memo(move || config.read().active_source.clone());
+    let source = crate::use_db_queries::use_active_source();
     let albums_res = crate::use_db_queries::use_albums(source);
     let gens = crate::db_reactivity::use_generations();
 
