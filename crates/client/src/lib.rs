@@ -1130,13 +1130,13 @@ impl api::SourceApi for GrpcApi {
             .collect())
     }
 
-    async fn check_server_draft(
+    async fn check_source_draft(
         &self,
-        draft: api::ServerDraft,
+        draft: api::SourceDraft,
     ) -> Result<api::DraftCheck, ApiError> {
         let check = self
             .client()
-            .check_server_draft(Request::new(convert::server_draft_to_proto(&draft)))
+            .check_source_draft(Request::new(convert::source_draft_to_proto(&draft)))
             .await
             .map_err(wire_error)?;
         Ok(convert::draft_check_from_proto(check.get_ref()))
@@ -1167,54 +1167,18 @@ impl api::SourceApi for GrpcApi {
         Ok(convert::source_info_from_proto(info.get_ref()))
     }
 
-    async fn upsert_local_source(
-        &self,
-        draft: api::LocalSourceDraft,
-    ) -> Result<api::SourceInfo, ApiError> {
+    async fn upsert_source(&self, draft: api::SourceDraft) -> Result<api::SourceInfo, ApiError> {
         let info = self
             .client()
-            .upsert_local_source(Request::new(convert::local_draft_to_proto(&draft)))
+            .upsert_source(Request::new(convert::source_draft_to_proto(&draft)))
             .await
             .map_err(wire_error)?;
         Ok(convert::source_info_from_proto(info.get_ref()))
     }
 
-    async fn delete_local_source(&self, id: String) -> Result<(), ApiError> {
+    async fn delete_source(&self, id: String) -> Result<(), ApiError> {
         self.client()
-            .delete_local_source(Request::new(proto::SourceId { id }))
-            .await
-            .map_err(wire_error)?;
-        Ok(())
-    }
-
-    async fn set_source_directories(
-        &self,
-        id: String,
-        directories: Vec<String>,
-    ) -> Result<api::SourceInfo, ApiError> {
-        let info = self
-            .client()
-            .set_source_directories(Request::new(proto::SetSourceDirectoriesRequest {
-                id,
-                directories,
-            }))
-            .await
-            .map_err(wire_error)?;
-        Ok(convert::source_info_from_proto(info.get_ref()))
-    }
-
-    async fn upsert_server(&self, draft: api::ServerDraft) -> Result<api::SourceInfo, ApiError> {
-        let info = self
-            .client()
-            .upsert_server(Request::new(convert::server_draft_to_proto(&draft)))
-            .await
-            .map_err(wire_error)?;
-        Ok(convert::source_info_from_proto(info.get_ref()))
-    }
-
-    async fn delete_server(&self, id: String) -> Result<(), ApiError> {
-        self.client()
-            .delete_server(Request::new(proto::SourceId { id }))
+            .delete_source(Request::new(proto::SourceId { id }))
             .await
             .map_err(wire_error)?;
         Ok(())

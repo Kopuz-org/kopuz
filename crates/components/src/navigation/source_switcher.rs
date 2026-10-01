@@ -76,30 +76,18 @@ fn entries(sources: &[api::SourceInfo]) -> Vec<(Source, String, api::Icon, Strin
     sources
         .iter()
         .map(|source| {
-            let on_device = i18n::t("source_on_this_device").to_string();
-            match (source.kind, source.service.as_ref()) {
-                (api::SourceKind::Server, Some(service)) => (
-                    Source::Server(source.id.clone()),
-                    source.name.clone(),
-                    service.icon.clone(),
-                    service.accent.clone(),
-                    crate::forms::text(&service.name).to_uppercase(),
-                ),
-                (api::SourceKind::LocalLibrary, _) => (
-                    Source::LocalLibrary(source.id.clone()),
-                    source.name.clone(),
-                    api::Icon::Class("fa-solid fa-folder-tree".to_string()),
-                    LOCAL_ACCENT.to_string(),
-                    on_device,
-                ),
-                _ => (
-                    Source::LocalLibrary(source.id.clone()),
-                    i18n::t("local").to_string(),
-                    api::Icon::Class("fa-solid fa-hard-drive".to_string()),
-                    LOCAL_ACCENT.to_string(),
-                    on_device,
-                ),
-            }
+            let sub = if source.needs_network {
+                crate::forms::text(&source.service.name).to_uppercase()
+            } else {
+                i18n::t("source_on_this_device").to_string()
+            };
+            (
+                Source::from_column(&source.id),
+                source.name.clone(),
+                source.service.icon.clone(),
+                source.service.accent.clone(),
+                sub,
+            )
         })
         .collect()
 }
@@ -120,10 +108,7 @@ pub fn SourceSwitcher(
     let active = rows
         .iter()
         .find(|source| source.active)
-        .map(|source| match source.kind {
-            api::SourceKind::Server => Source::Server(source.id.clone()),
-            _ => Source::LocalLibrary(source.id.clone()),
-        })
+        .map(|source| Source::from_column(&source.id))
         .unwrap_or_default();
     let sources = entries(&rows);
     let count = sources.len();

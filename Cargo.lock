@@ -4390,6 +4390,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "kopuz-config",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
 ]

@@ -716,7 +716,7 @@ fn App() -> Element {
         let current_server_key = active_source_row
             .read()
             .as_ref()
-            .filter(|source| source.kind == api::SourceKind::Server)
+            .filter(|source| source.needs_network)
             .map(|source| source.id.clone());
 
         if !*server_playlist_key_initialized.read() {

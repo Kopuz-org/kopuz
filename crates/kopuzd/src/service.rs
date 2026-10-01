@@ -1152,45 +1152,6 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::source_info_to_proto(&info)))
     }
 
-    async fn upsert_local_source(
-        &self,
-        request: Request<proto::LocalSourceDraft>,
-    ) -> Result<Response<proto::SourceInfo>, Status> {
-        let info = self
-            .0
-            .api
-            .upsert_local_source(convert::local_draft_from_proto(request.get_ref()))
-            .await
-            .map_err(failed)?;
-        Ok(Response::new(convert::source_info_to_proto(&info)))
-    }
-
-    async fn delete_local_source(
-        &self,
-        request: Request<proto::SourceId>,
-    ) -> Result<Response<proto::Unit>, Status> {
-        self.0
-            .api
-            .delete_local_source(request.into_inner().id)
-            .await
-            .map_err(failed)?;
-        Ok(Response::new(proto::Unit {}))
-    }
-
-    async fn set_source_directories(
-        &self,
-        request: Request<proto::SetSourceDirectoriesRequest>,
-    ) -> Result<Response<proto::SourceInfo>, Status> {
-        let request = request.into_inner();
-        let info = self
-            .0
-            .api
-            .set_source_directories(request.id, request.directories)
-            .await
-            .map_err(failed)?;
-        Ok(Response::new(convert::source_info_to_proto(&info)))
-    }
-
     async fn set_source_settings(
         &self,
         request: Request<proto::SetSourceSettingsRequest>,
@@ -1210,39 +1171,39 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::source_info_to_proto(&info)))
     }
 
-    async fn check_server_draft(
+    async fn check_source_draft(
         &self,
-        request: Request<proto::ServerDraft>,
+        request: Request<proto::SourceDraft>,
     ) -> Result<Response<proto::DraftCheck>, Status> {
         let check = self
             .0
             .api
-            .check_server_draft(convert::server_draft_from_proto(request.get_ref()))
+            .check_source_draft(convert::source_draft_from_proto(request.get_ref()))
             .await
             .map_err(failed)?;
         Ok(Response::new(convert::draft_check_to_proto(&check)))
     }
 
-    async fn upsert_server(
+    async fn upsert_source(
         &self,
-        request: Request<proto::ServerDraft>,
+        request: Request<proto::SourceDraft>,
     ) -> Result<Response<proto::SourceInfo>, Status> {
         let info = self
             .0
             .api
-            .upsert_server(convert::server_draft_from_proto(request.get_ref()))
+            .upsert_source(convert::source_draft_from_proto(request.get_ref()))
             .await
             .map_err(failed)?;
         Ok(Response::new(convert::source_info_to_proto(&info)))
     }
 
-    async fn delete_server(
+    async fn delete_source(
         &self,
         request: Request<proto::SourceId>,
     ) -> Result<Response<proto::Unit>, Status> {
         self.0
             .api
-            .delete_server(request.into_inner().id)
+            .delete_source(request.into_inner().id)
             .await
             .map_err(failed)?;
         Ok(Response::new(proto::Unit {}))

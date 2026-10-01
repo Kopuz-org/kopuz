@@ -15,8 +15,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use api::{
-    ApiError, CredentialProvision, ErrorCode, LocalSourceDraft, ServerDraft, SourceCapabilities,
-    SourceFolderEntry, SourceInfo, SourceKind, SourceLoginRequest, SourceState, Table,
+    ApiError, CredentialProvision, ErrorCode, SourceCapabilities, SourceDraft, SourceFolderEntry,
+    SourceInfo, SourceLoginRequest, SourceState, Table,
 };
 use server::source::AuthOutcome;
 
@@ -163,17 +163,14 @@ impl SourceService {
                     .find(|saved| saved.id == *local_id)
                     .ok_or_else(|| ApiError::not_found("no such local source"))?;
                 info.name = saved.name.clone();
-                info.kind = if local_id == config::DEFAULT_LOCAL_ID {
-                    SourceKind::Local
-                } else {
-                    SourceKind::LocalLibrary
-                };
+                info.service = crate::services::folders_ref();
                 info.authenticated = true;
-                info.directories = saved
+                let paths: Vec<String> = saved
                     .directories
                     .iter()
                     .map(|path| path.to_string_lossy().into_owned())
                     .collect();
+                info.settings = vec![crate::services::directories_field(&paths)];
             }
             config::Source::Server(server_id) => {
                 let server = resolved
@@ -182,8 +179,8 @@ impl SourceService {
                     .ok_or_else(|| ApiError::not_found("no such server"))?;
                 let view = crate::services::ServerView::from(server);
                 info.name = server.name.clone();
-                info.kind = SourceKind::Server;
-                info.service = Some(crate::services::service_ref(server.service));
+                info.needs_network = true;
+                info.service = crate::services::service_ref(server.service);
                 // An anonymous source needs no token to be usable, which is
                 // why this is not simply "has a token".
                 info.authenticated = server.access_token.is_some() || server.yt_anonymous;
@@ -193,7 +190,11 @@ impl SourceService {
                 info.detail = crate::services::detail(&view);
                 info.anonymous = server.yt_anonymous;
                 info.settings = crate::services::settings(&view, &current);
-                info.directories = resolved.folders_for(server_id);
+                if info.capabilities.browse_folders {
+                    info.settings.push(crate::services::directories_field(
+                        &resolved.folders_for(server_id),
+                    ));
+                }
             }
         }
         Ok(info)
@@ -286,32 +287,27 @@ impl SourceService {
         self.source_info(id).await
     }
 
-    pub async fn upsert_local_source(
-        &self,
-        draft: LocalSourceDraft,
-    ) -> Result<SourceInfo, ApiError> {
+    async fn upsert_folder_source(&self, draft: SourceDraft) -> Result<SourceInfo, ApiError> {
         self.config.ensure_unlocked(&["local_sources"])?;
-        let name = draft.name.trim();
-        if name.is_empty() {
-            return Err(ApiError::invalid_input("a local source needs a name"));
-        }
-        if draft.directories.is_empty()
-            || draft.directories.iter().any(|path| path.trim().is_empty())
-        {
-            return Err(ApiError::invalid_input(
-                "a local source needs at least one directory",
-            ));
+        if let Some(problem) = crate::services::check_folders(&draft).first() {
+            return Err(ApiError::invalid_input(crate::services::problem_text(
+                problem,
+            )));
         }
         let id = draft
             .id
+            .clone()
             .unwrap_or_else(|| format!("local:{}", uuid::Uuid::new_v4()));
         if !id.starts_with("local:") && id != config::DEFAULT_LOCAL_ID {
-            return Err(ApiError::invalid_input("that is not a local source id"));
+            return Err(ApiError::invalid_input("that is not a folder source id"));
         }
         let saved = config::SavedLocalSource {
             id: id.clone(),
-            name: name.to_string(),
-            directories: draft.directories.into_iter().map(PathBuf::from).collect(),
+            name: draft.name.trim().to_string(),
+            directories: crate::services::folder_paths(&draft.values)
+                .into_iter()
+                .map(PathBuf::from)
+                .collect(),
         };
         let updated = self
             .config
@@ -331,17 +327,17 @@ impl SourceService {
         self.source_info(&id).await
     }
 
-    pub async fn delete_local_source(&self, id: &str) -> Result<(), ApiError> {
+    async fn delete_folder_source(&self, id: &str) -> Result<(), ApiError> {
         self.config
             .ensure_unlocked(&["active_source", "local_sources"])?;
-        if id == "local" {
+        if id == config::DEFAULT_LOCAL_ID {
             return Err(ApiError::invalid_input(
-                "the default local library cannot be deleted",
+                "the default folder source cannot be deleted",
             ));
         }
         let current = self.current().await;
         if !current.local_sources.iter().any(|source| source.id == id) {
-            return Err(ApiError::not_found("no such local source"));
+            return Err(ApiError::not_found("no such source"));
         }
         let was_active = current.active_source.local_library_id() == Some(id);
         let id_owned = id.to_string();
@@ -362,64 +358,47 @@ impl SourceService {
         Ok(())
     }
 
-    pub async fn set_source_directories(
+    /// Replace a folder source's folders.
+    async fn set_folder_settings(
         &self,
         id: &str,
-        directories: Vec<String>,
+        values: &[api::FieldValue],
     ) -> Result<SourceInfo, ApiError> {
+        let Some(folders) = api::schema::value_of(values, crate::services::DIRECTORIES) else {
+            return self.source_info(id).await;
+        };
+        let directories = api::schema::decode_directories(folders);
         if directories.iter().any(|path| path.trim().is_empty()) {
             return Err(ApiError::invalid_input(
                 "a source directory cannot be empty",
             ));
         }
-        let source = config::Source::from_column(id);
-        let key = match &source {
-            config::Source::LocalLibrary(_) => "local_sources",
-            config::Source::Server(_) => "server_folders",
-        };
-        self.config.ensure_unlocked(&[key])?;
+        self.config.ensure_unlocked(&["local_sources"])?;
         let current = self.current().await;
-        match &source {
-            config::Source::LocalLibrary(local_id)
-                if !current
-                    .local_sources
-                    .iter()
-                    .any(|saved| saved.id == *local_id) =>
-            {
-                return Err(ApiError::not_found("no such local source"));
-            }
-            config::Source::Server(server_id)
-                if !current.servers.iter().any(|saved| saved.id == *server_id) =>
-            {
-                return Err(ApiError::not_found("no such server"));
-            }
-            _ => {}
+        if !current.local_sources.iter().any(|saved| saved.id == id) {
+            return Err(ApiError::not_found("no such source"));
         }
+        let target = id.to_string();
         let updated = self
             .config
-            .mutate_state(move |config| match source {
-                config::Source::LocalLibrary(local_id) => {
-                    if let Some(saved) = config
-                        .local_sources
-                        .iter_mut()
-                        .find(|saved| saved.id == local_id)
-                    {
-                        saved.directories = directories.into_iter().map(PathBuf::from).collect();
-                    }
-                }
-                config::Source::Server(server_id) => {
-                    config.set_folders_for(&server_id, directories);
+            .mutate_state(move |config| {
+                if let Some(saved) = config
+                    .local_sources
+                    .iter_mut()
+                    .find(|saved| saved.id == target)
+                {
+                    saved.directories = directories.into_iter().map(PathBuf::from).collect();
                 }
             })
             .await?;
-        self.publish(updated, vec![key.to_string()]);
+        self.publish(updated, vec!["local_sources".to_string()]);
         self.session.invalidate(Table::Servers);
         self.source_info(id).await
     }
 
     /// Which service a draft names, refused as invalid input if it is not one
     /// this daemon has.
-    fn drafted_service(draft: &ServerDraft) -> Result<config::MusicService, ApiError> {
+    fn drafted_service(draft: &SourceDraft) -> Result<config::MusicService, ApiError> {
         config::MusicService::from_id(&draft.service)
             .ok_or_else(|| ApiError::invalid_input("no such service"))
     }
@@ -428,16 +407,36 @@ impl SourceService {
         crate::services::all()
     }
 
-    pub async fn check_server_draft(
+    pub async fn check_source_draft(
         &self,
-        draft: ServerDraft,
+        draft: SourceDraft,
     ) -> Result<api::DraftCheck, ApiError> {
+        if draft.service == crate::services::FOLDERS {
+            return Ok(api::DraftCheck {
+                sign_in: api::SignInKind::None,
+                problems: crate::services::check_folders(&draft),
+            });
+        }
         let service = Self::drafted_service(&draft)?;
         let (sign_in, problems) = crate::services::check(service, &draft);
         Ok(api::DraftCheck { sign_in, problems })
     }
 
-    pub async fn upsert_server(&self, draft: ServerDraft) -> Result<SourceInfo, ApiError> {
+    pub async fn upsert_source(&self, draft: SourceDraft) -> Result<SourceInfo, ApiError> {
+        if draft.service == crate::services::FOLDERS {
+            return self.upsert_folder_source(draft).await;
+        }
+        self.upsert_server(draft).await
+    }
+
+    pub async fn delete_source(&self, id: &str) -> Result<(), ApiError> {
+        match config::Source::from_column(id) {
+            config::Source::LocalLibrary(_) => self.delete_folder_source(id).await,
+            config::Source::Server(_) => self.delete_server(id).await,
+        }
+    }
+
+    async fn upsert_server(&self, draft: SourceDraft) -> Result<SourceInfo, ApiError> {
         self.config.ensure_unlocked(&["server", "servers"])?;
         let service = Self::drafted_service(&draft)?;
         let (_, problems) = crate::services::check(service, &draft);
@@ -519,6 +518,12 @@ impl SourceService {
         id: &str,
         values: Vec<api::FieldValue>,
     ) -> Result<SourceInfo, ApiError> {
+        if matches!(
+            config::Source::from_column(id),
+            config::Source::LocalLibrary(_)
+        ) {
+            return self.set_folder_settings(id, &values).await;
+        }
         let current = self.current().await;
         let Some(existing) = current.servers.iter().find(|server| server.id == id) else {
             return Err(ApiError::not_found("no such server"));
@@ -529,6 +534,16 @@ impl SourceService {
                 .into_iter()
                 .map(str::to_string),
         );
+        let folders = api::schema::value_of(&values, crate::services::DIRECTORIES)
+            .map(api::schema::decode_directories);
+        if let Some(folders) = &folders {
+            if folders.iter().any(|path| path.trim().is_empty()) {
+                return Err(ApiError::invalid_input(
+                    "a source directory cannot be empty",
+                ));
+            }
+            keys.push("server_folders".to_string());
+        }
         let locked: Vec<&str> = keys.iter().map(String::as_str).collect();
         self.config.ensure_unlocked(&locked)?;
         let target = id.to_string();
@@ -543,6 +558,9 @@ impl SourceService {
                 crate::services::apply_server_settings(&values, &mut saved);
                 crate::services::apply_config_settings(saved.service, &values, config);
                 config.servers[index] = saved.clone();
+                if let Some(folders) = folders {
+                    config.set_folders_for(&saved.id, folders);
+                }
                 if config.active_source.server_id() == Some(saved.id.as_str())
                     && let Some(server) = config.server.as_mut()
                 {
@@ -561,7 +579,7 @@ impl SourceService {
         self.source_info(id).await
     }
 
-    pub async fn delete_server(&self, id: &str) -> Result<(), ApiError> {
+    async fn delete_server(&self, id: &str) -> Result<(), ApiError> {
         self.config
             .ensure_unlocked(&["active_source", "server", "servers"])?;
         let current = self.current().await;

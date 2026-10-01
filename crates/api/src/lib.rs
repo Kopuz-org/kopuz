@@ -45,14 +45,13 @@ pub use queue::{
 };
 pub use radio::{RadioStationInfo, RadioStreamInfo};
 pub use schema::{
-    ChoiceOption, FieldKind, FieldSpec, FieldValue, Icon, Problem, Text, spec_value, toggle_of,
-    value_of,
+    ChoiceOption, FieldKind, FieldSpec, FieldValue, Icon, Problem, Text, decode_directories,
+    encode_directories, spec_value, toggle_of, value_of,
 };
 pub use sources::{
     AlbumPresentation, ArtistPresentation, ConnectKind, CredentialProvision, DraftCheck,
-    FavoritesSyncMode, IntegrationInfo, LocalSourceDraft, PlaylistCapability, ServerDraft,
-    ServiceInfo, ServiceRef, SignInKind, SourceCapabilities, SourceFolderEntry, SourceInfo,
-    SourceKind, SourceLoginRequest,
+    FavoritesSyncMode, IntegrationInfo, PlaylistCapability, ServiceInfo, ServiceRef, SignInKind,
+    SourceCapabilities, SourceDraft, SourceFolderEntry, SourceInfo, SourceLoginRequest,
 };
 
 /// The config view: the layered config with credential keys
@@ -393,10 +392,11 @@ pub trait SourceApi: Send + Sync {
 
     /// What a draft would do if it were saved, and what is wrong with it.
     /// Cheap enough to call as a form is typed into.
-    async fn check_server_draft(&self, draft: ServerDraft) -> Result<DraftCheck, ApiError>;
+    async fn check_source_draft(&self, draft: SourceDraft) -> Result<DraftCheck, ApiError>;
 
-    /// Answer a source's own options. Absent keys are left alone, and an empty
-    /// secret is not a request to clear one.
+    /// Answer a source's own options, a folder source's folders included.
+    /// Absent keys are left alone, and an empty secret is not a request to
+    /// clear one.
     async fn set_source_settings(
         &self,
         id: String,
@@ -409,21 +409,10 @@ pub trait SourceApi: Send + Sync {
     /// library.
     async fn switch_source(&self, id: String) -> Result<SourceInfo, ApiError>;
 
-    /// Create or update a local library. Absent `id` creates.
-    async fn upsert_local_source(&self, draft: LocalSourceDraft) -> Result<SourceInfo, ApiError>;
+    /// Create or update a source from the answers to its service's form. Absent `id` creates.
+    async fn upsert_source(&self, draft: SourceDraft) -> Result<SourceInfo, ApiError>;
 
-    async fn delete_local_source(&self, id: String) -> Result<(), ApiError>;
-
-    /// Replace a source's scan roots, or a server's selected folders.
-    async fn set_source_directories(
-        &self,
-        id: String,
-        directories: Vec<String>,
-    ) -> Result<SourceInfo, ApiError>;
-
-    async fn upsert_server(&self, draft: ServerDraft) -> Result<SourceInfo, ApiError>;
-
-    async fn delete_server(&self, id: String) -> Result<(), ApiError>;
+    async fn delete_source(&self, id: String) -> Result<(), ApiError>;
 
     /// Store a secret obtained elsewhere. Write-only.
     async fn provision_credentials(

@@ -222,6 +222,35 @@ fn Field(
                 }
             }
         }
+        api::FieldKind::Directories => {
+            let key = field.key.clone();
+            let paths = api::decode_directories(&value);
+            let added = paths.clone();
+            let removed = paths.clone();
+            let add_key = key.clone();
+            rsx! {
+                div { class: "flex-1",
+                    crate::settings_items::MultiDirectoryPicker {
+                        current_paths: paths.iter().map(std::path::PathBuf::from).collect::<Vec<_>>(),
+                        on_add: move |path: std::path::PathBuf| {
+                            let mut next = added.clone();
+                            let path = path.display().to_string();
+                            if !next.contains(&path) {
+                                next.push(path);
+                            }
+                            on_change.call(api::FieldValue::new(add_key.clone(), api::encode_directories(&next)));
+                        },
+                        on_remove: move |index: usize| {
+                            let mut next = removed.clone();
+                            if index < next.len() {
+                                next.remove(index);
+                            }
+                            on_change.call(api::FieldValue::new(key.clone(), api::encode_directories(&next)));
+                        },
+                    }
+                }
+            }
+        }
         kind => {
             let secret = matches!(kind, api::FieldKind::Secret);
             let key = field.key.clone();

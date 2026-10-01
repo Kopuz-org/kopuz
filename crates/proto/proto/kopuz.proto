@@ -107,13 +107,10 @@ service Kopuz {
   rpc GetSources(GetSourcesRequest) returns (SourceList);
   rpc GetServices(GetServicesRequest) returns (ServiceList);
   rpc SelectSource(SourceId) returns (SourceInfo);
-  rpc UpsertLocalSource(LocalSourceDraft) returns (SourceInfo);
-  rpc DeleteLocalSource(SourceId) returns (Unit);
-  rpc SetSourceDirectories(SetSourceDirectoriesRequest) returns (SourceInfo);
   rpc SetSourceSettings(SetSourceSettingsRequest) returns (SourceInfo);
-  rpc CheckServerDraft(ServerDraft) returns (DraftCheck);
-  rpc UpsertServer(ServerDraft) returns (SourceInfo);
-  rpc DeleteServer(SourceId) returns (Unit);
+  rpc CheckSourceDraft(SourceDraft) returns (DraftCheck);
+  rpc UpsertSource(SourceDraft) returns (SourceInfo);
+  rpc DeleteSource(SourceId) returns (Unit);
   rpc ProvisionCredentials(CredentialProvision) returns (SourceInfo);
   rpc LoginSource(SourceLoginRequest) returns (SourceInfo);
   rpc ClearCredentials(SourceId) returns (Unit);
@@ -643,6 +640,8 @@ enum FieldKindTag {
   FIELD_KIND_TAG_RADIO = 7;
   // No control: a line of explanation, which show_when can hide.
   FIELD_KIND_TAG_NOTE = 8;
+  // A list of filesystem paths; the value is one JSON array of strings.
+  FIELD_KIND_TAG_DIRECTORIES = 9;
 }
 
 message FieldKind {
@@ -689,13 +688,6 @@ message Problem {
 
 // No credential appears in any of these. A source says whether it is
 // authenticated, never with what.
-enum SourceKind {
-  SOURCE_KIND_UNKNOWN = 0;
-  SOURCE_KIND_LOCAL = 1;
-  SOURCE_KIND_LOCAL_LIBRARY = 2;
-  SOURCE_KIND_SERVER = 3;
-}
-
 enum PlaylistCapability {
   PLAYLIST_CAPABILITY_NONE = 0;
   PLAYLIST_CAPABILITY_ADD_REMOVE = 1;
@@ -779,15 +771,14 @@ message ServiceList {
 message SourceInfo {
   string id = 1;
   string name = 2;
-  SourceKind kind = 3;
-  // Absent for a local source.
-  optional ServiceRef service = 4;
+  reserved 3; // was kind
+  ServiceRef service = 4;
   bool active = 5;
   bool authenticated = 6;
   SourceCapabilities capabilities = 7;
   reserved 8, 9, 11, 12; // were url, browser, storefront, language: now settings rows
   bool anonymous = 10;
-  repeated string directories = 13;
+  reserved 13; // was directories: now a settings row
   // The line under its name: an address, or whatever else identifies it.
   optional string detail = 14;
   SignInKind sign_in = 15;
@@ -797,6 +788,8 @@ message SourceInfo {
   // None once a source is authenticated, so it cannot answer for a source
   // whose stored credentials have gone stale.
   SignInKind reauth = 17;
+  // Reachability is worth watching: the library lives across the network.
+  bool needs_network = 18;
 }
 
 message GetSourcesRequest {}
@@ -809,15 +802,8 @@ message SourceId {
   string id = 1;
 }
 
-message LocalSourceDraft {
-  // Absent creates a new local library.
-  optional string id = 1;
-  string name = 2;
-  repeated string directories = 3;
-}
-
 // The answers to a ServiceInfo's form. Absent id creates.
-message ServerDraft {
+message SourceDraft {
   optional string id = 1;
   string name = 2;
   reserved 3, 5, 6, 7, 8; // were url, browser, anonymous, storefront, language: now form answers
@@ -831,11 +817,6 @@ message ServerDraft {
 message DraftCheck {
   SignInKind sign_in = 1;
   repeated Problem problems = 2;
-}
-
-message SetSourceDirectoriesRequest {
-  string id = 1;
-  repeated string directories = 2;
 }
 
 message SetSourceSettingsRequest {

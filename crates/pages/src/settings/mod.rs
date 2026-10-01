@@ -63,7 +63,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .clone()
             .unwrap_or_default()
             .into_iter()
-            .filter(|source| source.kind == api::SourceKind::Server)
+            .filter(|source| source.needs_network)
             .collect()
     });
     let active_server = use_memo(move || servers().into_iter().find(|server| server.active));
@@ -862,8 +862,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     username,
                     password,
                     service_name: active_server()
-                        .and_then(|server| server.service)
-                        .map(|service| components::forms::text(&service.name))
+                        .map(|server| components::forms::text(&server.service.name))
                         .unwrap_or_else(|| i18n::t("server").to_string()),
                     error: login_error,
                     loading: is_loading,
@@ -887,7 +886,9 @@ fn remote_folder_settings(server: Option<api::SourceInfo>) -> Option<RemoteFolde
     if !server.capabilities.browse_folders || !server.authenticated {
         return None;
     }
-    let folders = server.directories.clone();
+    let folders = api::spec_value(&server.settings, "directories")
+        .map(api::decode_directories)
+        .unwrap_or_default();
     let add_id = server.id.clone();
     let add_folders = folders.clone();
     let remove_id = server.id.clone();
@@ -916,7 +917,8 @@ fn remote_folder_settings(server: Option<api::SourceInfo>) -> Option<RemoteFolde
 fn set_directories(id: String, directories: Vec<String>) {
     let api = hooks::consume_api();
     spawn(async move {
-        if let Err(error) = api.set_source_directories(id, directories).await {
+        let folders = api::FieldValue::new("directories", api::encode_directories(&directories));
+        if let Err(error) = api.set_source_settings(id, vec![folders]).await {
             tracing::warn!(%error, "setting the source folders failed");
             hooks::toast::toast_error(&error.to_string());
         }

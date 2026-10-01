@@ -63,6 +63,8 @@ pub enum FieldKind {
     Toggle,
     /// A single filesystem path, with whatever picker the platform has.
     Directory,
+    /// A list of filesystem paths; the value is one JSON array of strings (see [`encode_directories`]).
+    Directories,
     /// `custom` lets a value outside the list be typed in.
     Choice {
         options: Vec<ChoiceOption>,
@@ -115,6 +117,16 @@ impl FieldValue {
     pub fn is_on(&self) -> bool {
         self.value == "true"
     }
+}
+
+/// The answer of a [`FieldKind::Directories`] row: a JSON array of strings.
+pub fn encode_directories(paths: &[String]) -> String {
+    serde_json::to_string(paths).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// The paths in a [`FieldKind::Directories`] answer; anything that is not a JSON array is empty.
+pub fn decode_directories(value: &str) -> Vec<String> {
+    serde_json::from_str(value).unwrap_or_default()
 }
 
 /// Read the current value of one row of a published list.

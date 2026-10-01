@@ -200,13 +200,18 @@ pub fn ServerSettings(
                     let is_active = srv.active;
                     let id_switch = id.clone();
                     let id_delete = id.clone();
-                    let settings = srv.settings.clone();
+                    // A server that browses a folder tree has its own picker for them.
+                    let settings: Vec<api::FieldSpec> = srv
+                        .settings
+                        .iter()
+                        .filter(|field| {
+                            !(srv.capabilities.browse_folders
+                                && matches!(field.kind, api::FieldKind::Directories))
+                        })
+                        .cloned()
+                        .collect();
                     let settings_id = srv.id.clone();
-                    let service_name = srv
-                        .service
-                        .as_ref()
-                        .map(|service| crate::forms::text(&service.name))
-                        .unwrap_or_default();
+                    let service_name = crate::forms::text(&srv.service.name);
                     let url = srv.detail.clone().unwrap_or_default();
                     // Folders are the whole library definition here, so the
                     // picker sits on the card the way it does for a local

@@ -57,7 +57,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
             if !active
                 .peek()
                 .as_ref()
-                .is_some_and(|source| source.kind == api::SourceKind::Server)
+                .is_some_and(|source| source.needs_network)
             {
                 if *is_offline.peek() {
                     is_offline.set(false);

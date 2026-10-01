@@ -18,8 +18,7 @@ pub enum ConnStatus {
     Offline,
 }
 
-/// Connection status of the active source: local libraries are always Online
-/// (no auth); a server is probed by the daemon on each switch.
+/// Connection status of the active source, probed by the daemon on each switch.
 pub fn use_connection_status() -> Memo<ConnStatus> {
     let api = crate::api::use_api();
     let sources = crate::sources::use_sources();
@@ -34,10 +33,6 @@ pub fn use_connection_status() -> Memo<ConnStatus> {
         let Some(active) = active else {
             return;
         };
-        if active.kind != api::SourceKind::Server {
-            status.set(ConnStatus::Online);
-            return;
-        }
         status.set(ConnStatus::Connecting);
         let api = api.clone();
         spawn(async move {

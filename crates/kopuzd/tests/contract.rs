@@ -1234,18 +1234,27 @@ async fn sources_agree_across_transports_and_carry_no_secret() {
     assert_eq!(local.len(), 1, "just the default local library: {local:?}");
     assert!(local[0].active, "the default library is active");
     assert!(local[0].authenticated, "a local library needs no sign-in");
-    assert_eq!(local[0].service, None);
+    assert_eq!(local[0].service.id, "folders");
+    assert!(!local[0].needs_network);
     assert_eq!(local[0].sign_in, api::SignInKind::None);
+    assert!(
+        local[0]
+            .settings
+            .iter()
+            .any(|field| matches!(field.kind, api::FieldKind::Directories)),
+        "its folders are a settings row: {:?}",
+        local[0].settings
+    );
 
     // Adding a server is visible to both, and provisioning a credential
     // reports authentication without echoing the secret.
-    let draft = api::ServerDraft {
+    let draft = api::SourceDraft {
         name: "Home".into(),
         service: "jellyfin".into(),
         values: vec![api::FieldValue::new("url", "https://jelly.example")],
         ..Default::default()
     };
-    let added = pair.wire.upsert_server(draft).await.expect("add server");
+    let added = pair.wire.upsert_source(draft).await.expect("add server");
     assert!(!added.authenticated, "a new server has no credentials yet");
     assert_eq!(added.detail.as_deref(), Some("https://jelly.example"));
     assert_eq!(
@@ -1278,7 +1287,7 @@ async fn sources_agree_across_transports_and_carry_no_secret() {
     );
 
     // A bad draft is refused identically.
-    let bad = api::ServerDraft {
+    let bad = api::SourceDraft {
         name: "No URL".into(),
         service: "jellyfin".into(),
         values: vec![api::FieldValue::new("url", "not-a-url")],
@@ -1286,18 +1295,147 @@ async fn sources_agree_across_transports_and_carry_no_secret() {
     };
     assert_eq!(
         pair.local
-            .upsert_server(bad.clone())
+            .upsert_source(bad.clone())
             .await
             .err()
             .map(|error| error.code),
-        pair.wire.upsert_server(bad).await.err().map(|e| e.code),
+        pair.wire.upsert_source(bad).await.err().map(|e| e.code),
     );
 
     pair.wire
-        .delete_server(added.id.clone())
+        .delete_source(added.id.clone())
         .await
         .expect("delete");
     assert_eq!(pair.local.sources().await.expect("sources").len(), 1);
+}
+
+/// A folder source is created, edited and deleted through the same calls as a
+/// server, with its folders carried as one field value.
+#[tokio::test]
+async fn a_folder_source_is_managed_through_the_generic_source_calls() {
+    let pair = spawn_pair().await;
+    let music = tempfile::tempdir().expect("tempdir");
+    let more = tempfile::tempdir().expect("tempdir");
+    let path = |dir: &tempfile::TempDir| dir.path().display().to_string();
+    let folders =
+        |paths: &[String]| api::FieldValue::new("directories", api::encode_directories(paths));
+
+    let services = pair.wire.services().await.expect("services");
+    let offered = services
+        .iter()
+        .find(|service| service.id == "folders")
+        .expect("folders are offered like any service");
+    assert!(
+        offered
+            .fields
+            .iter()
+            .any(|field| field.key == "directories"
+                && matches!(field.kind, api::FieldKind::Directories)),
+        "{offered:?}"
+    );
+
+    let empty = api::SourceDraft {
+        name: "Jazz".into(),
+        service: "folders".into(),
+        values: vec![folders(&[])],
+        ..Default::default()
+    };
+    let check = pair
+        .wire
+        .check_source_draft(empty.clone())
+        .await
+        .expect("check");
+    assert_eq!(
+        check,
+        pair.local
+            .check_source_draft(empty.clone())
+            .await
+            .expect("check")
+    );
+    assert!(
+        check
+            .problems
+            .iter()
+            .any(|problem| problem.field.as_deref() == Some("directories")),
+        "a folder source needs a folder: {check:?}"
+    );
+    assert_eq!(
+        pair.wire.upsert_source(empty).await.err().map(|e| e.code),
+        Some(ErrorCode::InvalidInput)
+    );
+
+    let created = pair
+        .wire
+        .upsert_source(api::SourceDraft {
+            name: "Jazz".into(),
+            service: "folders".into(),
+            values: vec![folders(&[path(&music)])],
+            ..Default::default()
+        })
+        .await
+        .expect("create");
+    assert_eq!(created.name, "Jazz");
+    assert_eq!(created.service.id, "folders");
+    assert!(created.authenticated && !created.needs_network);
+    assert_eq!(
+        api::spec_value(&created.settings, "directories").map(api::decode_directories),
+        Some(vec![path(&music)])
+    );
+    let listed = pair.local.sources().await.expect("sources");
+    assert_eq!(listed, pair.wire.sources().await.expect("sources"));
+    assert_eq!(listed.len(), 2, "{listed:?}");
+
+    let renamed = pair
+        .local
+        .upsert_source(api::SourceDraft {
+            id: Some(created.id.clone()),
+            name: "Bebop".into(),
+            service: "folders".into(),
+            values: vec![folders(&[path(&music), path(&more)])],
+            ..Default::default()
+        })
+        .await
+        .expect("edit");
+    assert_eq!(renamed.id, created.id);
+    assert_eq!(renamed.name, "Bebop");
+    assert_eq!(
+        api::spec_value(&renamed.settings, "directories").map(api::decode_directories),
+        Some(vec![path(&music), path(&more)])
+    );
+
+    let narrowed = pair
+        .wire
+        .set_source_settings(created.id.clone(), vec![folders(&[path(&more)])])
+        .await
+        .expect("set folders");
+    assert_eq!(
+        api::spec_value(&narrowed.settings, "directories").map(api::decode_directories),
+        Some(vec![path(&more)])
+    );
+    assert_eq!(narrowed.name, "Bebop", "the name is left alone");
+
+    assert_eq!(
+        pair.wire
+            .validate_source(created.id.clone())
+            .await
+            .expect("validate"),
+        api::SourceState::Online
+    );
+
+    pair.wire
+        .delete_source(created.id.clone())
+        .await
+        .expect("delete");
+    let left = pair.local.sources().await.expect("sources");
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(
+        pair.local
+            .delete_source(created.id)
+            .await
+            .err()
+            .map(|e| e.code),
+        Some(ErrorCode::NotFound)
+    );
 }
 
 /// The services a daemon offers, and the forms that add them, are its answer
@@ -1337,19 +1475,19 @@ async fn services_and_their_forms_agree_across_transports() {
 async fn a_draft_is_checked_identically_across_transports() {
     let pair = spawn_pair().await;
 
-    let missing = api::ServerDraft {
+    let missing = api::SourceDraft {
         name: String::new(),
         service: "spotify".into(),
         ..Default::default()
     };
     let local = pair
         .local
-        .check_server_draft(missing.clone())
+        .check_source_draft(missing.clone())
         .await
         .expect("local check");
     let wire = pair
         .wire
-        .check_server_draft(missing)
+        .check_source_draft(missing)
         .await
         .expect("wire check");
     assert_eq!(local, wire);
@@ -1362,13 +1500,13 @@ async fn a_draft_is_checked_identically_across_transports() {
         "a Spotify server needs its client id: {local:?}"
     );
 
-    let good = api::ServerDraft {
+    let good = api::SourceDraft {
         name: "Home".into(),
         service: "jellyfin".into(),
         values: vec![api::FieldValue::new("url", "https://jelly.example")],
         ..Default::default()
     };
-    let check = pair.wire.check_server_draft(good).await.expect("check");
+    let check = pair.wire.check_source_draft(good).await.expect("check");
     assert!(
         check.problems.is_empty(),
         "nothing wrong with it: {check:?}"
@@ -1376,19 +1514,19 @@ async fn a_draft_is_checked_identically_across_transports() {
     assert_eq!(check.sign_in, api::SignInKind::Password);
 
     // A service this daemon does not have is invalid input, not a panic.
-    let unknown = api::ServerDraft {
+    let unknown = api::SourceDraft {
         name: "Home".into(),
         service: "not-a-service".into(),
         ..Default::default()
     };
     assert_eq!(
         pair.local
-            .check_server_draft(unknown.clone())
+            .check_source_draft(unknown.clone())
             .await
             .err()
             .map(|error| error.code),
         pair.wire
-            .check_server_draft(unknown)
+            .check_source_draft(unknown)
             .await
             .err()
             .map(|error| error.code),
@@ -1403,7 +1541,7 @@ async fn source_settings_round_trip_without_touching_what_was_not_answered() {
 
     let added = pair
         .wire
-        .upsert_server(api::ServerDraft {
+        .upsert_source(api::SourceDraft {
             name: "Music".into(),
             service: "applemusic".into(),
             values: vec![

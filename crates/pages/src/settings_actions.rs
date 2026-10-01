@@ -134,8 +134,8 @@ pub fn draft(
     service: Signal<String>,
     values: Signal<Vec<api::FieldValue>>,
     secrets: Signal<Vec<api::FieldValue>>,
-) -> api::ServerDraft {
-    api::ServerDraft {
+) -> api::SourceDraft {
+    api::SourceDraft {
         id: None,
         name: name(),
         service: service(),
@@ -146,15 +146,15 @@ pub fn draft(
 
 /// Ask the daemon what is wrong with a draft. A service it does not have is
 /// simply nothing to say yet -- the form has not been filled in.
-pub fn check_draft(draft: api::ServerDraft, mut check: Signal<Option<api::DraftCheck>>) {
+pub fn check_draft(draft: api::SourceDraft, mut check: Signal<Option<api::DraftCheck>>) {
     let api = hooks::consume_api();
     spawn(async move {
-        check.set(api.check_server_draft(draft).await.ok());
+        check.set(api.check_source_draft(draft).await.ok());
     });
 }
 
 pub fn add_server(
-    draft: api::ServerDraft,
+    draft: api::SourceDraft,
     mut server_name: Signal<String>,
     mut values: Signal<Vec<api::FieldValue>>,
     mut secrets: Signal<Vec<api::FieldValue>>,
@@ -168,7 +168,7 @@ pub fn add_server(
         async move {
             // The daemon owns what each service's form needs, so it is what
             // says whether these answers are enough.
-            match api.check_server_draft(draft.clone()).await {
+            match api.check_source_draft(draft.clone()).await {
                 Ok(check) => {
                     if let Some(problem) = check.problems.first() {
                         error.set(Some(components::forms::text(&problem.label)));
@@ -180,7 +180,7 @@ pub fn add_server(
                     return;
                 }
             }
-            let saved = match api.upsert_server(draft).await {
+            let saved = match api.upsert_source(draft).await {
                 Ok(saved) => saved,
                 Err(failure) => {
                     error.set(Some(failure.to_string()));
@@ -220,7 +220,7 @@ pub fn switch_server(
 pub fn delete_saved(id: String) {
     let api = hooks::consume_api();
     spawn(async move {
-        if let Err(error) = api.delete_server(id).await {
+        if let Err(error) = api.delete_source(id).await {
             tracing::warn!(%error, "deleting a server failed");
             hooks::toast::toast_error(&error.to_string());
         }

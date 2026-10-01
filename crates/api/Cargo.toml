@@ -20,6 +20,7 @@ config = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

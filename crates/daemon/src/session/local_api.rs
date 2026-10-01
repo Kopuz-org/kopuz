@@ -752,11 +752,11 @@ impl api::SourceApi for LocalApi {
         Ok(self.sources()?.services().await)
     }
 
-    async fn check_server_draft(
+    async fn check_source_draft(
         &self,
-        draft: api::ServerDraft,
+        draft: api::SourceDraft,
     ) -> Result<api::DraftCheck, ApiError> {
-        self.sources()?.check_server_draft(draft).await
+        self.sources()?.check_source_draft(draft).await
     }
 
     async fn set_source_settings(
@@ -771,33 +771,12 @@ impl api::SourceApi for LocalApi {
         self.sources()?.switch_source(&id).await
     }
 
-    async fn upsert_local_source(
-        &self,
-        draft: api::LocalSourceDraft,
-    ) -> Result<api::SourceInfo, ApiError> {
-        self.sources()?.upsert_local_source(draft).await
+    async fn upsert_source(&self, draft: api::SourceDraft) -> Result<api::SourceInfo, ApiError> {
+        self.sources()?.upsert_source(draft).await
     }
 
-    async fn delete_local_source(&self, id: String) -> Result<(), ApiError> {
-        self.sources()?.delete_local_source(&id).await
-    }
-
-    async fn set_source_directories(
-        &self,
-        id: String,
-        directories: Vec<String>,
-    ) -> Result<api::SourceInfo, ApiError> {
-        self.sources()?
-            .set_source_directories(&id, directories)
-            .await
-    }
-
-    async fn upsert_server(&self, draft: api::ServerDraft) -> Result<api::SourceInfo, ApiError> {
-        self.sources()?.upsert_server(draft).await
-    }
-
-    async fn delete_server(&self, id: String) -> Result<(), ApiError> {
-        self.sources()?.delete_server(&id).await
+    async fn delete_source(&self, id: String) -> Result<(), ApiError> {
+        self.sources()?.delete_source(&id).await
     }
 
     async fn provision_credentials(
