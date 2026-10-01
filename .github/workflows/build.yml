@@ -20,6 +20,9 @@ jobs:
       - name: Check Rust i18n usage against en.ftl
         run: nix shell nixpkgs#nushell --command nu scripts/check_i18n_usage.nu
 
+      - name: Check frontend crates know no local source
+        run: nix shell nixpkgs#nushell --command nu scripts/check_frontend_sources.nu
+
       # The comparison needs a master to read; a shallow checkout carries none.
       - name: Fetch master for the wire comparison
         run: git fetch --depth=1 origin master
