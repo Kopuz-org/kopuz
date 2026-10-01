@@ -170,7 +170,7 @@ impl From<QueueCreditRow> for ArtistCredit {
     fn from(r: QueueCreditRow) -> Self {
         ArtistCredit {
             name: r.name,
-            key: r.artist_key.or_else(|| r.source_artist_id.clone()),
+            key: r.artist_key,
             id: r.source_artist_id,
             source: r.source.as_deref().map(config::Source::from_column),
         }

@@ -797,11 +797,6 @@ async fn purge_source(conn: &mut sqlx::SqliteConnection, source: &str) -> Result
     ] {
         sqlx::query(sql).bind(source).execute(&mut *conn).await?;
     }
-    let id_keys = format!("id:{source}:%");
-    sqlx::query("DELETE FROM kv WHERE name LIKE ?1")
-        .bind(&id_keys)
-        .execute(&mut *conn)
-        .await?;
     let miss_prefix = format!("{source}\u{1f}");
     sqlx::query("DELETE FROM kv WHERE kind = ?1 AND substr(name, 1, length(?2)) = ?2")
         .bind(crate::ARTIST_PHOTO_MISS_KIND)

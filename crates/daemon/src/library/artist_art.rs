@@ -75,8 +75,13 @@ impl LibraryService {
             .unlinked_artist_keys(source.source())
             .await
             .map_err(db_error)?;
+        let linked = self
+            .db
+            .linked_artist_keys(source.source())
+            .await
+            .map_err(db_error)?;
         for (artist, url) in images {
-            let Some(key) = credit_key(&artist, &unlinked) else {
+            let Some(key) = credit_key(&artist, &linked, &unlinked) else {
                 continue;
             };
             let _ = source.set_artist_image(&key, "server", Some(&url)).await;
@@ -124,8 +129,7 @@ impl LibraryService {
                     let has_photo =
                         photos.contains_key(&(scope.as_str().to_string(), key.to_string()));
                     let wants_photo = !has_photo && !fresh_misses.contains(&miss);
-                    let wanted =
-                        wants_photo || artist.id.as_ref().is_some_and(|id| unnamed.contains(id));
+                    let wanted = wants_photo || unnamed.contains(key);
                     wanted && in_flight.insert(miss.clone()) && {
                         claim.keys.push(miss);
                         true
@@ -234,14 +238,15 @@ async fn resolve_one(source: &ActiveSource, artist: &reader::ArtistCredit) -> bo
     }
 }
 
-/// The key a source's listing credit is filed under: its own id for a linked artist, else its unlinked row by name.
+/// The key a source's listing credit is filed under: its own, else its linked row by the id the source issued, else its unlinked row by name.
 pub(super) fn credit_key(
     credit: &reader::ArtistCredit,
+    linked: &std::collections::HashMap<String, String>,
     unlinked: &std::collections::HashMap<String, String>,
 ) -> Option<String> {
     match (&credit.key, &credit.id) {
         (Some(key), _) => Some(key.clone()),
-        (None, Some(id)) => Some(id.clone()),
+        (None, Some(id)) => linked.get(id).cloned(),
         (None, None) => unlinked
             .get(&utils::artist::normalize_artist_key(&credit.name))
             .cloned(),

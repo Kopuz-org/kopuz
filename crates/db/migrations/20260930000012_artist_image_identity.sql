@@ -15,10 +15,12 @@ SELECT a.source, a.key, i.kind, i.image_ref
                 AND i.artist_norm = 'id:' || a.source || ':' || a.source_artist_id;
 
 -- A bare folded name was shared by every unlinked artist called that, so each of them keeps a copy.
+-- A linked artist keeps only a custom one, which the old read fell back to and nothing can fetch again.
 INSERT OR IGNORE INTO artist_images_by_key (source, artist_key, kind, image_ref)
 SELECT a.source, a.key, i.kind, i.image_ref
   FROM artist_images i
-  JOIN artists a ON a.source_artist_id IS NULL AND a.name_key = i.artist_norm;
+  JOIN artists a ON a.name_key = i.artist_norm
+                AND (a.source_artist_id IS NULL OR i.kind = 'custom');
 
 DROP TABLE artist_images;
 ALTER TABLE artist_images_by_key RENAME TO artist_images;

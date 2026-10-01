@@ -20,9 +20,7 @@ pub struct Album {
 }
 
 /// A source-agnostic artist photo reference: a local file path or a remote URL.
-/// Resolved to a `CoverUrl` by the cover seam (`server::cover::artist`), so the
-/// UI never branches on where the image lives. A custom user override is handled
-/// separately (it's a priority concern, not a source one).
+/// A custom user override is handled separately (it's a priority concern, not a source one).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArtistImageRef {
     /// A local filesystem path (from the local scan).

@@ -377,8 +377,9 @@ impl LibraryService {
             self.invalidate(Table::Tracks);
         }
         let unlinked = self.db.unlinked_artist_keys(&src).await.map_err(db_error)?;
+        let linked = self.db.linked_artist_keys(&src).await.map_err(db_error)?;
         for (artist, url) in &snapshot.artist_images {
-            let Some(key) = super::artist_art::credit_key(artist, &unlinked) else {
+            let Some(key) = super::artist_art::credit_key(artist, &linked, &unlinked) else {
                 continue;
             };
             let _ = source.set_artist_image(&key, "server", Some(url)).await;

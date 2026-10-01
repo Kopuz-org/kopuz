@@ -221,6 +221,12 @@ pub trait ReadStore: Send + Sync {
         source: &Source,
     ) -> Result<std::collections::HashSet<String>, DbError>;
 
+    /// The key of each of `source`'s linked artists, by the id the source issued.
+    async fn linked_artist_keys(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+
     /// The key of each of `source`'s unlinked artists, by folded name.
     async fn unlinked_artist_keys(
         &self,

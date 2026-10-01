@@ -200,6 +200,13 @@ impl ReadStore for Native {
         queries::artist_keys_unnamed_by_source(&self.pool(), source).await
     }
 
+    async fn linked_artist_keys(
+        &self,
+        source: &crate::Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError> {
+        queries::linked_artist_keys(&self.pool(), source).await
+    }
+
     async fn unlinked_artist_keys(
         &self,
         source: &crate::Source,

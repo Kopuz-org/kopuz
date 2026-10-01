@@ -1104,13 +1104,13 @@ async fn import_artist_images(
     kind: &str,
     map: &HashMap<String, String>,
 ) -> Result<(), DbError> {
-    // The legacy maps are keyed by folded name, so an artist in `sources` is the unlinked row of that name.
+    // The legacy maps are keyed by folded name: the unlinked rows of that name, and a linked one only for a custom photo.
     for source in sources {
         for (artist, image) in map {
             sqlx::query!(
                 "INSERT OR IGNORE INTO artist_images (source, artist_key, kind, image_ref) \
                  SELECT source, key, ?3, ?4 FROM artists \
-                  WHERE source = ?1 AND source_artist_id IS NULL AND name_key = ?2",
+                  WHERE source = ?1 AND name_key = ?2 AND (source_artist_id IS NULL OR ?3 = 'custom')",
                 source,
                 artist,
                 kind,

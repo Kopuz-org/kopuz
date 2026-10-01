@@ -146,6 +146,34 @@ async fn unlinked_artist_keys_answer_by_folded_name() {
 }
 
 #[tokio::test]
+async fn linked_artist_keys_answer_by_source_id() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let srv = Source::Server("s1".into());
+    let linked = ArtistCredit {
+        source: Some(srv.clone()),
+        ..ArtistCredit::linked("Ada", "ar-1")
+    };
+    db.upsert_tracks(
+        &srv,
+        &[
+            track("b", "Ada", vec![linked]),
+            track("c", "Bob", Vec::new()),
+        ],
+    )
+    .await
+    .unwrap();
+    let keys = db.linked_artist_keys(&srv).await.unwrap();
+    assert_eq!(keys.len(), 1);
+    assert!(keys.contains_key("ar-1"));
+    assert!(
+        db.linked_artist_keys(&Source::Local)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn migration_converts_both_legacy_key_shapes() {
     let migrations = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations");
     let mut files: Vec<PathBuf> = std::fs::read_dir(&migrations)
@@ -179,6 +207,8 @@ async fn migration_converts_both_legacy_key_shapes() {
            ('id:s1:ar-1', 'server', 'https://p/ar1'), \
            ('ada', 'server', 'https://p/ada'), \
            ('ada', 'custom', '/pics/ada.png'), \
+           ('ada lovelace', 'custom', '/pics/lovelace.png'), \
+           ('ada lovelace', 'server', 'https://p/lovelace'), \
            ('nobody', 'server', 'https://p/nobody'), \
            ('id:s9:zz', 'server', 'https://p/gone'); \
          INSERT INTO kv (name, kind, value) VALUES ('ada', 'artist_photo_miss', '');",
@@ -215,6 +245,7 @@ async fn migration_converts_both_legacy_key_shapes() {
         vec![
             row("local", "k-local", "custom", "/pics/ada.png"),
             row("local", "k-local", "server", "https://p/ada"),
+            row("s1", "ar-1", "custom", "/pics/lovelace.png"),
             row("s1", "ar-1", "server", "https://p/ar1"),
             row("s1", "k-s1", "custom", "/pics/ada.png"),
             row("s1", "k-s1", "server", "https://p/ada"),

@@ -506,6 +506,25 @@ pub async fn artist_keys_unnamed_by_source(
     Ok(keys.into_iter().collect())
 }
 
+/// The key of each linked artist of `source`, by the id the source issued.
+pub async fn linked_artist_keys(
+    pool: &SqlitePool,
+    source: &Source,
+) -> Result<std::collections::HashMap<String, String>, DbError> {
+    let src = source.as_str();
+    let rows = sqlx::query!(
+        r#"SELECT source_artist_id AS "source_artist_id!: String", key FROM artists
+            WHERE source = ?1 AND source_artist_id IS NOT NULL"#,
+        src
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| (r.source_artist_id, r.key))
+        .collect())
+}
+
 /// The key of each unlinked artist of `source`, by folded name.
 pub async fn unlinked_artist_keys(
     pool: &SqlitePool,
