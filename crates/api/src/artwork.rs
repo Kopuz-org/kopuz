@@ -10,7 +10,7 @@
 pub enum ArtworkTarget {
     Track(String),
     Album(String),
-    Artist(crate::ArtistKey),
+    Artist(String),
     Playlist(String),
     Catalog(String),
     Station(String),

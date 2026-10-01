@@ -385,9 +385,14 @@ impl MutationService {
     }
 
     /// Where this artist's own photo is filed in `artist_images`.
-    async fn artist_image_key(&self, artist: &api::ArtistKey) -> Result<String, ApiError> {
+    async fn artist_image_key(&self, artist: &str) -> Result<String, ApiError> {
         let source = self.config().active_source;
-        let row = crate::artist_key::row(&self.db, &source, artist).await?;
+        let row = self
+            .db
+            .artist(&source, artist)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| ApiError::not_found("the library files no such artist"))?;
         Ok(utils::artist::image_key(
             source.as_str(),
             &row.name,

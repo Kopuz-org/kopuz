@@ -735,7 +735,7 @@ fn RemoteAlbumDetail(
     config: Signal<AppConfig>,
     title: String,
     artist: String,
-    artist_key: Option<api::ArtistKey>,
+    artist_key: Option<String>,
     year: Option<String>,
     album_id: Option<String>,
     local_cover: Option<utils::CoverUrl>,

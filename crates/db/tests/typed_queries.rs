@@ -91,7 +91,7 @@ async fn seed(db_path: &std::path::Path) {
            ('srv-1', 'al-yt', 'Yt Album', 'Cyn', 'Pop');\n\
          INSERT INTO listen_counts (source, track_key, count) VALUES \
            ('local', '/music/rock/a1.flac', 3), ('local', '/music/jazz/b_1.flac', 10), ('srv-1', 'vid1', 7);\n\
-         INSERT INTO artists (source, name, name_key) SELECT DISTINCT source, artist, lower(artist) FROM tracks;\n\
+         INSERT INTO artists (source, name, name_key, key) SELECT source, artist, lower(artist), lower(hex(randomblob(16))) FROM (SELECT DISTINCT source, artist FROM tracks);\n\
          INSERT INTO track_credits (track_pk, position, artist_pk, name) \
            SELECT t.rowid_pk, 0, a.id, t.artist FROM tracks t JOIN artists a ON a.source = t.source AND a.name = t.artist;\n",
     );
@@ -113,19 +113,19 @@ async fn typed_queries_smoke() {
         "album_tracks orders by disc/track"
     );
 
-    let bea_pk = db
+    let bea_key = db
         .artists(&local)
         .await
         .unwrap()
         .into_iter()
         .find(|artist| artist.name == "Bea")
         .expect("Bea is listed")
-        .pk;
-    let bea = db.artist_tracks(&local, bea_pk, None).await.unwrap();
+        .key;
+    let bea = db.artist_tracks(&local, &bea_key, None).await.unwrap();
     assert_eq!(bea.len(), 2);
     assert!(bea.iter().all(|t| t.artist == "Bea"));
 
-    let bounded = db.artist_tracks(&local, bea_pk, Some(1)).await.unwrap();
+    let bounded = db.artist_tracks(&local, &bea_key, Some(1)).await.unwrap();
     assert_eq!(bounded.len(), 1, "limit bounds the query SQL-side");
 
     let jazz = db.genre_tracks(&local, "Jazz").await.unwrap();

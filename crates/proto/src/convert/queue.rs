@@ -43,7 +43,7 @@ pub fn queue_context_from_proto(value: &QueueContext) -> Option<api::QueueContex
         },
         queue_context::Kind::Album(id) => api::QueueContext::Album { id: id.id.clone() },
         queue_context::Kind::ArtistKey(key) => api::QueueContext::Artist {
-            artist: api::ArtistKey::new(key.clone()),
+            artist: key.clone(),
         },
         queue_context::Kind::Genre(name) => api::QueueContext::Genre {
             name: name.name.clone(),

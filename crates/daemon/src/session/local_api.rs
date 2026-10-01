@@ -417,15 +417,11 @@ impl api::LibraryApi for LocalApi {
         self.mutations()?.remove_artwork(target).await
     }
 
-    async fn artist_tracks(
-        &self,
-        artist: api::ArtistKey,
-        page: Page,
-    ) -> Result<api::TrackPage, ApiError> {
+    async fn artist_tracks(&self, artist: String, page: Page) -> Result<api::TrackPage, ApiError> {
         self.library()?.artist_tracks(&artist, page).await
     }
 
-    async fn artist(&self, artist: api::ArtistKey) -> Result<api::ArtistDetail, ApiError> {
+    async fn artist(&self, artist: String) -> Result<api::ArtistDetail, ApiError> {
         self.library()?.artist(&artist).await
     }
 
@@ -461,7 +457,7 @@ impl api::LibraryApi for LocalApi {
         self.library()?.album_web_url(&id).await
     }
 
-    async fn refresh_artist_artwork(&self, artists: Vec<api::ArtistKey>) -> Result<(), ApiError> {
+    async fn refresh_artist_artwork(&self, artists: Vec<String>) -> Result<(), ApiError> {
         self.library()?.refresh_artist_artwork(artists).await
     }
 

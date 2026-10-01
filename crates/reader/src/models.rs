@@ -14,9 +14,9 @@ pub struct Album {
     pub manual_cover: bool,
     #[serde(default)]
     pub artist_id: Option<String>,
-    /// The library row of the billed artist, for an album read back from the library.
+    /// The key the library files the billed artist under, for an album read back from the library.
     #[serde(skip)]
-    pub artist_pk: Option<i64>,
+    pub artist_key: Option<String>,
 }
 
 /// A source-agnostic artist photo reference: a local file path or a remote URL.
@@ -185,9 +185,9 @@ pub struct ArtistCredit {
     /// The source that listed this credit, stamped as the row leaves it; `None` for one whose origin is unknown.
     #[serde(default)]
     pub source: Option<config::Source>,
-    /// The library row this credit is filed under, for a credit read back from the library.
+    /// The key the library files this artist under, for a credit read back from it; a linked artist's is its `id`.
     #[serde(default)]
-    pub artist_pk: Option<i64>,
+    pub key: Option<String>,
 }
 
 impl ArtistCredit {
@@ -196,7 +196,7 @@ impl ArtistCredit {
             name: name.into(),
             id: None,
             source: None,
-            artist_pk: None,
+            key: None,
         }
     }
 
@@ -205,8 +205,13 @@ impl ArtistCredit {
             name: name.into(),
             id: Some(id.into()),
             source: None,
-            artist_pk: None,
+            key: None,
         }
+    }
+
+    /// The key this artist is opened by: the library's, else the id its source issued, which the library files it under too.
+    pub fn open_key(&self) -> Option<&str> {
+        self.key.as_deref().or(self.id.as_deref())
     }
 }
 

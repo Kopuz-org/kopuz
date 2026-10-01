@@ -5,7 +5,7 @@ use kopuz_route::Route;
 pub struct NavSnapshot {
     pub route: Route,
     pub album_id: String,
-    pub artist: Option<api::ArtistKey>,
+    pub artist: Option<String>,
     pub playlist_id: Option<String>,
     pub discover_playlist_id: Option<String>,
     pub discover_playlist_title: Option<String>,
@@ -15,7 +15,7 @@ pub struct NavSnapshot {
 pub struct NavigationController {
     pub current_route: Signal<Route>,
     /// The open artist; `None` on the artist route is the grid of them all.
-    pub selected_artist: Signal<Option<api::ArtistKey>>,
+    pub selected_artist: Signal<Option<String>>,
     pub selected_album_id: Signal<String>,
     pub selected_playlist_id: Signal<Option<String>>,
     pub discover_playlist_id: Signal<Option<String>>,
@@ -25,7 +25,7 @@ pub struct NavigationController {
 }
 
 impl NavigationController {
-    pub fn open_artist(self, artist: api::ArtistKey) {
+    pub fn open_artist(self, artist: String) {
         let mut selected = self.selected_artist;
         let mut route = self.current_route;
         selected.set(Some(artist));

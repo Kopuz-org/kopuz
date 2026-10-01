@@ -135,7 +135,7 @@ pub(crate) async fn file_artist(
         Some(id) => {
             // A credit's text names the row until the source's own record has; after that it is one track's billing.
             sqlx::query_scalar!(
-                "INSERT INTO artists (source, source_artist_id, name, name_key) VALUES (?1, ?2, ?3, ?4) \
+                "INSERT INTO artists (source, source_artist_id, name, name_key, key) VALUES (?1, ?2, ?3, ?4, ?2) \
                  ON CONFLICT(source, source_artist_id) DO UPDATE SET \
                    name = CASE WHEN artists.named_by_source = 1 THEN artists.name ELSE ?3 END, \
                    name_key = CASE WHEN artists.named_by_source = 1 THEN artists.name_key ELSE ?4 END \
@@ -149,9 +149,9 @@ pub(crate) async fn file_artist(
             .await?
         }
         None => {
-            // The no-op update is what makes RETURNING answer for a row that already exists.
+            // Minted once when the row is filed; the no-op update is what makes RETURNING answer for a row that already exists.
             sqlx::query_scalar!(
-                "INSERT INTO artists (source, name, name_key) VALUES (?1, ?2, ?3) \
+                "INSERT INTO artists (source, name, name_key, key) VALUES (?1, ?2, ?3, lower(hex(randomblob(16)))) \
                  ON CONFLICT(source, name_key) WHERE source_artist_id IS NULL \
                  DO UPDATE SET name = artists.name \
                  RETURNING id AS \"id!: i64\"",
@@ -1285,14 +1285,14 @@ async fn write_queue_rows(
             let at = at as i64;
             let source = credit.source.as_ref().map(|source| source.as_str());
             sqlx::query!(
-                "INSERT INTO queue_credits (queue_position, position, name, source_artist_id, source, artist_pk) \
+                "INSERT INTO queue_credits (queue_position, position, name, source_artist_id, source, artist_key) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 position,
                 at,
                 credit.name,
                 credit.id,
                 source,
-                credit.artist_pk
+                credit.key
             )
             .execute(&mut *conn)
             .await?;

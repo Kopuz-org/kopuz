@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT t.rowid_pk AS \"rowid_pk!\", t.track_key, t.service,\n                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS \"cover_path?: String\",\n                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,\n                  t.track_number, t.disc_number,\n                  mb.release_id AS \"mb_release_id?\", mb.recording_id AS \"mb_recording_id?\", mb.track_id AS \"mb_track_id?\"\n             FROM tracks t\n             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id\n             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk\n            WHERE t.source = ?1 AND t.track_key LIKE ?2 ESCAPE '\\'\n            ORDER BY t.track_key",
+  "describe": {
+    "columns": [
+      {
+        "name": "rowid_pk!",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "track_key",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "service",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "cover_path?: String",
+        "ordinal": 3,
+        "type_info": "Null"
+      },
+      {
+        "name": "source_album_id",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "title",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "artist",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "album",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "duration",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "khz",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "bitrate",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "track_number",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "disc_number",
+        "ordinal": 12,
+        "type_info": "Integer"
+      },
+      {
+        "name": "mb_release_id?",
+        "ordinal": 13,
+        "type_info": "Text"
+      },
+      {
+        "name": "mb_recording_id?",
+        "ordinal": 14,
+        "type_info": "Text"
+      },
+      {
+        "name": "mb_track_id?",
+        "ordinal": 15,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false,
+      true,
+      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "782a063c90c400e30f3245e3b18b0e889888ff29af8288940a0f3450e388796a"
+}

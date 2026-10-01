@@ -192,7 +192,7 @@ pub fn artwork_request_from_proto(value: &ArtworkRequest) -> Option<api::Artwork
     let target = match value.entity.as_ref()? {
         Entity::Track(key) => api::ArtworkTarget::Track(key.clone()),
         Entity::Album(id) => api::ArtworkTarget::Album(id.clone()),
-        Entity::ArtistKey(key) => api::ArtworkTarget::Artist(api::ArtistKey::new(key.clone())),
+        Entity::ArtistKey(key) => api::ArtworkTarget::Artist(key.clone()),
         Entity::Playlist(id) => api::ArtworkTarget::Playlist(id.clone()),
         Entity::Catalog(id) => api::ArtworkTarget::Catalog(id.clone()),
         Entity::Station(id) => api::ArtworkTarget::Station(id.clone()),
@@ -223,7 +223,7 @@ pub fn artwork_target_from_proto(value: &ArtworkTarget) -> Option<api::ArtworkTa
     Some(match value.entity.as_ref()? {
         Entity::Track(key) => api::ArtworkTarget::Track(key.clone()),
         Entity::Album(id) => api::ArtworkTarget::Album(id.clone()),
-        Entity::ArtistKey(key) => api::ArtworkTarget::Artist(api::ArtistKey::new(key.clone())),
+        Entity::ArtistKey(key) => api::ArtworkTarget::Artist(key.clone()),
         Entity::Playlist(id) => api::ArtworkTarget::Playlist(id.clone()),
         Entity::Catalog(id) => api::ArtworkTarget::Catalog(id.clone()),
         Entity::Station(id) => api::ArtworkTarget::Station(id.clone()),
@@ -265,7 +265,7 @@ pub fn album_info_from_proto(value: &AlbumInfo) -> api::AlbumInfo {
         artist: value.artist.clone(),
         genre: value.genre.clone(),
         year: value.year as u16,
-        artist_key: value.artist_key.clone().map(api::ArtistKey::new),
+        artist_key: value.artist_key.clone(),
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
     }
 }
@@ -295,7 +295,7 @@ pub fn artist_info_to_proto(value: &api::ArtistInfo) -> ArtistInfo {
 
 pub fn artist_info_from_proto(value: &ArtistInfo) -> api::ArtistInfo {
     api::ArtistInfo {
-        key: api::ArtistKey::new(value.key.clone()),
+        key: value.key.clone(),
         name: value.name.clone(),
         track_count: value.track_count,
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
@@ -340,29 +340,21 @@ pub fn artist_credit_to_proto(value: &api::ArtistCredit) -> ArtistCredit {
 pub fn artist_credit_from_proto(value: &ArtistCredit) -> api::ArtistCredit {
     api::ArtistCredit {
         name: value.name.clone(),
-        key: value.key.clone().map(api::ArtistKey::new),
+        key: value.key.clone(),
     }
 }
 
-pub fn refresh_artists_to_proto(value: &[api::ArtistKey]) -> RefreshArtistArtworkRequest {
+pub fn refresh_artists_to_proto(value: &[String]) -> RefreshArtistArtworkRequest {
     RefreshArtistArtworkRequest {
-        keys: value.iter().map(ToString::to_string).collect(),
+        keys: value.to_vec(),
     }
 }
 
-pub fn refresh_artists_from_proto(value: &RefreshArtistArtworkRequest) -> Vec<api::ArtistKey> {
-    value
-        .keys
-        .iter()
-        .cloned()
-        .map(api::ArtistKey::new)
-        .collect()
+pub fn refresh_artists_from_proto(value: &RefreshArtistArtworkRequest) -> Vec<String> {
+    value.keys.clone()
 }
 
-pub fn artist_tracks_request_to_proto(
-    artist: &api::ArtistKey,
-    page: api::Page,
-) -> ArtistTracksRequest {
+pub fn artist_tracks_request_to_proto(artist: &str, page: api::Page) -> ArtistTracksRequest {
     ArtistTracksRequest {
         key: artist.to_string(),
         page: Some(page_to_proto(page)),
@@ -418,7 +410,7 @@ mod tests {
             credits: vec![
                 api::ArtistCredit {
                     name: "a".into(),
-                    key: Some(api::ArtistKey::new("src:srv:UC-a")),
+                    key: Some(String::from("UC-a")),
                 },
                 api::ArtistCredit {
                     name: "b".into(),
@@ -431,13 +423,13 @@ mod tests {
 
     #[test]
     fn every_artist_reference_carries_its_key_across() {
-        let key = api::ArtistKey::new("src:srv:ar-1");
+        let key = String::from("ar-1");
         let target = api::ArtworkTarget::Artist(key.clone());
         assert_eq!(
             artwork_target_from_proto(&artwork_target_to_proto(&target)),
             Some(target)
         );
-        let keys = [key.clone(), api::ArtistKey::new("lib:7")];
+        let keys = [key.clone(), String::from("5f0c1e2d9a8b4c3d")];
         assert_eq!(
             refresh_artists_from_proto(&refresh_artists_to_proto(&keys)),
             keys

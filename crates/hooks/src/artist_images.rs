@@ -5,9 +5,9 @@ use dioxus::prelude::*;
 /// Ask the daemon to fill in missing artist photos for what this grid renders.
 pub fn use_artist_photo_fetch(artists: Resource<Vec<api::ArtistInfo>>) {
     // Each photo found dirties `artists`, so an ask not remembered would repeat forever.
-    let mut asked_for = use_signal(Vec::<api::ArtistKey>::new);
+    let mut asked_for = use_signal(Vec::<String>::new);
     use_effect(move || {
-        let wanted: Vec<api::ArtistKey> = artists
+        let wanted: Vec<String> = artists
             .read()
             .iter()
             .flatten()

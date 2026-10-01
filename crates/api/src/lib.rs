@@ -30,9 +30,9 @@ pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
 pub use jobs::{DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState};
 pub use library::{
-    AlbumInfo, AlbumPage, ArtistCredit, ArtistDetail, ArtistInfo, ArtistKey, ArtistPage,
-    DEFAULT_PAGE_LIMIT, LyricChunkView, LyricLineView, LyricsView, Page, SearchResults, StatsView,
-    TrackFilter, TrackInfo, TrackPage, TrackSort,
+    AlbumInfo, AlbumPage, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT,
+    LyricChunkView, LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter,
+    TrackInfo, TrackPage, TrackSort,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
@@ -175,10 +175,10 @@ pub trait LibraryApi: Send + Sync {
 
     async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError>;
 
-    async fn artist_tracks(&self, artist: ArtistKey, page: Page) -> Result<TrackPage, ApiError>;
+    async fn artist_tracks(&self, artist: String, page: Page) -> Result<TrackPage, ApiError>;
 
     /// One artist's name, photo, count and billed albums.
-    async fn artist(&self, artist: ArtistKey) -> Result<ArtistDetail, ApiError>;
+    async fn artist(&self, artist: String) -> Result<ArtistDetail, ApiError>;
 
     /// One track per artist, for the artist grid's tiles.
     async fn artist_sample_tracks(&self, page: Page) -> Result<TrackPage, ApiError>;
@@ -235,7 +235,7 @@ pub trait LibraryApi: Send + Sync {
     async fn validate_radio_registry(&self, url: String) -> Result<u32, ApiError>;
 
     /// Look for photos for these artists, skipping found and recently missed ones; results arrive as a `Tracks` invalidation.
-    async fn refresh_artist_artwork(&self, artists: Vec<ArtistKey>) -> Result<(), ApiError>;
+    async fn refresh_artist_artwork(&self, artists: Vec<String>) -> Result<(), ApiError>;
 
     async fn lyrics(&self, key: String) -> Result<LyricsView, ApiError>;
 

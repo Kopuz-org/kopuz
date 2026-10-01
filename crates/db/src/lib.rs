@@ -144,7 +144,8 @@ impl From<sqlx::migrate::MigrateError> for DbError {
 /// One artist row of a source and the tracks credited to it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArtistRow {
-    pub pk: i64,
+    /// What the artist is opened by: the id its source issued, else one minted when the row was filed.
+    pub key: String,
     /// The id the source issued for this artist; an artist it issued none for is known by its row alone.
     pub source_id: Option<String>,
     pub name: String,
@@ -192,7 +193,7 @@ pub trait ReadStore: Send + Sync {
     async fn artist_tracks(
         &self,
         source: &Source,
-        artist: i64,
+        artist: &str,
         limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError>;
 
@@ -200,20 +201,17 @@ pub trait ReadStore: Send + Sync {
     async fn artist_albums(
         &self,
         source: &Source,
-        artist: i64,
+        artist: &str,
     ) -> Result<Vec<reader::Album>, DbError>;
 
     /// One artist of `source`, or `None` when it has no such row.
-    async fn artist(&self, source: &Source, artist: i64) -> Result<Option<ArtistRow>, DbError>;
+    async fn artist(&self, source: &Source, artist: &str) -> Result<Option<ArtistRow>, DbError>;
 
     /// The ids of `source`'s linked artists still wearing a credit's text, whose name the source has not given yet.
     async fn artists_unnamed_by_source(
         &self,
         source: &Source,
     ) -> Result<std::collections::HashSet<String>, DbError>;
-
-    /// The artist row `source` files under the id it issued.
-    async fn artist_pk(&self, source: &Source, source_id: &str) -> Result<Option<i64>, DbError>;
 
     /// Tracks whose album has this genre, artist/album-ordered.
     async fn genre_tracks(
@@ -264,13 +262,13 @@ pub trait ReadStore: Send + Sync {
     async fn artist_album_covers(
         &self,
         source: &Source,
-    ) -> Result<std::collections::HashMap<i64, String>, DbError>;
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
 
     /// One artist's entry of [`ReadStore::artist_album_covers`].
     async fn artist_album_cover(
         &self,
         source: &Source,
-        artist: i64,
+        artist: &str,
     ) -> Result<Option<String>, DbError>;
 
     /// Distinct non-empty album genres for a source, A→Z.

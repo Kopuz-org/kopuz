@@ -736,19 +736,18 @@ async fn artists_are_keyed_by_identity_on_both_transports() {
 }
 
 #[tokio::test]
-async fn a_key_no_daemon_minted_is_refused_on_both_transports() {
+async fn an_artist_key_the_library_files_nothing_under_opens_nothing_on_both_transports() {
     let pair = spawn_pair().await;
     let all = Page {
         offset: 0,
         limit: 100,
     };
     for (key, code) in [
-        ("", api::ErrorCode::InvalidInput),
-        ("name:local:ada", api::ErrorCode::InvalidInput),
-        ("src:some-other-server:ar-1", api::ErrorCode::NotFound),
-        ("lib:999999", api::ErrorCode::NotFound),
+        ("", api::ErrorCode::NotFound),
+        ("ar-1-of-another-server", api::ErrorCode::NotFound),
+        ("0123456789abcdef", api::ErrorCode::NotFound),
     ] {
-        let key = api::ArtistKey::new(key);
+        let key = String::from(key);
         let local = pair.local.artist_tracks(key.clone(), all).await;
         let wire = pair.wire.artist_tracks(key.clone(), all).await;
         assert_eq!(local.err().map(|e| e.code), Some(code), "{key}");

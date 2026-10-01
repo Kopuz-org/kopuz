@@ -61,7 +61,7 @@ pub fn HomeBody(
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
     on_select_playlist: EventHandler<String>,
-    on_open_artist: EventHandler<api::ArtistKey>,
+    on_open_artist: EventHandler<String>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
     let mut config = use_context::<Signal<AppConfig>>();
@@ -88,7 +88,7 @@ pub fn HomeBody(
                     hooks::artwork::url(artist.artwork.as_ref(), hooks::artwork::Size::Thumb)?;
                 Some((artist.key.clone(), cover))
             })
-            .collect::<HashMap<api::ArtistKey, utils::CoverUrl>>()
+            .collect::<HashMap<String, utils::CoverUrl>>()
     });
     let playlists_res = use_playlists();
     let offline_keys = use_memo(move || -> Vec<String> {

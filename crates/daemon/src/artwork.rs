@@ -148,7 +148,7 @@ pub fn artist_ref(
     library_view: bool,
 ) -> Option<ArtworkRef> {
     ref_for(
-        ArtworkTarget::Artist(crate::artist_key::of_row(source, artist)),
+        ArtworkTarget::Artist(artist.key.clone()),
         artist_cover(
             source.as_str(),
             &artist.name,
@@ -294,7 +294,12 @@ impl ArtworkService {
                 Ok(album_cover(&album))
             }
             ArtworkTarget::Artist(key) => {
-                let artist = crate::artist_key::row(&self.db, &config.active_source, key).await?;
+                let artist = self
+                    .db
+                    .artist(&config.active_source, key)
+                    .await
+                    .map_err(db_error)?
+                    .ok_or_else(|| ApiError::not_found("the library files no such artist"))?;
                 let images = self.db.artist_images().await.map_err(db_error)?;
                 let source = server::source::active(self.db.clone(), config);
                 let library_view =
@@ -303,7 +308,7 @@ impl ArtworkService {
                 let album = match library_view {
                     true => self
                         .db
-                        .artist_album_cover(&config.active_source, artist.pk)
+                        .artist_album_cover(&config.active_source, &artist.key)
                         .await
                         .map_err(db_error)?
                         .map(PathBuf::from),
@@ -579,7 +584,7 @@ mod tests {
                 cover_path: None,
                 manual_cover: false,
                 artist_id: None,
-                artist_pk: None,
+                artist_key: None,
             })
             .is_none()
         );

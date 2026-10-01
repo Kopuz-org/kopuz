@@ -33,7 +33,7 @@ enum AlbumAction {
 pub fn Artist(
     config: Signal<AppConfig>,
     /// The open artist; `None` shows the grid of them all.
-    artist: Signal<Option<api::ArtistKey>>,
+    artist: Signal<Option<String>>,
     on_navigate: EventHandler<String>,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
@@ -143,7 +143,7 @@ pub fn Artist(
         let albums = albums_res.read().clone().unwrap_or_default();
         let offline = caps().downloads && *is_offline.read();
 
-        let downloaded: HashSet<api::ArtistKey> = if offline {
+        let downloaded: HashSet<String> = if offline {
             offline_tracks_res
                 .read()
                 .iter()
@@ -153,7 +153,7 @@ pub fn Artist(
         } else {
             HashSet::new()
         };
-        let mut album_counts: HashMap<api::ArtistKey, u32> = HashMap::new();
+        let mut album_counts: HashMap<String, u32> = HashMap::new();
         for artist in albums.iter().filter_map(|album| album.artist_key.clone()) {
             *album_counts.entry(artist).or_default() += 1;
         }

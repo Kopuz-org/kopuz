@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO queue_credits (queue_position, position, name, source_artist_id, source, artist_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "ed60b0d161e8beb11afbfd8ce7aa0ac319977c96cc01b4edb5e1c28f8322a72b"
+}

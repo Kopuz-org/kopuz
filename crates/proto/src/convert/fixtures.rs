@@ -27,7 +27,7 @@ pub(super) fn sample_state() -> api::PlayerState {
             }),
             credits: vec![api::ArtistCredit {
                 name: "a".into(),
-                key: Some(api::ArtistKey::new("src:srv:UC-a")),
+                key: Some(String::from("UC-a")),
             }],
             ..Default::default()
         }),

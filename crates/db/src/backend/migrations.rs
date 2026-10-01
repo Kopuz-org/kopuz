@@ -292,15 +292,14 @@ async fn fill_queue(pool: &SqlitePool) -> Result<(), DbError> {
         };
         for (at, credit) in credits.iter().enumerate() {
             sqlx::query(
-                "INSERT INTO queue_credits (queue_position, position, name, source_artist_id, source, artist_pk) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO queue_credits (queue_position, position, name, source_artist_id, source) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             )
             .bind(position)
             .bind(at as i64)
             .bind(&credit.name)
             .bind(&credit.id)
             .bind(credit.source.as_ref().map(|source| source.as_str()))
-            .bind(credit.artist_pk)
             .execute(&mut *tx)
             .await?;
         }
@@ -1805,6 +1804,9 @@ mod row_fill_tests {
             "CREATE TABLE app_config (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL)",
             "ALTER TABLE queue_state ADD COLUMN queue_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE queue_state ADD COLUMN shuffle_order_json TEXT NOT NULL DEFAULT '[]'",
+            "DROP TRIGGER artists_key_required",
+            "DROP INDEX idx_artists_key",
+            "ALTER TABLE artists DROP COLUMN key",
             "ALTER TABLE artists DROP COLUMN named_by_source",
             "DELETE FROM _sqlx_migrations WHERE version >= 20260930000000",
         ] {

@@ -49,33 +49,12 @@ pub struct TrackInfo {
     pub credits: Vec<ArtistCredit>,
 }
 
-/// Which artist is meant, as the daemon minted it. A frontend compares and passes it back, never reads it.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ArtistKey(String);
-
-impl ArtistKey {
-    /// For the daemon, which mints keys, and the wire, which carries them.
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for ArtistKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// One artist a row credits: what the row calls them, and the key that opens them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArtistCredit {
     pub name: String,
     /// `None` for a name the daemon cannot tie to one artist, which nothing opens.
-    pub key: Option<ArtistKey>,
+    pub key: Option<String>,
 }
 
 impl TrackInfo {
@@ -173,7 +152,7 @@ pub struct AlbumInfo {
     pub year: u16,
     pub artwork: Option<crate::ArtworkRef>,
     /// Absent only when the album bills nobody.
-    pub artist_key: Option<ArtistKey>,
+    pub artist_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -185,7 +164,7 @@ pub struct AlbumPage {
 /// An artist and how many tracks the library holds for them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtistInfo {
-    pub key: ArtistKey,
+    pub key: String,
     pub name: String,
     pub track_count: u32,
     pub artwork: Option<crate::ArtworkRef>,
@@ -229,7 +208,7 @@ impl TrackInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::{ArtistCredit, ArtistKey, TrackInfo};
+    use super::{ArtistCredit, TrackInfo};
 
     fn track(artist: &str, credits: &[(&str, &str)]) -> TrackInfo {
         TrackInfo {
@@ -238,7 +217,7 @@ mod tests {
                 .iter()
                 .map(|(name, key)| ArtistCredit {
                     name: (*name).into(),
-                    key: Some(ArtistKey::new(*key)),
+                    key: Some((*key).into()),
                 })
                 .collect(),
             ..Default::default()
@@ -246,7 +225,7 @@ mod tests {
     }
 
     fn primary(row: &TrackInfo) -> Option<&str> {
-        row.primary_credit()?.key.as_ref().map(ArtistKey::as_str)
+        row.primary_credit()?.key.as_deref()
     }
 
     #[test]

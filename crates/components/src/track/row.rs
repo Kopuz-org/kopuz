@@ -20,7 +20,7 @@ pub(crate) fn copy_to_clipboard(text: &str) {
     let _ = dioxus::document::eval(&js);
 }
 /// The artist the row's artist cell opens; a row crediting nobody opens nothing.
-fn billed_artist(track: &Track) -> Option<api::ArtistKey> {
+fn billed_artist(track: &Track) -> Option<String> {
     track.primary_credit().and_then(|credit| credit.key.clone())
 }
 

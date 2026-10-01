@@ -150,7 +150,7 @@ pub fn use_album_tracks(
 /// Every track credited to an artist. No artist resolves to empty without asking.
 pub fn use_artist_tracks(
     source: Memo<Source>,
-    artist: Memo<Option<api::ArtistKey>>,
+    artist: Memo<Option<String>>,
 ) -> Resource<Result<Vec<api::TrackInfo>, api::ApiError>> {
     let api = use_api();
     let gens = use_generations();
@@ -179,7 +179,7 @@ pub fn use_artist_tracks(
 /// One artist's name, photo, track count and billed albums. No artist resolves to `None`.
 pub fn use_artist(
     source: Memo<Source>,
-    artist: Memo<Option<api::ArtistKey>>,
+    artist: Memo<Option<String>>,
 ) -> Resource<Option<Result<api::ArtistDetail, api::ApiError>>> {
     let api = use_api();
     let gens = use_generations();

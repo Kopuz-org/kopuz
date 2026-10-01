@@ -538,7 +538,7 @@ impl QueueMaterializer for LibraryService {
             QueueContext::Artist { artist } => {
                 let row = self.artist_row(artist).await?;
                 self.db
-                    .artist_tracks(&self.query_source(), row.pk, None)
+                    .artist_tracks(&self.query_source(), &row.key, None)
                     .await
                     .map_err(db_error)
             }

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ar.key, ar.source_artist_id, ar.name, COUNT(*) AS \"tracks!: i64\"\n             FROM (SELECT c.artist_pk AS artist, c.track_pk AS track\n                     FROM track_credits c JOIN artists ca ON ca.id = c.artist_pk\n                    WHERE ca.source = ?1\n                   UNION\n                   SELECT al.artist_pk, bt.rowid_pk FROM albums al\n                     JOIN tracks bt ON bt.source = al.source AND bt.source_album_id = al.source_album_id\n                    WHERE al.source = ?1 AND al.artist_pk IS NOT NULL AND al.derived = 0) cr\n             JOIN artists ar ON ar.id = cr.artist\n            GROUP BY ar.id",
+  "describe": {
+    "columns": [
+      {
+        "name": "key",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_artist_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "tracks!: i64",
+        "ordinal": 3,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "f6ca173cbc492054f7b89d9a0167165e234feebaa166469cb24ce117bced36c2"
+}

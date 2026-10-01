@@ -69,8 +69,8 @@ impl CatalogDetailRequest {
         }
     }
 
-    pub fn artist(artist: &crate::ArtistKey) -> Self {
-        Self::new(CatalogItemKind::Artist, artist.as_str())
+    pub fn artist(artist: &str) -> Self {
+        Self::new(CatalogItemKind::Artist, artist)
     }
 }
 
@@ -90,5 +90,5 @@ pub struct CatalogDetail {
     pub shelves: Vec<CatalogShelf>,
     pub continuation: Option<String>,
     /// For an album, the artist its header opens; absent when it bills nobody.
-    pub artist_key: Option<crate::ArtistKey>,
+    pub artist_key: Option<String>,
 }

@@ -266,7 +266,7 @@ mod tests {
             cover_path: None,
             manual_cover: false,
             artist_id: None,
-            artist_pk: None,
+            artist_key: None,
         }
     }
 

@@ -84,7 +84,7 @@ pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) 
                 match kind {
                     "track" => Some(api::ArtworkTarget::Track(id)),
                     "album" => Some(api::ArtworkTarget::Album(id)),
-                    "artist" => Some(api::ArtworkTarget::Artist(api::ArtistKey::new(id))),
+                    "artist" => Some(api::ArtworkTarget::Artist(id.to_string())),
                     "playlist" => Some(api::ArtworkTarget::Playlist(id)),
                     "catalog" => Some(api::ArtworkTarget::Catalog(id)),
                     "station" => Some(api::ArtworkTarget::Station(id)),

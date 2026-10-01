@@ -13,7 +13,7 @@ pub(super) fn render_server_section(
     hero_cover: Option<String>,
     continue_listening: Vec<(Track, Option<Album>, Option<String>)>,
     hero_entry: Option<(Track, Option<Album>, Option<String>)>,
-    artists: Vec<(String, Option<String>, api::ArtistKey)>,
+    artists: Vec<(String, Option<String>, String)>,
     new_releases: Vec<AlbumCard>,
     made_for_you: (String, Vec<AlbumCard>),
     recently_added: Vec<AlbumCard>,
@@ -21,7 +21,7 @@ pub(super) fn render_server_section(
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
     on_select_playlist: EventHandler<String>,
-    on_open_artist: EventHandler<api::ArtistKey>,
+    on_open_artist: EventHandler<String>,
     active_card_menu: Signal<Option<String>>,
     scroll_container: impl Fn(&str, i32) + Copy + 'static,
 ) -> Element {
@@ -556,8 +556,8 @@ fn render_listen_now(
 
 fn render_top_artists(
     is_vaxry: bool,
-    artists: Vec<(String, Option<String>, api::ArtistKey)>,
-    on_open_artist: EventHandler<api::ArtistKey>,
+    artists: Vec<(String, Option<String>, String)>,
+    on_open_artist: EventHandler<String>,
     scroll_container: impl Fn(&str, i32) + Copy + 'static,
 ) -> Element {
     if artists.is_empty() {

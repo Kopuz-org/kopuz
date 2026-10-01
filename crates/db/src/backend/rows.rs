@@ -31,7 +31,7 @@ pub struct TrackRow {
 pub struct CreditRow {
     pub track_pk: i64,
     pub name: String,
-    pub artist_pk: i64,
+    pub artist_key: String,
     pub source: String,
     pub source_artist_id: Option<String>,
 }
@@ -42,7 +42,7 @@ impl From<CreditRow> for ArtistCredit {
             name: r.name,
             id: r.source_artist_id,
             source: Some(config::Source::from_column(&r.source)),
-            artist_pk: Some(r.artist_pk),
+            key: Some(r.artist_key),
         }
     }
 }
@@ -81,7 +81,7 @@ pub struct AlbumRow {
     pub year: i64,
     pub cover_path: Option<String>,
     pub manual_cover: i64,
-    pub artist_pk: Option<i64>,
+    pub artist_key: Option<String>,
     pub artist_source_id: Option<String>,
 }
 
@@ -96,7 +96,7 @@ impl From<AlbumRow> for Album {
             cover_path: r.cover_path.map(PathBuf::from),
             manual_cover: r.manual_cover != 0,
             artist_id: r.artist_source_id,
-            artist_pk: r.artist_pk,
+            artist_key: r.artist_key,
         }
     }
 }
@@ -163,7 +163,7 @@ pub struct QueueCreditRow {
     pub name: String,
     pub source_artist_id: Option<String>,
     pub source: Option<String>,
-    pub artist_pk: Option<i64>,
+    pub artist_key: Option<String>,
 }
 
 impl From<QueueCreditRow> for ArtistCredit {
@@ -172,7 +172,7 @@ impl From<QueueCreditRow> for ArtistCredit {
             name: r.name,
             id: r.source_artist_id,
             source: r.source.as_deref().map(config::Source::from_column),
-            artist_pk: r.artist_pk,
+            key: r.artist_key,
         }
     }
 }

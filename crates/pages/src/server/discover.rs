@@ -42,7 +42,7 @@ fn keys_of(tracks: &[TrackInfo]) -> Vec<String> {
 pub fn DiscoverPage(
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
-    on_open_artist: EventHandler<api::ArtistKey>,
+    on_open_artist: EventHandler<String>,
 ) -> Element {
     let api = hooks::use_api();
     let caps = hooks::sources::use_capabilities();
@@ -181,7 +181,7 @@ fn ShelfRow(
     scroll_id: String,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
-    on_open_artist: EventHandler<api::ArtistKey>,
+    on_open_artist: EventHandler<String>,
 ) -> Element {
     if shelf.list {
         return rsx! { SongListShelf {
@@ -343,7 +343,7 @@ fn DiscoverTile(
     item: CatalogItem,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
-    on_open_artist: EventHandler<api::ArtistKey>,
+    on_open_artist: EventHandler<String>,
 ) -> Element {
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
@@ -387,7 +387,7 @@ fn DiscoverTile(
             }
         }
         CatalogItemKind::Artist => {
-            let artist = api::ArtistKey::new(item.id.clone());
+            let artist = item.id.clone();
             rsx! {
                 Card {
                     title: item.title.clone(),
@@ -855,11 +855,11 @@ fn BackButton(on_back: EventHandler<()>) -> Element {
 /// The source's own artist profile, for a source that presents artists remotely; its sections are catalog shelves.
 #[component]
 pub fn DiscoverArtistPage(
-    selected_artist: Signal<Option<api::ArtistKey>>,
+    selected_artist: Signal<Option<String>>,
     on_back: EventHandler<()>,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(CatalogItemKind, String, String)>,
-    on_open_artist: EventHandler<api::ArtistKey>,
+    on_open_artist: EventHandler<String>,
 ) -> Element {
     let api = hooks::use_api();
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();

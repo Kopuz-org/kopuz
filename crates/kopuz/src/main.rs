@@ -75,7 +75,7 @@ fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, 
 }
 
 /// Where a detail page keeps its scroll position; `None` on a route's own list.
-fn detail_scroll_key(route: Route, album: &str, artist: Option<&api::ArtistKey>) -> Option<String> {
+fn detail_scroll_key(route: Route, album: &str, artist: Option<&String>) -> Option<String> {
     match route {
         Route::Album if !album.is_empty() => Some(format!("album:{album}")),
         Route::Artist => artist.map(|artist| format!("artist:{artist}")),
@@ -677,7 +677,7 @@ fn App() -> Element {
     // Set with the id, by whichever click had it: the viewer serves more than
     // one kind and must not read the id to tell which.
     let mut discover_selected_playlist_kind = use_signal(|| api::CatalogItemKind::Playlist);
-    let mut selected_artist = use_signal(|| None::<api::ArtistKey>);
+    let mut selected_artist = use_signal(|| None::<String>);
     let search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
@@ -1769,7 +1769,7 @@ fn App() -> Element {
                                     selected_playlist_id.set(Some(id));
                                     current_route.set(Route::Playlists);
                                 },
-                                on_open_artist: move |artist: api::ArtistKey| nav_ctrl.open_artist(artist),
+                                on_open_artist: move |artist: String| nav_ctrl.open_artist(artist),
                             }
                         },
                         Route::Discover => rsx! {
@@ -1784,7 +1784,7 @@ fn App() -> Element {
                                     discover_selected_playlist_title.set(Some(title));
                                     current_route.set(Route::DiscoverPlaylist);
                                 },
-                                on_open_artist: move |artist: api::ArtistKey| nav_ctrl.open_artist(artist),
+                                on_open_artist: move |artist: String| nav_ctrl.open_artist(artist),
                             }
                         },
                         Route::DiscoverPlaylist => rsx! {
@@ -1864,7 +1864,7 @@ fn App() -> Element {
                                             discover_selected_playlist_title.set(Some(title));
                                             current_route.set(Route::DiscoverPlaylist);
                                         },
-                                        on_open_artist: move |artist: api::ArtistKey| nav_ctrl.open_artist(artist),
+                                        on_open_artist: move |artist: String| nav_ctrl.open_artist(artist),
                                     }
                                 }
                             } else {

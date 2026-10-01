@@ -64,7 +64,7 @@ fn credits(track: &Track) -> Vec<api::ArtistCredit> {
         .iter()
         .map(|credit| api::ArtistCredit {
             name: credit.name.clone(),
-            key: crate::artist_key::of_credit(credit),
+            key: credit.open_key().map(str::to_string),
         })
         .collect()
 }
@@ -131,22 +131,14 @@ mod tests {
     }
 
     #[test]
-    fn a_listed_credit_opens_the_artist_its_source_issued() {
+    fn a_listed_credit_opens_by_the_id_its_source_issued() {
         let yt = Source::Server("yt-1".into());
         let mut row = track(vec![ArtistCredit::linked("Ada", "UC-ada")]);
 
         listed_by(&yt, [&mut row]);
 
         let sent = credits(&row);
-        assert_eq!(sent[0].key, Some(crate::artist_key::issued(&yt, "UC-ada")));
-    }
-
-    /// Nothing says whose an unstamped id is, and a guess by service can open another server's artist.
-    #[test]
-    fn an_id_nobody_stamped_opens_nothing() {
-        let sent = credits(&track(vec![ArtistCredit::linked("Ada", "UC-ada")]));
-
-        assert_eq!((sent[0].name.as_str(), &sent[0].key), ("Ada", &None));
+        assert_eq!(sent[0].key.as_deref(), Some("UC-ada"));
     }
 
     /// The persisted queue carries the stamp, so a restart or a source switch never re-keys a row.
@@ -163,25 +155,20 @@ mod tests {
     }
 
     #[test]
-    fn a_stored_credit_is_keyed_by_the_row_it_is_filed_under() {
-        let filed = |credit: ArtistCredit, pk: i64| ArtistCredit {
-            source: Some(Source::Server("srv-0".into())),
-            artist_pk: Some(pk),
+    fn a_stored_credit_opens_by_the_key_it_is_filed_under() {
+        let filed = |credit: ArtistCredit, key: &str| ArtistCredit {
+            key: Some(key.into()),
             ..credit
         };
         let row = track(vec![
-            filed(ArtistCredit::linked("Ada", "UC-ada"), 3),
-            filed(ArtistCredit::unlinked("Boris"), 4),
+            filed(ArtistCredit::linked("Ada", "UC-ada"), "UC-ada"),
+            filed(ArtistCredit::unlinked("Boris"), "9f2b"),
         ]);
 
         let sent = credits(&row);
 
-        let elsewhere = Source::Server("srv-0".into());
-        assert_eq!(
-            sent[0].key,
-            Some(crate::artist_key::issued(&elsewhere, "UC-ada"))
-        );
-        assert_eq!(sent[1].key, Some(crate::artist_key::library(4)));
+        assert_eq!(sent[0].key.as_deref(), Some("UC-ada"));
+        assert_eq!(sent[1].key.as_deref(), Some("9f2b"));
     }
 
     /// A row that only names its artists still lists them all; there is nothing to open them by.

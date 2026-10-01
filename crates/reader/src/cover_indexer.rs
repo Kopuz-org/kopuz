@@ -154,7 +154,7 @@ mod tests {
             cover_path,
             manual_cover,
             artist_id: None,
-            artist_pk: None,
+            artist_key: None,
         }
     }
 

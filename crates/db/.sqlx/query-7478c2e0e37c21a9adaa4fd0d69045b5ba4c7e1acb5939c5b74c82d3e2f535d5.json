@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ar.key, al.cover_path AS \"cover_path!\", MIN(al.rowid_pk) AS \"first!: i64\"\n             FROM (SELECT c.artist_pk AS artist, c.track_pk AS track\n                     FROM track_credits c JOIN artists ca ON ca.id = c.artist_pk\n                    WHERE ca.source = ?1\n                   UNION\n                   SELECT ba.artist_pk, bt.rowid_pk FROM albums ba\n                     JOIN tracks bt ON bt.source = ba.source AND bt.source_album_id = ba.source_album_id\n                    WHERE ba.source = ?1 AND ba.artist_pk IS NOT NULL AND ba.derived = 0) cr\n             JOIN artists ar ON ar.id = cr.artist\n             JOIN tracks t ON t.rowid_pk = cr.track\n             JOIN albums al ON al.source = t.source AND al.source_album_id = t.source_album_id\n            WHERE al.cover_path IS NOT NULL\n            GROUP BY cr.artist",
+  "describe": {
+    "columns": [
+      {
+        "name": "key",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "cover_path!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "first!: i64",
+        "ordinal": 2,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "7478c2e0e37c21a9adaa4fd0d69045b5ba4c7e1acb5939c5b74c82d3e2f535d5"
+}

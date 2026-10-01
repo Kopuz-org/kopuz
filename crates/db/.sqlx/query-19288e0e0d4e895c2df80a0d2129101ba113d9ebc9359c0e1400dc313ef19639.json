@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT al.cover_path AS \"cover_path!\" FROM tracks t\n             JOIN albums al ON al.source = t.source AND al.source_album_id = t.source_album_id\n            WHERE al.cover_path IS NOT NULL AND t.rowid_pk IN (\n                  SELECT c.track_pk FROM track_credits c\n                   WHERE c.artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2)\n                  UNION\n                  SELECT bt.rowid_pk FROM albums ba\n                    JOIN tracks bt ON bt.source = ba.source AND bt.source_album_id = ba.source_album_id\n                   WHERE ba.source = ?1 AND ba.derived = 0\n                     AND ba.artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2))\n            ORDER BY al.rowid_pk LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "cover_path!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "19288e0e0d4e895c2df80a0d2129101ba113d9ebc9359c0e1400dc313ef19639"
+}

@@ -299,7 +299,7 @@ async fn a_track_gives_its_album_a_row_without_overwriting_a_real_one() {
             cover_path: None,
             manual_cover: false,
             artist_id: None,
-            artist_pk: None,
+            artist_key: None,
         }],
     )
     .await
@@ -420,14 +420,13 @@ async fn only_a_real_album_credits_its_tracks_to_its_artist() {
             cover_path: None,
             manual_cover: false,
             artist_id: Some("ar-1".into()),
-            artist_pk: None,
+            artist_key: None,
         }],
     )
     .await
     .unwrap();
 
-    let ar1 = db.artist_pk(&source, "ar-1").await.unwrap().expect("ar-1");
-    let ada = db.artist_tracks(&source, ar1, None).await.unwrap();
+    let ada = db.artist_tracks(&source, "ar-1", None).await.unwrap();
 
     let keys: Vec<String> = ada.iter().map(|t| t.id.key().into_owned()).collect();
     assert_eq!(
@@ -450,7 +449,6 @@ async fn a_renamed_artist_keeps_its_row_and_a_prune_drops_what_nothing_credits()
     )
     .await
     .unwrap();
-    let ada = db.artist_pk(&source, "ar-1").await.unwrap().unwrap();
     let boris = db
         .artists(&source)
         .await
@@ -458,7 +456,7 @@ async fn a_renamed_artist_keeps_its_row_and_a_prune_drops_what_nothing_credits()
         .into_iter()
         .find(|artist| artist.name == "Boris")
         .unwrap()
-        .pk;
+        .key;
 
     db.upsert_tracks(
         &source,
@@ -471,9 +469,46 @@ async fn a_renamed_artist_keeps_its_row_and_a_prune_drops_what_nothing_credits()
     .unwrap();
     db.prune_source(&source, &["t1".into()], &[]).await.unwrap();
 
-    let renamed = db.artist(&source, ada).await.unwrap().unwrap();
+    let renamed = db.artist(&source, "ar-1").await.unwrap().unwrap();
     assert_eq!((renamed.name.as_str(), renamed.tracks), ("Ada Lovelace", 1));
-    assert_eq!(db.artist(&source, boris).await.unwrap(), None);
+    assert_eq!(db.artist(&source, &boris).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn an_artist_is_keyed_by_its_source_id_or_by_one_key_minted_when_filed() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let source = Source::Server("jf".into());
+    let file = || async {
+        db.upsert_tracks(
+            &source,
+            &[
+                track("t1", vec![ArtistCredit::linked("Ada", "ar-1")]),
+                track("t2", vec![ArtistCredit::unlinked("Boris")]),
+                track("t3", vec![ArtistCredit::unlinked("Cleo")]),
+            ],
+        )
+        .await
+        .unwrap();
+        db.artists(&source).await.unwrap()
+    };
+
+    let first = file().await;
+    let again = file().await;
+
+    let key = |listed: &[db::ArtistRow], name: &str| {
+        listed
+            .iter()
+            .find(|artist| artist.name == name)
+            .unwrap()
+            .key
+            .clone()
+    };
+    assert_eq!(key(&first, "Ada"), "ar-1");
+    assert_ne!(key(&first, "Boris"), key(&first, "Cleo"));
+    assert_eq!(key(&first, "Boris").len(), 32, "a minted key, not a name");
+    assert_eq!(first, again, "filing again keeps every key");
+    let boris = db.artist(&source, &key(&first, "Boris")).await.unwrap();
+    assert_eq!(boris.map(|artist| artist.name).as_deref(), Some("Boris"));
 }
 
 #[tokio::test]
@@ -484,7 +519,6 @@ async fn once_the_source_names_an_artist_a_credit_no_longer_renames_it() {
     db.upsert_tracks(&source, &[billed("4LAT feat. Kasane Teto")])
         .await
         .unwrap();
-    let pk = db.artist_pk(&source, "UC-4lat").await.unwrap().unwrap();
     assert!(
         db.artists_unnamed_by_source(&source)
             .await
@@ -501,7 +535,7 @@ async fn once_the_source_names_an_artist_a_credit_no_longer_renames_it() {
         .await
         .unwrap();
 
-    let row = db.artist(&source, pk).await.unwrap().unwrap();
+    let row = db.artist(&source, "UC-4lat").await.unwrap().unwrap();
     assert_eq!(row.name, "4LAT");
     assert!(
         db.artists_unnamed_by_source(&source)
@@ -517,7 +551,7 @@ async fn a_queue_round_trips_through_its_rows() {
     let mut listed = track("t1", Vec::new());
     listed.credits = vec![ArtistCredit {
         source: Some(Source::Server("yt".into())),
-        artist_pk: Some(7),
+        key: Some("UC-ada".into()),
         ..ArtistCredit::linked("Ada", "UC-ada")
     }];
     listed.playlist_item_id = Some("entry-1".into());

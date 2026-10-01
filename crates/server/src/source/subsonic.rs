@@ -179,7 +179,7 @@ impl MediaSource for SubsonicSource {
                     cover_path: Some(PathBuf::from(album_id_prefixed.clone())),
                     manual_cover: false,
                     artist_id: album.artist_id.clone(),
-                    artist_pk: None,
+                    artist_key: None,
                 });
 
                 let songs = self.client.get_album_songs(&album.id).await.map_err(|e| {

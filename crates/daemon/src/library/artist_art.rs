@@ -35,16 +35,14 @@ impl LibraryService {
     /// Artists already resolved, and those whose miss is still fresh, are
     /// skipped -- so calling this on every page open is cheap once the first
     /// pass has run.
-    pub async fn refresh_artist_artwork(
-        &self,
-        artists: Vec<api::ArtistKey>,
-    ) -> Result<(), ApiError> {
+    pub async fn refresh_artist_artwork(&self, artists: Vec<String>) -> Result<(), ApiError> {
         let config = self.current_config();
         let source: ActiveSource = Arc::from(server::source::active(self.db.clone(), &config));
         match source.capabilities().artist_view {
             ArtistView::Library => self.refresh_bulk(&source).await,
             ArtistView::Remote => {
-                let wanted: std::collections::HashSet<&api::ArtistKey> = artists.iter().collect();
+                let wanted: std::collections::HashSet<&str> =
+                    artists.iter().map(String::as_str).collect();
                 let scope = source.source();
                 // A search wants the name the library calls them, which only the listing holds.
                 let named = self
@@ -53,12 +51,12 @@ impl LibraryService {
                     .await
                     .map_err(db_error)?
                     .into_iter()
-                    .filter(|row| wanted.contains(&crate::artist_key::of_row(scope, row)))
+                    .filter(|row| wanted.contains(row.key.as_str()))
                     .map(|row| reader::ArtistCredit {
                         name: row.name,
                         id: row.source_id,
                         source: Some(scope.clone()),
-                        artist_pk: Some(row.pk),
+                        key: Some(row.key),
                     })
                     .collect();
                 self.refresh_each(&source, named).await
