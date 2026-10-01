@@ -210,6 +210,14 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         favorites.clone(),
         session.config_watch(),
     );
+    // A failed settings read aborts boot above, so reaching here means the config is real.
+    crate::folder_scan::spawn(
+        jobs.clone(),
+        library.clone(),
+        session.config_watch(),
+        session.subscribe(),
+        true,
+    );
     let config_service_for_api = config_service.clone();
     let catalog = crate::CatalogService::new(database.clone(), session.clone(), library.clone());
     let radio_service = crate::RadioService::new(config_service.clone(), library.clone());

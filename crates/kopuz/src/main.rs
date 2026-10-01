@@ -63,19 +63,6 @@ const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
 const LIVE_THEME_POLL_MS: u64 = 400;
 const LIVE_THEME_IDLE_POLL_MS: u64 = 2000;
 
-fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, Vec<PathBuf>)> {
-    config
-        .local_sources
-        .iter()
-        .map(|source| {
-            (
-                config::Source::LocalLibrary(source.id.clone()),
-                source.directories.clone(),
-            )
-        })
-        .collect()
-}
-
 /// Where a detail page keeps its scroll position; `None` on a route's own list.
 fn detail_scroll_key(route: Route, album: &str, artist: Option<&String>) -> Option<String> {
     match route {
@@ -539,16 +526,12 @@ fn App() -> Element {
     // The core is already running: main built it before the window existed,
     // because the tracing subscriber and the titlebar come out of its config.
     let session = core.session.clone();
-    let library_service = core.library.clone();
-    let job_runner = core.jobs.clone();
     let favorites_service = core.favorites.clone();
     let scrobbler = core.scrobbler.clone();
 
     // Config reaches the session through the daemon's own write path, which
     // is the only copy that still holds the credentials this process is never
     // shown. Pushing the view we hold would blank them until the next save.
-    let mut trigger_rescan = use_signal(|| 0);
-    let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
     let current_song_title = use_signal(String::new);
@@ -561,7 +544,6 @@ fn App() -> Element {
     let current_track_snapshot = use_signal(|| None::<api::TrackInfo>);
     let mut volume = use_signal(|| 1.0f32);
     let mut persisted_volume = use_signal(|| 1.0f32);
-    let mut configured_local_libraries = use_signal(|| configured_local_sources(&config.peek()));
 
     let is_playing = use_signal(|| false);
     let mut is_fullscreen = use_signal(|| false);
@@ -663,13 +645,6 @@ fn App() -> Element {
             }},true);"#,
             utils::DEFAULT_COVER_SVG.replace('\'', "%27"),
         ));
-    });
-
-    use_effect(move || {
-        let next_sources = configured_local_sources(&config.read());
-        if *configured_local_libraries.peek() != next_sources {
-            configured_local_libraries.set(next_sources);
-        }
     });
 
     let mut selected_album_id = use_signal(String::new);
@@ -1004,7 +979,6 @@ fn App() -> Element {
                     let _apply = tracing::info_span!("startup.apply_config").entered();
                     let loaded = cfg_loaded;
                     config.set(loaded.clone());
-                    configured_local_libraries.set(configured_local_sources(&loaded));
                     volume.set(loaded.volume);
                     persisted_volume.set(loaded.volume);
                     i18n::set_locale(&loaded.language);
@@ -1027,47 +1001,6 @@ fn App() -> Element {
                     });
                 }
             }.instrument(tracing::info_span!("startup.load")));
-        }
-    });
-
-    let library_for_scan = library_service.clone();
-    let jobs_for_scan = job_runner.clone();
-    use_effect(move || {
-        // config_loaded_ok matters here: a defaulted config (load failure) has
-        // an empty music_directory, and the daemon's no-dirs branch prunes the
-        // local library - which must never happen off phantom state.
-        if !*initial_load_done.read() || !*config_loaded_ok.read() {
-            return;
-        }
-        let configured_sources = configured_local_libraries.read().clone();
-        let trigger = *trigger_rescan.read();
-
-        let scan_key = format!(
-            "{}|{}",
-            configured_sources
-                .iter()
-                .flat_map(|(source, dirs)| {
-                    std::iter::once(source.as_str().to_string())
-                        .chain(dirs.iter().map(|dir| dir.to_string_lossy().into_owned()))
-                })
-                .collect::<Vec<_>>()
-                .join(","),
-            trigger,
-        );
-        if *last_scan_key.peek() == Some(scan_key.clone()) {
-            return;
-        }
-        last_scan_key.set(Some(scan_key));
-
-        // The scan itself lives in the daemon's LibraryService now; the job
-        // runner's single-flight replaces the old epoch supersession, and the
-        // event bridge below feeds progress and invalidations back to the UI.
-        // The roots travel with the call: the config signal is the authority
-        // here, and the session's own copy may not have caught up yet.
-        if let Err(error) =
-            library_for_scan.spawn_scan_with_config(&jobs_for_scan, config.peek().clone())
-        {
-            tracing::warn!(%error, "library scan could not start");
         }
     });
 
@@ -1818,7 +1751,15 @@ fn App() -> Element {
                         Route::Library => rsx! {
                             pages::library::LibraryPage {
                                 config: config,
-                                on_rescan: move |_| *trigger_rescan.write() += 1,
+                                on_rescan: move |_| {
+                                    spawn(async move {
+                                        if let Err(error) =
+                                            backend::api().start_job(api::JobKind::Scan).await
+                                        {
+                                            tracing::warn!(%error, "rescan could not start");
+                                        }
+                                    });
+                                },
                                             is_playing: is_playing,
                                 current_playing: current_playing,
                                 current_song_title: current_song_title,

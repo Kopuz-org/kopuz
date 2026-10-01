@@ -12,6 +12,7 @@ pub mod config_service;
 pub mod downloads;
 pub mod external;
 pub mod favorites;
+pub mod folder_scan;
 pub mod integrations;
 pub mod jobs;
 pub mod library;
