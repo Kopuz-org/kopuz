@@ -232,7 +232,6 @@ browser_playback_needs_host = Tumatakbo ang playback sa isang browser sa host, n
 experimental = experimental
 copy = Copy
 media_server = Media Server
-media_servers = Mga Media Server
 saved_servers = Mga Naka-save na Server
 switch_to_server = Lumipat
 active_server = Aktibo

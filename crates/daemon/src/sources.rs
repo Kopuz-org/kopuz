@@ -368,7 +368,11 @@ impl SourceService {
         let Some(folders) = api::schema::value_of(values, crate::services::DIRECTORIES) else {
             return self.source_info(id).await;
         };
-        let directories = api::schema::decode_directories(folders);
+        let Ok(directories) = serde_json::from_str::<Vec<String>>(folders) else {
+            return Err(ApiError::invalid_input(
+                "source directories must be a list of paths",
+            ));
+        };
         if directories.iter().any(|path| path.trim().is_empty()) {
             return Err(ApiError::invalid_input(
                 "a source directory cannot be empty",

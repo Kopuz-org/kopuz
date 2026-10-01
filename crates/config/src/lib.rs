@@ -1077,12 +1077,6 @@ impl AppConfig {
         }
     }
 
-    pub fn add_local_source(&mut self, source: SavedLocalSource) {
-        if !self.local_sources.iter().any(|saved| saved.id == source.id) {
-            self.local_sources.push(source);
-        }
-    }
-
     pub fn remove_local_source(&mut self, id: &str) {
         self.local_sources.retain(|source| source.id != id);
         if self.active_source.local_library_id() == Some(id) {

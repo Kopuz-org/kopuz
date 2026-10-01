@@ -162,7 +162,6 @@ browser_playback_needs_host = Відтворення відбувається в
 experimental = experimental
 copy = Copy
 media_server = Медіа сервер
-media_servers = Медіа сервери
 saved_servers = Збережені сервери
 switch_to_server = Перемкнути
 active_server = Активний

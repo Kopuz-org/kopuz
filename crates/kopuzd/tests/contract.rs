@@ -502,12 +502,14 @@ async fn scan_job_indexes_local_files_over_the_wire() {
     std::fs::write(music.join("one.wav"), wav_bytes(1)).expect("write wav");
     std::fs::write(music.join("two.wav"), wav_bytes(1)).expect("write wav");
 
-    let mut config = pair.wire.config().await.expect("view").config;
-    config.local_sources = vec![config::SavedLocalSource::default_library(vec![
-        music.clone(),
-    ])];
     pair.wire
-        .set_config(config)
+        .set_source_settings(
+            "local".into(),
+            vec![api::FieldValue::new(
+                "directories",
+                api::encode_directories(&[music.to_string_lossy().into_owned()]),
+            )],
+        )
         .await
         .expect("point the library at the temp dir");
 

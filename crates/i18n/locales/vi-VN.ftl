@@ -232,7 +232,6 @@ browser_playback_needs_host = Việc phát nhạc chạy trong trình duyệt tr
 experimental = experimental
 copy = Copy
 media_server = Máy chủ media
-media_servers = Máy chủ media
 saved_servers = Máy chủ đã lưu
 switch_to_server = Chuyển
 active_server = Đang hoạt động

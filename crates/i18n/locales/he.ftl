@@ -162,7 +162,6 @@ browser_playback_needs_host = ההשמעה פועלת בדפדפן במערכת 
 experimental = experimental
 copy = Copy
 media_server = שרת מדיה
-media_servers = שרתי מדיה
 saved_servers = שרתים שמורים
 switch_to_server = החלפה
 active_server = פעיל

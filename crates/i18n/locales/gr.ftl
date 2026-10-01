@@ -162,7 +162,6 @@ browser_playback_needs_host = Η αναπαραγωγή γίνεται σε πρ
 experimental = experimental
 copy = Copy
 media_server = Διακομιστής Μέσων
-media_servers = Διακομιστές Μέσων
 saved_servers = Αποθηκευμένοι Διακομιστές
 switch_to_server = Εναλλαγή
 active_server = Ενεργός

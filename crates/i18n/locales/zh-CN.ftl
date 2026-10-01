@@ -162,7 +162,6 @@ browser_playback_needs_host = 播放在主机上的浏览器中进行，但此 F
 experimental = experimental
 copy = Copy
 media_server = 媒体服务器
-media_servers = 媒体服务器
 saved_servers = 已保存的服务器
 switch_to_server = 切换
 active_server = 活动

@@ -163,7 +163,6 @@ browser_playback_needs_host = Воспроизведение идёт в бра�
 experimental = experimental
 copy = Copy
 media_server = Медиасервер
-media_servers = Медиасерверы
 saved_servers = Сохранённые серверы
 switch_to_server = Переключить
 active_server = Активный

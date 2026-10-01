@@ -329,14 +329,16 @@ impl LibraryService {
 
     pub fn stats(&self) -> api::StatsView {
         let config = self.current_config();
-        let own = format!("{}|", config.active_source.as_str());
+        let own = config.active_source.listen_count_key("");
         let listen_counts = config
             .listen_counts
             .iter()
-            .filter_map(|(key, count)| match key.strip_prefix(&own) {
-                Some(uid) => Some((uid.to_owned(), *count)),
-                None if key.starts_with("local:") => None,
-                None => Some((key.clone(), *count)),
+            .filter_map(|(key, count)| {
+                if own.is_empty() {
+                    (!key.starts_with("local:")).then(|| (key.clone(), *count))
+                } else {
+                    key.strip_prefix(&own).map(|uid| (uid.to_owned(), *count))
+                }
             })
             .collect();
         api::StatsView { listen_counts }

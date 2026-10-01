@@ -162,7 +162,6 @@ browser_playback_needs_host = Oynatma, ana makinedeki bir tarayıcıda çalış�
 experimental = experimental
 copy = Copy
 media_server = Medya Sunucusu
-media_servers = Medya Sunucuları
 saved_servers = Kayıtlı Sunucular
 switch_to_server = Değiştir
 active_server = Aktif

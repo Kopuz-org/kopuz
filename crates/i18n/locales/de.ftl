@@ -162,7 +162,6 @@ browser_playback_needs_host = Die Wiedergabe läuft in einem Browser auf dem Hos
 experimental = experimental
 copy = Copy
 media_server = Medienserver
-media_servers = Medienserver
 saved_servers = Gespeicherte Server
 switch_to_server = Wechseln
 active_server = Aktiv

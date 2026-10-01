@@ -232,7 +232,6 @@ browser_playback_needs_host = La riproduzione avviene in un browser sull'host, c
 experimental = experimental
 copy = Copy
 media_server = Server multimediale
-media_servers = Server multimediali
 saved_servers = Server salvati
 switch_to_server = Passa a
 active_server = Attivo

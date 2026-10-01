@@ -232,7 +232,6 @@ browser_playback_needs_host = Pemutaran berjalan di browser pada host, yang belu
 experimental = experimental
 copy = Copy
 media_server = Peladen Media
-media_servers = Peladen Media
 saved_servers = Peladen yang Tersimpan
 switch_to_server = Beralih
 active_server = Aktif

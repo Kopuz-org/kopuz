@@ -1335,12 +1335,11 @@ message SetConfigRequest {
 
 // ---------------- config ----------------
 
-// A source is Local, a named local library, or a server; the id carries the
-// namespace (`local:<uuid>` or the server id) exactly as AppConfig holds it.
+// A source is a folder library or a server; the id carries the namespace as AppConfig holds it.
 message SourceRef {
+  reserved 1, 2;
   oneof kind {
-    Unit local = 1;
-    string local_library = 2;
+    string folders = 4;
     string server = 3;
   }
 }
@@ -1350,7 +1349,7 @@ message StringList {
   repeated string values = 1;
 }
 
-message SavedLocalSource {
+message SavedFolderSource {
   string id = 1;
   string name = 2;
   repeated string directories = 3;
@@ -1398,12 +1397,12 @@ message ArtistSortCriterion {
 // The settings surface, mirroring config::AppConfig minus the keys the
 // daemon never sends: credentials and machine-local path state.
 message Config {
-  repeated SavedLocalSource local_sources = 1;
+  repeated SavedFolderSource folder_sources = 69;
   SourceRef active_source = 2;
   bool source_explicitly_set = 3;
   map<string, StringList> server_folders = 4;
   // 5-7, 11-13, 48-50 were the settings the daemon publishes as field lists, and the retired music_directory.
-  reserved 5, 6, 7, 11, 12, 13, 48, 49, 50;
+  reserved 1, 5, 6, 7, 11, 12, 13, 48, 49, 50;
   string theme = 8;
   string live_theme_path = 9;
   string device_id = 10;

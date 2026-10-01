@@ -162,7 +162,6 @@ browser_playback_needs_host = A lejátszás a gazdagép egyik böngészőjében 
 experimental = experimental
 copy = Copy
 media_server = Médiaszerver
-media_servers = Médiaszerverek
 saved_servers = Mentett szerverek
 switch_to_server = Váltás
 active_server = Aktív

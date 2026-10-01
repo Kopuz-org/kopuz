@@ -162,7 +162,6 @@ browser_playback_needs_host = kalama musi li kama lon ilo lukin pi ilo lawa. ilo
 experimental = experimental
 copy = Copy
 media_server = pana
-media_servers = pana mute
 saved_servers = pana pi awen sona
 switch_to_server = o ante
 active_server = pana lon

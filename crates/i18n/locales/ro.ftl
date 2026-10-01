@@ -162,7 +162,6 @@ browser_playback_needs_host = Redarea rulează într-un browser de pe gazdă, pe
 experimental = experimental
 copy = Copy
 media_server = Server Media
-media_servers = Servere Media
 saved_servers = Servere Salvate
 switch_to_server = Comută
 active_server = Activ

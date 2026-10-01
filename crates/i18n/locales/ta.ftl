@@ -232,7 +232,6 @@ browser_playback_needs_host = இயக்கம் ஹோஸ்டில் உ
 experimental = experimental
 copy = Copy
 media_server = மீடியா சேவையகம்
-media_servers = மீடியா சேவையகங்கள்
 saved_servers = சேமிக்கப்பட்ட சேவையகங்கள்
 switch_to_server = மாறு
 active_server = செயலில்

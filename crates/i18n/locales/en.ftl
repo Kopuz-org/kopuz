@@ -252,7 +252,6 @@ browser_playback_needs_host = Playback runs in a browser on the host, which this
 experimental = experimental
 copy = Copy
 media_server = Media Server
-media_servers = Media Servers
 saved_servers = Saved Servers
 switch_to_server = Switch
 active_server = Active

@@ -232,7 +232,6 @@ browser_playback_needs_host = പ്ലേബാക്ക് ഹോസ്റ്�
 experimental = experimental
 copy = Copy
 media_server = മീഡിയ സെർവർ
-media_servers = മീഡിയ സെർവറുകൾ
 saved_servers = സംരക്ഷിച്ച സെർവറുകൾ
 switch_to_server = മാറുക
 active_server = സജീവം

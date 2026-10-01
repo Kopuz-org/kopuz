@@ -162,7 +162,6 @@ browser_playback_needs_host = 재생은 호스트의 브라우저에서 실행�
 experimental = experimental
 copy = Copy
 media_server = 미디어 서버
-media_servers = 미디어 서버
 saved_servers = 저장된 서버
 switch_to_server = 전환
 active_server = 활성

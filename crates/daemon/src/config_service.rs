@@ -295,6 +295,9 @@ fn with_daemon_owned_fields(
     incoming.cover_fetch_strategy = current.cover_fetch_strategy;
     incoming.server = current.server.clone();
     incoming.servers = current.servers.clone();
+    incoming.active_source = current.active_source.clone();
+    incoming.local_sources = current.local_sources.clone();
+    incoming.server_folders = current.server_folders.clone();
     incoming.musicbrainz_token = current.musicbrainz_token.clone();
     incoming.lastfm_api_key = current.lastfm_api_key.clone();
     incoming.lastfm_api_secret = current.lastfm_api_secret.clone();
@@ -341,6 +344,9 @@ fn stripped(config: &config::AppConfig) -> config::AppConfig {
     view.volume = config.volume;
     view.auto_fetch_covers = config.auto_fetch_covers;
     view.cover_fetch_strategy = config.cover_fetch_strategy;
+    view.active_source = config.active_source.clone();
+    view.local_sources = config.local_sources.clone();
+    view.server_folders = config.server_folders.clone();
     view
 }
 
@@ -369,6 +375,22 @@ fn changed_keys(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stale_whole_config_write_cannot_revert_folder_sources() {
+        let mut current = config::AppConfig::default();
+        current.local_sources.push(config::SavedLocalSource {
+            id: "local:a".into(),
+            name: "a".into(),
+            directories: vec!["/music".into()],
+        });
+        current.active_source = config::Source::LocalLibrary("local:a".into());
+        let updated = with_daemon_owned_fields(config::AppConfig::default(), &current);
+        assert_eq!(updated.local_sources, current.local_sources);
+        assert_eq!(updated.active_source, current.active_source);
+        let view = stripped(&current);
+        assert_eq!(view.local_sources, current.local_sources);
+    }
 
     #[tokio::test]
     async fn set_round_trips_and_keeps_credentials_the_caller_never_saw() {

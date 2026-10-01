@@ -232,7 +232,6 @@ browser_playback_needs_host = Afspelen gebeurt in een browser op de host, waarto
 experimental = experimental
 copy = Copy
 media_server = Mediaserver
-media_servers = Mediaservers
 saved_servers = Opgeslagen servers
 switch_to_server = Wisselen
 active_server = Actief

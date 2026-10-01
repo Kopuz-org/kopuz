@@ -232,7 +232,6 @@ browser_playback_needs_host = Uppspelningen sker i en webbläsare på värden, s
 experimental = experimental
 copy = Copy
 media_server = Mediaserver
-media_servers = Mediaservrar
 saved_servers = Sparade servrar
 switch_to_server = Byt
 active_server = Aktiv

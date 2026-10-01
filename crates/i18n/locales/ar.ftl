@@ -162,7 +162,6 @@ browser_playback_needs_host = يتم التشغيل في متصفح على ال�
 experimental = experimental
 copy = Copy
 media_server = خادم الوسائط
-media_servers = خوادم الوسائط
 saved_servers = الخوادم المحفوظة
 switch_to_server = تبديل
 active_server = نشط

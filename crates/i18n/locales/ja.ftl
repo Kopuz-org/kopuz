@@ -162,7 +162,6 @@ browser_playback_needs_host = 再生はホスト上のブラウザで行われ�
 experimental = experimental
 copy = Copy
 media_server = メディアサーバー
-media_servers = メディアサーバー
 saved_servers = 保存されたサーバー
 switch_to_server = 切り替え
 active_server = アクティブ
