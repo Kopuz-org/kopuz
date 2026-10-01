@@ -97,7 +97,7 @@ impl LibraryService {
         // The same lookup names a linked artist, so one wearing a credit's text is looked up though it has a photo.
         let unnamed = self
             .db
-            .artists_unnamed_by_source(source.source())
+            .artist_keys_unnamed_by_source(source.source())
             .await
             .map_err(db_error)?;
         let scope = source.source().as_str().to_string();

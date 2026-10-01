@@ -1804,6 +1804,8 @@ mod row_fill_tests {
             "CREATE TABLE app_config (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL)",
             "ALTER TABLE queue_state ADD COLUMN queue_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE queue_state ADD COLUMN shuffle_order_json TEXT NOT NULL DEFAULT '[]'",
+            "DROP VIEW artist_cover_albums",
+            "DROP VIEW artist_credit_rows",
             "DROP TRIGGER artists_key_required",
             "DROP INDEX idx_artists_key",
             "ALTER TABLE artists DROP COLUMN key",

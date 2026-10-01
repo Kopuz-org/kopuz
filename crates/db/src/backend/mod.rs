@@ -193,11 +193,11 @@ impl ReadStore for Native {
         queries::artist(&self.pool(), source, artist).await
     }
 
-    async fn artists_unnamed_by_source(
+    async fn artist_keys_unnamed_by_source(
         &self,
         source: &crate::Source,
     ) -> Result<std::collections::HashSet<String>, DbError> {
-        queries::artists_unnamed_by_source(&self.pool(), source).await
+        queries::artist_keys_unnamed_by_source(&self.pool(), source).await
     }
 
     async fn genre_tracks(

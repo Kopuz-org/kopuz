@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ar.key, ar.source_artist_id, ar.name,\n                  (SELECT COUNT(*) FROM artist_credit_rows cr\n                    WHERE cr.source = ?1 AND cr.artist_pk = ar.id) AS \"tracks!: i64\"\n             FROM artists ar WHERE ar.source = ?1 AND ar.key = ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "key",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_artist_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "tracks!: i64",
+        "ordinal": 3,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "c90ede52ba382b0fa79e8937a8470047f51bf4438ba2054de3d367f79864ce33"
+}

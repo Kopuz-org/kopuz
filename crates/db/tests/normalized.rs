@@ -520,7 +520,7 @@ async fn once_the_source_names_an_artist_a_credit_no_longer_renames_it() {
         .await
         .unwrap();
     assert!(
-        db.artists_unnamed_by_source(&source)
+        db.artist_keys_unnamed_by_source(&source)
             .await
             .unwrap()
             .contains("UC-4lat")
@@ -538,7 +538,7 @@ async fn once_the_source_names_an_artist_a_credit_no_longer_renames_it() {
     let row = db.artist(&source, "UC-4lat").await.unwrap().unwrap();
     assert_eq!(row.name, "4LAT");
     assert!(
-        db.artists_unnamed_by_source(&source)
+        db.artist_keys_unnamed_by_source(&source)
             .await
             .unwrap()
             .is_empty()
@@ -711,4 +711,48 @@ async fn lyrics_round_trip_through_their_rows() {
         Some(db::CachedLyrics::Missing { .. })
     ));
     assert_eq!(db.cached_lyrics("d").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn the_single_and_bulk_artist_covers_agree_for_every_artist() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let source = Source::Server("yt".into());
+    let on = |key: &str, album: &str, credits: Vec<ArtistCredit>| {
+        let mut row = track(key, credits);
+        row.album_id = album.into();
+        row
+    };
+    db.upsert_tracks(
+        &source,
+        &[
+            on("t1", "A1", vec![ArtistCredit::linked("Ada", "UC-ada")]),
+            on(
+                "t2",
+                "A2",
+                vec![
+                    ArtistCredit::linked("Ada", "UC-ada"),
+                    ArtistCredit::linked("Boris", "UC-boris"),
+                ],
+            ),
+            on("t3", "A3", vec![ArtistCredit::unlinked("Cleo")]),
+        ],
+    )
+    .await
+    .unwrap();
+    for (album, cover) in [("A2", "/a2.jpg"), ("A1", "/a1.jpg")] {
+        db.update_album_cover(&source, album, Some(cover), false)
+            .await
+            .unwrap();
+    }
+
+    let bulk = db.artist_album_covers(&source).await.unwrap();
+    let artists = db.artists(&source).await.unwrap();
+    assert_eq!(artists.len(), 3);
+    for artist in &artists {
+        let single = db.artist_album_cover(&source, &artist.key).await.unwrap();
+        assert_eq!(single, bulk.get(&artist.key).cloned(), "{}", artist.name);
+    }
+    assert_eq!(bulk.get("UC-ada").map(String::as_str), Some("/a1.jpg"));
+    assert_eq!(bulk.get("UC-boris").map(String::as_str), Some("/a2.jpg"));
+    assert_eq!(bulk.len(), 2);
 }

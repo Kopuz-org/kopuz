@@ -207,8 +207,8 @@ pub trait ReadStore: Send + Sync {
     /// One artist of `source`, or `None` when it has no such row.
     async fn artist(&self, source: &Source, artist: &str) -> Result<Option<ArtistRow>, DbError>;
 
-    /// The ids of `source`'s linked artists still wearing a credit's text, whose name the source has not given yet.
-    async fn artists_unnamed_by_source(
+    /// The keys of `source`'s linked artists still wearing a credit's text, whose name the source has not given yet.
+    async fn artist_keys_unnamed_by_source(
         &self,
         source: &Source,
     ) -> Result<std::collections::HashSet<String>, DbError>;

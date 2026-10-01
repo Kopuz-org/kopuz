@@ -223,13 +223,8 @@ pub async fn artist_tracks(
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
             WHERE t.source = ?1 AND t.rowid_pk IN (
-                  SELECT c.track_pk FROM track_credits c
-                   WHERE c.artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2)
-                  UNION
-                  SELECT bt.rowid_pk FROM albums al
-                    JOIN tracks bt ON bt.source = al.source AND bt.source_album_id = al.source_album_id
-                   WHERE al.source = ?1 AND al.derived = 0
-                     AND al.artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2))
+                  SELECT track_pk FROM artist_credit_rows
+                   WHERE source = ?1 AND artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2))
             ORDER BY t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE
             LIMIT ?3"#,
         src,
@@ -477,14 +472,9 @@ pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::Ar
     let src = source.as_str();
     let rows = sqlx::query!(
         r#"SELECT ar.key, ar.source_artist_id, ar.name, COUNT(*) AS "tracks!: i64"
-             FROM (SELECT c.artist_pk AS artist, c.track_pk AS track
-                     FROM track_credits c JOIN artists ca ON ca.id = c.artist_pk
-                    WHERE ca.source = ?1
-                   UNION
-                   SELECT al.artist_pk, bt.rowid_pk FROM albums al
-                     JOIN tracks bt ON bt.source = al.source AND bt.source_album_id = al.source_album_id
-                    WHERE al.source = ?1 AND al.artist_pk IS NOT NULL AND al.derived = 0) cr
-             JOIN artists ar ON ar.id = cr.artist
+             FROM artist_credit_rows cr
+             JOIN artists ar ON ar.id = cr.artist_pk
+            WHERE cr.source = ?1
             GROUP BY ar.id"#,
         src
     )
@@ -512,19 +502,19 @@ pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::Ar
     Ok(artists)
 }
 
-pub async fn artists_unnamed_by_source(
+pub async fn artist_keys_unnamed_by_source(
     pool: &SqlitePool,
     source: &Source,
 ) -> Result<std::collections::HashSet<String>, DbError> {
     let src = source.as_str();
-    let ids = sqlx::query_scalar!(
-        "SELECT source_artist_id AS \"id!: String\" FROM artists \
+    let keys = sqlx::query_scalar!(
+        "SELECT key FROM artists \
           WHERE source = ?1 AND source_artist_id IS NOT NULL AND named_by_source = 0",
         src
     )
     .fetch_all(pool)
     .await?;
-    Ok(ids.into_iter().collect())
+    Ok(keys.into_iter().collect())
 }
 
 /// One artist of `source` by its key, counted as [`artists`] counts it.
@@ -536,12 +526,8 @@ pub async fn artist(
     let src = source.as_str();
     let row = sqlx::query!(
         r#"SELECT ar.key, ar.source_artist_id, ar.name,
-                  (SELECT COUNT(*) FROM (
-                      SELECT c.track_pk FROM track_credits c WHERE c.artist_pk = ar.id
-                      UNION
-                      SELECT bt.rowid_pk FROM albums al
-                        JOIN tracks bt ON bt.source = al.source AND bt.source_album_id = al.source_album_id
-                       WHERE al.source = ?1 AND al.derived = 0 AND al.artist_pk = ar.id)) AS "tracks!: i64"
+                  (SELECT COUNT(*) FROM artist_credit_rows cr
+                    WHERE cr.source = ?1 AND cr.artist_pk = ar.id) AS "tracks!: i64"
              FROM artists ar WHERE ar.source = ?1 AND ar.key = ?2"#,
         src,
         artist
@@ -562,21 +548,10 @@ pub async fn artist_album_covers(
     source: &Source,
 ) -> Result<std::collections::HashMap<String, String>, DbError> {
     let src = source.as_str();
-    // A bare column beside MIN() is read from the row holding the minimum.
     let rows = sqlx::query!(
-        r#"SELECT ar.key, al.cover_path AS "cover_path!", MIN(al.rowid_pk) AS "first!: i64"
-             FROM (SELECT c.artist_pk AS artist, c.track_pk AS track
-                     FROM track_credits c JOIN artists ca ON ca.id = c.artist_pk
-                    WHERE ca.source = ?1
-                   UNION
-                   SELECT ba.artist_pk, bt.rowid_pk FROM albums ba
-                     JOIN tracks bt ON bt.source = ba.source AND bt.source_album_id = ba.source_album_id
-                    WHERE ba.source = ?1 AND ba.artist_pk IS NOT NULL AND ba.derived = 0) cr
-             JOIN artists ar ON ar.id = cr.artist
-             JOIN tracks t ON t.rowid_pk = cr.track
-             JOIN albums al ON al.source = t.source AND al.source_album_id = t.source_album_id
-            WHERE al.cover_path IS NOT NULL
-            GROUP BY cr.artist"#,
+        r#"SELECT ar.key, cv.cover_path AS "cover_path!"
+             FROM artist_cover_albums cv JOIN artists ar ON ar.id = cv.artist_pk
+            WHERE cv.source = ?1"#,
         src
     )
     .fetch_all(pool)
@@ -595,17 +570,8 @@ pub async fn artist_album_cover(
 ) -> Result<Option<String>, DbError> {
     let src = source.as_str();
     Ok(sqlx::query_scalar!(
-        r#"SELECT al.cover_path AS "cover_path!" FROM tracks t
-             JOIN albums al ON al.source = t.source AND al.source_album_id = t.source_album_id
-            WHERE al.cover_path IS NOT NULL AND t.rowid_pk IN (
-                  SELECT c.track_pk FROM track_credits c
-                   WHERE c.artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2)
-                  UNION
-                  SELECT bt.rowid_pk FROM albums ba
-                    JOIN tracks bt ON bt.source = ba.source AND bt.source_album_id = ba.source_album_id
-                   WHERE ba.source = ?1 AND ba.derived = 0
-                     AND ba.artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2))
-            ORDER BY al.rowid_pk LIMIT 1"#,
+        r#"SELECT cover_path AS "cover_path!" FROM artist_cover_albums
+            WHERE source = ?1 AND artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2)"#,
         src,
         artist
     )

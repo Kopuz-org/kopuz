@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT t.rowid_pk AS \"rowid_pk!\", t.track_key, t.service,\n                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS \"cover_path?: String\",\n                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,\n                  t.track_number, t.disc_number,\n                  mb.release_id AS \"mb_release_id?\", mb.recording_id AS \"mb_recording_id?\", mb.track_id AS \"mb_track_id?\"\n             FROM tracks t\n             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id\n             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk\n            WHERE t.source = ?1 AND t.rowid_pk IN (\n                  SELECT c.track_pk FROM track_credits c\n                   WHERE c.artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2)\n                  UNION\n                  SELECT bt.rowid_pk FROM albums al\n                    JOIN tracks bt ON bt.source = al.source AND bt.source_album_id = al.source_album_id\n                   WHERE al.source = ?1 AND al.derived = 0\n                     AND al.artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2))\n            ORDER BY t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE\n            LIMIT ?3",
+  "query": "SELECT t.rowid_pk AS \"rowid_pk!\", t.track_key, t.service,\n                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS \"cover_path?: String\",\n                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,\n                  t.track_number, t.disc_number,\n                  mb.release_id AS \"mb_release_id?\", mb.recording_id AS \"mb_recording_id?\", mb.track_id AS \"mb_track_id?\"\n             FROM tracks t\n             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id\n             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk\n            WHERE t.source = ?1 AND t.rowid_pk IN (\n                  SELECT track_pk FROM artist_credit_rows\n                   WHERE source = ?1 AND artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2))\n            ORDER BY t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE\n            LIMIT ?3",
   "describe": {
     "columns": [
       {
@@ -106,5 +106,5 @@
       true
     ]
   },
-  "hash": "39d3b351ac26efb239bfd992ce76a5cf8f084b4653d0ede71405ad302c56b82d"
+  "hash": "0245fe96d7d20454ea9777eb0c87fdcb0cef8c475df612c8b3eb8b21f6a9dea1"
 }
