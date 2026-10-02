@@ -30,17 +30,53 @@ pub async fn upsert_tracks(
     let src = source.as_str();
     let mut tx = pool.begin().await?;
     for t in tracks {
-        let track_key = t.id.key().into_owned();
-        let path = t.id.local_path().map(|p| p.to_string_lossy().into_owned());
-        let service = t.id.service().map(|s| service_str(s).to_string());
-        let duration = t.duration as i64;
-        let khz = t.khz as i64;
-        let bitrate = t.bitrate as i64;
-        let track_number = t.track_number.map(|n| n as i64);
-        let disc_number = t.disc_number.map(|n| n as i64);
-        // A remote row is dated when first seen; a local one takes its file's time from the scan.
-        let pk = sqlx::query_scalar!(
-            "INSERT INTO tracks \
+        upsert_track(&mut tx, src, t).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Re-file one track a scan read back from its file, and drop the album it left if that is now empty.
+pub async fn refile_track(
+    pool: &SqlitePool,
+    source: &Source,
+    track: &Track,
+    album: &Album,
+    left_album: &str,
+) -> Result<(), DbError> {
+    let src = source.as_str();
+    let mut tx = pool.begin().await?;
+    upsert_track(&mut tx, src, track).await?;
+    upsert_album(&mut tx, src, album).await?;
+    sqlx::query!(
+        "DELETE FROM albums WHERE source = ?1 AND source_album_id = ?2 \
+         AND NOT EXISTS (SELECT 1 FROM tracks WHERE source = ?1 AND source_album_id = ?2)",
+        src,
+        left_album
+    )
+    .execute(&mut *tx)
+    .await?;
+    prune_artists(&mut tx, src).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn upsert_track(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    src: &str,
+    t: &Track,
+) -> Result<(), DbError> {
+    let track_key = t.id.key().into_owned();
+    let path = t.id.local_path().map(|p| p.to_string_lossy().into_owned());
+    let service = t.id.service().map(|s| service_str(s).to_string());
+    let duration = t.duration as i64;
+    let khz = t.khz as i64;
+    let bitrate = t.bitrate as i64;
+    let track_number = t.track_number.map(|n| n as i64);
+    let disc_number = t.disc_number.map(|n| n as i64);
+    // A remote row is dated when first seen; a local one takes its file's time from the scan.
+    let pk = sqlx::query_scalar!(
+        "INSERT INTO tracks \
                (source, track_key, path, service, source_album_id, title, artist, album, duration, \
                 khz, bitrate, track_number, disc_number, cover_path, added_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
@@ -51,27 +87,25 @@ pub async fn upsert_tracks(
                title=?6, artist=?7, album=?8, duration=?9, \
                khz=?10, bitrate=?11, track_number=?12, disc_number=?13, cover_path=?14 \
              RETURNING rowid_pk AS \"pk!: i64\"",
-            src,
-            track_key,
-            path,
-            service,
-            t.album_id,
-            t.title,
-            t.artist,
-            t.album,
-            duration,
-            khz,
-            bitrate,
-            track_number,
-            disc_number,
-            t.cover
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        write_track_children(&mut tx, src, pk, t).await?;
-        ensure_album(&mut tx, src, pk, t).await?;
-    }
-    tx.commit().await?;
+        src,
+        track_key,
+        path,
+        service,
+        t.album_id,
+        t.title,
+        t.artist,
+        t.album,
+        duration,
+        khz,
+        bitrate,
+        track_number,
+        disc_number,
+        t.cover
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    write_track_children(tx, src, pk, t).await?;
+    ensure_album(tx, src, pk, t).await?;
     Ok(())
 }
 
@@ -314,19 +348,30 @@ pub async fn upsert_albums(
     let src = source.as_str();
     let mut tx = pool.begin().await?;
     for a in albums {
-        let year = a.year as i64;
-        let manual = a.manual_cover as i64;
-        let cover = a
-            .cover_path
-            .as_ref()
-            .map(|p| p.to_string_lossy().into_owned());
-        let billed = a.artist.trim();
-        let artist_pk = match billed.is_empty() {
-            true => None,
-            false => Some(file_artist(&mut tx, src, billed, a.artist_id.as_deref()).await?),
-        };
-        // The artist is replaced with its name, so an album rebilled to nobody drops the old row.
-        sqlx::query!(
+        upsert_album(&mut tx, src, a).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn upsert_album(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    src: &str,
+    a: &Album,
+) -> Result<(), DbError> {
+    let year = a.year as i64;
+    let manual = a.manual_cover as i64;
+    let cover = a
+        .cover_path
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned());
+    let billed = a.artist.trim();
+    let artist_pk = match billed.is_empty() {
+        true => None,
+        false => Some(file_artist(tx, src, billed, a.artist_id.as_deref()).await?),
+    };
+    // The artist is replaced with its name, so an album rebilled to nobody drops the old row.
+    sqlx::query!(
             "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_pk) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
              ON CONFLICT(source, source_album_id) DO UPDATE SET \
@@ -344,10 +389,8 @@ pub async fn upsert_albums(
             manual,
             artist_pk
         )
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-    }
-    tx.commit().await?;
     Ok(())
 }
 

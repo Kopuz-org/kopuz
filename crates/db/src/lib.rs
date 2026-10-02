@@ -650,6 +650,15 @@ pub trait Storage: ReadStore {
     async fn upsert_albums(&self, source: &Source, albums: &[reader::Album])
     -> Result<(), DbError>;
 
+    /// Re-file one track as a scan read it back, with its album; the album it left goes when empty.
+    async fn refile_track(
+        &self,
+        source: &Source,
+        track: &reader::Track,
+        album: &reader::Album,
+        left_album: &str,
+    ) -> Result<(), DbError>;
+
     /// Record when each `(track_key, unix_secs)` track was added, for the
     /// listings that sort by date added. Rows already stamped keep their value,
     /// so this is safe to call on every scan.

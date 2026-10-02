@@ -532,25 +532,8 @@ async fn dont_recommend_is_refused_by_a_source_without_it() {
     assert!(!caps.dont_recommend);
 }
 
-#[tokio::test]
-async fn scan_job_indexes_local_files_over_the_wire() {
-    let pair = spawn_pair().await;
-    let music = pair._dir.path().join("music");
-    std::fs::create_dir_all(&music).expect("music dir");
-    std::fs::write(music.join("one.wav"), wav_bytes(1)).expect("write wav");
-    std::fs::write(music.join("two.wav"), wav_bytes(1)).expect("write wav");
-
-    pair.wire
-        .set_source_settings(
-            "local".into(),
-            vec![api::FieldValue::new(
-                "directories",
-                api::encode_directories(&[music.to_string_lossy().into_owned()]),
-            )],
-        )
-        .await
-        .expect("point the library at the temp dir");
-
+/// Scan the library and wait for the job to finish.
+async fn run_scan(pair: &Pair) {
     let job = pair
         .wire
         .start_job(api::JobKind::Scan)
@@ -571,10 +554,108 @@ async fn scan_job_indexes_local_files_over_the_wire() {
                 );
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            api::JobState::Finished => break,
+            api::JobState::Finished => return,
             other => panic!("scan ended as {other:?}: {status:?}"),
         }
     }
+}
+
+/// The library's artist names and album titles, sorted.
+async fn shelves(api: &dyn KopuzApi) -> (Vec<String>, Vec<String>) {
+    let mut artists: Vec<String> = api
+        .artists(Page::default())
+        .await
+        .expect("artists")
+        .artists
+        .into_iter()
+        .map(|artist| artist.name)
+        .collect();
+    let mut albums: Vec<String> = api
+        .albums(Page::default())
+        .await
+        .expect("albums")
+        .albums
+        .into_iter()
+        .map(|album| album.title)
+        .collect();
+    artists.sort();
+    albums.sort();
+    (artists, albums)
+}
+
+/// A tag edit files what a rescan of the file would, splits no names, and leaves no emptied album or artist behind.
+#[tokio::test]
+async fn a_tag_edit_files_what_a_rescan_would() {
+    let pair = spawn_pair().await;
+    let music = pair._dir.path().join("music");
+    std::fs::create_dir_all(&music).expect("music dir");
+    std::fs::write(music.join("one.wav"), wav_bytes(1)).expect("write wav");
+    pair.wire
+        .set_source_settings(
+            "local".into(),
+            vec![api::FieldValue::new(
+                "directories",
+                api::encode_directories(&[music.to_string_lossy().into_owned()]),
+            )],
+        )
+        .await
+        .expect("point the library at the temp dir");
+    run_scan(&pair).await;
+    let key = pair
+        .wire
+        .tracks(TrackFilter::default(), Page::default())
+        .await
+        .expect("tracks")
+        .items
+        .into_iter()
+        .find(|track| track.title.contains("one"))
+        .expect("the scanned file")
+        .key;
+
+    pair.wire
+        .update_track_metadata(api::TrackMetadataPatch {
+            key,
+            artist: Some("Ada, Bob".into()),
+            album: Some("Edited".into()),
+            ..Default::default()
+        })
+        .await
+        .expect("edit the tags");
+
+    let edited = shelves(&pair.local).await;
+    assert_eq!(
+        edited,
+        (vec!["Ada, Bob".to_string()], vec!["Edited".to_string()]),
+        "one artist, no split, and the emptied album and its artist are gone"
+    );
+    assert_eq!(shelves(&pair.wire).await, edited);
+    run_scan(&pair).await;
+    assert_eq!(
+        shelves(&pair.local).await,
+        edited,
+        "a rescan of the edited file files the same"
+    );
+}
+
+#[tokio::test]
+async fn scan_job_indexes_local_files_over_the_wire() {
+    let pair = spawn_pair().await;
+    let music = pair._dir.path().join("music");
+    std::fs::create_dir_all(&music).expect("music dir");
+    std::fs::write(music.join("one.wav"), wav_bytes(1)).expect("write wav");
+    std::fs::write(music.join("two.wav"), wav_bytes(1)).expect("write wav");
+
+    pair.wire
+        .set_source_settings(
+            "local".into(),
+            vec![api::FieldValue::new(
+                "directories",
+                api::encode_directories(&[music.to_string_lossy().into_owned()]),
+            )],
+        )
+        .await
+        .expect("point the library at the temp dir");
+    run_scan(&pair).await;
 
     let page = pair
         .wire

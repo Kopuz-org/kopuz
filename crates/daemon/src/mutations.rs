@@ -114,7 +114,7 @@ impl MutationService {
         patch: TrackMetadataPatch,
     ) -> Result<api::TrackInfo, ApiError> {
         let config = self.config();
-        let mut track = self.track(&patch.key).await?;
+        let track = self.track(&patch.key).await?;
         let path = Self::editable_path(&config, &track)?;
 
         let title = patch.title.unwrap_or_else(|| track.title.clone());
@@ -147,34 +147,32 @@ impl MutationService {
             disc_number,
             cover,
         };
-        tokio::task::spawn_blocking(move || reader::write_tags(&path, &edits))
+        let written = path.clone();
+        tokio::task::spawn_blocking(move || reader::write_tags(&written, &edits))
             .await
             .map_err(|error| ApiError::internal(format!("tag writer task failed: {error}")))?
             .map_err(ApiError::internal)?;
 
-        track.title = title.trim().to_string();
-        track.artist = artist.trim().to_string();
-        // The artist string is what the user edited, so the credits are rebuilt from it rather than kept.
-        track.artists = artist
-            .split([';', ','])
-            .map(str::trim)
-            .filter(|artist| !artist.is_empty())
-            .map(str::to_string)
-            .collect();
-        track.credits = track
-            .artists
-            .iter()
-            .map(reader::ArtistCredit::unlinked)
-            .collect();
-        track.album = album.trim().to_string();
-        track.album_id = reader::metadata::make_album_id(&track.album, &track.artist);
-        track.track_number = track_number;
-        track.disc_number = disc_number;
+        // Read back as a scan would, so an edit files the same artists and album a rescan of the file does.
+        let reader::ScannedTrack {
+            track: mut scanned,
+            album: scanned_album,
+        } = tokio::task::spawn_blocking(move || reader::read_metadata(&path))
+            .await
+            .map_err(|error| ApiError::internal(format!("tag reader task failed: {error}")))?
+            .ok_or_else(|| ApiError::internal("the edited file could not be read back"))?;
+        scanned.cover = track.cover.clone();
         self.db
-            .upsert_tracks(&config.active_source, std::slice::from_ref(&track))
+            .refile_track(
+                &config.active_source,
+                &scanned,
+                &scanned_album,
+                &track.album_id,
+            )
             .await
             .map_err(db_error)?;
         self.session.invalidate(Table::Tracks);
+        self.session.invalidate(Table::Albums);
         // Read back, so the row carries the artist rows its new credits were filed under.
         let stored = self.track(&patch.key).await?;
         Ok(crate::wire::track_info(&stored, &config))

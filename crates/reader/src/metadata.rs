@@ -12,7 +12,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::{MetadataOptions, RawValue, StandardTag, Tag as SymphoniaTag};
 use symphonia::core::units::Timestamp;
 
-pub(crate) struct ScannedTrack {
+pub struct ScannedTrack {
     pub track: Track,
     pub album: Album,
 }
@@ -181,7 +181,7 @@ pub fn extract_metadata(
     }
 }
 
-pub(crate) fn read_metadata(track_path: &Path) -> Option<ScannedTrack> {
+pub fn read_metadata(track_path: &Path) -> Option<ScannedTrack> {
     let options = ParseOptions::new().read_cover_art(false);
     let tagged_file = match Probe::open(track_path).ok()?.options(options).read() {
         Ok(tagged_file) => tagged_file,

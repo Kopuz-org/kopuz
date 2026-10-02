@@ -11,7 +11,7 @@ pub mod sort;
 pub mod utils;
 
 pub use cover_indexer::{LocalCoverIndexReport, index_local_covers, missing_cover_ids};
-pub use metadata::{read, read_cover, write_tags};
+pub use metadata::{ScannedTrack, read, read_cover, read_metadata, write_tags};
 pub use models::{
     Album, ArtistCredit, ArtistImageRef, CoverChange, CoverRef, FavoritesStore, Library,
     PlaylistEntry, PlaylistFolder, PlaylistStore, Track, TrackEdits, TrackId,

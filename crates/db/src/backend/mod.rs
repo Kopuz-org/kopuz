@@ -623,6 +623,16 @@ impl Storage for Native {
         writes::upsert_albums(&self.pool(), source, albums).await
     }
 
+    async fn refile_track(
+        &self,
+        source: &crate::Source,
+        track: &reader::Track,
+        album: &reader::Album,
+        left_album: &str,
+    ) -> Result<(), DbError> {
+        writes::refile_track(&self.pool(), source, track, album, left_album).await
+    }
+
     async fn stamp_added_at(
         &self,
         source: &crate::Source,
