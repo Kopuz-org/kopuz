@@ -119,6 +119,7 @@ async fn activate(
             return;
         }
     };
+    hooks::sources::show_active(&source);
     // Which sign-in a source takes belongs to the service, and the daemon runs
     // it -- this only asks for whichever it named.
     match source.sign_in {

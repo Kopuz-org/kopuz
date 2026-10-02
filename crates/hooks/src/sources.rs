@@ -10,24 +10,58 @@ use dioxus::prelude::*;
 use crate::api::use_api;
 use crate::db_reactivity::{Table, use_generations};
 
-/// The configured sources, re-read when one changes or the active one moves.
-pub fn use_sources() -> Resource<Vec<api::SourceInfo>> {
+/// The configured sources every reader shares, so a switch shows everywhere at once.
+#[derive(Clone, Copy)]
+struct SourceRows(Signal<Option<Vec<api::SourceInfo>>>);
+
+/// Fetch the configured sources once for the tree, re-read when one changes or the active one moves.
+fn use_sources_provider() -> Signal<Option<Vec<api::SourceInfo>>> {
     let api = use_api();
     let gens = use_generations();
-    use_resource(move || {
+    let fetched = use_resource(move || {
         let _ = gens.generation(Table::Servers);
         let api = api.clone();
         async move { api.sources().await.unwrap_or_default() }
-    })
+    });
+    let mut rows = use_context_provider(|| SourceRows(Signal::new(None))).0;
+    use_effect(move || {
+        let next = fetched.read().clone();
+        if next.is_some() && *rows.peek() != next {
+            rows.set(next);
+        }
+    });
+    rows
 }
 
-/// Provide the active source's capabilities to the tree.
+/// The configured sources; `None` until the first answer arrives.
+pub fn use_sources() -> Signal<Option<Vec<api::SourceInfo>>> {
+    use_context::<SourceRows>().0
+}
+
+/// Show a source the daemon just switched to as the active one now, ahead of the refetch that confirms it.
+pub fn show_active(switched: &api::SourceInfo) {
+    let Some(SourceRows(mut rows)) = try_consume_context::<SourceRows>() else {
+        return;
+    };
+    let mut rows = rows.write();
+    let Some(rows) = rows.as_mut() else {
+        return;
+    };
+    for row in rows.iter_mut() {
+        if row.id == switched.id {
+            *row = switched.clone();
+        }
+        row.active = row.id == switched.id;
+    }
+}
+
+/// Provide the source list and the active source's capabilities to the tree.
 ///
-/// One resource feeds a plain signal so every consumer reads it
+/// One resource feeds plain signals so every consumer reads them
 /// synchronously while rendering, which is what the in-process handle used
 /// to give them.
 pub fn use_capabilities_provider() -> Signal<api::SourceCapabilities> {
-    let sources = use_sources();
+    let sources = use_sources_provider();
     let mut caps = use_context_provider(|| Signal::new(api::SourceCapabilities::default()));
     use_effect(move || {
         let next = sources

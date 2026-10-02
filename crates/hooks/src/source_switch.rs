@@ -60,6 +60,7 @@ pub async fn apply_source_switch(mut config: Signal<AppConfig>, id: String) -> b
     let api = crate::api::consume_api();
     match api.switch_source(id).await {
         Ok(info) => {
+            crate::sources::show_active(&info);
             let usable = info.authenticated;
             // The daemon owns the config now, so pull its version back rather
             // than reconstructing the same edit locally.
