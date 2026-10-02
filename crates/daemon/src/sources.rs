@@ -346,6 +346,10 @@ impl SourceService {
             .config
             .mutate_state(move |config| config.remove_local_source(&id_owned))
             .await?;
+        self.db
+            .purge_source(&config::Source::from_column(id))
+            .await
+            .map_err(db_error)?;
         if was_active {
             self.finish_source_change(
                 updated,

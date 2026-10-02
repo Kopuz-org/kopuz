@@ -783,7 +783,10 @@ pub async fn set_server_credentials(
 }
 
 /// Everything a source left behind: its rows name it by text, so nothing cascades from `servers`.
-async fn purge_source(conn: &mut sqlx::SqliteConnection, source: &str) -> Result<(), DbError> {
+pub(super) async fn purge_source(
+    conn: &mut sqlx::SqliteConnection,
+    source: &str,
+) -> Result<(), DbError> {
     for sql in [
         "DELETE FROM tracks WHERE source = ?1",
         "DELETE FROM albums WHERE source = ?1",

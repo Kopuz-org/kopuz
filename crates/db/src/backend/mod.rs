@@ -380,6 +380,13 @@ impl Storage for Native {
         cfg_store::save_config(&self.pool(), cfg, &self.settings_path).await
     }
 
+    async fn purge_source(&self, source: &crate::Source) -> Result<(), DbError> {
+        let mut tx = self.pool().begin().await?;
+        cfg_store::purge_source(&mut tx, source.as_str()).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {
         migrations::run_json_import(&self.pool(), config_dir, &self.settings_path).await
     }

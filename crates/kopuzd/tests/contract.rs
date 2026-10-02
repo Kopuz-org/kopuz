@@ -1424,12 +1424,47 @@ async fn a_folder_source_is_managed_through_the_generic_source_calls() {
         api::SourceState::Online
     );
 
+    let filed = config::Source::from_column(&created.id);
+    pair.database
+        .upsert_tracks(&filed, &[track("/jazz/a.flac"), track("/jazz/b.flac")])
+        .await
+        .expect("seed the folder source");
+    let library_before = pair
+        .database
+        .tracks_count(&db::TrackFilter::new(config::Source::default()))
+        .await
+        .expect("count");
+
     pair.wire
         .delete_source(created.id.clone())
         .await
         .expect("delete");
     let left = pair.local.sources().await.expect("sources");
     assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(
+        pair.database
+            .tracks_count(&db::TrackFilter::new(filed.clone()))
+            .await
+            .expect("count"),
+        0,
+        "a deleted folder source leaves no tracks behind"
+    );
+    assert!(
+        pair.database
+            .artists(&filed)
+            .await
+            .expect("artists")
+            .is_empty(),
+        "nor artists"
+    );
+    assert_eq!(
+        pair.database
+            .tracks_count(&db::TrackFilter::new(config::Source::default()))
+            .await
+            .expect("count"),
+        library_before,
+        "the other library is untouched"
+    );
     assert_eq!(
         pair.local
             .delete_source(created.id)

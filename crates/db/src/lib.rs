@@ -380,6 +380,9 @@ pub trait Storage: ReadStore {
     /// of the settings into the standalone config file when it is writable.
     async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
 
+    /// Drop every row a source left behind: its library, playlists, favorites, plays and photos.
+    async fn purge_source(&self, source: &Source) -> Result<(), DbError>;
+
     /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
     /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op
     /// if the DB already holds data or the sentinel exists. Idempotent; safe to
