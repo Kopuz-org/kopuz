@@ -172,7 +172,8 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     crate::os_media::spawn(&session);
     crate::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
     crate::integrations::spawn_discord_presence(&session, session.config_watch());
-    if let Some(snapshot) = queue_store.load().await
+    let restored_source = session.config_watch().borrow().active_source.clone();
+    if let Some(snapshot) = queue_store.load(&restored_source).await
         && !snapshot.queue.is_empty()
     {
         let restored = snapshot.queue.len();

@@ -401,28 +401,6 @@ impl PlayerController {
         });
     }
 
-    /// Hard reset when the active server changes: stop everything and clear
-    /// the queue so a queued remote track cannot replay through the wrong
-    /// backend.
-    pub fn reset_for_backend_switch(&mut self) {
-        self.playback_error.set(None);
-        self.clear_current_track_metadata();
-        self.queue.write().clear();
-        self.history.write().clear();
-        self.current_queue_index.set(0);
-        let handle = self.handle();
-        spawn(async move {
-            let _ = handle.player_command(api::PlayerCommand::Stop).await;
-            let request = api::SetQueueRequest {
-                mode: api::QueueMode::Replace,
-                context: api::QueueContext::Tracks { keys: Vec::new() },
-                start_index: None,
-                shuffle: None,
-            };
-            let _ = handle.set_queue(request).await;
-        });
-    }
-
     pub fn output_latency_secs(&self) -> f64 {
         *self.output_latency_ms.peek() as f64 / 1000.0
     }

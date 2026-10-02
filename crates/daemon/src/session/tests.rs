@@ -1053,17 +1053,25 @@ fn the_playing_row_carries_both_the_library_ref_and_the_source_qualified_id() {
 }
 
 struct MemoryStore {
-    saved: Mutex<Vec<db::QueueSnapshot>>,
+    saved: Mutex<Vec<(config::Source, db::QueueSnapshot)>>,
 }
 
 #[async_trait::async_trait]
 impl crate::persistence::QueueStore for MemoryStore {
-    async fn load(&self) -> Option<db::QueueSnapshot> {
-        None
+    async fn load(&self, source: &config::Source) -> Option<db::QueueSnapshot> {
+        let saved = self.saved.lock().expect("store lock");
+        saved
+            .iter()
+            .rev()
+            .find(|(at, _)| at == source)
+            .map(|(_, snapshot)| snapshot.clone())
     }
 
-    async fn save(&self, snapshot: db::QueueSnapshot) {
-        self.saved.lock().expect("store lock").push(snapshot);
+    async fn save(&self, source: &config::Source, snapshot: db::QueueSnapshot) {
+        self.saved
+            .lock()
+            .expect("store lock")
+            .push((source.clone(), snapshot));
     }
 }
 
@@ -1266,11 +1274,123 @@ async fn persist_now_writes_the_current_snapshot() {
     session.persist_now().await;
 
     let saved = store.saved.lock().expect("store lock");
-    let last = saved.last().expect("at least one snapshot");
+    let (_, last) = saved.last().expect("at least one snapshot");
     assert_eq!(last.version, 1);
     assert_eq!(last.queue.len(), 2);
     assert_eq!(last.current_queue_index, 0);
     assert!(!last.shuffle_enabled);
+}
+
+/// Each source keeps its queue: leaving one parks it, coming back resumes it, and a source never visited starts empty.
+#[tokio::test]
+async fn switching_sources_parks_and_resumes_each_queue() {
+    let store = Arc::new(MemoryStore {
+        saved: Mutex::new(Vec::new()),
+    });
+    let sink = FakeSinkHandle::default();
+    let player =
+        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
+    let mut on_a = config::AppConfig::default();
+    on_a.local_sources.push(config::SavedLocalSource {
+        id: "local:b".into(),
+        name: "B".into(),
+        directories: Vec::new(),
+    });
+    let mut on_b = on_a.clone();
+    on_b.active_source = config::Source::LocalLibrary("local:b".into());
+    let services = PlaybackServices {
+        config: on_a.clone(),
+        queue_store: Some(store.clone()),
+        ..Default::default()
+    };
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let api = LocalApi::new(session.clone());
+    api.set_queue(replace(&["a-0", "a-1"]))
+        .await
+        .expect("set queue");
+    wait_committed(&api).await;
+    let on_a_titles = queue_titles(&api).await;
+
+    session.set_config(on_b.clone(), vec!["active_source".into()]);
+    session.persist_now().await;
+    assert!(queue_titles(&api).await.is_empty(), "B was never visited");
+    api.set_queue(replace(&["b-0"])).await.expect("set queue");
+    wait_committed(&api).await;
+
+    session.set_config(on_a.clone(), vec!["active_source".into()]);
+    session.persist_now().await;
+    assert_eq!(
+        queue_titles(&api).await,
+        on_a_titles,
+        "A resumes its own queue"
+    );
+
+    session.set_config(on_b, vec!["active_source".into()]);
+    session.persist_now().await;
+    assert_eq!(queue_titles(&api).await.len(), 1, "and B its own");
+}
+
+/// A deleted source is not parked: its queue would outlive it.
+#[tokio::test]
+async fn leaving_a_deleted_source_parks_nothing() {
+    let store = Arc::new(MemoryStore {
+        saved: Mutex::new(Vec::new()),
+    });
+    let sink = FakeSinkHandle::default();
+    let player =
+        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
+    let mut on_b = config::AppConfig::default();
+    on_b.local_sources.push(config::SavedLocalSource {
+        id: "local:b".into(),
+        name: "B".into(),
+        directories: Vec::new(),
+    });
+    on_b.active_source = config::Source::LocalLibrary("local:b".into());
+    let services = PlaybackServices {
+        config: on_b.clone(),
+        queue_store: Some(store.clone()),
+        ..Default::default()
+    };
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let api = LocalApi::new(session.clone());
+    api.set_queue(replace(&["b-0"])).await.expect("set queue");
+    wait_committed(&api).await;
+    let saves_of_b = || {
+        store
+            .saved
+            .lock()
+            .expect("store lock")
+            .iter()
+            .filter(|(at, _)| *at == config::Source::LocalLibrary("local:b".into()))
+            .count()
+    };
+    session.persist_now().await;
+    let before = saves_of_b();
+
+    let mut deleted = on_b.clone();
+    deleted.remove_local_source("local:b");
+    session.set_config(
+        deleted,
+        vec!["local_sources".into(), "active_source".into()],
+    );
+    session.persist_now().await;
+
+    assert_eq!(
+        saves_of_b(),
+        before,
+        "nothing is parked for a deleted source"
+    );
+    assert!(queue_titles(&api).await.is_empty());
 }
 
 #[tokio::test]

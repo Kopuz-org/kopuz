@@ -552,12 +552,60 @@ async fn queue_round_trips() {
         shuffle_order: vec![0],
         shuffle_enabled: true,
     };
-    db.save_queue(&snap).await.unwrap();
-    let q = db.load_queue().await.unwrap();
+    db.save_queue(&Source::default(), &snap).await.unwrap();
+    let q = db.load_queue(&Source::default()).await.unwrap();
     assert_eq!(q.queue.len(), 1);
     assert_eq!(q.queue[0].title, "Yt One");
     assert_eq!(q.progress_secs, 42);
     assert!(q.shuffle_enabled);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn each_source_keeps_its_own_queue_and_a_purge_takes_only_its_own() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let local = Source::default();
+    let server = Source::Server("srv-1".into());
+    let snap = |key: &str, title: &str, progress_secs| QueueSnapshot {
+        version: 1,
+        queue: vec![server_track(key, title)],
+        progress_secs,
+        shuffle_order: vec![0],
+        ..Default::default()
+    };
+    db.save_queue(&local, &snap("L1", "Local one", 10))
+        .await
+        .unwrap();
+    db.save_queue(&server, &snap("S1", "Server one", 20))
+        .await
+        .unwrap();
+    db.save_queue_position(&server, &snap("S1", "Server one", 25))
+        .await
+        .unwrap();
+
+    let on_local = db.load_queue(&local).await.unwrap();
+    let on_server = db.load_queue(&server).await.unwrap();
+    assert_eq!(
+        (on_local.queue[0].title.as_str(), on_local.progress_secs),
+        ("Local one", 10)
+    );
+    assert_eq!(
+        (on_server.queue[0].title.as_str(), on_server.progress_secs),
+        ("Server one", 25)
+    );
+    assert!(
+        db.load_queue(&Source::Server("never".into()))
+            .await
+            .unwrap()
+            .queue
+            .is_empty()
+    );
+
+    db.purge_source(&server).await.unwrap();
+    assert!(db.load_queue(&server).await.unwrap().queue.is_empty());
+    assert_eq!(db.load_queue(&local).await.unwrap().queue.len(), 1);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

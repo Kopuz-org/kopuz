@@ -334,18 +334,21 @@ async fn a_restored_queue_shows_what_the_library_holds_now() {
     let source = Source::Server("jf".into());
     let stale = track("t1", Vec::new());
     let transient = track("radio-only", Vec::new());
-    db.save_queue(&db::QueueSnapshot {
-        version: 1,
-        queue: vec![stale.clone(), transient.clone()],
-        ..Default::default()
-    })
+    db.save_queue(
+        &Source::default(),
+        &db::QueueSnapshot {
+            version: 1,
+            queue: vec![stale.clone(), transient.clone()],
+            ..Default::default()
+        },
+    )
     .await
     .unwrap();
     let mut fresh = stale;
     fresh.title = "Renamed by a sync".into();
     db.upsert_tracks(&source, &[fresh]).await.unwrap();
 
-    let restored = db.load_queue().await.unwrap().queue;
+    let restored = db.load_queue(&Source::default()).await.unwrap().queue;
 
     assert_eq!(restored[0].title, "Renamed by a sync");
     let named = Track {
@@ -567,8 +570,8 @@ async fn a_queue_round_trips_through_its_rows() {
         shuffle_enabled: true,
     };
 
-    db.save_queue(&saved).await.unwrap();
-    let restored = db.load_queue().await.unwrap();
+    db.save_queue(&Source::default(), &saved).await.unwrap();
+    let restored = db.load_queue(&Source::default()).await.unwrap();
 
     assert_eq!(restored.queue, saved.queue, "a stream keeps having no end");
     assert_eq!(
@@ -594,17 +597,20 @@ async fn a_position_save_leaves_the_rows_alone() {
         queue: vec![track("t1", Vec::new()), track("t2", Vec::new())],
         ..Default::default()
     };
-    db.save_queue(&queued).await.unwrap();
+    db.save_queue(&Source::default(), &queued).await.unwrap();
 
-    db.save_queue_position(&db::QueueSnapshot {
-        current_queue_index: 1,
-        progress_secs: 12,
-        ..Default::default()
-    })
+    db.save_queue_position(
+        &Source::default(),
+        &db::QueueSnapshot {
+            current_queue_index: 1,
+            progress_secs: 12,
+            ..Default::default()
+        },
+    )
     .await
     .unwrap();
 
-    let restored = db.load_queue().await.unwrap();
+    let restored = db.load_queue(&Source::default()).await.unwrap();
     assert_eq!(restored.queue.len(), 2);
     assert_eq!(
         (restored.current_queue_index, restored.progress_secs),

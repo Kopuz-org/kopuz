@@ -1,17 +1,20 @@
-//! Queue persistence: the session's snapshot, stored as rows.
+//! Queue persistence: each source's snapshot, stored as rows.
 
 use async_trait::async_trait;
 
 #[async_trait]
 pub trait QueueStore: Send + Sync {
-    async fn load(&self) -> Option<db::QueueSnapshot>;
-    async fn save(&self, snapshot: db::QueueSnapshot);
+    /// The queue `source` was left with, if it has one.
+    async fn load(&self, source: &config::Source) -> Option<db::QueueSnapshot>;
+    async fn save(&self, source: &config::Source, snapshot: db::QueueSnapshot);
 }
+
+/// The source, rows and shuffle last written, so a save that only moved the playhead rewrites one row.
+type Written = Option<(config::Source, Vec<reader::Track>, Vec<usize>)>;
 
 pub struct DbQueueStore {
     db: db::Db,
-    /// The rows and shuffle last written, so a save that only moved the playhead rewrites one row.
-    written: tokio::sync::Mutex<Option<(Vec<reader::Track>, Vec<usize>)>>,
+    written: tokio::sync::Mutex<Written>,
 }
 
 impl DbQueueStore {
@@ -25,8 +28,8 @@ impl DbQueueStore {
 
 #[async_trait]
 impl QueueStore for DbQueueStore {
-    async fn load(&self) -> Option<db::QueueSnapshot> {
-        match self.db.load_queue().await {
+    async fn load(&self, source: &config::Source) -> Option<db::QueueSnapshot> {
+        match self.db.load_queue(source).await {
             Ok(snapshot) => Some(snapshot),
             Err(error) => {
                 tracing::warn!(%error, "queue snapshot load failed");
@@ -35,18 +38,20 @@ impl QueueStore for DbQueueStore {
         }
     }
 
-    async fn save(&self, snapshot: db::QueueSnapshot) {
+    async fn save(&self, source: &config::Source, snapshot: db::QueueSnapshot) {
         // Held across the write, so two saves never interleave their rows.
         let mut written = self.written.lock().await;
-        let unchanged = written.as_ref().is_some_and(|(queue, shuffle)| {
-            *queue == snapshot.queue && *shuffle == snapshot.shuffle_order
+        let unchanged = written.as_ref().is_some_and(|(at, queue, shuffle)| {
+            at == source && *queue == snapshot.queue && *shuffle == snapshot.shuffle_order
         });
         let saved = match unchanged {
-            true => self.db.save_queue_position(&snapshot).await,
-            false => self.db.save_queue(&snapshot).await,
+            true => self.db.save_queue_position(source, &snapshot).await,
+            false => self.db.save_queue(source, &snapshot).await,
         };
         match saved {
-            Ok(()) if !unchanged => *written = Some((snapshot.queue, snapshot.shuffle_order)),
+            Ok(()) if !unchanged => {
+                *written = Some((source.clone(), snapshot.queue, snapshot.shuffle_order));
+            }
             Ok(()) => {}
             Err(error) => {
                 *written = None;
@@ -94,24 +99,27 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = db::init(&dir.path().join("queue.db")).await.expect("db");
         let store = DbQueueStore::new(db.clone());
+        let source = config::Source::default();
         let playing = |keys: &[&str], progress_secs| db::QueueSnapshot {
             version: 1,
             queue: queue(keys),
             progress_secs,
             ..Default::default()
         };
-        store.save(playing(&["/a", "/b"], 0)).await;
+        store.save(&source, playing(&["/a", "/b"], 0)).await;
         // Rows the store did not write, so a rewrite would show.
-        db.save_queue(&playing(&["/elsewhere"], 0)).await.unwrap();
+        db.save_queue(&source, &playing(&["/elsewhere"], 0))
+            .await
+            .unwrap();
 
-        store.save(playing(&["/a", "/b"], 5)).await;
-        let stored = db.load_queue().await.unwrap();
+        store.save(&source, playing(&["/a", "/b"], 5)).await;
+        let stored = db.load_queue(&source).await.unwrap();
         assert_eq!(
             (titles(&stored), stored.progress_secs),
             (vec!["/elsewhere"], 5)
         );
 
-        store.save(playing(&["/a", "/c"], 5)).await;
-        assert_eq!(titles(&db.load_queue().await.unwrap()), ["/a", "/c"]);
+        store.save(&source, playing(&["/a", "/c"], 5)).await;
+        assert_eq!(titles(&db.load_queue(&source).await.unwrap()), ["/a", "/c"]);
     }
 }

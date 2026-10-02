@@ -317,8 +317,8 @@ pub trait ReadStore: Send + Sync {
         limit: u32,
     ) -> Result<Vec<reader::Album>, DbError>;
 
-    /// The stored queue, its library rows refreshed from what a sync since wrote.
-    async fn load_queue(&self) -> Result<QueueSnapshot, DbError>;
+    /// The queue `source` was left with, its library rows refreshed from what a sync since wrote.
+    async fn load_queue(&self, source: &Source) -> Result<QueueSnapshot, DbError>;
 
     /// The `PlaylistStore` (the active source's playlists + folders) — the read
     /// side of the playlists UI (`use_playlists`). Writes go through the
@@ -542,11 +542,15 @@ pub trait Storage: ReadStore {
     /// Register (`Some`) or forget (`None`) one track's downloaded copy.
     async fn set_offline_track(&self, id: &str, path: Option<&str>) -> Result<(), DbError>;
 
-    /// Replace the stored queue, rows and all.
-    async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
+    /// Replace `source`'s stored queue, rows and all.
+    async fn save_queue(&self, source: &Source, snap: &QueueSnapshot) -> Result<(), DbError>;
 
-    /// Store where the queue stands, for a save whose rows did not change.
-    async fn save_queue_position(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
+    /// Store where `source`'s queue stands, for a save whose rows did not change.
+    async fn save_queue_position(
+        &self,
+        source: &Source,
+        snap: &QueueSnapshot,
+    ) -> Result<(), DbError>;
 
     /// Pin (`Some` manifest) a station after the others, or unpin it (`None`).
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError>;

@@ -705,9 +705,11 @@ fn App() -> Element {
     // so the DB-backed query hooks re-run and the UI refreshes.
     let gens_for_albums = hooks::db_reactivity::use_generations();
     let active_source_row = hooks::sources::use_active_source_info();
+    let source_rows = hooks::sources::use_sources();
 
     use_effect(move || {
-        if !*initial_load_done.read() {
+        // Until the rows arrive there is no active source to compare against, and the first one is not a switch.
+        if !*initial_load_done.read() || source_rows.read().is_none() {
             return;
         }
 
@@ -728,9 +730,7 @@ fn App() -> Element {
         if *last_server_playlist_key.read() != current_server_key {
             last_server_playlist_key.set(current_server_key);
             selected_playlist_id.set(None);
-            ctrl.reset_for_backend_switch();
-            // Nothing to reload: pages query by source, so switching servers is
-            // just a key change — every hook re-queries the new server's rows.
+            // The daemon swaps the queue itself, and pages re-query by source.
         }
     });
 

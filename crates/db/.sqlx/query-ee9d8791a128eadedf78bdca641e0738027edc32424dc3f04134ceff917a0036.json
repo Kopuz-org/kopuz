@@ -1,0 +1,116 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT position, track_key, service, source_album_id, title, artist, album, duration, khz, bitrate, track_number, disc_number, cover_path, mb_release_id, mb_recording_id, mb_track_id, playlist_item_id FROM queue_tracks WHERE source = ?1 ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "name": "position",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "track_key",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "service",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_album_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "title",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "artist",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "album",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "duration",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "khz",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "bitrate",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "track_number",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "disc_number",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "cover_path",
+        "ordinal": 12,
+        "type_info": "Text"
+      },
+      {
+        "name": "mb_release_id",
+        "ordinal": 13,
+        "type_info": "Text"
+      },
+      {
+        "name": "mb_recording_id",
+        "ordinal": 14,
+        "type_info": "Text"
+      },
+      {
+        "name": "mb_track_id",
+        "ordinal": 15,
+        "type_info": "Text"
+      },
+      {
+        "name": "playlist_item_id",
+        "ordinal": 16,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "ee9d8791a128eadedf78bdca641e0738027edc32424dc3f04134ceff917a0036"
+}

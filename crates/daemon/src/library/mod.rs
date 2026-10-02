@@ -601,6 +601,10 @@ impl QueueMaterializer for LibraryService {
             QueueContext::PlaylistRadio { id } => self.catalog_service()?.playlist_radio(id).await,
         }
     }
+
+    fn register_restored(&self, tracks: &[Track]) {
+        self.register_transient(tracks);
+    }
 }
 
 #[cfg(test)]

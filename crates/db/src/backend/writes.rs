@@ -1192,32 +1192,42 @@ pub async fn meta_put(
     Ok(())
 }
 
-/// Replace the whole stored queue: its rows, their credits and the shuffled order.
-#[tracing::instrument(name = "queue.save", skip_all, fields(tracks = snap.queue.len()))]
-pub async fn save_queue(pool: &SqlitePool, snap: &QueueSnapshot) -> Result<(), DbError> {
+/// Replace one source's stored queue: its rows, their credits and the shuffled order.
+#[tracing::instrument(name = "queue.save", skip_all, fields(source = %source.as_str(), tracks = snap.queue.len()))]
+pub async fn save_queue(
+    pool: &SqlitePool,
+    source: &Source,
+    snap: &QueueSnapshot,
+) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    write_queue(&mut tx, snap).await?;
+    write_queue(&mut tx, source.as_str(), snap).await?;
     tx.commit().await?;
     Ok(())
 }
 
-/// The queue's rows and where it stands, for a caller already inside a transaction.
+/// One source's queue rows and where it stands, for a caller already inside a transaction.
 pub(crate) async fn write_queue(
     conn: &mut sqlx::SqliteConnection,
+    source: &str,
     snap: &QueueSnapshot,
 ) -> Result<(), DbError> {
-    write_queue_rows(conn, &snap.queue, &snap.shuffle_order).await?;
-    write_queue_position(conn, snap).await
+    write_queue_rows(conn, source, &snap.queue, &snap.shuffle_order).await?;
+    write_queue_position(conn, source, snap).await
 }
 
-/// Store where the queue stands without rewriting its rows, for a save whose list did not change.
-pub async fn save_queue_position(pool: &SqlitePool, snap: &QueueSnapshot) -> Result<(), DbError> {
+/// Store where a source's queue stands without rewriting its rows, for a save whose list did not change.
+pub async fn save_queue_position(
+    pool: &SqlitePool,
+    source: &Source,
+    snap: &QueueSnapshot,
+) -> Result<(), DbError> {
     let mut conn = pool.acquire().await?;
-    write_queue_position(&mut conn, snap).await
+    write_queue_position(&mut conn, source.as_str(), snap).await
 }
 
 async fn write_queue_position(
     conn: &mut sqlx::SqliteConnection,
+    source: &str,
     snap: &QueueSnapshot,
 ) -> Result<(), DbError> {
     let version = snap.version as i64;
@@ -1225,10 +1235,11 @@ async fn write_queue_position(
     let progress = snap.progress_secs as i64;
     let shuffle_on = snap.shuffle_enabled as i64;
     sqlx::query!(
-        "INSERT INTO queue_state (id, version, current_queue_index, progress_secs, shuffle_enabled) \
-         VALUES (1, ?1, ?2, ?3, ?4) \
-         ON CONFLICT(id) DO UPDATE SET version = ?1, current_queue_index = ?2, \
-           progress_secs = ?3, shuffle_enabled = ?4",
+        "INSERT INTO queue_state (source, version, current_queue_index, progress_secs, shuffle_enabled) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(source) DO UPDATE SET version = ?2, current_queue_index = ?3, \
+           progress_secs = ?4, shuffle_enabled = ?5",
+        source,
         version,
         current,
         progress,
@@ -1239,14 +1250,15 @@ async fn write_queue_position(
     Ok(())
 }
 
-/// The queue's rows in play order; a radio stream stores no duration, since it has no end.
+/// A source's queue rows in play order; a radio stream stores no duration, since it has no end.
 async fn write_queue_rows(
     conn: &mut sqlx::SqliteConnection,
+    source: &str,
     queue: &[Track],
     shuffle_order: &[usize],
 ) -> Result<(), DbError> {
     // Credits and the shuffle cascade from the rows they point at.
-    sqlx::query!("DELETE FROM queue_tracks")
+    sqlx::query!("DELETE FROM queue_tracks WHERE source = ?1", source)
         .execute(&mut *conn)
         .await?;
     for (position, t) in queue.iter().enumerate() {
@@ -1259,10 +1271,11 @@ async fn write_queue_rows(
         let track_number = t.track_number.map(|n| n as i64);
         let disc_number = t.disc_number.map(|n| n as i64);
         sqlx::query!(
-            "INSERT INTO queue_tracks (position, track_key, service, source_album_id, title, artist, \
-               album, duration, khz, bitrate, track_number, disc_number, cover_path, mb_release_id, \
-               mb_recording_id, mb_track_id, playlist_item_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            "INSERT INTO queue_tracks (source, position, track_key, service, source_album_id, title, \
+               artist, album, duration, khz, bitrate, track_number, disc_number, cover_path, \
+               mb_release_id, mb_recording_id, mb_track_id, playlist_item_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            source,
             position,
             track_key,
             service,
@@ -1294,15 +1307,17 @@ async fn write_queue_rows(
         };
         for (at, credit) in credits.iter().enumerate() {
             let at = at as i64;
-            let source = credit.source.as_ref().map(|source| source.as_str());
+            let listed_by = credit.source.as_ref().map(|listed| listed.as_str());
             sqlx::query!(
-                "INSERT INTO queue_credits (queue_position, position, name, source_artist_id, source, artist_key) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO queue_credits (queue_source, queue_position, position, name, \
+                   source_artist_id, source, artist_key) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                source,
                 position,
                 at,
                 credit.name,
                 credit.id,
-                source,
+                listed_by,
                 credit.key
             )
             .execute(&mut *conn)
@@ -1317,7 +1332,8 @@ async fn write_queue_rows(
         let step = step as i64;
         let position = *position as i64;
         sqlx::query!(
-            "INSERT INTO queue_shuffle (step, position) VALUES (?1, ?2)",
+            "INSERT INTO queue_shuffle (source, step, position) VALUES (?1, ?2, ?3)",
+            source,
             step,
             position
         )

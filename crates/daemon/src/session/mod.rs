@@ -46,6 +46,9 @@ pub(crate) struct QueueMirrorSnapshot {
 #[async_trait::async_trait]
 pub trait QueueMaterializer: Send + Sync {
     async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError>;
+
+    /// Make a restored queue's rows addressable by key, since some were listed once and never stored.
+    fn register_restored(&self, _tracks: &[Track]) {}
 }
 
 /// Durable playback bookkeeping: recents on commit, listen counts when a
@@ -579,6 +582,9 @@ impl Session {
                 let _ = reply.send(result);
             }
             SessionCmd::SetConfig { config, changed } => {
+                if config.active_source != self.config.active_source {
+                    self.swap_queue(&config, state_tx).await;
+                }
                 self.apply_config(*config, changed, state_tx);
             }
             SessionCmd::Emit(event) => self.emit(*event),
@@ -624,7 +630,7 @@ impl Session {
                 if let Some(store) = self.queue_store.clone() {
                     let snapshot = self.snapshot();
                     self.queue_dirty = false;
-                    store.save(snapshot).await;
+                    store.save(&self.config.active_source, snapshot).await;
                 }
                 let _ = reply.send(());
             }
@@ -1395,10 +1401,31 @@ impl Session {
             return;
         };
         let snapshot = self.snapshot();
+        let source = self.config.active_source.clone();
         self.queue_dirty = false;
         tokio::spawn(async move {
-            store.save(snapshot).await;
+            store.save(&source, snapshot).await;
         });
+    }
+
+    /// Park the queue under the source being left, while it is still configured, and resume the one being entered.
+    async fn swap_queue(
+        &mut self,
+        next: &config::AppConfig,
+        state_tx: &watch::Sender<PlayerState>,
+    ) {
+        let resumed = match self.queue_store.clone() {
+            Some(store) => {
+                let leaving = self.config.active_source.clone();
+                if next.has_source(&leaving) {
+                    store.save(&leaving, self.snapshot()).await;
+                }
+                store.load(&next.active_source).await.unwrap_or_default()
+            }
+            None => db::QueueSnapshot::default(),
+        };
+        self.materializer.register_restored(&resumed.queue);
+        let _ = self.handle_restore(resumed, state_tx);
     }
 
     fn commit_transition_model(&mut self, token: u64) -> bool {

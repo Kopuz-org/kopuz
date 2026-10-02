@@ -816,7 +816,7 @@ pub async fn run_json_import(
         shuffle_order: queue.shuffle_order.iter().map(|&at| at as usize).collect(),
         shuffle_enabled: queue.shuffle_enabled,
     };
-    super::writes::write_queue(&mut tx, &snapshot).await?;
+    super::writes::write_queue(&mut tx, imported_config.active_source.as_str(), &snapshot).await?;
 
     // Record what this import actually consumed, so finalize never moves aside a skipped corrupt file.
     for file in &consumed {
@@ -1820,6 +1820,8 @@ mod row_fill_tests {
             "DROP TABLE ytdlp_history",
             "DROP TABLE server_folders",
             "CREATE TABLE app_config (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL)",
+            "DROP TABLE queue_state",
+            "CREATE TABLE queue_state (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL DEFAULT 1, current_queue_index INTEGER NOT NULL DEFAULT 0, progress_secs INTEGER NOT NULL DEFAULT 0, shuffle_enabled INTEGER NOT NULL DEFAULT 0)",
             "ALTER TABLE queue_state ADD COLUMN queue_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE queue_state ADD COLUMN shuffle_order_json TEXT NOT NULL DEFAULT '[]'",
             "DROP TABLE artist_images",

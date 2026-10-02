@@ -309,8 +309,8 @@ impl ReadStore for Native {
         queries::albums_recently_added(&self.pool(), source, limit).await
     }
 
-    async fn load_queue(&self) -> Result<crate::QueueSnapshot, DbError> {
-        dump::load_queue(&self.pool()).await
+    async fn load_queue(&self, source: &crate::Source) -> Result<crate::QueueSnapshot, DbError> {
+        dump::load_queue(&self.pool(), source).await
     }
 
     async fn load_playlists(
@@ -565,12 +565,20 @@ impl Storage for Native {
         writes::set_offline_track(&self.pool(), id, path).await
     }
 
-    async fn save_queue(&self, snap: &crate::QueueSnapshot) -> Result<(), DbError> {
-        writes::save_queue(&self.pool(), snap).await
+    async fn save_queue(
+        &self,
+        source: &crate::Source,
+        snap: &crate::QueueSnapshot,
+    ) -> Result<(), DbError> {
+        writes::save_queue(&self.pool(), source, snap).await
     }
 
-    async fn save_queue_position(&self, snap: &crate::QueueSnapshot) -> Result<(), DbError> {
-        writes::save_queue_position(&self.pool(), snap).await
+    async fn save_queue_position(
+        &self,
+        source: &crate::Source,
+        snap: &crate::QueueSnapshot,
+    ) -> Result<(), DbError> {
+        writes::save_queue_position(&self.pool(), source, snap).await
     }
 
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError> {

@@ -112,24 +112,40 @@ pub async fn load_playlists(pool: &SqlitePool, source: &Source) -> Result<Playli
     Ok(PlaylistStore { playlists, folders })
 }
 
-pub async fn load_queue(pool: &SqlitePool) -> Result<QueueSnapshot, DbError> {
+/// The queue `source` was left with; empty when it never had one.
+pub async fn load_queue(
+    pool: &SqlitePool,
+    source: &crate::Source,
+) -> Result<QueueSnapshot, DbError> {
+    let src = source.as_str();
     let row = sqlx::query!(
         "SELECT version, current_queue_index, progress_secs, shuffle_enabled \
-         FROM queue_state WHERE id = 1"
+         FROM queue_state WHERE source = ?1",
+        src
     )
     .fetch_optional(pool)
     .await?;
     let Some(row) = row else {
         return Ok(QueueSnapshot::default());
     };
-    let rows: Vec<super::rows::QueueTrackRow> =
-        sqlx::query_as("SELECT * FROM queue_tracks ORDER BY position")
-            .fetch_all(pool)
-            .await?;
-    let credits: Vec<super::rows::QueueCreditRow> =
-        sqlx::query_as("SELECT * FROM queue_credits ORDER BY queue_position, position")
-            .fetch_all(pool)
-            .await?;
+    let rows = sqlx::query_as!(
+        super::rows::QueueTrackRow,
+        "SELECT position, track_key, service, source_album_id, title, artist, album, duration, \
+           khz, bitrate, track_number, disc_number, cover_path, mb_release_id, mb_recording_id, \
+           mb_track_id, playlist_item_id \
+         FROM queue_tracks WHERE source = ?1 ORDER BY position",
+        src
+    )
+    .fetch_all(pool)
+    .await?;
+    let credits = sqlx::query_as!(
+        super::rows::QueueCreditRow,
+        "SELECT queue_position, name, source_artist_id, source, artist_key \
+         FROM queue_credits WHERE queue_source = ?1 ORDER BY queue_position, position",
+        src
+    )
+    .fetch_all(pool)
+    .await?;
     let mut by_row: std::collections::HashMap<i64, Vec<reader::ArtistCredit>> =
         std::collections::HashMap::new();
     for credit in credits {
@@ -145,10 +161,12 @@ pub async fn load_queue(pool: &SqlitePool) -> Result<QueueSnapshot, DbError> {
             row.into_track(credits)
         })
         .collect();
-    let shuffle_order: Vec<i64> =
-        sqlx::query_scalar("SELECT position FROM queue_shuffle ORDER BY step")
-            .fetch_all(pool)
-            .await?;
+    let shuffle_order = sqlx::query_scalar!(
+        "SELECT position FROM queue_shuffle WHERE source = ?1 ORDER BY step",
+        src
+    )
+    .fetch_all(pool)
+    .await?;
     Ok(QueueSnapshot {
         version: row.version.clamp(0, u8::MAX as i64) as u8,
         queue: super::queries::refresh_from_library(pool, saved).await?,

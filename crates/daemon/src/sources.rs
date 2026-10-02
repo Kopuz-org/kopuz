@@ -245,7 +245,6 @@ impl SourceService {
         changed: Vec<String>,
     ) -> Result<(), ApiError> {
         self.publish(updated, changed);
-        self.session.reset_playback().await?;
         self.session.clear_error();
         for table in [
             Table::Servers,
@@ -612,9 +611,6 @@ impl SourceService {
             updated,
             vec!["servers".to_string(), "active_source".to_string()],
         );
-        if was_active {
-            self.session.reset_playback().await?;
-        }
         self.session.invalidate(Table::Servers);
         // The browser profile is this server's, so it goes with it rather
         // than being left behind holding a session.

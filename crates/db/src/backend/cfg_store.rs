@@ -797,6 +797,8 @@ pub(super) async fn purge_source(
         "DELETE FROM listen_counts WHERE source = ?1",
         "DELETE FROM kv WHERE kind = ?1",
         "DELETE FROM artist_images WHERE source = ?1",
+        "DELETE FROM queue_tracks WHERE source = ?1",
+        "DELETE FROM queue_state WHERE source = ?1",
     ] {
         sqlx::query(sql).bind(source).execute(&mut *conn).await?;
     }
@@ -900,9 +902,10 @@ mod tests {
         };
         let saver = {
             let pool = pool.clone();
+            let source = source.clone();
             async move {
                 for _ in 0..20 {
-                    crate::backend::writes::save_queue(&pool, &snapshot).await?;
+                    crate::backend::writes::save_queue(&pool, &source, &snapshot).await?;
                 }
                 Ok::<(), DbError>(())
             }

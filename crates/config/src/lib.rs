@@ -1022,6 +1022,14 @@ impl AppConfig {
         }
     }
 
+    /// Whether `source` is one this config still has, as opposed to one just deleted.
+    pub fn has_source(&self, source: &Source) -> bool {
+        match source {
+            Source::LocalLibrary(id) => self.local_sources.iter().any(|saved| &saved.id == id),
+            Source::Server(id) => self.servers.iter().any(|saved| &saved.id == id),
+        }
+    }
+
     pub fn find_saved_server(&self, id: &str) -> Option<&SavedServer> {
         self.servers.iter().find(|s| s.id == id)
     }
