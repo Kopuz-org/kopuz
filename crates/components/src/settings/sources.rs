@@ -233,7 +233,7 @@ pub fn SourceSettings(
             button {
                 onclick: move |_| on_add.call(()),
                 class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
-                "{i18n::t(\"add_server\")}"
+                "{i18n::t(\"add_source\")}"
             }
         }
     }

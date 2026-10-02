@@ -66,7 +66,7 @@ pub fn AddSourcePopup(
                 class: "popup",
                 onclick: |e| e.stop_propagation(),
 
-                h2 { "{i18n::t(\"add_media_server\")}" }
+                h2 { "{i18n::t(\"add_source\")}" }
 
                 if let Some(err) = error() {
                     p { class: "error", "{err}" }
@@ -77,7 +77,7 @@ pub fn AddSourcePopup(
                 }
 
                 input {
-                    placeholder: "{i18n::t(\"server_name\")}",
+                    placeholder: "{i18n::t(\"source_name\")}",
                     value: "{name()}",
                     oninput: move |e| name.set(e.value()),
                     onkeydown: move |e| e.stop_propagation()

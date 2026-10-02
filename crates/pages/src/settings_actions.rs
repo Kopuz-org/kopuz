@@ -153,13 +153,13 @@ pub fn check_draft(draft: api::SourceDraft, mut check: Signal<Option<api::DraftC
     });
 }
 
-pub fn add_server(
+pub fn add_source(
     draft: api::SourceDraft,
-    mut server_name: Signal<String>,
+    mut source_name: Signal<String>,
     mut values: Signal<Vec<api::FieldValue>>,
     mut secrets: Signal<Vec<api::FieldValue>>,
     mut error: Signal<Option<String>>,
-    mut show_add_server: Signal<bool>,
+    mut show_add_source: Signal<bool>,
     show_login: Signal<bool>,
     playback_error: Signal<Option<String>>,
 ) {
@@ -188,20 +188,20 @@ pub fn add_server(
                 }
             };
 
-            server_name.set(String::new());
+            source_name.set(String::new());
             values.set(Vec::new());
             // Cleared with the rest of the form: it has been handed over, and
-            // a credential left in a live signal is one the next server can
+            // a credential left in a live signal is one the next source can
             // pick up.
             secrets.set(Vec::new());
             error.set(None);
-            show_add_server.set(false);
+            show_add_source.set(false);
 
-            // A server is added to be used, so it becomes the active source
+            // A source is added to be used, so it becomes the active one
             // and picks up whichever sign-in it still needs.
             activate(api, saved.id, error, show_login, playback_error).await;
         }
-        .instrument(tracing::info_span!("source.add_server")),
+        .instrument(tracing::info_span!("source.add")),
     );
 }
 

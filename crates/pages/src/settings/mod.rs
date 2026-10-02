@@ -61,12 +61,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .into_iter()
             .find(|source| source.active && source.needs_network)
     });
-    let mut show_add_server = use_signal(|| false);
+    let mut show_add_source = use_signal(|| false);
     let mut show_login = use_signal(|| false);
 
     let services = hooks::sources::use_services();
-    let server_name = use_signal(String::new);
-    let server_service = use_signal(String::new);
+    let source_name = use_signal(String::new);
+    let source_service = use_signal(String::new);
     let draft_values = use_signal(Vec::<api::FieldValue>::new);
     let draft_secrets = use_signal(Vec::<api::FieldValue>::new);
     let draft_check = use_signal(|| Option::<api::DraftCheck>::None);
@@ -125,27 +125,27 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     // wrong with it and which sign-in saving it will start.
     use_effect(move || {
         let draft = crate::settings_actions::draft(
-            server_name,
-            server_service,
+            source_name,
+            source_service,
             draft_values,
             draft_secrets,
         );
         crate::settings_actions::check_draft(draft, draft_check);
     });
 
-    let handle_add_server = move |_| {
-        crate::settings_actions::add_server(
+    let handle_add_source = move |_| {
+        crate::settings_actions::add_source(
             crate::settings_actions::draft(
-                server_name,
-                server_service,
+                source_name,
+                source_service,
                 draft_values,
                 draft_secrets,
             ),
-            server_name,
+            source_name,
             draft_values,
             draft_secrets,
             error,
-            show_add_server,
+            show_add_source,
             show_login,
             ctrl.playback_error,
         );
@@ -517,7 +517,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 control: rsx! {
                                     SourceSettings {
                                         sources: all_sources(),
-                                        on_add: move |_| show_add_server.set(true),
+                                        on_add: move |_| show_add_source.set(true),
                                         on_delete: handle_delete_saved,
                                         on_switch: handle_switch_server,
                                         on_login: move |_| sign_in_again(),
@@ -739,18 +739,18 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             }
             }
 
-            if show_add_server() {
+            if show_add_source() {
                 AddSourcePopup {
                     services: services.read().clone().unwrap_or_default(),
-                    service: server_service,
-                    name: server_name,
+                    service: source_service,
+                    name: source_name,
                     values: draft_values,
                     secrets: draft_secrets,
                     check: draft_check(),
                     host_access: host_access(),
                     error,
-                    on_close: move |_| show_add_server.set(false),
-                    on_save: handle_add_server
+                    on_close: move |_| show_add_source.set(false),
+                    on_save: handle_add_source
                 }
             }
 
