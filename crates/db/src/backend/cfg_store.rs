@@ -221,7 +221,8 @@ pub async fn save_config(
     cfg: &AppConfig,
     settings_path: &Path,
 ) -> Result<(), DbError> {
-    let mut tx = pool.begin().await?;
+    // It can read before it writes, and a deferred BEGIN then fails at once against a write that landed meanwhile.
+    let mut tx = super::begin_immediate(pool).await?;
     let active = sync_servers(&mut tx, cfg).await?;
     write_state(&mut tx, cfg, &active).await?;
     tx.commit().await?;
@@ -229,10 +230,7 @@ pub async fn save_config(
 }
 
 /// Sync the saved servers and the active one's creds; answers the active source with any resolved server id stamped in.
-async fn sync_servers(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-    cfg: &AppConfig,
-) -> Result<Source, DbError> {
+async fn sync_servers(tx: &mut sqlx::SqliteConnection, cfg: &AppConfig) -> Result<Source, DbError> {
     let now = now_secs();
     // Non-cred fields only: the in-memory config carries no other server's creds to write.
     for s in &cfg.servers {
@@ -282,13 +280,13 @@ async fn sync_servers(
         .chain(active_id.as_deref())
         .collect();
     let existing: Vec<String> = sqlx::query_scalar!("SELECT id FROM servers")
-        .fetch_all(&mut **tx)
+        .fetch_all(&mut *tx)
         .await?;
     for id in existing {
         if !keep.contains(id.as_str()) {
             purge_source(tx, &id).await?;
             sqlx::query!("DELETE FROM servers WHERE id = ?1", id)
-                .execute(&mut **tx)
+                .execute(&mut *tx)
                 .await?;
         }
     }
