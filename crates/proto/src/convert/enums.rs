@@ -74,6 +74,7 @@ pub fn table_to_proto(value: api::Table) -> Table {
         api::Table::Folders => Table::Folders,
         api::Table::Servers => Table::Servers,
         api::Table::Recents => Table::Recents,
+        api::Table::Stations => Table::Stations,
         api::Table::Unknown => Table::Unspecified,
     }
 }
@@ -87,6 +88,7 @@ pub fn table_from_proto(value: i32) -> api::Table {
         Table::Folders => api::Table::Folders,
         Table::Servers => api::Table::Servers,
         Table::Recents => api::Table::Recents,
+        Table::Stations => api::Table::Stations,
         Table::Unspecified => api::Table::Unknown,
     }
 }
@@ -137,6 +139,7 @@ pub fn job_state_from_proto(value: i32) -> api::JobState {
 
 pub fn source_state_to_proto(value: api::SourceState) -> SourceState {
     match value {
+        api::SourceState::Checking => SourceState::Checking,
         api::SourceState::Online => SourceState::Online,
         api::SourceState::AuthExpired => SourceState::AuthExpired,
         api::SourceState::Offline => SourceState::Offline,
@@ -145,6 +148,7 @@ pub fn source_state_to_proto(value: api::SourceState) -> SourceState {
 
 pub fn source_state_from_proto(value: i32) -> api::SourceState {
     match SourceState::try_from(value).unwrap_or(SourceState::Unspecified) {
+        SourceState::Checking => api::SourceState::Checking,
         SourceState::Online => api::SourceState::Online,
         SourceState::AuthExpired => api::SourceState::AuthExpired,
         SourceState::Offline | SourceState::Unspecified => api::SourceState::Offline,
@@ -245,5 +249,38 @@ mod tests {
             assert_eq!(kind, job_kind_from_proto(job_kind_to_proto(kind) as i32));
         }
         assert_eq!(job_kind_from_proto(404), api::JobKind::Unknown);
+    }
+
+    #[test]
+    fn every_table_round_trips() {
+        for table in [
+            api::Table::Tracks,
+            api::Table::Albums,
+            api::Table::Playlists,
+            api::Table::Favorites,
+            api::Table::Folders,
+            api::Table::Servers,
+            api::Table::Recents,
+            api::Table::Stations,
+            api::Table::Unknown,
+        ] {
+            assert_eq!(table, table_from_proto(table_to_proto(table) as i32));
+        }
+        assert_eq!(table_from_proto(404), api::Table::Unknown);
+    }
+
+    #[test]
+    fn every_source_state_round_trips() {
+        for state in [
+            api::SourceState::Checking,
+            api::SourceState::Online,
+            api::SourceState::AuthExpired,
+            api::SourceState::Offline,
+        ] {
+            assert_eq!(
+                state,
+                source_state_from_proto(source_state_to_proto(state) as i32)
+            );
+        }
     }
 }

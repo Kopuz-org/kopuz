@@ -15,11 +15,13 @@ use tokio::sync::{RwLock, watch};
 
 use crate::config_service::ConfigService;
 use crate::library::LibraryService;
+use crate::session::SessionHandle;
 
 pub struct RadioService {
     registry: RwLock<StationRegistry>,
     config: Arc<ConfigService>,
     library: Arc<LibraryService>,
+    session: SessionHandle,
 }
 
 /// A station's own picture, where its metadata carries one.
@@ -55,11 +57,16 @@ fn station_info(manifest: &StationManifest, pinned: bool) -> RadioStationInfo {
 }
 
 impl RadioService {
-    pub fn new(config: Arc<ConfigService>, library: Arc<LibraryService>) -> Arc<Self> {
+    pub fn new(
+        config: Arc<ConfigService>,
+        library: Arc<LibraryService>,
+        session: SessionHandle,
+    ) -> Arc<Self> {
         Arc::new(Self {
             registry: RwLock::new(StationRegistry::new()),
             config,
             library,
+            session,
         })
     }
 
@@ -110,6 +117,7 @@ impl RadioService {
         let snapshot = Arc::new(registry.clone());
         *self.registry.write().await = registry;
         self.library.set_station_registry(snapshot);
+        self.session.invalidate(api::Table::Stations);
     }
 
     pub async fn stations(&self) -> Vec<RadioStationInfo> {
@@ -190,9 +198,12 @@ impl RadioService {
         let json = serde_json::to_string(&manifest)
             .map_err(|error| ApiError::internal(error.to_string()))?;
 
-        self.config
+        let updated = self
+            .config
             .set_pinned_station(&manifest.id, pinned.then_some(json))
             .await?;
+        self.session
+            .set_config(updated, vec!["pinned_stations".to_string()]);
         self.reload().await?;
         if !pinned {
             // Unpinning demotes rather than forgets: the station drops out of
@@ -202,6 +213,7 @@ impl RadioService {
             let snapshot = Arc::new(registry.clone());
             drop(registry);
             self.library.set_station_registry(snapshot);
+            self.session.invalidate(api::Table::Stations);
         }
         Ok(())
     }

@@ -162,6 +162,9 @@ pub fn source_info_to_proto(value: &api::SourceInfo) -> SourceInfo {
         settings: value.settings.iter().map(field_spec_to_proto).collect(),
         needs_network: value.needs_network,
         permanent: value.permanent,
+        state: value
+            .state
+            .map(|state| super::enums::source_state_to_proto(state) as i32),
     }
 }
 
@@ -184,6 +187,7 @@ pub fn source_info_from_proto(value: &SourceInfo) -> api::SourceInfo {
         settings: value.settings.iter().map(field_spec_from_proto).collect(),
         needs_network: value.needs_network,
         permanent: value.permanent,
+        state: value.state.map(super::enums::source_state_from_proto),
     }
 }
 
@@ -317,8 +321,17 @@ mod tests {
             settings: vec![url_field()],
             needs_network: true,
             permanent: true,
+            state: Some(api::SourceState::AuthExpired),
         };
         assert_eq!(info, source_info_from_proto(&source_info_to_proto(&info)));
+        let unprobed = api::SourceInfo {
+            state: None,
+            ..info
+        };
+        assert_eq!(
+            unprobed,
+            source_info_from_proto(&source_info_to_proto(&unprobed))
+        );
     }
 
     /// The form a client renders to add a server, and the answers it sends

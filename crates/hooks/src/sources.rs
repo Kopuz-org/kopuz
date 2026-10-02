@@ -5,7 +5,10 @@
 //! answers every "should this button exist?" question without anyone
 //! branching on a service name.
 
+use std::collections::HashMap;
+
 use dioxus::prelude::*;
+use futures_util::StreamExt;
 
 use crate::api::use_api;
 use crate::db_reactivity::{Table, use_generations};
@@ -18,16 +21,43 @@ struct SourceRows(Signal<Option<Vec<api::SourceInfo>>>);
 fn use_sources_provider() -> Signal<Option<Vec<api::SourceInfo>>> {
     let api = use_api();
     let gens = use_generations();
+    let fetch_api = api.clone();
     let fetched = use_resource(move || {
         let _ = gens.generation(Table::Servers);
-        let api = api.clone();
+        let api = fetch_api.clone();
         async move { api.sources().await.unwrap_or_default() }
     });
     let mut rows = use_context_provider(|| SourceRows(Signal::new(None))).0;
+    // The daemon's latest probe answers, laid over each fetch: a fetch that left before an answer arrived carries the older one.
+    let mut heard = use_signal(HashMap::<String, api::SourceState>::new);
     use_effect(move || {
-        let next = fetched.read().clone();
+        let mut next = fetched.read().clone();
+        for row in next.iter_mut().flatten() {
+            if let Some(state) = heard.peek().get(&row.id) {
+                row.state = Some(*state);
+            }
+        }
         if next.is_some() && *rows.peek() != next {
             rows.set(next);
+        }
+    });
+    use_future(move || {
+        let api = api.clone();
+        async move {
+            let mut events = api.events();
+            while let Some(event) = events.next().await {
+                if let api::ApiEvent::SourceStatus { source, state } = event {
+                    if let Some(row) = rows
+                        .write()
+                        .iter_mut()
+                        .flatten()
+                        .find(|row| row.id == source)
+                    {
+                        row.state = Some(state);
+                    }
+                    heard.write().insert(source, state);
+                }
+            }
         }
     });
     rows
@@ -49,7 +79,10 @@ pub fn show_active(switched: &api::SourceInfo) {
     };
     for row in rows.iter_mut() {
         if row.id == switched.id {
+            // The status events keep the row's state current; the reply's may predate them.
+            let state = row.state.or(switched.state);
             *row = switched.clone();
+            row.state = state;
         }
         row.active = row.id == switched.id;
     }

@@ -153,6 +153,7 @@ async fn spawn_pair() -> Pair {
     );
     let sources =
         daemon::SourceService::new(database.clone(), session.clone(), config_service.clone());
+    sources.watch_active(session.config_watch());
     let integrations = daemon::IntegrationService::new(config_service.clone(), session.clone());
     let downloader = daemon::UrlDownloadService::new(session.clone(), config_service.clone());
     let build_api = |session: SessionHandle| {
@@ -399,6 +400,43 @@ async fn subscribe_stream_delivers_typed_events() {
             }
         }
     }
+}
+
+fn active_state(rows: Vec<api::SourceInfo>) -> Option<api::SourceState> {
+    rows.into_iter()
+        .find(|row| row.active)
+        .and_then(|row| row.state)
+}
+
+/// Wait out the daemon's first probe of its active source, which runs in the background from boot.
+async fn wait_probed(pair: &Pair) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let state = active_state(pair.local.sources().await.expect("local sources"));
+        if state.is_some_and(|state| state != api::SourceState::Checking) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the daemon never probed its active source: {state:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// The connection dot reads the daemon's probe off the source row, the same on both transports.
+#[tokio::test]
+async fn the_active_sources_status_is_the_daemons_probe() {
+    let pair = spawn_pair().await;
+    wait_probed(&pair).await;
+    let local = active_state(pair.local.sources().await.expect("local sources"));
+    let wire = active_state(pair.wire.sources().await.expect("wire sources"));
+    assert_eq!(
+        local,
+        Some(api::SourceState::Online),
+        "a folder source is always reachable"
+    );
+    assert_eq!(wire, local, "the wire reports what the daemon holds");
 }
 
 #[tokio::test]
@@ -1229,6 +1267,7 @@ async fn mutations_agree_across_transports() {
 #[tokio::test]
 async fn sources_agree_across_transports_and_carry_no_secret() {
     let pair = spawn_pair().await;
+    wait_probed(&pair).await;
 
     let local = pair.local.sources().await.expect("local sources");
     let wire = pair.wire.sources().await.expect("wire sources");
@@ -1383,6 +1422,7 @@ async fn a_folder_source_is_managed_through_the_generic_source_calls() {
         api::spec_value(&created.settings, "directories").map(api::decode_directories),
         Some(vec![path(&music)])
     );
+    wait_probed(&pair).await;
     let listed = pair.local.sources().await.expect("sources");
     assert_eq!(listed, pair.wire.sources().await.expect("sources"));
     assert_eq!(listed.len(), 2, "{listed:?}");

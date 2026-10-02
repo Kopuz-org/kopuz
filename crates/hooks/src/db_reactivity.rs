@@ -22,9 +22,10 @@ pub enum Table {
     Folders = 4,
     Servers = 5,
     Recents = 6,
+    Stations = 7,
 }
 
-const N: usize = 7;
+const N: usize = 8;
 
 /// One monotonically-increasing counter per [`Table`], plus a dirty bitset the
 /// flusher drains. `Copy` (just `Signal`s inside), so it's cheap to pass around
@@ -46,6 +47,11 @@ impl Generations {
     /// ~150ms. Use on the hot path of a streaming insert (scan/sync batches).
     pub fn bump_coalesced(mut self, table: Table) {
         self.dirty.write()[table as usize] = true;
+    }
+
+    /// Re-run every keyed query, for when the events that would have named the tables were lost.
+    pub fn bump_all(mut self) {
+        self.dirty.set([true; N]);
     }
 
     /// Current generation of a table. Read this inside a query hook so the hook
@@ -75,6 +81,7 @@ impl Generations {
 pub fn use_generations_provider() -> Generations {
     let gens = Generations {
         counters: [
+            use_signal(|| 0u64),
             use_signal(|| 0u64),
             use_signal(|| 0u64),
             use_signal(|| 0u64),

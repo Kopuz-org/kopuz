@@ -133,6 +133,8 @@ pub struct SourceInfo {
     pub needs_network: bool,
     /// Every install has it, so it cannot be deleted.
     pub permanent: bool,
+    /// What the daemon's last probe found; `None` until it has probed this source.
+    pub state: Option<crate::SourceState>,
 }
 
 /// A source to create or update, as the answers to a [`ServiceInfo`]'s form.

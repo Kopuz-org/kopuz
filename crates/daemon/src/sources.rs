@@ -10,8 +10,10 @@
 //! profile or a loopback listener, and ends holding a secret, which makes it
 //! system-level work regardless of who triggered it.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use api::{
@@ -26,10 +28,16 @@ use crate::session::SessionHandle;
 /// How long a browser sign-in may sit waiting for a person.
 const SIGNIN_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// How often an active source that is not online is probed again, so it recovers without a switch.
+const RETRY_PROBE: Duration = Duration::from_secs(60);
+
 pub struct SourceService {
     db: db::Db,
     session: SessionHandle,
     config: Arc<ConfigService>,
+    /// Each source's last probe answer, tagged with the probe that wrote it.
+    status: Mutex<HashMap<String, (u64, SourceState)>>,
+    probes: AtomicU64,
 }
 
 fn db_error(error: db::DbError) -> ApiError {
@@ -80,7 +88,31 @@ impl SourceService {
             db,
             session,
             config,
+            status: Mutex::new(HashMap::new()),
+            probes: AtomicU64::new(0),
         })
+    }
+
+    /// The last probe answer for `id`, if it has been probed.
+    pub fn status(&self, id: &str) -> Option<SourceState> {
+        let status = self.status.lock().ok()?;
+        status.get(id).map(|(_, state)| *state)
+    }
+
+    /// Store a probe's answer unless a later probe of the same source already wrote; announce it when it moved.
+    fn record_status(&self, id: &str, probe: u64, state: SourceState) {
+        let Ok(mut status) = self.status.lock() else {
+            return;
+        };
+        let previous = status.get(id).copied();
+        if previous.is_some_and(|(at, _)| at > probe) {
+            return;
+        }
+        status.insert(id.to_string(), (probe, state));
+        drop(status);
+        if previous.map(|(_, was)| was) != Some(state) {
+            self.session.publish_source_status(id, state);
+        }
     }
 
     async fn current(&self) -> config::AppConfig {
@@ -153,6 +185,7 @@ impl SourceService {
             id: key.as_str().to_string(),
             active: current.active_source.as_str() == key.as_str(),
             capabilities: capabilities(source.capabilities()),
+            state: self.status(key.as_str()),
             ..Default::default()
         };
         match &key {
@@ -883,14 +916,65 @@ impl SourceService {
     }
 
     pub async fn validate_source(&self, id: &str) -> Result<SourceState, ApiError> {
+        self.probe(id, false).await
+    }
+
+    /// Probe `id` and record the answer; `announce` shows it as checking meanwhile, for a source with no answer of its own yet.
+    async fn probe(&self, id: &str, announce: bool) -> Result<SourceState, ApiError> {
+        let probe = self.probes.fetch_add(1, Ordering::Relaxed) + 1;
+        if announce {
+            self.record_status(id, probe, SourceState::Checking);
+        }
         let (_, source) = self.resolve(id).await?;
         let state = match source.validate().await {
             AuthOutcome::Valid => SourceState::Online,
             AuthOutcome::Expired => SourceState::AuthExpired,
             AuthOutcome::Unreachable => SourceState::Offline,
         };
-        self.session.publish_source_status(id, state);
+        self.record_status(id, probe, state);
         Ok(state)
+    }
+
+    /// Probe the active source whenever it or its server entry changes, and retry one that is not online.
+    pub fn watch_active(
+        self: &Arc<Self>,
+        mut config: tokio::sync::watch::Receiver<config::AppConfig>,
+    ) {
+        let service = self.clone();
+        tokio::spawn(async move {
+            let key =
+                |config: &config::AppConfig| (config.active_source.clone(), config.server.clone());
+            let mut probed: Option<(config::Source, Option<config::MusicServer>)> = None;
+            let mut retry = tokio::time::interval(RETRY_PROBE);
+            retry.tick().await;
+            let mut retry_due = false;
+            loop {
+                let next = key(&config.borrow_and_update());
+                let id = next.0.as_str().to_string();
+                let moved = probed.as_ref() != Some(&next);
+                let unsettled = retry_due && service.status(&id) != Some(SourceState::Online);
+                if moved || unsettled {
+                    let fresh = probed.as_ref().is_none_or(|(source, _)| *source != next.0);
+                    probed = Some(next);
+                    // Spawned, so a slow unreachable server cannot hold up probing the next source.
+                    let service = service.clone();
+                    tokio::spawn(async move {
+                        if let Err(error) = service.probe(&id, fresh).await {
+                            tracing::debug!(%error, source = %id, "probing the active source failed");
+                        }
+                    });
+                }
+                retry_due = tokio::select! {
+                    changed = config.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                        false
+                    }
+                    _ = retry.tick() => true,
+                };
+            }
+        });
     }
 
     /// Keep a source signed in without anyone asking. YouTube rotates its

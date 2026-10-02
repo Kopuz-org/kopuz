@@ -435,6 +435,27 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::SUCCESS
 }
 
+/// Pull the daemon's settings into the app's copy, keeping edits not yet sent.
+async fn adopt_daemon_config(
+    config: Signal<config::AppConfig>,
+    baseline: hooks::config_sync::ConfigBaseline,
+) {
+    match backend::api().config().await {
+        Ok(view) => baseline.adopt(config, &view.config),
+        Err(error) => tracing::warn!(%error, "re-reading settings failed"),
+    }
+}
+
+/// Events were lost, so re-read everything the app holds from the daemon.
+fn resync(
+    gens: hooks::db_reactivity::Generations,
+    config: Signal<config::AppConfig>,
+    baseline: hooks::config_sync::ConfigBaseline,
+) {
+    gens.bump_all();
+    spawn(adopt_daemon_config(config, baseline));
+}
+
 #[component]
 fn App() -> Element {
     // tao's event loop calls process::exit() on window close, so the
@@ -512,6 +533,7 @@ fn App() -> Element {
     // Which settings a managed file pins, so those rows render locked. The
     // daemon reads those layers; nothing here opens the file.
     hooks::config_view::use_locked_keys_provider();
+    let config_baseline = hooks::config_sync::use_config_baseline_provider();
 
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.
@@ -762,14 +784,7 @@ fn App() -> Element {
         );
     });
 
-    // The store saves are FULL-REPLACE (hundreds-to-thousands of statements),
-    // so saving on every signal mutation hammered the runtime — a batch
-    // download bumping `offline_tracks` per finished song ran a complete
-    // config save (≈840 listen-count upserts) per completion and starved the
-    // audio stream into underruns. Each domain now marks itself dirty and a
-    // debounced saver loop persists at most once per cooldown window,
-    // coalescing bursts. The CloseRequested flush below covers quitting inside
-    // the window.
+    // Debounced: a settings save is a whole-config write, so a burst of edits must coalesce into one.
     let mut config_dirty = use_signal(|| 0u64);
     use_effect(move || {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
@@ -810,12 +825,16 @@ fn App() -> Element {
             flushed = *config_dirty.peek();
             let mut snapshot = config.peek().clone();
             snapshot.volume = *volume.peek();
-            if let Err(error) = api
-                .set_config(snapshot)
+            match api
+                .set_config(snapshot.clone())
                 .instrument(tracing::info_span!("config.persist"))
                 .await
             {
-                tracing::error!(%error, "failed to save settings");
+                Ok(view) => {
+                    config_baseline.record(snapshot);
+                    config_baseline.adopt(config, &view.config);
+                }
+                Err(error) => tracing::error!(%error, "failed to save settings"),
             }
             utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
         }
@@ -967,6 +986,7 @@ fn App() -> Element {
                 {
                     Ok(view) => {
                         config_loaded_ok.set(true);
+                        config_baseline.record(view.config.clone());
                         Some(view.config)
                     }
                     Err(error) => {
@@ -1023,6 +1043,7 @@ fn App() -> Element {
                                     api::Table::Folders => Some(Table::Folders),
                                     api::Table::Servers => Some(Table::Servers),
                                     api::Table::Recents => Some(Table::Recents),
+                                    api::Table::Stations => Some(Table::Stations),
                                     _ => None,
                                 };
                                 if let Some(table) = mapped {
@@ -1041,9 +1062,15 @@ fn App() -> Element {
                             } => {
                                 scan_current_file.set(None);
                             }
+                            api::ApiEvent::ConfigChanged { .. } => {
+                                spawn(adopt_daemon_config(config, config_baseline));
+                            }
+                            api::ApiEvent::Resync => {
+                                resync(gens, config, config_baseline);
+                            }
                             _ => {}
                         },
-                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Lagged(_)) => resync(gens, config, config_baseline),
                         Err(RecvError::Closed) => break,
                     }
                 }

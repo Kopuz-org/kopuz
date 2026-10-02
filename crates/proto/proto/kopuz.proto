@@ -792,6 +792,8 @@ message SourceInfo {
   bool needs_network = 18;
   // Every install has it, so it cannot be deleted.
   bool permanent = 19;
+  // What the daemon's last probe found; absent until it has probed this source.
+  optional SourceState state = 20;
 }
 
 message GetSourcesRequest {}
@@ -1717,6 +1719,7 @@ enum Table {
   TABLE_FOLDERS = 5;
   TABLE_SERVERS = 6;
   TABLE_RECENTS = 7;
+  TABLE_STATIONS = 8;
 }
 
 enum JobKind {
@@ -1742,6 +1745,7 @@ enum SourceState {
   SOURCE_STATE_ONLINE = 1;
   SOURCE_STATE_AUTH_EXPIRED = 2;
   SOURCE_STATE_OFFLINE = 3;
+  SOURCE_STATE_CHECKING = 4;
 }
 
 enum NoticeLevel {

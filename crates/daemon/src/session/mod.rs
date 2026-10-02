@@ -1275,18 +1275,15 @@ impl Session {
         }
         self.last_recent_key = Some(uid);
         if let Some(recorder) = self.recorder.clone() {
+            let events = self.events.clone();
             tokio::spawn(async move {
                 recorder.record_recent(&track).await;
-            });
-            self.emit(ApiEvent::LibraryInvalidated {
-                table: api::Table::Recents,
+                announce_history(&events);
             });
         }
     }
 
     /// Record the committed track as recently played, once per session track.
-    /// The invalidation event lets clients refresh recents immediately even
-    /// though the durable write is fire-and-forget.
     fn maybe_record_recent(&mut self) {
         let Some(recorder) = self.recorder.clone() else {
             return;
@@ -1300,11 +1297,10 @@ impl Session {
         }
         self.last_recent_key = Some(uid);
         let track = track.clone();
+        let events = self.events.clone();
         tokio::spawn(async move {
             recorder.record_recent(&track).await;
-        });
-        self.emit(ApiEvent::LibraryInvalidated {
-            table: api::Table::Recents,
+            announce_history(&events);
         });
     }
 
@@ -1324,8 +1320,10 @@ impl Session {
         if track.duration == u64::MAX {
             return;
         }
+        let events = self.events.clone();
         tokio::spawn(async move {
             recorder.bump_listen_count(&track).await;
+            announce_history(&events);
         });
     }
 
@@ -1664,6 +1662,13 @@ struct ExternalState {
     track: Option<Track>,
     artwork: Option<String>,
     completed_key: Option<String>,
+}
+
+/// Tell clients play history moved, sent after the write so a re-read sees it.
+fn announce_history(events: &broadcast::Sender<ApiEvent>) {
+    let _ = events.send(ApiEvent::LibraryInvalidated {
+        table: api::Table::Recents,
+    });
 }
 
 fn merge_buffered_range(ranges: &mut Vec<BufferedRange>, incoming: BufferedRange) {

@@ -16,6 +16,8 @@ pub enum Table {
     Folders,
     Servers,
     Recents,
+    /// The radio station list, including which stations are pinned.
+    Stations,
     Unknown,
 }
 
@@ -50,6 +52,8 @@ pub enum NoticeLevel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceState {
+    /// The daemon is probing it and has no answer yet.
+    Checking,
     Online,
     AuthExpired,
     Offline,

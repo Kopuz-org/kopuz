@@ -16,19 +16,7 @@ pub fn debug_db_section() -> Element {
     let gens = hooks::db_reactivity::use_generations();
     let mut status = use_signal(String::new);
 
-    let bump_all = move || {
-        use hooks::db_reactivity::Table;
-        for t in [
-            Table::Tracks,
-            Table::Albums,
-            Table::Playlists,
-            Table::Favorites,
-            Table::Folders,
-            Table::Servers,
-        ] {
-            gens.bump(t);
-        }
-    };
+    let bump_all = move || gens.bump_all();
 
     let db_reset = db.clone();
     let db_release = db.clone();

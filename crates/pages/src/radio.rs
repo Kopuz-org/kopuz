@@ -20,12 +20,8 @@ pub struct RadioProps {
     pub config: Signal<config::AppConfig>,
 }
 
-/// Pin or unpin, then re-read the selected list. The daemon keeps the
-/// station's manifest, so a pin outlives a registry that stops listing it.
-///
-/// The local set moves first and is put back on failure: the answer is a round
-/// trip away and a check mark that waits for it reads as a dead button.
-fn toggle_pin(id: String, mut pinned_ids: Signal<HashSet<String>>, mut generation: Signal<u64>) {
+/// Pin or unpin, moving the check mark first and putting it back on failure; the daemon announces the new list.
+fn toggle_pin(id: String, mut pinned_ids: Signal<HashSet<String>>) {
     let pinned = pinned_ids.peek().contains(&id);
     if pinned {
         pinned_ids.write().remove(&id);
@@ -42,9 +38,7 @@ fn toggle_pin(id: String, mut pinned_ids: Signal<HashSet<String>>, mut generatio
             } else {
                 pinned_ids.write().remove(&id);
             }
-            return;
         }
-        generation += 1;
     });
 }
 
@@ -92,11 +86,11 @@ pub fn Radio(props: RadioProps) -> Element {
     // Expanded stations set for stream overflow
     let mut expanded_stations = use_signal(HashSet::<String>::new);
 
-    // Bumped by a pin, so the selected list re-reads without re-searching.
-    let pin_gen = use_signal(|| 0u64);
+    // Re-read when the daemon announces the list moved, so a pin re-reads without re-searching.
+    let gens = hooks::db_reactivity::use_generations();
     let selected_api = api.clone();
     let selected = use_resource(move || {
-        let _ = pin_gen();
+        let _ = gens.generation(hooks::db_reactivity::Table::Stations);
         let api = selected_api.clone();
         async move { api.radio_stations().await.unwrap_or_default() }
     });
@@ -630,7 +624,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                                         let st = st.clone();
                                                         move |evt: MouseEvent| {
                                                             evt.stop_propagation();
-                                                            toggle_pin(st.id.clone(), pinned_ids, pin_gen);
+                                                            toggle_pin(st.id.clone(), pinned_ids);
                                                         }
                                                     },
                                                     if pinned_ids.read().contains(&st.id) {
@@ -715,7 +709,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                                     let st = st.clone();
                                                     move |evt: MouseEvent| {
                                                         evt.stop_propagation();
-                                                        toggle_pin(st.id.clone(), pinned_ids, pin_gen);
+                                                        toggle_pin(st.id.clone(), pinned_ids);
                                                     }
                                                 },
                                                 if pinned_ids.read().contains(&st.id) {

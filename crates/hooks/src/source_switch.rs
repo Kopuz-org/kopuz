@@ -18,54 +18,33 @@ pub enum ConnStatus {
     Offline,
 }
 
-/// Connection status of the active source, probed by the daemon on each switch.
+/// Connection status of the active source, as the daemon's probes last found it.
 pub fn use_connection_status() -> Memo<ConnStatus> {
-    let api = crate::api::use_api();
     let sources = crate::sources::use_sources();
-    let mut status = use_signal(|| ConnStatus::Connecting);
-    use_effect(move || {
-        let active = sources
-            .read()
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .find(|source| source.active);
-        let Some(active) = active else {
-            return;
-        };
-        status.set(ConnStatus::Connecting);
-        let api = api.clone();
-        spawn(async move {
-            let state = match api.validate_source(active.id.clone()).await {
-                Ok(api::SourceState::Online) => ConnStatus::Online,
-                _ => ConnStatus::Offline,
-            };
-            // A switch away while this was in flight has its own probe; this answer is about a source no longer shown.
-            let still_active = sources.peek().as_ref().is_some_and(|all| {
-                all.iter()
-                    .any(|source| source.active && source.id == active.id)
-            });
-            if still_active {
-                status.set(state);
-            }
-        });
-    });
-    use_memo(move || *status.read())
+    use_memo(move || {
+        let sources = sources.read();
+        let active = sources.iter().flatten().find(|source| source.active);
+        match active.and_then(|source| source.state) {
+            None | Some(api::SourceState::Checking) => ConnStatus::Connecting,
+            Some(api::SourceState::Online) => ConnStatus::Online,
+            Some(api::SourceState::AuthExpired | api::SourceState::Offline) => ConnStatus::Offline,
+        }
+    })
 }
 
 /// Apply a source switch. Answers whether the source is usable without a
 /// sign-in (stored credentials, or a source usable anonymously), so the caller can
 /// launch a sign-in flow otherwise.
-pub async fn apply_source_switch(mut config: Signal<AppConfig>, id: String) -> bool {
+pub async fn apply_source_switch(config: Signal<AppConfig>, id: String) -> bool {
     let api = crate::api::consume_api();
+    let baseline = try_consume_context::<crate::config_sync::ConfigBaseline>();
     match api.switch_source(id).await {
         Ok(info) => {
             crate::sources::show_active(&info);
             let usable = info.authenticated;
-            // The daemon owns the config now, so pull its version back rather
-            // than reconstructing the same edit locally.
-            if let Ok(view) = api.config().await {
-                config.set(view.config);
+            // Read back now rather than on the event, so a caller sees the switched config on return.
+            if let (Some(baseline), Ok(view)) = (baseline, api.config().await) {
+                baseline.adopt(config, &view.config);
             }
             usable
         }

@@ -1142,6 +1142,81 @@ async fn recents_record_once_and_completion_bumps_listens() {
     assert_eq!(recents.len(), 2, "resume must not re-record the same track");
 }
 
+/// Writes play history slowly, into the same log a listening client writes what it hears.
+struct SlowRecorder {
+    log: Arc<Mutex<Vec<&'static str>>>,
+}
+
+impl SlowRecorder {
+    async fn write(&self) {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        self.log.lock().expect("log lock").push("written");
+    }
+}
+
+#[async_trait::async_trait]
+impl PlaybackRecorder for SlowRecorder {
+    async fn record_recent(&self, _: &Track) {
+        self.write().await;
+    }
+
+    async fn bump_listen_count(&self, _: &Track) {
+        self.write().await;
+    }
+}
+
+/// A client re-reading play history on its event must find the write that caused it.
+#[tokio::test]
+async fn play_history_is_announced_after_it_is_written() {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let harness = harness_with_services(
+        |_| {},
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+        Some(Arc::new(SlowRecorder { log: log.clone() })),
+    );
+    let mut events = harness.api.session.subscribe();
+    let heard = log.clone();
+    tokio::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            if matches!(
+                event,
+                ApiEvent::LibraryInvalidated {
+                    table: api::Table::Recents
+                }
+            ) {
+                heard.lock().expect("log lock").push("announced");
+            }
+        }
+    });
+
+    harness
+        .api
+        .set_queue(replace(&["short-a", "short-b"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    drive_until(&harness, "auto-advance to second track", |state| {
+        state.queue.index == Some(1) && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let log = log.lock().expect("log lock").clone();
+    let (mut written, mut announced) = (0, 0);
+    for entry in &log {
+        match *entry {
+            "written" => written += 1,
+            _ => announced += 1,
+        }
+        assert!(announced <= written, "announced before written: {log:?}");
+    }
+    assert_eq!(
+        (written, announced),
+        (3, 3),
+        "two recents and a listen: {log:?}"
+    );
+}
+
 #[tokio::test]
 async fn failed_crossfade_preparation_records_no_listen_and_can_retry() {
     let recorder = Arc::new(MemoryRecorder {
