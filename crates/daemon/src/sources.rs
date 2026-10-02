@@ -806,16 +806,15 @@ impl SourceService {
                     .map_err(ApiError::internal)?;
                     (secret, "me".to_string())
                 }
-                // Spotify's "URL" field holds the client id its PKCE flow
-                // needs, not an address.
+                // Spotify signs in with the desktop client's id and stores the
+                // reusable credentials the login hands back, so there is no
+                // token to refresh afterwards.
                 config::MusicService::Spotify => {
-                    let auth = server::spotify::auth::launch_signin_and_extract(server.url)
+                    let device_id = self.current().await.device_id.clone();
+                    let auth = server::spotify::auth::sign_in(device_id)
                         .await
                         .map_err(ApiError::internal)?;
-                    (
-                        server::spotify::auth::pack_token(&auth.access_token, &auth.refresh_token),
-                        auth.user_id,
-                    )
+                    (auth.stored, auth.username)
                 }
                 _ => {
                     return Err(ApiError::unsupported(
@@ -882,23 +881,17 @@ impl SourceService {
     }
 
     /// Keep a source signed in without anyone asking. YouTube rotates its
-    /// cookies and Spotify's tokens expire, and a frontend that had to do
-    /// this was a frontend that had to hold the credential.
+    /// cookies, and a frontend that had to do this was a frontend that had
+    /// to hold the credential.
     pub fn spawn_credential_upkeep(self: &Arc<Self>) {
         let service = self.clone();
         tokio::spawn(async move {
-            // Long enough not to hammer either provider, short enough that a
+            // Long enough not to hammer the provider, short enough that a
             // session does not lapse between checks.
             let mut ticker = tokio::time::interval(Duration::from_secs(300));
-            let mut since_spotify = 0u32;
             loop {
                 ticker.tick().await;
                 service.rotate_ytmusic().await;
-                since_spotify += 1;
-                if since_spotify >= 6 {
-                    since_spotify = 0;
-                    service.refresh_spotify().await;
-                }
             }
         });
     }
@@ -935,40 +928,6 @@ impl SourceService {
             }
             Ok(None) => {}
             Err(error) => tracing::debug!(%error, "YouTube Music keepalive failed"),
-        }
-    }
-
-    async fn refresh_spotify(&self) {
-        let config = self.current().await;
-        let Some(server) = config
-            .server
-            .as_ref()
-            .filter(|server| server.service == config::MusicService::Spotify)
-        else {
-            return;
-        };
-        let (Some(packed), Some(id)) = (
-            server.access_token.clone(),
-            config.active_source.server_id().map(str::to_string),
-        ) else {
-            return;
-        };
-        match server::spotify::auth::refresh_packed(&packed, server.url.clone()).await {
-            Ok(refreshed) if refreshed != packed => {
-                if let Err(error) = self
-                    .provision_credentials(CredentialProvision {
-                        server_id: id,
-                        secret: refreshed,
-                        user_id: server.user_id.clone(),
-                        browser: None,
-                    })
-                    .await
-                {
-                    tracing::warn!(%error, "storing the refreshed Spotify token failed");
-                }
-            }
-            Ok(_) => {}
-            Err(error) => tracing::debug!(%error, "Spotify token refresh failed"),
         }
     }
 }

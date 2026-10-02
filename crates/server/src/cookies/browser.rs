@@ -248,16 +248,10 @@ pub(crate) async fn find_browser_bin(
 }
 
 /// Plain `Command` natively; `flatpak-spawn --host --watch-bus` when packaged,
-/// so `child.kill()`/`kill_on_drop` still tears the host browser down.
+/// so `child.kill()`/`kill_on_drop` still tears the host browser down: a
+/// cookie import owns the browser it spawned and wants it gone when kopuz
+/// drops the child.
 pub(crate) fn browser_command(bin: &BrowserBin) -> Command {
-    browser_command_with(bin, true)
-}
-
-/// The same, with `--watch-bus` optional. A cookie import owns the browser it
-/// spawned and wants it gone when kopuz drops the child; the Spotify player
-/// page lands in the user's own browser, which must outlive kopuz's bus
-/// connection.
-pub(crate) fn browser_command_with(bin: &BrowserBin, watch_bus: bool) -> Command {
     let tokens: Vec<&str> = match bin {
         BrowserBin::Path(p) => vec![p.as_str()],
         BrowserBin::CommandLine(c) => {
@@ -272,9 +266,7 @@ pub(crate) fn browser_command_with(bin: &BrowserBin, watch_bus: bool) -> Command
     if in_flatpak() {
         let mut c = Command::new("flatpak-spawn");
         c.arg("--host");
-        if watch_bus {
-            c.arg("--watch-bus");
-        }
+        c.arg("--watch-bus");
         c.args(&tokens);
         c
     } else {

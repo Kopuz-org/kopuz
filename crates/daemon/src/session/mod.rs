@@ -293,7 +293,7 @@ impl SessionHandle {
     }
 
     /// Offer the integration that plays what the engine cannot. Consulted
-    /// on every load, so a Spotify track in the queue reaches it.
+    /// on every load, so a track of its service in the queue reaches it.
     pub fn set_external_sink(&self, player: crate::external::SharedExternalPlayer) {
         let _ = self.cmd_tx.send(SessionCmd::SetExternalSink(player));
     }
@@ -1186,8 +1186,8 @@ impl Session {
             }
             self.record_listen(track);
             // The queue is kopuz's, so its end-of-track is kopuz's too: the
-            // next item may be another Spotify track or a local file, and
-            // either way the load path decides who plays it.
+            // next item may be another of the integration's tracks or a local
+            // file, and either way the load path decides who plays it.
             if let Err(error) = self.play_next(false, state_tx) {
                 tracing::warn!(%error, "advancing after an external track failed");
             }

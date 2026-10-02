@@ -100,6 +100,7 @@ let
             (s + /.cargo)
             (s + /crates)
             (s + /data)
+            (s + /vendor)
 
             (s + /Cargo.toml)
             (s + /Cargo.lock)

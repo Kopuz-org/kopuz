@@ -1,5 +1,7 @@
-//! Playback the audio engine cannot drive: a Spotify Connect device, a browser
-//! tab holding a Web Playback SDK session.
+//! Playback the audio engine cannot drive: a service that plays a track
+//! itself, on a device of its own or on a surface it owns. Nothing registers
+//! one today (Spotify audio goes through the engine since the move to
+//! librespot); the seam stays for a service that needs it.
 //!
 //! These are media sources like any other, so the daemon owns them: it holds
 //! the credentials, it makes the API calls, and it drives the OS media widget
@@ -29,7 +31,7 @@ pub trait ExternalPlayer: Send + Sync {
     fn service(&self) -> config::MusicService;
 
     /// Start one track. `artwork` is a URL the integration may show on its own
-    /// surface, which for a browser tab is its Media Session card.
+    /// surface, such as an OS media card.
     async fn load(&self, track: &Track, artwork: Option<String>) -> Result<(), ApiError>;
 
     async fn resume(&self) -> Result<(), ApiError>;

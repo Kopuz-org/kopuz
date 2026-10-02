@@ -69,12 +69,20 @@ pub enum ResolvedStreamRef<'a> {
     /// everything the decode factory needs, so it never re-reads the config.
     /// Written by `AppleMusicSource::resolve_stream`.
     AppleMusicFmp4(&'a str),
+    /// A Spotify track, by base62 id. The decode worker opens it through the
+    /// process's librespot session (`spotify::session::current`), so the ref
+    /// carries no credential. Written by `SpotifySource::resolve_stream`.
+    Spotify(&'a str),
     Direct(&'a str),
 }
 
 impl<'a> ResolvedStreamRef<'a> {
     pub fn pending_marker(item_id: &str) -> String {
         format!("__PENDING:{item_id}")
+    }
+
+    pub fn spotify_marker(track_id: &str) -> String {
+        format!("__SPOTIFY:{track_id}")
     }
 
     pub fn parse(value: &'a str) -> Self {
@@ -84,6 +92,8 @@ impl<'a> ResolvedStreamRef<'a> {
             Self::SoundCloudHls(url)
         } else if let Some(payload) = value.strip_prefix("__AM_FMP4:") {
             Self::AppleMusicFmp4(payload)
+        } else if let Some(track_id) = value.strip_prefix("__SPOTIFY:") {
+            Self::Spotify(track_id)
         } else {
             Self::Direct(value)
         }
@@ -111,6 +121,10 @@ mod tests {
         assert_eq!(
             ResolvedStreamRef::parse("__SC_HLS:https://example.invalid/x.m3u8"),
             ResolvedStreamRef::SoundCloudHls("https://example.invalid/x.m3u8")
+        );
+        assert_eq!(
+            ResolvedStreamRef::parse(&ResolvedStreamRef::spotify_marker("4uLU6hMCjMI75M1A2tKUQC")),
+            ResolvedStreamRef::Spotify("4uLU6hMCjMI75M1A2tKUQC")
         );
     }
 

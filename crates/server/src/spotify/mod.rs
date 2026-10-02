@@ -1,20 +1,25 @@
-//! Spotify integration built on official public surfaces only.
+//! Spotify through librespot, the desktop client's own protocol.
 //!
-//! - [`auth`] — OAuth Authorization-Code + PKCE against `accounts.spotify.com`
-//!   with a user-supplied Client ID and a loopback redirect. No password ever
-//!   reaches kopuz.
-//! - [`api`] — the public Web API (`api.spotify.com`) for library, playlists,
-//!   liked songs, search, and issuing playback on a Connect device.
-//! - [`host`] — playback via the official Web Playback SDK. The SDK needs a
-//!   Widevine CDM, which kopuz's embedded webview lacks on macOS/Linux, so the
-//!   host launches the user's own browser (which ships Widevine) and drives the
-//!   SDK there over a localhost WebSocket. Premium is required for playback;
-//!   library/metadata work on any account.
+//! - [`auth`] — Authorization-Code + PKCE against `accounts.spotify.com` with
+//!   the desktop client id, then a librespot login that turns the OAuth token
+//!   into credentials that do not expire. No app to register, no password.
+//! - [`session`] — the one live access-point connection per account, shared
+//!   by every caller in the process.
+//! - [`catalog`] — library, liked songs, playlists, albums and the home page
+//!   over the client's own endpoints (`spclient`). The public Web API is not
+//!   used: Spotify throttles it for the client id every librespot player
+//!   shares.
+//! - [`search`] — the web player's GraphQL search.
+//! - [`stream`] — audio. The track's file id from metadata, its key from the
+//!   access point, and the decrypted Ogg Vorbis as a seekable reader the
+//!   engine decodes like any other remote stream. Premium is required for
+//!   playback; the reads work on any account.
 //!
-//! The refresh token is packed into the existing `access_token` config column
-//! as `"<access>\n<refresh>"` (see [`auth::pack_token`]) so no schema migration
-//! is needed. The Client ID lives in the server's `url` field.
+//! The stored credentials live in the server's `access_token` column as JSON
+//! (see [`session::pack_credentials`]).
 
-pub mod api;
 pub mod auth;
-pub mod host;
+pub mod catalog;
+pub mod search;
+pub mod session;
+pub mod stream;

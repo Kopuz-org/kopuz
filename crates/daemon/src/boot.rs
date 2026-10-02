@@ -75,12 +75,21 @@ async fn open_database(path: &Path) -> Result<db::Db, Box<dyn std::error::Error>
 }
 
 /// What the core needs done on the thread that builds its runtime, before it
-/// is built. Today that is the JS platform: every thread that will run V8
-/// has to descend from the one that initialised it, and the runtime's workers
-/// are the ancestors of everything the core spawns.
+/// is built. The JS platform: every thread that will run V8 has to descend
+/// from the one that initialised it, and the runtime's workers are the
+/// ancestors of everything the core spawns. And the TLS crypto backend:
+/// reqwest brings rustls with aws-lc-rs and librespot brings it with ring,
+/// and with both linked rustls refuses to guess, so it is told here before
+/// the first connection.
 pub fn prepare_thread() {
     #[cfg(not(target_os = "android"))]
     server::ytmusic::ensure_v8_platform();
+    if rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .is_err()
+    {
+        tracing::debug!("a rustls crypto provider was already installed");
+    }
 }
 
 /// Open the library, start the audio engine, and wire every service onto it.
@@ -220,11 +229,6 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     });
     let downloader = crate::UrlDownloadService::new(session.clone(), config_service.clone());
     downloader.attach_rescan(library.clone(), jobs.clone());
-    // Spotify plays itself, so the session is told where to send a track it
-    // cannot decode. Nothing starts until one is actually queued.
-    let spotify = crate::SpotifySink::new(session.clone(), config_service.clone());
-    session.set_external_sink(spotify.clone());
-    spotify.spawn_discovery();
     let api = Arc::new(
         LocalApi::new(session.clone())
             .with_library(library.clone())
@@ -239,7 +243,6 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_mutations(mutations)
             .with_sources(sources.clone())
             .with_downloader(downloader)
-            .with_spotify(spotify)
             .with_integrations(crate::IntegrationService::new(
                 config_service_for_api,
                 session.clone(),

@@ -264,18 +264,6 @@ impl Browser {
         Browser::Floorp,
     ];
 
-    /// The Chromium family, in the order an automatic choice should try it.
-    /// Spotify playback is limited to these: its Web Playback SDK has a
-    /// long-standing Firefox bug, so a Gecko browser is never offered there.
-    pub const CHROMIUM_FAMILY: &'static [Browser] = &[
-        Browser::Chrome,
-        Browser::Chromium,
-        Browser::Brave,
-        Browser::Edge,
-        Browser::Vivaldi,
-        Browser::Helium,
-    ];
-
     /// The stable id used in URL routes, settings UI option values,
     /// libsecret lookups, etc.
     pub fn id(self) -> &'static str {

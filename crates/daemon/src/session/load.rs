@@ -621,6 +621,7 @@ impl ClassifiedLoad {
                     }
                     ResolvedStreamRef::SoundCloudHls(_)
                     | ResolvedStreamRef::AppleMusicFmp4(_)
+                    | ResolvedStreamRef::Spotify(_)
                     | ResolvedStreamRef::Direct(_) => (stream_ref, None, None),
                 };
 

@@ -99,9 +99,9 @@ one gRPC schema on a local socket, documented in [docs/api.md](docs/api.md).
   like/unlike. Added via a one-time browser sign-in in an isolated profile. See
   [SoundCloud Setup](#soundcloud-setup).
 - **Spotify**: Your saved tracks, albums, and playlists, a **Discover** page,
-  search, and scrobbling, with playback through Spotify's official Web Playback
-  SDK or any **Spotify Connect** device you own. Needs Premium and a one-time
-  app setup. See [Spotify Setup](#spotify-setup).
+  search, and scrobbling, with audio streamed and decoded by Kopuz itself
+  through [librespot](https://github.com/librespot-org/librespot). Playback
+  needs Premium. See [Spotify Setup](#spotify-setup).
 - **Lyrics Support**: Enjoy real-time synced and plain lyrics, complete with
   auto-scrolling to follow along with your music.
 - **Favorites**: Star tracks locally or sync favorites with your
@@ -670,158 +670,81 @@ playlists, and like/unlike. Removing the source cleans up its isolated profile.
 
 ## Spotify Setup
 
-Spotify works differently from every other backend in Kopuz, so it needs a bit
-of one-time setup. Kopuz talks to the official Web API for your library, and the
-audio itself is played by Spotify's official Web Playback SDK running in a
-browser on your machine. Kopuz drives that player and shows everything in its
-own UI, but it never touches the audio stream, and it never asks for your
-password.
+Spotify in Kopuz runs on [librespot](https://github.com/librespot-org/librespot),
+the open-source implementation of the protocol Spotify's own desktop client
+speaks. Kopuz logs in as a Spotify client, fetches the audio, decrypts it, and
+decodes it in its own player like every other backend. There is no browser tab,
+no Widevine, and no app to register. Kopuz never sees your password: sign-in is
+Spotify's own consent page.
 
 ### Before you start
 
-You need three things:
+- **Spotify Premium** for playback. Spotify only streams to third-party clients
+  on Premium. Browsing your library, playlists, and search still work without
+  it.
+- **A browser** for the one-time sign-in. Any browser will do; it is only used
+  to approve the login.
 
-- **Spotify Premium.** The Web Playback SDK refuses to stream on free accounts.
-  Browsing your library still works without Premium, playback does not.
-- **Your own Spotify client.** Kopuz does not ship a Client ID, you create one
-  in about two minutes and paste it in.
-- **A supported browser installed.** Chrome, Edge, Brave, Chromium, Vivaldi,
-  Helium or Safari on macOS. Firefox is not usable here: the SDK has a
-  long-standing bug in Firefox where playback dies a few seconds in, so Kopuz
-  will not pick it.
+### 1. Add the source in Kopuz
 
-  > [!NOTE]
-  > To use the Spotify backend with Helium, you need to place the Widevine files
-  > in the correct location. See
-  > [here](https://github.com/imputnet/helium/issues/116#issuecomment-3668370766)
-  > for more information. On NixOS using
-  > [hjem](https://github.com/feel-co/hjem), this can be done by adding
-  >
-  > ```nix
-  > hjem.users.your-username = {
-  >   xdg.config.files."net.imput.helium/WidevineCdm/latest-component-updated-widevine-cdm".text = ''
-  >     {"Path":"${pkgs.widevine-cdm}/share/google/chrome/WidevineCdm"}
-  >   '';
-  > };
-  > ```
-  >
-  > to your configuration.
-
-### 1. Create your Spotify app
-
-1. Open
-   [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
-   and log in with the account you want to listen with.
-2. Click **Create app**. Name and description can be anything, they are only
-   shown to you.
-3. In **Redirect URIs**, add exactly this, no trailing slash:
-
-   ```text
-   http://127.0.0.1:8898/callback
-   ```
-
-   Spotify compares this string character by character, so a typo here is the
-   single most common reason sign-in fails.
-
-4. Under **Which API/SDKs are you planning to use?**, tick both **Web API** and
-   **Web Playback SDK**.
-5. Save, then open the app's **Settings** and copy the **Client ID**. You never
-   need the Client Secret, Kopuz uses PKCE instead.
-6. Go to the app's **User Management** and add the display name and email of
-   every Spotify account that will sign in, including your own.
-
-> [!IMPORTANT]
-> A freshly created app is in Spotify's **Development Mode**. That means at most
-> five listed users can sign in, the app owner needs Premium, and some API
-> surfaces are restricted (see [What Spotify limits](#what-spotify-limits)
-> below). This is Spotify's policy, not a Kopuz limitation.
-
-### 2. Add the source in Kopuz
-
-Go to **Settings → Media servers → Add → Spotify**, paste your Client ID into
-the **Spotify Client ID** field, and save.
+Go to **Settings → Media servers → Add → Spotify**, give it a name, and save.
 
 Kopuz opens Spotify's consent page in your default browser. Approve it, and the
 redirect comes back to a small listener Kopuz runs on `127.0.0.1:8898` just for
 those few seconds. Make sure nothing else is sitting on port 8898 while you sign
-in. After that the source is ready, and Kopuz refreshes the token on its own
-from then on.
+in. Kopuz then logs a session in with that approval and keeps the reusable
+credentials Spotify hands back, so the source stays signed in until you remove
+it.
 
-### 3. Playing music
+### 2. Playing music
 
-There are two places your music can come out, and you can switch between them
-whenever you like.
-
-**The in-app player (default).** The first time you hit play, Kopuz opens a
-small player tab in a supported browser. That tab is doing the actual playing,
-because DRM playback only works in a real browser. Leave it open in the
-background and forget about it. Everything is still controlled from Kopuz:
-play/pause, seek, volume, next/previous, your queue, and your system media keys.
-The tab closes itself when you quit Kopuz.
-
-Browsers block sound until you interact with a page, so if the very first track
-sits there doing nothing, click once anywhere in that tab. Kopuz waits for that
-and then starts the track.
-
-**A Spotify Connect device.** The device button in the bottom bar lists whatever
-Spotify Connect targets you have around: your phone, the desktop app, a speaker,
-a TV. Pick one and Kopuz sends playback straight there, with no browser tab
-involved at all. Progress, play state, and the current track stay in sync in
-Kopuz, and your OS media widget follows along too. Pick **kopuz (this app)** to
-come back to the in-app player.
-
-### Settings worth knowing
-
-Both of these live on the Spotify row under **Settings → Media servers**:
-
-- **Spotify playback browser.** Which browser gets the player tab. **Automatic**
-  picks the first supported one it finds installed.
-- **Spotify playback device.** What Kopuz should do when Spotify is already
-  playing somewhere else as Kopuz starts up. **Other device** (the default)
-  means Kopuz adopts that session and just syncs to it instead of yanking
-  playback away from it. **This app** means Kopuz always plays locally.
+Just play. A Spotify track is streamed in the highest quality your account
+allows (320 kbps Ogg Vorbis on Premium), decoded by Kopuz's own audio engine,
+and goes through the same equalizer, crossfade, and output device settings as a
+local file. Scrubbing works, and tracks you have played recently are cached on
+disk so a replay does not fetch them again.
 
 ### What you get
 
 Saved tracks show up as favorites, saved albums as your library, and your
 playlists are browsable. There is a **Discover** page with On repeat, Jump back
-in, and All-time favorites, search across tracks/albums/artists, liking and
+in, and All-time favorites, search across tracks and albums, liking and
 unliking, and scrobbling to Last.fm, Libre.fm, and ListenBrainz like any other
 source.
 
 ### What Spotify limits
 
-Most of the rough edges here come from Spotify's Development Mode, not from
-Kopuz:
-
-- **Search returns at most ten results per type.** Development Mode apps get a
-  hard cap on the search endpoint.
+- **Playback needs Premium.** A free account signs in and browses fine, but
+  Spotify refuses to hand a third-party client the audio.
+- **Some Premium accounts get no audio at all.** Since late 2025 Spotify's
+  backend refuses the audio key to librespot-based clients for a subset of
+  accounts, mostly newer ones (the ones whose username is a long random
+  string). Kopuz reports this as *"Spotify would not hand out the key"*. It is
+  a server-side decision that no client can work around; see
+  [librespot issue #1649](https://github.com/librespot-org/librespot/issues/1649).
+  The library, playlists and search still work on such an account.
 - **Playlists are read-only.** You can browse and play them, but creating and
   editing playlists is not available for Spotify sources.
-- **Playlists you only follow may look empty.** Spotify only exposes the tracks
-  of playlists you own or collaborate on. Editorial playlists (Discover Weekly,
-  Release Radar, and friends) are off limits to third-party apps entirely.
+- **Kopuz is not a Spotify Connect target.** It does not show up in the Spotify
+  app's device list, and it cannot send playback to your other devices.
 - **No downloads, no tag editing, no radio** for Spotify tracks.
-- **No equalizer, crossfade, or gapless** on Spotify audio. The browser owns
-  that audio pipeline, so Kopuz's own audio features do not apply to it.
 
 ### Troubleshooting
 
-- **"Spotify playback needs Chrome, Edge, Brave, Chromium, Vivaldi, Helium, or
-  Safari"** means none of those were found. Install one, then pick it under
-  **Settings → Media servers**.
-- **Sign-in never completes.** Check the redirect URI on your Spotify app
-  character by character, and make sure nothing else is using port 8898.
-- **Sign-in is refused for a friend's account.** Add them under **User
-  Management** on your app first. Development Mode allows five users total.
-- **Auth errors after the app has been closed for a while.** Kopuz refreshes the
-  token on startup, so give it a moment. If it sticks, remove the Spotify source
-  and add it again.
-- **The Discover page is empty.** If you signed in before updating Kopuz, your
-  token may predate the scopes Discover needs. Sign out and back in.
-- **A track plays in the tab but Kopuz looks frozen**, or the other way around.
-  Closing the player tab by hand disconnects the device. Press play again in
-  Kopuz and it will open a fresh one.
+- **Sign-in never completes.** Make sure nothing else is using port 8898, and
+  that the browser that opened is the one you approved the login in.
+- **"Spotify refused the login"** right after approving. Spotify sometimes
+  needs a second attempt on a brand-new device id; remove the source and add it
+  again.
+- **A track fails with "not available on Spotify here."** The recording is not
+  licensed for your account's country and Spotify lists no alternative.
+- **A track will not start on a free account.** Playback needs Premium; the
+  library still works.
+- **"Spotify would not hand out the key" on a Premium account.** Your account
+  is one Spotify blocks from librespot-based clients (see above). Nothing in
+  Kopuz can change that; an older account on the same machine typically works.
+- **Auth errors after an update.** The stored credentials from the browser-based
+  Spotify backend cannot be reused. Remove the Spotify source and add it again.
 
 ## Logs & Debugging
 
