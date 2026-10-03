@@ -22,7 +22,7 @@ fn use_sources_provider() -> Signal<Option<Vec<api::SourceInfo>>> {
     let api = use_api();
     let gens = use_generations();
     let fetch_api = api.clone();
-    let fetched = use_resource(move || {
+    let mut fetched = use_resource(move || {
         let _ = gens.generation(Table::Servers);
         let api = fetch_api.clone();
         async move { api.sources().await.unwrap_or_default() }
@@ -46,16 +46,24 @@ fn use_sources_provider() -> Signal<Option<Vec<api::SourceInfo>>> {
         async move {
             let mut events = api.events();
             while let Some(event) = events.next().await {
-                if let api::ApiEvent::SourceStatus { source, state } = event {
-                    if let Some(row) = rows
-                        .write()
-                        .iter_mut()
-                        .flatten()
-                        .find(|row| row.id == source)
-                    {
-                        row.state = Some(state);
+                match event {
+                    api::ApiEvent::SourceStatus { source, state } => {
+                        if let Some(row) = rows
+                            .write()
+                            .iter_mut()
+                            .flatten()
+                            .find(|row| row.id == source)
+                        {
+                            row.state = Some(state);
+                        }
+                        heard.write().insert(source, state);
                     }
-                    heard.write().insert(source, state);
+                    // Answers may have been lost, so a fresh fetch is trusted over what was heard.
+                    api::ApiEvent::Resync => {
+                        heard.write().clear();
+                        fetched.restart();
+                    }
+                    _ => {}
                 }
             }
         }

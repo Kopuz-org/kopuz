@@ -148,6 +148,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let session = SessionHandle::try_spawn(library.clone(), services)
         .map_err(|error| format!("audio engine init failed: {error:?}"))?;
     library.attach_session(session.clone());
+    config_service.attach_session(session.clone());
     scrobbler.attach_session(session.clone());
     {
         let scrobbler = scrobbler.clone();
@@ -173,17 +174,22 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     crate::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
     crate::integrations::spawn_discord_presence(&session, session.config_watch());
     let restored_source = session.config_watch().borrow().active_source.clone();
-    if let Some(snapshot) = queue_store.load(&restored_source).await
-        && !snapshot.queue.is_empty()
-    {
-        let restored = snapshot.queue.len();
-        // A restored queue can hold rows the library never stored -- last
-        // session's radio mix, say. Register them the way a live listing is,
-        // or hearting the track that is playing answers "unknown track key".
-        library.register_transient(&snapshot.queue);
-        match session.restore_queue(snapshot).await {
-            Ok(_) => tracing::info!(tracks = restored, "queue restored from the last session"),
-            Err(error) => tracing::warn!(%error, "queue restore failed"),
+    match queue_store.load(&restored_source).await {
+        Ok(snapshot) if !snapshot.queue.is_empty() => {
+            let restored = snapshot.queue.len();
+            // A restored queue can hold rows the library never stored -- last
+            // session's radio mix, say. Register them the way a live listing is,
+            // or hearting the track that is playing answers "unknown track key".
+            library.register_transient(&snapshot.queue);
+            match session.restore_queue(snapshot).await {
+                Ok(_) => tracing::info!(tracks = restored, "queue restored from the last session"),
+                Err(error) => tracing::warn!(%error, "queue restore failed"),
+            }
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(%error, "the last session's queue could not be read");
+            session.hold_unread_queue();
         }
     }
     let artwork = crate::ArtworkService::new(
@@ -237,7 +243,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             tracing::warn!(%error, "radio registry could not be loaded");
         }
     });
-    let downloader = crate::UrlDownloadService::new(session.clone(), config_service.clone());
+    let downloader = crate::UrlDownloadService::new(config_service.clone());
     downloader.attach_rescan(library.clone(), jobs.clone());
     // Spotify plays itself, so the session is told where to send a track it
     // cannot decode. Nothing starts until one is actually queued.
@@ -259,10 +265,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_sources(sources.clone())
             .with_downloader(downloader)
             .with_spotify(spotify)
-            .with_integrations(crate::IntegrationService::new(
-                config_service_for_api,
-                session.clone(),
-            )),
+            .with_integrations(crate::IntegrationService::new(config_service_for_api)),
     );
 
     Ok(Core {

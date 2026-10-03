@@ -61,6 +61,8 @@ pub use sources::{
 pub struct ConfigView {
     pub config: config::AppConfig,
     pub locked_keys: Vec<String>,
+    /// Rises with every saved change, so a client can tell an older view from a newer one.
+    pub revision: u64,
 }
 
 /// What this build speaks: bump it with any wire change a mismatched peer would misread, never for an added field.

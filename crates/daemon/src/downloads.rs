@@ -151,9 +151,7 @@ impl DownloadsService {
     }
 
     async fn register(&self, item_id: &str, path: Option<String>) -> Result<(), ApiError> {
-        let updated = self.config.set_offline_track(item_id, path).await?;
-        self.session
-            .set_config(updated, vec!["offline_tracks".to_string()]);
+        self.config.set_offline_track(item_id, path).await?;
         self.session.invalidate(Table::Tracks);
         Ok(())
     }

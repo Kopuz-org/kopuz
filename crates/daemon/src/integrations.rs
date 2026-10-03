@@ -604,15 +604,11 @@ fn clear_stored(id: &str, config: &mut config::AppConfig) {
 /// and asks whether one is configured, never what it holds.
 pub struct IntegrationService {
     config: Arc<crate::config_service::ConfigService>,
-    session: crate::session::SessionHandle,
 }
 
 impl IntegrationService {
-    pub fn new(
-        config: Arc<crate::config_service::ConfigService>,
-        session: crate::session::SessionHandle,
-    ) -> Arc<Self> {
-        Arc::new(Self { config, session })
+    pub fn new(config: Arc<crate::config_service::ConfigService>) -> Arc<Self> {
+        Arc::new(Self { config })
     }
 
     pub async fn list(&self) -> Vec<IntegrationInfo> {
@@ -631,22 +627,22 @@ impl IntegrationService {
         let target = id.to_string();
         let updated = self
             .config
-            .mutate_state(move |config| apply(&target, &values, config))
+            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
+                apply(&target, &values, config)
+            })
             .await?;
-        let info = info_of(id, &updated)?;
-        self.publish(updated);
-        Ok(info)
+        info_of(id, &updated)
     }
 
     pub async fn clear(&self, id: &str) -> Result<(), ApiError> {
         info_of(id, &self.config.snapshot().await)?;
         self.config.ensure_unlocked(&clear_keys(id))?;
         let target = id.to_string();
-        let updated = self
-            .config
-            .mutate_state(move |config| clear_stored(&target, config))
+        self.config
+            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
+                clear_stored(&target, config)
+            })
             .await?;
-        self.publish(updated);
         Ok(())
     }
 
@@ -687,7 +683,7 @@ impl IntegrationService {
         let session_key = web_sign_in(id, &api_key, &api_secret).await?;
         let updated = self
             .config
-            .mutate_state(move |config| {
+            .mutate_state(&[INTEGRATIONS_KEY], move |config| {
                 if librefm {
                     config.librefm_session_key = session_key;
                 } else {
@@ -695,17 +691,12 @@ impl IntegrationService {
                 }
             })
             .await?;
-        let info = info_of(id, &updated)?;
-        self.publish(updated);
-        Ok(info)
-    }
-
-    /// Push the change so the running scrobbler picks it up.
-    fn publish(&self, updated: config::AppConfig) {
-        self.session
-            .set_config(updated, vec!["integrations".to_string()]);
+        info_of(id, &updated)
     }
 }
+
+/// What an integration write reports as changed, so the running scrobbler picks it up.
+const INTEGRATIONS_KEY: &str = "integrations";
 
 /// Open the approval page, then poll for the session key. The person has to
 /// click through in a browser, so the wait is generous and bounded.

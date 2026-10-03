@@ -45,6 +45,7 @@ pub fn config_view_to_proto(value: &api::ConfigView) -> ConfigView {
     ConfigView {
         config: Some(config_to_proto(&value.config)),
         locked_keys: value.locked_keys.clone(),
+        revision: value.revision,
     }
 }
 
@@ -52,6 +53,7 @@ pub fn config_view_from_proto(value: &ConfigView) -> api::ConfigView {
     api::ConfigView {
         config: config_from_proto(value.config.as_ref().unwrap_or(&Config::default())),
         locked_keys: value.locked_keys.clone(),
+        revision: value.revision,
     }
 }
 

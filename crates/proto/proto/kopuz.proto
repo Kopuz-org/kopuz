@@ -1325,6 +1325,8 @@ message DownloadList {
 message ConfigView {
   Config config = 1;
   repeated string locked_keys = 2;
+  // Rises with every saved change, so a client can tell an older view from a newer one.
+  uint64 revision = 3;
 }
 
 // Replaces the settings surface wholesale: read the view, change what you
@@ -1601,7 +1603,7 @@ message DaemonStatus {
   string version = 1;
   reserved 2; // was api_version; the frontend ships with the daemon
   uint64 uptime_secs = 3;
-  // Bumped on any change a mismatched peer would misread; each side refuses a peer on another revision.
+  // Bumped on any change a mismatched peer would misread; a client's handshake refuses a daemon on another revision.
   uint32 proto_revision = 4;
 }
 

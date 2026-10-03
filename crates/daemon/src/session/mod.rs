@@ -108,6 +108,8 @@ enum SessionCmd {
         config: Box<config::AppConfig>,
         changed: Vec<String>,
     },
+    QueueUnread,
+    PreviewEqualizer(config::EqualizerSettings),
     Emit(Box<ApiEvent>),
     AttachExternal(crate::external::SharedExternalPlayer),
     /// The integration that can play what the engine cannot, offered
@@ -197,6 +199,8 @@ impl SessionHandle {
             materializer: materializer.clone(),
             queue_store: services.queue_store,
             queue_dirty: false,
+            queue_unread: false,
+            persisting: None,
             recorder: services.recorder,
             scrobbler: services.scrobbler,
             last_recent_key: None,
@@ -392,7 +396,17 @@ impl SessionHandle {
 
     /// Adopt a new config (a ConfigService patch): applies live audio
     /// settings and emits `config.changed`.
-    pub fn set_config(&self, config: config::AppConfig, changed: Vec<String>) {
+    /// The stored queue could not be read, so nothing may be saved over it until a new queue is built.
+    pub fn hold_unread_queue(&self) {
+        let _ = self.cmd_tx.send(SessionCmd::QueueUnread);
+    }
+
+    /// Let the engine play `equalizer` without storing it or touching the settings.
+    pub fn preview_equalizer(&self, equalizer: config::EqualizerSettings) {
+        let _ = self.cmd_tx.send(SessionCmd::PreviewEqualizer(equalizer));
+    }
+
+    pub(crate) fn set_config(&self, config: config::AppConfig, changed: Vec<String>) {
         let _ = self.cmd_tx.send(SessionCmd::SetConfig {
             config: Box::new(config),
             changed,
@@ -499,6 +513,10 @@ struct Session {
     materializer: Arc<dyn QueueMaterializer>,
     queue_store: Option<Arc<dyn crate::persistence::QueueStore>>,
     queue_dirty: bool,
+    /// The active source's stored queue could not be read, so nothing is saved over it until a new queue is built.
+    queue_unread: bool,
+    /// The last queue save in flight; each waits for the one before, so awaiting this awaits them all.
+    persisting: Option<tokio::task::JoinHandle<()>>,
     recorder: Option<Arc<dyn PlaybackRecorder>>,
     scrobbler: Option<Arc<crate::scrobbler::Scrobbler>>,
     last_recent_key: Option<String>,
@@ -587,6 +605,8 @@ impl Session {
                 }
                 self.apply_config(*config, changed, state_tx);
             }
+            SessionCmd::QueueUnread => self.queue_unread = true,
+            SessionCmd::PreviewEqualizer(equalizer) => self.player.set_equalizer(equalizer),
             SessionCmd::Emit(event) => self.emit(*event),
             SessionCmd::AttachExternal(player) => {
                 self.attach_external_now(player);
@@ -627,7 +647,10 @@ impl Session {
                 });
             }
             SessionCmd::Persist(reply) => {
-                if let Some(store) = self.queue_store.clone() {
+                self.settle_persists().await;
+                if let Some(store) = self.queue_store.clone()
+                    && !self.queue_unread
+                {
                     let snapshot = self.snapshot();
                     self.queue_dirty = false;
                     store.save(&self.config.active_source, snapshot).await;
@@ -1334,6 +1357,8 @@ impl Session {
         snapshot: db::QueueSnapshot,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
+        // A restore replaces whatever is playing, an integration's device included.
+        self.release_external();
         self.cancel_load_task();
         self.cancel_radio_task();
         self.pending_transition = None;
@@ -1395,35 +1420,59 @@ impl Session {
     /// Fire-and-forget save off the actor thread; overlapping writes are
     /// last-write-wins on one SQLite row.
     fn persist_async(&mut self) {
+        self.queue_dirty = false;
         let Some(store) = self.queue_store.clone() else {
             return;
         };
+        if self.queue_unread {
+            return;
+        }
         let snapshot = self.snapshot();
         let source = self.config.active_source.clone();
-        self.queue_dirty = false;
-        tokio::spawn(async move {
+        let before = self.persisting.take();
+        self.persisting = Some(tokio::spawn(async move {
+            if let Some(before) = before {
+                let _ = before.await;
+            }
             store.save(&source, snapshot).await;
-        });
+        }));
     }
 
-    /// Park the queue under the source being left, while it is still configured, and resume the one being entered.
+    /// Wait out every queue save already started.
+    async fn settle_persists(&mut self) {
+        if let Some(pending) = self.persisting.take() {
+            let _ = pending.await;
+        }
+    }
+
+    /// Park the queue under the source being left, or drop it when that source is gone, and resume the one being entered.
     async fn swap_queue(
         &mut self,
         next: &config::AppConfig,
         state_tx: &watch::Sender<PlayerState>,
     ) {
-        let resumed = match self.queue_store.clone() {
+        let (resumed, unread) = match self.queue_store.clone() {
             Some(store) => {
+                self.settle_persists().await;
                 let leaving = self.config.active_source.clone();
-                if next.has_source(&leaving) {
+                if !next.has_source(&leaving) {
+                    store.forget(&leaving).await;
+                } else if !self.queue_unread {
                     store.save(&leaving, self.snapshot()).await;
                 }
-                store.load(&next.active_source).await.unwrap_or_default()
+                match store.load(&next.active_source).await {
+                    Ok(resumed) => (resumed, false),
+                    Err(error) => {
+                        tracing::warn!(%error, "the queue of the source switched to could not be read");
+                        (db::QueueSnapshot::default(), true)
+                    }
+                }
             }
-            None => db::QueueSnapshot::default(),
+            None => (db::QueueSnapshot::default(), false),
         };
         self.materializer.register_restored(&resumed.queue);
         let _ = self.handle_restore(resumed, state_tx);
+        self.queue_unread = unread;
     }
 
     fn commit_transition_model(&mut self, token: u64) -> bool {

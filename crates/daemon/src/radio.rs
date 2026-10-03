@@ -198,12 +198,9 @@ impl RadioService {
         let json = serde_json::to_string(&manifest)
             .map_err(|error| ApiError::internal(error.to_string()))?;
 
-        let updated = self
-            .config
+        self.config
             .set_pinned_station(&manifest.id, pinned.then_some(json))
             .await?;
-        self.session
-            .set_config(updated, vec!["pinned_stations".to_string()]);
         self.reload().await?;
         if !pinned {
             // Unpinning demotes rather than forgets: the station drops out of

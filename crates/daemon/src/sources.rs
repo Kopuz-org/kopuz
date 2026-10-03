@@ -234,17 +234,6 @@ impl SourceService {
         Ok(info)
     }
 
-    /// Rebuild the media source from a config someone wrote directly. A
-    /// settings write can move where the library reads from, and nothing else
-    /// would notice: the source is built once and held.
-    pub fn refresh_active(&self, updated: &config::AppConfig) {
-        self.session
-            .set_active_source(Some(Arc::from(server::source::active(
-                self.db.clone(),
-                updated,
-            ))));
-    }
-
     /// Whether a browser sign-in can run here at all. A sandboxed daemon with
     /// no host access cannot spawn one, and a client should say so before
     /// offering a source whose only sign-in is a browser one.
@@ -259,25 +248,9 @@ impl SourceService {
         }
     }
 
-    /// Push a config change into the session, rebuilding the media source so
-    /// later loads resolve against the new backend.
-    fn publish(&self, updated: config::AppConfig, changed: Vec<String>) {
-        self.session
-            .set_active_source(Some(Arc::from(server::source::active(
-                self.db.clone(),
-                &updated,
-            ))));
-        self.session.set_config(updated, changed);
-    }
-
     /// Everything a client holds is about to be wrong, so say so once rather
     /// than leaving it to notice per table.
-    async fn finish_source_change(
-        &self,
-        updated: config::AppConfig,
-        changed: Vec<String>,
-    ) -> Result<(), ApiError> {
-        self.publish(updated, changed);
+    fn finish_source_change(&self) {
         self.session.clear_error();
         for table in [
             Table::Servers,
@@ -290,7 +263,6 @@ impl SourceService {
         ] {
             self.session.invalidate(table);
         }
-        Ok(())
     }
 
     pub async fn switch_source(&self, id: &str) -> Result<SourceInfo, ApiError> {
@@ -300,9 +272,8 @@ impl SourceService {
         let source = target.active_source.clone();
         let changed = previous != source;
         let server = target.server.clone();
-        let updated = self
-            .config
-            .mutate_state(move |config| match source {
+        self.config
+            .mutate_state(&["active_source", "server"], move |config| match source {
                 config::Source::LocalLibrary(_) => config.set_active_local_source(source),
                 config::Source::Server(_) => {
                     if let Some(server) = server {
@@ -312,10 +283,7 @@ impl SourceService {
             })
             .await?;
         if changed {
-            self.finish_source_change(updated, vec!["active_source".to_string()])
-                .await?;
-        } else {
-            self.publish(updated, vec!["active_source".to_string()]);
+            self.finish_source_change();
         }
         self.source_info(id).await
     }
@@ -342,9 +310,8 @@ impl SourceService {
                 .map(PathBuf::from)
                 .collect(),
         };
-        let updated = self
-            .config
-            .mutate_state(move |config| {
+        self.config
+            .mutate_state(&["local_sources"], move |config| {
                 match config
                     .local_sources
                     .iter_mut()
@@ -355,7 +322,6 @@ impl SourceService {
                 }
             })
             .await?;
-        self.publish(updated, vec!["local_sources".to_string()]);
         self.session.invalidate(Table::Servers);
         self.source_info(&id).await
     }
@@ -374,22 +340,19 @@ impl SourceService {
         }
         let was_active = current.active_source.local_library_id() == Some(id);
         let id_owned = id.to_string();
-        let updated = self
-            .config
-            .mutate_state(move |config| config.remove_local_source(&id_owned))
+        // The session drops this source's queue itself once its pending saves land, so none outlives the purge.
+        self.config
+            .mutate_state(&["local_sources", "active_source"], move |config| {
+                config.remove_local_source(&id_owned)
+            })
             .await?;
         self.db
             .purge_source(&config::Source::from_column(id))
             .await
             .map_err(db_error)?;
         if was_active {
-            self.finish_source_change(
-                updated,
-                vec!["local_sources".to_string(), "active_source".to_string()],
-            )
-            .await?;
+            self.finish_source_change();
         } else {
-            self.publish(updated, vec!["local_sources".to_string()]);
             self.session.invalidate(Table::Servers);
         }
         Ok(())
@@ -420,9 +383,8 @@ impl SourceService {
             return Err(ApiError::not_found("no such source"));
         }
         let target = id.to_string();
-        let updated = self
-            .config
-            .mutate_state(move |config| {
+        self.config
+            .mutate_state(&["local_sources"], move |config| {
                 if let Some(saved) = config
                     .local_sources
                     .iter_mut()
@@ -432,7 +394,6 @@ impl SourceService {
                 }
             })
             .await?;
-        self.publish(updated, vec!["local_sources".to_string()]);
         self.session.invalidate(Table::Servers);
         self.source_info(id).await
     }
@@ -507,9 +468,8 @@ impl SourceService {
                 .server
                 .as_ref()
                 .is_some_and(|server| server.service != saved.service || server.url != saved.url);
-        let updated = self
-            .config
-            .mutate_state(move |config| {
+        self.config
+            .mutate_state(&["servers", "server"], move |config| {
                 match config.servers.iter_mut().find(|entry| entry.id == saved.id) {
                     Some(existing) => *existing = saved.clone(),
                     None => config.servers.push(saved.clone()),
@@ -531,7 +491,6 @@ impl SourceService {
                 }
             })
             .await?;
-        self.publish(updated, vec!["servers".to_string()]);
         if backend_changed {
             self.session.reset_playback().await?;
         }
@@ -588,9 +547,8 @@ impl SourceService {
         let locked: Vec<&str> = keys.iter().map(String::as_str).collect();
         self.config.ensure_unlocked(&locked)?;
         let target = id.to_string();
-        let updated = self
-            .config
-            .mutate_state(move |config| {
+        self.config
+            .mutate_state(&locked, move |config| {
                 let Some(index) = config.servers.iter().position(|server| server.id == target)
                 else {
                     return;
@@ -615,7 +573,6 @@ impl SourceService {
                 }
             })
             .await?;
-        self.publish(updated, keys);
         self.session.invalidate(Table::Servers);
         self.source_info(id).await
     }
@@ -631,20 +588,19 @@ impl SourceService {
             .map(|server| server.service);
         let was_active = current.active_source.server_id() == Some(id);
         let id_owned = id.to_string();
-        let updated = self
-            .config
-            .mutate_state(move |config| {
+        self.config
+            .mutate_state(&["servers", "active_source", "server"], move |config| {
                 config.remove_saved_server(&id_owned);
                 if was_active {
                     config.clear_active_server();
                 }
             })
             .await?;
-        self.publish(
-            updated,
-            vec!["servers".to_string(), "active_source".to_string()],
-        );
-        self.session.invalidate(Table::Servers);
+        if was_active {
+            self.finish_source_change();
+        } else {
+            self.session.invalidate(Table::Servers);
+        }
         // The browser profile is this server's, so it goes with it rather
         // than being left behind holding a session.
         #[cfg(not(target_os = "android"))]
@@ -700,9 +656,8 @@ impl SourceService {
         let user = server.user_id.clone();
         let saved = config::SavedServer::from_music_server(&server);
         let live = server.clone();
-        let updated = self
-            .config
-            .mutate_state(move |config| {
+        self.config
+            .mutate_state(&["servers", "server"], move |config| {
                 match config.servers.iter_mut().find(|entry| entry.id == saved.id) {
                     Some(existing) => *existing = saved,
                     None => config.servers.push(saved),
@@ -716,16 +671,10 @@ impl SourceService {
             .set_server_credentials(&provision.server_id, token.as_deref(), user.as_deref())
             .await
             .map_err(db_error)?;
-        if active {
-            self.publish(updated, vec!["servers".to_string()]);
-            // A different account is a different library, so what is loaded
-            // from the old one stops.
-            if previous_user != server.user_id {
-                self.session.reset_playback().await?;
-            }
-        } else {
-            self.session
-                .set_config(updated, vec!["servers".to_string()]);
+        // A different account is a different library, so what is loaded
+        // from the old one stops.
+        if active && previous_user != server.user_id {
+            self.session.reset_playback().await?;
         }
         self.session.invalidate(Table::Servers);
         self.source_info(&provision.server_id).await
@@ -781,11 +730,9 @@ impl SourceService {
             .await
             .map_err(db_error)?;
         if active {
-            let updated = self
-                .config
-                .mutate_state(move |config| config.server = Some(server))
+            self.config
+                .mutate_state(&["server"], move |config| config.server = Some(server))
                 .await?;
-            self.publish(updated, vec!["servers".to_string()]);
             if had_credentials {
                 self.session.reset_playback().await?;
             }

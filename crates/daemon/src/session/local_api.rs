@@ -538,12 +538,10 @@ impl api::ArtworkApi for LocalApi {
         let keys = crate::artwork::settings::written_keys(&values);
         service.ensure_unlocked(&keys)?;
         let updated = service
-            .mutate_state(move |config| crate::artwork::settings::apply(&values, config))
+            .mutate_state(&keys, move |config| {
+                crate::artwork::settings::apply(&values, config)
+            })
             .await?;
-        self.session.set_config(
-            updated.clone(),
-            keys.iter().map(|key| key.to_string()).collect(),
-        );
         Ok(crate::artwork::settings::fields(&updated))
     }
 }
@@ -565,20 +563,7 @@ impl api::ConfigApi for LocalApi {
                 "this daemon runs without a config service",
             ));
         };
-        let (view, updated, changed) = service.set(config).await?;
-        // A settings write can move where the library reads from, so the
-        // source is rebuilt before anything loads against the old one.
-        if let Some(sources) = &self.sources
-            && changed.iter().any(|key| {
-                matches!(
-                    key.as_str(),
-                    "active_source" | "local_sources" | "server_folders"
-                )
-            })
-        {
-            sources.refresh_active(&updated);
-        }
-        self.session.set_config(updated, changed);
+        let (view, _, _) = service.set(config).await?;
         Ok(view)
     }
 
@@ -586,12 +571,7 @@ impl api::ConfigApi for LocalApi {
         &self,
         equalizer: config::EqualizerSettings,
     ) -> Result<(), ApiError> {
-        // Not a config write: the engine hears it, nothing is stored, and
-        // the session keeps the settings it already had.
-        let mut preview = self.session.config_watch().borrow().clone();
-        preview.equalizer = equalizer;
-        self.session
-            .set_config(preview, vec!["equalizer".to_string()]);
+        self.session.preview_equalizer(equalizer);
         Ok(())
     }
 

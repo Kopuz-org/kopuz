@@ -49,6 +49,28 @@ impl NavigationController {
         playlist.set(None);
     }
 
+    /// The active source changed: what is open and every step back names the old source's rows, so all of it goes.
+    pub fn leave_source(self) {
+        let mut restoring = self.restoring;
+        let mut history = self.history;
+        let mut route = self.current_route;
+        let mut album = self.selected_album_id;
+        let mut artist = self.selected_artist;
+        let mut playlist = self.selected_playlist_id;
+        let mut discover_playlist = self.discover_playlist_id;
+        let mut discover_title = self.discover_playlist_title;
+        restoring.set(true);
+        history.write().clear();
+        album.set(String::new());
+        artist.set(None);
+        playlist.set(None);
+        discover_playlist.set(None);
+        discover_title.set(None);
+        if *route.peek() == Route::DiscoverPlaylist {
+            route.set(Route::Home);
+        }
+    }
+
     pub fn go_back(self) {
         let mut history = self.history;
         let Some(prev) = history.write().pop() else {

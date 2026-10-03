@@ -11,9 +11,21 @@
 //! churn, and an immediate write keeps the daemon free of idle timers.
 
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 
 use api::{ApiError, ConfigView};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockWriteGuard};
+
+use crate::session::SessionHandle;
+
+/// Keys whose change means the active media source has to be rebuilt.
+const SOURCE_KEYS: &[&str] = &[
+    "active_source",
+    "server",
+    "servers",
+    "local_sources",
+    "server_folders",
+];
 
 /// Never serialized to a client and never patchable: credentials move through
 /// the dedicated provisioning endpoints, and `offline_tracks` is
@@ -21,16 +33,62 @@ use tokio::sync::RwLock;
 pub struct ConfigService {
     db: db::Db,
     settings_path: PathBuf,
-    current: RwLock<config::AppConfig>,
+    current: RwLock<Held>,
+    session: OnceLock<SessionHandle>,
+}
+
+/// The running config and the revision of its last saved change.
+struct Held {
+    config: config::AppConfig,
+    revision: u64,
 }
 
 impl ConfigService {
     pub fn new(db: db::Db, settings_path: PathBuf, current: config::AppConfig) -> Self {
+        // Seeded from the clock so a restarted daemon never hands out a revision a client already passed.
+        let revision = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis() as u64)
+            .unwrap_or_default();
         Self {
             db,
             settings_path,
-            current: RwLock::new(current),
+            current: RwLock::new(Held {
+                config: current,
+                revision,
+            }),
+            session: OnceLock::new(),
         }
+    }
+
+    /// Hand every later change to `session`, which then always holds what was saved last.
+    pub fn attach_session(&self, session: SessionHandle) {
+        let _ = self.session.set(session);
+    }
+
+    /// Mark a saved change and pass it on while the write guard is still held, so the session sees changes in the order they were saved.
+    fn publish(&self, held: &mut RwLockWriteGuard<'_, Held>, changed: Vec<String>) {
+        held.revision += 1;
+        let Some(session) = self.session.get() else {
+            return;
+        };
+        if changed
+            .iter()
+            .any(|key| SOURCE_KEYS.contains(&key.as_str()))
+        {
+            session.set_active_source(Some(Arc::from(server::source::active(
+                self.db.clone(),
+                &held.config,
+            ))));
+        }
+        session.set_config(held.config.clone(), changed);
+    }
+
+    async fn save(&self, config: &config::AppConfig) -> Result<(), ApiError> {
+        self.db
+            .save_config(config)
+            .await
+            .map_err(|error| ApiError::internal(format!("config save failed: {error}")))
     }
 
     fn locked_keys(&self) -> Vec<String> {
@@ -61,22 +119,23 @@ impl ConfigService {
         }
     }
 
-    /// Change config from inside the daemon, persist it, and hand back the
-    /// result.
+    /// Change config from inside the daemon, persist it, pass it to the session
+    /// under `keys`, and hand back the result.
     ///
     /// Unlike [`Self::set`] this touches credential fields, which is the
     /// point: signing in writes a token no caller ever sent us.
     pub async fn mutate_state(
         &self,
+        keys: &[&str],
         mutate: impl FnOnce(&mut config::AppConfig) + Send,
     ) -> Result<config::AppConfig, ApiError> {
-        let mut current = self.current.write().await;
-        mutate(&mut current);
-        self.db
-            .save_config(&current)
-            .await
-            .map_err(|error| ApiError::internal(format!("config save failed: {error}")))?;
-        Ok(current.clone())
+        let mut held = self.current.write().await;
+        let mut next = held.config.clone();
+        mutate(&mut next);
+        self.save(&next).await?;
+        held.config = next;
+        self.publish(&mut held, keys.iter().map(|key| key.to_string()).collect());
+        Ok(held.config.clone())
     }
 
     /// Persist one offline-track registration without rewriting the whole
@@ -86,7 +145,7 @@ impl ConfigService {
         item_id: &str,
         path: Option<String>,
     ) -> Result<config::AppConfig, ApiError> {
-        let mut current = self.current.write().await;
+        let mut held = self.current.write().await;
         self.db
             .set_offline_track(item_id, path.as_deref())
             .await
@@ -95,13 +154,14 @@ impl ConfigService {
             })?;
         match path {
             Some(path) => {
-                current.offline_tracks.insert(item_id.to_string(), path);
+                held.config.offline_tracks.insert(item_id.to_string(), path);
             }
             None => {
-                current.offline_tracks.remove(item_id);
+                held.config.offline_tracks.remove(item_id);
             }
         }
-        Ok(current.clone())
+        self.publish(&mut held, vec!["offline_tracks".to_string()]);
+        Ok(held.config.clone())
     }
 
     /// Pin a station's manifest after the other pins (`Some`), or unpin it (`None`), without a whole-config save.
@@ -110,36 +170,43 @@ impl ConfigService {
         id: &str,
         manifest: Option<String>,
     ) -> Result<config::AppConfig, ApiError> {
-        let mut current = self.current.write().await;
+        let mut held = self.current.write().await;
         self.db
             .set_pinned_station(id, manifest.as_deref())
             .await
             .map_err(|error| ApiError::internal(format!("station pin failed: {error}")))?;
         // Mirrors the row write: a re-pin keeps its place, a new pin goes last.
-        let held = current
-            .pinned_stations
+        let pins = &mut held.config.pinned_stations;
+        let at = pins
             .iter()
             .position(|pinned| manifest_id(pinned).as_deref() == Some(id));
-        match (manifest, held) {
-            (Some(manifest), Some(at)) => current.pinned_stations[at] = manifest,
-            (Some(manifest), None) => current.pinned_stations.push(manifest),
+        match (manifest, at) {
+            (Some(manifest), Some(at)) => pins[at] = manifest,
+            (Some(manifest), None) => pins.push(manifest),
             (None, Some(at)) => {
-                current.pinned_stations.remove(at);
+                pins.remove(at);
             }
             (None, None) => {}
         }
-        Ok(current.clone())
+        self.publish(&mut held, vec!["pinned_stations".to_string()]);
+        Ok(held.config.clone())
     }
 
     pub async fn snapshot(&self) -> config::AppConfig {
-        self.current.read().await.clone()
+        self.current.read().await.config.clone()
     }
 
     pub async fn view(&self) -> Result<ConfigView, ApiError> {
-        Ok(ConfigView {
-            config: stripped(&self.current.read().await.clone()),
+        let held = self.current.read().await;
+        Ok(self.view_of(&held))
+    }
+
+    fn view_of(&self, held: &Held) -> ConfigView {
+        ConfigView {
+            config: stripped(&held.config),
             locked_keys: self.locked_keys(),
-        })
+            revision: held.revision,
+        }
     }
 
     /// Replace the settings surface. The incoming config is whole, so the
@@ -148,23 +215,19 @@ impl ConfigService {
     /// a locked key is refused only when the value actually differs, so a
     /// read-modify-write that leaves it alone still succeeds.
     ///
-    /// Returns the new view plus the changed top-level keys, which the
-    /// caller forwards to the session for `config.changed` and any live
+    /// Returns the new view plus the changed top-level keys, which have
+    /// already reached the session for `config.changed` and any live
     /// audio-setting updates.
     pub async fn set(
         &self,
         incoming: config::AppConfig,
     ) -> Result<(ConfigView, config::AppConfig, Vec<String>), ApiError> {
-        let mut current = self.current.write().await;
-        let updated = with_daemon_owned_fields(incoming, &current);
+        let mut held = self.current.write().await;
+        let updated = with_daemon_owned_fields(incoming, &held.config);
 
-        let changed = changed_keys(&current, &updated)?;
+        let changed = changed_keys(&held.config, &updated)?;
         if changed.is_empty() {
-            let view = ConfigView {
-                config: stripped(&current),
-                locked_keys: self.locked_keys(),
-            };
-            return Ok((view, current.clone(), Vec::new()));
+            return Ok((self.view_of(&held), held.config.clone(), Vec::new()));
         }
         let locked = self.locked_keys();
         let refused: Vec<&str> = changed
@@ -179,97 +242,28 @@ impl ConfigService {
             )));
         }
 
-        self.db
-            .save_config(&updated)
-            .await
-            .map_err(|error| ApiError::internal(format!("config save failed: {error}")))?;
-        *current = updated.clone();
-        drop(current);
-
-        let view = self.view().await?;
-        Ok((view, updated, changed))
-    }
-
-    /// Make `source` the active one.
-    ///
-    /// Not a config write a caller could make itself: switching to a server
-    /// means loading that server's stored credentials and putting them in the
-    /// active snapshot, and those are exactly the fields
-    /// [`Self::set`] refuses to take from a caller. Answers whether the new
-    /// source is actually usable -- a server whose credentials are missing
-    /// switches, but the caller needs to know it must prompt a sign-in.
-    pub async fn switch_source(
-        &self,
-        source: config::Source,
-    ) -> Result<(bool, config::AppConfig, Vec<String>), ApiError> {
-        let mut current = self.current.write().await;
-        let usable = match &source {
-            config::Source::LocalLibrary(_) => {
-                current.set_active_local_source(source.clone());
-                true
-            }
-            config::Source::Server(id) => {
-                let Some(saved) = current.find_saved_server(id).cloned() else {
-                    return Err(ApiError::not_found("no such server"));
-                };
-                let anonymous =
-                    saved.service == config::MusicService::YtMusic && saved.yt_anonymous;
-                let stored = self.db.load_server(&saved.id).await.ok().flatten();
-                let token = stored
-                    .as_ref()
-                    .and_then(|server| server.access_token.clone());
-                let has_creds = token.as_deref().is_some_and(|token| !token.is_empty());
-                current.set_active_server_snapshot(config::MusicServer {
-                    name: saved.name,
-                    url: saved.url,
-                    service: saved.service,
-                    // Anonymous YT keeps an empty but present token, so the
-                    // backend reads it as anonymous rather than signed out.
-                    access_token: if anonymous {
-                        Some(String::new())
-                    } else {
-                        token
-                    },
-                    user_id: stored.as_ref().and_then(|server| server.user_id.clone()),
-                    id: Some(saved.id.clone()),
-                    yt_browser: saved.yt_browser,
-                    yt_anonymous: anonymous,
-                    apple_music_storefront: saved.apple_music_storefront,
-                    apple_music_language: saved.apple_music_language,
-                });
-                has_creds || anonymous
-            }
-        };
-        let updated = current.clone();
-        drop(current);
-        self.db
-            .save_config(&updated)
-            .await
-            .map_err(|error| ApiError::internal(format!("config save failed: {error}")))?;
-        tracing::info!(target: "kopuz::source", source = %source.as_str(), "source switched");
-        Ok((
-            usable,
-            updated,
-            vec!["active_source".to_string(), "server".to_string()],
-        ))
+        self.save(&updated).await?;
+        held.config = updated.clone();
+        self.publish(&mut held, changed.clone());
+        Ok((self.view_of(&held), updated, changed))
     }
 
     /// Persist the engine's own volume. It is not a caller-set key -- the
     /// session owns it and every frontend just reports what the user did --
     /// so it skips the locked-key and secret machinery of [`Self::set`].
     pub async fn set_volume(&self, volume: f32) -> Result<(), ApiError> {
-        let mut current = self.current.write().await;
+        let mut held = self.current.write().await;
         let volume = volume.clamp(0.0, 1.0);
-        if (current.volume - volume).abs() < f32::EPSILON {
+        if (held.config.volume - volume).abs() < f32::EPSILON {
             return Ok(());
         }
-        current.volume = volume;
-        let snapshot = current.clone();
-        drop(current);
-        self.db
-            .save_config(&snapshot)
-            .await
-            .map_err(|error| ApiError::internal(format!("volume save failed: {error}")))
+        let mut next = held.config.clone();
+        next.volume = volume;
+        // Saved under the guard: a snapshot saved after it drops could undo a server added meanwhile.
+        self.save(&next).await?;
+        held.config = next;
+        held.revision += 1;
+        Ok(())
     }
 }
 
@@ -556,7 +550,7 @@ mod tests {
         );
 
         service
-            .mutate_state(|config| {
+            .mutate_state(&["auto_fetch_covers", "cover_fetch_strategy"], |config| {
                 config.auto_fetch_covers = false;
                 config.cover_fetch_strategy = config::FetchStrategy::LastFmOnly;
             })

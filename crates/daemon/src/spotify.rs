@@ -469,7 +469,7 @@ impl SpotifySink {
             .await
             .map_err(ApiError::internal)?;
         self.config
-            .mutate_state(move |config| {
+            .mutate_state(&["server"], move |config| {
                 if let Some(server) = config.server.as_mut()
                     && server.service == config::MusicService::Spotify
                     && server.url == client_id

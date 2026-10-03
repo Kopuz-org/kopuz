@@ -132,6 +132,7 @@ async fn spawn_pair() -> Pair {
         provider,
     );
     library.attach_session(session.clone());
+    config_service.attach_session(session.clone());
     let jobs = Arc::new(JobRunner::new(session.clone()));
     let favorites = FavoritesService::new(database.clone(), session.clone());
     let artwork = daemon::ArtworkService::new(
@@ -154,8 +155,8 @@ async fn spawn_pair() -> Pair {
     let sources =
         daemon::SourceService::new(database.clone(), session.clone(), config_service.clone());
     sources.watch_active(session.config_watch());
-    let integrations = daemon::IntegrationService::new(config_service.clone(), session.clone());
-    let downloader = daemon::UrlDownloadService::new(session.clone(), config_service.clone());
+    let integrations = daemon::IntegrationService::new(config_service.clone());
+    let downloader = daemon::UrlDownloadService::new(config_service.clone());
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)
             .with_config(config_service.clone())

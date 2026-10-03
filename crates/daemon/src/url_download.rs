@@ -21,7 +21,6 @@ use api::{ApiError, DownloadHistoryEntry, DownloadState, JobKind, JobRef};
 
 use crate::config_service::ConfigService;
 use crate::jobs::{JobCtx, JobRunner};
-use crate::session::SessionHandle;
 
 /// The one field that is not part of `ytdlp_options`.
 const OUTPUT_DIR: &str = "output_dir";
@@ -35,7 +34,6 @@ const HISTORY_KEY: &str = "ytdlp_history";
 const HISTORY_LIMIT: usize = 50;
 
 pub struct UrlDownloadService {
-    session: SessionHandle,
     config: Arc<ConfigService>,
     rescan: std::sync::OnceLock<(Arc<crate::library::LibraryService>, Arc<JobRunner>)>,
 }
@@ -429,9 +427,8 @@ fn audio_qualities() -> FieldKind {
 }
 
 impl UrlDownloadService {
-    pub fn new(session: SessionHandle, config: Arc<ConfigService>) -> Arc<Self> {
+    pub fn new(config: Arc<ConfigService>) -> Arc<Self> {
         Arc::new(Self {
-            session,
             config,
             rescan: std::sync::OnceLock::new(),
         })
@@ -677,17 +674,14 @@ impl UrlDownloadService {
             keys.push(OPTIONS_KEY);
         }
         self.config.ensure_unlocked(&keys)?;
-        let updated = self
-            .config
-            .mutate_state(move |config| {
+        self.config
+            .mutate_state(&keys, move |config| {
                 if let Some(dir) = value_of(&values, OUTPUT_DIR) {
                     config.ytdlp_output_dir = dir.trim().to_string();
                 }
                 apply_options(&values, &mut config.ytdlp_options);
             })
             .await?;
-        self.session
-            .set_config(updated, keys.iter().map(|key| (*key).to_string()).collect());
         Ok(self.settings().await)
     }
 
@@ -712,11 +706,9 @@ impl UrlDownloadService {
 
     pub async fn clear_history(&self) -> Result<(), ApiError> {
         self.config.ensure_unlocked(&[HISTORY_KEY])?;
-        let updated = self
-            .config
-            .mutate_state(|config| config.ytdlp_history.clear())
+        self.config
+            .mutate_state(&[HISTORY_KEY], |config| config.ytdlp_history.clear())
             .await?;
-        self.publish_history(updated);
         Ok(())
     }
 
@@ -821,22 +813,16 @@ impl UrlDownloadService {
             },
             error,
         };
-        match self
+        if let Err(error) = self
             .config
-            .mutate_state(move |config| {
+            .mutate_state(&[HISTORY_KEY], move |config| {
                 config.ytdlp_history.insert(0, entry);
                 config.ytdlp_history.truncate(HISTORY_LIMIT);
             })
             .await
         {
-            Ok(updated) => self.publish_history(updated),
-            Err(error) => tracing::warn!(%error, "the download history could not be saved"),
+            tracing::warn!(%error, "the download history could not be saved");
         }
-    }
-
-    fn publish_history(&self, updated: config::AppConfig) {
-        self.session
-            .set_config(updated, vec![HISTORY_KEY.to_string()]);
     }
 }
 

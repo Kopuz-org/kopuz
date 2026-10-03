@@ -4,9 +4,11 @@ use async_trait::async_trait;
 
 #[async_trait]
 pub trait QueueStore: Send + Sync {
-    /// The queue `source` was left with, if it has one.
-    async fn load(&self, source: &config::Source) -> Option<db::QueueSnapshot>;
+    /// The queue `source` was left with, empty when it has none; an error is a queue that could not be read.
+    async fn load(&self, source: &config::Source) -> Result<db::QueueSnapshot, db::DbError>;
     async fn save(&self, source: &config::Source, snapshot: db::QueueSnapshot);
+    /// Drop the queue stored for `source`.
+    async fn forget(&self, source: &config::Source);
 }
 
 /// The source, rows and shuffle last written, so a save that only moved the playhead rewrites one row.
@@ -28,13 +30,17 @@ impl DbQueueStore {
 
 #[async_trait]
 impl QueueStore for DbQueueStore {
-    async fn load(&self, source: &config::Source) -> Option<db::QueueSnapshot> {
-        match self.db.load_queue(source).await {
-            Ok(snapshot) => Some(snapshot),
-            Err(error) => {
-                tracing::warn!(%error, "queue snapshot load failed");
-                None
-            }
+    async fn load(&self, source: &config::Source) -> Result<db::QueueSnapshot, db::DbError> {
+        self.db.load_queue(source).await
+    }
+
+    async fn forget(&self, source: &config::Source) {
+        let mut written = self.written.lock().await;
+        if written.as_ref().is_some_and(|(at, _, _)| at == source) {
+            *written = None;
+        }
+        if let Err(error) = self.db.clear_queue(source).await {
+            tracing::warn!(%error, "dropping a removed source's queue failed");
         }
     }
 

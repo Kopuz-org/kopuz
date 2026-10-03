@@ -6,9 +6,9 @@ use serde_json::{Map, Value};
 /// Volume rides the player state, so the settings copy never takes it from here.
 const SKIPPED: &[&str] = &["volume"];
 
-/// The config this app last sent or adopted, which tells the echo of its own write from another writer's change.
+/// The config this app last sent or adopted and the daemon revision it matches, which tells the echo of its own write from another writer's change.
 #[derive(Clone, Copy)]
-pub struct ConfigBaseline(Signal<Option<config::AppConfig>>);
+pub struct ConfigBaseline(Signal<Option<(config::AppConfig, u64)>>);
 
 pub fn use_config_baseline_provider() -> ConfigBaseline {
     use_context_provider(|| ConfigBaseline(Signal::new(None)))
@@ -19,20 +19,33 @@ pub fn use_config_baseline() -> ConfigBaseline {
 }
 
 impl ConfigBaseline {
-    /// Note a config the daemon now holds because this app sent or loaded it.
-    pub fn record(mut self, config: config::AppConfig) {
-        self.0.set(Some(config));
+    /// Start from the view the app loaded.
+    pub fn loaded(mut self, view: &api::ConfigView) {
+        self.0.set(Some((view.config.clone(), view.revision)));
     }
 
-    /// Take into `local` every field the daemon moved since the baseline, keeping edits not yet sent.
-    pub fn adopt(mut self, mut local: Signal<config::AppConfig>, daemon: &config::AppConfig) {
-        let Some(baseline) = self.0.peek().clone() else {
+    /// Note the config this app just sent, before adopting the view its write answered with.
+    pub fn sent(mut self, config: config::AppConfig) {
+        let revision = self.0.peek().as_ref().map_or(0, |(_, revision)| *revision);
+        self.0.set(Some((config, revision)));
+    }
+
+    /// Take into `local` every field a newer `view` moved since the baseline, keeping edits not yet sent.
+    pub fn adopt(mut self, mut local: Signal<config::AppConfig>, view: &api::ConfigView) {
+        let Some((baseline, revision)) = self.0.peek().clone() else {
             return;
         };
+        // A read that left before a later write answered is older than what the app holds.
+        if view.revision <= revision {
+            return;
+        }
         let current = local.peek().clone();
-        if let Some((next_local, next_baseline)) = moved(&current, &baseline, daemon) {
-            self.0.set(Some(next_baseline));
-            local.set(next_local);
+        match moved(&current, &baseline, &view.config) {
+            Some((next_local, next_baseline)) => {
+                self.0.set(Some((next_baseline, view.revision)));
+                local.set(next_local);
+            }
+            None => self.0.set(Some((baseline, view.revision))),
         }
     }
 }

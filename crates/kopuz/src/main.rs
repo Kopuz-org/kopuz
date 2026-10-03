@@ -441,7 +441,7 @@ async fn adopt_daemon_config(
     baseline: hooks::config_sync::ConfigBaseline,
 ) {
     match backend::api().config().await {
-        Ok(view) => baseline.adopt(config, &view.config),
+        Ok(view) => baseline.adopt(config, &view),
         Err(error) => tracing::warn!(%error, "re-reading settings failed"),
     }
 }
@@ -678,8 +678,6 @@ fn App() -> Element {
     let mut discover_selected_playlist_kind = use_signal(|| api::CatalogItemKind::Playlist);
     let mut selected_artist = use_signal(|| None::<String>);
     let search_query = use_signal(String::new);
-    let mut last_server_playlist_key = use_signal(|| None::<String>);
-    let mut server_playlist_key_initialized = use_signal(|| false);
     let queue = use_signal(Vec::<api::TrackInfo>::new);
     let current_queue_index = use_signal(|| 0usize);
 
@@ -727,34 +725,6 @@ fn App() -> Element {
     // so the DB-backed query hooks re-run and the UI refreshes.
     let gens_for_albums = hooks::db_reactivity::use_generations();
     let active_source_row = hooks::sources::use_active_source_info();
-    let source_rows = hooks::sources::use_sources();
-
-    use_effect(move || {
-        // Until the rows arrive there is no active source to compare against, and the first one is not a switch.
-        if !*initial_load_done.read() || source_rows.read().is_none() {
-            return;
-        }
-
-        // Which source is active is the identity that matters here; a token
-        // rotates without making it a different account.
-        let current_server_key = active_source_row
-            .read()
-            .as_ref()
-            .filter(|source| source.needs_network)
-            .map(|source| source.id.clone());
-
-        if !*server_playlist_key_initialized.read() {
-            last_server_playlist_key.set(current_server_key);
-            server_playlist_key_initialized.set(true);
-            return;
-        }
-
-        if *last_server_playlist_key.read() != current_server_key {
-            last_server_playlist_key.set(current_server_key);
-            selected_playlist_id.set(None);
-            // The daemon swaps the queue itself, and pages re-query by source.
-        }
-    });
 
     use_effect(move || {
         if !*initial_load_done.read() {
@@ -831,8 +801,8 @@ fn App() -> Element {
                 .await
             {
                 Ok(view) => {
-                    config_baseline.record(snapshot);
-                    config_baseline.adopt(config, &view.config);
+                    config_baseline.sent(snapshot);
+                    config_baseline.adopt(config, &view);
                 }
                 Err(error) => tracing::error!(%error, "failed to save settings"),
             }
@@ -986,7 +956,7 @@ fn App() -> Element {
                 {
                     Ok(view) => {
                         config_loaded_ok.set(true);
-                        config_baseline.record(view.config.clone());
+                        config_baseline.loaded(&view);
                         Some(view.config)
                     }
                     Err(error) => {
@@ -1164,6 +1134,25 @@ fn App() -> Element {
         restoring: nav_restoring,
     };
     provide_context(nav_ctrl);
+    // The daemon swaps the queue itself and lists re-query by source; open pages and the back history name the old source's rows.
+    let mut last_active_source = use_signal(|| None::<String>);
+    use_effect(move || {
+        let Some(active) = active_source_row
+            .read()
+            .as_ref()
+            .map(|source| source.id.clone())
+        else {
+            return;
+        };
+        let previous = last_active_source.peek().clone();
+        if previous.as_deref() == Some(active.as_str()) {
+            return;
+        }
+        last_active_source.set(Some(active));
+        if previous.is_some() {
+            nav_ctrl.leave_source();
+        }
+    });
 
     // Sidebar collapse state. On Android the sidebar is an overlay drawer that
     // starts collapsed and is toggled by the mobile header hamburger; the

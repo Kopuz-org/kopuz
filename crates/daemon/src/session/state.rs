@@ -12,6 +12,7 @@ impl Session {
         self.rev += 1;
         if queue_changed {
             self.queue_rev = self.rev;
+            self.queue_unread = false;
         }
         self.queue_dirty = true;
         let state = self.build_state();
