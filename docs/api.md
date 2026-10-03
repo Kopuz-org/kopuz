@@ -209,7 +209,7 @@ configured library roots.
 
 Jobs: `StartJob {kind}` (scan / library_sync / favorites_sync /
 playlist_sync), `CancelJob`, `StartDownloads {keys}`, `RemoveDownload`,
-`GetDownloadStatuses`, `StartYtdlp {url, output_dir, format, options}`.
+`GetDownloadStatuses`, `DownloadUrl {url, format}`.
 A job kind is single-flight: a second start returns ALREADY_EXISTS.
 
 Sources and integrations: `GetSources`, `SelectSource`, `UpsertServer`,

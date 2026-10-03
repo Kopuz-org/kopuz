@@ -626,6 +626,13 @@ impl api::JobApi for LocalApi {
         service.start(runner, url, format).await
     }
 
+    async fn search_downloads(
+        &self,
+        query: String,
+    ) -> Result<Vec<api::DownloadCandidate>, ApiError> {
+        self.downloader()?.search(&query).await
+    }
+
     async fn download_formats(&self) -> Result<Vec<api::ChoiceOption>, ApiError> {
         Ok(self.downloader()?.formats())
     }

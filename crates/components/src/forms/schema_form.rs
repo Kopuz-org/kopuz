@@ -182,10 +182,16 @@ fn Field(
                 for option in options.into_iter() {
                     label {
                         key: "{option.value}",
-                        class: "flex items-center gap-2 text-sm text-white cursor-pointer",
+                        class: if option.unavailable.is_some() {
+                            "flex items-center gap-2 text-sm text-white opacity-40 cursor-not-allowed"
+                        } else {
+                            "flex items-center gap-2 text-sm text-white cursor-pointer"
+                        },
+                        title: option.unavailable.as_ref().map(super::text),
                         input {
                             r#type: "radio",
                             name: "{field.key}",
+                            disabled: option.unavailable.is_some(),
                             checked: value == option.value,
                             onchange: {
                                 let key = field.key.clone();

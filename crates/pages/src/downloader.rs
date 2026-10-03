@@ -1,4 +1,4 @@
-//! Fetching a URL to a file.
+//! Finding songs and fetching them to files.
 //!
 //! Which tool does it, where it writes and every option it takes are the
 //! daemon's; this asks for the formats and the options it publishes, renders
@@ -30,16 +30,25 @@ pub fn DownloaderPage() -> Element {
     }
     let listed = history.read().clone().unwrap_or_default();
     let running = progress.read().running;
+    let mut submitted = use_signal(String::new);
+    let found = hooks::downloader::use_search(submitted);
 
+    let fetch = use_callback(move |url: String| {
+        failure.set(None);
+        active_url.set(url.clone());
+        hooks::downloader::start(url, format(), failure);
+    });
     let mut do_download = move || {
         let url = url_input().trim().to_string();
         if url.is_empty() {
             return;
         }
-        failure.set(None);
-        active_url.set(url.clone());
-        hooks::downloader::start(url, format(), failure);
+        fetch.call(url);
         url_input.set(String::new());
+    };
+    let mut do_search = move || {
+        failure.set(None);
+        submitted.set(url_input().trim().to_string());
     };
 
     // The history gains a row when a download finishes, which is the moment
@@ -83,8 +92,14 @@ pub fn DownloaderPage() -> Element {
                         url_input.set(e.value());
                     },
                     onkeydown: move |e| {
-                        if e.key() == dioxus::prelude::Key::Enter { do_download(); }
+                        if e.key() == dioxus::prelude::Key::Enter { do_search(); }
                     }
+                }
+                button {
+                    class: "bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white px-4 py-3 rounded-xl transition-colors text-sm shrink-0",
+                    title: i18n::t("search").to_string(),
+                    onclick: move |_| do_search(),
+                    i { class: "fa-solid fa-magnifying-glass" }
                 }
                 button {
                     class: "bg-white/10 hover:bg-white/20 text-white px-5 py-3 rounded-xl transition-colors font-medium text-sm shrink-0",
@@ -98,7 +113,11 @@ pub fn DownloaderPage() -> Element {
                 for option in formats.iter().cloned() {
                     button {
                         key: "{option.value}",
-                        class: if *format.read() == option.value {
+                        disabled: option.unavailable.is_some(),
+                        title: option.unavailable.as_ref().map(components::forms::text),
+                        class: if option.unavailable.is_some() {
+                            "text-xs px-3 py-1.5 rounded-lg bg-white/5 text-slate-600 opacity-50 cursor-not-allowed"
+                        } else if *format.read() == option.value {
                             "text-xs px-3 py-1.5 rounded-lg bg-white/20 text-white font-medium transition-colors"
                         } else {
                             "text-xs px-3 py-1.5 rounded-lg bg-white/5 text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
@@ -116,6 +135,14 @@ pub fn DownloaderPage() -> Element {
                 div { class: "mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200 whitespace-pre-wrap",
                     i { class: "fa-solid fa-triangle-exclamation mr-2 text-red-300" }
                     "{error}"
+                }
+            }
+
+            if !submitted.read().is_empty() {
+                SearchResults {
+                    query: submitted(),
+                    found: found.read().clone(),
+                    on_download: fetch,
                 }
             }
 
@@ -146,9 +173,9 @@ pub fn DownloaderPage() -> Element {
                     if running {
                         ActiveRow { progress, url: active_url() }
                     }
-                    for entry in listed.into_iter() {
+                    for (position, entry) in listed.into_iter().enumerate() {
                         HistoryRow {
-                            key: "{entry.url}",
+                            key: "{position}-{entry.url}",
                             entry,
                             formats: formats.clone(),
                         }
@@ -159,6 +186,89 @@ pub fn DownloaderPage() -> Element {
                     i { class: "fa-solid fa-download text-4xl mb-4 block opacity-30" }
                     p { class: "text-sm", "{i18n::t(\"downloader_empty_state\")}" }
                 }
+            }
+        }
+    }
+}
+
+/// What a search or a pasted link turned up, each song with its own download.
+/// `found` is `None` while the answer is on its way.
+#[component]
+fn SearchResults(
+    query: String,
+    found: Option<Result<Vec<api::DownloadCandidate>, String>>,
+    on_download: Callback<String>,
+) -> Element {
+    match found {
+        None => rsx! {
+            div { class: "flex justify-center py-6 text-slate-500",
+                i { class: "fa-solid fa-spinner fa-spin" }
+            }
+        },
+        Some(Err(error)) => rsx! {
+            div { class: "mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200 whitespace-pre-wrap",
+                i { class: "fa-solid fa-triangle-exclamation mr-2 text-red-300" }
+                "{error}"
+            }
+        },
+        Some(Ok(ref candidates)) if candidates.is_empty() => rsx! {
+            p { class: "text-sm text-slate-500 py-4 text-center",
+                "{i18n::t_with(\"no_results_found\", &[(\"query\", query.clone())])}"
+            }
+        },
+        Some(Ok(candidates)) => rsx! {
+            div { class: "mb-5 max-h-96 overflow-y-auto rounded-xl border border-white/10 divide-y divide-white/5",
+                for (position, candidate) in candidates.into_iter().enumerate() {
+                    CandidateRow {
+                        key: "{position}-{candidate.url}",
+                        candidate,
+                        on_download,
+                    }
+                }
+            }
+        },
+    }
+}
+
+#[component]
+fn CandidateRow(candidate: api::DownloadCandidate, on_download: Callback<String>) -> Element {
+    let byline = [candidate.artist.as_str(), candidate.album.as_str()]
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let duration = format!(
+        "{}:{:02}",
+        candidate.duration_secs / 60,
+        candidate.duration_secs % 60
+    );
+    let url = candidate.url.clone();
+
+    rsx! {
+        div { class: "flex items-center gap-3 px-3 py-2 hover:bg-white/5 transition-colors",
+            if let Some(cover) = candidate.cover_url.as_ref() {
+                img {
+                    class: "w-10 h-10 rounded object-cover shrink-0 bg-white/5",
+                    src: "{cover}",
+                    loading: "lazy",
+                }
+            } else {
+                div { class: "w-10 h-10 rounded shrink-0 bg-white/5 flex items-center justify-center",
+                    i { class: "fa-solid fa-music text-slate-600 text-xs" }
+                }
+            }
+            div { class: "flex-1 min-w-0",
+                p { class: "text-white text-sm truncate", "{candidate.title}" }
+                p { class: "text-slate-500 text-xs truncate", "{byline}" }
+            }
+            if candidate.duration_secs > 0 {
+                span { class: "text-slate-500 text-xs tabular-nums shrink-0", "{duration}" }
+            }
+            button {
+                class: "text-slate-400 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors shrink-0",
+                title: i18n::t("downloader_download").to_string(),
+                onclick: move |_| on_download.call(url.clone()),
+                i { class: "fa-solid fa-download" }
             }
         }
     }

@@ -694,6 +694,7 @@ pub mod settings {
                         .map(|strategy| ChoiceOption {
                             value: strategy_id(*strategy).to_string(),
                             label: Text::key(strategy_id(*strategy)),
+                            ..Default::default()
                         })
                         .collect(),
                     custom: false,

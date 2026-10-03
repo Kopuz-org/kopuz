@@ -73,13 +73,13 @@ pub async fn load_config(
             *slot = row.value;
         }
     }
-    cfg.ytdlp_history = sqlx::query!(
+    cfg.downloader_history = sqlx::query!(
         "SELECT url, title, format, status, error FROM ytdlp_history ORDER BY position"
     )
     .fetch_all(pool)
     .await?
     .into_iter()
-    .map(|row| config::YtdlpHistoryEntry {
+    .map(|row| config::DownloaderHistoryEntry {
         url: row.url,
         title: row.title,
         format: row.format,
@@ -397,7 +397,7 @@ pub(crate) async fn write_state(
     sqlx::query!("DELETE FROM ytdlp_history")
         .execute(&mut *conn)
         .await?;
-    for (position, entry) in cfg.ytdlp_history.iter().enumerate() {
+    for (position, entry) in cfg.downloader_history.iter().enumerate() {
         let position = position as i64;
         sqlx::query!(
             "INSERT INTO ytdlp_history (position, url, title, format, status, error) \

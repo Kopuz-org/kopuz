@@ -42,82 +42,30 @@ pub fn default_radio_registries() -> Vec<RegistryEntry> {
         is_default: true,
     }]
 }
+/// How the URL downloader writes what it fetches. Options the earlier yt-dlp
+/// downloader stored are ignored when read back.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct YtdlpOptions {
+pub struct DownloaderOptions {
     #[serde(default = "default_true")]
     pub embed_metadata: bool,
     #[serde(default = "default_true")]
     pub embed_thumbnail: bool,
     #[serde(default)]
-    pub postprocess_thumbnail_square: bool,
-    #[serde(default)]
-    pub embed_chapters: bool,
-    #[serde(default)]
-    pub embed_subs: bool,
-    #[serde(default)]
-    pub embed_info_json: bool,
-    #[serde(default)]
     pub write_thumbnail: bool,
+    #[serde(default = "default_true")]
+    pub organize_by_album: bool,
     #[serde(default)]
-    pub write_description: bool,
-    #[serde(default)]
-    pub write_info_json: bool,
-    #[serde(default)]
-    pub write_subs: bool,
-    #[serde(default)]
-    pub write_auto_subs: bool,
-    #[serde(default)]
-    pub write_comments: bool,
-    #[serde(default)]
-    pub sponsorblock: bool,
-    #[serde(default)]
-    pub sponsorblock_mark: bool,
-    #[serde(default)]
-    pub split_chapters: bool,
-    #[serde(default)]
-    pub convert_thumbnail: String,
-    #[serde(default)]
-    pub no_playlist: bool,
-    #[serde(default)]
-    pub xattrs: bool,
-    #[serde(default)]
-    pub no_mtime: bool,
-    #[serde(default)]
-    pub rate_limit: String,
-    #[serde(default)]
-    pub cookies_from_browser: String,
-    #[serde(default)]
-    pub js_runtimes: String,
-    #[serde(default = "default_audio_quality")]
-    pub audio_quality: u8,
+    pub overwrite_existing: bool,
 }
 
-impl Default for YtdlpOptions {
+impl Default for DownloaderOptions {
     fn default() -> Self {
         Self {
             embed_metadata: true,
             embed_thumbnail: true,
-            postprocess_thumbnail_square: false,
-            embed_chapters: false,
-            embed_subs: false,
-            embed_info_json: false,
             write_thumbnail: false,
-            write_description: false,
-            write_info_json: false,
-            write_subs: false,
-            write_auto_subs: false,
-            write_comments: false,
-            sponsorblock: false,
-            sponsorblock_mark: false,
-            split_chapters: false,
-            convert_thumbnail: String::new(),
-            no_playlist: false,
-            xattrs: false,
-            no_mtime: false,
-            rate_limit: String::new(),
-            cookies_from_browser: String::new(),
-            js_runtimes: String::new(),
-            audio_quality: 0,
+            organize_by_album: true,
+            overwrite_existing: false,
         }
     }
 }
@@ -129,12 +77,9 @@ fn default_depth_blur_strength() -> u8 {
 fn default_true() -> bool {
     true
 }
-fn default_audio_quality() -> u8 {
-    0
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct YtdlpHistoryEntry {
+pub struct DownloaderHistoryEntry {
     pub url: String,
     pub title: String,
     pub format: String,
@@ -734,12 +679,14 @@ pub struct AppConfig {
     pub device_change_behavior: DeviceChangeBehavior,
     #[serde(default)]
     pub sample_rate_mode: SampleRateMode,
-    #[serde(default)]
-    pub ytdlp_output_dir: String,
-    #[serde(default)]
-    pub ytdlp_options: YtdlpOptions,
-    #[serde(default)]
-    pub ytdlp_history: Vec<YtdlpHistoryEntry>,
+    /// Stored under the names the yt-dlp downloader gave these, so existing
+    /// settings and history carry over.
+    #[serde(default, rename = "ytdlp_output_dir")]
+    pub downloader_output_dir: String,
+    #[serde(default, rename = "ytdlp_options")]
+    pub downloader_options: DownloaderOptions,
+    #[serde(default, rename = "ytdlp_history")]
+    pub downloader_history: Vec<DownloaderHistoryEntry>,
     #[serde(default)]
     pub titlebar_mode: TitlebarMode,
     #[serde(default)]
@@ -960,9 +907,9 @@ impl Default for AppConfig {
             equalizer: EqualizerSettings::default(),
             device_change_behavior: DeviceChangeBehavior::Pause,
             sample_rate_mode: SampleRateMode::System,
-            ytdlp_output_dir: String::new(),
-            ytdlp_options: YtdlpOptions::default(),
-            ytdlp_history: Vec::new(),
+            downloader_output_dir: String::new(),
+            downloader_options: DownloaderOptions::default(),
+            downloader_history: Vec::new(),
             titlebar_mode: TitlebarMode::Custom,
             offline_quality: OfflineQuality::default(),
             offline_tracks: HashMap::new(),

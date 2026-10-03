@@ -22,8 +22,7 @@ depends=(
 )
 
 optdepends=(
-    'yt-dlp'
-    'python-mutagen'
+    'ffmpeg: converting YouTube downloads to MP3, FLAC or WAV'
 )
 
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Kopuz-org/kopuz/releases/download/v${pkgver}/kopuz_v${pkgver}_x86_64-linux.tar.gz")

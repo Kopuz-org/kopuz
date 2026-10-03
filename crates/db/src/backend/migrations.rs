@@ -420,7 +420,7 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
             .execute(&mut *tx)
             .await?;
     }
-    for (position, entry) in cfg.ytdlp_history.iter().enumerate() {
+    for (position, entry) in cfg.downloader_history.iter().enumerate() {
         sqlx::query(
             "INSERT OR REPLACE INTO ytdlp_history (position, url, title, format, status, error) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",

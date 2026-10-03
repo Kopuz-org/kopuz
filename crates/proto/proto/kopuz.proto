@@ -92,6 +92,7 @@ service Kopuz {
   rpc CancelJob(JobId) returns (CancelJobResponse);
   rpc StartDownloads(DownloadRequest) returns (JobRef);
   rpc DownloadUrl(DownloadUrlRequest) returns (JobRef);
+  rpc SearchDownloads(SearchDownloadsRequest) returns (DownloadCandidates);
   rpc GetDownloadFormats(GetDownloadFormatsRequest) returns (DownloadFormats);
   rpc GetArtworkSettings(GetArtworkSettingsRequest) returns (ArtworkSettings);
   rpc SetArtworkSettings(SetArtworkSettingsRequest) returns (ArtworkSettings);
@@ -626,6 +627,8 @@ message Icon {
 message ChoiceOption {
   string value = 1;
   Text label = 2;
+  // Why it cannot be picked right now; absent when it can.
+  Text unavailable = 3;
 }
 
 enum FieldKindTag {
@@ -1239,6 +1242,24 @@ message DownloadUrlRequest {
   string url = 1;
   // One of GetDownloadFormats' option values.
   string format = 2;
+}
+
+message SearchDownloadsRequest {
+  string query = 1;
+}
+
+message DownloadCandidate {
+  // What DownloadUrl takes to fetch this one song.
+  string url = 1;
+  string title = 2;
+  string artist = 3;
+  string album = 4;
+  uint64 duration_secs = 5;
+  optional string cover_url = 6;
+}
+
+message DownloadCandidates {
+  repeated DownloadCandidate candidates = 1;
 }
 
 message GetDownloadFormatsRequest {}

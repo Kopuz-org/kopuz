@@ -207,6 +207,7 @@ fn options_for(browsers: &[Browser]) -> Vec<ChoiceOption> {
         .map(|browser| ChoiceOption {
             value: browser.id().to_string(),
             label: Text::literal(browser.label()),
+            ..Default::default()
         })
         .collect()
 }
@@ -218,6 +219,7 @@ fn browser_field(value: Option<&str>, show_when: Option<FieldValue>) -> FieldSpe
     let mut options = vec![ChoiceOption {
         value: AUTOMATIC.to_string(),
         label: Text::key("sign_in_browser_auto"),
+        ..Default::default()
     }];
     options.extend(options_for(Browser::ALL));
     FieldSpec {
@@ -239,6 +241,7 @@ fn code_options(codes: &[&str]) -> Vec<ChoiceOption> {
         .map(|code| ChoiceOption {
             value: (*code).to_string(),
             label: Text::literal(*code),
+            ..Default::default()
         })
         .collect()
 }
@@ -279,10 +282,12 @@ pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
                             ChoiceOption {
                                 value: BY_BROWSER.to_string(),
                                 label: Text::key("sign_in_with_browser"),
+                                ..Default::default()
                             },
                             ChoiceOption {
                                 value: ANONYMOUS.to_string(),
                                 label: Text::key("sign_in_anonymously"),
+                                ..Default::default()
                             },
                         ],
                     },
@@ -337,10 +342,12 @@ pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
                             ChoiceOption {
                                 value: BY_BROWSER.to_string(),
                                 label: Text::key("sign_in_with_browser"),
+                                ..Default::default()
                             },
                             ChoiceOption {
                                 value: MANUAL.to_string(),
                                 label: Text::key("apple_music_paste_token"),
+                                ..Default::default()
                             },
                         ],
                     },
@@ -414,6 +421,7 @@ pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
             let mut hosts = vec![ChoiceOption {
                 value: AUTOMATIC.to_string(),
                 label: Text::key("playback_browser_auto"),
+                ..Default::default()
             }];
             hosts.extend(options_for(Browser::CHROMIUM_FAMILY));
             vec![

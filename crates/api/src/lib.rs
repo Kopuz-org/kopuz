@@ -28,7 +28,9 @@ pub use catalog::{
 };
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
-pub use jobs::{DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState};
+pub use jobs::{
+    DownloadCandidate, DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState,
+};
 pub use library::{
     AlbumInfo, AlbumPage, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT,
     LyricChunkView, LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter,
@@ -360,6 +362,11 @@ pub trait JobApi: Send + Sync {
     /// beyond the format, is the daemon's; progress arrives as job events and
     /// the outcome joins [`Self::downloader_history`].
     async fn download_url(&self, url: String, format: String) -> Result<JobRef, ApiError>;
+
+    /// Songs to download for `query`: what YouTube Music finds for a name, or
+    /// the tracks a pasted link stands for. Each comes back with the URL
+    /// [`Self::download_url`] takes.
+    async fn search_downloads(&self, query: String) -> Result<Vec<DownloadCandidate>, ApiError>;
 
     /// The formats a download can be asked for, picked per download rather
     /// than kept in the settings.

@@ -23,6 +23,24 @@ pub fn start(url: String, format: String, mut failure: Signal<Option<String>>) {
     });
 }
 
+/// Songs to download for `query`, re-asked whenever it changes; an empty query
+/// finds nothing without a round trip.
+pub fn use_search(query: Signal<String>) -> Resource<Result<Vec<api::DownloadCandidate>, String>> {
+    let api = use_api();
+    use_resource(move || {
+        let query = query();
+        let api = api.clone();
+        async move {
+            if query.trim().is_empty() {
+                return Ok(Vec::new());
+            }
+            api.search_downloads(query)
+                .await
+                .map_err(|error| error.to_string())
+        }
+    })
+}
+
 /// The formats a download can be asked for.
 pub fn use_formats() -> Resource<Vec<api::ChoiceOption>> {
     let api = use_api();

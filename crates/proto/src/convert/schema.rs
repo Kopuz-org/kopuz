@@ -40,6 +40,7 @@ pub fn choice_option_to_proto(value: &api::ChoiceOption) -> ChoiceOption {
     ChoiceOption {
         value: value.value.clone(),
         label: Some(text_to_proto(&value.label)),
+        unavailable: value.unavailable.as_ref().map(text_to_proto),
     }
 }
 
@@ -51,6 +52,7 @@ pub fn choice_option_from_proto(value: &ChoiceOption) -> api::ChoiceOption {
             .as_ref()
             .map(text_from_proto)
             .unwrap_or_default(),
+        unavailable: value.unavailable.as_ref().map(text_from_proto),
     }
 }
 
@@ -200,10 +202,12 @@ mod tests {
             api::ChoiceOption {
                 value: "us".into(),
                 label: api::Text::literal("United States"),
+                ..Default::default()
             },
             api::ChoiceOption {
                 value: "tr".into(),
                 label: api::Text::key("storefront-tr"),
+                unavailable: Some(api::Text::key("downloader_needs_ffmpeg")),
             },
         ];
         let kinds = [

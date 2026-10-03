@@ -49,6 +49,9 @@ impl Default for Icon {
 pub struct ChoiceOption {
     pub value: String,
     pub label: Text,
+    /// Why this choice cannot be picked right now, such as a missing tool. A
+    /// frontend shows it greyed out with this as the reason.
+    pub unavailable: Option<Text>,
 }
 
 /// What control a field is edited with.

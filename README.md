@@ -143,12 +143,14 @@ one gRPC schema on a local socket, documented in [docs/api.md](docs/api.md).
   switching.
 - **Channel Mode**: Switch between `Stereo`, `Mono`, `Left only`, `Right only`,
   and `Swap L/R` output modes.
-- **yt-dlp Integration**: Download audio directly from YouTube and other
-  supported sites via yt-dlp. Choose your output format (Best Audio, MP3, FLAC,
-  Opus, WAV, or MP4 video). FLAC is not recommended since yt-dlp remuxes lossy
-  audio rather than decoding from a lossless source. Supports SponsorBlock,
-  chapter splitting, cookies, rate limiting, and more. Requires `yt-dlp`
-  installed on your system.
+- **YouTube Downloads**: Paste a YouTube or YouTube Music link to a song, a
+  playlist or an album and Kopuz downloads it through its own YouTube client,
+  using your YouTube Music session for Premium quality when you are signed in.
+  Files are tagged with title, artist, album and cover art, filed into album
+  folders, and picked up by the next library scan. Best Audio keeps the stream
+  exactly as YouTube serves it and needs nothing installed; converting to MP3,
+  FLAC or WAV needs `ffmpeg`, which is also used to give Opus streams an Ogg
+  container that can carry tags.
 - **Metadata Settings**: A dedicated Metadata section in Settings lets you
   control how artist images are sourced. Choose between **Album Cover** (uses
   the first album artwork as the artist photo, default) or **Artist Photo**
@@ -647,10 +649,9 @@ The setup dialog offers two methods:
 
 ### Premium tracks
 
-Music Premium-locked tracks fall back to a local
-[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) resolve when the primary path
-returns `UNPLAYABLE`, so having `yt-dlp` installed helps for those. Anonymous
-mode can't play Premium-only content at all.
+A signed-in Music Premium account gets its higher-quality streams through
+Kopuz's own YouTube client, for playback and downloads alike. Anonymous mode
+can't play Premium-only content at all.
 
 ## SoundCloud Setup
 

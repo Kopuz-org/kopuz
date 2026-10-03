@@ -306,9 +306,9 @@ fn with_daemon_owned_fields(
     incoming.discord_presence = current.discord_presence;
     incoming.discord_presence_paused = current.discord_presence_paused;
     incoming.discord_presence_source = current.discord_presence_source;
-    incoming.ytdlp_output_dir = current.ytdlp_output_dir.clone();
-    incoming.ytdlp_options = current.ytdlp_options.clone();
-    incoming.ytdlp_history = current.ytdlp_history.clone();
+    incoming.downloader_output_dir = current.downloader_output_dir.clone();
+    incoming.downloader_options = current.downloader_options.clone();
+    incoming.downloader_history = current.downloader_history.clone();
     incoming
 }
 

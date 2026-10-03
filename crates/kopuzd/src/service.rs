@@ -923,6 +923,24 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::JobRef { job_id: job.job_id }))
     }
 
+    async fn search_downloads(
+        &self,
+        request: Request<proto::SearchDownloadsRequest>,
+    ) -> Result<Response<proto::DownloadCandidates>, Status> {
+        let candidates = self
+            .0
+            .api
+            .search_downloads(request.into_inner().query)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::DownloadCandidates {
+            candidates: candidates
+                .iter()
+                .map(convert::download_candidate_to_proto)
+                .collect(),
+        }))
+    }
+
     async fn get_download_formats(
         &self,
         _: Request<proto::GetDownloadFormatsRequest>,

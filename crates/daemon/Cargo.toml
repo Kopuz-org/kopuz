@@ -32,7 +32,7 @@ player = { workspace = true }
 radio = { workspace = true }
 reader = { workspace = true }
 server = { workspace = true }
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "process"] }
 tracing = { workspace = true }
 rand = { workspace = true }
 async-trait = { workspace = true }

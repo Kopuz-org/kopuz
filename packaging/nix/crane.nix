@@ -11,7 +11,7 @@
   tailwindcss_4,
   dioxus-cli,
   # Runtime deps
-  yt-dlp,
+  ffmpeg,
   # Linux Deps
   wrapGAppsHook3,
   webkitgtk_4_1,
@@ -175,7 +175,7 @@ craneLib.mkCargoDerivation (
     preFixup = lib.optionalString stdenv.isLinux ''
       gappsWrapperArgs+=(
         --chdir $out/bin
-        --prefix PATH : ${lib.makeBinPath [ yt-dlp ]}
+        --prefix PATH : ${lib.makeBinPath [ ffmpeg ]}
         --prefix LD_LIBRARY_PATH : ${libayatana-appindicator}/lib
       )
     '';

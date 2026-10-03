@@ -112,10 +112,13 @@ próprias credenciais e os seus próprios favoritos.
   músicas em compilações nativas de ambiente de trabalho. A reprodução no navegador atualmente usa uma troca normal de faixas.
 - **Modo de Canal**: Alterne entre modos de saída `Estéreo`, `Mono`, `Apenas Esquerdo`, `Apenas Direito`,
   e `Trocar E/D`.
-- **Integração com yt-dlp**: Transfira áudio diretamente do YouTube e outros
-  sites suportados via yt-dlp. Escolha o seu formato de saída (Melhor Áudio, MP3, FLAC,
-  WAV ou vídeo MP4). O FLAC não é recomendado pois o yt-dlp gera áudio com perdas
-  em vez de descodificar de uma fonte sem perdas. Suporta SponsorBlock, divisão de capítulos, cookies, limitação de taxa e mais. Requer `yt-dlp` instalado no seu sistema.
+- **Transferências do YouTube**: Cole uma ligação do YouTube ou do YouTube Music
+  para uma música, uma playlist ou um álbum e o Kopuz transfere-a com o seu
+  próprio cliente YouTube, usando a sua sessão do YouTube Music para qualidade
+  Premium quando tem sessão iniciada. Os ficheiros ficam com título, artista,
+  álbum e capa, organizados em pastas por álbum, e entram na próxima análise da
+  biblioteca. Melhor Áudio guarda a transmissão tal como o YouTube a serve e
+  não requer nada instalado; converter para MP3, FLAC ou WAV requer `ffmpeg`.
 - **Definições de Metadados**: Uma secção dedicada de Metadados nas Definições permite-lhe
   controlar como as imagens de artistas são obtidas. Escolha entre **Capa de Álbum** (usa
   a primeira capa de álbum como foto do artista, predefinido) ou **Foto de Artista**
@@ -388,9 +391,10 @@ O diálogo de configuração oferece dois métodos:
 
 ### Faixas Premium
 
-As faixas bloqueadas pelo Music Premium recorrem a uma resolução local
-[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) quando o caminho principal
-retorna `UNPLAYABLE`, por isso ter o `yt-dlp` instalado pode ajudar nessas situações. O modo anónimo não pode reproduzir conteúdo exclusivo do Premium.
+Uma conta Music Premium com sessão iniciada obtém as transmissões de maior
+qualidade através do cliente YouTube do próprio Kopuz, tanto para reprodução
+como para transferências. O modo anónimo não pode reproduzir conteúdo exclusivo
+do Premium.
 
 ## Configuração do SoundCloud
 

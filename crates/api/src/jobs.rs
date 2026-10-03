@@ -11,6 +11,17 @@ pub struct DownloadHistoryEntry {
     pub error: Option<String>,
 }
 
+/// One song the downloader found, ready to be handed back as `url`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DownloadCandidate {
+    pub url: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub duration_secs: u64,
+    pub cover_url: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DownloadState {
     #[default]

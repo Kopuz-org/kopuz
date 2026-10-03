@@ -809,6 +809,23 @@ impl api::JobApi for GrpcApi {
         })
     }
 
+    async fn search_downloads(
+        &self,
+        query: String,
+    ) -> Result<Vec<api::DownloadCandidate>, ApiError> {
+        let found = self
+            .client()
+            .search_downloads(Request::new(proto::SearchDownloadsRequest { query }))
+            .await
+            .map_err(wire_error)?;
+        Ok(found
+            .get_ref()
+            .candidates
+            .iter()
+            .map(convert::download_candidate_from_proto)
+            .collect())
+    }
+
     async fn download_formats(&self) -> Result<Vec<api::ChoiceOption>, ApiError> {
         let formats = self
             .client()

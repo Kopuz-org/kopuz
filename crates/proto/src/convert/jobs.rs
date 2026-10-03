@@ -68,6 +68,28 @@ pub fn download_history_entry_from_proto(
     }
 }
 
+pub fn download_candidate_to_proto(value: &api::DownloadCandidate) -> DownloadCandidate {
+    DownloadCandidate {
+        url: value.url.clone(),
+        title: value.title.clone(),
+        artist: value.artist.clone(),
+        album: value.album.clone(),
+        duration_secs: value.duration_secs,
+        cover_url: value.cover_url.clone(),
+    }
+}
+
+pub fn download_candidate_from_proto(value: &DownloadCandidate) -> api::DownloadCandidate {
+    api::DownloadCandidate {
+        url: value.url.clone(),
+        title: value.title.clone(),
+        artist: value.artist.clone(),
+        album: value.album.clone(),
+        duration_secs: value.duration_secs,
+        cover_url: value.cover_url.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,6 +108,24 @@ mod tests {
             assert_eq!(
                 status,
                 download_status_from_proto(&download_status_to_proto(&status))
+            );
+        }
+    }
+
+    #[test]
+    fn a_download_candidate_round_trips_with_and_without_a_cover() {
+        for cover_url in [None, Some("https://lh3.example.test/c=w544".to_string())] {
+            let candidate = api::DownloadCandidate {
+                url: "https://music.youtube.com/watch?v=dQw4w9WgXcQ".into(),
+                title: "A Song".into(),
+                artist: "An Artist".into(),
+                album: "An Album".into(),
+                duration_secs: 213,
+                cover_url,
+            };
+            assert_eq!(
+                candidate,
+                download_candidate_from_proto(&download_candidate_to_proto(&candidate))
             );
         }
     }
