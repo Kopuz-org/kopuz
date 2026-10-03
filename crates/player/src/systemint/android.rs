@@ -14,6 +14,13 @@ pub fn take_back_pressed() -> bool {
     BACK_PENDING.swap(false, Ordering::SeqCst)
 }
 
+/// Wait on the UI runtime, keeping JNI callbacks away from Dioxus signals.
+pub async fn wait_back_pressed() {
+    while !take_back_pressed() {
+        super::back_notify().notified().await;
+    }
+}
+
 const PERMISSION_UNANSWERED: u8 = 0;
 const PERMISSION_GRANTED: u8 = 1;
 const PERMISSION_DENIED: u8 = 2;

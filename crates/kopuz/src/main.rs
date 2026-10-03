@@ -1297,6 +1297,31 @@ fn App() -> Element {
     let switch_source = hooks::source_switch::use_switch_source();
     let all_sources = hooks::sources::use_sources();
     let mut show_quick_search = use_signal(|| false);
+    #[cfg(target_os = "android")]
+    use_future(move || async move {
+        let mut is_devices_open = is_devices_open;
+        let mut is_rightbar_open = is_rightbar_open;
+        loop {
+            player::systemint::wait_back_pressed().await;
+            if *show_quick_search.peek() {
+                show_quick_search.set(false);
+            } else if *is_devices_open.peek() {
+                is_devices_open.set(false);
+            } else if *is_rightbar_open.peek() {
+                is_rightbar_open.set(false);
+            } else if *is_fullscreen.peek() {
+                is_fullscreen.set(false);
+            } else if !*is_sidebar_collapsed.peek() {
+                is_sidebar_collapsed.set(true);
+            } else if !nav_history.peek().is_empty() {
+                nav_ctrl.go_back();
+            } else {
+                // Finishing the activity destroys Wry's native runtime; keep
+                // playback and the existing WebView alive when leaving the root.
+                player::systemint::move_task_to_back();
+            }
+        }
+    });
     let quick_search_source = hooks::use_db_queries::use_active_source();
     use_effect(move || {
         if !*show_quick_search.read() {
