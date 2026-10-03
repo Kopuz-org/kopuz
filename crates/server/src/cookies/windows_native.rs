@@ -271,13 +271,9 @@ fn decrypt_value(enc: &[u8], dpapi: Option<&[u8]>, app_bound: Option<&[u8]>) -> 
         Scheme::Dpapi => dpapi?,
         Scheme::AppBound => app_bound?,
     };
-    if key.len() != 32 {
-        return None;
-    }
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
-    let pt = cipher
-        .decrypt(Nonce::from_slice(&enc[3..15]), &enc[15..])
-        .ok()?;
+    let key = Key::<Aes256Gcm>::try_from(key).ok()?;
+    let nonce = Nonce::try_from(&enc[3..15]).ok()?;
+    let pt = Aes256Gcm::new(&key).decrypt(&nonce, &enc[15..]).ok()?;
     Some(String::from_utf8_lossy(pt.get(32..).unwrap_or(&pt)).into_owned())
 }
 
