@@ -317,6 +317,7 @@ pub async fn folder_tracks(
     with_credits(pool, rows).await
 }
 
+/// One track per billed artist, the credit the byline names else the first, as a tile bills it; the name match folds ASCII case only.
 pub async fn artist_sample_tracks(
     pool: &SqlitePool,
     source: &Source,
@@ -332,11 +333,17 @@ pub async fn artist_sample_tracks(
                   t.track_number, t.disc_number,
                   mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?"
              FROM tracks t
-             JOIN (SELECT MIN(c.track_pk) AS track_pk, c.artist_pk FROM track_credits c
-                     JOIN tracks s ON s.rowid_pk = c.track_pk
-                    WHERE s.source = ?1 AND c.position = 0
-                    GROUP BY c.artist_pk) first ON first.track_pk = t.rowid_pk
-             JOIN artists ar ON ar.id = first.artist_pk
+             JOIN (SELECT MIN(s.rowid_pk) AS track_pk,
+                          COALESCE(
+                            (SELECT c.artist_pk FROM track_credits c
+                              WHERE c.track_pk = s.rowid_pk AND TRIM(c.name) = TRIM(s.artist) COLLATE NOCASE
+                              ORDER BY c.position LIMIT 1),
+                            (SELECT c.artist_pk FROM track_credits c
+                              WHERE c.track_pk = s.rowid_pk AND c.position = 0)) AS billed
+                     FROM tracks s
+                    WHERE s.source = ?1
+                    GROUP BY billed) first ON first.track_pk = t.rowid_pk
+             JOIN artists ar ON ar.id = first.billed
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
             ORDER BY ar.name COLLATE NOCASE

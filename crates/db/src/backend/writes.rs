@@ -32,8 +32,6 @@ pub async fn upsert_tracks(
     for t in tracks {
         upsert_track(&mut tx, src, t).await?;
     }
-    // A re-credited track can leave its old artist with nothing; that row goes rather than lingering under its key.
-    prune_artists(&mut tx, src).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -352,7 +350,6 @@ pub async fn upsert_albums(
     for a in albums {
         upsert_album(&mut tx, src, a).await?;
     }
-    prune_artists(&mut tx, src).await?;
     tx.commit().await?;
     Ok(())
 }

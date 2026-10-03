@@ -762,33 +762,37 @@ async fn a_restored_queue_refreshes_from_its_own_source_only() {
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
-/// Re-crediting a track drops the artist it no longer credits, rather than leaving the row under its key.
+/// One listing crediting a track differently must not cost its artist the key its photo hangs on; the full prune at a sync's end clears real orphans.
 #[tokio::test]
-async fn a_re_credited_track_leaves_no_orphaned_artist() {
+async fn a_briefly_uncredited_artist_keeps_its_key_until_a_full_prune() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
     let source = Source::Server("srv-1".into());
-    let mut track = server_track("T1", "Song");
-    track.artist = "Old Name".into();
-    track.artists = vec!["Old Name".into()];
-    db.upsert_tracks(&source, std::slice::from_ref(&track))
-        .await
-        .unwrap();
-    let before = db.unlinked_artist_keys(&source).await.unwrap();
-    assert_eq!(before.len(), 1, "{before:?}");
+    let credited = |name: &str| {
+        let mut track = server_track("T1", "Song");
+        track.artist = name.into();
+        track.artists = vec![name.into()];
+        track
+    };
+    db.upsert_tracks(&source, &[credited("Ada")]).await.unwrap();
+    let first = db.unlinked_artist_keys(&source).await.unwrap();
 
-    track.artist = "New Name".into();
-    track.artists = vec!["New Name".into()];
-    db.upsert_tracks(&source, std::slice::from_ref(&track))
+    db.upsert_tracks(&source, &[credited("Someone Else")])
         .await
         .unwrap();
-    let after = db.unlinked_artist_keys(&source).await.unwrap();
-    assert_eq!(
-        after.len(),
-        1,
-        "only the credited artist remains: {after:?}"
+    db.upsert_tracks(&source, &[credited("Ada")]).await.unwrap();
+    let back = db.unlinked_artist_keys(&source).await.unwrap();
+    assert!(
+        first.iter().all(|(name, key)| back.get(name) == Some(key)),
+        "Ada keeps her key: {first:?} vs {back:?}"
     );
-    assert_ne!(after, before, "and it is the new one");
+
+    db.prune_source(&source, &["T1".into()], &[]).await.unwrap();
+    assert_eq!(
+        db.unlinked_artist_keys(&source).await.unwrap(),
+        first,
+        "the full prune leaves only the credited artist"
+    );
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
