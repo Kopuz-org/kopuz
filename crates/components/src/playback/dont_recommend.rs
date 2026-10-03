@@ -32,8 +32,8 @@ pub fn DontRecommendButton(class: String) -> Element {
                 // Stacked glyphs, not a border: a border reads lighter than the heart beside it.
                 i { class: "fa-regular fa-circle" }
                 i {
-                    class: "fa-solid fa-minus absolute inset-0 flex items-center justify-center",
-                    style: "transform: scale(0.5, 0.76)",
+                    class: "fa-solid fa-minus absolute inset-0",
+                    style: "display: flex; align-items: center; justify-content: center; transform: scale(0.5, 0.76)",
                 }
             }
         }
