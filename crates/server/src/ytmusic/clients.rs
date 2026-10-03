@@ -54,6 +54,23 @@ pub const WEB_REMIX: YouTubeClient = YouTubeClient {
     is_embedded: false,
 };
 
+/// The YouTube Music Android app. Only used to read a song's lyrics tab,
+/// which answers it with timed lines where the web client gets plain text.
+pub const ANDROID_MUSIC: YouTubeClient = YouTubeClient {
+    client_name: "ANDROID_MUSIC",
+    client_version: "7.27.52",
+    client_id: "21",
+    user_agent: "com.google.android.apps.youtube.music/7.27.52 (Linux; U; Android 14) gzip",
+    os_name: "Android",
+    os_version: "14",
+    device_make: "",
+    device_model: "",
+    android_sdk_version: Some(34),
+    login_supported: false,
+    use_signature_timestamp: false,
+    is_embedded: false,
+};
+
 /// The anonymous client: plain URLs, no JS player, and -- as yt-dlp
 /// classifies it -- no proof-of-origin token required or recommended.
 ///

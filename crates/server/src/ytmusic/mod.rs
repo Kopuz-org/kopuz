@@ -8,6 +8,7 @@ pub mod decipher;
 pub mod discover;
 pub mod innertube;
 pub mod isolated_profile;
+pub mod lyrics;
 pub mod mix;
 pub mod mutations;
 pub mod player;

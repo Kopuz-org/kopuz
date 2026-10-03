@@ -213,6 +213,58 @@ pub async fn player(
         .map_err(|e| format!("player JSON parse: {e}"))
 }
 
+/// Any `/youtubei/v1/{endpoint}` call on music.youtube.com as `client`, with
+/// `payload`'s fields beside the client context. Cookies are sent only to a
+/// client that can sign in.
+pub async fn post(
+    client: YouTubeClient,
+    endpoint: &str,
+    payload: Value,
+    cookies: Option<&str>,
+) -> Result<Value, String> {
+    let mut body = json!({
+        "context": {
+            "client": build_context(client),
+            "user": { "lockedSafetyMode": false }
+        },
+    });
+    if let (Some(body), Value::Object(fields)) = (body.as_object_mut(), payload) {
+        body.extend(fields);
+    }
+    let mut req = http_client()
+        .post(format!(
+            "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/{endpoint}?prettyPrint=false"
+        ))
+        .header("User-Agent", client.user_agent)
+        .header("Content-Type", "application/json")
+        .header("X-Goog-Api-Format-Version", "1")
+        .header("X-YouTube-Client-Name", client.client_id)
+        .header("X-YouTube-Client-Version", client.client_version);
+    if client.client_name.starts_with("WEB") {
+        req = req
+            .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
+            .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
+    }
+    if client.login_supported
+        && let Some(c) = cookies.filter(|c| !c.is_empty())
+    {
+        let auth =
+            sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
+    }
+    let resp = req
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("{endpoint} HTTP: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("{endpoint} HTTP {}", resp.status()));
+    }
+    resp.json::<Value>()
+        .await
+        .map_err(|e| format!("{endpoint} JSON parse: {e}"))
+}
+
 /// Hits `/youtubei/v1/browse` (used for Liked Music validation and library
 /// fetches). Always WEB_REMIX with cookies.
 pub async fn browse(browse_id: &str, cookies: &str) -> Result<Value, String> {

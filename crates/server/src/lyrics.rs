@@ -68,7 +68,9 @@ mod musixmatch;
 mod paxsenix;
 
 use musixmatch::fetch_from_musixmatch_enhanced;
-use paxsenix::{fetch_from_paxsenix_apple_music, fetch_from_paxsenix_youtube};
+use paxsenix::{
+    extract_youtube_video_id, fetch_from_paxsenix_apple_music, fetch_from_paxsenix_youtube,
+};
 
 #[derive(Debug, Deserialize)]
 struct LrcLibResponse {
@@ -286,10 +288,7 @@ where
     // Anything not backed by a file on disk. Missing a prefix here costs twice:
     // the `.lrc` lookup below runs against a path that was never a path, and
     // `prefer_local` returns before the remote providers are ever reached.
-    let is_server = track_path.starts_with("jellyfin:")
-        || track_path.starts_with("subsonic:")
-        || track_path.starts_with("custom:")
-        || track_path.starts_with("applemusic:");
+    let is_server = is_remote_track(track_path);
     let mut fallback: Option<Lyrics> = None;
 
     // 1. Local .lrc file (only for local tracks)
@@ -438,6 +437,24 @@ where
                     fallback.get_or_insert(lyrics);
                 }
             }
+        }
+    }
+
+    if let Some(video_id) = extract_youtube_video_id(track_path) {
+        let started = Instant::now();
+        let native = fetch_youtube_music_lyrics(&video_id, reach).await;
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "youtube_music key_hash={} elapsed_ms={} kind={}",
+            log_lyrics_key_hash(&cache_key),
+            started.elapsed().as_millis(),
+            lyrics_kind(native.as_ref())
+        );
+        if let Some(lyrics) = native
+            && lyrics_quality(&lyrics) >= lyrics_quality_option(fallback.as_ref())
+        {
+            on_progress(lyrics.clone());
+            fallback = Some(lyrics);
         }
     }
 
@@ -684,6 +701,57 @@ fn has_word_timestamps(lyrics: &Lyrics) -> bool {
     }
 }
 
+/// Whether `track_path` names a track a service streams rather than a file on
+/// disk. Any service missed here would have its `.lrc` looked up beside a path
+/// that was never one, and with local lyrics preferred, never reach a remote
+/// provider at all.
+fn is_remote_track(track_path: &str) -> bool {
+    [
+        "jellyfin:",
+        "subsonic:",
+        "custom:",
+        "applemusic:",
+        "ytmusic:",
+        "soundcloud:",
+        "spotify:",
+        "nextcloud:",
+    ]
+    .iter()
+    .any(|prefix| track_path.starts_with(prefix))
+}
+
+/// The song's own lyrics from YouTube Music, for a track it streams. A
+/// failed request counts as unreached, so a passing outage is not cached as
+/// the song having no lyrics.
+async fn fetch_youtube_music_lyrics(video_id: &str, reach: &ProviderReach) -> Option<Lyrics> {
+    use crate::ytmusic::lyrics::YtLyrics;
+
+    match crate::ytmusic::lyrics::fetch(video_id, None).await {
+        Ok(found) => found.map(|lyrics| match lyrics {
+            YtLyrics::Timed(lines) => Lyrics::Synced(
+                lines
+                    .into_iter()
+                    .map(|line| LyricLine {
+                        start_time: line.start_ms as f64 / 1000.0,
+                        end_time: line.end_ms.map(|ms| ms as f64 / 1000.0),
+                        text: line.text,
+                        chunks: Vec::new(),
+                        parent_line_index: None,
+                        background: false,
+                        opposite_turn: false,
+                    })
+                    .collect(),
+            ),
+            YtLyrics::Plain(text) => Lyrics::Plain(text),
+        }),
+        Err(error) => {
+            tracing::warn!(target: "kopuz::lyrics", "youtube_music failed={error}");
+            reach.unreachable();
+            None
+        }
+    }
+}
+
 fn lyrics_quality(lyrics: &Lyrics) -> u8 {
     match lyrics {
         Lyrics::Synced(lines) if lines.iter().any(|line| line.chunks.len() > 1) => 2,
@@ -758,6 +826,10 @@ fn lyrics_terminal_debug_enabled() -> bool {
     std::env::var_os("KOPUZ_LYRICS_DEBUG").is_some()
 }
 
+/// Bumped whenever the chain gains a provider, so a miss remembered before
+/// that provider could answer is not served in place of asking it.
+const PROVIDER_REVISION: u32 = 2;
+
 fn lyrics_cache_key(
     artist: &str,
     title: &str,
@@ -766,7 +838,10 @@ fn lyrics_cache_key(
     track_path: &str,
     enable_musixmatch: bool,
 ) -> String {
-    let provider_policy = if enable_musixmatch { "mm:on" } else { "mm:off" };
+    let provider_policy = format!(
+        "{}|p{PROVIDER_REVISION}",
+        if enable_musixmatch { "mm:on" } else { "mm:off" }
+    );
     if !track_path.trim().is_empty() {
         return format!("{}|{}", track_path.trim(), provider_policy);
     }
@@ -1046,6 +1121,23 @@ mod tests {
             Some("r9jGBwgzEzA".to_string())
         );
         assert_eq!(extract_youtube_video_id("/music/song.flac"), None);
+    }
+
+    /// A streamed track has no `.lrc` beside it, so taking one for a file would
+    /// end the search early whenever local lyrics are preferred.
+    #[test]
+    fn every_streaming_service_counts_as_remote() {
+        for path in [
+            "ytmusic:r9jGBwgzEzA",
+            "spotify:4uLU6hMCjMI75M1A2tKUQC",
+            "soundcloud:123",
+            "nextcloud:files/song.mp3",
+            "jellyfin:abc",
+        ] {
+            assert!(super::is_remote_track(path), "{path}");
+        }
+        assert!(!super::is_remote_track("/music/song.flac"));
+        assert!(!super::is_remote_track(r"C:\Music\song.flac"));
     }
 
     #[test]
