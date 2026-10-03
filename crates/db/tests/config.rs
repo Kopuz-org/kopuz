@@ -85,11 +85,60 @@ async fn webview_upgrade_removes_registered_sessions_and_keeps_cookie_sessions()
             .unwrap();
     assert_eq!(tables, 0);
     let signed_out: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM servers WHERE auth_state = 'unauthenticated'")
+        sqlx::query_scalar("SELECT count(*) FROM servers s LEFT JOIN server_credentials c ON c.server_id = s.id WHERE c.server_id IS NULL")
             .fetch_one(&mut connection)
             .await
             .unwrap();
     assert_eq!(signed_out, 3);
+}
+
+#[tokio::test]
+async fn webview_upgrade_after_server_split_keeps_current_credentials() {
+    for browser_table_applied in [false, true] {
+        let path = unique_db();
+        // A current master database has the split schema without the branch's
+        // migrations. Also cover a launch that already created browser_auth
+        // before failing at the old cleanup migration.
+        let db = db::init(&path).await.unwrap();
+        drop(db);
+        let pool = sqlx::SqlitePool::connect_with(SqliteConnectOptions::new().filename(&path))
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "DELETE FROM _sqlx_migrations WHERE version IN (20260919000000, 20260919010000, 20261003000000); \
+             INSERT INTO servers (id, name, url, service) VALUES ('keep', 'Keep', '', 'YtMusic'), ('old', 'Old', '', 'YtMusic'); \
+             INSERT INTO server_credentials (server_id, access_token, user_id) VALUES ('keep', 'SAPISID=keep; SID=session', 'user'), ('old', 'kopuz:youtube:oauth:v1', 'old-user');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        if browser_table_applied {
+            let mut browser = sqlx::migrate::Migrator::new(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations"),
+            )
+            .await
+            .unwrap();
+            browser
+                .migrations
+                .to_mut()
+                .retain(|m| m.version == 20260919000000);
+            browser.set_ignore_missing(true);
+            browser.run(&pool).await.unwrap();
+        }
+        pool.close().await;
+        for _ in 0..2 {
+            let db = db::init(&path).await.unwrap();
+            let kept = db.load_server("keep").await.unwrap().unwrap();
+            assert_eq!(
+                kept.access_token.as_deref(),
+                Some("SAPISID=keep; SID=session")
+            );
+            assert_eq!(kept.user_id.as_deref(), Some("user"));
+            let old = db.load_server("old").await.unwrap().unwrap();
+            assert!(old.access_token.is_none());
+            assert!(old.user_id.is_none());
+        }
+    }
 }
 
 #[tokio::test]

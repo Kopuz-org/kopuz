@@ -133,6 +133,28 @@ const STATE_TABLES_CREATED: i64 = 20260930000005;
 const LYRICS_CACHE_DROPPED: i64 = 20260930000007;
 
 async fn migrate(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> Result<(), DbError> {
+    let adapted;
+    let migrator = if applied(pool, 20260924000001).await? {
+        // A database from master can already have split server credentials before
+        // seeing this branch's older WebView migration. Apply its equivalent on
+        // the current schema, retaining the original checksum for older installs.
+        let mut migrations = migrator.migrations.to_vec();
+        for migration in &mut migrations {
+            if migration.version == 20260919010000 {
+                migration.sql =
+                    include_str!("../../migrations/20261003000000_restore_webview_credentials.sql")
+                        .into();
+            }
+        }
+        adapted = sqlx::migrate::Migrator {
+            migrations: migrations.into(),
+            ignore_missing: migrator.ignore_missing,
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        &adapted
+    } else {
+        migrator
+    };
     match migrator.run(pool).await {
         Ok(()) => Ok(()),
         Err(sqlx::migrate::MigrateError::VersionMismatch(_)) => {

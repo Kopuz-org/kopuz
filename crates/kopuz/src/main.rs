@@ -1914,8 +1914,7 @@ fn App() -> Element {
                             selected_album_id.set(String::new());
                         }
                         if route == Route::Artist {
-                            selected_artist_name.set(String::new());
-                            selected_artist_channel_id.set(None);
+                            selected_artist.set(None);
                         }
                         current_route.set(route);
                     },
