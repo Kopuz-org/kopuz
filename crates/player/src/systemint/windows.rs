@@ -21,7 +21,7 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use windows::core::{PCWSTR, Ref, w};
 use windows::{
-    Foundation::{TimeSpan, TypedEventHandler, Uri},
+    Foundation::{TimeSpan, TypedEventHandler},
     Media::{
         MediaPlaybackStatus, MediaPlaybackType, PlaybackPositionChangeRequestedEventArgs,
         SystemMediaTransportControls, SystemMediaTransportControlsButton,
@@ -261,11 +261,11 @@ fn find_toolbar_icon(kind: TaskbarIconKind) -> Option<std::path::PathBuf> {
 
     let mut bases = Vec::new();
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            bases.push(exe_dir.join("assets").join("toolbar_icons"));
-            bases.push(exe_dir.join("kopuz").join("assets").join("toolbar_icons"));
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        bases.push(exe_dir.join("assets").join("toolbar_icons"));
+        bases.push(exe_dir.join("kopuz").join("assets").join("toolbar_icons"));
     }
 
     if let Ok(current_dir) = std::env::current_dir() {
@@ -588,6 +588,51 @@ fn fetch_artwork_bytes(path: &str) -> Option<Vec<u8>> {
     }
 }
 
+/// The artwork SMTC shows, keyed by the path or URL it came from: `None` while
+/// it is still loading, so play/pause and seek updates reuse one fetch.
+static THUMBNAIL: StdMutex<Option<(String, Option<RandomAccessStreamReference>)>> =
+    StdMutex::new(None);
+
+/// What is known about `art`: `None` when nothing has been asked for it yet,
+/// `Some(None)` while it loads.
+fn cached_thumbnail(art: &str) -> Option<Option<RandomAccessStreamReference>> {
+    let cache = THUMBNAIL.lock().ok()?;
+    cache
+        .as_ref()
+        .filter(|(key, _)| key == art)
+        .map(|(_, stream)| stream.clone())
+}
+
+/// Fetch `art` off the calling thread and hand SMTC the bytes, URL or file
+/// alike: SMTC fetching a URL itself shows nothing for an unpackaged desktop
+/// app. An answer that lands after the track moved on is dropped, so a slow
+/// cover cannot replace the next one.
+fn load_thumbnail(art: String) {
+    if let Ok(mut cache) = THUMBNAIL.lock() {
+        *cache = Some((art.clone(), None));
+    }
+    std::thread::spawn(move || {
+        let Some(stream_ref) =
+            fetch_artwork_bytes(&art).and_then(|bytes| stream_ref_from_bytes(&bytes))
+        else {
+            tracing::debug!("SMTC artwork could not be loaded");
+            return;
+        };
+        let Ok(mut cache) = THUMBNAIL.lock() else {
+            return;
+        };
+        if cache.as_ref().is_none_or(|(key, _)| *key != art) {
+            return;
+        }
+        *cache = Some((art, Some(stream_ref.clone())));
+        drop(cache);
+        if let Some(updater) = current_smtc().and_then(|smtc| smtc.DisplayUpdater().ok()) {
+            let _ = updater.SetThumbnail(&stream_ref);
+            let _ = updater.Update();
+        }
+    });
+}
+
 pub fn update_now_playing(
     title: &str,
     artist: &str,
@@ -629,29 +674,13 @@ pub fn update_now_playing(
             let _ = props.SetAlbumTitle(&windows::core::HSTRING::from(album));
         }
 
-        if let Some(art) = artwork_path {
-            if art.starts_with("http://") || art.starts_with("https://") {
-                // Jellyfin: give the url directly to SMTC, it fetches lazily
-                if let Ok(uri) = Uri::CreateUri(&windows::core::HSTRING::from(art)) {
-                    if let Ok(stream_ref) = RandomAccessStreamReference::CreateFromUri(&uri) {
-                        let _ = updater.SetThumbnail(&stream_ref);
-                    }
+        if let Some(art) = artwork_path.filter(|art| !art.is_empty()) {
+            match cached_thumbnail(art) {
+                Some(Some(stream_ref)) => {
+                    let _ = updater.SetThumbnail(&stream_ref);
                 }
-            } else {
-                // Local: read bytes on a background thread, then apply thumbnail
-                let art_owned = art.to_string();
-                std::thread::spawn(move || {
-                    if let Some(bytes) = fetch_artwork_bytes(&art_owned) {
-                        if let Some(stream_ref) = stream_ref_from_bytes(&bytes) {
-                            if let Some(smtc) = current_smtc() {
-                                if let Ok(updater) = smtc.DisplayUpdater() {
-                                    let _ = updater.SetThumbnail(&stream_ref);
-                                    let _ = updater.Update();
-                                }
-                            }
-                        }
-                    }
-                });
+                Some(None) => {}
+                None => load_thumbnail(art.to_string()),
             }
         }
 
@@ -663,14 +692,14 @@ pub fn update_now_playing(
         setup_taskbar_buttons(HWND(app_hwnd as _), playing);
     }
 
-    if duration > 0.0 {
-        if let Ok(timeline) = SystemMediaTransportControlsTimelineProperties::new() {
-            let _ = timeline.SetStartTime(secs_to_timespan(0.0));
-            let _ = timeline.SetEndTime(secs_to_timespan(duration));
-            let _ = timeline.SetPosition(secs_to_timespan(position));
-            let _ = timeline.SetMinSeekTime(secs_to_timespan(0.0));
-            let _ = timeline.SetMaxSeekTime(secs_to_timespan(duration));
-            let _ = smtc.UpdateTimelineProperties(&timeline);
-        }
+    if duration > 0.0
+        && let Ok(timeline) = SystemMediaTransportControlsTimelineProperties::new()
+    {
+        let _ = timeline.SetStartTime(secs_to_timespan(0.0));
+        let _ = timeline.SetEndTime(secs_to_timespan(duration));
+        let _ = timeline.SetPosition(secs_to_timespan(position));
+        let _ = timeline.SetMinSeekTime(secs_to_timespan(0.0));
+        let _ = timeline.SetMaxSeekTime(secs_to_timespan(duration));
+        let _ = smtc.UpdateTimelineProperties(&timeline);
     }
 }
