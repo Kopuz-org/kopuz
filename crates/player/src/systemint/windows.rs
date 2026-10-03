@@ -1,12 +1,15 @@
 // Windows system integration: System Media Transport Controls (SMTC),
-// media keys, Now Playing info, and HWND discovery.
+// media keys, Now Playing info, and taskbar thumb buttons.
 //
 // Architecture:
 // - COM must be initialized on the thread that uses WinRT APIs. Since the
 //   Tokio thread pool does not call CoInitializeEx, setup runs on a
 //   dedicated std::thread::spawn thread.
-// - HWND discovery uses EnumWindows to find the process's visible window.
-//   If none exists yet, a message-only window (HWND_MESSAGE) is created.
+// - The daemon boots before the app window exists (and kopuzd never has
+//   one), so `init` binds SMTC to a hidden window owned by that dedicated
+//   thread, which then pumps messages for the life of the process so the
+//   window stays alive. Once the app has a window it calls `attach_window`
+//   and SMTC moves to it, which also gives the taskbar its thumb buttons.
 // - SMTC button events (play/pause/next/prev/seek) are forwarded to the
 //   player via an unbounded mpsc channel.
 // - CoInitializeEx + WinRT/COM FFI is documented with // SAFETY: invariants.
@@ -16,7 +19,7 @@ use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Mutex as StdMutex, OnceLock};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use windows::core::{BOOL, PCWSTR, Ref, w};
+use windows::core::{PCWSTR, Ref, w};
 use windows::{
     Foundation::{TimeSpan, TypedEventHandler, Uri},
     Media::{
@@ -31,7 +34,6 @@ use windows::{
         System::Com::{
             CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
         },
-        System::Threading::GetCurrentProcessId,
         System::WinRT::RoGetActivationFactory,
         UI::{
             Shell::{
@@ -39,10 +41,10 @@ use windows::{
                 THUMBBUTTON, TaskbarList,
             },
             WindowsAndMessaging::{
-                CallWindowProcW, CreateWindowExW, DefWindowProcW, EnumWindows, GWLP_WNDPROC,
-                GetWindowThreadProcessId, HICON, HWND_MESSAGE, IMAGE_ICON, IsWindowVisible,
-                LR_DEFAULTSIZE, LR_LOADFROMFILE, LoadImageW, SetWindowLongPtrW, WINDOW_EX_STYLE,
-                WINDOW_STYLE, WM_COMMAND, WNDPROC,
+                CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_WNDPROC,
+                GetMessageW, HICON, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE, LoadImageW, MSG,
+                SetWindowLongPtrW, TranslateMessage, WINDOW_EX_STYLE, WM_COMMAND, WNDPROC,
+                WS_OVERLAPPED,
             },
         },
     },
@@ -58,7 +60,36 @@ pub enum SystemEvent {
     Seek(f64),
 }
 
-static SMTC: OnceLock<SystemMediaTransportControls> = OnceLock::new();
+/// The live SMTC instance and the window it is bound to.
+struct Binding {
+    smtc: SystemMediaTransportControls,
+    hwnd: isize,
+}
+
+static SMTC: StdMutex<Option<Binding>> = StdMutex::new(None);
+/// The app's real window, once it has reported one; owns the taskbar buttons.
+static APP_HWND: AtomicIsize = AtomicIsize::new(0);
+/// The last state pushed, replayed onto SMTC when it moves to a new window.
+static LAST_NOW_PLAYING: StdMutex<Option<NowPlaying>> = StdMutex::new(None);
+
+#[derive(Clone)]
+struct NowPlaying {
+    title: String,
+    artist: String,
+    album: String,
+    duration: f64,
+    position: f64,
+    playing: bool,
+    artwork: Option<String>,
+}
+
+fn current_smtc() -> Option<SystemMediaTransportControls> {
+    SMTC.lock()
+        .ok()?
+        .as_ref()
+        .map(|binding| binding.smtc.clone())
+}
+
 static EVENT_SENDER: OnceLock<UnboundedSender<SystemEvent>> = OnceLock::new();
 static EVENT_RECEIVER: OnceLock<Mutex<UnboundedReceiver<SystemEvent>>> = OnceLock::new();
 
@@ -77,6 +108,9 @@ pub fn poll_event() -> Option<SystemEvent> {
 }
 
 pub async fn wait_event() -> Option<SystemEvent> {
+    // Create the channel here too: the listener can start before SMTC setup
+    // has run, and must not mistake "not set up yet" for "closed".
+    let _ = get_tx();
     if let Some(rx) = EVENT_RECEIVER.get() {
         let mut guard = rx.lock().await;
         guard.recv().await
@@ -85,88 +119,39 @@ pub async fn wait_event() -> Option<SystemEvent> {
     }
 }
 
-// HWND discovery
-struct EnumData {
-    pid: u32,
-    hwnd: HWND,
-    // fallback for when no visible window exists yet
-    any_hwnd: HWND,
-}
-
-// SAFETY:
-// - This function matches the expected C callback signature for
-//   EnumWindows (WNDENUMPROC). The system calls it for each top-level
-//   window.
-// - LPARAM contains a valid pointer to an EnumData struct allocated
-//   on the stack in find_main_hwnd(). The reference does not escape
-//   because EnumWindows calls this callback synchronously.
-// - GetWindowThreadProcessId and IsWindowVisible are safe to call
-//   with any valid HWND.
-unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+/// A hidden top-level window for SMTC to bind to until the app has one.
+/// Owned by the calling thread, which must keep pumping messages.
+fn create_hidden_window() -> Option<HWND> {
     // SAFETY:
-    // - LPARAM is a valid pointer to an EnumData struct that lives
-    //   on the caller's stack for the duration of EnumWindows.
-    let data = unsafe { &mut *(lparam.0 as *mut EnumData) };
-    let mut pid = 0u32;
-    // SAFETY: GetWindowThreadProcessId is safe with a valid HWND
-    // and a mutable output pointer.
-    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-    if pid == data.pid
-    // SAFETY: IsWindowVisible is safe to call with any HWND.
-    && unsafe { IsWindowVisible(hwnd).as_bool() }
-    {
-        data.hwnd = hwnd;
-        BOOL(0) // stop enumeration
-    } else {
-        if pid == data.pid && data.any_hwnd.0.is_null() {
-            data.any_hwnd = hwnd;
-        }
-        BOOL(1)
-    }
-}
-
-fn create_message_window() -> Option<HWND> {
-    // SAFETY:
-    // - CreateWindowExW with HWND_MESSAGE creates a message-only window,
-    //   which does not require a parent window or a window procedure.
-    // - All parameters are well-formed: class name is "STATIC" (a
-    //   standard Windows class), title is a valid wide string, and
-    //   dimensions are zero (message windows have no visual presence).
-    // - The return value is checked for null to ensure validity.
+    // - "STATIC" is a system window class, so no registration is needed.
+    // - The window is never shown (no WS_VISIBLE), so it has no visual or
+    //   taskbar presence; the return value is checked before use.
     let hwnd = unsafe {
         CreateWindowExW(
             WINDOW_EX_STYLE::default(),
             w!("STATIC"),
             w!("KopuzSMTC"),
-            WINDOW_STYLE::default(),
+            WS_OVERLAPPED,
             0,
             0,
             0,
             0,
-            Some(HWND_MESSAGE),
+            None,
             None,
             None,
             None,
         )
     };
     match hwnd {
-        Ok(h) if !h.0.is_null() => {
-            MESSAGE_ONLY_HWND.store(h.0 as isize, Ordering::Release);
-            Some(h)
-        }
+        Ok(h) if !h.0.is_null() => Some(h),
         _ => None,
     }
-}
-
-fn is_message_only_window(hwnd: HWND) -> bool {
-    !hwnd.0.is_null() && MESSAGE_ONLY_HWND.load(Ordering::Acquire) == hwnd.0 as isize
 }
 
 const TASKBAR_PREV_ID: u32 = 0x4b01;
 const TASKBAR_PLAY_PAUSE_ID: u32 = 0x4b02;
 const TASKBAR_NEXT_ID: u32 = 0x4b03;
 
-static MESSAGE_ONLY_HWND: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_HWND: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_PREV_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_BUTTONS_ADDED: AtomicBool = AtomicBool::new(false);
@@ -338,7 +323,7 @@ fn create_taskbar_list() -> windows::core::Result<ITaskbarList3> {
 }
 
 fn setup_taskbar_buttons(hwnd: HWND, playing: bool) {
-    if hwnd.0.is_null() || hwnd == HWND_MESSAGE || is_message_only_window(hwnd) {
+    if hwnd.0.is_null() {
         return;
     }
 
@@ -389,149 +374,182 @@ fn setup_taskbar_buttons(hwnd: HWND, playing: bool) {
     }
 }
 
-fn find_main_hwnd() -> Option<HWND> {
-    let mut data = EnumData {
-        // SAFETY: GetCurrentProcessId is a simple system call that
-        // always succeeds and requires no special setup.
-        pid: unsafe { GetCurrentProcessId() },
-        hwnd: HWND(std::ptr::null_mut()),
-        any_hwnd: HWND(std::ptr::null_mut()),
-    };
-
-    // SAFETY:
-    // - EnumWindows is safe to call with a valid callback pointer and
-    //   a user-data parameter.
-    // - enum_proc is a valid C callback matching the expected signature.
-    // - LPARAM contains a valid pointer to `data`, which lives on the
-    //   stack for the duration of the EnumWindows call.
-    // - EnumWindows is synchronous, so the reference does not escape.
-    let _ = unsafe { EnumWindows(Some(enum_proc), LPARAM(&mut data as *mut EnumData as isize)) };
-
-    if !data.hwnd.0.is_null() {
-        return Some(data.hwnd);
-    }
-
-    // hacky
-    if !data.any_hwnd.0.is_null() {
-        return Some(data.any_hwnd);
-    }
-    create_message_window()
-}
-
 // SMTC setup
 use windows::Win32::System::WinRT::ISystemMediaTransportControlsInterop;
 
-fn setup_smtc(hwnd: HWND) {
-    if SMTC.get().is_some() {
-        return;
+fn create_smtc(hwnd: HWND) -> windows::core::Result<SystemMediaTransportControls> {
+    // SAFETY:
+    // - RoGetActivationFactory is a WinRT API that is safe to call
+    //   after CoInitializeEx has been initialized on this thread.
+    // - ISystemMediaTransportControlsInterop::GetForWindow is safe
+    //   with a valid HWND owned by this process.
+    // - All subsequent SMTC method calls are thread-safe COM/WinRT
+    //   operations that do not violate memory safety.
+    // - The TypedEventHandler closures capture the sender by value
+    //   and do not introduce data races.
+    unsafe {
+        let class_id = windows::core::HSTRING::from("Windows.Media.SystemMediaTransportControls");
+        let interop: ISystemMediaTransportControlsInterop = RoGetActivationFactory(&class_id)?;
+        let smtc: SystemMediaTransportControls = interop.GetForWindow(hwnd)?;
+
+        smtc.SetIsEnabled(true)?;
+        smtc.SetIsPlayEnabled(true)?;
+        smtc.SetIsPauseEnabled(true)?;
+        smtc.SetIsNextEnabled(true)?;
+        smtc.SetIsPreviousEnabled(true)?;
+        smtc.SetIsStopEnabled(true)?;
+
+        let tx = get_tx();
+        let seek_tx = tx.clone();
+
+        smtc.ButtonPressed(&TypedEventHandler::new(
+            move |_: Ref<SystemMediaTransportControls>,
+                  args: Ref<SystemMediaTransportControlsButtonPressedEventArgs>|
+                  -> windows::core::Result<()> {
+                if let Some(args) = args.as_ref() {
+                    let btn: SystemMediaTransportControlsButton = args.Button()?;
+                    let evt = if btn == SystemMediaTransportControlsButton::Play
+                        || btn == SystemMediaTransportControlsButton::Pause
+                    {
+                        Some(SystemEvent::Toggle)
+                    } else if btn == SystemMediaTransportControlsButton::Next {
+                        Some(SystemEvent::Next)
+                    } else if btn == SystemMediaTransportControlsButton::Previous {
+                        Some(SystemEvent::Prev)
+                    } else {
+                        None
+                    };
+                    if let Some(e) = evt {
+                        let _ = tx.send(e);
+                    }
+                }
+                Ok(())
+            },
+        ))?;
+
+        smtc.PlaybackPositionChangeRequested(&TypedEventHandler::new(
+            move |_: Ref<SystemMediaTransportControls>,
+                  args: Ref<PlaybackPositionChangeRequestedEventArgs>|
+                  -> windows::core::Result<()> {
+                if let Some(args) = args.as_ref() {
+                    let pos = args.RequestedPlaybackPosition()?;
+                    let secs = pos.Duration as f64 / 10_000_000.0;
+                    let _ = seek_tx.send(SystemEvent::Seek(secs));
+                }
+                Ok(())
+            },
+        ))?;
+
+        Ok(smtc)
     }
+}
 
-    let result = (|| {
-        // SAFETY:
-        // - RoGetActivationFactory is a WinRT API that is safe to call
-        //   after CoInitializeEx has been initialized on this thread.
-        // - ISystemMediaTransportControlsInterop::GetForWindow is safe
-        //   with a valid HWND (either a visible window or a message-only
-        //   window).
-        // - All subsequent SMTC method calls are thread-safe COM/WinRT
-        //   operations that do not violate memory safety.
-        // - The TypedEventHandler closures capture the sender by value
-        //   and do not introduce data races.
-        unsafe {
-            let class_id =
-                windows::core::HSTRING::from("Windows.Media.SystemMediaTransportControls");
-            let interop: ISystemMediaTransportControlsInterop = RoGetActivationFactory(&class_id)?;
-            let smtc: SystemMediaTransportControls = interop.GetForWindow(hwnd)?;
-
-            smtc.SetIsEnabled(true)?;
-            smtc.SetIsPlayEnabled(true)?;
-            smtc.SetIsPauseEnabled(true)?;
-            smtc.SetIsNextEnabled(true)?;
-            smtc.SetIsPreviousEnabled(true)?;
-            smtc.SetIsStopEnabled(true)?;
-
-            let tx = get_tx();
-            let seek_tx = tx.clone();
-
-            smtc.ButtonPressed(&TypedEventHandler::new(
-                move |_: Ref<SystemMediaTransportControls>,
-                      args: Ref<SystemMediaTransportControlsButtonPressedEventArgs>|
-                      -> windows::core::Result<()> {
-                    if let Some(args) = args.as_ref() {
-                        let btn: SystemMediaTransportControlsButton = args.Button()?;
-                        let evt = if btn == SystemMediaTransportControlsButton::Play
-                            || btn == SystemMediaTransportControlsButton::Pause
-                        {
-                            Some(SystemEvent::Toggle)
-                        } else if btn == SystemMediaTransportControlsButton::Next {
-                            Some(SystemEvent::Next)
-                        } else if btn == SystemMediaTransportControlsButton::Previous {
-                            Some(SystemEvent::Prev)
-                        } else {
-                            None
-                        };
-                        if let Some(e) = evt {
-                            let _ = tx.send(e);
-                        }
-                    }
-                    Ok(())
-                },
-            ))?;
-
-            smtc.PlaybackPositionChangeRequested(&TypedEventHandler::new(
-                move |_: Ref<SystemMediaTransportControls>,
-                      args: Ref<PlaybackPositionChangeRequestedEventArgs>|
-                      -> windows::core::Result<()> {
-                    if let Some(args) = args.as_ref() {
-                        let pos = args.RequestedPlaybackPosition()?;
-                        let secs = pos.Duration as f64 / 10_000_000.0;
-                        let _ = seek_tx.send(SystemEvent::Seek(secs));
-                    }
-                    Ok(())
-                },
-            ))?;
-
-            windows::core::Result::Ok(smtc)
-        }
-    })();
-
-    match result {
+/// Bind SMTC to `hwnd`, retiring any previous binding. With `only_if_unbound`
+/// an existing binding wins, so the fallback never displaces the app window.
+fn bind_smtc(hwnd: HWND, only_if_unbound: bool) -> bool {
+    let Ok(mut slot) = SMTC.lock() else {
+        return false;
+    };
+    match slot.as_ref() {
+        Some(_) if only_if_unbound => return false,
+        Some(binding) if binding.hwnd == hwnd.0 as isize => return false,
+        _ => {}
+    }
+    match create_smtc(hwnd) {
         Ok(smtc) => {
-            if SMTC.set(smtc).is_ok() {
-                setup_taskbar_buttons(hwnd, false);
-                tracing::debug!("SMTC initialised");
+            if let Some(old) = slot.replace(Binding {
+                smtc,
+                hwnd: hwnd.0 as isize,
+            }) {
+                // Two enabled sessions would show up as two players.
+                let _ = old.smtc.SetIsEnabled(false);
             }
+            tracing::debug!("SMTC bound to window");
+            true
         }
-        Err(e) => tracing::warn!(error = ?e, "SMTC setup failed"),
+        Err(e) => {
+            tracing::warn!(error = ?e, "SMTC setup failed");
+            false
+        }
     }
 }
 
 pub fn init() {
-    if SMTC.get().is_some() {
-        return;
-    }
+    // The event channel has to exist before anyone waits on it.
+    let _ = get_tx();
     static INIT_ONCE: OnceLock<()> = OnceLock::new();
     INIT_ONCE.get_or_init(|| {
         std::thread::spawn(|| {
             // CoInitializeEx must be called on the thread that uses WinRT/COM.
-            // The tokio thread pool does not do this, so setup_smtc must run here.
+            // The tokio thread pool does not do this, so setup runs here.
             // SAFETY:
             // - CoInitializeEx initializes COM for the calling thread with
             //   the specified concurrency model (apartment-threaded).
             // - It is safe to call once per thread; subsequent calls return
             //   S_FALSE or RPC_E_CHANGED_MODE, which we ignore.
-            // - The None parameter means we are not aggregating another
-            //   COM object.
             unsafe {
                 let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             }
 
-            match find_main_hwnd() {
-                Some(hwnd) => setup_smtc(hwnd),
-                None => tracing::warn!("could not find main HWND for SMTC"),
+            let Some(hwnd) = create_hidden_window() else {
+                tracing::warn!("could not create a window for SMTC");
+                return;
+            };
+            if bind_smtc(hwnd, true) {
+                replay_now_playing();
+            }
+
+            // A window dies with the thread that created it, so this thread
+            // stays and pumps its messages for the life of the process.
+            let mut msg = MSG::default();
+            // SAFETY: a standard message loop over an owned MSG buffer.
+            unsafe {
+                while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
             }
         });
     });
+}
+
+/// Move SMTC onto the app's window and give it taskbar thumb buttons. Call
+/// from the thread that owns the window, once it exists.
+pub fn attach_window(hwnd: isize) {
+    if hwnd == 0 {
+        return;
+    }
+    let _ = get_tx();
+    // SAFETY: see `init`; a thread that already initialised COM (as the UI
+    // thread has) just gets S_FALSE or RPC_E_CHANGED_MODE back.
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    }
+    APP_HWND.store(hwnd, Ordering::Release);
+    let hwnd = HWND(hwnd as _);
+    bind_smtc(hwnd, false);
+    let playing = LAST_NOW_PLAYING
+        .lock()
+        .ok()
+        .and_then(|last| last.as_ref().map(|it| it.playing))
+        .unwrap_or(false);
+    setup_taskbar_buttons(hwnd, playing);
+    replay_now_playing();
+}
+
+fn replay_now_playing() {
+    let last = LAST_NOW_PLAYING.lock().ok().and_then(|last| last.clone());
+    if let Some(it) = last {
+        update_now_playing(
+            &it.title,
+            &it.artist,
+            &it.album,
+            it.duration,
+            it.position,
+            it.playing,
+            it.artwork.as_deref(),
+        );
+    }
 }
 
 // convert seconds to a Windows TimeSpan (unit is 100-nanosecond ticks)
@@ -574,17 +592,28 @@ pub fn update_now_playing(
     title: &str,
     artist: &str,
     album: &str,
-    _duration: f64,
-    _position: f64,
+    duration: f64,
+    position: f64,
     playing: bool,
     artwork_path: Option<&str>,
 ) {
-    // init in case init() wasn't called before the first track plays
-    if SMTC.get().is_none() {
-        init();
+    if let Ok(mut last) = LAST_NOW_PLAYING.lock() {
+        *last = Some(NowPlaying {
+            title: title.to_string(),
+            artist: artist.to_string(),
+            album: album.to_string(),
+            duration,
+            position,
+            playing,
+            artwork: artwork_path.map(str::to_string),
+        });
     }
 
-    let Some(smtc) = SMTC.get() else { return };
+    // init in case init() wasn't called before the first track plays; the
+    // state just stored is replayed once SMTC is up.
+    init();
+
+    let Some(smtc) = current_smtc() else { return };
 
     let _ = smtc.SetPlaybackStatus(if playing {
         MediaPlaybackStatus::Playing
@@ -614,7 +643,7 @@ pub fn update_now_playing(
                 std::thread::spawn(move || {
                     if let Some(bytes) = fetch_artwork_bytes(&art_owned) {
                         if let Some(stream_ref) = stream_ref_from_bytes(&bytes) {
-                            if let Some(smtc) = SMTC.get() {
+                            if let Some(smtc) = current_smtc() {
                                 if let Ok(updater) = smtc.DisplayUpdater() {
                                     let _ = updater.SetThumbnail(&stream_ref);
                                     let _ = updater.Update();
@@ -629,10 +658,9 @@ pub fn update_now_playing(
         let _ = updater.Update();
     }
 
-    let duration = _duration;
-    let position = _position;
-    if let Some(hwnd) = find_main_hwnd() {
-        setup_taskbar_buttons(hwnd, playing);
+    let app_hwnd = APP_HWND.load(Ordering::Acquire);
+    if app_hwnd != 0 {
+        setup_taskbar_buttons(HWND(app_hwnd as _), playing);
     }
 
     if duration > 0.0 {

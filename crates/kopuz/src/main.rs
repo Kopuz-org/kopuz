@@ -817,6 +817,13 @@ fn App() -> Element {
         win.set_decorations(mode == config::TitlebarMode::System);
     });
 
+    // The daemon set SMTC up before this window existed; move it onto the
+    // window so media controls and taskbar buttons belong to the app.
+    #[cfg(target_os = "windows")]
+    use_hook(|| {
+        player::systemint::attach_window(dioxus::desktop::window().window.hwnd() as isize);
+    });
+
     #[cfg(target_os = "windows")]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
