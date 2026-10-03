@@ -41,6 +41,18 @@ pub fn track_radio_handler(key: String) -> Option<EventHandler<()>> {
     supported.then(|| EventHandler::new(move |_| ctrl.play_track_radio(key.clone(), notices())))
 }
 
+/// What playing a search result does on a source that answers searches from a
+/// catalog: `Some` starts a radio from the track instead of queueing the
+/// unrelated matches around it; `None` means play the results as a queue.
+///
+/// Same `consume_context` rule as [`track_radio_handler`].
+pub fn search_play_radio_handler(key: String) -> Option<EventHandler<()>> {
+    let mut ctrl = consume_context::<PlayerController>();
+    let caps = consume_context::<Signal<api::SourceCapabilities>>();
+    let supported = caps.read().search_radio;
+    supported.then(|| EventHandler::new(move |_| ctrl.play_track_radio(key.clone(), notices())))
+}
+
 /// The playlist counterpart. Gated on its own flag: a source can seed
 /// a mix from a song but not from a playlist, so sharing the track flag put an
 /// action on playlist cards that could only ever fail.

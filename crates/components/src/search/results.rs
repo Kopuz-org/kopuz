@@ -118,6 +118,7 @@ pub fn SearchResults(
                                 let track_queue = track.clone();
                                 let track_delete = track.clone();
                                 let queue_source = search_queue.clone();
+                                let play_radio = crate::radio_actions::search_play_radio_handler(track.key.clone());
                                 let matches_current_path = currently_playing_path.as_ref() == Some(&track.uid);
                                 let matches_current_metadata = currently_playing_path.is_none()
                                     && !current_song_title.is_empty()
@@ -167,7 +168,10 @@ pub fn SearchResults(
                                             );
                                         },
                                         on_play: move |_| {
-                                            ctrl.play_queue_at(queue_source.clone(), idx);
+                                            match play_radio {
+                                                Some(radio) => radio.call(()),
+                                                None => ctrl.play_queue_at(queue_source.clone(), idx),
+                                            }
                                         }
                                     }
                                 }

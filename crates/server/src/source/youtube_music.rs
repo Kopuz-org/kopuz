@@ -69,7 +69,10 @@ impl MediaSource for YtSource {
             downloads: true,
             discover: true,
             dont_recommend: true,
-            radio: RadioSeeds::ALL,
+            radio: RadioSeeds {
+                search: true,
+                ..RadioSeeds::ALL
+            },
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Remote,
             albums: AlbumType::YtMusic,

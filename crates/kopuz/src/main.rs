@@ -817,6 +817,13 @@ fn App() -> Element {
         win.set_decorations(mode == config::TitlebarMode::System);
     });
 
+    // The daemon set SMTC up before this window existed; move it onto the
+    // window so media controls and taskbar buttons belong to the app.
+    #[cfg(target_os = "windows")]
+    use_hook(|| {
+        player::systemint::attach_window(dioxus::desktop::window().window.hwnd() as isize);
+    });
+
     #[cfg(target_os = "windows")]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
@@ -1922,6 +1929,12 @@ fn App() -> Element {
                 QuickSearch {
                     show: show_quick_search,
                     on_play: move |(track, fallback): (api::TrackInfo, Vec<api::TrackInfo>)| {
+                        if let Some(radio) =
+                            components::radio_actions::search_play_radio_handler(track.key.clone())
+                        {
+                            radio.call(());
+                            return;
+                        }
                         let api = hooks::consume_api();
                         let _ = quick_search_source();
                         let filter = hooks::TrackFilter {

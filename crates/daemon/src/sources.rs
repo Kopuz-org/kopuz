@@ -62,6 +62,7 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
         dont_recommend: caps.dont_recommend,
         track_radio: caps.radio.track,
         playlist_radio: caps.radio.playlist,
+        search_radio: caps.radio.track && caps.radio.search,
         playlists: match caps.playlists {
             PlaylistOps::None => PlaylistCapability::None,
             PlaylistOps::AddRemove => PlaylistCapability::AddRemove,

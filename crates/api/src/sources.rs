@@ -63,6 +63,9 @@ pub struct SourceCapabilities {
     pub dont_recommend: bool,
     pub track_radio: bool,
     pub playlist_radio: bool,
+    /// Playing a search result starts a track radio from it rather than
+    /// queueing the results.
+    pub search_radio: bool,
     /// It plays on devices of its own, which a client can list and move to.
     pub external_devices: bool,
     /// It plays through a browser on the host, not the engine.

@@ -20,7 +20,7 @@ pub use linux::{
 mod windows;
 
 #[cfg(target_os = "windows")]
-pub use windows::{SystemEvent, init, poll_event, update_now_playing, wait_event};
+pub use windows::{SystemEvent, attach_window, init, poll_event, update_now_playing, wait_event};
 
 #[cfg(target_os = "android")]
 mod android;
