@@ -163,6 +163,10 @@ fn ServerHeroBanner(
         }
     });
 
+    if hero_entry.is_none() && !edit {
+        return rsx! {};
+    }
+
     let hero_height = config.read().hero_height;
     let section_class = if is_vaxry {
         "relative rounded-xl overflow-hidden mb-10"
@@ -487,7 +491,7 @@ fn render_listen_now(
             if use_cards {
                 div { class: "flex overflow-x-auto gap-4 pb-4 scrollbar-hide scroll-smooth -mx-2 px-2",
                     ontouchstart: move |evt| evt.stop_propagation(),
-                    for (album_id, title, artist, cover_url) in shuffled_albums.iter().skip(1).take(10).cloned() {
+                    for (album_id, title, artist, cover_url) in shuffled_albums.iter().take(10).cloned() {
                         div {
                             class: "flex-none w-40 group cursor-pointer",
                             onclick: {
@@ -516,8 +520,8 @@ fn render_listen_now(
                     }
                 }
             } else {
-                div { class: "grid grid-cols-[repeat(auto-fill,minmax(350px,1fr))] gap-4",
-                    for (album_id, title, artist, cover_url) in shuffled_albums.iter().skip(1).take(8).cloned() {
+                div { class: "grid grid-cols-[repeat(auto-fill,minmax(min(350px,100%),1fr))] gap-4",
+                    for (album_id, title, artist, cover_url) in shuffled_albums.iter().take(8).cloned() {
                         div {
                             class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
                             onclick: {

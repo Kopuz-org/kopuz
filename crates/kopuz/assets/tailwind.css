@@ -898,6 +898,9 @@
   .cursor-grabbing {
     cursor: grabbing;
   }
+  .cursor-not-allowed {
+    cursor: not-allowed;
+  }
   .cursor-ns-resize {
     cursor: ns-resize;
   }
@@ -922,8 +925,8 @@
   .grid-cols-\[repeat\(auto-fill\,minmax\(180px\,1fr\)\)\] {
     grid-template-columns: repeat(auto-fill,minmax(180px,1fr));
   }
-  .grid-cols-\[repeat\(auto-fill\,minmax\(350px\,1fr\)\)\] {
-    grid-template-columns: repeat(auto-fill,minmax(350px,1fr));
+  .grid-cols-\[repeat\(auto-fill\,minmax\(min\(350px\,100\%\)\,1fr\)\)\] {
+    grid-template-columns: repeat(auto-fill,minmax(min(350px, 100%),1fr));
   }
   .flex-col {
     flex-direction: column;
@@ -1063,6 +1066,14 @@
       border-top-style: var(--tw-border-style);
       border-top-width: calc(1px * var(--tw-divide-y-reverse));
       border-bottom-width: calc(1px * calc(1 - var(--tw-divide-y-reverse)));
+    }
+  }
+  .divide-white\/5 {
+    :where(& > :not(:last-child)) {
+      border-color: color-mix(in srgb, #fff 5%, transparent);
+      @supports (color: color-mix(in lab, red, red)) {
+        border-color: color-mix(in oklab, var(--color-white) 5%, transparent);
+      }
     }
   }
   .divide-white\/\[0\.07\] {
