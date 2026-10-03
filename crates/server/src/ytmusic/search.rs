@@ -416,6 +416,11 @@ fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
         // No channel link: skip the leading kind label, take the next token.
         .or_else(|| subtitle.get(1).map(|(t, _)| ArtistCredit::unlinked(t)))
         .filter(|credit| !credit.name.is_empty());
+    let duration = subtitle
+        .iter()
+        .find(|(t, _)| looks_like_duration(t))
+        .and_then(|(t, _)| parse_mm_ss(t))
+        .unwrap_or(0);
 
     let thumbnail_url = card
         .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
@@ -434,7 +439,7 @@ fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
         artists: artist.into_iter().collect(),
         album,
         album_browse_id,
-        duration: 0,
+        duration,
         thumbnail_url,
     })
 }
@@ -857,7 +862,9 @@ fn parse_mm_ss(s: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod credit_tests {
-    use super::{ParsedRow, parse_playlist_track, parse_search_row, parsed_to_track};
+    use super::{
+        ParsedRow, parse_card_shelf, parse_playlist_track, parse_search_row, parsed_to_track,
+    };
     use serde_json::{Value, json};
 
     fn column(runs: &[(&str, Option<&str>)]) -> Value {
@@ -990,5 +997,34 @@ mod credit_tests {
         assert_eq!(track.artist, "Ada");
         assert_eq!(track.artists, ["Ada", "Boris"]);
         assert_eq!(track.credits[1].id.as_deref(), Some("UCboris"));
+    }
+
+    /// The top-result card carries its length in the subtitle like a list row
+    /// does, so the first result is not the one song with no duration.
+    #[test]
+    fn the_top_result_card_has_a_duration() {
+        let card = json!({
+            "onTap": { "watchEndpoint": {
+                "videoId": "vid",
+                "watchEndpointMusicSupportedConfigs": { "watchEndpointMusicConfig": {
+                    "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                } }
+            } },
+            "title": { "runs": [{ "text": "Song" }] },
+            "subtitle": { "runs": [
+                { "text": "Song" },
+                { "text": " • " },
+                { "text": "Ada", "navigationEndpoint": { "browseEndpoint": { "browseId": "UCada" } } },
+                { "text": " • " },
+                { "text": "Album", "navigationEndpoint": { "browseEndpoint": { "browseId": "MPREb_album" } } },
+                { "text": " • " },
+                { "text": "3:21" }
+            ] }
+        });
+
+        let parsed = parse_card_shelf(&card).expect("a music card");
+        assert_eq!(parsed.duration, 201);
+        assert_eq!(parsed.album.as_deref(), Some("Album"));
+        assert_eq!(parsed.artists[0].name, "Ada");
     }
 }
