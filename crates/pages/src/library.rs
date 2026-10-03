@@ -15,14 +15,22 @@ use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, TrackSortField, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
-    use_active_source, use_albums, use_artists, use_playlists, use_tracks_window,
+    WindowRows, use_active_source, use_albums, use_artists, use_playlists, use_tracks_window,
 };
 use hooks::use_player_controller::PlayerController;
 use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
 use std::collections::HashSet;
 
-const ITEM_HEIGHT: f64 = 60.0; // 60px: p-2 padding (16px*2=32) + content height (~28px)
+const ITEM_HEIGHT: f64 = 60.0;
+
+fn window_padding(total_tracks: usize, window: &WindowRows) -> (f64, f64) {
+    let offset = window.offset as usize;
+    (
+        offset as f64 * ITEM_HEIGHT,
+        total_tracks.saturating_sub(offset + window.rows.len()) as f64 * ITEM_HEIGHT,
+    )
+}
 
 #[component]
 pub fn LibraryPage(
@@ -127,12 +135,10 @@ pub fn LibraryPage(
 
     let total_tracks = total_rows();
     let is_empty = total_tracks == 0;
-    let scroll_info = use_virtual_scroll(
-        *scroll_stat.read(),
-        *container_height.read(),
-        total_tracks,
-        ITEM_HEIGHT,
-    );
+    let window_rows = window.rows.read().clone().unwrap_or_default();
+    // The resource retains the previous rows while fetching. Moving their pad
+    // to the requested offset would shift those rows until the fetch completes.
+    let (top_pad, bottom_pad) = window_padding(total_tracks, &window_rows);
     let all_selected = !is_empty && selected_tracks.read().len() >= total_tracks;
     let currently_playing_idx: Option<usize> = {
         let current_index = *ctrl.current_queue_index.read();
@@ -143,7 +149,6 @@ pub fn LibraryPage(
     let tracks_nodes = {
         let cap = caps();
         let conf = config.read();
-        let window_rows = window.rows.read().clone().unwrap_or_default();
         let row_offset = window_rows.offset as usize;
         window_rows
             .rows
@@ -474,8 +479,8 @@ pub fn LibraryPage(
                 container_height,
                 item_height: ITEM_HEIGHT,
                 saved_scroll,
-                top_pad: scroll_info.top_pad,
-                bottom_pad: scroll_info.bottom_pad,
+                top_pad,
+                bottom_pad,
                 onscroll: move |scroll| {
                     scroll_positions.write().insert(Route::Library, scroll);
                 },
@@ -497,5 +502,50 @@ pub fn LibraryPage(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn window(offset: u32, count: usize) -> WindowRows {
+        WindowRows {
+            offset,
+            rows: vec![api::TrackInfo::default(); count],
+        }
+    }
+
+    #[test]
+    fn pending_window_keeps_loaded_tracks_at_their_absolute_positions() {
+        let loaded = window(20, 30);
+        let requested = use_virtual_scroll(2_400.0, 600.0, 100, ITEM_HEIGHT);
+        assert_ne!(requested.start_index, loaded.offset as usize);
+
+        let (before, _) = window_padding(100, &loaded);
+        let next = window(requested.start_index as u32, requested.items_to_render);
+        let (after, _) = window_padding(100, &next);
+
+        // Track 40 is in both windows and must stay at 2400px as rows arrive.
+        assert_eq!(before + (40 - loaded.offset) as f64 * ITEM_HEIGHT, 2_400.0);
+        assert_eq!(after + (40 - next.offset) as f64 * ITEM_HEIGHT, 2_400.0);
+    }
+
+    #[test]
+    fn loading_and_partial_windows_preserve_the_full_scroll_height() {
+        for loaded in [WindowRows::default(), window(20, 30), window(90, 7)] {
+            let (top, bottom) = window_padding(100, &loaded);
+            assert_eq!(
+                top + loaded.rows.len() as f64 * ITEM_HEIGHT + bottom,
+                6_000.0
+            );
+        }
+    }
+
+    #[test]
+    fn shrinking_count_does_not_underflow_while_old_rows_are_visible() {
+        let (top, bottom) = window_padding(10, &window(90, 10));
+        assert_eq!(top, 5_400.0);
+        assert_eq!(bottom, 0.0);
     }
 }
