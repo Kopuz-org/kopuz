@@ -9,7 +9,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
-use config::{ChannelMode, EqualizerSettings};
+use config::{ChannelMode, EqualizerSettings, ReplayGainInfo, ReplayGainSettings};
 
 use super::rt::{Retired, RtCmd, RtSession, RtState};
 use super::sink::{AudioSink, DataCallbackFactory, SinkConfig};
@@ -129,6 +129,14 @@ struct Session {
     worker: WorkerHandle,
     written: Arc<AtomicU64>,
     played: Arc<AtomicU64>,
+    /// Linear ReplayGain factor the audio callback reads for this session.
+    gain: Arc<AtomicU32>,
+    /// The track's own tagged values, kept so a settings change can recompute
+    /// the factor for a session that is already playing.
+    replay_gain: ReplayGainInfo,
+    /// Whether this track was loaded as part of an album run; picks the album
+    /// gain under `ReplayGainMode::Auto`.
+    album_context: bool,
     base_micros: u64,
     duration: Duration,
     seekable: bool,
@@ -148,6 +156,8 @@ struct StartPlan {
     duration: Duration,
     transition: Transition,
     start_at: Option<Duration>,
+    album_context: bool,
+    service_replay_gain: ReplayGainInfo,
 }
 
 struct Pending {
@@ -163,7 +173,9 @@ struct RingParts {
     rt_session: RtSession,
 }
 
-fn make_ring(config: SinkConfig) -> RingParts {
+/// `gain` is the session's ReplayGain cell. A seek re-rings a session that is
+/// already levelled, so it passes its existing cell back in.
+fn make_ring(config: SinkConfig, gain: Arc<AtomicU32>) -> RingParts {
     let size = (config.sample_rate as usize * config.channels * RING_BUF_SECONDS).max(1);
     let (producer, consumer) = rtrb::RingBuffer::new(size);
     let written = Arc::new(AtomicU64::new(0));
@@ -172,7 +184,11 @@ fn make_ring(config: SinkConfig) -> RingParts {
         producer,
         written,
         played: played.clone(),
-        rt_session: RtSession { consumer, played },
+        rt_session: RtSession {
+            consumer,
+            played,
+            gain,
+        },
     }
 }
 
@@ -189,6 +205,7 @@ struct Actor {
     volume: Arc<AtomicU32>,
     paused: Arc<AtomicBool>,
     eq_settings: EqualizerSettings,
+    replay_gain_settings: ReplayGainSettings,
     channel_mode: ChannelMode,
     device_change_behavior: config::DeviceChangeBehavior,
     sample_rate_mode: config::SampleRateMode,
@@ -240,6 +257,7 @@ impl Actor {
             volume: Arc::new(AtomicU32::new(super::rt::volume_bits(1.0))),
             paused: Arc::new(AtomicBool::new(false)),
             eq_settings: EqualizerSettings::default(),
+            replay_gain_settings: ReplayGainSettings::default(),
             channel_mode: ChannelMode::Stereo,
             device_change_behavior: config::DeviceChangeBehavior::Resume,
             sample_rate_mode: config::SampleRateMode::System,
@@ -353,6 +371,22 @@ impl Actor {
                 self.eq_settings = settings.clone();
                 self.send_rt(RtCmd::SetEqualizer(settings));
             }
+            Command::SetReplayGain(settings) => {
+                self.replay_gain_settings = settings;
+                // Sessions publish their gain through a shared cell, so both
+                // sides of an in-flight crossfade re-level without a reload.
+                for session in [self.current.as_ref(), self.fading.as_ref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    session.gain.store(
+                        settings
+                            .linear_gain(session.replay_gain, session.album_context)
+                            .to_bits(),
+                        Ordering::Relaxed,
+                    );
+                }
+            }
             Command::SetDeviceChangeBehavior(behavior) => {
                 self.device_change_behavior = behavior;
             }
@@ -391,6 +425,8 @@ impl Actor {
             duration,
             transition,
             start_at,
+            album_context,
+            service_replay_gain,
             reply,
         } = request;
 
@@ -414,6 +450,8 @@ impl Actor {
                 duration,
                 transition,
                 start_at,
+                album_context,
+                service_replay_gain,
             },
             reply,
         });
@@ -428,6 +466,7 @@ impl Actor {
                 token,
                 source_sample_rate,
                 seekable,
+                replay_gain,
             } => {
                 if self.pending.as_ref().is_none_or(|p| p.plan.token != token) {
                     // Stale probe from a superseded load; its command sender is
@@ -435,7 +474,7 @@ impl Actor {
                     return;
                 }
                 let pending = self.pending.take().expect("checked above");
-                self.start_session(pending, source_sample_rate, seekable);
+                self.start_session(pending, source_sample_rate, seekable, replay_gain);
             }
             WorkerMsg::Eof { token, epoch } => {
                 if let Some(current) = &mut self.current
@@ -480,11 +519,17 @@ impl Actor {
     }
 
     /// A probed source is ready: decide crossfade vs immediate and start it.
-    fn start_session(&mut self, pending: Pending, source_sample_rate: Option<u32>, seekable: bool) {
+    fn start_session(
+        &mut self,
+        pending: Pending,
+        source_sample_rate: Option<u32>,
+        seekable: bool,
+        replay_gain: ReplayGainInfo,
+    ) {
         let Pending { plan, reply } = pending;
         let token = plan.token;
 
-        match self.try_start_session(plan, source_sample_rate, seekable) {
+        match self.try_start_session(plan, source_sample_rate, seekable, replay_gain) {
             Ok(outcome) => {
                 // Publish before resolving the reply so a caller that reads
                 // status right after awaiting sees the new session.
@@ -520,6 +565,7 @@ impl Actor {
         plan: StartPlan,
         source_sample_rate: Option<u32>,
         seekable: bool,
+        replay_gain: ReplayGainInfo,
     ) -> Result<LoadOutcome, String> {
         let StartPlan {
             token,
@@ -527,6 +573,8 @@ impl Actor {
             duration,
             transition,
             start_at,
+            album_context,
+            service_replay_gain,
         } = plan;
 
         let fade = match transition {
@@ -603,12 +651,20 @@ impl Actor {
             (config, None, false)
         };
 
+        // The stream's own tags describe the exact bytes being decoded, so
+        // they win; the server's values fill in what a transcode stripped.
+        let replay_gain = replay_gain.or(service_replay_gain);
+        let gain = Arc::new(AtomicU32::new(
+            self.replay_gain_settings
+                .linear_gain(replay_gain, album_context)
+                .to_bits(),
+        ));
         let RingParts {
             producer,
             written,
             played,
             rt_session,
-        } = make_ring(config);
+        } = make_ring(config, gain.clone());
         let _ = worker.cmd_tx.send(WorkerCmd::Start {
             producer,
             written: written.clone(),
@@ -627,6 +683,9 @@ impl Actor {
             worker,
             written,
             played,
+            gain,
+            replay_gain,
+            album_context,
             base_micros: start_at.unwrap_or(Duration::ZERO).as_micros() as u64,
             duration,
             seekable,
@@ -717,7 +776,7 @@ impl Actor {
         // the ring generation first so a pre-seek Eof still in flight from the
         // worker is dropped instead of ending the seeked session.
         current.ring_epoch += 1;
-        let ring = make_ring(config);
+        let ring = make_ring(config, current.gain.clone());
         let _ = current.worker.cmd_tx.send(WorkerCmd::Seek {
             target,
             producer: ring.producer,

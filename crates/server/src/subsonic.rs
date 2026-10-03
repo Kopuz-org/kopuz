@@ -81,6 +81,36 @@ pub struct SubsonicSong {
     pub disc_number: Option<u32>,
     pub genre: Option<String>,
     pub cover_art: Option<String>,
+    pub replay_gain: Option<SubsonicReplayGain>,
+}
+
+/// The OpenSubsonic `replayGain` object. `baseGain` is deliberately unread:
+/// it exists for Ogg Opus output gain, which the decoder already applies.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubsonicReplayGain {
+    pub track_gain: Option<f32>,
+    pub album_gain: Option<f32>,
+    pub track_peak: Option<f32>,
+    pub album_peak: Option<f32>,
+}
+
+impl SubsonicSong {
+    pub fn replay_gain_info(&self) -> config::ReplayGainInfo {
+        let Some(gain) = &self.replay_gain else {
+            return config::ReplayGainInfo::default();
+        };
+        config::ReplayGainInfo {
+            track_gain_db: gain.track_gain.filter(|db| db.is_finite()),
+            track_peak: gain
+                .track_peak
+                .filter(|peak| peak.is_finite() && *peak > 0.0),
+            album_gain_db: gain.album_gain.filter(|db| db.is_finite()),
+            album_peak: gain
+                .album_peak
+                .filter(|peak| peak.is_finite() && *peak > 0.0),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -795,5 +825,34 @@ mod tests {
                 .iter()
                 .any(|ext| ext.name == SONIC_SIMILARITY_EXTENSION)
         );
+    }
+
+    #[test]
+    fn reads_the_opensubsonic_replaygain_object() {
+        let song: SubsonicSong = serde_json::from_str(
+            r#"{
+                "id": "1",
+                "title": "T",
+                "replayGain": {
+                    "trackGain": -7.5,
+                    "albumGain": -5.25,
+                    "trackPeak": 0.98,
+                    "baseGain": 0
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let info = song.replay_gain_info();
+        assert_eq!(info.track_gain_db, Some(-7.5));
+        assert_eq!(info.album_gain_db, Some(-5.25));
+        assert_eq!(info.track_peak, Some(0.98));
+        assert_eq!(info.album_peak, None);
+    }
+
+    #[test]
+    fn a_song_without_the_object_reports_nothing() {
+        let song: SubsonicSong = serde_json::from_str(r#"{"id": "1", "title": "T"}"#).unwrap();
+        assert!(song.replay_gain_info().is_empty());
     }
 }

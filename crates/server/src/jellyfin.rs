@@ -122,6 +122,20 @@ pub struct Item {
     pub container: Option<String>,
     pub bitrate: Option<u32>,
     pub sample_rate: Option<u32>,
+    pub normalization_gain: Option<f32>,
+    pub album_normalization_gain: Option<f32>,
+}
+
+impl Item {
+    /// Jellyfin derives these from LUFS and publishes no peak, so clip
+    /// prevention has nothing to work with on a Jellyfin-supplied gain.
+    pub fn replay_gain_info(&self) -> config::ReplayGainInfo {
+        config::ReplayGainInfo {
+            track_gain_db: self.normalization_gain.filter(|db| db.is_finite()),
+            album_gain_db: self.album_normalization_gain.filter(|db| db.is_finite()),
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -829,5 +843,38 @@ impl JellyfinClient {
 
         let items_resp: ItemsResponse = self.request_with_query(&path, &query).await?;
         Ok(items_resp.items)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Item;
+
+    #[test]
+    fn reads_the_normalization_gains() {
+        let item: Item = serde_json::from_str(
+            r#"{
+                "Name": "T",
+                "Id": "1",
+                "Type": "Audio",
+                "NormalizationGain": -7.5,
+                "AlbumNormalizationGain": -5.25
+            }"#,
+        )
+        .unwrap();
+
+        let info = item.replay_gain_info();
+        assert_eq!(info.track_gain_db, Some(-7.5));
+        assert_eq!(info.album_gain_db, Some(-5.25));
+        // Jellyfin publishes no peaks, so clip prevention stays inert here.
+        assert_eq!(info.track_peak, None);
+        assert_eq!(info.album_peak, None);
+    }
+
+    #[test]
+    fn an_item_from_an_older_server_reports_nothing() {
+        let item: Item =
+            serde_json::from_str(r#"{"Name": "T", "Id": "1", "Type": "Audio"}"#).unwrap();
+        assert!(item.replay_gain_info().is_empty());
     }
 }

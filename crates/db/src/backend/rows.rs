@@ -25,6 +25,10 @@ pub struct TrackRow {
     pub mb_track_id: Option<String>,
     pub playlist_item_id: Option<String>,
     pub artists_json: String,
+    pub rg_track_gain: Option<f64>,
+    pub rg_track_peak: Option<f64>,
+    pub rg_album_gain: Option<f64>,
+    pub rg_album_peak: Option<f64>,
 }
 
 impl From<TrackRow> for Track {
@@ -53,6 +57,12 @@ impl From<TrackRow> for Track {
             musicbrainz_track_id: r.mb_track_id,
             playlist_item_id: r.playlist_item_id,
             artists: serde_json::from_str(&r.artists_json).unwrap_or_default(),
+            replay_gain: config::ReplayGainInfo {
+                track_gain_db: r.rg_track_gain.map(|v| v as f32),
+                track_peak: r.rg_track_peak.map(|v| v as f32),
+                album_gain_db: r.rg_album_gain.map(|v| v as f32),
+                album_peak: r.rg_album_peak.map(|v| v as f32),
+            },
         }
     }
 }

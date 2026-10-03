@@ -167,6 +167,7 @@ impl SessionHandle {
         player.set_volume(services.config.volume);
         player.set_channel_mode(services.config.channel_mode);
         player.set_equalizer(services.config.equalizer.clone());
+        player.set_replay_gain(services.config.replay_gain);
         player.set_device_change_behavior(services.config.device_change_behavior);
         player.set_sample_rate_mode(services.config.sample_rate_mode);
 
@@ -1115,6 +1116,7 @@ impl Session {
                     self.player.set_volume(self.volume);
                 }
                 "equalizer" => self.player.set_equalizer(config.equalizer.clone()),
+                "replay_gain" => self.player.set_replay_gain(config.replay_gain),
                 "channel_mode" => self.player.set_channel_mode(config.channel_mode),
                 "sample_rate_mode" => self.player.set_sample_rate_mode(config.sample_rate_mode),
                 "device_change_behavior" => {

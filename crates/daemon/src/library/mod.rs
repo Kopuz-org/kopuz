@@ -467,6 +467,7 @@ impl LibraryService {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec![],
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 
@@ -613,6 +614,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec![],
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 
@@ -747,6 +749,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec![],
+            replay_gain: config::ReplayGainInfo::default(),
         };
 
         assert!(

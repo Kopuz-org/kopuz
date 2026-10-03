@@ -398,6 +398,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: Vec::new(),
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 
