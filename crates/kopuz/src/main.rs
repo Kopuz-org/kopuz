@@ -1098,12 +1098,15 @@ fn App() -> Element {
     let mut is_sidebar_collapsed = use_signal(|| cfg!(target_os = "android"));
     use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
 
-    // Mirror of the drawer's swipe-left-to-close: a swipe right anywhere on the
-    // page opens it. Horizontal carousels swallow their own touches so scrolling
-    // one back to the start does not pull the drawer out with it.
+    // Only an edge swipe opens the drawer; horizontal scrolling and sliders
+    // elsewhere on the page must not turn into navigation gestures.
     let mut open_swipe = components::gestures::use_swipe();
     let on_open_swipe = move |evt: TouchEvent| {
+        let from_edge = open_swipe
+            .origin()
+            .is_some_and(|(x, _)| (0.0..=24.0).contains(&x));
         if open_swipe.finish(&evt) == Some(components::gestures::SwipeDirection::Right)
+            && from_edge
             && cfg!(target_os = "android")
             && *is_sidebar_collapsed.peek()
         {

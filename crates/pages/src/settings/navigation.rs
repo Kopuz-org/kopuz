@@ -60,6 +60,8 @@ pub(super) fn SettingsNavigation(
         nav {
             class: "settings-fan",
             aria_label: i18n::t("settings"),
+            // The category strip owns its scroll gesture, including at its edge.
+            ontouchstart: move |evt| evt.stop_propagation(),
             div { class: "settings-fan-disc",
                 SettingsFanItem {
                     category: SettingsCategory::General,
