@@ -61,10 +61,8 @@ async fn artwork(State(server): State<Arc<ArtworkServer>>, uri: http::Uri) -> Re
         Ok(Ok(data)) => (
             [
                 (header::CONTENT_TYPE, data.content_type.as_str()),
-                (
-                    header::CACHE_CONTROL,
-                    "private, max-age=31536000, immutable",
-                ),
+                // Entity IDs and versions can repeat after a session change.
+                (header::CACHE_CONTROL, "no-store"),
                 (
                     header::ACCESS_CONTROL_ALLOW_ORIGIN,
                     "https://dioxus.index.html",
@@ -168,12 +166,7 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()[header::CONTENT_TYPE], "image/png");
-        assert!(
-            response.headers()[header::CACHE_CONTROL]
-                .to_str()
-                .unwrap()
-                .contains("immutable")
-        );
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
         assert_eq!(&bytes[..], b"album:source:a&b +c:true");
     }
