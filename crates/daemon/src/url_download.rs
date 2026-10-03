@@ -704,8 +704,10 @@ impl UrlDownloadService {
         }
         let sidecar_wanted =
             options.write_thumbnail || (options.embed_thumbnail && !target.taggable());
+        let sidecar = output.with_extension("jpg");
         if let Some(cover) = cover.filter(|_| sidecar_wanted)
-            && let Err(error) = tokio::fs::write(output.with_extension("jpg"), cover).await
+            && (options.overwrite_existing || !sidecar.exists())
+            && let Err(error) = tokio::fs::write(&sidecar, cover).await
         {
             tracing::warn!(%error, "the cover could not be saved beside the download");
         }

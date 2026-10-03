@@ -553,7 +553,7 @@ where
                 if let Some(lyrics) = result {
                     let should_replace = fallback
                         .as_ref()
-                        .map(|current| lyrics_quality(&lyrics) >= lyrics_quality(current))
+                        .map(|current| lyrics_quality(&lyrics) > lyrics_quality(current))
                         .unwrap_or(true);
                     if should_replace {
                         fallback = Some(lyrics.clone());
