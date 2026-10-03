@@ -81,6 +81,10 @@ pub struct RadioSeeds {
     pub track: bool,
     /// Backs [`MediaSource::start_playlist_radio`](super::MediaSource::start_playlist_radio).
     pub playlist: bool,
+    /// Playing a search result starts a radio from it instead of queueing the
+    /// results: a catalog search is a list of unrelated matches, not an album.
+    /// Needs `track`.
+    pub search: bool,
 }
 
 impl RadioSeeds {
@@ -88,18 +92,21 @@ impl RadioSeeds {
     pub const NONE: Self = Self {
         track: false,
         playlist: false,
+        search: false,
     };
 
     /// A song seed only, the Subsonic/OpenSubsonic shape.
     pub const TRACK: Self = Self {
         track: true,
         playlist: false,
+        search: false,
     };
 
     /// Both seeds, the catalog-remote shape.
     pub const ALL: Self = Self {
         track: true,
         playlist: true,
+        search: false,
     };
 }
 
