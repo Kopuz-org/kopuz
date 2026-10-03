@@ -33,7 +33,13 @@ pub fn use_lyrics(key: Memo<String>, radio: Memo<bool>, not_found: String) -> Si
         let api = api.clone();
         let not_found = not_found.clone();
         spawn(async move {
-            let found = api.lyrics(asked.clone()).await.ok().map(from_view);
+            let found = match api.lyrics(asked.clone()).await {
+                Ok(view) => Some(from_view(view)),
+                Err(error) => {
+                    tracing::debug!(%error, key = %asked, "no lyrics for the playing track");
+                    None
+                }
+            };
             if *key.peek() != asked {
                 return;
             }

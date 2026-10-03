@@ -9,7 +9,7 @@ pub(crate) fn use_fullscreen_lyrics() -> Signal<Option<Option<utils::lyrics::Lyr
         ctrl.current_track_snapshot
             .read()
             .as_ref()
-            .map(|track| track.uid.clone())
+            .map(|track| track.key.clone())
             .unwrap_or_default()
     });
     let radio = use_memo(move || {
