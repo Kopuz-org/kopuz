@@ -3,6 +3,33 @@
 use dioxus::prelude::*;
 use hooks::PlayerController;
 
+/// A circle with a bar through its middle, drawn rather than stacked from two
+/// font glyphs: each glyph sits in its own advance width, so the bar never
+/// lined up with the circle's center. The stroke matches the weight of Font
+/// Awesome's regular circle, so it reads as heavy as the heart beside it.
+#[component]
+fn NoEntryIcon() -> Element {
+    rsx! {
+        svg {
+            width: "0.875em",
+            height: "0.875em",
+            view_box: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            stroke_width: "2.25",
+            stroke_linecap: "round",
+            "aria-hidden": "true",
+            circle { cx: "12", cy: "12", r: "10.5" }
+            line {
+                x1: "7",
+                y1: "12",
+                x2: "17",
+                y2: "12",
+            }
+        }
+    }
+}
+
 /// Renders nothing when the active source takes no such signal.
 #[component]
 pub fn DontRecommendButton(class: String) -> Element {
@@ -24,18 +51,7 @@ pub fn DontRecommendButton(class: String) -> Element {
             title: "{label}",
             "aria-label": "{label}",
             onclick: move |_| hooks::recommendations::dont_recommend(ctrl),
-            // Inline, not a Tailwind class: purged from the stylesheet it silently falls back to 1em.
-            span {
-                class: "relative inline-flex",
-                style: "font-size: 0.875em",
-                "aria-hidden": "true",
-                // Stacked glyphs, not a border: a border reads lighter than the heart beside it.
-                i { class: "fa-regular fa-circle" }
-                i {
-                    class: "fa-solid fa-minus absolute inset-0",
-                    style: "display: flex; align-items: center; justify-content: center; transform: scale(0.5, 0.76)",
-                }
-            }
+            NoEntryIcon {}
         }
     }
 }
