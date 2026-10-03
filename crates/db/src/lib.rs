@@ -552,6 +552,9 @@ pub trait Storage: ReadStore {
         snap: &QueueSnapshot,
     ) -> Result<(), DbError>;
 
+    /// Forget `source`'s stored queue.
+    async fn clear_queue(&self, source: &Source) -> Result<(), DbError>;
+
     /// Pin (`Some` manifest) a station after the others, or unpin it (`None`).
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError>;
 

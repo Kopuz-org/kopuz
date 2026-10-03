@@ -724,3 +724,71 @@ async fn active_server_writes_never_touch_other_servers_rows() {
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
+
+/// Two accounts can hold the same video; restoring one's queue must refresh it from that account's library, not the other's.
+#[tokio::test]
+async fn a_restored_queue_refreshes_from_its_own_source_only() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let mine = Source::Server("srv-mine".into());
+    let theirs = Source::Server("srv-theirs".into());
+    db.upsert_tracks(&theirs, &[server_track("VID", "Their row")])
+        .await
+        .unwrap();
+    db.upsert_tracks(&mine, &[server_track("VID", "My row")])
+        .await
+        .unwrap();
+    let mut queued = server_track("VID", "Queued");
+    queued.playlist_item_id = Some("entry-7".into());
+    db.save_queue(
+        &mine,
+        &QueueSnapshot {
+            version: 1,
+            queue: vec![queued],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let restored = db.load_queue(&mine).await.unwrap();
+    assert_eq!(restored.queue[0].title, "My row");
+    assert_eq!(
+        restored.queue[0].playlist_item_id.as_deref(),
+        Some("entry-7"),
+        "the queued entry keeps its own playlist entry"
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// Re-crediting a track drops the artist it no longer credits, rather than leaving the row under its key.
+#[tokio::test]
+async fn a_re_credited_track_leaves_no_orphaned_artist() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::Server("srv-1".into());
+    let mut track = server_track("T1", "Song");
+    track.artist = "Old Name".into();
+    track.artists = vec!["Old Name".into()];
+    db.upsert_tracks(&source, std::slice::from_ref(&track))
+        .await
+        .unwrap();
+    let before = db.unlinked_artist_keys(&source).await.unwrap();
+    assert_eq!(before.len(), 1, "{before:?}");
+
+    track.artist = "New Name".into();
+    track.artists = vec!["New Name".into()];
+    db.upsert_tracks(&source, std::slice::from_ref(&track))
+        .await
+        .unwrap();
+    let after = db.unlinked_artist_keys(&source).await.unwrap();
+    assert_eq!(
+        after.len(),
+        1,
+        "only the credited artist remains: {after:?}"
+    );
+    assert_ne!(after, before, "and it is the new one");
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}

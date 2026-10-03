@@ -332,10 +332,14 @@ pub async fn artist_sample_tracks(
                   t.track_number, t.disc_number,
                   mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?"
              FROM tracks t
+             JOIN (SELECT MIN(c.track_pk) AS track_pk, c.artist_pk FROM track_credits c
+                     JOIN tracks s ON s.rowid_pk = c.track_pk
+                    WHERE s.source = ?1 AND c.position = 0
+                    GROUP BY c.artist_pk) first ON first.track_pk = t.rowid_pk
+             JOIN artists ar ON ar.id = first.artist_pk
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
-            WHERE t.rowid_pk IN (SELECT MIN(rowid_pk) FROM tracks WHERE source = ?1 GROUP BY artist)
-            ORDER BY t.artist COLLATE NOCASE
+            ORDER BY ar.name COLLATE NOCASE
             LIMIT ?2"#,
         src,
         limit
@@ -431,11 +435,13 @@ pub async fn tracks_by_keys(
 /// Swap each queued track for its library row where one exists, so a restore shows what a sync since wrote.
 pub(crate) async fn refresh_from_library(
     pool: &SqlitePool,
+    source: &Source,
     queue: Vec<Track>,
 ) -> Result<Vec<Track>, DbError> {
     if queue.is_empty() {
         return Ok(queue);
     }
+    let src = source.as_str();
     let keys: Vec<String> = queue.iter().map(|t| t.id.key().into_owned()).collect();
     let keys_json = serde_json::to_string(&keys)?;
     let rows = sqlx::query_as!(
@@ -448,7 +454,8 @@ pub(crate) async fn refresh_from_library(
              FROM tracks t
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
-            WHERE t.track_key IN (SELECT value FROM json_each(?1))"#,
+            WHERE t.source = ?1 AND t.track_key IN (SELECT value FROM json_each(?2))"#,
+        src,
         keys_json
     )
     .fetch_all(pool)
@@ -458,7 +465,11 @@ pub(crate) async fn refresh_from_library(
         .into_iter()
         .map(
             |queued| match library.iter().find(|row| row.id == queued.id) {
-                Some(row) => row.clone(),
+                // The playlist entry is the queued row's own; the library row has none.
+                Some(row) => Track {
+                    playlist_item_id: queued.playlist_item_id,
+                    ..row.clone()
+                },
                 None => queued,
             },
         )

@@ -118,12 +118,14 @@ pub async fn load_queue(
     source: &crate::Source,
 ) -> Result<QueueSnapshot, DbError> {
     let src = source.as_str();
+    // One read snapshot, so a save landing between the reads cannot pair old rows with a new index.
+    let mut tx = pool.begin().await?;
     let row = sqlx::query!(
         "SELECT version, current_queue_index, progress_secs, shuffle_enabled \
          FROM queue_state WHERE source = ?1",
         src
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let Some(row) = row else {
         return Ok(QueueSnapshot::default());
@@ -136,7 +138,7 @@ pub async fn load_queue(
          FROM queue_tracks WHERE source = ?1 ORDER BY position",
         src
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await?;
     let credits = sqlx::query_as!(
         super::rows::QueueCreditRow,
@@ -144,7 +146,7 @@ pub async fn load_queue(
          FROM queue_credits WHERE queue_source = ?1 ORDER BY queue_position, position",
         src
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await?;
     let mut by_row: std::collections::HashMap<i64, Vec<reader::ArtistCredit>> =
         std::collections::HashMap::new();
@@ -165,11 +167,12 @@ pub async fn load_queue(
         "SELECT position FROM queue_shuffle WHERE source = ?1 ORDER BY step",
         src
     )
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(QueueSnapshot {
         version: row.version.clamp(0, u8::MAX as i64) as u8,
-        queue: super::queries::refresh_from_library(pool, saved).await?,
+        queue: super::queries::refresh_from_library(pool, source, saved).await?,
         current_queue_index: row.current_queue_index.max(0) as usize,
         progress_secs: row.progress_secs.max(0) as u64,
         shuffle_order: shuffle_order

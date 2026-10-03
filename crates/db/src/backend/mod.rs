@@ -581,6 +581,10 @@ impl Storage for Native {
         writes::save_queue_position(&self.pool(), source, snap).await
     }
 
+    async fn clear_queue(&self, source: &crate::Source) -> Result<(), DbError> {
+        writes::clear_queue(&self.pool(), source).await
+    }
+
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError> {
         writes::set_pinned_station(&self.pool(), id, manifest).await
     }

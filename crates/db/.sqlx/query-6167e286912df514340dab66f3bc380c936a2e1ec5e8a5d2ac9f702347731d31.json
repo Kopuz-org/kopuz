@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT t.rowid_pk AS \"rowid_pk!\", t.track_key, t.service,\n                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS \"cover_path?: String\",\n                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,\n                  t.track_number, t.disc_number,\n                  mb.release_id AS \"mb_release_id?\", mb.recording_id AS \"mb_recording_id?\", mb.track_id AS \"mb_track_id?\"\n             FROM tracks t\n             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id\n             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk\n            WHERE t.track_key IN (SELECT value FROM json_each(?1))",
+  "query": "SELECT t.rowid_pk AS \"rowid_pk!\", t.track_key, t.service,\n                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS \"cover_path?: String\",\n                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,\n                  t.track_number, t.disc_number,\n                  mb.release_id AS \"mb_release_id?\", mb.recording_id AS \"mb_recording_id?\", mb.track_id AS \"mb_track_id?\"\n             FROM tracks t\n             JOIN (SELECT MIN(c.track_pk) AS track_pk, c.artist_pk FROM track_credits c\n                     JOIN tracks s ON s.rowid_pk = c.track_pk\n                    WHERE s.source = ?1 AND c.position = 0\n                    GROUP BY c.artist_pk) first ON first.track_pk = t.rowid_pk\n             JOIN artists ar ON ar.id = first.artist_pk\n             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id\n             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk\n            ORDER BY ar.name COLLATE NOCASE\n            LIMIT ?2",
   "describe": {
     "columns": [
       {
@@ -21,7 +21,7 @@
       {
         "name": "cover_path?: String",
         "ordinal": 3,
-        "type_info": "Text"
+        "type_info": "Null"
       },
       {
         "name": "source_album_id",
@@ -85,13 +85,13 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
-      false,
+      true,
       false,
       true,
-      true,
+      null,
       false,
       false,
       false,
@@ -106,5 +106,5 @@
       true
     ]
   },
-  "hash": "4f27986b21fa563f6c36f085e21c0eb4a57293ee47e10ba03c7919e98555e0af"
+  "hash": "6167e286912df514340dab66f3bc380c936a2e1ec5e8a5d2ac9f702347731d31"
 }

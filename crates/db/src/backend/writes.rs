@@ -32,6 +32,8 @@ pub async fn upsert_tracks(
     for t in tracks {
         upsert_track(&mut tx, src, t).await?;
     }
+    // A re-credited track can leave its old artist with nothing; that row goes rather than lingering under its key.
+    prune_artists(&mut tx, src).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -350,6 +352,7 @@ pub async fn upsert_albums(
     for a in albums {
         upsert_album(&mut tx, src, a).await?;
     }
+    prune_artists(&mut tx, src).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -840,7 +843,8 @@ pub async fn set_playlist_tracks(
     entries: &[reader::PlaylistEntry],
 ) -> Result<(), DbError> {
     let src = source.as_str();
-    let mut tx = pool.begin().await?;
+    // It reads before it writes, and a deferred BEGIN then fails at once against a write that landed meanwhile.
+    let mut tx = super::begin_immediate(pool).await?;
     let pk = resolve_or_create_pk(&mut tx, src, pl_id).await?;
     sqlx::query!("DELETE FROM playlist_tracks WHERE playlist_pk = ?1", pk)
         .execute(&mut *tx)
@@ -1005,7 +1009,8 @@ pub async fn upsert_playlist_tracks_page(
     epoch: i64,
 ) -> Result<(), DbError> {
     let src = source.as_str();
-    let mut tx = pool.begin().await?;
+    // It reads before it writes, and a deferred BEGIN then fails at once against a write that landed meanwhile.
+    let mut tx = super::begin_immediate(pool).await?;
     let pk = resolve_or_create_pk(&mut tx, src, pl_id).await?;
     for (i, entry) in entries.iter().enumerate() {
         let pos = start_position + i as i64;
@@ -1290,6 +1295,20 @@ async fn write_queue_position(
     )
     .execute(&mut *conn)
     .await?;
+    Ok(())
+}
+
+/// Forget `source`'s stored queue; its credits and shuffle cascade from the rows.
+pub async fn clear_queue(pool: &SqlitePool, source: &Source) -> Result<(), DbError> {
+    let src = source.as_str();
+    let mut tx = pool.begin().await?;
+    sqlx::query!("DELETE FROM queue_tracks WHERE source = ?1", src)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query!("DELETE FROM queue_state WHERE source = ?1", src)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(())
 }
 

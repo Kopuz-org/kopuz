@@ -335,7 +335,7 @@ async fn a_restored_queue_shows_what_the_library_holds_now() {
     let stale = track("t1", Vec::new());
     let transient = track("radio-only", Vec::new());
     db.save_queue(
-        &Source::default(),
+        &source,
         &db::QueueSnapshot {
             version: 1,
             queue: vec![stale.clone(), transient.clone()],
@@ -348,7 +348,7 @@ async fn a_restored_queue_shows_what_the_library_holds_now() {
     fresh.title = "Renamed by a sync".into();
     db.upsert_tracks(&source, &[fresh]).await.unwrap();
 
-    let restored = db.load_queue(&Source::default()).await.unwrap().queue;
+    let restored = db.load_queue(&source).await.unwrap().queue;
 
     assert_eq!(restored[0].title, "Renamed by a sync");
     let named = Track {
