@@ -62,6 +62,17 @@ struct State {
     poll: Option<tokio::task::JoinHandle<()>>,
 }
 
+/// The Web API access token `config` holds for an active Spotify source.
+fn access_of(config: &config::AppConfig) -> Option<String> {
+    let server = config.server.as_ref()?;
+    if server.service != config::MusicService::Spotify {
+        return None;
+    }
+    let packed = server.access_token.clone()?;
+    let access = server::spotify::auth::unpack_token(&packed).0;
+    (!access.is_empty()).then_some(access)
+}
+
 impl SpotifySink {
     pub fn new(session: SessionHandle, config: Arc<ConfigService>) -> Arc<Self> {
         let sink = Arc::new(Self {
@@ -89,14 +100,7 @@ impl SpotifySink {
 
     /// The account's access token, when Spotify is the active server.
     fn access(&self) -> Option<String> {
-        let config = self.session.config_watch().borrow().clone();
-        let server = config.server.as_ref()?;
-        if server.service != config::MusicService::Spotify {
-            return None;
-        }
-        let packed = server.access_token.clone()?;
-        let access = server::spotify::auth::unpack_token(&packed).0;
-        (!access.is_empty()).then_some(access)
+        access_of(&self.session.config_watch().borrow())
     }
 
     fn require_access(&self) -> Result<String, ApiError> {
@@ -468,7 +472,8 @@ impl SpotifySink {
         let refreshed = server::spotify::auth::refresh_packed(&packed, client_id.clone())
             .await
             .map_err(ApiError::internal)?;
-        self.config
+        let saved = self
+            .config
             .mutate_state(&["server"], move |config| {
                 if let Some(server) = config.server.as_mut()
                     && server.service == config::MusicService::Spotify
@@ -478,8 +483,9 @@ impl SpotifySink {
                 }
             })
             .await?;
+        // From what was saved: the session's copy catches up only once its actor handles the change.
         if let Some(host) = self.with_state(|state| state.host.clone())
-            && let Some(access) = self.access()
+            && let Some(access) = access_of(&saved)
         {
             host.set_token(access).await;
         }

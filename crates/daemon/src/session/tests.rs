@@ -1844,6 +1844,12 @@ async fn an_unreadable_queue_is_not_saved_over() {
     api.player_command(PlayerCommand::SetVolume { volume: 0.3 })
         .await
         .expect("a change that marks the session dirty");
+    api.player_command(PlayerCommand::SetMode {
+        shuffle: Some(true),
+        loop_mode: None,
+    })
+    .await
+    .expect("a shuffle toggle on nothing builds no queue");
     session.persist_now().await;
     session.set_config(on_a, vec!["active_source".into()]);
     session.persist_now().await;

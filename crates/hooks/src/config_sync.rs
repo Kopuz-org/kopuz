@@ -35,8 +35,8 @@ impl ConfigBaseline {
         let Some((baseline, revision)) = self.0.peek().clone() else {
             return;
         };
-        // A read that left before a later write answered is older than what the app holds.
-        if view.revision <= revision {
+        // A read that left before a later write answered is older than what the app holds; a daemon that predates revisions sends 0 and is taken as is.
+        if view.revision != 0 && view.revision <= revision {
             return;
         }
         let current = local.peek().clone();
