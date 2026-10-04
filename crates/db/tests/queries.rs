@@ -1,6 +1,4 @@
-//! Windowed track query proof (issue #347, step 6): a 20k-track library is
-//! sorted/filtered/paged in SQL — a page query returns only its slice, in the
-//! requested order, and the count reflects the filter.
+//! Sorting, filtering, pagination, and matching counts over a 20k-track library.
 
 use std::path::PathBuf;
 

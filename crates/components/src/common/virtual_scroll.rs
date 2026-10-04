@@ -146,7 +146,6 @@ pub fn VirtualScrollView(
             id: "{id}",
             class: "{class}",
 
-
             style: "overflow-anchor: none;",
             onmounted: move |event| {
                 spawn(async move {

@@ -1,8 +1,6 @@
-//! Scrobbling, ported from `hooks/src/scrobble_scheduler.rs`: on each track
-//! commit, announce now-playing, wait for the Last.fm threshold (240 s or
-//! half the track) while the same session keeps playing, then submit to the
-//! native source, Last.fm, Libre.fm, and ListenBrainz, with the transient
-//! failure queue and its drain-on-success behavior intact.
+//! Announce now-playing on track commit and scrobble after 240 seconds or half
+//! the track's duration, provided the same session keeps playing. Transient
+//! failures are queued and retried after a successful submission.
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -82,8 +80,7 @@ impl Scrobbler {
         session.state().phase == Phase::Playing
     }
 
-    /// Wall-clock accumulation of playing time, aborted when the session
-    /// moves on, mirroring the hooks `wait_for_playtime`.
+    /// Accumulate playing time until the threshold or a session change.
     async fn wait_for_playtime(session: &SessionHandle, threshold: Duration, token: u64) -> bool {
         let tick = Duration::from_secs(1);
         let mut played = Duration::ZERO;

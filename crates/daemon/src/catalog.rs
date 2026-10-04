@@ -1,14 +1,5 @@
-//! The source's browse catalog, as the API serves it.
-//!
-//! Every network call the discover surface used to make from the UI process
-//! happens here, and every song it returns is registered with the library, so
-//! a client can queue, heart or ask for the artwork of a browse row by key
-//! exactly as it would a library track.
-//!
-//! Tile images are public URLs, but they are not handed over: the daemon
-//! remembers them and serves the bytes through `ArtworkApi`, so a frontend has
-//! exactly one way to get a picture and one that cannot fetch a URL itself
-//! still works.
+//! Browse catalogs from the active source. Tracks are registered in the library
+//! so clients can queue them by key; tile images are served through `ArtworkApi`.
 
 use crate::error::source_error;
 

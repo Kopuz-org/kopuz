@@ -82,7 +82,7 @@ pub fn TrackRow(
         if let Some(handler) = on_long_press {
             let mut occurred = long_press_occurred;
             let task = spawn(async move {
-                utils::sleep(std::time::Duration::from_millis(600)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(600)).await;
                 occurred.set(true);
                 handler.call(());
             });
@@ -694,11 +694,6 @@ pub fn TrackRow(
         }
     };
 }
-
-/// Re-exported from [`crate::radio_actions`], where track and playlist radio
-/// share one implementation. Kept here so the existing row call sites keep
-/// reading `track_row::radio_handler(...)`.
-pub use crate::radio_actions::track_radio_handler as radio_handler;
 
 /// Copy a shareable link for a track. Which page a row has -- the source's
 /// own, or the one its metadata names elsewhere -- is the daemon's knowledge.

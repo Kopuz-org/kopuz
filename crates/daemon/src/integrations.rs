@@ -1,9 +1,5 @@
-//! Playback integrations ported from the event pump: the Jellyfin session
-//! reporter and the Discord presence projector, plus the source-backed
-//! [`PlaybackRecorder`].
-//!
-//! Both tasks are event-driven off the session's state stream with their
-//! timers gated on activity, so an idle daemon takes no wakeups from them.
+//! Jellyfin session reporting, Discord presence, and source-backed playback records.
+//! Reporters follow session events and run timers only while active.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,8 +18,7 @@ const JELLYFIN_REPORT_SECS: u64 = 5;
 const JELLYFIN_KEEPALIVE_TICKS: u32 = 6;
 const DISCORD_TICK_SECS: u64 = 30;
 
-/// Durable recents + listen counts over the active source, matching the
-/// pump: recents record under the DB key, listen counts under the uid.
+/// Record recents under the track's DB key and listen counts under its uid.
 pub struct SourceRecorder {
     source: server::source::ActiveSource,
 }
@@ -199,9 +194,8 @@ impl Drop for DiscordState {
     }
 }
 
-/// Discord presence projection, ported from the pump: now-playing on play,
-/// paused card when enabled, cleared when disabled, with async cover-art
-/// resolution keyed by song so a late result never stamps the wrong track.
+/// Update Discord presence from playback state and preferences. Cover results
+/// are keyed by track so late responses cannot overwrite the current picture.
 pub fn spawn_discord_presence(
     session: &SessionHandle,
     config: watch::Receiver<config::AppConfig>,

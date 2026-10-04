@@ -42,7 +42,7 @@ pub(crate) fn FullscreenAndroid(
         close_from.set(from);
         closing.set(true);
         spawn(async move {
-            utils::sleep(std::time::Duration::from_millis(200)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             is_fullscreen.set(false);
         });
     };
@@ -129,7 +129,6 @@ pub(crate) fn FullscreenAndroid(
 
     rsx! {
         div {
-
 
             class: "fixed inset-0 z-[70] flex flex-col text-white select-none {sheet_anim}",
             style: "{sheet_style}",

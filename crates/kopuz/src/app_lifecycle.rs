@@ -62,7 +62,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
                     is_offline.set(false);
                 }
                 misses = 0;
-                utils::sleep(std::time::Duration::from_secs(30)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 continue;
             }
             let online = client
@@ -83,7 +83,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
                 }
             }
             let secs = if *is_offline.peek() { 10 } else { 30 };
-            utils::sleep(std::time::Duration::from_secs(secs)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
         }
     });
 
@@ -93,7 +93,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
         } else if network_banner.peek().as_ref() == Some(&true) {
             network_banner.set(Some(false));
             spawn(async move {
-                utils::sleep(std::time::Duration::from_secs(4)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
                 if network_banner.read().as_ref() == Some(&false) {
                     network_banner.set(None);
                 }

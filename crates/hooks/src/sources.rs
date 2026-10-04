@@ -1,9 +1,4 @@
-//! What is configured to play from, as the UI reads it.
-//!
-//! A frontend used to build a media source and ask it what it could do. It
-//! reads rows now: the daemon owns the source, and `SourceCapabilities`
-//! answers every "should this button exist?" question without anyone
-//! branching on a service name.
+//! Configured sources and their capabilities, fetched from the daemon.
 
 use std::collections::HashMap;
 

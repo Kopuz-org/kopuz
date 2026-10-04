@@ -182,8 +182,6 @@ fn AlbumGrid(
             } else {
                 div {
 
-
-
                     class: if *view_mode.read() == AlbumViewMode::List { "view-list" } else { "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6" },
                     for album in albums() {
                         {
@@ -688,7 +686,6 @@ fn RemoteAlbumDetail(
 
             div { class: "flex-1 min-h-0 flex flex-col md:flex-row gap-10 overflow-hidden",
 
-
                 div { class: "md:w-[320px] shrink-0 flex flex-col items-center md:items-start text-center md:text-left gap-5 md:pt-2",
                     div {
                         class: "w-full max-w-[300px] aspect-square rounded-lg bg-stone-800 overflow-hidden relative shrink-0 shadow-2xl shadow-black/40",
@@ -786,7 +783,6 @@ fn RemoteAlbumDetail(
                         }
                     }
                 }
-
 
                 div { class: "flex-1 min-h-0 overflow-y-auto pb-24",
                     for (idx, track) in tracks.iter().cloned().enumerate() {

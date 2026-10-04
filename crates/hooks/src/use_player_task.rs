@@ -1,10 +1,4 @@
-//! What is left of the frontend's playback orchestration: the OS surfaces
-//! only this process can reach.
-//!
-//! Engine playback, the media widget, external playback and every listen it
-//! records live in the daemon, which drives the desktop media widget
-//! itself. What is left is Android: its notification has no event queue, so
-//! its taps arrive through a JNI callback and are dispatched here.
+//! Android media controls: dispatch JNI callbacks and update notification state.
 
 #[cfg(target_os = "android")]
 use crate::use_player_controller::LoopMode;

@@ -58,10 +58,10 @@ pub(crate) fn use_settings_persistence(
         let mut flushed = 0u64;
         loop {
             if *config_dirty.peek() == flushed {
-                utils::sleep(std::time::Duration::from_millis(250)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
                 continue;
             }
-            utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
             let pending = *config_dirty.peek();
             let mut snapshot = config.peek().clone();
             snapshot.volume = *volume.peek();
@@ -84,7 +84,7 @@ pub(crate) fn use_settings_persistence(
                     }
                 }
             }
-            utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
         }
     });
 }

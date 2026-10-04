@@ -1,6 +1,4 @@
-//! Config persistence round-trip (issue #347, step 4): the in-memory `AppConfig`
-//! survives save→load, creds live in the `servers` table (never the blob), and
-//! play counts live in `listen_counts`.
+//! Configuration, credentials, and listen-count persistence.
 
 use std::path::PathBuf;
 

@@ -1,11 +1,8 @@
-//! Pure queue/shuffle/loop state, ported from
-//! `hooks/src/player_controller_queue.rs` with identical semantics.
+//! Queue, shuffle, and loop state.
 //!
-//! Positions are logical: while shuffle is on, `current` and every history
-//! entry point into `shuffle_order` (a permutation of physical indices), and
-//! only [`QueueModel::physical_index_of`] does the indirection. The model
-//! decides what to play; committing that decision to the audio engine is the
-//! session actor's job.
+//! While shuffling, `current` and history contain logical indices into
+//! `shuffle_order`; [`QueueModel::physical_index_of`] maps them to track indices.
+//! The session actor commits playback decisions to the engine.
 
 use api::LoopMode;
 use reader::Track;
@@ -70,9 +67,8 @@ impl QueueModel {
         self.loop_mode = self.loop_mode.next();
     }
 
-    /// Physical queue index for a logical position. Deliberately unbounded in
-    /// linear mode, mirroring the hooks version: `track_at` does the bounds
-    /// check against the queue itself.
+    /// Map a logical position to a physical index. Without shuffle, bounds
+    /// checking is left to [`Self::track_at`].
     pub fn physical_index_of(&self, position: usize) -> Option<usize> {
         if self.shuffle {
             self.shuffle_order.get(position).copied()
@@ -204,10 +200,8 @@ impl QueueModel {
         }
     }
 
-    /// Explicit jump to a physical index (a row click), with history. While
-    /// shuffling, the target becomes position 0 of a fresh permutation, which
-    /// nets out to the old enable/disable workaround in the hooks version.
-    /// Returns the logical position to play.
+    /// Jump to a physical index, recording history. With shuffle, the target
+    /// becomes position 0 of a fresh permutation. Returns the logical position.
     pub fn jump_to(&mut self, physical_idx: usize) -> usize {
         self.push_history_dedup();
         self.current = physical_idx;
@@ -235,10 +229,8 @@ impl QueueModel {
         Some(position)
     }
 
-    /// Replace the queue contents. Callers follow up with [`Self::jump_to`];
-    /// history and permutation carry over exactly like the hooks version,
-    /// where the jump's rebuild covers the shuffle case. An empty replacement
-    /// has no follow-up jump to repair the pointer, so it resets everything.
+    /// Replace tracks while retaining history and permutation; callers must
+    /// follow with [`Self::jump_to`]. An empty replacement resets all state.
     pub fn replace(&mut self, tracks: Vec<Track>) {
         if tracks.is_empty() {
             self.clear();

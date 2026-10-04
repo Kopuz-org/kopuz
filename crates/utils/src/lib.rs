@@ -18,15 +18,6 @@ use std::sync::Arc;
 
 pub type CoverUrl = Arc<str>;
 
-pub fn cover_url_from_string(url: String) -> CoverUrl {
-    Arc::from(url)
-}
-
-/// Cross-platform async sleep backed by tokio.
-pub async fn sleep(duration: std::time::Duration) {
-    tokio::time::sleep(duration).await;
-}
-
 /// Run a future on tokio's worker pool instead of the calling thread.
 ///
 /// Dioxus polls its tasks (`use_resource`, `spawn`) on the UI thread, so any
@@ -107,7 +98,7 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
         "image/jpeg"
     };
     let b64 = general_purpose::STANDARD.encode(&bytes);
-    Some(cover_url_from_string(format!("data:{mime};base64,{b64}")))
+    Some(CoverUrl::from(format!("data:{mime};base64,{b64}")))
 }
 
 #[cfg(not(target_os = "android"))]
@@ -132,13 +123,13 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
             "http://artwork.dioxus.localhost/local?p={}&v=thumb400-hq1920",
             percent_encoding::utf8_percent_encode(abs_str, QUERY_VAL)
         );
-        Some(cover_url_from_string(url))
+        Some(CoverUrl::from(url))
     } else {
         let url = format!(
             "artwork://local?p={}&v=thumb400-hq1920",
             percent_encoding::utf8_percent_encode(abs_str, QUERY_VAL)
         );
-        Some(cover_url_from_string(url))
+        Some(CoverUrl::from(url))
     }
 }
 
@@ -196,13 +187,13 @@ fn entity_artwork_url(origin: &str, kind: &str, id: &str, version: u64, hq: bool
     let id = percent_encoding::utf8_percent_encode(id, QUERY_VAL);
     let quality = if hq { "&hq=1" } else { "" };
     let url = format!("{origin}?{kind}={id}{quality}&v={version}");
-    cover_url_from_string(url)
+    CoverUrl::from(url)
 }
 
 pub const DEFAULT_COVER_SVG: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%231e1b2e'/%3E%3Ccircle cx='200' cy='180' r='70' fill='none' stroke='%233d3466' stroke-width='6'/%3E%3Cpath d='M155 280 Q200 240 245 280' fill='none' stroke='%233d3466' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E";
 
 pub fn default_cover_url() -> CoverUrl {
-    cover_url_from_string(DEFAULT_COVER_SVG.to_string())
+    CoverUrl::from(DEFAULT_COVER_SVG)
 }
 
 #[cfg(test)]
