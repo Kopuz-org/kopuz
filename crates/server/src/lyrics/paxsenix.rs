@@ -2,155 +2,15 @@ use std::time::Duration;
 
 use super::{
     ItunesSearchResponse, ItunesSong, LyricChunk, LyricLine, Lyrics, PaxsenixAppleLyricLine,
-    PaxsenixAppleLyricPart, PaxsenixAppleLyricsResponse, PaxsenixYoutubeSearchResult,
-    ProviderReach, has_usable_line_timing, lrc_has_usable_timing, lyrics_kind, lyrics_match_score,
-    parse_lrc, timed_line_count, timed_part_count,
+    PaxsenixAppleLyricPart, PaxsenixAppleLyricsResponse, ProviderReach, has_usable_line_timing,
+    lrc_has_usable_timing, lyrics_kind, lyrics_match_score, parse_lrc, timed_line_count,
+    timed_part_count,
 };
 
 const PAXSENIX_ROOT_URL: &str = "https://lyrics.paxsenix.org";
 const ITUNES_SEARCH_ROOT_URL: &str = "https://itunes.apple.com/search";
 const PAXSENIX_TIMEOUT: Duration = Duration::from_secs(5);
 const PAXSENIX_APPLE_LYRICS_TIMEOUT: Duration = Duration::from_secs(10);
-const PAXSENIX_YOUTUBE_LYRICS_TIMEOUT: Duration = Duration::from_secs(3);
-
-pub(super) async fn fetch_from_paxsenix_youtube(
-    artist: &str,
-    title: &str,
-    duration: u64,
-    track_path: &str,
-    reach: &ProviderReach,
-) -> Option<Lyrics> {
-    let client = reqwest::Client::new();
-    let video_id = if let Some(video_id) = extract_youtube_video_id(track_path) {
-        video_id
-    } else {
-        let query = format!("{title} {artist}");
-        let query = query.trim();
-        if query.is_empty() {
-            return None;
-        }
-
-        let results = client
-            .get(format!("{PAXSENIX_ROOT_URL}/youtube/search"))
-            .query(&[("q", query)])
-            .timeout(PAXSENIX_TIMEOUT)
-            .send()
-            .await
-            .map_err(|error| {
-                tracing::warn!(
-                    target: "kopuz::lyrics",
-                    "paxsenix_youtube search failed={error}"
-                );
-                reach.unreachable();
-            })
-            .ok()?
-            .json::<Vec<PaxsenixYoutubeSearchResult>>()
-            .await
-            .map_err(|error| {
-                tracing::warn!(
-                    target: "kopuz::lyrics",
-                    "paxsenix_youtube search json_failed={error}"
-                );
-            })
-            .ok()?;
-
-        let selected = best_youtube_result(&results, query, duration)?;
-        lyrics_debug!(
-            "paxsenix_youtube selected_video id={} title={:?} artist={:?} candidates={}",
-            selected.video_id,
-            selected.title,
-            selected.author,
-            results.len()
-        );
-        selected.video_id.clone()
-    };
-
-    let lrc = client
-        .get(format!("{PAXSENIX_ROOT_URL}/youtube/lyrics"))
-        .query(&[("id", video_id.as_str())])
-        .timeout(PAXSENIX_YOUTUBE_LYRICS_TIMEOUT)
-        .send()
-        .await
-        .map_err(|error| {
-            tracing::warn!(
-                target: "kopuz::lyrics",
-                "paxsenix_youtube lyrics failed={error}"
-            );
-            reach.unreachable();
-        })
-        .ok()?
-        .text()
-        .await
-        .map_err(|error| {
-            tracing::warn!(
-                target: "kopuz::lyrics",
-                "paxsenix_youtube lyrics text_failed={error}"
-            );
-        })
-        .ok()?;
-
-    if lrc.trim().is_empty() || !lrc_has_usable_timing(&lrc) {
-        return None;
-    }
-
-    let lines = parse_lrc(&lrc);
-    if has_usable_line_timing(&lines) {
-        Some(Lyrics::Synced(lines))
-    } else {
-        None
-    }
-}
-
-pub(super) fn best_youtube_result<'a>(
-    results: &'a [PaxsenixYoutubeSearchResult],
-    query: &str,
-    duration: u64,
-) -> Option<&'a PaxsenixYoutubeSearchResult> {
-    results
-        .iter()
-        .filter_map(|result| {
-            let candidate = format!("{} {}", result.title, result.author);
-            let text_score = lyrics_match_score(&candidate, query);
-            if text_score < 55.0 {
-                return None;
-            }
-
-            let duration_score = match (duration, parse_colon_duration(&result.duration)) {
-                (0, _) | (_, None) => 0.0,
-                (expected, Some(candidate_seconds)) => {
-                    let delta = candidate_seconds.abs_diff(expected);
-                    if delta > 12 {
-                        return None;
-                    }
-                    12.0 - delta as f64
-                }
-            };
-
-            Some((text_score + duration_score, result))
-        })
-        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|(_, result)| result)
-}
-
-pub(super) fn parse_colon_duration(duration: &str) -> Option<u64> {
-    let mut total = 0_u64;
-    let mut parts = duration.split(':').peekable();
-    parts.peek()?;
-    for part in parts {
-        total = total
-            .checked_mul(60)?
-            .checked_add(part.parse::<u64>().ok()?)?;
-    }
-    Some(total)
-}
-
-pub(super) fn extract_youtube_video_id(track_path: &str) -> Option<String> {
-    track_path
-        .strip_prefix("ytmusic:")
-        .and_then(|rest| rest.split(':').next())
-        .filter(|video_id| !video_id.trim().is_empty())
-        .map(|video_id| video_id.to_string())
-}
 
 pub(super) async fn fetch_from_paxsenix_apple_music(
     artist: &str,
