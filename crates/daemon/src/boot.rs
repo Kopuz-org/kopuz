@@ -177,9 +177,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     match queue_store.load(&restored_source).await {
         Ok(snapshot) if !snapshot.queue.is_empty() => {
             let restored = snapshot.queue.len();
-            // A restored queue can hold rows the library never stored -- last
-            // session's radio mix, say. Register them the way a live listing is,
-            // or hearting the track that is playing answers "unknown track key".
+
             library.register_transient(&snapshot.queue);
             match session.restore_queue(snapshot).await {
                 Ok(_) => tracing::info!(tracks = restored, "queue restored from the last session"),
@@ -218,7 +216,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         favorites.clone(),
         session.config_watch(),
     );
-    // A failed settings read aborts boot above, so reaching here means the config is real.
+
     crate::folder_scan::spawn(
         jobs.clone(),
         library.clone(),
@@ -234,8 +232,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     artwork.attach_library(library.clone());
     artwork.attach_catalog(catalog.clone());
     artwork.attach_radio(radio_service.clone());
-    // The registry starts empty and is built from config here, rather than
-    // by whichever frontend happened to be open.
+
     radio_service.watch_config(session.config_watch());
     let radio_boot = radio_service.clone();
     tokio::spawn(async move {
@@ -245,8 +242,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     });
     let downloader = crate::UrlDownloadService::new(config_service.clone());
     downloader.attach_rescan(library.clone(), jobs.clone());
-    // Spotify plays itself, so the session is told where to send a track it
-    // cannot decode. Nothing starts until one is actually queued.
+
     let spotify = crate::SpotifySink::new(session.clone(), config_service.clone());
     session.set_external_sink(spotify.clone());
     spotify.spawn_discovery();

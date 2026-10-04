@@ -348,8 +348,8 @@ pub async fn album_remote(
 /// Shelves whose endpoint fails (e.g. a token signed in before
 /// the `user-top-read` / `user-read-recently-played` scopes were added) are
 /// skipped, so the page degrades instead of erroring.
-pub async fn discover_home(access: &str) -> Result<crate::ytmusic::discover::DiscoverHome, String> {
-    use crate::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf};
+pub async fn discover_home(access: &str) -> Result<crate::catalog::DiscoverHome, String> {
+    use crate::catalog::{DiscoverHome, DiscoverItem, DiscoverShelf};
 
     let song_shelf = |title: &str, tracks: Vec<Track>| DiscoverShelf {
         title: title.to_string(),

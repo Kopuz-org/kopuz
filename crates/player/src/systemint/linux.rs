@@ -156,15 +156,12 @@ impl PlayerInterface for P {
         Ok(())
     }
     async fn seek(&self, offset: Time) -> fdo::Result<()> {
-        // MPRIS Seek is relative to the current position.
         let current = self.0.lock().map(|s| s.position).unwrap_or(Time::ZERO);
         let target = (current.as_micros() + offset.as_micros()).max(0);
         self.1.send(SystemEvent::Seek(target as f64 / 1e6)).ok();
         Ok(())
     }
     async fn set_position(&self, _: mpris_server::TrackId, position: Time) -> fdo::Result<()> {
-        // The trackid is constant (always the current track), so any request
-        // that reached us refers to it.
         let target = position.as_micros().max(0);
         self.1.send(SystemEvent::Seek(target as f64 / 1e6)).ok();
         Ok(())
@@ -315,9 +312,7 @@ fn setup() {
         let (ntx, mut nrx) = tokio::sync::mpsc::unbounded_channel();
         NOTIFY.set(ntx).ok();
         let st = state();
-        // Before the thread, not inside it: the caller reads RX the moment
-        // this returns, and a reader that finds it missing takes that for
-        // "the channel is closed" and stops listening for good.
+
         let events = tx();
         std::thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
@@ -396,10 +391,6 @@ pub fn update_now_playing(
             b = b.trackid(trackid);
         }
         if let Some(art) = artwork_path {
-            // MPRIS art_url accepts any URI. Pass remote URLs (Jellyfin
-            // thumbs, YT Music covers) through unchanged so clients can
-            // fetch them directly; only wrap actual local file paths
-            // with file://.
             b = b.art_url(
                 if art.starts_with("http://")
                     || art.starts_with("https://")

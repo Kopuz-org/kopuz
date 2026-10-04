@@ -54,16 +54,13 @@ where
     }
 
     let handle = tokio::spawn(fut);
-    // Aborting an already-finished task is a no-op, so the guard can simply
-    // live for the whole function — it only bites on mid-await drop.
+
     let _guard = AbortOnDrop(handle.abort_handle());
     match handle.await {
         Ok(out) => out,
         Err(err) => match err.try_into_panic() {
             Ok(panic) => std::panic::resume_unwind(panic),
-            // Unreachable via our own abort (the awaiter was dropped with the
-            // guard); a cancellation seen here means runtime shutdown, where
-            // the app is exiting anyway.
+
             Err(err) => panic!("offloaded task cancelled: {err}"),
         },
     }
@@ -130,9 +127,6 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
         .add(b'\\')
         .add(b':');
 
-    // Version the URL because the WebView caches protocol responses for a year;
-    // the token prevents an old full-resolution response from surviving a
-    // change back to the thumbnail/HQ split.
     if cfg!(target_os = "windows") {
         let url = format!(
             "http://artwork.dioxus.localhost/local?p={}&v=thumb400-hq1920",
@@ -277,8 +271,7 @@ mod offload_tests {
             let _guard = guard;
             tokio::time::sleep(std::time::Duration::from_secs(300)).await;
         });
-        // Poll the offload future long enough to spawn, then drop it (select
-        // drops the loser when the timer wins).
+
         tokio::select! {
             _ = fut => panic!("offloaded sleep cannot have completed"),
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}

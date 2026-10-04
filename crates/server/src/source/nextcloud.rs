@@ -26,7 +26,6 @@ pub(super) struct NextcloudSource {
 
 impl NextcloudSource {
     pub(super) fn new(db: Db, source: Source, conn: &ServerConn) -> Self {
-        // A bad URL reports Connectivity from the ops, rather than failing here.
         let client = NextcloudClient::new(&conn.url, &conn.user_id, &conn.token)
             .inspect_err(|e| tracing::warn!(error = %e, "nextcloud client unavailable"))
             .ok();
@@ -56,7 +55,7 @@ const CAPABILITIES: Capabilities = Capabilities {
     discover: false,
     dont_recommend: false,
     radio: RadioSeeds::NONE,
-    playlists: PlaylistOps::None, // none over raw WebDAV, the Music app's are Subsonic
+    playlists: PlaylistOps::None,
     artist_view: ArtistView::Library,
     albums: AlbumType::Standard,
     favorites_sync: FavoritesSync::Instant,
@@ -109,7 +108,6 @@ async fn track_durations(
         .map(|track| (track.id.key().into_owned(), track.duration))
         .collect();
 
-    // Owned, for the same lifetime reason album_art takes owned parts.
     let missing: Vec<String> = paths
         .iter()
         .filter(|path| !durations.contains_key(*path))
@@ -155,7 +153,6 @@ impl MediaSource for NextcloudSource {
             .await
             .map_err(SourceError::Backend)?;
 
-        // Nothing persists until the snapshot is whole, so a serial pass here stalls the sync.
         let mut jobs = Vec::with_capacity(albums.len());
         for album in &albums {
             jobs.push(album_art(
@@ -169,7 +166,6 @@ impl MediaSource for NextcloudSource {
             .collect::<Vec<_>>()
             .await;
 
-        // Per album, before the tracks, so an album's tracks share one file.
         let mut cached_covers: HashMap<String, String> = HashMap::new();
         let mut out_albums = Vec::with_capacity(albums.len());
 
@@ -179,7 +175,6 @@ impl MediaSource for NextcloudSource {
             }
 
             out_albums.push(reader::Album {
-                // No cover segment: a remote path can hold the ':' the ref splits on.
                 id: reader::CoverRef::stored_item_ref(MusicService::Nextcloud, &album.path, None),
                 title: album.title,
                 artist: album.artist,
@@ -214,7 +209,7 @@ impl MediaSource for NextcloudSource {
                     title: track.title,
                     artist: track.artist.clone(),
                     album: track.album,
-                    // 0 when neither the listing nor the header stated one.
+
                     duration,
                     khz: 0,
                     bitrate: 0,
@@ -243,7 +238,7 @@ impl MediaSource for NextcloudSource {
             url: self.client()?.stream_url(item_id),
             format: None,
             user_agent: None,
-            // The scan probed the header; repeating it costs a round trip per play.
+
             duration_secs: None,
             bitrate: None,
             content_length: None,
@@ -322,7 +317,6 @@ mod tests {
         let id = reader::CoverRef::stored_item_ref(MusicService::Nextcloud, path, None);
         assert_eq!(id, "nextcloud:/Music/Artist/Vol 1: Deluxe");
 
-        // Art travels beside the id, as a path that parses on its own shape.
         let cached = "/home/u/.cache/kopuz/nextcloud-covers/abc.jpg";
         assert_eq!(
             reader::CoverRef::parse(cached),

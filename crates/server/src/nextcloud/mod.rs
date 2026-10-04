@@ -111,7 +111,7 @@ impl NextcloudClient {
             .basic_auth(user_id, password)
             .user_id(user_id)
             .user_agent(concat!("Kopuz/", env!("CARGO_PKG_VERSION")))
-            .timeout(Some(std::time::Duration::from_secs(180))) // scans run long
+            .timeout(Some(std::time::Duration::from_secs(180)))
             .build()
             .map_err(|e| format!("invalid Nextcloud server URL: {e}"))?;
 
@@ -121,7 +121,6 @@ impl NextcloudClient {
             .and_then(|()| authed.set_password(Some(password)))
             .map_err(|()| "server URL cannot carry credentials".to_string())?;
 
-        // Subpath installs ("https://host/nextcloud") have no trailing slash.
         let mut authed_base = authed.to_string();
         if !authed_base.ends_with('/') {
             authed_base.push('/');
@@ -138,7 +137,6 @@ impl NextcloudClient {
         self.nc.files().stat("/").await.map(|_| ())
     }
 
-    // Hand-built: nextcloud-rs keeps its DAV URL builder private.
     pub(crate) fn stream_url(&self, remote_path: &str) -> String {
         let encoded = dav_path::normalise(remote_path)
             .split('/')
@@ -178,7 +176,7 @@ impl NextcloudClient {
                 .await
             {
                 Ok(entries) => entries,
-                // A renamed or unshared root must not void the rest.
+
                 Err(e) => {
                     tracing::warn!(root, error = %e, "nextcloud folder unreadable");
                     failures.push(format!("{root}: {e}"));
@@ -194,7 +192,6 @@ impl NextcloudClient {
             return Err(format!("could not list {}", failures.join("; ")));
         }
 
-        // Nested roots (a folder and its parent) would list a track twice.
         albums.sort_by(|a, b| a.path.cmp(&b.path));
         albums.dedup_by(|a, b| a.path == b.path);
         tracks.sort_by(|a, b| a.path.cmp(&b.path));
@@ -215,7 +212,6 @@ impl NextcloudClient {
 
         let mut dirs: Vec<String> = entries
             .into_iter()
-            // PROPFIND depth 1 includes the collection itself.
             .filter(|e| e.is_directory && dav_path::normalise(&e.path) != path)
             .map(|e| e.path)
             .collect();
@@ -277,11 +273,11 @@ impl NextcloudClient {
             if info.duration_secs.is_some() {
                 return info.duration_secs;
             }
-            // Ogg states its length in the last page, never in the first.
+
             if head.bytes.starts_with(b"OggS") {
                 return self.ogg_tail_duration(remote_path, &info, head.total).await;
             }
-            // Whole file already read, so a wider window changes nothing.
+
             if head.total <= *window {
                 break;
             }
@@ -343,7 +339,7 @@ impl NextcloudClient {
 
         let (bytes, ext) = match self.embedded_art(&track.path).await {
             EmbeddedArt::Found(bytes, ext) => (bytes, ext),
-            // Previews come out of the same tags, so asking buys nothing.
+
             EmbeddedArt::NoArt => return None,
             EmbeddedArt::Unreadable => self.preview_art(track).await?,
         };
@@ -367,7 +363,6 @@ impl NextcloudClient {
             .ok()?;
 
         match self.nc.previews().fetch(url).await {
-            // No preview provider for the format, or previews are off.
             Ok(None) => None,
             Ok(Some(preview)) => {
                 let ext = extension_for_mime(preview.content_type);
@@ -408,7 +403,7 @@ impl NextcloudClient {
                     break;
                 }
                 CoverProbe::None => return EmbeddedArt::NoArt,
-                // Whole file already read, so a longer window changes nothing.
+
                 CoverProbe::Truncated if head.total <= *window => {
                     return EmbeddedArt::Unreadable;
                 }

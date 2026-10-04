@@ -26,8 +26,6 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
     let albums_res = use_albums(source);
     let counts_res = use_listen_counts(source);
     let filter = use_memo(move || {
-        // The source is the daemon's; naming it here only keeps the memo
-        // re-running across a switch.
         let _ = source();
         TrackFilter {
             sort: TrackSort::PlayCount,
@@ -35,7 +33,6 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
         }
     });
 
-    // album_id → genre (covers resolve via the source seam off the track itself).
     let album_map = use_memo(move || {
         albums_res
             .read()

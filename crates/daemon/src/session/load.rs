@@ -14,22 +14,18 @@ impl Session {
         let Some(track) = self.model.track_at(idx).cloned() else {
             return false;
         };
-        // A track only an integration can play is handed to it, and one it
-        // cannot hands playback back. Both directions run through here, so
-        // every way of reaching a track -- next, previous, a jump, a new queue
-        // -- switches sides the same way.
+
         match self.sink_for(&track) {
             Some(sink) => return self.start_external_load(track, sink),
             None if self.external.is_some() => self.release_external(),
             None => {}
         }
-        let track_key = track.id.uid();
         let (restore_seek, clear_pending_resume) = self.pending_resume_seek(&track);
         let use_crossfade = allow_crossfade
             && self.should_crossfade()
             && restore_seek.is_none_or(|position| position.is_zero());
         let crossfade_duration = Duration::from_secs(self.config.crossfade_seconds as u64);
-        let item_ref = PlaybackItemRef::parse(&track_key);
+        let item_ref = PlaybackItemRef::from_id(&track.id);
         let is_radio = item_ref.is_radio();
         let is_server = item_ref.is_server();
         let item_id = item_ref.primary_id().unwrap_or_default().to_string();
@@ -53,8 +49,6 @@ impl Session {
                     Some("audio") | Some("bin")
                 );
                 if bad_ext {
-                    // Imported config paths are untrusted. Remove only the
-                    // stale mapping; deleting the path could remove user data.
                     self.config.offline_tracks.remove(&item_id);
                     None
                 } else {
@@ -104,15 +98,10 @@ impl Session {
             && local_path.is_none()
             && remote_ref.is_none()
         {
-            // A crossfade candidate that cannot resolve is dropped whole; the
-            // end-of-track advance retries on the committed model and reports
-            // through the branch below.
             if allow_crossfade {
                 return false;
             }
-            // The caller already moved the queue pointer and will publish, so
-            // a silent return would present the new track as playing while the
-            // old audio continues. Fail the way a resolve failure would.
+
             tracing::warn!(
                 queue_index = idx,
                 title = %track.title,
@@ -209,8 +198,6 @@ impl Session {
 
         if !use_crossfade {
             if is_server || is_radio {
-                // Remote resolution deliberately silences the old session;
-                // local files switch seamlessly inside the engine.
                 self.player.stop_for_transition();
                 self.phase = ApiPhase::Idle;
             }
@@ -277,9 +264,6 @@ impl Session {
             prepared.bitrate,
         );
 
-        // macOS Now Playing needs a file path (`NSImage initWithContentsOfFile`
-        // cannot load a URL), so a remote cover is fetched to a temp file in
-        // the background and re-pushed; the other platforms take URLs as-is.
         #[cfg(target_os = "macos")]
         let artwork_fetch = prepared
             .artwork
@@ -380,8 +364,6 @@ impl Session {
                 if matching_transition {
                     if outcome.crossfaded {
                         if let Some(pending) = self.pending_transition.as_mut() {
-                            // Keep the visible queue/track outgoing until the
-                            // authoritative TrackSwitched event.
                             pending.stage = TransitionStage::Fading;
                         }
                     } else {
@@ -407,10 +389,7 @@ impl Session {
                     self.publish(state_tx, false);
                 }
             }
-            None => {
-                // Engine-side cancellation is owned by the command that
-                // cancelled it; token guards reject any late completion.
-            }
+            None => {}
         }
     }
 
@@ -579,8 +558,6 @@ impl ClassifiedLoad {
                 source,
                 item_id,
             } => {
-                // The fallback resolve blocks on the runtime captured here;
-                // this closure executes on the runtime-less decode worker.
                 let rt_handle = tokio::runtime::Handle::current();
                 Box::new(move || match player::decoder::open_file(&path) {
                     Ok(parts) => Ok(parts),
@@ -627,8 +604,6 @@ impl ClassifiedLoad {
                     | ResolvedStreamRef::Direct(_) => (stream_ref, None, None),
                 };
 
-                // The factory runs on the decode worker (no runtime), so hand
-                // every blocking stream/decrypt path this task's handle.
                 let rt_handle = tokio::runtime::Handle::current();
                 network_factory(
                     stream_url,

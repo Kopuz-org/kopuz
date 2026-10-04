@@ -4,9 +4,6 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::Notify;
 
-// Set from the JNI thread when the hardware/gesture back is pressed; drained on the
-// runtime by take_back_pressed(). Decoupled because dioxus signals can only be touched
-// from the runtime thread, not the JNI thread.
 static BACK_PENDING: AtomicBool = AtomicBool::new(false);
 
 /// Returns true once per back press, clearing the pending flag.
@@ -140,7 +137,7 @@ impl RepeatMode {
 }
 
 static JVM: OnceLock<JavaVM> = OnceLock::new();
-// App classloader cached from main thread so FindClass works from any thread.
+
 static CLASSLOADER: OnceLock<GlobalRef> = OnceLock::new();
 type BackgroundHandler = Arc<Mutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>;
 static BACKGROUND_HANDLER: OnceLock<BackgroundHandler> = OnceLock::new();
@@ -192,8 +189,7 @@ fn dispatch_event(event: SystemEvent) {
     {
         handler(event);
     }
-    // The handler only queues; without this the command waits for the activity to
-    // come back into view.
+
     wake_run_loop();
 }
 
@@ -216,7 +212,6 @@ pub fn init() {
     });
 }
 
-// Cache the app classloader from the activity so FindClass works from background threads.
 fn cache_classloader() {
     let vm = match JVM.get() {
         Some(v) => v,
@@ -232,8 +227,7 @@ fn cache_classloader() {
         tracing::warn!("null activity context; skipping classloader cache");
         return;
     }
-    // Transient local only — we immediately turn the resolved classloader into a
-    // GlobalRef below and never retain this raw activity pointer.
+
     let activity = unsafe { JObject::from_raw(raw.cast()) };
     let result: Result<(), jni::errors::Error> = (|| {
         let cl = env
@@ -253,7 +247,6 @@ fn cache_classloader() {
     }
 }
 
-// Resolve an app class using the cached classloader, falling back to FindClass.
 fn find_app_class<'a>(env: &mut JNIEnv<'a>, name: &str) -> Result<JClass<'a>, jni::errors::Error> {
     if let Some(cl) = CLASSLOADER.get() {
         let dot_name = env.new_string(name.replace('/', "."))?;
@@ -415,7 +408,6 @@ fn resolve_artwork(url: &str) -> Option<String> {
     } else if let Some(stripped) = url.strip_prefix("file://") {
         Some(stripped.to_string())
     } else if url.starts_with('/') {
-        // Bare absolute path (e.g. a downloaded server cover in the temp dir).
         Some(url.to_string())
     } else {
         normalize_artwork(url)
@@ -457,9 +449,6 @@ fn data_url_to_file(url: &str) -> Option<String> {
     payload.hash(&mut hasher);
     let hash = hasher.finish();
 
-    // Hash is part of the filename so a new track yields a new path — the Kotlin
-    // side caches its decoded bitmap by path and would otherwise keep showing the
-    // previous track's art when the filename stayed constant.
     if let Ok(guard) = LAST_DATA_ART.lock()
         && let Some((last_hash, path)) = guard.as_ref()
         && *last_hash == hash
@@ -473,7 +462,6 @@ fn data_url_to_file(url: &str) -> Option<String> {
     let bytes = general_purpose::STANDARD.decode(payload).ok()?;
     std::fs::write(&path, &bytes).ok()?;
     if let Ok(mut guard) = LAST_DATA_ART.lock() {
-        // Remove the previously written art file so they don't accumulate.
         if let Some((_, old_path)) = guard.as_ref()
             && old_path != &path
         {
@@ -603,12 +591,6 @@ pub fn update_modes(shuffle: bool, repeat: RepeatMode) {
     }
 }
 
-// The event loop parks in `ALooper_pollAll` whenever the activity is not visible,
-// which stops dioxus polling its tasks: media buttons queue up undelivered, the
-// queue never advances at the end of a track, and now-playing stops updating —
-// all while audio keeps running on the engine's own threads. tao wakes that same
-// looper for its proxy events, so holding a handle to it lets any thread do the
-// same.
 unsafe extern "C" {
     fn ALooper_forThread() -> *mut std::ffi::c_void;
     fn ALooper_acquire(looper: *mut std::ffi::c_void);
@@ -624,8 +606,6 @@ static KEEPALIVE: AtomicBool = AtomicBool::new(false);
 /// from the event loop thread (a dioxus hook body qualifies); every other thread
 /// has a different looper, or none at all.
 pub fn capture_event_loop() {
-    // SAFETY: both are thread-safe NDK calls; `acquire` keeps the looper alive for
-    // the process, which is exactly as long as the pointer is readable.
     let looper = unsafe { ALooper_forThread() };
     if looper.is_null() {
         tracing::warn!("no looper on the event loop thread; background control will stall");
@@ -641,7 +621,6 @@ pub fn capture_event_loop() {
         )
         .is_err()
     {
-        // SAFETY: balances the acquire above; a concurrent caller won the slot.
         unsafe { ALooper_release(looper) };
         return;
     }
@@ -652,7 +631,6 @@ pub fn capture_event_loop() {
 pub fn wake_run_loop() {
     let looper = EVENT_LOOP.load(Ordering::SeqCst);
     if !looper.is_null() {
-        // SAFETY: `looper` was acquired above and is valid for the process.
         unsafe { ALooper_wake(looper) };
     }
 }
@@ -687,8 +665,6 @@ fn start_keepalive() {
         .spawn(|| {
             loop {
                 if KEEPALIVE.load(Ordering::SeqCst) {
-                    // Both halves matter: the waker gives the runtime a reason to
-                    // poll, `wake_run_loop` gets the parked event loop to notice.
                     wake_tokio();
                     wake_run_loop();
                     std::thread::sleep(std::time::Duration::from_millis(250));
@@ -769,7 +745,6 @@ fn clear_jni_exception(env: &mut JNIEnv) {
     }
 }
 
-// Called from Kotlin: MediaReceiver.nativeOnAction(String) — routes notification button taps to Rust
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_moe_kopuz_kopuz_MediaReceiver_nativeOnAction(
     mut env: JNIEnv,
@@ -787,12 +762,12 @@ pub extern "system" fn Java_moe_kopuz_kopuz_MediaReceiver_nativeOnAction(
         "next" => dispatch_event(SystemEvent::Next),
         "prev" => dispatch_event(SystemEvent::Prev),
         "stop" => dispatch_event(SystemEvent::Stop),
-        // Hardware/gesture back — handled by the app router, not a media command.
+
         "back" => {
             BACK_PENDING.store(true, Ordering::SeqCst);
             super::back_wake();
         }
-        // Activity lifecycle, not a media command: no listener to dispatch to.
+
         "bg-enter" => set_keepalive(true),
         "bg-exit" => set_keepalive(false),
         "shuffle" => dispatch_event(SystemEvent::ToggleShuffle),

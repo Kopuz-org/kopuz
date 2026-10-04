@@ -14,7 +14,7 @@ pub enum Route {
     Favorites,
     Activity,
     Radio,
-    // URL downloads + the custom theme editor are desktop/web only — excluded on Android.
+
     #[cfg(not(target_os = "android"))]
     Downloader,
     Settings,

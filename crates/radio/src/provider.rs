@@ -206,7 +206,6 @@ fn check_heartbeat(json: &Value, def: &WebSocketSourceDef, current_interval: u64
     None
 }
 
-// Keep in minds that this function wrote entirely for listen.moe, haven't tested with other providers that use websocket.
 async fn start_ws_metadata(
     def: WebSocketSourceDef,
     stream_id: String,
@@ -289,7 +288,7 @@ async fn start_ws_metadata(
         if tx.is_closed() {
             return;
         }
-        // Wait before reconnecting
+
         time::sleep(Duration::from_secs(5)).await;
     }
 }

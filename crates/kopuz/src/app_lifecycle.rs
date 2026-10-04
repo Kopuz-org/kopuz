@@ -42,8 +42,7 @@ pub fn use_webview_script_engine() {
 pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signal<bool> {
     let mut is_offline = use_signal(|| false);
     use_context_provider(|| is_offline);
-    // Only a remote source makes reachability a thing worth watching, and
-    // which is active is the daemon's answer.
+
     let active = hooks::sources::use_active_source_info();
     use_future(move || async move {
         let Ok(client) = reqwest::Client::builder()

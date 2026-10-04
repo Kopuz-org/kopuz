@@ -24,6 +24,19 @@ pub struct JobProgress {
     pub message: Option<String>,
 }
 
+fn running_job(jobs: &[api::JobStatus], kind: api::JobKind) -> JobProgress {
+    jobs.iter()
+        .find(|job| job.kind == kind && job.state == api::JobState::Running)
+        .map(|job| JobProgress {
+            running: true,
+            phase: job.phase.clone(),
+            current: job.current,
+            message: job.message.clone(),
+            total: job.total,
+        })
+        .unwrap_or_default()
+}
+
 /// Follow every job of `kind`. Starts from the daemon's current job list, so
 /// a page that mounts mid-sync shows the sync rather than nothing.
 pub fn use_job_progress(kind: api::JobKind) -> Signal<JobProgress> {
@@ -33,24 +46,18 @@ pub fn use_job_progress(kind: api::JobKind) -> Signal<JobProgress> {
     use_future(move || {
         let api = api.clone();
         async move {
-            if let Ok(jobs) = api.jobs().await
-                && let Some(job) = jobs
-                    .iter()
-                    .find(|job| job.kind == kind && job.state == api::JobState::Running)
-            {
-                state.set(JobProgress {
-                    running: true,
-                    phase: job.phase.clone(),
-                    current: job.current,
-                    message: job.message.clone(),
-                    total: job.total,
-                });
-            }
-
             let mut events = api.events();
+            match api.jobs().await {
+                Ok(jobs) => state.set(running_job(&jobs, kind)),
+                Err(error) => tracing::warn!(%error, "could not load job status"),
+            }
             use futures_util::StreamExt;
             while let Some(event) = events.next().await {
                 match event {
+                    api::ApiEvent::Resync => match api.jobs().await {
+                        Ok(jobs) => state.set(running_job(&jobs, kind)),
+                        Err(error) => tracing::warn!(%error, "could not reload job status"),
+                    },
                     api::ApiEvent::JobProgress(progress) if progress.kind == kind => {
                         state.set(JobProgress {
                             running: true,
@@ -66,6 +73,7 @@ pub fn use_job_progress(kind: api::JobKind) -> Signal<JobProgress> {
                     _ => {}
                 }
             }
+            state.set(JobProgress::default());
         }
     });
 

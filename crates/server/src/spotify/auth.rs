@@ -87,8 +87,7 @@ pub async fn authorize_with(
             self.0.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
-    // Closing the Android activity cancels this future. Release the callback
-    // listener as well, so another sign-in can start immediately.
+
     let _cancel = CancelOnDrop(cancelled.clone());
     let expected_state = state.clone();
     let code =

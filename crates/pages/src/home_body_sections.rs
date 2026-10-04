@@ -121,9 +121,7 @@ fn ServerHeroBanner(
     let mut start_h = use_signal(|| 0_u32);
 
     let source = use_active_source();
-    // The track's own `album_id` (not the resolved `Album`, which lags behind a
-    // separate albums query) — so the play button and the favorite-state heart
-    // work the instant the hero track renders, not only once albums load.
+
     let hero_album_id_val = hero_entry
         .as_ref()
         .map(|(t, _, _)| t.album_id.clone())
@@ -742,8 +740,7 @@ fn render_playlists(
     if recent_playlists.is_empty() {
         return rsx! { div {} };
     }
-    // Radio is the one playlist action a home card can offer without the
-    // playlists page's folder/rename state, so the whole menu rides its gate.
+
     let can_radio = consume_context::<Signal<api::SourceCapabilities>>()
         .read()
         .playlist_radio;

@@ -154,7 +154,7 @@ impl MediaSource for SpotifySource {
             .map_err(SourceError::from)
     }
 
-    async fn discover_home(&self) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
+    async fn discover_home(&self) -> Result<crate::catalog::DiscoverHome, SourceError> {
         let token = self.token()?;
         crate::spotify::api::discover_home(token)
             .await

@@ -24,8 +24,7 @@ pub async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
             "custom" => {
                 overrides.insert(identity, PathBuf::from(r.image_ref));
             }
-            // Server photo wins over a local one for the same artist: `insert`
-            // always overwrites, `or_insert` for local never clobbers a server.
+
             "server" => {
                 photos.insert(identity, ArtistImageRef::Remote(r.image_ref));
             }
@@ -40,10 +39,6 @@ pub async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
 }
 
 pub async fn load_playlists(pool: &SqlitePool, source: &Source) -> Result<PlaylistStore, DbError> {
-    // Scoped to the ACTIVE source only: the app is in local OR one server mode
-    // at a time, so the in-memory store represents exactly one source — a local
-    // and a server playlist that share an id never collide here. The caller
-    // passes the IN-MEMORY active source (the persisted blob lags a switch).
     let src = source.as_str();
     let rows = sqlx::query!(
         "SELECT rowid_pk as \"rowid_pk!\", source_pl_id, name, cover_path, image_tag \
@@ -53,9 +48,6 @@ pub async fn load_playlists(pool: &SqlitePool, source: &Source) -> Result<Playli
     .fetch_all(pool)
     .await?;
 
-    // One query for every playlist's tracks (not one per playlist), grouped
-    // by playlist afterwards. Order by playlist first so each group's tracks
-    // arrive contiguous and position-sorted.
     let track_rows = sqlx::query!(
         "SELECT pt.playlist_pk, pt.track_ref \
          FROM playlist_tracks pt \
@@ -118,7 +110,7 @@ pub async fn load_queue(
     source: &crate::Source,
 ) -> Result<QueueSnapshot, DbError> {
     let src = source.as_str();
-    // One read snapshot, so a save landing between the reads cannot pair old rows with a new index.
+
     let mut tx = pool.begin().await?;
     let row = sqlx::query!(
         "SELECT version, current_queue_index, progress_secs, shuffle_enabled \

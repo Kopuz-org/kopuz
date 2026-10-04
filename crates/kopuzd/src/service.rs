@@ -1078,7 +1078,10 @@ impl Kopuz for KopuzGrpc {
         let view = self
             .0
             .api
-            .set_config(convert::config_from_proto(config))
+            .set_config(api::ConfigUpdate {
+                config: convert::config_from_proto(config),
+                expected_revision: request.get_ref().expected_revision,
+            })
             .await
             .map_err(failed)?;
         Ok(Response::new(convert::config_view_to_proto(&view)))
@@ -1428,8 +1431,6 @@ pub fn bind_socket(path: &std::path::Path) -> std::io::Result<Listener> {
     use std::io::{Error, ErrorKind};
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 
-    // sockaddr_un.sun_path is a fixed 108-byte field, and the kernel's error
-    // for overrunning it names a constant nobody recognises.
     const SUN_PATH_MAX: usize = 100;
     if path.as_os_str().len() > SUN_PATH_MAX {
         return Err(Error::new(
@@ -1694,11 +1695,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("kopuzd.sock");
 
-        // A crashed daemon leaves the socket file with nobody behind it.
         drop(std::os::unix::net::UnixListener::bind(&path).expect("leftover"));
         let live = bind_socket(&path).expect("stale socket reclaimed");
 
-        // Now one is really serving, so a second daemon must refuse.
         let error = bind_socket(&path).expect_err("live socket refused");
         assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
         drop(live);

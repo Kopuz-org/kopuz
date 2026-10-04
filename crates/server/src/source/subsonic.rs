@@ -425,9 +425,7 @@ impl MediaSource for SubsonicSource {
             .into_iter()
             .filter(|song| song.id != seed_ref)
             .collect();
-        // Nothing similar means no radio. Returning the seed on its own would
-        // read as success and replace the queue with the one song already
-        // playing, so hand back empty and let the caller say so.
+
         if similar.is_empty() {
             return Ok(Vec::new());
         }

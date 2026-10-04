@@ -55,8 +55,8 @@ impl ProviderClient {
                 })
             }
             MusicService::Nextcloud => {
-                // The password is expected to be an app password (Settings,
-                // Security), which is revocable and survives 2FA.
+
+
                 let client =
                     crate::nextcloud::NextcloudClient::new(&self.server_url, username, password)?;
                 client

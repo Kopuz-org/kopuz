@@ -5,19 +5,11 @@ use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
 use tracing::Instrument;
 
-// Architecture:
-// - A background download task (tokio::spawn) fetches audio chunks via HTTP
-// - Synchronous Read/Seek impls consume the buffer (required by symphonia decoder)
-// - Shared state uses tokio::sync::Mutex so the async task never blocks
-//   a Tokio worker thread with std::sync::Mutex::lock()
-// - The sync side uses blocking_lock() + 5ms polling (acceptable latency for audio)
-// - Prebuffering ensures at least 256KB before first read to avoid starvation
+const MIN_PREBUFFER_BYTES: usize = 256 * 1024;
 
-const MIN_PREBUFFER_BYTES: usize = 256 * 1024; // 256KB
+const MIN_BUFFER_AHEAD: usize = 128 * 1024;
 
-const MIN_BUFFER_AHEAD: usize = 128 * 1024; // 128KB
-
-const MAX_BUFFER_SIZE: usize = 1024 * 1024 * 1024; // 1GB
+const MAX_BUFFER_SIZE: usize = 1024 * 1024 * 1024;
 const PROGRESS_REPORT_STEP: usize = 64 * 1024;
 
 /// Reports one downloaded byte range as `[start, end)` plus the total length
@@ -93,8 +85,6 @@ impl StreamBuffer {
 
         let state_clone = state.clone();
 
-        // Background download task on the app runtime; shared state via
-        // tokio::sync::Mutex::lock().await (never blocks a worker thread).
         runtime.spawn(
             async move {
                 let ua = user_agent
@@ -105,8 +95,6 @@ impl StreamBuffer {
                     .build()
                     .unwrap_or_else(|_| reqwest::Client::new());
 
-                // Radio directories often hand out a playlist (.pls/.m3u par example)
-                // instead of the stream; follow it to its first entry.
                 let mut url = url;
                 let mut hops = 0u8;
                 let result = loop {
@@ -129,8 +117,6 @@ impl StreamBuffer {
                             }
                             match response.text().await.ok().as_deref().and_then(|text| {
                                 utils::playlist::first_stream_url(text)
-                                    // Playlist 2 playlist is HLS or a loop;
-                                    // not decodable, so stop here.
                                     .filter(|next| !utils::playlist::is_playlist(None, next))
                             }) {
                                 Some(next) => {
@@ -147,8 +133,7 @@ impl StreamBuffer {
                             }
                         }
                         Ok(response) => break Err(format!("HTTP {}", response.status())),
-                        // `without_url`: the URL a request failed on can carry
-                        // credentials, and this string reaches the player UI.
+
                         Err(e) => break Err(e.without_url().to_string()),
                     }
                 };
@@ -173,8 +158,6 @@ impl StreamBuffer {
                             notify.notify_waiters();
                         }
 
-                        // De-interleave only if the server honours the
-                        // Icy-MetaData request.
                         let mut icy = icy_tx.and_then(|tx| {
                             let metaint = response
                                 .headers()
@@ -280,13 +263,6 @@ impl StreamBuffer {
         Self { state, pos: 0 }
     }
 
-    // Blocking wait helpers.
-    // These are called from the sync Read impl, so they use blocking_lock()
-    // on the tokio::sync::Mutex. A 5ms polling interval is negligible compared
-    // to network latency (~100ms+) and audio decode times.
-    // The async download side uses Notify::notify_waiters() to wake any
-    // eventual future blocking_lock waiter faster, though polling alone suffices.
-
     fn wait_for_prebuffer(&self) {
         let (lock, _notify) = &*self.state;
         loop {
@@ -354,10 +330,6 @@ impl Read for StreamBuffer {
             }
         }
 
-        // Main read loop:
-        // 1. If data is available at current pos → copy into buf, advance pos, return
-        // 2. If download is finished (done) → return 0 (EOF) or error
-        // 3. Otherwise → wait for more data from the download task and retry
         let (lock, _notify) = &*self.state;
         loop {
             let state = lock.blocking_lock();

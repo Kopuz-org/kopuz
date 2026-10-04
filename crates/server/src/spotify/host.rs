@@ -379,8 +379,7 @@ async fn launch_browser(id: &str, url: &str) -> bool {
         let Some(bin) = crate::cookies::browser::find_browser_bin(*kind, None).await else {
             return false;
         };
-        // No `--watch-bus`: the page opens in the user's own browser, which
-        // has to outlive kopuz's bus connection rather than die with it.
+
         crate::cookies::browser::browser_command_with(&bin, false)
             .arg(url)
             .spawn()
@@ -424,9 +423,7 @@ async fn open_player_page(url: &str, preferred: Option<&str>) -> Result<(), Stri
             return Ok(());
         }
     }
-    // Under Flatpak every browser lives on the host, so a sandbox that cannot
-    // reach `flatpak-spawn --host` finds nothing however much is installed.
-    // Say that instead of telling the user to install a browser they have.
+
     #[cfg(all(unix, not(target_os = "macos")))]
     if crate::cookies::browser::in_flatpak() && !crate::cookies::browser::has_host_spawn().await {
         return Err(

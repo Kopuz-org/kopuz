@@ -266,7 +266,6 @@ pub async fn resolve_cover_art_url(
         Err(e) => tracing::warn!("MusicBrainz search failed: {}", e),
     }
 
-    // Fallback: iTunes
     match resolve_via_itunes(artist, album).await {
         Ok(Some(url)) => return Some(url),
         Ok(None) => tracing::info!("No iTunes match"),

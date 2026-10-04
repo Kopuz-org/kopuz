@@ -256,10 +256,7 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
     }
 
     let artist = edits.artist.trim();
-    // Compare against the same representation the editor seeds from (structured
-    // TrackArtists joined with ", ", else the single artist field). Only rewrite
-    // the artist tags when it actually changed, so editing unrelated fields keeps
-    // the structured multi-artist data intact.
+
     let existing_track_artists: Vec<String> = tag
         .get_strings(ItemKey::TrackArtists)
         .flat_map(|s| s.split(';').map(|a| a.trim().to_string()))
@@ -276,7 +273,7 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
         } else {
             tag.set_artist(artist.to_string());
         }
-        // Drop the now-stale structured split; re-derived from `artist` on scan.
+
         tag.remove_key(ItemKey::TrackArtists);
     }
 
@@ -299,8 +296,6 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
     match &edits.cover {
         CoverChange::Keep => {}
         CoverChange::Remove => {
-            // Clear every embedded picture, not just CoverFront — read_cover()
-            // falls back to any picture type, so a leftover would reappear.
             while !tag.pictures().is_empty() {
                 tag.remove_picture(0);
             }

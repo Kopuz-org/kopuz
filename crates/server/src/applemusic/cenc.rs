@@ -126,8 +126,6 @@ fn find_all_children(
     result
 }
 
-// Track info
-
 struct TrackInfo {
     track_id: u32,
     default_iv_size: u8,
@@ -152,8 +150,6 @@ fn extract_track_info(
             continue;
         }
 
-        // The version byte decides where the track id sits, so the length
-        // needed isn't known until it has been read — hence the two checks.
         let track_id = find_child(data, trak_body_start, trak_body_end, TKHD)
             .filter(|(bs, be, _)| bs < be)
             .and_then(|(s, be, _)| {
@@ -202,8 +198,6 @@ fn get_tenc_iv_size(data: &[u8], enca_body_start: usize, enca_body_end: usize) -
     16
 }
 
-// SENC parsing
-
 /// Per-sample decryption inputs read out of a `senc` box: each sample's 16-byte
 /// IV, paired with its subsample layout as `(clear_bytes, encrypted_bytes)`
 /// runs (empty when the sample is encrypted whole).
@@ -215,7 +209,6 @@ fn parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample: bo
     }
 
     if use_subsample {
-        // Subsample mode: each sample has [IV] + subsample_count(2) + patterns(n*6)
         if iv_size != 0
             && let Some(result) = try_parse_senc(iv_size, sample_count, raw_data, true)
         {
@@ -231,7 +224,6 @@ fn parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample: bo
             }
         }
     } else {
-        // Full-sample mode: each sample has just [IV], no subsample patterns
         if iv_size != 0
             && let Some(result) = try_parse_senc(iv_size, sample_count, raw_data, false)
         {
@@ -307,8 +299,6 @@ fn try_parse_senc(
     Some((ivs, subs))
 }
 
-// CENC decryption
-
 /// Decrypt one CENC sample in place through the CDM.
 fn crypt_sample_cenc(
     sample: &mut [u8],
@@ -369,7 +359,6 @@ pub struct Fmp4Layout {
 /// Pure parsing — no CDM calls — so it's cheap (~10ms for a 7 MB track) and can
 /// run before the first byte is needed.
 pub fn index_fmp4(data: &[u8]) -> Result<Fmp4Layout, String> {
-    // 1. Find init segment (ftyp + moov)
     let mut init_end = 0usize;
     let mut pos = 0;
     while pos + 8 <= data.len() {
@@ -394,7 +383,6 @@ pub fn index_fmp4(data: &[u8]) -> Result<Fmp4Layout, String> {
         samples: Vec::new(),
     };
 
-    // 2. Walk each fragment (moof + mdat) collecting sample positions.
     pos = init_end;
     while pos + 8 <= data.len() {
         let (moof_bs, moof_be, moof_total) = match read_box(data, pos) {
@@ -408,7 +396,6 @@ pub fn index_fmp4(data: &[u8]) -> Result<Fmp4Layout, String> {
         let moof_pos = pos;
         let moof_start_pos = moof_pos as u64;
 
-        // The mdat carrying this moof's samples follows it.
         let mdat_pos = moof_pos + moof_total;
         let Some((_, _, mdat_total_size)) = read_box(data, mdat_pos) else {
             break;
@@ -425,11 +412,6 @@ pub fn index_fmp4(data: &[u8]) -> Result<Fmp4Layout, String> {
                 continue;
             }
 
-            // Every read below is bounds-checked against the box's own end
-            // rather than assumed. These bytes come off the network, and
-            // `index_fmp4` runs under `State`'s mutex — an out-of-range index
-            // here would poison it and leave the track unplayable for good,
-            // reported only as "decrypt state poisoned".
             let tfhd = find_child(data, traf_bs, traf_be, TFHD);
             let track_id = tfhd
                 .as_ref()
@@ -479,8 +461,6 @@ pub fn index_fmp4(data: &[u8]) -> Result<Fmp4Layout, String> {
                 continue;
             }
 
-            // A running offset: re-summing the preceding sizes per sample is
-            // quadratic, and a fragment holds hundreds of samples.
             let mut offset = trun_data_offset;
             let mut iv = [0u8; 16];
             for (i, &sz) in samples.iter().enumerate() {
@@ -507,8 +487,6 @@ pub fn index_fmp4(data: &[u8]) -> Result<Fmp4Layout, String> {
         pos = moof_be;
     }
 
-    // Debug, not info: a streaming track re-walks this on every new fragment, so
-    // at info it drowns the log and makes indexing look like the slow step.
     tracing::debug!(
         "am.decrypt: indexed {} samples, init {} bytes",
         layout.samples.len(),
@@ -546,8 +524,6 @@ pub fn decrypt_sample(
         &sample.subs,
     )
 }
-
-// Parse trun
 
 fn parse_trun(
     data: &[u8],
@@ -610,24 +586,22 @@ fn parse_trun(
         }
     }
 
-    // Fill default sizes from tfhd/trex if trun didn't provide sizes
     if sizes.is_empty()
         && sample_count > 0
         && let Some((tfhd_bs, _, _)) = tfhd
     {
-        // tfhd body: version(1)+flags(3)=4 bytes, track_id(4 bytes), then optional fields
         let tfhd_version_flags = u32be(data, tfhd_bs);
         let tfhd_flags = tfhd_version_flags & 0x00FFFFFF;
-        let mut off = tfhd_bs + 8; // skip version+flags + track_id
+        let mut off = tfhd_bs + 8;
         if tfhd_flags & 0x000001 != 0 {
             off += 8;
-        } // base_data_offset (u64)
+        }
         if tfhd_flags & 0x000002 != 0 {
             off += 4;
-        } // sample_description_index (u32)
+        }
         if tfhd_flags & 0x000008 != 0 {
             off += 4;
-        } // default_sample_duration (u32)
+        }
         if tfhd_flags & 0x000010 != 0 && off + 4 <= data.len() {
             let def_size = u32be(data, off);
             if def_size > 0 {
@@ -636,8 +610,6 @@ fn parse_trun(
         }
     }
 
-    // baseOffset = moofStartPos; if trun has dataOffset: baseOffset += dataOffset
-    // offsetInMdat = baseOffset - mdatPayloadOffset
     let mut data_start: usize = 0;
     if has_data_offset {
         let base_offset = moof_start_pos.wrapping_add(trun_data_offset_i32 as i64 as u64);
@@ -705,11 +677,10 @@ fn find_descriptor(data: &[u8], mut pos: usize, end: usize, tag: u8) -> Option<(
         if this_tag == tag {
             return Some((body, body_end));
         }
-        // Descend through the containers on the way to the payload.
+
         match this_tag {
-            // ES_Descriptor: ES_ID(2) + flags(1) before its children.
             3 => pos = body + 3,
-            // DecoderConfigDescriptor: 13 bytes of fixed fields before its children.
+
             4 => pos = body + 13,
             _ => pos = body_end,
         }
@@ -726,7 +697,6 @@ pub fn audio_config(data: &[u8]) -> Option<AudioConfig> {
     let (moov_bs, moov_be) = find_deep(data, 0, data.len(), MOOV)?;
     let (stsd_bs, _) = find_deep(data, moov_bs, moov_be, STSD)?;
 
-    // stsd body: version+flags(4), entry_count(4), then sample entries.
     let entry = stsd_bs + 8;
     let (entry_body, entry_end, _) = read_box(data, entry)?;
     let kind = box_type(data, entry);
@@ -734,20 +704,12 @@ pub fn audio_config(data: &[u8]) -> Option<AudioConfig> {
         return None;
     }
 
-    // AudioSampleEntry: 6 reserved + 2 data_reference_index, then 8 bytes of
-    // version/revision/vendor, channelcount(2), samplesize(2), pre_defined(2),
-    // reserved(2), samplerate(4, 16.16 fixed point).
-    //
-    // `read_box` only vouches for the box being inside the buffer, not for the
-    // body being long enough to hold the fields the type implies — a sample
-    // entry declaring size 8 passes it. Reading through `get` turns a short one
-    // into `None` instead of an index past the end.
     let channels = u16::from_be_bytes(
         data.get(entry_body + 16..entry_body + 18)?
             .try_into()
             .ok()?,
     );
-    // Only the integer half of the 16.16 rate is meaningful for AAC.
+
     let sample_rate = u32::from(u16::from_be_bytes(
         data.get(entry_body + 24..entry_body + 26)?
             .try_into()
@@ -755,7 +717,7 @@ pub fn audio_config(data: &[u8]) -> Option<AudioConfig> {
     ));
 
     let (esds_bs, esds_be, _) = find_child(data, entry_body + 28, entry_end, ESDS)?;
-    // esds body starts with version+flags.
+
     let (asc_start, asc_end) = find_descriptor(data, esds_bs + 4, esds_be, 5)?;
     let codec_specific = data.get(asc_start..asc_end)?.to_vec();
     if codec_specific.is_empty() || channels == 0 || sample_rate == 0 {
@@ -785,10 +747,10 @@ mod tests {
             Some((5, 4)),
             "the four-byte padded form Apple and others emit"
         );
-        // 0x81 0x00 => (1 << 7) | 0 = 128
+
         assert_eq!(descriptor_len(&[0x81, 0x00], 0), Some((128, 2)));
         assert_eq!(descriptor_len(&[], 0), None);
-        // Never runs past four bytes even if every one sets the continue bit.
+
         assert_eq!(descriptor_len(&[0x80, 0x80, 0x80, 0x80], 0), Some((0, 4)));
     }
 
@@ -797,9 +759,6 @@ mod tests {
     /// fixed offset instead would land in the middle of a field.
     #[test]
     fn the_specific_info_is_found_through_its_containers() {
-        // ES_Descriptor(3) { ES_ID(2), flags(1),
-        //   DecoderConfigDescriptor(4) { 13 fixed bytes,
-        //     DecoderSpecificInfo(5) { 0x12 0x10 } } }
         let mut esds = vec![0x03, 0x19, 0x00, 0x00, 0x00];
         esds.extend_from_slice(&[0x04, 0x11]);
         esds.extend_from_slice(&[0x40, 0x15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -853,7 +812,7 @@ mod tests {
     fn encrypted_init() -> Vec<u8> {
         let mut tkhd = vec![0u8; 20];
         tkhd[12..16].copy_from_slice(&1u32.to_be_bytes());
-        // stsd: version/flags, then a one-entry table.
+
         let stsd = concat(&[vec![0, 0, 0, 0, 0, 0, 0, 1], boxed(b"enca", &[0u8; 28])]);
         concat(&[
             boxed(b"ftyp", b"isom"),
@@ -874,11 +833,8 @@ mod tests {
     /// a malformed box should produce.
     #[test]
     fn short_boxes_do_not_panic_the_indexer() {
-        // A `tkhd` at the very end of the buffer, which is the ordinary case
-        // while the init segment is still arriving: nothing follows `moov`, so
-        // reading the version byte and the track id runs off the allocation.
         let empty = boxed(b"tkhd", &[]);
-        // Version 1 puts the track id at +20; this body stops at 4.
+
         let stunted = boxed(b"tkhd", &[1, 0, 0, 0]);
         for trak_body in [empty, stunted] {
             let data = concat(&[
@@ -889,9 +845,6 @@ mod tests {
             assert!(index.samples.is_empty(), "no moof, so no samples");
         }
 
-        // `senc`'s per-sample table starts at +8, so a body shorter than that
-        // makes the table's start exceed its end. Slicing that way panics
-        // regardless of how much buffer follows.
         for senc_body in [Vec::new(), vec![0u8; 4], vec![0u8; 7]] {
             let traf = boxed(
                 b"traf",
@@ -970,18 +923,14 @@ mod tests {
                 path.display(),
                 cfg.channels
             );
-            // An AudioSpecificConfig is at least two bytes: 5 bits object type,
-            // 4 bits sampling frequency index, 4 bits channel configuration.
+
             assert!(
                 (2..=64).contains(&cfg.codec_specific.len()),
                 "{}: implausible csd-0 of {} bytes",
                 path.display(),
                 cfg.codec_specific.len()
             );
-            // The sample entry and the AudioSpecificConfig describe the same
-            // track by different routes, so they have to agree. This is the real
-            // check: a mis-parse of either one shows up as a disagreement, where
-            // plausibility bounds alone would let it through.
+
             const ASC_RATES: [u32; 13] = [
                 96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000,
                 7350,

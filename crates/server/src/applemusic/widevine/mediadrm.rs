@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn the_uuid_is_widevines() {
         let (most, least) = widevine_uuid_halves();
-        // edef8ba9-79d6-4ace-a3c8-27dcd51d21ed
+
         assert_eq!(most as u64, 0xedef_8ba9_79d6_4ace);
         assert_eq!(least as u64, 0xa3c8_27dc_d51d_21ed);
     }

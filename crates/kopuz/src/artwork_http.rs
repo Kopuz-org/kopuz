@@ -22,8 +22,7 @@ struct ArtworkServer {
 #[cfg(target_os = "android")]
 pub async fn start(api: Arc<dyn api::ArtworkApi>) -> std::io::Result<String> {
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
-    // Only this process knows the route. Other apps and browser pages must not
-    // be able to enumerate a user's private library through the loopback port.
+
     let path = format!("/{}/api", uuid::Uuid::new_v4());
     let endpoint = format!("http://{}{path}", listener.local_addr()?);
     let router = router(api, &path, Duration::from_secs(20));
@@ -61,7 +60,6 @@ async fn artwork(State(server): State<Arc<ArtworkServer>>, uri: http::Uri) -> Re
         Ok(Ok(data)) => (
             [
                 (header::CONTENT_TYPE, data.content_type.as_str()),
-                // Entity IDs and versions can repeat after a session change.
                 (header::CACHE_CONTROL, "no-store"),
                 (
                     header::ACCESS_CONTROL_ALLOW_ORIGIN,
@@ -197,7 +195,7 @@ mod tests {
             "/secret/api",
             Duration::from_millis(20),
         );
-        // More than one full batch exercises permit release after cancellation.
+
         for _ in 0..10 {
             let response = app
                 .clone()

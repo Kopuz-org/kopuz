@@ -122,9 +122,7 @@ impl GrpcApi {
     pub fn new(path: impl Into<PathBuf>) -> Result<Self, ApiError> {
         let path = path.into();
         let dial = path.clone();
-        // tonic still needs a syntactically valid URI to fill the HTTP/2
-        // :authority header. The connector below ignores it; nothing
-        // resolves this name.
+
         let channel = Endpoint::from_static("http://kopuz.invalid").connect_with_connector_lazy(
             service_fn(move |_: Uri| {
                 let dial = dial.clone();
@@ -654,7 +652,7 @@ impl api::ArtworkApi for GrpcApi {
             .map_err(wire_error)?
             .into_inner();
         let mut data = api::ArtworkData::default();
-        // The content type rides the first chunk only; the rest is body.
+
         while let Some(chunk) = stream.message().await.map_err(wire_error)? {
             if !chunk.content_type.is_empty() {
                 data.content_type = chunk.content_type;
@@ -709,11 +707,12 @@ impl api::ConfigApi for GrpcApi {
         Ok(convert::config_view_from_proto(view.get_ref()))
     }
 
-    async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError> {
+    async fn set_config(&self, update: api::ConfigUpdate) -> Result<ConfigView, ApiError> {
         let view = self
             .client()
             .set_config(Request::new(proto::SetConfigRequest {
-                config: Some(convert::config_to_proto(&config)),
+                config: Some(convert::config_to_proto(&update.config)),
+                expected_revision: update.expected_revision,
             }))
             .await
             .map_err(wire_error)?;
@@ -938,16 +937,12 @@ impl api::EventApi for GrpcApi {
 async fn run_event_loop(client: Client, tx: tokio::sync::mpsc::UnboundedSender<api::ApiEvent>) {
     let mut attached = false;
     loop {
-        // A reattach means the daemon restarted, so the mirror is stale in
-        // ways no cursor could reconcile. Resync tells the consumer to
-        // refetch, which is the same thing it does for a lagged channel.
         if attached && tx.send(api::ApiEvent::Resync).is_err() {
             return;
         }
         match stream_once(client.clone(), &tx).await {
             Ok(()) => return,
-            // Nothing is listening on the socket, so there is no daemon to
-            // reattach to: end the stream and let the consumer decide.
+
             Err(error) if error.code == api::ErrorCode::DaemonGone => {
                 tracing::info!(%error, "the daemon is gone; ending the event stream");
                 return;
@@ -972,10 +967,6 @@ async fn stream_once(
         .map_err(wire_error)?
         .into_inner();
     loop {
-        // Watch for the consumer going away as well as for events: parked in
-        // message() alone, this task would never notice its receiver was
-        // dropped, and the daemon would keep counting a frontend that is no
-        // longer listening.
         let message = tokio::select! {
             message = inbound.message() => message,
             () = tx.closed() => return Ok(()),

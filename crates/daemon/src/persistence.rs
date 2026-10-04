@@ -45,7 +45,6 @@ impl QueueStore for DbQueueStore {
     }
 
     async fn save(&self, source: &config::Source, snapshot: db::QueueSnapshot) {
-        // Held across the write, so two saves never interleave their rows.
         let mut written = self.written.lock().await;
         let unchanged = written.as_ref().is_some_and(|(at, queue, shuffle)| {
             at == source && *queue == snapshot.queue && *shuffle == snapshot.shuffle_order
@@ -114,7 +113,7 @@ mod tests {
             ..Default::default()
         };
         store.save(&source, playing(&["/a", "/b"], 0)).await;
-        // Rows the store did not write, so a rewrite would show.
+
         db.save_queue(&source, &playing(&["/elsewhere"], 0))
             .await
             .unwrap();

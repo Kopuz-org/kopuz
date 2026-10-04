@@ -122,8 +122,6 @@ impl SpotifySink {
             .map_err(ApiError::internal)?;
         Ok(devices
             .into_iter()
-            // This app's own SDK device is offered as "this app", not as one
-            // of the account's other devices.
             .filter(|device| Some(&device.id) != own.as_ref())
             .map(|device| ExternalDevice {
                 active: selected.as_deref() == Some(device.id.as_str()) || device.is_active,
@@ -332,8 +330,6 @@ impl SpotifySink {
                     ..
                 } => {
                     if self.with_state(|state| state.selected.is_some()) {
-                        // A Connect device owns playback; the tab's own state
-                        // is about a session nobody is listening to.
                         continue;
                     }
                     if self.stale(track_id.as_deref()) {
@@ -483,7 +479,7 @@ impl SpotifySink {
                 }
             })
             .await?;
-        // From what was saved: the session's copy catches up only once its actor handles the change.
+
         if let Some(host) = self.with_state(|state| state.host.clone())
             && let Some(access) = access_of(&saved)
         {
@@ -540,7 +536,7 @@ impl ExternalPlayer for SpotifySink {
 
     async fn load(&self, track: &Track, artwork: Option<String>) -> Result<(), ApiError> {
         let key = track.id.key().into_owned();
-        // Adopting a session already playing this track must not restart it.
+
         if self.with_state(|state| state.playing_key.as_deref() == Some(key.as_str())) {
             return Ok(());
         }
@@ -553,8 +549,6 @@ impl ExternalPlayer for SpotifySink {
             return Ok(());
         }
 
-        // The tab shows what is playing on its own media card, so it is told
-        // before it is asked to play.
         if let Some(host) = self.with_state(|state| state.host.clone()) {
             host.set_now_playing(track, artwork.as_deref().unwrap_or_default());
         }
@@ -567,8 +561,7 @@ impl ExternalPlayer for SpotifySink {
         });
         match ready {
             Some(device) => self.start_uri(device, uri).await,
-            // No tab yet, or one that has not had its play gesture: start it
-            // and let the pending URI go when it is ready.
+
             None => {
                 if let Some(sink) = self.arc() {
                     sink.ensure_host();

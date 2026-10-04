@@ -158,8 +158,7 @@ impl LibraryService {
                     .upsert_tracks(&source, chunk)
                     .await
                     .map_err(db_error)?;
-                // After the upsert: the stamp keeps the earliest value a row
-                // has ever had, so it needs the row to exist first.
+
                 if let Err(error) = self
                     .db
                     .stamp_added_at(&source, &added_at_stamps(chunk))
@@ -189,7 +188,7 @@ impl LibraryService {
                 .prune_source(&source, &keep_keys, &keep_albums)
                 .await
                 .map_err(db_error)?;
-            // The scanner names a folder's artist by text; here that is the identity of the source's unlinked row.
+
             let unlinked = self
                 .db
                 .unlinked_artist_keys(&source)
@@ -282,10 +281,7 @@ impl LibraryService {
         }
         if changed {
             self.invalidate(Table::Albums);
-            // An artist with no photo of their own wears an album's cover, so
-            // indexing one changes the artist listing too. Without this the
-            // grid stays blank until something else dirties tracks -- which,
-            // on a first scan, is nothing.
+
             self.invalidate(Table::Tracks);
         }
     }
@@ -375,7 +371,10 @@ impl LibraryService {
             .map(|track| track.id.key().into_owned())
             .collect();
         let keep_albums: Vec<String> = merged_albums.iter().map(|album| album.id.clone()).collect();
-        let _ = source.prune(&keep_keys, &keep_albums).await;
+        source
+            .prune(&keep_keys, &keep_albums)
+            .await
+            .map_err(crate::error::source_error)?;
         self.invalidate(Table::Tracks);
         self.invalidate(Table::Albums);
         Ok(())

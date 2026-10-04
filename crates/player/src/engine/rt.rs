@@ -218,10 +218,6 @@ impl RtState {
                 .fading
                 .as_mut()
                 .map(|s| {
-                    // Advance the outgoing counter too, so the actor can report
-                    // a live outgoing position during the fade. These counters
-                    // feed nothing else: the drain check reads only the active
-                    // session, and a seek-cancelled fade installs a fresh ring.
                     let read = read_into(&mut s.consumer, fading_scratch);
                     s.played.fetch_add(read as u64, Ordering::Relaxed);
                     apply_gain(&mut fading_scratch[..read], session_gain(s));
@@ -241,10 +237,7 @@ impl RtState {
             };
 
             let frames = read / channels;
-            // Advance the crossfade gain by a constant per-frame step instead of
-            // recomputing a division per frame in the RT callback. Rebase the
-            // starting gain from the integer progress counter at each chunk so
-            // float error can't accumulate across the whole fade.
+
             let total = fade.total_frames.max(1) as f32;
             let step = 1.0 / total;
             let mut fade_in_gain = fade.progress_frames.min(fade.total_frames) as f32 / total;
@@ -258,8 +251,7 @@ impl RtState {
                 }
                 fade_in_gain += step;
             }
-            // A trailing partial frame (read not divisible by channels) is
-            // passed through unmixed.
+
             chunk[(frames * channels)..read]
                 .copy_from_slice(&active_scratch[(frames * channels)..read]);
 
@@ -268,8 +260,6 @@ impl RtState {
                 fade_completed = Some(fade.generation);
             }
 
-            // Past-total frames mix at saturated gains (1.0 active / 0.0
-            // fading), so the block is still filled; teardown happens below.
             written += read;
             if read < chunk_len {
                 break;

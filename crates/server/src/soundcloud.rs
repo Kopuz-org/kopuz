@@ -217,18 +217,15 @@ pub(crate) async fn resolve_stream(
 
     if let Some(tc) = transcodings.iter().find(|tc| {
         transcoding_protocol(tc) == Some("hls") && transcoding_mime(tc) == Some("audio/mp4")
-    }) {
-        // Best-effort: if the AAC/HLS transcoding can't be resolved, fall
-        // through to the progressive MP3 stream rather than failing the play.
-        if let Some(hls_url) = tc.get("url").and_then(|v| v.as_str()) {
-            match resolve_media_url(&http, hls_url, track_auth, token).await {
-                Ok(media) => return Ok(ResolvedStream::HlsAac(media)),
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "SoundCloud HLS resolve failed; falling back to progressive"
-                    );
-                }
+    }) && let Some(hls_url) = tc.get("url").and_then(|v| v.as_str())
+    {
+        match resolve_media_url(&http, hls_url, track_auth, token).await {
+            Ok(media) => return Ok(ResolvedStream::HlsAac(media)),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "SoundCloud HLS resolve failed; falling back to progressive"
+                );
             }
         }
     }
@@ -352,7 +349,7 @@ fn parse_track(item: &Value) -> Option<Track> {
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
-    // SoundCloud has no artist entity; the uploader is it.
+
     let artist_id = user
         .and_then(|u| u.get("id"))
         .and_then(|v| v.as_u64())
@@ -377,9 +374,6 @@ fn parse_track(item: &Value) -> Option<Track> {
         .unwrap_or(0);
 
     Some(Track {
-        // Typed identity (replaces the old `soundcloud:<id>:urlhex_…` path hack);
-        // the artwork URL lives in `cover`, resolved straight through by the
-        // SoundCloud arm of the cover seam.
         id: reader::models::TrackId::Server {
             service: config::MusicService::SoundCloud,
             item_id: track_id.to_string(),
@@ -481,8 +475,6 @@ pub(crate) async fn liked_tracks_page(
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                // Each entry is `{created_at, kind:"like", track:{…}}`; the track
-                // object is nested under "track". Fall back to the bare item.
                 .map(|item| item.get("track").unwrap_or(item))
                 .filter_map(parse_track)
                 .collect()
@@ -500,8 +492,7 @@ pub(crate) async fn liked_tracks_page(
 pub(crate) async fn list_playlists(token: &str) -> Result<Vec<PlaylistSummary>, String> {
     let http = http_client();
     let cid = client_id(&http, false).await?;
-    // `/me/playlists` 404s like `/me/likes/tracks`; the web player reads a
-    // user's playlists from `/users/{id}/playlists`.
+
     let uid = derive_user_id(token)
         .await
         .ok_or("SoundCloud: couldn't resolve the signed-in user id")?;
@@ -618,9 +609,6 @@ pub(crate) async fn get_playlist_entries(
 pub(crate) async fn set_track_like(track_id: &str, like: bool, token: &str) -> Result<(), String> {
     let http = http_client();
 
-    // Public API: POST/DELETE https://api.soundcloud.com/likes/tracks/{id}. Unlike
-    // the web player's api-v2 host it isn't DataDome-gated, so the OAuth token
-    // alone authorizes the write.
     let url = format!("{API_V1}/likes/tracks/{track_id}");
     let req = if like {
         http.post(&url)
@@ -739,7 +727,7 @@ mod tests {
         assert_eq!(t.duration, 215);
         assert_eq!(track_id(&t), "42");
         assert_eq!(t.id.service(), Some(config::MusicService::SoundCloud));
-        // The artwork URL lives in `cover` now (not a path-encoded tag).
+
         assert!(t.cover.as_deref().is_some_and(|c| c.contains("sndcdn.com")));
     }
 }

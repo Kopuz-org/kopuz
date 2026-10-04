@@ -111,10 +111,18 @@ impl DownloadsService {
             .collect()
     }
 
-    /// Item ids with a registered offline copy.
+    /// Item ids with an available offline copy.
     pub async fn list(&self) -> Vec<String> {
         let config = self.session.config_watch().borrow().clone();
-        let mut ids: Vec<String> = config.offline_tracks.keys().cloned().collect();
+        let mut ids = Vec::new();
+        for (id, path) in &config.offline_tracks {
+            if tokio::fs::metadata(path)
+                .await
+                .is_ok_and(|metadata| metadata.is_file())
+            {
+                ids.push(id.clone());
+            }
+        }
         ids.sort();
         ids
     }
@@ -231,16 +239,15 @@ impl DownloadsService {
         config: &config::AppConfig,
         key: &str,
     ) -> Result<(), ApiError> {
-        let uid = self
+        let track = self
             .db
             .tracks_by_keys(&config.active_source, &[key.to_string()])
             .await
             .map_err(|error| ApiError::internal(format!("database error: {error}")))?
             .into_iter()
             .next()
-            .map(|track| track.id.uid())
-            .unwrap_or_else(|| key.to_string());
-        let item_ref = PlaybackItemRef::parse(&uid);
+            .ok_or_else(|| ApiError::not_found("no such track to download"))?;
+        let item_ref = PlaybackItemRef::from_id(&track.id);
         if !item_ref.is_server() {
             return Err(ApiError::invalid_input(
                 "only server tracks can be cached offline",
@@ -368,10 +375,9 @@ impl DownloadsService {
     }
 
     pub async fn remove(&self, key: &str) -> Result<(), ApiError> {
-        let item_ref = PlaybackItemRef::parse(key);
-        let item_id = item_ref.primary_id().unwrap_or(key).to_string();
+        let item_id = key;
         let config = self.session.config_watch().borrow().clone();
-        let Some(path) = config.offline_tracks.get(&item_id).cloned() else {
+        let Some(path) = config.offline_tracks.get(item_id).cloned() else {
             return Err(ApiError::not_found("no offline copy for this track"));
         };
         match self.remove_cache_file(Path::new(&path)) {
@@ -380,7 +386,7 @@ impl DownloadsService {
                 tracing::warn!(%error, %path, "offline file removal failed; unregistering anyway");
             }
         }
-        self.register(&item_id, None).await
+        self.register(item_id, None).await
     }
 }
 

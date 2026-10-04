@@ -65,9 +65,6 @@ pub fn parse_item_id(path: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
-    // Build an AppConfig with a server via serde so the test isn't tied to
-    // MusicServer's full field list (only name/url are required; the rest
-    // default).
     fn cfg(service: &str, token: Option<&str>, user_id: Option<&str>) -> config::AppConfig {
         let mut server = serde_json::json!({
             "name": "test",
@@ -97,25 +94,21 @@ mod tests {
 
     #[test]
     fn resolve_none_without_server_or_token() {
-        // No server configured at all.
         assert!(ServerConn::resolve(&config::AppConfig::default()).is_none());
-        // Server present but no access token.
+
         assert!(ServerConn::resolve(&cfg("Jellyfin", None, Some("u"))).is_none());
     }
 
     #[test]
     fn resolve_requires_user_id_except_ytmusic() {
-        // Jellyfin/Subsonic/Custom need a user_id — missing → None.
         assert!(ServerConn::resolve(&cfg("Jellyfin", Some("t"), None)).is_none());
         assert!(ServerConn::resolve(&cfg("Subsonic", Some("t"), None)).is_none());
         assert!(ServerConn::resolve(&cfg("Custom", Some("t"), None)).is_none());
 
-        // …present → resolves with the id carried through.
         let c = ServerConn::resolve(&cfg("Jellyfin", Some("t"), Some("u"))).unwrap();
         assert_eq!(c.user_id, "u");
         assert_eq!(c.token, "t");
 
-        // YtMusic authenticates by cookie — user_id optional, still resolves.
         let yt = ServerConn::resolve(&cfg("YtMusic", Some("cookie"), None)).unwrap();
         assert_eq!(yt.token, "cookie");
         assert!(yt.user_id.is_empty());

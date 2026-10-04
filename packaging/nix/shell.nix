@@ -4,9 +4,6 @@
   mkShell,
   stdenv,
   just,
-  bash,
-  bazelisk,
-  writeShellScriptBin,
   flatpak,
   flatpak-builder,
   appstream,
@@ -19,26 +16,7 @@
 }:
 let
   kopuzPkg = self.packages.${stdenv.hostPlatform.system}.kopuz;
-  nixTarget = lib.replaceStrings [ "-" ] [ "_" ] stdenv.hostPlatform.config;
-  bazel = writeShellScriptBin "bazel" ''
-    case "$1" in
-      build|run|test|coverage|aquery)
-        command="$1"
-        shift
-        exec ${lib.getExe bazelisk} "$command" \
-          --shell_executable=${lib.getExe bash} \
-          --action_env=PATH="$PATH" \
-          --action_env=PKG_CONFIG_PATH="$PKG_CONFIG_PATH" \
-          --action_env=NIX_LDFLAGS="$NIX_LDFLAGS" \
-          --action_env=NIX_CC_WRAPPER_TARGET_HOST_${nixTarget}=1 \
-          --action_env=NIX_BINTOOLS_WRAPPER_TARGET_HOST_${nixTarget}=1 \
-          "$@"
-        ;;
-      *)
-        exec ${lib.getExe bazelisk} "$@"
-        ;;
-    esac
-  '';
+
 in
 mkShell {
   name = "kopuz-dev";
@@ -47,8 +25,6 @@ mkShell {
   nativeBuildInputs = [
     # Dev
     just
-    bazel
-    bazelisk
 
     nodejs_22
     ffmpeg
