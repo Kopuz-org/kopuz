@@ -205,11 +205,10 @@ impl Scrobbler {
             return;
         }
 
-        if let (Some(source), Some(id)) = (&source, item_id.as_deref()) {
-            match source.scrobble(id).await {
-                Ok(_) => tracing::info!("scrobbled: {} - {}", track.artist, track.title),
-                Err(error) => tracing::warn!(%error, "scrobble failed"),
-            }
+        if let (Some(source), Some(id)) = (&source, item_id.as_deref())
+            && let Err(error) = source.scrobble(id).await
+        {
+            tracing::warn!(%error, "source scrobble failed");
         }
 
         let mut scrobble_ok = false;
@@ -304,10 +303,10 @@ impl Scrobbler {
             match scrobble::musicbrainz::submit_listens(&token_mb, vec![listen], "single").await {
                 Ok(_) => {
                     scrobble_ok = true;
-                    tracing::info!("MusicBrainz scrobbled: {} - {}", track.artist, track.title);
+                    tracing::info!("ListenBrainz scrobbled: {} - {}", track.artist, track.title);
                 }
                 Err(error) => {
-                    tracing::warn!(%error, "MusicBrainz scrobble failed");
+                    tracing::warn!(%error, "ListenBrainz scrobble failed");
                     if scrobble::queue::is_transient(&error) {
                         scrobble::queue::enqueue(
                             &self.db,
