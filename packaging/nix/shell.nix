@@ -14,6 +14,7 @@
   gtk3,
   libayatana-appindicator,
   mesa,
+  gst_all_1,
 }:
 let
   kopuzPkg = self.packages.${stdenv.hostPlatform.system}.kopuz;
@@ -39,6 +40,16 @@ mkShell {
   env = lib.optionalAttrs stdenv.hostPlatform.isLinux {
     GIO_MODULE_DIR = "${glib-networking}/lib/gio/modules/";
     GSETTINGS_SCHEMA_DIR = "${glib.getSchemaPath gtk3}";
+    GST_PLUGIN_SYSTEM_PATH_1_0 = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
+      with gst_all_1;
+      [
+        gstreamer
+        gst-plugins-base
+        gst-plugins-good
+        gst-plugins-bad
+        gst-libav
+      ]
+    );
     LD_LIBRARY_PATH = "${lib.makeLibraryPath kopuzPkg.buildInputs}:${libayatana-appindicator}/lib:$LD_LIBRARY_PATH";
     WEBKIT_DISABLE_COMPOSITING_MODE = "1";
     RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
