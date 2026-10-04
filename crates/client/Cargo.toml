@@ -21,7 +21,6 @@ config = { workspace = true }
 directories = { workspace = true }
 proto = { workspace = true }
 tonic = { workspace = true }
-serde_json = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 tokio = { workspace = true }

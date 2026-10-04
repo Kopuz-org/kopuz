@@ -53,3 +53,98 @@ fn compare_album(
 fn compare_text(left: &str, right: &str) -> Ordering {
     left.trim().to_lowercase().cmp(&right.trim().to_lowercase())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn album(id: &str, title: &str, artist: &str, year: u16, genre: &str) -> AlbumInfo {
+        AlbumInfo {
+            id: id.to_string(),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            genre: genre.to_string(),
+            year,
+            ..AlbumInfo::default()
+        }
+    }
+
+    fn crit(field: AlbumSortField, dir: SortDirection) -> SortCriterion<AlbumSortField> {
+        SortCriterion::new(field, dir)
+    }
+
+    #[test]
+    fn sorts_by_title_case_insensitive_ascending() {
+        let mut albums = vec![
+            album("1", "banana", "x", 0, ""),
+            album("2", "Apple", "x", 0, ""),
+            album("3", "cherry", "x", 0, ""),
+        ];
+        sort_albums(
+            &mut albums,
+            &[crit(AlbumSortField::Title, SortDirection::Asc)],
+        );
+        let titles: Vec<&str> = albums.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(titles, ["Apple", "banana", "cherry"]);
+    }
+
+    #[test]
+    fn artist_then_year_breaks_ties() {
+        let mut albums = vec![
+            album("1", "Later", "same", 2020, ""),
+            album("2", "Earlier", "same", 2010, ""),
+            album("3", "Other", "aaa", 1999, ""),
+        ];
+        sort_albums(
+            &mut albums,
+            &[
+                crit(AlbumSortField::Artist, SortDirection::Asc),
+                crit(AlbumSortField::Year, SortDirection::Asc),
+            ],
+        );
+        let ids: Vec<&str> = albums.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["3", "2", "1"]);
+    }
+
+    #[test]
+    fn year_descending() {
+        let mut albums = vec![
+            album("1", "A", "x", 2000, ""),
+            album("2", "B", "x", 2020, ""),
+            album("3", "C", "x", 2010, ""),
+        ];
+        sort_albums(
+            &mut albums,
+            &[crit(AlbumSortField::Year, SortDirection::Desc)],
+        );
+        let ids: Vec<&str> = albums.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["2", "3", "1"]);
+    }
+
+    #[test]
+    fn available_fields_gate_year_and_genre() {
+        let bare = vec![album("1", "One", "x", 0, "")];
+        let rich = vec![album("2", "Two", "x", 2001, "Rock")];
+        assert_eq!(
+            available_album_fields(&bare),
+            vec![AlbumSortField::Title, AlbumSortField::Artist]
+        );
+        assert_eq!(
+            available_album_fields(&rich),
+            vec![
+                AlbumSortField::Title,
+                AlbumSortField::Artist,
+                AlbumSortField::Year,
+                AlbumSortField::Genre,
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_criteria_leaves_order_unchanged() {
+        let mut albums = vec![album("2", "C", "x", 0, ""), album("1", "A", "x", 0, "")];
+        sort_albums(&mut albums, &[]);
+        let ids: Vec<&str> = albums.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["2", "1"]);
+    }
+}

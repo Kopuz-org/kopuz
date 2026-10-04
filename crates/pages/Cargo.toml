@@ -28,7 +28,6 @@ hooks = { workspace = true }
 config = { workspace = true }
 utils = { workspace = true }
 kopuz_route = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 rand = { workspace = true }

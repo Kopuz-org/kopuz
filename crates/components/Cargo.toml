@@ -17,16 +17,13 @@ workspace = true
 
 [dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
-directories = { workspace = true }
 tracing = { workspace = true }
 base64 = { workspace = true }
-uuid = { workspace = true }
 utils = { workspace = true }
 kopuz_route = { workspace = true }
 config = { workspace = true }
 api = { workspace = true }
 hooks = { workspace = true }
-rand = { workspace = true }
 tokio = { workspace = true, features = ["time", "fs"] }
 serde_json = { workspace = true }
 i18n = { workspace = true }

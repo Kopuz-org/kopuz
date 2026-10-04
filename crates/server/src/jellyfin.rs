@@ -164,20 +164,6 @@ pub struct AlbumsResponse {
     pub total_record_count: u32,
 }
 
-#[derive(Deserialize, Debug, Clone)]
-#[serde(rename_all = "PascalCase")]
-pub struct Genre {
-    pub name: String,
-    pub id: String,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "PascalCase")]
-pub struct GenresResponse {
-    pub items: Vec<Genre>,
-    pub total_record_count: u32,
-}
-
 impl JellyfinClient {
     pub fn new(
         base_url: &str,
