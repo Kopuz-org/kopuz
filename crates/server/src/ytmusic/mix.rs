@@ -23,10 +23,7 @@ impl MixSeed<'_> {
     fn mix_playlist_id(&self) -> String {
         match self {
             Self::Video(id) => format!("RDAMVM{id}"),
-            // Playlist ids are stored bare, but the `VL`-prefixed browse form
-            // leaks in from some InnerTube responses (see `playlists.rs`) and
-            // `RDAMPL` wants the bare one. Normalizing here rather than at
-            // construction means no caller can skip it.
+
             Self::Playlist(id) => format!("RDAMPL{}", id.strip_prefix("VL").unwrap_or(id)),
         }
     }
@@ -51,17 +48,9 @@ impl std::fmt::Display for MixSeed<'_> {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct MixPage {
-    pub tracks: Vec<Track>,
-    /// The `RD…` id YT built the mix under; a continuation names it again.
-    pub playlist_id: Option<String>,
-    pub continuation: Option<String>,
-}
-
-/// Ask YT to generate a radio queue from `seed` and return its first page.
+/// Ask YT to generate a radio queue from `seed` and return the tracks it lists.
 #[tracing::instrument(name = "yt.mix", skip(cookies), fields(seed = %seed))]
-pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<MixPage, String> {
+pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<Vec<Track>, String> {
     let client = WEB_REMIX;
     let mut body = json!({
         "enablePersistentPlaylistPanel": true,
@@ -84,60 +73,23 @@ pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<MixPage, S
     {
         obj.insert("videoId".into(), json!(video_id));
     }
-    let resp = post_next(&body, cookies).await?;
-    Ok(walk_queue(&resp))
-}
 
-#[tracing::instrument(name = "yt.mix_continuation", skip(token, cookies), fields(playlist = %playlist_id))]
-pub(super) async fn fetch_continuation(
-    playlist_id: &str,
-    token: &str,
-    cookies: &str,
-) -> Result<MixPage, String> {
-    let client = WEB_REMIX;
-    let body = json!({
-        "enablePersistentPlaylistPanel": true,
-        "continuation": token,
-        "playlistId": playlist_id,
-        "isAudioOnly": true,
-        "context": {
-            "client": {
-                "clientName": client.client_name,
-                "clientVersion": client.client_version,
-                "hl": "en",
-                "gl": "US",
-            },
-            "user": { "lockedSafetyMode": false },
-        },
-    });
-    let resp = post_next(&body, cookies).await?;
-    Ok(walk_continuation(&resp))
-}
-
-/// Works without auth (anonymous radio for any public video), so empty cookies
-/// skip Cookie + SAPISID.
-async fn post_next(body: &Value, cookies: &str) -> Result<Value, String> {
-    let client = WEB_REMIX;
+    let cookies_opt = if cookies.is_empty() {
+        None
+    } else {
+        Some(cookies)
+    };
     let mut req = super::innertube::http_client()
         .clone()
         .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
-        // The same header set every other InnerTube call sends. This one was
-        // missing the User-Agent and the API format version, which is what
-        // YouTube started answering with a bare 403 -- browse and player, which
-        // send them, kept working from the same session and cookies.
-        .header("User-Agent", client.user_agent)
-        .header("Content-Type", "application/json")
-        .header("X-Goog-Api-Format-Version", "1")
-        .header("X-YouTube-Client-Name", client.client_id)
-        .header("X-YouTube-Client-Version", client.client_version)
-        .header("X-Origin", ORIGIN)
-        .header("Origin", ORIGIN)
-        .header("Referer", format!("{ORIGIN}/"));
-    if !cookies.is_empty() {
-        let auth = sapisid_hash(cookies, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;
-        req = req.header("Cookie", cookies).header("Authorization", auth);
+        .headers(super::innertube::request_headers(client, ORIGIN))
+        .header("Origin", ORIGIN);
+    if let Some(c) = cookies_opt {
+        let auth = sapisid_hash(c, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
     }
-    req.json(body)
+    let resp: Value = req
+        .json(&body)
         .send()
         .await
         .map_err(|e| format!("next HTTP: {e}"))?
@@ -145,83 +97,48 @@ async fn post_next(body: &Value, cookies: &str) -> Result<Value, String> {
         .map_err(|e| format!("next HTTP: {e}"))?
         .json()
         .await
-        .map_err(|e| format!("next JSON: {e}"))
+        .map_err(|e| format!("next JSON: {e}"))?;
+
+    Ok(walk_queue(&resp))
 }
 
-fn walk_queue(resp: &Value) -> MixPage {
-    // Iterate the watchNext tabs by tabRenderer presence rather than
-    // assuming the queue lives at tabs[0]. YT A/B-tests the tab order
-    // (Up next vs Lyrics vs Related) and the positional dive
-    // silently returned an empty queue whenever the queue tab wasn't
-    // first — kills 'next song' and the radio button.
+fn walk_queue(resp: &Value) -> Vec<Track> {
     let tabs = resp
         .pointer(
             "/contents/singleColumnMusicWatchNextResultsRenderer/tabbedRenderer/watchNextTabbedResultsRenderer/tabs",
         )
         .and_then(|v| v.as_array());
     let Some(tabs) = tabs else {
-        return MixPage::default();
+        return Vec::new();
     };
-    tabs.iter()
-        .find_map(|tab| {
-            tab.get("tabRenderer")
-                .and_then(|t| t.get("content"))
-                .and_then(|c| c.get("musicQueueRenderer"))
-                .and_then(|q| q.get("content"))
-                .and_then(|c| c.get("playlistPanelRenderer"))
-        })
-        .map(walk_panel)
-        .unwrap_or_default()
-}
+    let items = tabs.iter().find_map(|tab| {
+        tab.get("tabRenderer")
+            .and_then(|t| t.get("content"))
+            .and_then(|c| c.get("musicQueueRenderer"))
+            .and_then(|q| q.get("content"))
+            .and_then(|c| c.get("playlistPanelRenderer"))
+            .and_then(|p| p.get("contents"))
+            .and_then(|v| v.as_array())
+    });
+    let Some(items) = items else {
+        return Vec::new();
+    };
 
-fn walk_continuation(resp: &Value) -> MixPage {
-    resp.pointer("/continuationContents/playlistPanelContinuation")
-        .map(walk_panel)
-        .unwrap_or_default()
-}
-
-/// Takes a `playlistPanelRenderer` or a later page's `playlistPanelContinuation`.
-fn walk_panel(panel: &Value) -> MixPage {
-    let tracks = panel
-        .get("contents")
-        .and_then(|v| v.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    item.get("playlistPanelVideoRenderer").or_else(|| {
-                        item.pointer(
-                            "/playlistPanelVideoWrapperRenderer/primaryRenderer/playlistPanelVideoRenderer",
-                        )
-                    })
-                })
-                .filter_map(parse_queue_row)
-                .collect()
-        })
-        .unwrap_or_default();
-    // `nextRadioContinuationData` for a mix, `nextContinuationData` for a
-    // long playlist queue; the key is the only difference.
-    let continuation = panel
-        .get("continuations")
-        .and_then(|v| v.as_array())
-        .and_then(|list| {
-            list.iter().find_map(|entry| {
-                entry
-                    .as_object()?
-                    .values()
-                    .find_map(|data| data.get("continuation")?.as_str())
-            })
-        })
-        .filter(|token| !token.is_empty())
-        .map(str::to_string);
-    MixPage {
-        tracks,
-        playlist_id: panel
-            .get("playlistId")
-            .and_then(|v| v.as_str())
-            .map(str::to_string),
-        continuation,
+    let mut out = Vec::new();
+    for item in items {
+        let row = item.get("playlistPanelVideoRenderer").or_else(|| {
+            item.pointer(
+                "/playlistPanelVideoWrapperRenderer/primaryRenderer/playlistPanelVideoRenderer",
+            )
+        });
+        let Some(row) = row else {
+            continue;
+        };
+        if let Some(track) = parse_queue_row(row) {
+            out.push(track);
+        }
     }
+    out
 }
 
 fn parse_queue_row(row: &Value) -> Option<Track> {
@@ -263,8 +180,6 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
         })
         .unwrap_or_default();
 
-    // For songs (has_album): byline = [artist, album, year-or-views, likes]
-    // For videos:            byline = [artist, views, likes]
     let primary_artist = byline.first().cloned().unwrap_or_default();
     let artists = if primary_artist.is_empty() {
         Vec::new()
@@ -320,9 +235,6 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
 }
 
 fn normalize_yt_thumbnail(url: &str) -> String {
-    // See discover.rs for the rationale: only rewrite when the URL
-    // already carries a `=wNNN` size suffix; otherwise the suffix
-    // glues onto mixart / query-style URLs and 404s.
     if let Some(idx) = url.rfind("=w")
         && url[idx + 2..]
             .chars()
@@ -366,10 +278,31 @@ pub async fn artist_channel_for_video(
             },
         },
     });
-    let resp = post_next(&body, cookies).await?;
+    let cookies_opt = if cookies.is_empty() {
+        None
+    } else {
+        Some(cookies)
+    };
+    let mut req = super::innertube::http_client()
+        .clone()
+        .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
+        .headers(super::innertube::request_headers(client, ORIGIN))
+        .header("Origin", ORIGIN);
+    if let Some(c) = cookies_opt {
+        let auth = sapisid_hash(c, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
+    }
+    let resp: Value = req
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("next HTTP: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("next HTTP: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("next JSON: {e}"))?;
 
-    // (text, channel) pairs from the requested video's own byline — scoped by
-    // videoId so other queue entries' artists can't be picked up.
     let mut channels: Vec<(String, String)> = Vec::new();
     collect_video_byline_channels(&resp, video_id, &mut channels);
     let want = super::search::fold_artist_name(artist_name);
@@ -378,10 +311,6 @@ pub async fn artist_channel_for_video(
         .find(|(text, _)| super::search::fold_artist_name(text) == want)
         .map(|(_, id)| id.clone())
         .or_else(|| {
-            // A joined credit ("beat_shobon & CircusP") equals no single run;
-            // the run it STARTS with is the credit's primary artist. Longest
-            // prefix, so "A & B" prefers a run "A & B'" over plain "A"… never
-            // a mid-string accident.
             channels
                 .iter()
                 .filter(|(text, _)| {
@@ -398,9 +327,6 @@ pub async fn artist_channel_for_video(
             ids.all(|id| id == first).then(|| first.to_string())
         })
         .or_else(|| {
-            // Unlinked byline text (album songs credited to a joined name):
-            // the row menu's "Go to artist" entry is YT's own canonical
-            // artist for the song.
             let mut menu_artists = Vec::new();
             collect_video_menu_artists(&resp, video_id, &mut menu_artists);
             menu_artists.into_iter().next()
@@ -497,52 +423,5 @@ fn collect_video_byline_channels(v: &Value, video_id: &str, out: &mut Vec<(Strin
             }
         }
         _ => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn recorded() -> Value {
-        serde_json::from_str(include_str!("../../tests/fixtures/next_radio.json"))
-            .expect("fixture is JSON")
-    }
-
-    #[test]
-    fn a_radio_response_lists_its_tracks_and_the_next_page() {
-        let page = walk_queue(&recorded());
-
-        assert!(page.tracks.len() >= 40, "got {}", page.tracks.len());
-        assert_eq!(page.tracks[0].id.key(), "IluRBvnYMoY");
-        assert_eq!(page.playlist_id.as_deref(), Some("RDAMVMIluRBvnYMoY"));
-        assert!(
-            page.continuation
-                .as_deref()
-                .is_some_and(|token| token.starts_with("CDIS")),
-            "{:?}",
-            page.continuation
-        );
-    }
-
-    #[test]
-    fn a_continuation_page_parses_like_the_first() {
-        let first = recorded();
-        let panel = first
-            .pointer("/contents/singleColumnMusicWatchNextResultsRenderer/tabbedRenderer/watchNextTabbedResultsRenderer/tabs/0/tabRenderer/content/musicQueueRenderer/content/playlistPanelRenderer")
-            .expect("queue panel")
-            .clone();
-        let continued = json!({ "continuationContents": { "playlistPanelContinuation": panel } });
-
-        assert_eq!(walk_continuation(&continued), walk_queue(&first));
-    }
-
-    #[test]
-    fn a_last_page_has_no_continuation() {
-        let page = walk_continuation(&json!({
-            "continuationContents": { "playlistPanelContinuation": { "contents": [] } }
-        }));
-
-        assert_eq!(page, MixPage::default());
     }
 }

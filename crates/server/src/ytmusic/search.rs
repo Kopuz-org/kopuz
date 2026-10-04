@@ -294,7 +294,7 @@ async fn do_search_raw(
         .post(format!(
             "{ORIGIN_YT_MUSIC}/youtubei/v1/search?prettyPrint=false"
         ))
-        .headers(super::innertube::request_headers(client))
+        .headers(super::innertube::request_headers(client, ORIGIN_YT_MUSIC))
         .header("Origin", ORIGIN_YT_MUSIC)
         .json(&body);
     if let Some(c) = cookies {
