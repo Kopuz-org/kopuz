@@ -1177,19 +1177,18 @@ fn factory_error_reports_and_keeps_prior_audio() {
     );
     assert!(result.is_err(), "broken factory must fail the load");
 
+    let mut seen = Vec::new();
+    wait_until("Error event carrying failed token 2", || {
+        drain_events(&mut events, &mut seen);
+        seen.iter()
+            .any(|e| matches!(e, Event::Error { token: 2, .. }))
+    });
+
     assert_eq!(engine.status().token, 1);
     assert_eq!(engine.status().phase, Phase::Playing);
     wait_until("audio from token 1", || {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
-    let mut seen = Vec::new();
-    drain_events(&mut events, &mut seen);
-    assert!(
-        seen.iter()
-            .any(|e| matches!(e, Event::Error { token: 2, .. })),
-        "Error event carries the failed token: {seen:?}"
-    );
-
     engine.shutdown();
 }
 
