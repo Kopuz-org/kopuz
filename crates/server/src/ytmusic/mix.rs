@@ -82,7 +82,7 @@ pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<Vec<Track>
     let mut req = super::innertube::http_client()
         .clone()
         .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
-        .headers(super::innertube::request_headers(client))
+        .headers(super::innertube::request_headers(client, ORIGIN))
         .header("Origin", ORIGIN);
     if let Some(c) = cookies_opt {
         let auth = sapisid_hash(c, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;
@@ -286,7 +286,7 @@ pub async fn artist_channel_for_video(
     let mut req = super::innertube::http_client()
         .clone()
         .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
-        .headers(super::innertube::request_headers(client))
+        .headers(super::innertube::request_headers(client, ORIGIN))
         .header("Origin", ORIGIN);
     if let Some(c) = cookies_opt {
         let auth = sapisid_hash(c, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;

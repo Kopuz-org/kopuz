@@ -728,7 +728,10 @@ async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
     let client = WEB_REMIX;
     let mut req = http_client()
         .post(url)
-        .headers(super::innertube::request_headers(client));
+        .headers(super::innertube::request_headers(
+            client,
+            ORIGIN_YOUTUBE_MUSIC,
+        ));
 
     if !cookies.is_empty()
         && let Some(auth) = sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC)
