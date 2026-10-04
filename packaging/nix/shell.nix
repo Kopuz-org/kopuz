@@ -13,6 +13,7 @@
   glib,
   gtk3,
   libayatana-appindicator,
+  mesa,
 }:
 let
   kopuzPkg = self.packages.${stdenv.hostPlatform.system}.kopuz;
@@ -42,4 +43,9 @@ mkShell {
     WEBKIT_DISABLE_COMPOSITING_MODE = "1";
     RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
   };
+
+  shellHook = lib.optionalString stdenv.hostPlatform.isLinux ''
+    export __EGL_VENDOR_LIBRARY_DIRS="''${__EGL_VENDOR_LIBRARY_DIRS-/run/opengl-driver/share/glvnd/egl_vendor.d:/etc/glvnd/egl_vendor.d:/usr/share/glvnd/egl_vendor.d:${mesa}/share/glvnd/egl_vendor.d}"
+    export GBM_BACKENDS_PATH="''${GBM_BACKENDS_PATH-/run/opengl-driver/lib/gbm:${mesa}/lib/gbm}"
+  '';
 }
