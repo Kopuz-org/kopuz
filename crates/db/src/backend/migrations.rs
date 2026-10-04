@@ -31,23 +31,30 @@ use reader::models::{Track, TrackId};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
-/// Run migrations, tolerating a checksum mismatch that's purely a line-ending
-/// difference of the same migration SQL: sqlx checksums raw bytes, so a CRLF
-/// (Windows) and an LF (Linux/macOS) checkout of an identical migration hash
-/// differently. On a `VersionMismatch` we reconcile and retry; a checksum that
-/// matches neither line ending is a genuine edit and still fails.
+mod legacy_artists;
+
+/// Run the database's migration history, including the earlier artist-credit
+/// schema when its exact historical checksums match. Only line-ending differences
+/// are reconciled; unrecognized migration edits still fail.
 pub(super) async fn run_migrations(
     pool: &SqlitePool,
     settings_path: Option<&Path>,
 ) -> Result<(), DbError> {
-    for fill in Fill::ALL {
+    let legacy = legacy_artists::for_database(pool).await?;
+    let migrator = legacy.as_ref().unwrap_or(&MIGRATOR);
+    let artists = if legacy.is_some() {
+        Fill::LegacyArtists
+    } else {
+        Fill::Artists
+    };
+    for fill in [artists, Fill::Queue, Fill::State, Fill::DerivedAlbums] {
         let (made_room, dropped_old) = fill.between();
         if applied(pool, dropped_old).await? {
             continue;
         }
         let mut through = sqlx::migrate::Migrator {
             migrations: std::borrow::Cow::Owned(
-                MIGRATOR
+                migrator
                     .iter()
                     .filter(|m| m.version <= made_room)
                     .cloned()
@@ -59,25 +66,25 @@ pub(super) async fn run_migrations(
         migrate(pool, &through).await?;
         fill.run(pool, settings_path).await?;
     }
-    migrate(pool, &MIGRATOR).await
+    migrate(pool, migrator).await
 }
 
 /// Data SQL can't move, filled in Rust after the migration that makes room for it and before the one dropping its old home.
 #[derive(Clone, Copy)]
 enum Fill {
     Artists,
+    LegacyArtists,
     Queue,
     State,
     DerivedAlbums,
 }
 
 impl Fill {
-    const ALL: [Fill; 4] = [Fill::Artists, Fill::Queue, Fill::State, Fill::DerivedAlbums];
-
     /// The migration the fill follows, and the one it must precede.
     fn between(self) -> (i64, i64) {
         match self {
             Fill::Artists => (ARTISTS_CREATED, 20260922000001),
+            Fill::LegacyArtists => (20260924000004, 20260924000005),
             Fill::Queue => (QUEUE_ROWS_CREATED, 20260930000001),
             Fill::State => (STATE_TABLES_CREATED, 20260930000006),
             Fill::DerivedAlbums => (LYRICS_CACHE_DROPPED, 20260930000008),
@@ -87,6 +94,7 @@ impl Fill {
     async fn run(self, pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(), DbError> {
         match self {
             Fill::Artists => fill_artists(pool).await,
+            Fill::LegacyArtists => legacy_artists::fill(pool).await,
             Fill::Queue => fill_queue(pool).await,
             Fill::State => fill_state(pool, settings_path).await,
             Fill::DerivedAlbums => fill_derived_albums(pool).await,
@@ -133,6 +141,7 @@ const STATE_TABLES_CREATED: i64 = 20260930000005;
 const LYRICS_CACHE_DROPPED: i64 = 20260930000007;
 
 async fn migrate(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> Result<(), DbError> {
+    let history = migrator;
     let adapted;
     let migrator = if applied(pool, 20260924000001).await? {
         let mut migrations = migrator.migrations.to_vec();
@@ -155,7 +164,7 @@ async fn migrate(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> Resul
     match migrator.run(pool).await {
         Ok(()) => Ok(()),
         Err(sqlx::migrate::MigrateError::VersionMismatch(_)) => {
-            reconcile_eol_checksums(pool).await?;
+            reconcile_eol_checksums(pool, history).await?;
             migrator.run(pool).await.map_err(Into::into)
         }
         Err(e) => Err(e.into()),
@@ -478,9 +487,10 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
 /// Re-stamp `_sqlx_migrations` rows whose checksum differs from this binary's
 /// only by line endings. `VersionMismatch` reports just the first offender, so
 /// reconcile every applied migration in one pass before retrying.
-async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
-    use sha2::{Digest, Sha384};
-
+async fn reconcile_eol_checksums(
+    pool: &SqlitePool,
+    migrator: &sqlx::migrate::Migrator,
+) -> Result<(), DbError> {
     let stored: HashMap<i64, Vec<u8>> =
         sqlx::query_as::<_, (i64, Vec<u8>)>("SELECT version, checksum FROM _sqlx_migrations")
             .fetch_all(pool)
@@ -488,7 +498,7 @@ async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
             .into_iter()
             .collect();
 
-    for m in MIGRATOR.iter() {
+    for m in migrator.iter() {
         let Some(stored_ck) = stored.get(&m.version) else {
             continue;
         };
@@ -496,12 +506,7 @@ async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
             continue;
         }
 
-        let lf = m.sql.replace("\r\n", "\n");
-        let crlf = lf.replace('\n', "\r\n");
-        let matches_eol_variant = [lf.as_bytes(), crlf.as_bytes()]
-            .into_iter()
-            .any(|bytes| Sha384::digest(bytes).as_slice() == stored_ck.as_slice());
-        if matches_eol_variant {
+        if checksum_matches(m, stored_ck) {
             sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
                 .bind(m.checksum.as_ref())
                 .bind(m.version)
@@ -514,6 +519,19 @@ async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
         }
     }
     Ok(())
+}
+
+fn checksum_matches(migration: &sqlx::migrate::Migration, checksum: &[u8]) -> bool {
+    use sha2::{Digest, Sha384};
+
+    if migration.checksum.as_ref() == checksum {
+        return true;
+    }
+    let lf = migration.sql.replace("\r\n", "\n");
+    let crlf = lf.replace('\n', "\r\n");
+    [lf.as_bytes(), crlf.as_bytes()]
+        .into_iter()
+        .any(|bytes| Sha384::digest(bytes).as_slice() == checksum)
 }
 
 /// Before applying new migrations to an existing DB, copy it (plus WAL sidecars)
