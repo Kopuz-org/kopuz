@@ -23,7 +23,6 @@ info_plist_path = "Info.plist"
 # Desktop only. Android uses the mobile renderer, logs to logcat, and has no Discord IPC.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
-discord-rich-presence = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 ctrlc = { workspace = true }
@@ -31,7 +30,6 @@ webbrowser = { workspace = true }
 # The socket the app serves its core on, and the client that dials one.
 kopuzd = { workspace = true }
 client = { workspace = true }
-futures-util = { workspace = true }
 wallpaper = { version = "3.2", default-features = false }
 
 [target.'cfg(target_os = "android")'.dependencies]
@@ -65,12 +63,10 @@ hooks = { workspace = true }
 percent-encoding = { workspace = true }
 image = { workspace = true }
 utils = { workspace = true }
-rand = { workspace = true }
 material-colors = "0.4.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 i18n = { workspace = true }
-urlencoding = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 
 

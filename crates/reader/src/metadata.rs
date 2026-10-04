@@ -315,20 +315,6 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Read the embedded front-cover picture (or best available) as raw bytes plus
-/// its MIME type, for previewing in the metadata editor. `None` if the file has
-/// no embedded artwork.
-pub fn read_cover(track_path: &Path) -> Option<(Vec<u8>, String)> {
-    let tagged = Probe::open(track_path).ok()?.read().ok()?;
-    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
-    let picture = extract_embedded_cover(&tagged, tag)?;
-    let mime = picture
-        .mime_type()
-        .map(|m| m.as_str().to_string())
-        .unwrap_or_else(|| "image/jpeg".to_string());
-    Some((picture.data().to_vec(), mime))
-}
-
 fn is_matroska_audio(track_path: &Path) -> bool {
     track_path
         .extension()

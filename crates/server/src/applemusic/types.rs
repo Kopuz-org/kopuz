@@ -287,28 +287,6 @@ pub struct ArtistSearchAttributes {
     pub genreNames: Vec<String>,
 }
 
-/// A reference entry in the `data` array of a library response.
-#[derive(Debug, Clone, Deserialize)]
-pub struct LibraryRef {
-    pub id: String,
-    #[serde(rename = "type")]
-    pub ref_type: String,
-}
-
-/// The top-level library response with `data` (references) and `resources` (nested map).
-/// Resources are keyed by type name, then by id: `resources["library-albums"]["l.xxx"]`.
-/// We use `serde_json::Value` because the outer map may contain multiple types
-/// (e.g. "artists" + "library-albums") and only one type is our target.
-#[derive(Debug, Clone, Deserialize)]
-pub struct LibraryResourceResponse {
-    #[serde(default)]
-    pub next: String,
-    #[serde(default)]
-    pub data: Vec<LibraryRef>,
-    #[serde(default)]
-    pub resources: serde_json::Value,
-}
-
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LibrarySongResource {
     pub id: String,
@@ -473,45 +451,6 @@ pub struct LibraryPlaylistDescription {
 pub struct LibraryPlaylistRelationships {
     #[serde(default)]
     pub catalog: RelationshipData<Vec<LibraryCatalogRef>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct LibraryPlaylistTracksResponse {
-    #[serde(default)]
-    pub next: String,
-    #[serde(default)]
-    pub data: Vec<LibraryRef>,
-    #[serde(default)]
-    pub resources: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct WebPlaybackResp {
-    #[serde(default)]
-    pub songList: Vec<WebPlaybackSong>,
-    #[serde(default)]
-    pub status: i32,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct WebPlaybackSong {
-    #[serde(default)]
-    #[serde(rename = "hls-playlist-url")]
-    pub hls_playlist_url: String,
-    #[serde(default)]
-    #[serde(rename = "hls-key-cert-url")]
-    pub hls_key_cert_url: String,
-    #[serde(default)]
-    pub assets: Vec<WebPlaybackAsset>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct WebPlaybackAsset {
-    #[serde(default)]
-    pub flavor: String,
-    #[serde(default)]
-    #[serde(rename = "URL")]
-    pub url: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

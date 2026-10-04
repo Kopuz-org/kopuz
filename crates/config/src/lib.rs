@@ -1155,16 +1155,7 @@ impl AppConfig {
         }
     }
 
-    pub fn find_saved_server(&self, id: &str) -> Option<&SavedServer> {
-        self.servers.iter().find(|s| s.id == id)
-    }
-
     pub fn migrate_sidebar_order(&mut self) {
-        for key in self.sidebar_order.iter_mut() {
-            if key == "downloader" {
-                *key = "downloader".to_string();
-            }
-        }
         let all_keys = default_sidebar_order();
         for key in &all_keys {
             if !self.sidebar_order.iter().any(|k| k == key) {
