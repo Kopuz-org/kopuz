@@ -1,14 +1,3 @@
-// macOS system integration: media keys, Now Playing info, audio session, power
-// management, and run loop heartbeat for remote command dispatching.
-//
-// Architecture:
-// - init() sets up: NSProcessInfo (prevent App Nap), IOKit (no idle sleep),
-//   AVAudioSession (background playback), MPRemoteCommandCenter (media keys),
-//   CFRunLoopTimer (periodic heartbeat to wake the Tokio runtime)
-// - update_now_playing() pushes metadata + artwork to MPNowPlayingInfoCenter
-// - CFRunLoopWakeUp() is called to unblock the main thread from Tokio tasks
-// - All Objective-C/CoreFoundation FFI is documented with // SAFETY: invariants
-
 use std::ptr::NonNull;
 use std::sync::Mutex as StdMutex;
 use std::sync::{Arc, OnceLock};
@@ -29,10 +18,6 @@ use objc2_media_player::{
     MPRemoteCommandHandlerStatus,
 };
 
-// SAFETY:
-// These are well-documented CoreFoundation C functions. The FFI
-// signatures match the official Apple headers. Each call site
-// documents why the specific call is safe.
 unsafe extern "C" {
     fn CFRunLoopGetMain() -> *mut std::ffi::c_void;
     fn CFRunLoopWakeUp(rl: *mut std::ffi::c_void);
@@ -57,10 +42,7 @@ unsafe extern "C" {
 
 type IOPMAssertionID = u32;
 #[link(name = "IOKit", kind = "framework")]
-// SAFETY:
-// IOPMAssertionCreateWithName is a documented IOKit function.
-// The FFI signature matches Apple's IOPMLib.h header. The call
-// site documents the specific safety invariants.
+
 unsafe extern "C" {
     fn IOPMAssertionCreateWithName(
         assertion_type: *const std::ffi::c_void,
@@ -75,18 +57,10 @@ unsafe extern "C" {
 /// the Now Playing heartbeat timer and MPRemoteCommandCenter callbacks
 /// installed by [`init`] never fire.
 pub fn park_main_loop() {
-    // SAFETY: CFRunLoopRun runs the current thread's run loop; it takes no
-    // arguments and only returns when the loop is stopped or has no sources.
-    // The heartbeat timer installed by `init` keeps at least one source alive.
     unsafe { CFRunLoopRun() }
 }
 
 pub fn wake_run_loop() {
-    // SAFETY:
-    // - CFRunLoopGetMain() always returns a valid reference to the main
-    //   thread's run loop; it never returns null.
-    // - CFRunLoopWakeUp is safe to call on any valid run loop and does
-    //   not require additional synchronization.
     unsafe { CFRunLoopWakeUp(CFRunLoopGetMain()) }
 }
 
@@ -148,12 +122,6 @@ fn dispatch_event(event: SystemEvent) {
     wake_run_loop();
 }
 
-// SAFETY:
-// - This function matches the C callback signature expected by
-//   CFRunLoopTimerCreate (CFRunLoopTimerCallBack).
-// - It only calls wake_tokio() which is a safe Rust function.
-// - Parameters are unused, so their raw pointer values are never
-//   dereferenced.
 unsafe extern "C" fn main_loop_heartbeat(
     _timer: *mut std::ffi::c_void,
     _info: *mut std::ffi::c_void,
@@ -163,146 +131,123 @@ unsafe extern "C" fn main_loop_heartbeat(
 
 pub fn init() {
     static ONCE: OnceLock<()> = OnceLock::new();
-    ONCE.get_or_init(|| {
-        // SAFETY:
-        // - msg_send! on NSProcessInfo, AVFoundation, and MediaPlayer objects
-        //   is safe because these are well-known Apple frameworks that do not
-        //   require special threading or memory management beyond retain/release,
-        //   which objc2 handles automatically.
-        // - transmute from &NSString to *const c_void is sound because
-        //   NSString is a valid Objective-C object with a stable memory layout
-        //   compatible with CoreFoundation's CFStringRef.
-        // - IOPMAssertionCreateWithName expects a CFStringRef; transmuting
-        //   NSString to *const c_void is valid for the same reason (toll-free
-        //   bridging between CFStringRef and NSString).
-        // - CFRunLoopGetMain() always returns a valid run loop reference.
-        // - CFRunLoopTimerCreate with null allocator uses the default allocator,
-        //   which is correct for CoreFoundation.
-        // - kCFRunLoopCommonModes is a valid CFStringRef constant.
-        // - main_loop_heartbeat matches the required C callback signature.
-        // - All pointers passed to CoreFoundation functions are valid for the
-        //   duration of the calls.
-        // - The activity pointer from beginActivityWithOptions: is checked for
-        //   null before being used.
-        unsafe {
-            use objc2::ClassType;
-            let process_info: *mut AnyObject =
-                objc2::msg_send![NSProcessInfo::class(), processInfo];
-            let reason = NSString::from_str("Kopuz Background Audio Playback");
-            let options: u64 = 0x00FFFFFF | 0xFF00000000;
-            let activity: *mut AnyObject =
-                objc2::msg_send![process_info, beginActivityWithOptions: options, reason: &*reason];
-            if !activity.is_null() {
-                let _: *mut AnyObject = objc2::msg_send![activity, retain];
-                tracing::debug!("App Nap bypassed with NSProcessInfo activity (latency-critical)");
-            }
+    ONCE.get_or_init(|| unsafe {
+        use objc2::ClassType;
+        let process_info: *mut AnyObject = objc2::msg_send![NSProcessInfo::class(), processInfo];
+        let reason = NSString::from_str("Kopuz Background Audio Playback");
+        let options: u64 = 0x00FFFFFF | 0xFF00000000;
+        let activity: *mut AnyObject =
+            objc2::msg_send![process_info, beginActivityWithOptions: options, reason: &*reason];
+        if !activity.is_null() {
+            let _: *mut AnyObject = objc2::msg_send![activity, retain];
+            tracing::debug!("App Nap bypassed with NSProcessInfo activity (latency-critical)");
+        }
 
-            let assertion_type = NSString::from_str("NoIdleSleepAssertion");
-            let assertion_reason = NSString::from_str("Kopuz is playing audio");
-            let mut assertion_id: IOPMAssertionID = 0;
-            let kr = IOPMAssertionCreateWithName(
-                &*assertion_type as *const objc2_foundation::NSString as *const std::ffi::c_void,
-                255,
-                &*assertion_reason as *const objc2_foundation::NSString as *const std::ffi::c_void,
-                &mut assertion_id,
-            );
-            if kr == 0 {
-                tracing::debug!(id = assertion_id, "IOKit power assertion created");
+        let assertion_type = NSString::from_str("NoIdleSleepAssertion");
+        let assertion_reason = NSString::from_str("Kopuz is playing audio");
+        let mut assertion_id: IOPMAssertionID = 0;
+        let kr = IOPMAssertionCreateWithName(
+            &*assertion_type as *const objc2_foundation::NSString as *const std::ffi::c_void,
+            255,
+            &*assertion_reason as *const objc2_foundation::NSString as *const std::ffi::c_void,
+            &mut assertion_id,
+        );
+        if kr == 0 {
+            tracing::debug!(id = assertion_id, "IOKit power assertion created");
+        } else {
+            tracing::warn!(kr, "failed to create IOKit power assertion");
+        }
+
+        let session = AVAudioSession::sharedInstance();
+        if let Some(category) = AVAudioSessionCategoryPlayback {
+            if let Err(e) = session.setCategory_error(category) {
+                tracing::warn!(error = ?e, "failed to set AVAudioSession category");
+            }
+            if let Err(e) = session.setActive_error(true) {
+                tracing::warn!(error = ?e, "failed to activate AVAudioSession");
             } else {
-                tracing::warn!(kr, "failed to create IOKit power assertion");
+                tracing::debug!("AVAudioSession configured for background playback");
             }
+        } else {
+            tracing::error!("AVAudioSessionCategoryPlayback not available");
+        }
 
-            let session = AVAudioSession::sharedInstance();
-            if let Some(category) = AVAudioSessionCategoryPlayback {
-                if let Err(e) = session.setCategory_error(category) {
-                    tracing::warn!(error = ?e, "failed to set AVAudioSession category");
-                }
-                if let Err(e) = session.setActive_error(true) {
-                    tracing::warn!(error = ?e, "failed to activate AVAudioSession");
-                } else {
-                    tracing::debug!("AVAudioSession configured for background playback");
-                }
-            } else {
-                tracing::error!("AVAudioSessionCategoryPlayback not available");
-            }
+        let center = MPRemoteCommandCenter::sharedCommandCenter();
 
-            let center = MPRemoteCommandCenter::sharedCommandCenter();
+        center.playCommand().addTargetWithHandler(&RcBlock::new(
+            move |_: NonNull<MPRemoteCommandEvent>| {
+                dispatch_event(SystemEvent::Play);
+                MPRemoteCommandHandlerStatus::Success
+            },
+        ));
 
-            center.playCommand().addTargetWithHandler(&RcBlock::new(
-                move |_: NonNull<MPRemoteCommandEvent>| {
-                    dispatch_event(SystemEvent::Play);
-                    MPRemoteCommandHandlerStatus::Success
-                },
-            ));
+        center.pauseCommand().addTargetWithHandler(&RcBlock::new(
+            move |_: NonNull<MPRemoteCommandEvent>| {
+                dispatch_event(SystemEvent::Pause);
+                MPRemoteCommandHandlerStatus::Success
+            },
+        ));
 
-            center.pauseCommand().addTargetWithHandler(&RcBlock::new(
-                move |_: NonNull<MPRemoteCommandEvent>| {
-                    dispatch_event(SystemEvent::Pause);
-                    MPRemoteCommandHandlerStatus::Success
-                },
-            ));
+        center
+            .togglePlayPauseCommand()
+            .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
+                dispatch_event(SystemEvent::Toggle);
+                MPRemoteCommandHandlerStatus::Success
+            }));
 
-            center
-                .togglePlayPauseCommand()
-                .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
-                    dispatch_event(SystemEvent::Toggle);
-                    MPRemoteCommandHandlerStatus::Success
-                }));
+        center
+            .nextTrackCommand()
+            .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
+                dispatch_event(SystemEvent::Next);
+                MPRemoteCommandHandlerStatus::Success
+            }));
 
-            center
-                .nextTrackCommand()
-                .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
-                    dispatch_event(SystemEvent::Next);
-                    MPRemoteCommandHandlerStatus::Success
-                }));
+        center
+            .previousTrackCommand()
+            .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
+                dispatch_event(SystemEvent::Prev);
+                MPRemoteCommandHandlerStatus::Success
+            }));
 
-            center
-                .previousTrackCommand()
-                .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
-                    dispatch_event(SystemEvent::Prev);
-                    MPRemoteCommandHandlerStatus::Success
-                }));
-
-            center
-                .changePlaybackPositionCommand()
-                .addTargetWithHandler(&RcBlock::new(
-                    move |event: NonNull<MPRemoteCommandEvent>| {
-                        match event
-                            .as_ref()
-                            .downcast_ref::<MPChangePlaybackPositionCommandEvent>()
-                        {
-                            Some(event) => {
-                                dispatch_event(SystemEvent::Seek(event.positionTime()));
-                                MPRemoteCommandHandlerStatus::Success
-                            }
-                            None => MPRemoteCommandHandlerStatus::CommandFailed,
+        center
+            .changePlaybackPositionCommand()
+            .addTargetWithHandler(&RcBlock::new(
+                move |event: NonNull<MPRemoteCommandEvent>| {
+                    match event
+                        .as_ref()
+                        .downcast_ref::<MPChangePlaybackPositionCommandEvent>()
+                    {
+                        Some(event) => {
+                            dispatch_event(SystemEvent::Seek(event.positionTime()));
+                            MPRemoteCommandHandlerStatus::Success
                         }
-                    },
-                ));
-
-            let fire_date = CFAbsoluteTimeGetCurrent();
-            let timer = CFRunLoopTimerCreate(
-                std::ptr::null(),
-                fire_date,
-                0.25,
-                0,
-                0,
-                main_loop_heartbeat,
-                std::ptr::null(),
-            );
-            if !timer.is_null() {
-                CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
-                tracing::debug!("CFRunLoopTimer heartbeat started on main run loop (250ms)");
-            } else {
-                tracing::warn!("failed to create CFRunLoopTimer, falling back to thread");
-                std::thread::spawn(|| {
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_millis(250));
-                        wake_tokio();
-                        wake_run_loop();
+                        None => MPRemoteCommandHandlerStatus::CommandFailed,
                     }
-                });
-            }
+                },
+            ));
+
+        let fire_date = CFAbsoluteTimeGetCurrent();
+        let timer = CFRunLoopTimerCreate(
+            std::ptr::null(),
+            fire_date,
+            0.25,
+            0,
+            0,
+            main_loop_heartbeat,
+            std::ptr::null(),
+        );
+        if !timer.is_null() {
+            CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
+            tracing::debug!("CFRunLoopTimer heartbeat started on main run loop (250ms)");
+        } else {
+            tracing::warn!("failed to create CFRunLoopTimer, falling back to thread");
+            std::thread::spawn(|| {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    wake_tokio();
+                    wake_run_loop();
+                }
+            });
         }
     });
 }
@@ -315,9 +260,6 @@ struct ArtworkCache {
     artwork: objc2::rc::Retained<MPMediaItemArtwork>,
 }
 
-// SAFETY: MPMediaItemArtwork is a MediaPlayer framework object documented as
-// thread-safe (it is designed to be handed to MPNowPlayingInfoCenter from any
-// thread), and the cache only clones retains out of it under the mutex.
 unsafe impl Send for ArtworkCache {}
 
 static ARTWORK_CACHE: StdMutex<Option<ArtworkCache>> = StdMutex::new(None);
@@ -330,12 +272,6 @@ fn artwork_for_path(path: &str) -> Option<objc2::rc::Retained<MPMediaItemArtwork
         return Some(c.artwork.clone());
     }
 
-    // SAFETY:
-    // - initWithContentsOfFile returns nil for unreadable files, mapped to
-    //   None by objc2.
-    // - initWithImage: follows the alloc-init convention (+1 retain), so
-    //   Retained::from_raw takes ownership without over-releasing; the null
-    //   check guards a failed init.
     let artwork = unsafe {
         let ns_path = NSString::from_str(path);
         let image = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path)?;
@@ -363,17 +299,6 @@ pub fn update_now_playing(
 ) {
     init();
 
-    // SAFETY:
-    // - This entire block interacts with MediaPlayer framework objects
-    //   (MPNowPlayingInfoCenter, MPMediaItemArtwork) which are thread-safe
-    //   and designed to be called from any thread on macOS.
-    // - transmute from NSString/NSNumber to AnyObject is safe because
-    //   these Foundation types inherit from NSObject and their memory
-    //   layout is compatible. The protocol conformance is verified by
-    //   the existing type system.
-    // - transmute from NSMutableDictionary to NSDictionary is safe because
-    //   NSMutableDictionary is a subclass of NSDictionary; the upcast is
-    //   valid in Objective-C and matches what the framework expects.
     unsafe {
         let center = MPNowPlayingInfoCenter::defaultCenter();
 
@@ -428,14 +353,6 @@ pub fn update_now_playing(
 }
 
 pub fn refresh_now_playing() {
-    // SAFETY:
-    // - MPNowPlayingInfoCenter::defaultCenter() returns a valid,
-    //   thread-safe singleton.
-    // - nowPlayingInfo() returns an Option that may be None; we pass
-    //   None through as_deref() which maps to nil, which is a valid
-    //   argument for setNowPlayingInfo (clears the info).
-    // - setNowPlayingInfo accepts an optional dictionary; no
-    //   preconditions are violated here.
     unsafe {
         let center = MPNowPlayingInfoCenter::defaultCenter();
         let existing = center.nowPlayingInfo();

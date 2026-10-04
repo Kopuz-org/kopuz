@@ -45,9 +45,7 @@ const LYRIC_LINE_ASSUMED_MAX_SECONDS: f64 = 7.0;
 const INTERLUDE_LYRIC_CLASS: &str = "flex w-full items-center py-2 opacity-40 hover:opacity-80 cursor-pointer transition-opacity duration-300";
 const INTERLUDE_ACTIVE_LYRIC_CLASS: &str =
     "flex w-full items-center py-2 opacity-100 cursor-pointer transition-opacity duration-300";
-// Depth-of-field blur, keyed by layout since the rightbar's smaller type
-// turns mushy at the fullscreen step. Roughly a third of the font size at
-// full clamp keeps the farthest lines legible instead of a smear.
+
 const FULLSCREEN_DEPTH_BLUR_STEP_PX: f64 = 1.5;
 const FULLSCREEN_DEPTH_BLUR_MAX_PX: f64 = 8.0;
 const RIGHTBAR_DEPTH_BLUR_STEP_PX: f64 = 1.1;
@@ -346,8 +344,7 @@ fn build_display_lines(
     for pair in main.windows(2) {
         let (current, next) = (pair[0], pair[1]);
         let next_start = lines[next].start_time;
-        // Background lines sit after their parent in the list and can outlast
-        // it, so the gap starts once every line in the run has finished.
+
         let gap_start = lines[current..next]
             .iter()
             .map(line_end_estimate)
@@ -408,15 +405,12 @@ pub fn LyricsView(
     let mut ctrl = use_context::<PlayerController>();
     let mut auto_sync = use_signal(|| true);
 
-    // Clear functions when the component is dropped
     use_drop(move || {
         let _cleanup = eval(&format!(
             "for (const [key, type] of [['lineOver', 'mouseover'], ['lineOut', 'mouseout']]) {{ const fn = window[`__{layout}_${{key}}`]; if (fn) document.removeEventListener(type, fn); }} for (const key of ['updateLyrics', 'resetLyrics', 'setAutoSync', 'autoSync', 'lineOver', 'lineOut']) delete window[`__{layout}_${{key}}`];"
         ));
     });
 
-    // Take over on real input, not on scroll events: line growth and the browser's
-    // own scroll anchoring move scrollTop on their own. The sync button re-arms.
     use_future(move || async move {
         let mut listener = eval(&format!(
             r#"
@@ -908,7 +902,6 @@ pub fn LyricsView(
     use_resource(move || {
         let lyrics = lyrics.read().clone();
 
-        // a fresh track re-arms auto-scroll
         auto_sync.set(true);
 
         let _reset = eval(&format!(
@@ -923,7 +916,6 @@ pub fn LyricsView(
                 let main_line_indices = main_line_indices(&lines);
 
                 loop {
-                    // The clock runs ahead of the speakers; hold the lyrics back.
                     let (offset_secs, depth_blur_enabled, depth_blur_strength) = {
                         let cfg = config.peek();
                         let offset_secs = if cfg.lyrics_offset_auto {
@@ -965,7 +957,6 @@ pub fn LyricsView(
                             })
                             .unwrap_or(50);
                     } else {
-                        // we are before the first line, invalidate current line
                         let active_secondary_lines = active_secondary_lines(
                             &lines,
                             &main_line_indices,
@@ -1211,8 +1202,6 @@ mod tests {
 
     #[test]
     fn background_line_stays_lit_when_the_next_main_line_starts() {
-        // Apple's rows for The Chain: the next main line begins while the
-        // backing vocal of the previous one is still running.
         let lines = vec![
             line(63.167, Some(67.299)),
             background_line(65.48, Some(67.299), 0),
@@ -1275,7 +1264,7 @@ mod tests {
 
         assert!(rightbar_step < fullscreen_step);
         assert!(rightbar_max < fullscreen_max);
-        // At least a couple of lines of headroom before the clamp kicks in.
+
         assert!(fullscreen_max > fullscreen_step * 2.0);
         assert!(rightbar_max > rightbar_step * 2.0);
     }

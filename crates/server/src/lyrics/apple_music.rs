@@ -48,7 +48,6 @@ pub(super) async fn fetch_apple_music_lyrics(
 
     let client = reqwest::Client::new();
 
-    // Resolve library ID to catalog ID if needed.
     let catalog_id = resolve_catalog_id(&client, auth, reach).await;
     let catalog_id = match catalog_id {
         Some(id) => id,
@@ -61,7 +60,6 @@ pub(super) async fn fetch_apple_music_lyrics(
         }
     };
 
-    // Try syllable-lyrics first (word-level timing, quality 2), then lyrics (line-level).
     for lrc_type in &["syllable-lyrics", "lyrics"] {
         let path = format!(
             "/v1/catalog/{}/songs/{}/{lrc_type}?l={}&extend=ttmlLocalizations",
@@ -191,9 +189,6 @@ enum TimingMode {
 }
 
 fn detect_timing_mode(ttml: &str) -> TimingMode {
-    // Look for itunes:timing attribute on the root <tt> element.
-    // quick-xml doesn't handle namespace prefixes well for custom attrs,
-    // so we do a simple search.
     if ttml.contains("itunes:timing=\"Word\"") || ttml.contains("timing=\"Word\"") {
         TimingMode::Word
     } else if ttml.contains("itunes:timing=\"None\"") || ttml.contains("timing=\"None\"") {
@@ -202,8 +197,6 @@ fn detect_timing_mode(ttml: &str) -> TimingMode {
         TimingMode::Line
     }
 }
-
-// ── Plain (untimed) ───────────────────────────────────────────────────
 
 fn parse_plain(ttml: &str) -> Option<Lyrics> {
     let lines = extract_p_texts(ttml);
@@ -251,8 +244,6 @@ fn extract_p_texts(ttml: &str) -> Vec<String> {
     }
     texts
 }
-
-// ── Line-timed ────────────────────────────────────────────────────────
 
 fn parse_line_timed(ttml: &str) -> Option<Lyrics> {
     let lines = parse_line_timed_impl(ttml);
@@ -313,8 +304,6 @@ fn parse_line_timed_impl(ttml: &str) -> Vec<LyricLine> {
     lines
 }
 
-// ── Word-timed (syllable) ─────────────────────────────────────────────
-
 fn parse_word_timed(ttml: &str) -> Option<Lyrics> {
     let lines = parse_word_timed_impl(ttml);
     if lines.is_empty() {
@@ -359,10 +348,7 @@ fn parse_word_timed_impl(ttml: &str) -> Vec<LyricLine> {
                     current_text.push_str(&t);
                 }
             }
-            // Whitespace *between* two spans is the word separator. It has to
-            // be read off the markup rather than assumed: Latin lyrics put a
-            // space there, CJK syllable spans butt up against each other, and
-            // inserting one anyway yields "くるくる くる 回る".
+
             Ok(Event::Text(ref e))
                 if in_p
                     && e.unescape()
@@ -380,8 +366,7 @@ fn parse_word_timed_impl(ttml: &str) -> Vec<LyricLine> {
                         if let Some(end) = parse_am_time(end) {
                             p_end = Some(p_end.map_or(end, |prev: f64| prev.max(end)));
                         }
-                        // The separator leads the word it precedes, so a chunk
-                        // highlighted mid-line carries its own leading space.
+
                         let text = if pending_space && !line_words.is_empty() {
                             format!(" {text}")
                         } else {
@@ -427,8 +412,6 @@ fn parse_word_timed_impl(ttml: &str) -> Vec<LyricLine> {
     lines
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────
-
 fn get_attr_value(e: &quick_xml::events::BytesStart, name: &[u8]) -> Option<String> {
     for attr in e.attributes().flatten() {
         if attr.key.local_name().as_ref() == name {
@@ -457,7 +440,6 @@ fn parse_am_time(value: &str) -> Option<f64> {
             let frac_secs = frac as f64 / 10f64.powi(time_part[dot_pos + 1..].len() as i32);
 
             if prefix.contains(':') {
-                // hh:mm:ss.xx
                 let h_m: Vec<&str> = prefix.split(':').collect();
                 if h_m.len() == 2 {
                     let h: u32 = h_m[0].parse().ok()?;
@@ -467,12 +449,10 @@ fn parse_am_time(value: &str) -> Option<f64> {
                     None
                 }
             } else {
-                // mm:ss.xx
                 let m: u32 = prefix.parse().ok()?;
                 Some((m as f64 * 60.0) + secs as f64 + frac_secs)
             }
         } else {
-            // mm:ss or hh:mm:ss (no fractional part)
             let secs: u32 = time_part.parse().ok()?;
             if prefix.contains(':') {
                 let h_m: Vec<&str> = prefix.split(':').collect();
@@ -489,13 +469,11 @@ fn parse_am_time(value: &str) -> Option<f64> {
             }
         }
     } else if let Some(dot_pos) = value.find('.') {
-        // ss.xx
         let secs: u32 = value[..dot_pos].parse().ok()?;
         let frac: u32 = value[dot_pos + 1..].parse().ok()?;
         let frac_secs = frac as f64 / 10f64.powi(value[dot_pos + 1..].len() as i32);
         Some(secs as f64 + frac_secs)
     } else {
-        // ss
         value.parse::<u32>().ok().map(|s| s as f64)
     }
 }
@@ -565,13 +543,12 @@ mod tests {
 
     #[test]
     fn parse_word_timed_ttml() {
-        // Minified TTML from Apple Music API (syllable-lyrics)
         let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="Word" xml:lang="en"><head><metadata><ttm:agent type="person" xml:id="v1"/></metadata></head><body dur="3:26.426"><div begin="33.848" end="44.197"><p begin="33.848" end="35.283" ttm:agent="v1"><span begin="33.848" end="34.101">You</span> <span begin="34.101" end="34.577">feel</span> <span begin="34.577" end="35.283">it</span></p><p begin="35.382" end="36.515" ttm:agent="v1"><span begin="35.382" end="35.885">Creep</span> <span begin="35.885" end="36.515">in</span></p></div></body></tt>"#;
         let result = parse_ttml(ttml).unwrap();
         match result {
             Lyrics::Synced(lines) => {
                 assert_eq!(lines.len(), 2);
-                // Line 1: "You feel it"
+
                 assert!((lines[0].start_time - 33.848).abs() < 0.001);
                 assert!((lines[0].end_time.unwrap() - 35.283).abs() < 0.001);
                 assert_eq!(lines[0].text, "You feel it");
@@ -579,7 +556,7 @@ mod tests {
                 assert_eq!(lines[0].chunks[0].text, "You");
                 assert_eq!(lines[0].chunks[1].text, " feel");
                 assert_eq!(lines[0].chunks[2].text, " it");
-                // Line 2: "Creep in"
+
                 assert_eq!(lines[1].text, "Creep in");
                 assert_eq!(lines[1].chunks.len(), 2);
             }
@@ -595,23 +572,22 @@ mod tests {
 
     #[test]
     fn parse_real_syllable_ttml() {
-        // Real minified Apple Music syllable lyrics from "Paralyzed" by Sleep Theory
         let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="Word" xml:lang="en"><head><metadata><ttm:agent type="person" xml:id="v1"/></metadata></head><body dur="3:26.426"><div begin="33.848" end="44.197"><p begin="33.848" end="35.283" ttm:agent="v1"><span begin="33.848" end="34.101">You</span> <span begin="34.101" end="34.577">feel</span> <span begin="34.577" end="35.283">it</span></p><p begin="35.382" end="36.515" ttm:agent="v1"><span begin="35.382" end="35.885">Creep</span> <span begin="35.885" end="36.515">in</span></p><p begin="36.580" end="39.115" ttm:agent="v1"><span begin="36.580" end="36.821">A</span> <span begin="36.821" end="37.475">thousand</span> <span begin="37.475" end="37.868">knives</span> <span begin="37.868" end="38.076">that</span> <span begin="38.076" end="38.516">sink</span> <span begin="38.516" end="39.115">in</span></p></div></body></tt>"#;
         let result = parse_ttml(ttml).unwrap();
         match result {
             Lyrics::Synced(lines) => {
                 assert_eq!(lines.len(), 3);
-                // Line 1: "You feel it"
+
                 assert!((lines[0].start_time - 33.848).abs() < 0.001);
                 assert_eq!(lines[0].text, "You feel it");
                 assert_eq!(lines[0].chunks.len(), 3);
                 assert_eq!(lines[0].chunks[0].text, "You");
                 assert_eq!(lines[0].chunks[1].text, " feel");
                 assert_eq!(lines[0].chunks[2].text, " it");
-                // Line 2: "Creep in"
+
                 assert_eq!(lines[1].text, "Creep in");
                 assert_eq!(lines[1].chunks.len(), 2);
-                // Line 3: "A thousand knives that sink in"
+
                 assert_eq!(lines[2].text, "A thousand knives that sink in");
                 assert_eq!(lines[2].chunks.len(), 6);
             }
@@ -621,13 +597,12 @@ mod tests {
 
     #[test]
     fn parse_cjk_syllable_ttml() {
-        // Real minified Apple Music CJK syllable lyrics (no spaces between spans)
         let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" itunes:timing="Word" xml:lang="ja"><head><metadata><ttm:agent type="person" xml:id="v1"/></metadata></head><body dur="3:32.759"><div begin="28.220" end="1:24.880"><p begin="28.220" end="33.220" ttm:agent="v1"><span begin="28.220" end="29.020">くるくる</span><span begin="29.020" end="29.820">くる</span><span begin="29.820" end="30.620">回る</span><span begin="30.620" end="31.420">世界を</span><span begin="31.420" end="32.220">漂っている</span></p><p begin="33.220" end="36.650" ttm:agent="v1"><span begin="33.220" end="34.220">漂っている</span><span begin="34.220" end="35.020">漂っている</span><span begin="35.020" end="36.650">のよ</span></p></div></body></tt>"#;
         let result = parse_ttml(ttml).unwrap();
         match result {
             Lyrics::Synced(lines) => {
                 assert_eq!(lines.len(), 2);
-                // Line 1: CJK text - no spaces
+
                 assert_eq!(lines[0].text, "くるくるくる回る世界を漂っている");
                 assert_eq!(lines[0].chunks.len(), 5);
                 assert_eq!(lines[0].chunks[0].text, "くるくる");
@@ -635,7 +610,7 @@ mod tests {
                 assert_eq!(lines[0].chunks[2].text, "回る");
                 assert_eq!(lines[0].chunks[3].text, "世界を");
                 assert_eq!(lines[0].chunks[4].text, "漂っている");
-                // Line 2: CJK text - no spaces
+
                 assert_eq!(lines[1].text, "漂っている漂っているのよ");
                 assert_eq!(lines[1].chunks.len(), 3);
                 assert_eq!(lines[1].chunks[0].text, "漂っている");

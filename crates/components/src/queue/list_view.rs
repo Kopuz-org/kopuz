@@ -180,8 +180,6 @@ pub fn QueueSummary(
 ) -> Element {
     let ctrl = use_context::<PlayerController>();
     let is_radio = if let Some(track) = ctrl.get_track_at(*current_queue_index.read()) {
-        // As of today, radio tracks have a duration of u64::MAX, if this
-        // invariant ever changes, this logic must be updated as well
         track.is_radio()
     } else {
         false
@@ -304,7 +302,6 @@ pub fn QueueListView(
         });
     });
 
-    // Clear functions when the component is dropped
     use_drop(move || {
         let _cleanup = eval(&format!(
             "window.__{layout}_queueScrollDispose?.(); delete window.__{layout}_queueScrollDispose; delete window.__{layout}_queueJump;"
@@ -314,9 +311,6 @@ pub fn QueueListView(
     let mut auto_sync = use_signal(|| true);
 
     use_hook(move || {
-        // The queue is virtualized, so the playing row usually isn't in the
-        // DOM — jumping goes through scrollTop math on the row index instead
-        // of scrollIntoView. Far jumps snap instantly; near ones glide.
         let _jump_func = eval(&format!(
             r#"
                 window.__{layout}_queueJump = (index) => {{
@@ -336,11 +330,6 @@ pub fn QueueListView(
         ));
     });
 
-    // Hand scroll control back to the user the moment they scroll the queue
-    // themselves; the sync button re-arms auto-follow. Watching input events
-    // (wheel / touch / scrollbar grab) instead of `scroll` keeps our own
-    // smooth jumps — whose end time the browser doesn't expose — from
-    // disarming auto-follow.
     use_future(move || async move {
         let mut listener = eval(&format!(
             r#"
@@ -389,8 +378,6 @@ pub fn QueueListView(
     };
 
     let get_track_cover = |track: &api::TrackInfo| -> Option<utils::CoverUrl> {
-        // The row carries its own reference; the width only says whether
-        // this surface wants the large one.
         hooks::artwork::for_track(track, hooks::artwork::size_for(cover_max_width))
     };
 

@@ -24,8 +24,6 @@ pub fn toggle_favorite(key: String) {
             }
         };
         if let Err(error) = api.set_favorite(key.clone(), favorite).await {
-            // The daemon says what refused it, so a heart that snaps back
-            // does not read as a broken button.
             crate::toast::toast_error(&error.to_string());
         }
     });

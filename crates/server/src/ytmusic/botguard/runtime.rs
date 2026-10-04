@@ -42,7 +42,7 @@ async fn init() -> Result<Warm, String> {
         .init()
         .await
         .map_err(|e| e.to_string())?;
-    // lifetime() is the integrity token's TTL in seconds; refresh at 80%.
+
     let ttl = bg.lifetime() as u64;
     let refresh_at = Instant::now() + Duration::from_secs(ttl.saturating_mul(4) / 5);
     Ok(Warm { bg, refresh_at })
@@ -66,7 +66,6 @@ pub fn run(mut rx: mpsc::UnboundedReceiver<MintRequest>) {
         let mut warm: Option<Warm> = None;
 
         while let Some(req) = rx.recv().await {
-            // (Re)negotiate the integrity token on first use or near expiry.
             let needs_init = warm.as_ref().is_none_or(|w| Instant::now() >= w.refresh_at);
             if needs_init {
                 match init().await {
@@ -89,8 +88,7 @@ pub fn run(mut rx: mpsc::UnboundedReceiver<MintRequest>) {
                 w.bg.mint_token(&req.video_id)
                     .await
                     .map_err(|e| format!("mint: {e}"));
-            // A mint failure often means the token went stale early — drop the
-            // instance so the next request re-negotiates.
+
             if result.is_err() {
                 warm = None;
             }

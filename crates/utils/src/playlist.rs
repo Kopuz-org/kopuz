@@ -24,8 +24,7 @@ pub fn is_playlist(content_type: Option<&str>, url_path: &str) -> bool {
         if PLAYLIST_CONTENT_TYPES.contains(&ct.as_str()) {
             return true;
         }
-        // Concrete audio type beats the extension check: some servers serve
-        // real audio from ".m3u" paths.
+
         if ct.starts_with("audio/") || ct.starts_with("video/") {
             return false;
         }
@@ -78,7 +77,7 @@ mod tests {
         assert!(is_playlist(None, "/stream.m3u"));
         assert!(is_playlist(None, "/hls/master.M3U8"));
         assert!(!is_playlist(Some("audio/mpeg"), "/stream"));
-        // Concrete audio content-type overrides a playlist-looking path.
+
         assert!(!is_playlist(Some("audio/aac"), "/legacy.m3u"));
         assert!(!is_playlist(None, "/stream.mp3"));
     }

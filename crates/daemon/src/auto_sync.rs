@@ -75,7 +75,6 @@ struct Syncs {
 
 impl Syncs {
     async fn check(&self, config: &config::AppConfig) {
-        // A local library has nothing to pull; it has the file scan.
         let active = server::source::active(self.db.clone(), config);
         if !active.capabilities().sync {
             return;
@@ -93,7 +92,7 @@ impl Syncs {
             };
             match started {
                 Ok(_) => tracing::info!(?kind, source = source.as_str(), "auto-sync started"),
-                // Usually a sync of this kind is already running.
+
                 Err(error) => tracing::debug!(%error, ?kind, "auto-sync not started"),
             }
         }

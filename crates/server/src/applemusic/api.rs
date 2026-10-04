@@ -15,11 +15,6 @@ fn track_refs(item_refs: &[String]) -> Vec<serde_json::Value> {
         .collect()
 }
 
-// The `me` endpoints take their arguments as `ids[type]=` query parameters,
-// percent-encoded as Apple's own client sends them. They're built here, apart
-// from the requests, because nothing short of mutating a real library can check
-// them at runtime — so the tests check them here instead.
-
 fn favorites_path(item_id: &str) -> String {
     format!("/v1/me/favorites?ids%5Bsongs%5D={item_id}")
 }
@@ -170,8 +165,6 @@ impl AppleMusicApi {
             .header("Referer", "https://music.apple.com/");
 
         if let Some(token) = &self.media_user_token {
-            // Both, as Apple's own client does: `Media-User-Token` is what the
-            // API documents, the cookie is what the web player carries.
             req = req
                 .header("Media-User-Token", token)
                 .header("Cookie", format!("media-user-token={token}"));
@@ -205,8 +198,6 @@ impl AppleMusicApi {
             .json(body);
 
         if let Some(token) = &self.media_user_token {
-            // Both, as Apple's own client does: `Media-User-Token` is what the
-            // API documents, the cookie is what the web player carries.
             req = req
                 .header("Media-User-Token", token)
                 .header("Cookie", format!("media-user-token={token}"));
@@ -264,8 +255,6 @@ impl AppleMusicApi {
             .header("Referer", "https://music.apple.com/");
 
         if let Some(token) = &self.media_user_token {
-            // Both, as Apple's own client does: `Media-User-Token` is what the
-            // API documents, the cookie is what the web player carries.
             req = req
                 .header("Media-User-Token", token)
                 .header("Cookie", format!("media-user-token={token}"));
@@ -283,8 +272,6 @@ impl AppleMusicApi {
         }
         Ok(resp)
     }
-
-    // ── Catalog API (no media-user-token needed) ────────────────────
 
     pub async fn get_song(&self, id: &str) -> Result<TrackData, String> {
         let path = format!(
@@ -384,11 +371,6 @@ impl AppleMusicApi {
         })
     }
 
-    // ── Library API (requires media-user-token) ─────────────────────
-    // These use the standard format (no format[resources]=map) where
-    // data[] contains full objects with inline attributes/relationships,
-    // matching how the Go downloader parses them.
-
     /// Generic paginated library fetch — returns the full `data` array from
     /// each page, following `next` until exhausted.
     ///
@@ -437,12 +419,7 @@ impl AppleMusicApi {
                     }
                 }
             }
-            // `self.get` prefixes BASE, so an absolute `next` has to lose it
-            // first or the URL becomes `https://amp-api…https://…`. Apple does
-            // return absolute cursors on some library endpoints — see
-            // `get_library_playlist_tracks`, which strips it the same way. A
-            // cursor pointing back at the page that produced it would page
-            // forever, so that ends the walk too.
+
             next = parsed
                 .get("next")
                 .and_then(|n| n.as_str())
@@ -528,7 +505,6 @@ impl AppleMusicApi {
             format!("parse playlist: {e}")
         })?;
 
-        // Extract tracks from relationships.tracks.data
         let mut all = Vec::new();
         let tracks_data = parsed
             .pointer("/data/0/relationships/tracks/data")
@@ -546,7 +522,6 @@ impl AppleMusicApi {
             }
         }
 
-        // Follow pagination via relationships.tracks.next
         let mut next = parsed
             .pointer("/data/0/relationships/tracks/next")
             .and_then(|n| n.as_str())
@@ -555,9 +530,7 @@ impl AppleMusicApi {
         let mut page_num = 1u32;
         while let Some(next_path) = next.take() {
             page_num += 1;
-            // Strip absolute prefix so self.get() adds auth headers. The cursor
-            // carries only `l` and `offset`, so the relationships have to be
-            // asked for again or every page but the first arrives bare.
+
             let path = next_path.strip_prefix(BASE).unwrap_or(&next_path);
             let separator = if path.contains('?') { '&' } else { '?' };
             let path = format!("{path}{separator}{PLAYLIST_TRACK_PAGE_INCLUDE}");
@@ -631,7 +604,6 @@ impl AppleMusicApi {
             return Ok(Some(pl.id.clone()));
         }
 
-        // Only correct in English, so it runs second.
         if let Some(pl) = playlists
             .iter()
             .find(|pl| pl.attributes.name == FAVORITES_NAME_EN)
@@ -668,8 +640,6 @@ impl AppleMusicApi {
             .collect())
     }
 
-    // ── Stations ────────────────────────────────────────────────────
-
     /// The station that continues a library playlist once it runs out — what
     /// Apple's own client calls autoplay.
     ///
@@ -690,8 +660,7 @@ impl AppleMusicApi {
         if seed_track_ids.is_empty() {
             return Err("an empty playlist can't seed a station".to_string());
         }
-        // The container type has to name the library, not the catalog: passing
-        // `playlists` with a library id is rejected as a malformed id.
+
         let body = serde_json::json!({
             "data": seed_track_ids
                 .iter()
@@ -706,8 +675,6 @@ impl AppleMusicApi {
         let resp = self.post("/v1/me/stations/continuous", &body).await?;
         let status = resp.status();
         if !status.is_success() {
-            // What a playlist of uploads gets: Apple has no catalog song to
-            // build a station out of, so there is nothing to fall back to.
             tracing::debug!("am.station: continuous refused the playlist ({status})");
             return Err(
                 "Apple Music can't build a station from this playlist — its tracks aren't in the catalog"
@@ -812,8 +779,7 @@ impl AppleMusicApi {
                             }
                         }
                     }
-                    // One failed call in a round isn't fatal — the others in the
-                    // same round usually carry it.
+
                     Err(e) => tracing::debug!("am.station: a next-tracks call failed ({e})"),
                 }
             }
@@ -844,8 +810,6 @@ impl AppleMusicApi {
         tracing::info!("am.station: queued {} tracks", queue.len());
         Ok(queue)
     }
-
-    // ── Library mutations ───────────────────────────────────────────
 
     /// Favourite (or un-favourite) a catalog song.
     ///
@@ -903,9 +867,7 @@ impl AppleMusicApi {
         item_refs: &[String],
     ) -> Result<String, String> {
         tracing::debug!("am.create_playlist: name={name}, items={}", item_refs.len());
-        // Tracks belong under `relationships`, not `attributes` — Apple ignores
-        // (or rejects) them anywhere else, which is why playlists created with
-        // songs came out empty.
+
         let body = serde_json::json!({
             "attributes": { "name": name },
             "relationships": { "tracks": { "data": track_refs(item_refs) } },
@@ -1026,7 +988,6 @@ impl AppleMusicApi {
     /// Resolve a library ID (starts with `i.`) to its catalog Adam ID.
     /// Returns the ID unchanged if it's already numeric.
     pub async fn resolve_catalog_id(&self, id: &str) -> Result<String, String> {
-        // Catalog IDs are numeric — library IDs contain ".".
         if id.chars().all(|c| c.is_ascii_digit()) {
             return Ok(id.to_string());
         }
@@ -1036,9 +997,6 @@ impl AppleMusicApi {
         let resp = self.get(&path).await?;
         let status = resp.status();
         if !status.is_success() {
-            // Expected for uploaded iCloud Music Library tracks: they have no
-            // catalog equivalent because Apple never sold them. Keeping the
-            // library id is right — `web_playback_body` dispatches on it.
             tracing::debug!(
                 "am.resolve_catalog_id: no catalog equivalent for {id} ({status}), \
                  playing it as a library track"
@@ -1075,10 +1033,8 @@ impl AppleMusicApi {
             return Err("media-user-token too short".into());
         }
 
-        // Resolve library IDs to catalog IDs — lyrics API only works with catalog IDs.
         let catalog_id = self.resolve_catalog_id(id).await?;
 
-        // Try syllable-lyrics first (word-level timing, quality 2).
         for lrc_type in &["syllable-lyrics", "lyrics"] {
             let path = format!(
                 "/v1/catalog/{}/songs/{}/{lrc_type}?l={}&extend=ttmlLocalizations",
@@ -1222,11 +1178,9 @@ mod tests {
 
     #[test]
     fn pagination_handles_cursors_and_requests_without_a_query() {
-        // A cursor with no query at all still needs our parameters.
         let merged = carry_query_forward("/v1/me/library/songs", "/v1/me/library/songs?limit=100");
         assert_eq!(merged, "/v1/me/library/songs?limit=100");
 
-        // Nothing to carry forward.
         assert_eq!(
             carry_query_forward("/v1/me/library/songs?offset=100", "/v1/me/library/songs"),
             "/v1/me/library/songs?offset=100"
@@ -1378,7 +1332,6 @@ mod tests {
             "the station is not named after the library playlist"
         );
 
-        // A refusal carries no station rather than an empty one.
         let refused = serde_json::json!({ "results": {} });
         assert!(refused.pointer("/results/station/id").is_none());
     }

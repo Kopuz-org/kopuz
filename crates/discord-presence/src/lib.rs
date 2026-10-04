@@ -259,9 +259,6 @@ impl Drop for Presence {
     }
 }
 
-// Android has no Discord IPC; this no-op stub keeps the `Presence` API surface so the
-// shared player-task code compiles unchanged. The app never constructs it on Android
-// (`Presence::new` errors), so the context stays `None` and every call site is skipped.
 #[cfg(target_os = "android")]
 #[derive(Debug)]
 pub struct Presence;

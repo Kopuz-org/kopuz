@@ -472,7 +472,7 @@ fn lastfm(config: &config::AppConfig) -> IntegrationInfo {
         id: LASTFM.to_string(),
         name: Text::key("lastfm"),
         icon: Icon::Class("fa-brands fa-lastfm".into()),
-        // A session key is what scrobbles; the api key alone only reaches the sign-in page.
+
         configured: !config.lastfm_session_key.trim().is_empty(),
         connect: ConnectKind::WebSignIn,
         fields: vec![
@@ -499,7 +499,7 @@ fn librefm(config: &config::AppConfig) -> IntegrationInfo {
         icon: Icon::Class("fa-brands fa-lastfm".into()),
         configured: !config.librefm_session_key.trim().is_empty(),
         connect: ConnectKind::WebSignIn,
-        // Its api key and secret are compiled in, so there is nothing to fill in.
+
         fields: Vec::new(),
     }
 }
@@ -507,7 +507,7 @@ fn librefm(config: &config::AppConfig) -> IntegrationInfo {
 /// What this build publishes, in the order a settings page lists it.
 fn all(config: &config::AppConfig) -> Vec<IntegrationInfo> {
     let mut published = Vec::new();
-    // Android has no Discord client to talk to, so the row is not offered there.
+
     if !cfg!(target_os = "android") {
         published.push(discord(config));
     }
@@ -583,7 +583,6 @@ fn clear_keys(id: &str) -> Vec<&'static str> {
 
 fn clear_stored(id: &str, config: &mut config::AppConfig) {
     match id {
-        // Discord holds no credential, so unconfigured means presence off.
         DISCORD => config.discord_presence = Some(false),
         LISTENBRAINZ => config.musicbrainz_token.clear(),
         LASTFM => {

@@ -35,7 +35,6 @@ impl Theme {
         self.vars.get(key).map(String::as_str)
     }
 
-    // Maps values back to the css custom properties Kopuz uses.
     pub fn to_css(&self) -> String {
         self.to_css_for(&format!(".theme-{}", self.id))
     }

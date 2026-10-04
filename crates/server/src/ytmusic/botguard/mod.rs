@@ -40,8 +40,6 @@ pub fn ensure_started() {
     use std::sync::Once;
     static START: Once = Once::new();
     START.call_once(|| {
-        // Before spawning, so it can't race the decipher isolate (see
-        // `ytmusic::ensure_v8_platform`).
         crate::ytmusic::ensure_v8_platform();
         let (tx, rx) = mpsc::unbounded_channel::<MintRequest>();
         let _ = set_minter(tx);
@@ -59,8 +57,7 @@ pub fn ensure_started() {}
 
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
-    // Live: boots V8, runs the BotGuard VM, hits jnn-pa. Run explicitly with
-    // `cargo test -p kopuz-server mints -- --ignored --nocapture`.
+
     #[tokio::test]
     #[ignore = "hits live YouTube BotGuard"]
     async fn mints_a_content_pot() {
@@ -68,7 +65,7 @@ mod tests {
             .await
             .expect("mint should succeed");
         assert!(!pot.is_empty(), "pot must be non-empty");
-        // A second mint within TTL should reuse the cached WebPoMinter.
+
         let pot2 = super::mint_content_pot("9bZkp7q19f0")
             .await
             .expect("second mint should succeed");
@@ -90,8 +87,7 @@ pub async fn mint_content_pot(video_id: &str) -> Result<String, String> {
         reply,
     })
     .map_err(|_| "PO token minter channel closed".to_string())?;
-    // The first mint pays V8 boot + token negotiation; a hung runtime must not
-    // hang the caller.
+
     match tokio::time::timeout(std::time::Duration::from_secs(20), rx).await {
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err("PO token minter dropped the reply".to_string()),

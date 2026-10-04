@@ -78,7 +78,6 @@ async fn upsert_track(
     let rg_track_peak = t.replay_gain.track_peak.map(f64::from);
     let rg_album_gain = t.replay_gain.album_gain_db.map(f64::from);
     let rg_album_peak = t.replay_gain.album_peak.map(f64::from);
-    // A remote row is dated when first seen; a local one takes its file's time from the scan.
     let pk = sqlx::query_scalar!(
         "INSERT INTO tracks \
                (source, track_key, path, service, source_album_id, title, artist, album, duration, \
@@ -150,7 +149,7 @@ async fn ensure_album(
     .fetch_all(&mut **tx)
     .await?;
     let artist_pk = billed_credit(&t.artist, &credits);
-    // A derived row follows its tracks' credits as they gain ids; a synced or scanned row stays as written.
+
     sqlx::query!(
         "INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_pk, derived) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) ON CONFLICT(source, source_album_id) \
@@ -177,7 +176,7 @@ pub(crate) async fn file_artist(
     let name_key = utils::artist::normalize_artist_key(name);
     let pk = match id.map(str::trim).filter(|id| !id.is_empty()) {
         Some(id) => {
-            // A credit's text names the row until the source's own record has; after that it is one track's billing.
+
             sqlx::query_scalar!(
                 "INSERT INTO artists (source, source_artist_id, name, name_key, key) VALUES (?1, ?2, ?3, ?4, ?2) \
                  ON CONFLICT(source, source_artist_id) DO UPDATE SET \
@@ -193,7 +192,7 @@ pub(crate) async fn file_artist(
             .await?
         }
         None => {
-            // Minted once when the row is filed; the no-op update is what makes RETURNING answer for a row that already exists.
+
             sqlx::query_scalar!(
                 "INSERT INTO artists (source, name, name_key, key) VALUES (?1, ?2, ?3, lower(hex(randomblob(16)))) \
                  ON CONFLICT(source, name_key) WHERE source_artist_id IS NULL \
@@ -240,7 +239,6 @@ fn stored_credits<'a>(t: &'a Track, src: &str) -> Vec<(&'a str, Option<&'a str>)
             .credits
             .iter()
             .map(|credit| {
-                // An id another source issued names nobody here.
                 let id = match &credit.source {
                     Some(issuer) if issuer.as_str() != src => None,
                     _ => credit.id.as_deref(),
@@ -265,7 +263,6 @@ pub(crate) async fn write_track_children(
     pk: i64,
     t: &Track,
 ) -> Result<(), DbError> {
-    // Some paths only name a row's artists, so bare names never replace a list that carries an id.
     let linked: i64 = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM track_credits c JOIN artists a ON a.id = c.artist_pk \
          WHERE c.track_pk = ?1 AND a.source_artist_id IS NOT NULL",
@@ -380,7 +377,7 @@ async fn upsert_album(
         true => None,
         false => Some(file_artist(tx, src, billed, a.artist_id.as_deref()).await?),
     };
-    // The artist is replaced with its name, so an album rebilled to nobody drops the old row.
+
     sqlx::query!(
             "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover, artist_pk) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
@@ -412,9 +409,6 @@ pub async fn set_favorite(
     on: bool,
 ) -> Result<(), DbError> {
     if on {
-        // A fresh like sorts to the top (rank below the current minimum); a
-        // re-like of a pending-unlike tombstone just resurrects it as a
-        // pending-like and keeps its existing rank/position.
         sqlx::query!(
             "INSERT INTO favorites (server_id, ref, dirty, rank) \
              SELECT ?1, ?2, 1, COALESCE(MIN(rank), 0) - 1 FROM favorites WHERE server_id = ?1 \
@@ -426,8 +420,7 @@ pub async fn set_favorite(
         .await?;
     } else {
         let mut tx = pool.begin().await?;
-        // A never-pushed like just disappears; a synced (clean) row becomes a
-        // pending-unlike tombstone so the removal survives until pushed.
+
         sqlx::query!(
             "DELETE FROM favorites WHERE server_id = ?1 AND ref = ?2 AND dirty = 1",
             server_id,
@@ -498,7 +491,7 @@ pub async fn replace_favorites_clean(
 ) -> Result<(), DbError> {
     let keep_json = serde_json::to_string(refs)?;
     let mut tx = pool.begin().await?;
-    // Drop clean rows the remote no longer has (dirty rows survive — not pushed yet).
+
     sqlx::query!(
         "DELETE FROM favorites WHERE server_id = ?1 AND dirty = 0 \
          AND ref NOT IN (SELECT value FROM json_each(?2))",
@@ -507,9 +500,7 @@ pub async fn replace_favorites_clean(
     )
     .execute(&mut *tx)
     .await?;
-    // Add the remote set in one statement. `json_each.key` is the array index,
-    // which is also the remote newest-first rank. Updating only rank preserves a
-    // dirty row's pending local toggle.
+
     sqlx::query(
         "INSERT INTO favorites (server_id, ref, dirty, rank) \
          SELECT ?1, CAST(value AS TEXT), 0, CAST(key AS INTEGER) FROM json_each(?2) WHERE true \
@@ -850,7 +841,7 @@ pub async fn set_playlist_tracks(
     entries: &[reader::PlaylistEntry],
 ) -> Result<(), DbError> {
     let src = source.as_str();
-    // It reads before it writes, and a deferred BEGIN then fails at once against a write that landed meanwhile.
+
     let mut tx = super::begin_immediate(pool).await?;
     let pk = resolve_or_create_pk(&mut tx, src, pl_id).await?;
     sqlx::query!("DELETE FROM playlist_tracks WHERE playlist_pk = ?1", pk)
@@ -1016,15 +1007,12 @@ pub async fn upsert_playlist_tracks_page(
     epoch: i64,
 ) -> Result<(), DbError> {
     let src = source.as_str();
-    // It reads before it writes, and a deferred BEGIN then fails at once against a write that landed meanwhile.
+
     let mut tx = super::begin_immediate(pool).await?;
     let pk = resolve_or_create_pk(&mut tx, src, pl_id).await?;
     for (i, entry) in entries.iter().enumerate() {
         let pos = start_position + i as i64;
-        // Overwrite by position: re-walking in order re-stamps positions 0..N with
-        // the current epoch; a now-shorter playlist leaves its tail at the old
-        // epoch for the sweep. Position is the entry order, so this also applies
-        // reorders in place.
+
         sqlx::query!(
             "INSERT INTO playlist_tracks (playlist_pk, position, track_ref, epoch, item_id) \
              VALUES (?1, ?2, ?3, ?4, ?5) \
@@ -1326,7 +1314,6 @@ async fn write_queue_rows(
     queue: &[Track],
     shuffle_order: &[usize],
 ) -> Result<(), DbError> {
-    // Credits and the shuffle cascade from the rows they point at.
     sqlx::query!("DELETE FROM queue_tracks WHERE source = ?1", source)
         .execute(&mut *conn)
         .await?;
@@ -1375,7 +1362,7 @@ async fn write_queue_rows(
         )
         .execute(&mut *conn)
         .await?;
-        // A row that only names its artists keeps those names as unlinked credits, as the library does.
+
         let credits: std::borrow::Cow<[reader::ArtistCredit]> = match t.credits.is_empty() {
             false => t.credits.as_slice().into(),
             true => t
@@ -1404,7 +1391,6 @@ async fn write_queue_rows(
         }
     }
     for (step, position) in shuffle_order.iter().enumerate() {
-        // An order naming a slot past the end would fail the whole save for one bad entry.
         if *position >= queue.len() {
             continue;
         }

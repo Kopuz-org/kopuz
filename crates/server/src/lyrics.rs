@@ -80,8 +80,6 @@ struct LrcLibResponse {
     plain_lyrics: Option<String>,
 }
 
-// --- Apple Music lyrics types ---
-
 #[derive(Debug, Deserialize)]
 struct ItunesSearchResponse {
     #[serde(default)]
@@ -132,8 +130,6 @@ struct PaxsenixAppleLyricPart {
     part: bool,
 }
 
-// --- YouTube lyrics types ---
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PaxsenixYoutubeSearchResult {
@@ -142,8 +138,6 @@ struct PaxsenixYoutubeSearchResult {
     author: String,
     duration: String,
 }
-
-// --- Public API ---
 
 /// Fetch lyrics for a track, trying sources in priority order while preferring
 /// word-timed lyrics over line-only matches:
@@ -156,9 +150,7 @@ struct PaxsenixYoutubeSearchResult {
 ///
 /// For Jellyfin: `server_token` = access token, `server_user_id` = user_id (unused for lyrics)
 /// For Subsonic: `server_token` = password, `server_user_id` = username
-// skip_all, not skip(track_path): a bare skip auto-records every other arg
-// as a span field, which would leak server_token (and url/user_id) into the
-// trace + log. Record only artist/title, explicitly.
+
 #[tracing::instrument(name = "lyrics.fetch", skip_all, fields(artist = %request.artist, title = %request.title))]
 pub async fn fetch_lyrics_for_request(request: &LyricsRequest) -> LyricsFetch {
     let reach = ProviderReach::default();
@@ -285,13 +277,9 @@ where
         }
     };
 
-    // Anything not backed by a file on disk. Missing a prefix here costs twice:
-    // the `.lrc` lookup below runs against a path that was never a path, and
-    // `prefer_local` returns before the remote providers are ever reached.
     let is_server = is_remote_track(track_path);
     let mut fallback: Option<Lyrics> = None;
 
-    // 1. Local .lrc file (only for local tracks)
     if !is_server {
         let started = Instant::now();
         let local = fetch_local_lrc(track_path).await;
@@ -347,7 +335,6 @@ where
         return fallback;
     }
 
-    // 2. Server lyrics
     if let Some(server_url) = server_url {
         if track_path.starts_with("jellyfin:") {
             if let (Some(item_id), Some(token)) =
@@ -497,9 +484,6 @@ where
         }
     }
 
-    // 3/4/5. Apple Music and direct YouTube lyrics are the primary remote
-    // providers. Optional Musixmatch starts with them, but can only replace
-    // the primary result when it returns strictly better timing quality.
     let apple_started = Instant::now();
     let youtube_started = Instant::now();
     let musixmatch_started = Instant::now();

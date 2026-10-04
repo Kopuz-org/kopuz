@@ -12,7 +12,7 @@ pub fn DownloaderPage() -> Element {
     let mut format = use_signal(String::new);
     let mut show_opts = use_signal(|| false);
     let mut failure = use_signal(|| Option::<String>::None);
-    // Named before the daemon reports a title, so the row has something to say.
+
     let mut active_url = use_signal(String::new);
     let reload = use_signal(|| 0u64);
     let progress = hooks::downloader::use_progress();
@@ -21,8 +21,7 @@ pub fn DownloaderPage() -> Element {
     let mut history = hooks::downloader::use_history(reload);
 
     let formats = formats.read().clone().unwrap_or_default();
-    // The first format the daemon offers is the default, so the page does not
-    // name one of them itself.
+
     if format.read().is_empty()
         && let Some(first) = formats.first()
     {
@@ -51,8 +50,6 @@ pub fn DownloaderPage() -> Element {
         submitted.set(url_input().trim().to_string());
     };
 
-    // The history gains a row when a download finishes, which is the moment
-    // the job stops running.
     use_effect(move || {
         if !progress.read().running {
             history.restart();

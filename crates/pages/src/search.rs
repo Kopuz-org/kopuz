@@ -91,7 +91,12 @@ pub fn Search(
             } else {
                 SearchBar { search_query: data.search_query }
 
-                if let Some(Some((tracks, albums))) = data.search_results.cloned() {
+                if let Some(error) = data.search_results.error() {
+                    components::common::query_error::QueryError {
+                        message: error.to_string(),
+                        onretry: move |_| { let mut query = data.search_results; query.restart(); },
+                    }
+                } else if let Some(Some((tracks, albums))) = data.search_results.cloned() {
                     SearchResults {
                         search_query: data.search_query.read().clone(),
                         tracks: tracks.clone(),

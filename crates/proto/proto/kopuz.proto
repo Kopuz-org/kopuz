@@ -1357,6 +1357,7 @@ message ConfigView {
 // want, send it back. A locked key whose value actually differs is refused.
 message SetConfigRequest {
   Config config = 1;
+  uint64 expected_revision = 2;
 }
 
 

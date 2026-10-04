@@ -552,9 +552,6 @@ impl Session {
         persist.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
-            // The correction branch is disabled while nothing plays, so an
-            // idle daemon takes zero timer wakeups and this task parks until
-            // a command or engine event arrives.
             tokio::select! {
                 command = cmd_rx.recv() => {
                     let Some(command) = command else { break };
@@ -674,12 +671,6 @@ impl Session {
         command: PlayerCommand,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
-        // Media keys, MPRIS and every frontend send the same commands whoever
-        // is playing; while an integration owns playback they go to it, since
-        // the engine has nothing to act on. Toggle resolves here because only
-        // the daemon knows the current phase.
-        // Next and previous are the queue's, whoever is playing: an
-        // integration holds one track and knows nothing about what follows it.
         if self.external.is_some()
             && !matches!(command, PlayerCommand::Next | PlayerCommand::Previous)
         {
@@ -725,9 +716,6 @@ impl Session {
             PlayerCommand::SetMode { shuffle, loop_mode } => {
                 queue_changed = shuffle.is_some();
                 if let Some(on) = shuffle {
-                    // Toggling rebuilds the permutation around the outgoing
-                    // track, so a pending crossfade target has to be re-found
-                    // by the physical index it held before the rebuild.
                     let target = match self.pending_transition.as_ref() {
                         Some(pending) => self.model.physical_index_of(pending.to_position),
                         None => None,
@@ -823,9 +811,7 @@ impl Session {
                         "cannot remove the playing position; skip or stop first",
                     ));
                 }
-                // The track a crossfade is already fading into is as much "the
-                // playing position" as the outgoing one; removing it would land
-                // the commit on its neighbour while its audio keeps running.
+
                 if self
                     .pending_transition
                     .as_ref()
@@ -888,8 +874,7 @@ impl Session {
                 "start_index and shuffle apply to mode \"replace\" only",
             ));
         }
-        // Bounded so a hanging materializer (a slow source resolve) cannot
-        // wedge the whole session command loop.
+
         let tracks = tokio::time::timeout(
             MATERIALIZE_TIMEOUT,
             self.materializer.materialize(&request.context),
@@ -925,13 +910,9 @@ impl Session {
                     self.stop_playback();
                 }
             }
-            // Appending lands past every existing position, so a pending
-            // crossfade target needs no remap.
+
             QueueMode::Append => self.model.add(tracks),
             QueueMode::PlayNext => match self.pending_transition.as_ref() {
-                // Mid-crossfade the queue still reads as the outgoing track,
-                // but "next" means after the one already fading in, or the
-                // insertion would be skipped the moment the fade commits.
                 Some(pending) => self.model.insert_at(pending.to_position + 1, tracks),
                 None => self.model.insert_next(tracks),
             },
@@ -963,8 +944,7 @@ impl Session {
             }
             NextOutcome::EndOfQueue => {
                 self.model = candidate;
-                // End of queue: kill an in-flight load so it cannot restart
-                // playback later; the stale-Loaded rule catches a promoted one.
+
                 self.cancel_load_task();
                 self.pending_transition = None;
                 self.set_intent(PlaybackIntent::Stopped);
@@ -1004,9 +984,6 @@ impl Session {
     fn pause(&mut self, state_tx: &watch::Sender<PlayerState>) {
         let is_radio = self.current_track_is_radio();
 
-        // Pausing mid-load cancels it, else a cancelled reply leaves intent
-        // stuck Loading. Resolving crossfades revert whole; immediate loads
-        // record a resume point. A running fade is merely frozen.
         if self.intent.is_loading() && self.revert_transition().is_none() {
             self.cancel_load_task();
             if !is_radio {
@@ -1040,8 +1017,6 @@ impl Session {
             return;
         }
 
-        // Re-adopt a live engine session after a flow that quiesced playback
-        // but kept it resumable, or the stale-session rule would stop it.
         let engine_token = self.player.session_token();
         if engine_token != 0 {
             self.set_intent(PlaybackIntent::Committed {
@@ -1216,9 +1191,7 @@ impl Session {
                 external.completed_key = Some(track.id.uid());
             }
             self.record_listen(track);
-            // The queue is kopuz's, so its end-of-track is kopuz's too: the
-            // next item may be another Spotify track or a local file, and
-            // either way the load path decides who plays it.
+
             if let Err(error) = self.play_next(false, state_tx) {
                 tracing::warn!(%error, "advancing after an external track failed");
             }
@@ -1359,7 +1332,6 @@ impl Session {
         snapshot: db::QueueSnapshot,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<CommandAck, ApiError> {
-        // A restore replaces whatever is playing, an integration's device included.
         self.release_external();
         self.cancel_load_task();
         self.cancel_radio_task();
@@ -1596,9 +1568,6 @@ impl Session {
         let pending = self.pending_resume.as_ref();
         let position = pending.and_then(|pending| {
             (pending.track_key == track.id.uid()).then(|| {
-                // Workaround: When the last track gets replayed/resumed after it ended,
-                // it should show progress starting from the start instead of leaving it
-                // at the end of the song, while audio is playing in the background.
                 if self.phase == ApiPhase::Ended {
                     Duration::ZERO
                 } else {
@@ -1612,9 +1581,6 @@ impl Session {
 
     fn store_pending_resume(&mut self) {
         if let Some(track) = self.model.current_track() {
-            // The displayed progress, like the hooks progress signal: the live
-            // engine position only while audibly playing; otherwise the last
-            // published anchor, which is what a restore or a pause seeded.
             let position_ms = if self.phase == ApiPhase::Playing && !self.intent.is_loading() {
                 self.displayed_position().as_millis() as u64
             } else {
@@ -1636,8 +1602,6 @@ impl Session {
         duration_secs: Option<u64>,
         bitrate: Option<u32>,
     ) {
-        // A queue edit may have shifted a crossfade candidate since its load
-        // started, so probe results follow the remapped position.
         let idx = self
             .pending_transition
             .as_ref()

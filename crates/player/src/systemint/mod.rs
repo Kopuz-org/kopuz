@@ -42,8 +42,6 @@ pub fn get_android_music_dir() -> Option<String> {
     None
 }
 
-// notify_one stores a permit, so a back press between checking the pending flag
-// and awaiting the notification still wakes the UI task.
 use std::sync::OnceLock;
 use tokio::sync::Notify;
 

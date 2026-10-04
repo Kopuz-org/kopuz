@@ -106,7 +106,7 @@ impl Scrobbler {
         };
         let config = session.config_watch().borrow().clone();
         let uid = track.id.uid();
-        let item_ref = PlaybackItemRef::parse(&uid);
+        let item_ref = PlaybackItemRef::from_id(&track.id);
         if item_ref.is_radio() {
             return;
         }

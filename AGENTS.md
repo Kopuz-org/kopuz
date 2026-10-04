@@ -37,13 +37,12 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   hook. Pages render the wire rows themselves — `api::TrackInfo`,
   `AlbumInfo`, `PlaylistCatalog` — so there is no conversion layer to keep in
   step.
-- **Settings file:** `AppConfig` persists to the `app_config` blob AND a
-  standalone `settings.toml` next to the DB (`crates/config/src/store.rs`; the
-  dead legacy store was `config.json`, which the importer renames).
-  Load layers blob → file → `settings.d/*.toml` drop-ins → `KOPUZ_CONFIG_*`
-  env; values travel as `serde_json::Value` and convert at the TOML edge. An
-  hjem-managed file (store symlink / read-only) is never written and its keys
-  render locked in the settings UI.
+- **Settings file:** user settings live in `settings.toml` (debug builds use
+  `settings-debug.toml`); state, credentials, and library data live in typed
+  SQLite tables. `crates/db/src/backend/cfg_store.rs` hydrates them into
+  `AppConfig`. File layers are implemented in `crates/config/src/store.rs`.
+  Managed files are never overwritten; unlocked values use the local companion
+  file. Settings API writes require the revision returned by the last read.
 
 ## Sources & covers (`crates/server`, daemon-only)
 
@@ -96,8 +95,7 @@ Run clippy (debug + release), fmt, and the tests covering your change before eac
   artwork, sources).
 - `crates/pages`, `crates/components`, `crates/kopuz_route` — UI + routing.
 - `crates/player` audio · `crates/radio` · `crates/scrobble` · `crates/discord-presence`
-  · `crates/i18n` · `crates/utils` (`CoverUrl`, image-URL builders; its cover
-  cache is behind the `db-cache` feature, so a frontend never links SQLite).
+  · `crates/i18n` · `crates/utils` (`CoverUrl`, image-URL builders; frontend utilities do not link SQLite).
 - `android-src/` — Kotlin media-session classes patched in by `build.rs`.
 - `packaging/` (flatpak / AUR / nix) · `scripts/` (codegen + vendor helpers).
 

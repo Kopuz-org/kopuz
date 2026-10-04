@@ -156,8 +156,7 @@ fn merge_scanned_tracks(library: &mut Library, scanned_tracks: Vec<ScannedTrack>
         .enumerate()
         .map(|(index, album)| (album.id.clone(), index))
         .collect();
-    // A legacy title-only album may hold another artist's automatic cover after
-    // a collision. Only an explicitly chosen cover is safe to carry forward.
+
     let legacy_album_indexes: HashMap<_, _> = library
         .albums
         .iter()

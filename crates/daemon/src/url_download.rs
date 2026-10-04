@@ -15,9 +15,9 @@ use std::sync::Arc;
 
 use api::schema::{ChoiceOption, FieldKind, FieldSpec, FieldValue, Text, toggle_of, value_of};
 use api::{ApiError, DownloadCandidate, DownloadHistoryEntry, DownloadState, JobKind, JobRef};
+use server::stream::AudioFormat as StreamFormat;
 use server::youtube_download::{self, Link, YoutubeDownloader};
 use server::ytmusic::YtStreamInfo;
-use server::ytmusic::player::AudioFormat as StreamFormat;
 
 use crate::config_service::ConfigService;
 use crate::jobs::{JobCtx, JobRunner};

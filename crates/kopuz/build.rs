@@ -282,22 +282,15 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=WRY_ANDROID_KOTLIN_FILES_OUT_DIR");
 
-    // Only do anything android-specific on Android builds; on desktop the env var
-    // is absent and we return after the Windows resource step above.
     let out_dir = match std::env::var("WRY_ANDROID_KOTLIN_FILES_OUT_DIR") {
         Ok(d) => PathBuf::from(d),
         Err(_) => return,
     };
 
-    // android-src lives at the repo root (crates/kopuz/../../android-src).
     let android_src = crate_dir.join("..").join("..").join("android-src");
-    // Re-run when files are added/removed under android-src. Note: a directory's mtime
-    // does NOT change when an existing file inside it is edited, so this alone misses
-    // edits — copy_file/copy_kt_dir additionally emit rerun-if-changed per source file.
+
     println!("cargo:rerun-if-changed={}", android_src.display());
 
-    // out_dir = <project>/app/src/main/kotlin/dev/dioxus/main
-    //   ancestors: [.../dev/dioxus/main, .../dev/dioxus, .../dev, .../kotlin]
     let kotlin_root = match out_dir.ancestors().nth(3) {
         Some(p) => p.to_path_buf(),
         None => {
@@ -314,16 +307,11 @@ fn main() {
     };
     let manifest = main_dir.join("AndroidManifest.xml");
 
-    // Older (manual) builds copied the helper classes under the java/ source root.
-    // If those linger alongside our kotlin/ copies, both source sets compile the same
-    // classes and Kotlin fails with "Redeclaration". Remove the stale java/ copies.
     let stale_java = main_dir.join("java/moe/kopuz/kopuz");
     if stale_java.exists() {
         let _ = fs::remove_dir_all(&stale_java);
     }
 
-    // 1. Copy the media helper classes (package moe.kopuz.kopuz). Clear the dest
-    //    first so a renamed/removed source class can't leave an orphan .kt behind.
     let helper_src = android_src.join("java/moe/kopuz/kopuz");
     let helper_dst = kotlin_root.join("moe/kopuz/kopuz");
     let _ = fs::remove_dir_all(&helper_dst);
@@ -334,8 +322,6 @@ fn main() {
     let _ = fs::remove_dir_all(&verifier_dst);
     copy_kt_dir(&verifier_src, &verifier_dst);
 
-    // 2. Override the generated MainActivity (package dev.dioxus.main) so it wires
-    //    up MediaSessionHelper and requests the notification permission at startup.
     let main_activity_src = android_src.join("kotlin/dev/dioxus/main/MainActivity.kt");
     let main_activity_dst = out_dir.join("MainActivity.kt");
     copy_file(&main_activity_src, &main_activity_dst);
@@ -344,8 +330,6 @@ fn main() {
     println!("cargo:rerun-if-changed={}", rust_webview.display());
     patch_rust_webview(&rust_webview);
 
-    // 3. Patch the freshly-generated manifest with permissions + service + receiver.
-    //    dx rewrites this file every build, so re-run whenever it changes.
     if manifest.exists() {
         println!("cargo:rerun-if-changed={}", manifest.display());
         patch_manifest(&manifest);
@@ -356,25 +340,17 @@ fn main() {
         ));
     }
 
-    // 4. Drop R8 keep rules so release (`dx bundle`) minification doesn't strip the
-    //    JNI-reached Kotlin. The release build.gradle globs **/*.pro under the module.
     copy_str(&main_dir.join("kopuz-keep.pro"), KEEP_RULES);
 
-    // 5. Generate launcher icons from our logo. dx only ships its default icon, so
-    //    build them here.
     generate_launcher_icons(&main_dir.join("res"));
     write_media_icons(&main_dir.join("res"));
     write_notification_icon(&asset_crate_dir, &main_dir.join("res"));
 
-    // 5b. Replace dx's network security config; the manifest already points at it.
     copy_str(
         &main_dir.join("res/xml/network_security_config.xml"),
         NETWORK_SECURITY_CONFIG,
     );
 
-    // 6. dx templates `versionCode = 1` into the module's Gradle script and never
-    //    moves it, so every release would look like the same build to Android and
-    //    refuse to install over its predecessor. Derive it from the crate version.
     if let Some(app_dir) = main_dir.parent().and_then(Path::parent) {
         patch_version_code(&app_dir.join("build.gradle.kts"));
         patch_sdk_levels(&app_dir.join("build.gradle.kts"));
@@ -505,8 +481,6 @@ fn android_version_code() -> u32 {
 
 fn write_media_icons(res: &Path) {
     for icon in MEDIA_ICONS {
-        // The dot needs room under the glyph, so an active icon shrinks it slightly
-        // rather than letting the two collide.
         let body = if icon.dot {
             format!(
                 r##"    <group android:scaleX="0.85" android:scaleY="0.85" android:pivotX="12" android:pivotY="10">
@@ -604,7 +578,6 @@ fn generate_launcher_icons(res: &Path) {
         }
     };
 
-    // (density dir suffix, px size)
     let densities = [
         ("mdpi", 48u32),
         ("hdpi", 72),
@@ -617,7 +590,7 @@ fn generate_launcher_icons(res: &Path) {
         if !dir.is_dir() {
             continue;
         }
-        // Remove dx's webp variants so they don't collide with our PNG.
+
         let _ = fs::remove_file(dir.join("ic_launcher.webp"));
         let _ = fs::remove_file(dir.join("ic_launcher_round.webp"));
         let resized = img.resize_exact(size, size, image::imageops::FilterType::Lanczos3);
@@ -626,8 +599,6 @@ fn generate_launcher_icons(res: &Path) {
         }
     }
 
-    // Drop the adaptive-icon descriptors so API 26+ uses our raster icon directly
-    // instead of dx's default vector foreground/background.
     let anydpi = res.join("mipmap-anydpi-v26");
     let _ = fs::remove_file(anydpi.join("ic_launcher.xml"));
     let _ = fs::remove_file(anydpi.join("ic_launcher_round.xml"));
@@ -665,7 +636,6 @@ fn copy_kt_dir(src: &Path, dst: &Path) {
 }
 
 fn copy_file(src: &Path, dst: &Path) {
-    // Per-file so editing this exact source re-triggers the build script.
     println!("cargo:rerun-if-changed={}", src.display());
     if let Some(parent) = dst.parent() {
         let _ = fs::create_dir_all(parent);
@@ -710,9 +680,6 @@ fn patch_manifest(path: &Path) {
         );
     }
 
-    // Tao/Wry cannot initialize twice in a live process. Reuse the launcher
-    // activity and let its WebView handle configuration changes in place.
-    // singleTask alone does not prevent recreation on theme/density changes.
     if let Some(name) = content.find("android:name=\"dev.dioxus.main.MainActivity\"")
         && let Some(start) = content[..name].rfind("<activity ")
         && let Some(end) = content[name..].find('>')

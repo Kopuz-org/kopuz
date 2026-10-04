@@ -9,8 +9,6 @@ use db::{QueueSnapshot, Source, TrackFilter};
 use reader::models::{Track, TrackId};
 
 fn unique_db() -> PathBuf {
-    // pid + counter, not just clock: macOS's µs clock let parallel tests
-    // collide on a nanos-only name and delete each other's live DB.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
@@ -87,16 +85,15 @@ async fn recently_played_round_trip() {
     for k in ["a", "b", "c"] {
         db.push_recent(&local, k).await.unwrap();
     }
-    // Re-playing "a" moves it back to the front (monotonic rank, no tie).
+
     db.push_recent(&local, "a").await.unwrap();
     assert_eq!(
         db.recently_played(&local, 50).await.unwrap(),
         vec!["a", "c", "b"]
     );
-    // The limit caps the result, newest first.
+
     assert_eq!(db.recently_played(&local, 1).await.unwrap(), vec!["a"]);
 
-    // Per-source isolation: a server keeps its own history.
     let srv = Source::Server("srv-1".into());
     db.push_recent(&srv, "VID1").await.unwrap();
     assert_eq!(db.recently_played(&srv, 50).await.unwrap(), vec!["VID1"]);
@@ -181,13 +178,11 @@ async fn playlist_add_appends_and_dedups() {
         .await
         .unwrap();
 
-    // New tracks append at the end, in order.
     db.add_playlist_tracks(&Source::default(), "pl", &["c".into(), "d".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "b", "c", "d"]);
 
-    // Already-present refs are skipped; only the genuinely new one is appended.
     db.add_playlist_tracks(&Source::default(), "pl", &["b".into(), "e".into()])
         .await
         .unwrap();
@@ -196,7 +191,6 @@ async fn playlist_add_appends_and_dedups() {
         ["a", "b", "c", "d", "e"]
     );
 
-    // A batch with an internal duplicate adds that ref only once.
     db.add_playlist_tracks(&Source::default(), "pl", &["f".into(), "f".into()])
         .await
         .unwrap();
@@ -241,13 +235,11 @@ async fn playlist_remove_keeps_remaining_order() {
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c"]);
 
-    // Removing a non-member is a no-op.
     db.remove_playlist_tracks(&Source::default(), "pl", &["z".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c"]);
 
-    // A later add still appends after the survivors (no position collision).
     db.add_playlist_tracks(&Source::default(), "pl", &["e".into()])
         .await
         .unwrap();
@@ -278,7 +270,6 @@ async fn folder_create_rename_delete() {
     assert_eq!(store.folders.len(), 1);
     assert_eq!(store.folders[0].name, "Rock");
 
-    // create on the same id is an upsert of the name (idempotent on id).
     db.create_folder("f1", "Metal").await.unwrap();
     let store = db.load_playlists(&Source::default()).await.unwrap();
     assert_eq!(store.folders.len(), 1, "no duplicate folder row");
@@ -307,7 +298,6 @@ async fn folder_move_is_not_duplicate() {
     db.create_folder("f1", "A").await.unwrap();
     db.create_folder("f2", "B").await.unwrap();
 
-    // Put a playlist in f1, then move it to f2: it must leave f1, not be in both.
     db.set_playlist_folder("p1", Some("f1")).await.unwrap();
     assert_eq!(folder_members(&db, "f1").await, vec!["p1"]);
 
@@ -318,7 +308,6 @@ async fn folder_move_is_not_duplicate() {
     );
     assert_eq!(folder_members(&db, "f2").await, vec!["p1"]);
 
-    // None removes it from every folder.
     db.set_playlist_folder("p1", None).await.unwrap();
     assert!(folder_members(&db, "f2").await.is_empty());
 
@@ -336,7 +325,6 @@ async fn folder_membership_appends_in_order() {
     db.set_playlist_folder("pC", Some("f1")).await.unwrap();
     assert_eq!(folder_members(&db, "f1").await, vec!["pA", "pB", "pC"]);
 
-    // Re-adding an existing member is idempotent (no duplicate, position kept).
     db.set_playlist_folder("pB", Some("f1")).await.unwrap();
     assert_eq!(folder_members(&db, "f1").await, vec!["pA", "pC", "pB"]);
 
@@ -351,7 +339,7 @@ async fn deleting_folder_cascades_membership() {
     db.set_playlist_folder("p1", Some("f1")).await.unwrap();
 
     db.delete_folder("f1").await.unwrap();
-    // Folder gone; re-creating it must come back empty (no orphaned membership).
+
     db.create_folder("f1", "A").await.unwrap();
     assert!(
         folder_members(&db, "f1").await.is_empty(),
@@ -391,7 +379,6 @@ async fn fresh_like_sorts_to_top() {
     db.set_favorite("srv-1", "B", true).await.unwrap();
     db.set_favorite("srv-1", "C", true).await.unwrap();
 
-    // Each new like surfaces at the top, newest first (matches YT's ordering).
     assert_eq!(db.favorites("srv-1").await.unwrap(), vec!["C", "B", "A"]);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
@@ -403,21 +390,17 @@ async fn pull_applies_remote_order_and_fresh_like_tops_it() {
     let db = db::init(&db_path).await.unwrap();
     seed_active_server(&db, "srv-1").await;
 
-    // A pull stores the remote's order (newest first).
     db.replace_favorites_clean("srv-1", &["X".into(), "Y".into(), "Z".into()])
         .await
         .unwrap();
     assert_eq!(db.favorites("srv-1").await.unwrap(), vec!["X", "Y", "Z"]);
 
-    // A fresh local like lands above the pulled set.
     db.set_favorite("srv-1", "NEW", true).await.unwrap();
     assert_eq!(
         db.favorites("srv-1").await.unwrap(),
         vec!["NEW", "X", "Y", "Z"]
     );
 
-    // A re-pull that reorders the remote set is reflected on existing rows; the
-    // still-pending local like (not yet in the remote set) stays on top.
     db.replace_favorites_clean("srv-1", &["Z".into(), "X".into(), "Y".into()])
         .await
         .unwrap();
@@ -435,7 +418,6 @@ async fn streaming_favorites_upsert_then_sweep() {
     let db = db::init(&db_path).await.unwrap();
     seed_active_server(&db, "srv-1").await;
 
-    // First sync (epoch 1), streamed in two pages — order accumulates.
     db.upsert_favorites_page("srv-1", &["A".into(), "B".into()], 0, 1)
         .await
         .unwrap();
@@ -444,16 +426,13 @@ async fn streaming_favorites_upsert_then_sweep() {
         .unwrap();
     assert_eq!(db.favorites("srv-1").await.unwrap(), vec!["A", "B", "C"]);
 
-    // A pending local like must survive sweeps (push-before-pull).
     db.set_favorite("srv-1", "LOCAL", true).await.unwrap();
 
-    // Second sync (epoch 2): B was unliked remotely (only C, A re-seen, reordered).
     db.upsert_favorites_page("srv-1", &["C".into(), "A".into()], 0, 2)
         .await
         .unwrap();
     db.sweep_favorites("srv-1", 2).await.unwrap();
 
-    // B swept (stale epoch); the dirty local like stays on top; C/A in new order.
     assert_eq!(
         db.favorites("srv-1").await.unwrap(),
         vec!["LOCAL", "C", "A"]
@@ -483,7 +462,6 @@ async fn streaming_playlist_tracks_upsert_then_sweep() {
             .unwrap_or_default()
     }
 
-    // First walk (epoch 1), streamed in two pages — order accumulates by position.
     db.upsert_playlist_tracks_page(&srv, "PLX", &["A".into(), "B".into()], 0, 1)
         .await
         .unwrap();
@@ -492,14 +470,11 @@ async fn streaming_playlist_tracks_upsert_then_sweep() {
         .unwrap();
     assert_eq!(entries(&db, &srv).await, vec!["A", "B", "C"]);
 
-    // Second walk (epoch 2): B removed remotely, C/A reordered, list now shorter.
     db.upsert_playlist_tracks_page(&srv, "PLX", &["C".into(), "A".into()], 0, 2)
         .await
         .unwrap();
     db.sweep_playlist_tracks(&srv, "PLX", 2).await.unwrap();
 
-    // Positions 0,1 overwritten to C,A this epoch; position 2 (old C) kept the
-    // stale epoch and was swept — so the shrunk, reordered list survives.
     assert_eq!(entries(&db, &srv).await, vec!["C", "A"]);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
@@ -512,10 +487,6 @@ async fn liked_music_playlist_surfaces_in_the_grid() {
     seed_active_server(&db, "srv-1").await;
     let srv = Source::Server("srv-1".into());
 
-    // "LM" (YT Liked Music) is a playlist like any other as far as the store is
-    // concerned — the YT source decides where its entries come from. This read
-    // used to filter the id out, which hid the tile no matter what the source
-    // returned.
     db.upsert_playlist_meta(&srv, "PLX", "Mix", None, None)
         .await
         .unwrap();
@@ -651,7 +622,6 @@ async fn active_server_writes_never_touch_other_servers_rows() {
     let db = db::init(&db_path).await.unwrap();
     seed_active_server(&db, "srv-1").await;
 
-    // Seed ANOTHER server's cache directly.
     let other = Source::Server("srv-other".into());
     db.upsert_tracks(&other, &[server_track("OV1", "Other One")])
         .await
@@ -664,7 +634,6 @@ async fn active_server_writes_never_touch_other_servers_rows() {
         .unwrap();
     db.set_favorite("srv-other", "OV1", true).await.unwrap();
 
-    // A full sync-style write cycle for the ACTIVE server (srv-1)...
     let active = Source::Server("srv-1".into());
     db.upsert_tracks(
         &active,
@@ -689,7 +658,6 @@ async fn active_server_writes_never_touch_other_servers_rows() {
         .unwrap();
     db.delete_playlist(&active, "TMP").await.unwrap();
 
-    // ...must leave srv-other's rows completely intact.
     let other_count = db
         .tracks_count(&TrackFilter::new(Source::Server("srv-other".into())))
         .await
@@ -701,7 +669,6 @@ async fn active_server_writes_never_touch_other_servers_rows() {
         "other server's favorites survived"
     );
 
-    // Each server's playlists are scoped to that source — srv-1 first...
     let store = db
         .load_playlists(&Source::Server("srv-1".into()))
         .await
@@ -710,7 +677,6 @@ async fn active_server_writes_never_touch_other_servers_rows() {
     assert_eq!(store.playlists[0].id, "PL1");
     assert_eq!(store.playlists[0].tracks, vec!["VID1"]);
 
-    // ...and srv-other's playlist survived untouched.
     let store = db
         .load_playlists(&Source::Server("srv-other".into()))
         .await

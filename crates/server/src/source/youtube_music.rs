@@ -54,9 +54,6 @@ impl MediaSource for YtSource {
     }
 
     fn capabilities(&self) -> Capabilities {
-        // YT has discover + radio, can add/remove playlist entries, but its
-        // InnerTube exposes no reorder mutation — so no `reorder_playlist`
-        // override; it inherits the unsupported default.
         Capabilities {
             edit_tags: false,
             delete_from_disk: false,
@@ -94,7 +91,7 @@ impl MediaSource for YtSource {
         if seed_ref.trim().is_empty() {
             return Err(SourceError::InvalidInput("track has no video id".into()));
         }
-        // /next works anonymously (empty cookies), so no auth gate here.
+
         self.client
             .start_mix(seed_ref)
             .await
@@ -108,8 +105,7 @@ impl MediaSource for YtSource {
         if playlist_ref.trim().is_empty() {
             return Err(SourceError::InvalidInput("playlist has no id".into()));
         }
-        // Liked Music needs no special case here: YT builds `RDAMPLLM` like any
-        // other playlist mix — that is exactly what its own web client asks for.
+
         self.client
             .start_playlist_mix(playlist_ref)
             .await
@@ -137,14 +133,14 @@ impl MediaSource for YtSource {
         Ok((tracks, Vec::new()))
     }
 
-    async fn discover_home(&self) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
+    async fn discover_home(&self) -> Result<crate::catalog::DiscoverHome, SourceError> {
         self.client.discover_home().await.map_err(SourceError::from)
     }
 
     async fn discover_continuation(
         &self,
         token: &str,
-    ) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
+    ) -> Result<crate::catalog::DiscoverHome, SourceError> {
         self.client
             .discover_continuation(token)
             .await
@@ -167,8 +163,6 @@ impl MediaSource for YtSource {
     }
 
     async fn fetch_album_by_ref(&self, id: &str) -> Result<Option<RemoteAlbum>, SourceError> {
-        // Resolve the id (raw browse id, `ytmusic:album:MPRE…`, or a synthesized
-        // `ytmusic:album:<hash>`) to a real browse id before fetching.
         let browse_id = if let Some(bid) = crate::ytmusic::search::album_browse_id(id) {
             Some(bid)
         } else if let Some((album, artist)) = crate::ytmusic::search::synth_album_parts(id) {
@@ -226,7 +220,7 @@ impl MediaSource for YtSource {
     async fn fetch_artist(
         &self,
         channel_id: &str,
-    ) -> Result<crate::ytmusic::discover::YtArtist, SourceError> {
+    ) -> Result<crate::catalog::CatalogArtist, SourceError> {
         self.client
             .fetch_artist(channel_id)
             .await
@@ -260,8 +254,7 @@ impl MediaSource for YtSource {
                 name: None,
             });
         }
-        // No artists-search entry (user channels for uploaded content) —
-        // reconcile the channel from a library song and use its avatar.
+
         let Some(key) = artist.key.as_deref() else {
             return Ok(ArtistLookup::default());
         };
@@ -292,10 +285,6 @@ impl MediaSource for YtSource {
         playlist_id: &str,
         item_refs: &[String],
     ) -> Result<Vec<String>, SourceError> {
-        // Adding to Liked Music IS liking, so it goes through the favorite path
-        // rather than a playlist mutation YT would reject. The local row is
-        // written clean, not dirty — the push already happened here, and a dirty
-        // row would have the reconciler push it a second time.
         if playlist_id == LIKED_MUSIC_ID {
             let sid = self.source.as_str();
             let mut added = Vec::new();
@@ -343,9 +332,7 @@ impl MediaSource for YtSource {
         if vid.is_empty() {
             return Err(SourceError::InvalidInput("track has no video id".into()));
         }
-        // Removing from Liked Music is unliking (see `add_to_playlist`). Local
-        // first so the row disappears immediately, then push, reverting the
-        // local write if YT rejects it — the same order the favorites hook uses.
+
         if playlist_id == LIKED_MUSIC_ID {
             self.record_favorite(track, false).await?;
             if let Err(e) = self.push_favorite(&vid, false).await {
@@ -418,10 +405,7 @@ impl MediaSource for YtSource {
                     .map(|u| reader::CoverRef::encode_url(u)),
             })
             .collect();
-        // YT's own library grid normally carries the Liked Music tile (with its
-        // artwork), so this only fills in when that tile is missing — the grid's
-        // shape is not something to depend on. Anonymous sessions have no likes,
-        // so nothing is added there.
+
         if self.client.is_authenticated() && !out.iter().any(|p| p.id == LIKED_MUSIC_ID) {
             out.insert(
                 0,
@@ -442,7 +426,7 @@ impl MediaSource for YtSource {
         if playlist_id == LIKED_MUSIC_ID {
             return self.liked_music_entries().await;
         }
-        // The YT client already returns typed tracks.
+
         Ok(self.client.get_playlist_entries(playlist_id).await?)
     }
 
@@ -452,14 +436,12 @@ impl MediaSource for YtSource {
         cursor: Option<String>,
     ) -> Result<PlaylistPage, SourceError> {
         if playlist_id == LIKED_MUSIC_ID {
-            // Favorites are already local, so there's nothing to page through.
             return Ok(PlaylistPage {
                 tracks: self.liked_music_entries().await?,
                 next: None,
             });
         }
-        // True per-page InnerTube walk so a long playlist streams into the cache
-        // (and the UI) instead of blocking on a full fetch every visit.
+
         let (tracks, next) = self
             .client
             .playlist_page(playlist_id, cursor.as_deref())

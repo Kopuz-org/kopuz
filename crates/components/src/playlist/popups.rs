@@ -80,7 +80,6 @@ fn AddFolderFromFileManagerButton(
     }
 }
 
-// Android has no native folder dialog.
 #[cfg(target_os = "android")]
 #[component]
 fn AddFolderFromFileManagerButton(

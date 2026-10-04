@@ -118,8 +118,6 @@ impl EngineHandle {
 
 impl Drop for EngineHandle {
     fn drop(&mut self) {
-        // Fire-and-forget: the actor tears itself down; joining here would
-        // block the UI thread on app exit.
         let _ = self.tx.send(ActorMsg::Cmd(Command::Shutdown));
     }
 }
@@ -280,15 +278,12 @@ impl Actor {
     }
 
     fn run(mut self) {
-        // Open the output up front so the pipeline is warm (silence until the
-        // first Load), matching the old constructor's behavior.
         if let Err(e) = self.open_output(None) {
             tracing::error!(error = %e, "failed to open initial output stream");
         }
 
         while !self.shutting_down {
             if self.is_idle() {
-                // Nothing for a tick to derive — park instead of spinning.
                 match self.rx.recv() {
                     Ok(msg) => self.handle(msg),
                     Err(_) => break,
@@ -317,16 +312,12 @@ impl Actor {
             && self.pending_device_rebuild.is_none()
     }
 
-    // ── message handling ────────────────────────────────────────────────
-
     fn handle(&mut self, msg: ActorMsg) {
         match msg {
             ActorMsg::Cmd(cmd) => self.handle_command(cmd),
             ActorMsg::Worker(msg) => self.handle_worker(msg),
             ActorMsg::DeviceError { device_lost } => self.handle_device_error(device_lost),
             ActorMsg::DefaultDeviceChanged => {
-                // Radio can't re-seek onto a rebuilt stream; playing on the old
-                // (still-working) device beats stopping.
                 if self.current.as_ref().is_some_and(|c| !c.seekable) {
                     tracing::info!(
                         "default output changed during a live stream; staying on the old device"
@@ -423,8 +414,6 @@ impl Actor {
                 self.device_change_behavior = behavior;
             }
             Command::SetSampleRateMode(mode) => {
-                // Takes effect on the next track start or stream rebuild; the
-                // live stream keeps its rate to avoid an audible glitch now.
                 self.sample_rate_mode = mode;
             }
             Command::SetDuration(duration) => {
@@ -470,7 +459,7 @@ impl Actor {
                     let _ = reply.send(Err(message.clone()));
                 }
                 self.emit(Event::Error { token, message });
-                // discard_pending above may have removed a published pending.
+
                 self.publish();
                 return;
             }
@@ -487,8 +476,7 @@ impl Actor {
             },
             reply,
         });
-        // Make the pending load visible in status right away, so the UI can see
-        // a transition is in flight without waiting for the next tick.
+
         self.publish();
     }
 
@@ -501,8 +489,6 @@ impl Actor {
                 replay_gain,
             } => {
                 if self.pending.as_ref().is_none_or(|p| p.plan.token != token) {
-                    // Stale probe from a superseded load; its command sender is
-                    // gone, so the worker exits by itself.
                     return;
                 }
                 let pending = self.pending.take().expect("checked above");
@@ -527,13 +513,9 @@ impl Actor {
                         token,
                         message: error,
                     });
-                    // The pending load is gone; clear it from status.
+
                     self.publish();
                 } else if let Some(current) = self.current.take_if(|c| c.token == token) {
-                    // A LIVE session's worker can fail too: a post-EOF seek
-                    // whose re-probe errors sends Failed and exits. Ignoring it
-                    // left the session in a silent Playing forever — retire it
-                    // and report, so the controller can react.
                     self.retire_session(current);
                     self.emit(Event::Error {
                         token,
@@ -541,8 +523,6 @@ impl Actor {
                     });
                     self.publish();
                 } else if let Some(fading) = self.fading.take_if(|f| f.token == token) {
-                    // The outgoing side of a crossfade failing just ends its
-                    // fade-out early; the incoming session is unaffected.
                     self.retire_session(fading);
                     self.publish();
                 }
@@ -563,8 +543,6 @@ impl Actor {
 
         match self.try_start_session(plan, source_sample_rate, seekable, replay_gain) {
             Ok(outcome) => {
-                // Publish before resolving the reply so a caller that reads
-                // status right after awaiting sees the new session.
                 self.publish();
                 if let Some(reply) = reply {
                     let _ = reply.send(Ok(outcome));
@@ -579,8 +557,7 @@ impl Actor {
                     token,
                     message: error,
                 });
-                // The pending load is gone; without this the status keeps
-                // advertising it (and a transition) forever.
+
                 self.publish();
             }
         }
@@ -613,14 +590,7 @@ impl Actor {
             Transition::Crossfade(fade) if !fade.is_zero() => Some(fade),
             _ => None,
         };
-        // Crossfade needs a live, audible outgoing session and an open stream.
-        // The fade runs at the LIVE config — the incoming worker resamples to it
-        // — so a source-rate mismatch (YT mixes 48kHz Opus and 44.1kHz AAC
-        // freely) doesn't silently downgrade the fade to a hard cut. While
-        // paused we fall back to an immediate switch and stay paused instead of
-        // blasting audio through the user's pause; a drained (ended) outgoing
-        // session has nothing left to fade out. Take the outgoing session here
-        // so the invariant ("a fade has an outgoing") is local.
+
         let live_config = self.sink.config();
         let outgoing = fade
             .filter(|_| !self.paused.load(Ordering::Relaxed) && self.rt_tx.is_some())
@@ -631,8 +601,6 @@ impl Actor {
                     .map(|session| (fade, config, session))
             });
 
-        // Branch only on the fade decision; the ring/start/swap/install tail is
-        // shared. `config`, `fade_frames`, and `crossfaded` capture the delta.
         let (config, fade, crossfaded) = if let Some((fade, config, outgoing)) = outgoing {
             self.stop_fading();
             self.fading = Some(outgoing);
@@ -644,12 +612,6 @@ impl Actor {
                 true,
             )
         } else {
-            // Immediate switch: reopen at the source's preferred rate when it
-            // differs (Source mode only; System mode keeps the device at its
-            // default rate and the worker resamples). Everything fallible
-            // happens BEFORE the outgoing sessions are retired, so a failed
-            // start leaves the prior track playing (matching the failed-load
-            // contract) instead of half-torn-down state under a stale status.
             let desired_rate = self.desired_output_rate(source_sample_rate);
             let desired_config = match self.sink.probe_config(desired_rate) {
                 Ok(config) => config,
@@ -669,10 +631,6 @@ impl Actor {
             }
             self.stop_fading();
 
-            // A load un-pauses, including the device — a paused stream would
-            // play the new track silently. Exception: a crossfade that fell
-            // back *because* the user is paused honors the pause instead of
-            // blasting the next track through it; it starts on Resume.
             let honor_pause = fade.is_some() && self.paused.load(Ordering::Relaxed);
             if !honor_pause {
                 self.paused.store(false, Ordering::Relaxed);
@@ -755,15 +713,6 @@ impl Actor {
             return;
         };
 
-        // The seek targets the visible track: during a crossfade that's the
-        // outgoing (fading) session, otherwise the current one. Decide up front,
-        // before any teardown:
-        //   - a token that no longer matches the visible session means a
-        //     crossfade promoted a different track since the caller issued the
-        //     seek — drop it rather than scrub the wrong track;
-        //   - seeking out of a non-seekable outgoing source (radio) must leave
-        //     the fade running, not retire the incoming session and strand the
-        //     RT mid-fade.
         match self.fading.as_ref().or(self.current.as_ref()) {
             None => return,
             Some(visible) if expect_token.is_some_and(|t| t != visible.token) => {
@@ -777,11 +726,6 @@ impl Actor {
             Some(_) => {}
         }
 
-        // Cancel the fade and seek the outgoing (visible) worker in place — it
-        // is still alive as the fading session, so no re-resolve. The incoming
-        // session is dropped, and last_token follows the promotion so
-        // subsequent PhaseChanged/idle events name the session that actually
-        // plays, not the retired incoming one.
         if let Some(outgoing) = self.fading.take() {
             if let Some(incoming) = self.current.take() {
                 self.retire_session(incoming);
@@ -793,29 +737,22 @@ impl Actor {
         let Some(current) = &mut self.current else {
             return;
         };
-        // Captured before the latch is cleared below; drives the resume rule.
+
         let revive_from_ended = current.ended;
 
-        // Keep a guard gap before the end so a seek can't land past the last
-        // packet (matches the old engine's END_GUARD).
         let target = if current.duration > SEEK_END_GUARD {
             target.min(current.duration - SEEK_END_GUARD)
         } else {
             Duration::ZERO
         };
 
-        // Fresh ring: pre-seek samples die with the old one, no drain races. Bump
-        // the ring generation first so a pre-seek Eof still in flight from the
-        // worker is dropped instead of ending the seeked session.
         current.ring_epoch += 1;
         let ring = make_ring(config, current.gain.clone());
         let _ = current.worker.cmd_tx.send(WorkerCmd::Seek {
             target,
             producer: ring.producer,
             written: ring.written.clone(),
-            // The live config rides along: a device rebuild may have changed
-            // the rate/channels since this session's Start, and the decode
-            // must retarget with the ring or play at the wrong pitch.
+
             channels: config.channels,
             sample_rate: config.sample_rate,
             epoch: current.ring_epoch,
@@ -824,7 +761,7 @@ impl Actor {
         current.played = ring.played;
         current.base_micros = target.as_micros() as u64;
         current.eof = false;
-        // Seeking an ended session revives its parked worker.
+
         current.ended = false;
 
         let rt_session = ring.rt_session;
@@ -832,10 +769,7 @@ impl Actor {
             session: rt_session,
             fade: None,
         });
-        // Seeking a track out of its ended state resumes playback: `Ended` is
-        // terminal and end-of-queue quiesced the device, so scrubbing back in
-        // is an intent to listen. A seek on a merely-paused track (ended ==
-        // false) never reaches here and stays paused.
+
         if revive_from_ended {
             self.paused.store(false, Ordering::Relaxed);
             if let Err(e) = self.sink.play() {
@@ -862,10 +796,6 @@ impl Actor {
     /// The output stream died (device unplugged, format lost). Rebuild it and
     /// resume the current session at its last position via the seek protocol.
     fn handle_device_error(&mut self, device_lost: bool) {
-        // The dead stream's callback can emit a burst of errors; rebuild once.
-        // Coalesce rather than drop: a genuine device change arriving inside
-        // the window (the same hot-plug produces both signals) must still be
-        // honored, on the next tick, or playback stays on the wrong device.
         if self
             .last_output_rebuild
             .is_some_and(|at| at.elapsed() < Duration::from_millis(500))
@@ -892,7 +822,6 @@ impl Actor {
                     tracing::info!(device_lost, "output stream rebuilt; reseeking in place");
                     self.handle_seek(position, None);
                 } else if let Some(current) = self.current.take() {
-                    // Non-seekable (radio): the controller has to re-load.
                     let token = current.token;
                     self.retire_session(current);
                     self.emit(Event::Error {
@@ -900,10 +829,7 @@ impl Actor {
                         message: "output stream lost".to_string(),
                     });
                 }
-                // The user chooses whether a device CHANGE keeps playing on the
-                // new output or holds paused there (unplugged headphones
-                // shouldn't blast the speakers). A same-device stall recovery
-                // is not a device change — it just keeps playing.
+
                 if device_lost
                     && was_playing
                     && self.device_change_behavior == config::DeviceChangeBehavior::Pause
@@ -919,10 +845,7 @@ impl Actor {
                 tracing::error!(error = %e, "failed to rebuild output stream");
                 let token = self.last_token;
                 self.handle_stop(false);
-                // The stream that errored is gone; its callback will never run
-                // again, so no Retired can ever come back. Abandon the RT
-                // bookkeeping (rings died with the stream) or the outstanding
-                // count wedges the loop out of parking forever.
+
                 self.rt_tx = None;
                 self.retire_rx = None;
                 self.rt_rings_outstanding = 0;
@@ -935,12 +858,7 @@ impl Actor {
         self.publish();
     }
 
-    // ── periodic work ───────────────────────────────────────────────────
-
     fn tick(&mut self) {
-        // Each step publishes if (and only if) it changed observable state, so
-        // a steady Playing tick allocates nothing: position reads live off the
-        // shared atomic in the last-published status.
         if let Some(device_lost) = self.pending_device_rebuild
             && self
                 .last_output_rebuild
@@ -952,8 +870,6 @@ impl Actor {
         self.latch_drain_complete();
         self.emit_throttled_position();
 
-        // Finished detached workers just get dropped (JoinHandle drop detaches);
-        // live ones are re-checked next tick.
         self.graveyard.retain(|handle| !handle.is_finished());
     }
 
@@ -965,9 +881,7 @@ impl Actor {
         if let Some(retire_rx) = &self.retire_rx {
             while let Ok(msg) = retire_rx.try_recv() {
                 retired += 1;
-                // Only the CURRENT fade's completion counts: a stale one raced
-                // the start of a newer fade, and completing on it would retire
-                // the new outgoing session at fade start.
+
                 if matches!(msg, Retired::FadeComplete(_, generation)
                     if generation == self.fade_generation)
                 {
@@ -977,9 +891,6 @@ impl Actor {
         }
         self.rt_rings_outstanding = self.rt_rings_outstanding.saturating_sub(retired);
 
-        // Emit TrackSwitched only when an outgoing session actually retired: a
-        // FadeComplete can race a seek that already cancelled the fade, and
-        // that must not fabricate a switch.
         if fade_completed && let Some(outgoing) = self.fading.take() {
             let from_token = outgoing.token;
             self.retire_session(outgoing);
@@ -1006,8 +917,6 @@ impl Actor {
             _ => None,
         };
         if let Some(token) = ended_token {
-            // emit() wakes the platform run loop, so the subscriber's
-            // auto-advance fires without waiting for a poll tick.
             self.emit(Event::Ended { token });
             self.publish();
         }
@@ -1027,13 +936,10 @@ impl Actor {
                 self.emit(Event::Position { token, position });
             }
         }
-        // MPRIS reads position on demand from this stored value; the old
-        // engine ran a dedicated 250ms thread for it.
+
         #[cfg(target_os = "linux")]
         systemint::update_position(position.as_secs_f64());
     }
-
-    // ── plumbing ────────────────────────────────────────────────────────
 
     fn phase(&self) -> Phase {
         match &self.current {
@@ -1103,7 +1009,7 @@ impl Actor {
         }
         let is_position = matches!(event, Event::Position { .. });
         let mut delivered = false;
-        // Fan out to every subscriber, pruning any whose receiver has dropped.
+
         self.events.retain(|tx| match tx.send(event.clone()) {
             Ok(()) => {
                 delivered = true;
@@ -1112,17 +1018,12 @@ impl Actor {
             Err(_) => false,
         });
         if delivered && !is_position {
-            // Waking tokio isn't enough on platforms where the app main loop
-            // itself may be parked (tao/CFRunLoop).
             #[cfg(any(target_os = "android", target_os = "macos"))]
             systemint::wake_run_loop();
         }
     }
 
     fn send_rt(&mut self, cmd: RtCmd) {
-        // Each Swap hands the RT a new ring consumer it will later ship back as
-        // a Retired message; track the balance so the loop knows when the RT is
-        // empty and it can park.
         if matches!(cmd, RtCmd::Swap { .. }) {
             self.rt_rings_outstanding += 1;
         }
@@ -1167,16 +1068,12 @@ impl Actor {
         let config = self.sink.open(desired_sample_rate, make_cb)?;
         self.rt_tx = Some(rt_tx);
         self.retire_rx = Some(retire_rx);
-        // The old RT state (and any rings it still held) is dropped with the old
-        // stream; the fresh one starts owning nothing.
+
         self.rt_rings_outstanding = 0;
         Ok(config)
     }
 
     fn teardown(&mut self) {
-        // Detach every remaining worker into the graveyard, then join the lot.
-        // A pending probe's cmd channel closes when its handle drops, so it
-        // needs no explicit Stop.
         if let Some(pending) = self.pending.take() {
             drop(pending.reply);
             self.graveyard.push(pending.plan.worker.join);
@@ -1187,16 +1084,13 @@ impl Actor {
         if let Some(fading) = self.fading.take() {
             self.retire_session(fading);
         }
-        // Closing the sink drops the stream and with it the RT state and any
-        // consumers it still owns, unblocking workers stuck on full rings.
+
         self.sink.close();
         self.rt_tx = None;
         self.retire_rx = None;
 
         let joins = std::mem::take(&mut self.graveyard);
         for join in joins {
-            // A worker wedged in network I/O can't be joined without hanging
-            // shutdown; detach it and let process exit clean it up.
             if join.is_finished() {
                 let _ = join.join();
             } else {

@@ -7,11 +7,6 @@
 use std::path::PathBuf;
 
 fn unique_dir() -> PathBuf {
-    // Unique by construction (pid + counter), not just by clock: macOS's
-    // µs-resolution clock let parallel tests land on the same nanos-only name,
-    // and the first finisher's cleanup deleted the other's live DB
-    // (SQLITE_CANTOPEN, code 14). Nanos stay so a killed run's leftover dir
-    // can't be picked up by a later run reusing the pid.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
@@ -51,21 +46,20 @@ async fn import(config_json: &str) -> (db::Db, PathBuf) {
 async fn migration_imports_recently_played_per_source() {
     let (db, dir) = import(LEGACY_CONFIG).await;
 
-    // Local list → the local partition, newest-first order preserved.
     assert_eq!(
         db.recently_played(&db::Source::default(), 50)
             .await
             .unwrap(),
         vec!["/m/a.flac", "/m/b.flac"]
     );
-    // Server list → the active server's partition.
+
     assert_eq!(
         db.recently_played(&db::Source::Server("s1".into()), 50)
             .await
             .unwrap(),
         vec!["VID1", "VID2", "VID3"]
     );
-    // A non-active server gets none (the legacy list was the active server's).
+
     assert!(
         db.recently_played(&db::Source::Server("s2".into()), 50)
             .await
@@ -79,7 +73,7 @@ async fn migration_imports_recently_played_per_source() {
 #[tokio::test]
 async fn migration_is_idempotent() {
     let (db, dir) = import(LEGACY_CONFIG).await;
-    // A second run is gated off (the DB now has data) — no duplicated rows.
+
     db.import_legacy_json(&dir).await.unwrap();
     assert_eq!(
         db.recently_played(&db::Source::Server("s1".into()), 50)

@@ -286,7 +286,7 @@ impl ArtworkService {
                 let source = server::source::active(self.db.clone(), config);
                 let library_view =
                     source.capabilities().artist_view == server::source::ArtistView::Library;
-                // The cover the listing advertised, so the bytes served are the picture its ref was versioned on.
+
                 let album = match library_view {
                     true => self
                         .db
@@ -321,9 +321,7 @@ impl ArtworkService {
                 };
                 Ok(playlist_cover(playlist, config, first.as_ref()))
             }
-            // Public images the daemon holds a URL for. Proxied rather than
-            // handed over, so every frontend gets pictures the same way and
-            // one that cannot fetch a URL itself still works.
+
             ArtworkTarget::Catalog(id) => self
                 .catalog
                 .get()

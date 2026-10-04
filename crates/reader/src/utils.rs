@@ -133,40 +133,32 @@ mod tests {
         let dir_path = std::env::temp_dir().join(format!("kopuz_test_dir_{nanos}"));
         std::fs::create_dir_all(&dir_path).unwrap();
 
-        // 1. Empty directory
         assert!(find_folder_cover(&dir_path).is_none());
 
-        // 2. Directory with only non-image files
         File::create(dir_path.join("song.mp3")).unwrap();
         File::create(dir_path.join("readme.txt")).unwrap();
         assert!(find_folder_cover(&dir_path).is_none());
 
-        // 3. Directory with generic/fallback image
         let random_image = dir_path.join("random_picture.jpg");
         File::create(&random_image).unwrap();
         assert_eq!(find_folder_cover(&dir_path), Some(random_image.clone()));
 
-        // 4. Directory with high-priority candidate image
         let cover_image = dir_path.join("cover.png");
         File::create(&cover_image).unwrap();
-        // Should prefer "cover.png" over "random_picture.jpg"
+
         assert_eq!(find_folder_cover(&dir_path), Some(cover_image.clone()));
 
-        // 5. Directory with other candidate (e.g. hqdefault)
-        // Clean up and recreate with hqdefault
         std::fs::remove_file(cover_image).unwrap();
         std::fs::remove_file(random_image).unwrap();
         let hq_image = dir_path.join("hqdefault.webp");
         File::create(&hq_image).unwrap();
         assert_eq!(find_folder_cover(&dir_path), Some(hq_image));
 
-        // 6. Ambiguous generic images should not be chosen arbitrarily
         std::fs::remove_file(dir_path.join("hqdefault.webp")).unwrap();
         File::create(dir_path.join("random_picture.jpg")).unwrap();
         File::create(dir_path.join("other_picture.png")).unwrap();
         assert!(find_folder_cover(&dir_path).is_none());
 
-        // Clean up
         let _ = std::fs::remove_dir_all(&dir_path);
     }
 }

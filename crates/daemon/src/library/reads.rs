@@ -140,16 +140,18 @@ impl LibraryService {
     }
 
     pub async fn albums_recently_added(&self, page: Page) -> Result<AlbumPage, ApiError> {
-        // The store applies the recency order and the cut, so it has to see the
-        // whole window the caller is paging within, not just the page length.
-        let depth = page.offset.saturating_add(page.limit);
         let source = self.query_source();
-        let rows = self
+        let (total, items) = self
             .db
-            .albums_recently_added(&source, depth)
+            .albums_recently_added_page(
+                &source,
+                db::Page {
+                    offset: page.offset,
+                    limit: page.limit,
+                },
+            )
             .await
             .map_err(db_error)?;
-        let (total, items) = window(&rows, page);
         Ok(AlbumPage {
             albums: items.iter().map(album_info).collect(),
             total,
@@ -322,8 +324,7 @@ impl LibraryService {
     pub async fn recent_tracks(&self, page: Page) -> Result<TrackPage, ApiError> {
         let config = self.current_config();
         let source = self.query_source();
-        // Recents are a key list; the rows come back unordered, so they are
-        // put back into play order here.
+
         let keys = self
             .db
             .recently_played(&source, page.offset.saturating_add(page.limit))
@@ -353,17 +354,14 @@ impl LibraryService {
 
     pub async fn search(&self, query: &str) -> Result<SearchResults, ApiError> {
         let config = self.current_config();
-        // A remote source answers over the network, so search is the one read
-        // here that goes through the source rather than straight to the DB.
+
         let source = server::source::active(self.db.clone(), &config);
         let (mut tracks, albums) = source
             .search(query)
             .await
             .map_err(|error| ApiError::internal(format!("search failed: {error}")))?;
         crate::wire::listed_by(source.source(), &mut tracks);
-        // A remote hit may name a track the library has never stored, so
-        // remember it: the caller gets a key, and queueing or hearting that
-        // key has to resolve to something.
+
         self.register_transient(&tracks);
         Ok(SearchResults {
             tracks: tracks

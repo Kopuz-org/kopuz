@@ -109,12 +109,6 @@ impl State {
         }
         self.indexed_at = self.downloaded;
 
-        // The relabel has to come off first. `patch_init` rewrites the sample
-        // entry's type from `enca` to `mp4a` so the decoder accepts the track, but
-        // that is the very box the fragment walk looks for to know the track is
-        // encrypted — leave it patched and every later walk finds an unencrypted
-        // file and indexes nothing. Both directions are a 4-byte write, and the
-        // single lock means no reader can observe the buffer mid-flip.
         let restore = std::mem::take(&mut self.enca_positions);
         for &pos in &restore {
             if pos + 8 <= self.buf.len() {
@@ -124,7 +118,6 @@ impl State {
         let indexed = cenc::index_fmp4(&self.buf[..self.downloaded]);
         self.enca_positions = restore;
 
-        // An `Err` just means no `moov` yet — too early to index anything.
         if let Ok(fresh) = indexed {
             if fresh.samples.len() >= self.layout.samples.len() {
                 if self.enca_positions.is_empty() {
@@ -133,14 +126,10 @@ impl State {
                 self.decrypted.resize(fresh.samples.len(), false);
                 self.layout = fresh;
             } else {
-                // Can't happen with a growing prefix; keeping the longer index is
-                // the safe response, since `decrypted` indexes into it.
                 tracing::warn!("am.decrypt: re-index shrank the sample list, ignoring it");
             }
         }
 
-        // Put the relabel back (or apply it for the first time) so a read of the
-        // init segment sees a track the decoder will open.
         if !self.enca_positions.is_empty() {
             for &pos in &self.enca_positions {
                 if pos + 8 <= self.buf.len() {
@@ -180,7 +169,6 @@ impl ChunkSink {
         s.reindex();
         s.complete = true;
         if s.downloaded < s.buf.len() {
-            // Short read: the rest of the buffer is padding that never arrived.
             let missing = s.buf.len() - s.downloaded;
             tracing::warn!("am.stream: download ended {missing} bytes short");
         }
@@ -252,8 +240,7 @@ impl ProgressiveTrack {
                 cdm: None,
                 session: None,
                 error: None,
-                // Nothing left to decrypt, so a caller waiting on the whole
-                // track is already satisfied.
+
                 fill_done: true,
             })),
             read_pos: Arc::new(AtomicUsize::new(0)),
@@ -330,8 +317,6 @@ impl ProgressiveTrack {
             s.key_id = key_id;
         }
 
-        // Build the cushion before the decoder ever reads. Costs a fraction of a
-        // second and is what keeps playback from stuttering out of the gate.
         let started = Instant::now();
         let prebuffer_end = {
             let init_end = self.wait_for_init()?;
@@ -346,16 +331,11 @@ impl ProgressiveTrack {
             PREBUFFER_BYTES / 1024,
             started.elapsed().as_secs_f64()
         );
-        // The seek bar draws these, same as the HTTP-backed sources. A listener
-        // reads it the same way: how much is ready to play.
+
         if let Some(p) = &progress {
             p(0, prebuffer_end as u64, Some(self.total));
         }
 
-        // Fill in the rest in order, so sequential playback stays ahead of the
-        // playhead. A plain thread rather than a task: the decryption itself is
-        // CPU-bound, and between bursts this parks waiting on the playhead — so
-        // it lives as long as the track does, mostly idle.
         let state = self.state.clone();
         let read_pos = self.read_pos.clone();
         let total = self.total;
@@ -412,7 +392,7 @@ impl ProgressiveTrack {
                 if s.frontier() >= want {
                     return Ok(());
                 }
-                // Nothing more is coming; the caller reads what there is.
+
                 if s.complete {
                     return Ok(());
                 }
@@ -432,10 +412,6 @@ impl ProgressiveTrack {
     /// Bytes outside any sample — the init segment, `moof` headers, box headers —
     /// are already cleartext and cost nothing.
     fn ensure_range(&self, start: usize, end: usize) -> IoResult<()> {
-        // One lock for the whole range, not one per sample: re-acquiring it
-        // between samples lets the background filler cut in each time, so a read
-        // that needs 80 samples ends up interleaved 80 times. A reader is
-        // latency-critical (the audio device is draining); the filler is not.
         let mut s = self
             .state
             .lock()
@@ -443,7 +419,7 @@ impl ProgressiveTrack {
         if let Some(e) = &s.error {
             return Err(IoError::other(e.clone()));
         }
-        // No CDM means either nothing to decrypt (cache hit) or already finished.
+
         if s.cdm.is_none() {
             return Ok(());
         }
@@ -461,7 +437,7 @@ impl ProgressiveTrack {
         if samples.is_empty() {
             return Ok(());
         }
-        // First sample that could overlap: samples are sorted and disjoint.
+
         let first = samples.partition_point(|s| s.end() <= start);
         if first >= samples.len() || samples[first].start >= end {
             return Ok(());
@@ -547,7 +523,6 @@ fn fill(
     let mut stalled_since: Option<Instant> = None;
 
     loop {
-        // What's the next sample, and is there one yet?
         let next = {
             let Ok(mut s) = state.lock() else { return };
             if s.error.is_some() {
@@ -560,7 +535,6 @@ fn fill(
                 Some(sample) => Some((sample.start, sample.end())),
                 None if s.complete => None,
                 None => {
-                    // More fragments are still coming.
                     drop(s);
                     match stalled_since {
                         Some(since) if since.elapsed() > WAIT_TIMEOUT => {
@@ -580,14 +554,10 @@ fn fill(
         };
         stalled_since = None;
 
-        // Stay a bounded distance ahead of the playhead, then idle. Racing to the
-        // end of the track only buys contention.
         while sample_start > read_pos.load(Ordering::Relaxed) + LOOKAHEAD_BYTES {
             std::thread::sleep(Duration::from_millis(100));
         }
         if index.is_multiple_of(FILL_BATCH) {
-            // Hand the lock back so a read waiting to copy bytes it already has
-            // isn't stuck behind the whole burst.
             std::thread::sleep(Duration::from_millis(1));
         }
         if let Err(e) = ensure_decrypted(&state, index) {
@@ -611,9 +581,7 @@ fn fill(
 
     let finished = {
         let Ok(mut s) = state.lock() else { return };
-        // Dropping the handle frees nothing exclusive — it only marks this track
-        // done so later reads skip the CDM. The session goes with it: every sample
-        // is plaintext now, so nothing needs its keys any more.
+
         s.cdm = None;
         s.session = None;
         let whole = s.downloaded == s.buf.len();
@@ -637,12 +605,11 @@ fn ensure_decrypted(state: &Mutex<State>, index: usize) -> Result<(), String> {
     if s.decrypted.get(index).copied().unwrap_or(true) {
         return Ok(());
     }
-    // Already finished (CDM released) — nothing left that could need decrypting.
+
     if s.cdm.is_none() {
         return Ok(());
     }
 
-    // Split the borrow so the buffer, index and CDM can be used together.
     let State {
         buf,
         layout,
@@ -674,8 +641,6 @@ impl Read for ProgressiveTrack {
         let start = self.pos as usize;
         let end = (start + out.len()).min(self.total as usize);
 
-        // The probe's end-of-file read is served from padding rather than waited
-        // on — see `PROBE_TAIL_BYTES`.
         let tail_begins = (self.total as usize).saturating_sub(PROBE_TAIL_BYTES);
         if start < tail_begins {
             self.wait_for(end.min(tail_begins))?;
@@ -733,7 +698,7 @@ mod tests {
         assert_eq!(t.seek(SeekFrom::End(-10)).unwrap(), 90);
         assert_eq!(t.seek(SeekFrom::Start(5)).unwrap(), 5);
         assert_eq!(t.seek(SeekFrom::Current(3)).unwrap(), 8);
-        // Past the end clamps rather than erroring, matching a file.
+
         assert_eq!(t.seek(SeekFrom::Start(1_000)).unwrap(), 100);
         assert!(t.seek(SeekFrom::Start(0)).is_ok());
         assert!(t.seek(SeekFrom::Current(-1)).is_err());
@@ -761,7 +726,6 @@ mod tests {
             })
             .collect();
 
-        // Bytes 100..110 are sample 0, 110..120 sample 1, and so on.
         let first = |start: usize| samples.partition_point(|s| s.end() <= start);
         assert_eq!(first(0), 0, "a read before any sample starts at sample 0");
         assert_eq!(first(100), 0);
@@ -784,7 +748,7 @@ mod tests {
             assert_eq!(&s.buf[..5], &[1, 2, 3, 4, 5]);
             assert_eq!(&s.buf[5..], &[0; 5], "the rest is padding");
         }
-        // Overshooting the promised length is clamped, not panicked on.
+
         sink.push(&[9; 100]);
         let s = track.state.lock().unwrap();
         assert_eq!(s.downloaded, 10);
@@ -797,7 +761,7 @@ mod tests {
     fn a_read_in_the_probe_tail_does_not_wait() {
         let total = 64 * 1024;
         let (mut track, _sink) = ProgressiveTrack::streaming(total as u64);
-        // Nothing downloaded at all, and no `complete` flag to release a waiter.
+
         track.seek(SeekFrom::End(-160)).unwrap();
         let mut buf = [0u8; 160];
         let started = Instant::now();
@@ -818,8 +782,7 @@ mod tests {
     fn a_read_below_the_tail_waits_and_then_reports_the_stall() {
         let total = 1024 * 1024;
         let (mut track, sink) = ProgressiveTrack::streaming(total as u64);
-        // Fail the download so the wait ends deterministically instead of after
-        // the 30s timeout.
+
         sink.fail("connection reset".to_string());
         let mut buf = [0u8; 1024];
         let err = track
@@ -909,8 +872,7 @@ mod tests {
         assert_eq!(s.downloaded, total);
         assert!(s.patched, "the init segment should end up relabelled");
         assert!(last_samples > 0, "no samples were ever indexed");
-        // The frontier lands inside the final fragment, so allow its framing but
-        // nothing like a whole fragment's worth.
+
         let shortfall = total - s.frontier();
         assert!(
             shortfall < 64 * 1024,
@@ -984,19 +946,14 @@ mod tests {
         let whole = [true, true, true];
         assert_eq!(shortfall(1000, 1000, true, &whole), None);
 
-        // Nothing to decrypt: a cache hit arrives already plaintext.
         assert_eq!(shortfall(1000, 1000, true, &[]), None);
 
         let short = shortfall(900, 1000, true, &whole).expect("bytes missing");
         assert!(short.contains("900 of 1000"), "{short}");
 
-        // Every byte arrived, but the body was never marked finished — the
-        // "gave up waiting for fragments" exit, which records no error.
         let unfinished = shortfall(1000, 1000, false, &whole).expect("never finished");
         assert!(unfinished.contains("never finished"), "{unfinished}");
 
-        // Bytes all present and the download finished, but the fill stopped
-        // before working through them.
         let partial =
             shortfall(1000, 1000, true, &[true, false, false]).expect("samples still encrypted");
         assert!(partial.contains("2 of 3"), "{partial}");

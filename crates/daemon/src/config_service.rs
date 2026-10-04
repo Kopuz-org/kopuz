@@ -1,14 +1,4 @@
-//! ConfigService: authority over the running `AppConfig`.
-//!
-//! Reads arrive fully layered from the database (blob, `settings.toml`,
-//! `settings.d` drop-ins, env); writes go back through `db::save_config`,
-//! which owns the blob/settings-file split. This service adds the wire
-//! contract on top: credential stripping, hjem-locked keys, RFC 7396 merge
-//! patches, and pushing accepted changes into the player session.
-//!
-//! Patches persist immediately rather than debounced: API clients act on
-//! explicit user intent (a settings form submit), not per-keystroke signal
-//! churn, and an immediate write keeps the daemon free of idle timers.
+//! Revision-checked settings updates, managed-key enforcement, and daemon-owned state.
 
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -45,7 +35,6 @@ struct Held {
 
 impl ConfigService {
     pub fn new(db: db::Db, settings_path: PathBuf, current: config::AppConfig) -> Self {
-        // Seeded from the clock so a restarted daemon never hands out a revision a client already passed.
         let revision = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|elapsed| elapsed.as_millis() as u64)
@@ -175,7 +164,7 @@ impl ConfigService {
             .set_pinned_station(id, manifest.as_deref())
             .await
             .map_err(|error| ApiError::internal(format!("station pin failed: {error}")))?;
-        // Mirrors the row write: a re-pin keeps its place, a new pin goes last.
+
         let pins = &mut held.config.pinned_stations;
         let at = pins
             .iter()
@@ -220,10 +209,16 @@ impl ConfigService {
     /// audio-setting updates.
     pub async fn set(
         &self,
-        incoming: config::AppConfig,
+        update: api::ConfigUpdate,
     ) -> Result<(ConfigView, config::AppConfig, Vec<String>), ApiError> {
         let mut held = self.current.write().await;
-        let updated = with_daemon_owned_fields(incoming, &held.config);
+        if update.expected_revision != held.revision {
+            return Err(ApiError::new(
+                api::ErrorCode::Conflict,
+                "settings changed; reload before saving",
+            ));
+        }
+        let updated = with_daemon_owned_fields(update.config, &held.config);
 
         let changed = changed_keys(&held.config, &updated)?;
         if changed.is_empty() {
@@ -259,7 +254,7 @@ impl ConfigService {
         }
         let mut next = held.config.clone();
         next.volume = volume;
-        // Saved under the guard: a snapshot saved after it drops could undo a server added meanwhile.
+
         self.save(&next).await?;
         held.config = next;
         held.revision += 1;
@@ -318,23 +313,9 @@ fn manifest_id(manifest: &str) -> Option<String> {
     manifest.get("id")?.as_str().map(str::to_string)
 }
 
-/// The credentials blanked for a caller. Not a security boundary on a socket
-/// only this user can open -- it keeps secrets out of a surface that is
-/// written back wholesale, so a frontend cannot round-trip a stale copy over
-/// them.
-///
-/// `offline_tracks` is deliberately not blanked. It is not a secret: it is
-/// which tracks have a local copy, which is exactly what a download indicator
-/// renders. Blanking it made every one of those read empty.
-///
-/// `volume` and the cover-lookup keys are restored for the same reason: they
-/// are daemon-owned on the way in, so the helper above would hand back the
-/// default here. A frontend reads this to place its volume slider at startup,
-/// and a read that lied about the others would be a worse surface than one
-/// that simply refuses to take them.
+/// Settings exposed to clients; machine-local paths and credentials stay in the daemon.
 fn stripped(config: &config::AppConfig) -> config::AppConfig {
     let mut view = with_daemon_owned_fields(config.clone(), &config::AppConfig::default());
-    view.offline_tracks = config.offline_tracks.clone();
     view.volume = config.volume;
     view.auto_fetch_covers = config.auto_fetch_covers;
     view.cover_fetch_strategy = config.cover_fetch_strategy;
@@ -369,6 +350,51 @@ fn changed_keys(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stale_writers_cannot_overwrite_another_clients_settings() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let database = db::init(&dir.path().join("cfg.db")).await.expect("db");
+        let service = ConfigService::new(
+            database,
+            dir.path().join("settings.toml"),
+            config::AppConfig::default(),
+        );
+        let original = service.view().await.expect("view");
+        let mut first = original.config.clone();
+        first.crossfade_seconds = 7;
+        service
+            .set(api::ConfigUpdate {
+                config: first,
+                expected_revision: original.revision,
+            })
+            .await
+            .expect("first writer");
+        let mut stale = original.config;
+        stale.theme = "nord".into();
+        let error = service
+            .set(api::ConfigUpdate {
+                config: stale,
+                expected_revision: original.revision,
+            })
+            .await
+            .expect_err("stale writer");
+        assert_eq!(error.code, api::ErrorCode::Conflict);
+        assert_eq!(service.snapshot().await.crossfade_seconds, 7);
+    }
+
+    #[test]
+    fn offline_paths_stay_in_the_daemon() {
+        let mut config = config::AppConfig::default();
+        config
+            .offline_tracks
+            .insert("track".into(), "/private/cache/track".into());
+        assert!(stripped(&config).offline_tracks.is_empty());
+        assert_eq!(
+            with_daemon_owned_fields(stripped(&config), &config).offline_tracks,
+            config.offline_tracks
+        );
+    }
 
     #[test]
     fn a_stale_whole_config_write_cannot_revert_folder_sources() {
@@ -405,7 +431,13 @@ mod tests {
         let mut next = view.config.clone();
         next.hero_height = 320;
         next.crossfade_seconds = 4;
-        let (view, updated, changed) = service.set(next).await.expect("set");
+        let (view, updated, changed) = service
+            .set(api::ConfigUpdate {
+                config: next,
+                expected_revision: service.view().await.expect("view").revision,
+            })
+            .await
+            .expect("set");
         assert_eq!(view.config.hero_height, 320);
         assert_eq!(updated.crossfade_seconds, 4);
         assert_eq!(changed.len(), 2, "only the two edited keys are reported");
@@ -432,7 +464,13 @@ mod tests {
         );
 
         let view = service.view().await.expect("view");
-        let (_, _, changed) = service.set(view.config).await.expect("idempotent set");
+        let (_, _, changed) = service
+            .set(api::ConfigUpdate {
+                config: view.config,
+                expected_revision: service.view().await.expect("view").revision,
+            })
+            .await
+            .expect("idempotent set");
         assert!(changed.is_empty());
     }
 
@@ -455,16 +493,23 @@ mod tests {
         let mut changed_locked = view.config.clone();
         changed_locked.theme = "other".to_string();
         let err = service
-            .set(changed_locked)
+            .set(api::ConfigUpdate {
+                config: changed_locked,
+                expected_revision: service.view().await.expect("view").revision,
+            })
             .await
             .expect_err("changing a locked key is refused");
         assert_eq!(err.code, api::ErrorCode::InvalidInput);
 
-        // Leaving it alone is fine, so a read-modify-write of any other key
-        // still works while a managed layer pins this one.
         let mut other = view.config.clone();
         other.crossfade_seconds = 6;
-        let (_, updated, changed) = service.set(other).await.expect("untouched locked key");
+        let (_, updated, changed) = service
+            .set(api::ConfigUpdate {
+                config: other,
+                expected_revision: service.view().await.expect("view").revision,
+            })
+            .await
+            .expect("untouched locked key");
         assert_eq!(updated.crossfade_seconds, 6);
         assert_eq!(changed, vec!["crossfade_seconds".to_string()]);
     }
@@ -516,7 +561,13 @@ mod tests {
         let snapshot = service.view().await.expect("view").config;
 
         service.set_volume(0.2).await.expect("set volume");
-        let (view, updated, changed) = service.set(snapshot).await.expect("set");
+        let (view, updated, changed) = service
+            .set(api::ConfigUpdate {
+                config: snapshot,
+                expected_revision: service.view().await.expect("view").revision,
+            })
+            .await
+            .expect("set");
 
         assert_eq!(view.config.volume, 0.2, "the view reports the live volume");
         assert_eq!(updated.volume, 0.2);
@@ -558,7 +609,13 @@ mod tests {
             .expect("cover settings");
 
         snapshot.theme = "nord".to_string();
-        let (view, updated, changed) = service.set(snapshot).await.expect("set");
+        let (view, updated, changed) = service
+            .set(api::ConfigUpdate {
+                config: snapshot,
+                expected_revision: service.view().await.expect("view").revision,
+            })
+            .await
+            .expect("set");
 
         assert!(!view.config.auto_fetch_covers, "automatic covers stay off");
         assert_eq!(

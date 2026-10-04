@@ -87,14 +87,11 @@ pub fn Radio(props: RadioProps) -> Element {
     };
     let api = hooks::use_api();
 
-    // Search / filter
     let mut filter = use_signal(String::new);
     let debounce_gen = use_hook(|| Arc::new(AtomicU64::new(0))).clone();
 
-    // Expanded stations set for stream overflow
     let mut expanded_stations = use_signal(HashSet::<String>::new);
 
-    // Re-read when the daemon announces the list moved, so a pin re-reads without re-searching.
     let gens = hooks::db_reactivity::use_generations();
     let selected_api = api.clone();
     let selected = use_resource(move || {
@@ -103,8 +100,6 @@ pub fn Radio(props: RadioProps) -> Element {
         async move { api.radio_stations().await.unwrap_or_default() }
     });
 
-    // The public directory: popular stations by default, a live search once
-    // the debounced filter has text. The daemon queries it.
     let directory: Resource<Result<Vec<RadioStationInfo>, String>> = use_resource(move || {
         let query = filter();
         let api = api.clone();
@@ -139,8 +134,6 @@ pub fn Radio(props: RadioProps) -> Element {
     let has_custom = !filtered.is_empty();
     let searching = !query.is_empty();
 
-    // Resource keeps its stale value while refetching,
-    // track pending separately for the search spinner.
     let browser_loading = matches!(
         *directory.state().read(),
         UseResourceState::Pending | UseResourceState::Paused
@@ -172,7 +165,6 @@ pub fn Radio(props: RadioProps) -> Element {
                                 }
                             }
                         }
-                        // Search — Vaxry
                         div { class: if cfg!(target_os = "android") { "relative w-full" } else { "relative w-64" },
                             i {
                                 class: "fa-solid fa-magnifying-glass absolute top-1/2 -translate-y-1/2 text-xs",
@@ -248,7 +240,7 @@ pub fn Radio(props: RadioProps) -> Element {
                     }
                 }
 
-                // ── Custom registry stations (user-added registries) ────────────
+
                 if has_custom {
                     h2 {
                         class: if is_vaxry { "text-[10px] font-bold mb-2" } else { "text-sm font-bold mb-3 uppercase tracking-wider" },
@@ -258,7 +250,7 @@ pub fn Radio(props: RadioProps) -> Element {
                 }
 
                 if is_vaxry {
-                    // Vaxry
+
                     if has_custom {
                         div { class: "flex flex-col mb-8",
                             div {
@@ -271,7 +263,7 @@ pub fn Radio(props: RadioProps) -> Element {
                             }
 
                             for station in filtered.iter() {
-                                // Outer wrapper — not a grid, expanded row renders below without overlap
+
                                 div {
                                     class: "rounded-lg mx-1 group cursor-pointer transition-colors hover:bg-white/[0.04]",
                                     onclick: {
@@ -402,7 +394,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                         }
                                     }
 
-                                    // Expanded stream row — full width below grid, no overlap possible
+
                                     if expanded_stations.read().contains(&station.id) {
                                         div {
                                             class: "flex flex-wrap items-center gap-2 px-4 pb-3",
@@ -430,7 +422,7 @@ pub fn Radio(props: RadioProps) -> Element {
                         }
                     }
                 } else {
-                    // Normal
+
                     if has_custom {
                         div { class: "grid grid-cols-1 lg:grid-cols-2 gap-3 mb-8",
                             for station in filtered.iter() {
@@ -500,7 +492,7 @@ pub fn Radio(props: RadioProps) -> Element {
                     }
                 }
 
-                // radio-browser.info directory
+
                 div { class: "flex items-end justify-between mb-3",
                     h2 {
                         class: if is_vaxry { "text-[10px] font-bold" } else { "text-sm font-bold uppercase tracking-wider" },

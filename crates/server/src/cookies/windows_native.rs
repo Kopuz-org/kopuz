@@ -28,9 +28,6 @@ use windows::core::{BSTR, GUID, HRESULT, IUnknown, IUnknown_Vtbl, Interface, int
 
 use super::store::{Cookie, host_matches_domain};
 
-// Chrome's elevation-service COM interface. Vtable after IUnknown is
-// RunRecoveryCRXElevated, EncryptData, DecryptData — we only call EncryptData
-// (slot 4). The trait IID is the base IElevator; we QI the brand IID at runtime.
 #[interface("A949CB4E-C4F9-44C4-B213-6BF8AA9AC69C")]
 unsafe trait IElevator: IUnknown {
     unsafe fn run_recovery_crx_elevated(
@@ -80,8 +77,7 @@ fn brand_elevation(browser: Browser) -> Option<(u128, &'static [u128])> {
             0x576B31AF_6369_4B6B_8560_E4B203A97A8B,
             &[0xF396861E_0C8E_4C71_8256_2FAE6D759CE9],
         )),
-        // No elevation service (Chromium/Vivaldi/Helium), or not a Chromium
-        // browser at all — the plant is skipped, v10 still works.
+
         _ => None,
     }
 }
@@ -93,7 +89,7 @@ fn elevator_encrypt(browser: Browser, plaintext: &[u8]) -> Result<Vec<u8>, Strin
         let clsid = GUID::from_u128(clsid);
         let factory: IUnknown = CoCreateInstance(&clsid, None, CLSCTX_LOCAL_SERVER)
             .map_err(|e| format!("CoCreateInstance: {e}"))?;
-        // QI the first registered brand interface (vtable layout-compatible).
+
         let mut unk: Option<IElevator> = None;
         for iid in iids {
             let mut raw = core::ptr::null_mut();
@@ -177,7 +173,7 @@ pub(crate) fn cookie_db_locked(profile_root: &Path) -> bool {
     if !p.exists() {
         return false;
     }
-    // share_mode(0) = deny-all; 32 = ERROR_SHARING_VIOLATION.
+
     match std::fs::OpenOptions::new()
         .read(true)
         .share_mode(0)
@@ -290,8 +286,7 @@ pub(crate) async fn read_cookies(
     if !src.exists() {
         return Err(format!("no Cookies store under {}", profile_root.display()));
     }
-    // Snapshot-copy so we read consistently even while the browser holds it open.
-    // Unique per call (pid + counter) so concurrent reads don't clobber each other.
+
     static SNAPSHOT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let tmp = std::env::temp_dir().join(format!(
         "kopuz-ck-{}-{}",
@@ -310,8 +305,6 @@ pub(crate) async fn read_cookies(
     let dpapi = load_v10_key(profile_root);
     let app_bound = load_v20_key(profile_root);
 
-    // Read-write (not read_only) so the rollback journal can recover if the
-    // browser was killed mid-write.
     let mut conn = sqlx::sqlite::SqliteConnectOptions::new()
         .filename(&db)
         .create_if_missing(false)

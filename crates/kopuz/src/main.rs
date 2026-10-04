@@ -14,6 +14,7 @@ use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 use dioxus::desktop::wry::WebViewExtUnix;
 use dioxus::prelude::*;
 use kopuz_route::Route;
+use settings_persistence::adopt_daemon_config;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::Instrument;
@@ -34,6 +35,7 @@ mod desktop_shell;
 #[cfg(not(target_os = "android"))]
 mod exit_flush;
 mod logging;
+mod settings_persistence;
 mod static_assets;
 #[cfg(not(target_os = "android"))]
 mod ui_profile;
@@ -46,8 +48,6 @@ const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::fol
 /// Store saves (config/library/playlists/favorites) are full-replace and
 /// expensive; bursts of mutations (batch downloads, syncs) coalesce into one
 /// save per settle+cooldown window instead of one per mutation.
-const STORE_SAVE_SETTLE_MS: u64 = 600;
-const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
 /// How often the matugen/pywal palette is stat'd. The active rate is what a
 /// wallpaper change costs before the colours follow; the idle one only exists to
 /// notice the theme being switched on.
@@ -84,8 +84,7 @@ fn build_custom_font_css(path: &str) -> Option<String> {
         "ttf" => ("font/ttf", "truetype"),
         _ => return None,
     };
-    // Cap the file size before reading: the bytes end up base64-inlined in the
-    // DOM, so an oversized (or wrongly-picked) file would bloat the document.
+
     const MAX_FONT_BYTES: u64 = 32 * 1024 * 1024;
     let len = std::fs::metadata(path).ok()?.len();
     if len > MAX_FONT_BYTES {
@@ -132,15 +131,10 @@ fn init_android_tls() -> Result<(), String> {
     if ctx.vm().is_null() || ctx.context().is_null() {
         return Err("no android JVM or Context on the ndk context".to_string());
     }
-    // `::jni` — `dioxus::prelude::*` re-exports its own, older `jni`, and a glob
-    // import shadows the extern prelude.
-    //
-    // SAFETY: wry's activity populates ndk_context before `main` runs, and both
-    // handles stay valid for the lifetime of the process.
+
     let vm = unsafe { ::jni::JavaVM::from_raw(ctx.vm().cast()) };
     let raw_context = ctx.context().cast();
     vm.attach_current_thread(|env| {
-        // SAFETY: `raw_context` is the Activity's global Context reference.
         let context = unsafe { ::jni::objects::JObject::from_raw(env, raw_context) };
         rustls_platform_verifier::android::init_with_env(env, context)
     })
@@ -148,7 +142,6 @@ fn init_android_tls() -> Result<(), String> {
 }
 
 fn main() -> std::process::ExitCode {
-    // Core startup can fail before Dioxus installs its logger at launch.
     #[cfg(target_os = "android")]
     dioxus::logger::initialize_default();
 
@@ -159,7 +152,6 @@ fn main() -> std::process::ExitCode {
 
     #[cfg(target_os = "linux")]
     if std::env::var_os("WEBKIT_FORCE_VBLANK_TIMER").is_none() {
-        // SAFETY: first statement of main, before any thread is spawned.
         unsafe { std::env::set_var("WEBKIT_FORCE_VBLANK_TIMER", "1") };
     }
 
@@ -170,10 +162,6 @@ fn main() -> std::process::ExitCode {
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
-        // Before the core, so what it warns about while booting -- a source
-        // that would not load, a bus name already taken, the socket -- lands in
-        // the log instead of being lost. The chrome trace is the one part that
-        // has to wait: whether it is wanted lives in the library.
         logging::init(&log_dir);
         let core = match backend::start() {
             Ok(core) => core,
@@ -279,13 +267,8 @@ fn main() -> std::process::ExitCode {
 
     #[cfg(target_os = "android")]
     {
-        // JNI media session + classloader cache. Player::new() also calls this (idempotent
-        // OnceLock), but doing it up front means the session exists before first playback.
         player::systemint::init();
 
-        // `App` reads the core out of `backend` while it renders, so it has to
-        // exist before the UI launches, exactly as on desktop. Only the socket
-        // is desktop-only; the core itself is what every hook reads through.
         if let Err(error) = backend::start() {
             tracing::error!(%error, "the daemon core failed to start");
             return std::process::ExitCode::FAILURE;
@@ -344,17 +327,6 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::SUCCESS
 }
 
-/// Pull the daemon's settings into the app's copy, keeping edits not yet sent.
-async fn adopt_daemon_config(
-    config: Signal<config::AppConfig>,
-    baseline: hooks::config_sync::ConfigBaseline,
-) {
-    match backend::api().config().await {
-        Ok(view) => baseline.adopt(config, &view),
-        Err(error) => tracing::warn!(%error, "re-reading settings failed"),
-    }
-}
-
 /// Events were lost, so re-read everything the app holds from the daemon.
 fn resync(
     gens: hooks::db_reactivity::Generations,
@@ -367,16 +339,6 @@ fn resync(
 
 #[component]
 fn App() -> Element {
-    // tao's event loop calls process::exit() on window close, so the
-    // logging::shutdown() after .launch() never runs and the chrome trace
-    // would be left truncated (cut mid-event, unloadable). Flush on the
-    // loop's final event so a normally-closed window still yields a valid
-    // trace. (Ctrl+C is covered separately by the SIGINT handler.)
-    // logging::shutdown() is called from the DB close-flush handler below —
-    // wry handlers fire in registration order, and shutting logging down
-    // first would leave the final queue/config persists (and any failure
-    // warnings) out of latest.log and the trace.
-
     #[cfg(target_os = "android")]
     app_lifecycle::use_webview_script_engine();
 
@@ -384,27 +346,19 @@ fn App() -> Element {
     use_hook(|| {
         let webview = dioxus::desktop::window().webview.webview();
         if let Some(settings) = webview.settings() {
-            // Kopuz never navigates away from its single Dioxus document.
             settings.set_enable_page_cache(false);
         }
     });
 
-    // The whole-Library signal is GONE — pages read through query hooks, and
-    // every row carries the reference its picture resolves from.
     let mut current_route = use_signal(|| Route::Home);
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
         use_signal(std::collections::HashMap::new);
-    // Album/artist list and detail share one Route, so detail scroll is kept in a
-    // separate map keyed by `album:<id>` / `artist:<name>`. This stops a detail's
-    // scroll from clobbering the list scroll the user expects back on return.
+
     let mut detail_scroll_positions: Signal<std::collections::HashMap<String, f64>> =
         use_signal(std::collections::HashMap::new);
-    // Set by the source switcher's "Manage sources" to scroll Settings to a
-    // section (an element id) instead of restoring its last scroll position.
+
     let mut settings_anchor: Signal<Option<String>> = use_signal(|| None);
     let cache_dir = use_memo(move || {
-        // Android: external/ProjectDirs paths aren't writable; use the app-internal files
-        // dir (getFilesDir via JNI) so saves don't fail with EACCES.
         #[cfg(target_os = "android")]
         {
             let mut path = player::systemint::get_files_dir()
@@ -426,43 +380,31 @@ fn App() -> Element {
             path
         }
     });
-    // ROOT-owned: detached tasks (download workers, close-flush) read/write
-    // these after the spawning page — and in principle this component — is
-    // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
+
     let mut config = use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
     let core = backend::core().expect("core started in main before launch");
-    // The one seam every hook and page reads through.
+
     use_context_provider(|| core.api.clone() as Arc<dyn api::KopuzApi>);
-    // The settings page renders this; only the app can supply it, since only
-    // the app holds the core's write-capable database handle.
+
     use_context_provider(|| pages::DebugPanel(debug_panel::debug_db_section));
     #[cfg(debug_assertions)]
     use_context_provider(|| core.db.clone());
     hooks::db_reactivity::use_generations_provider();
-    // Which settings a managed file pins, so those rows render locked. The
-    // daemon reads those layers; nothing here opens the file.
+
     hooks::config_view::use_locked_keys_provider();
     let config_baseline = hooks::config_sync::use_config_baseline_provider();
 
-    // Capabilities of the active source — drives source-agnostic routing (e.g.
-    // which artist view to render) without hardcoding services in the router.
     let active_caps = hooks::sources::use_capabilities_provider();
-    // The PoToken minter isn't armed here: it's a headless deno_core runtime that
-    // self-starts on the first `mint_content_pot` (only when YT demands a pot).
+
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]
     let cover_cache = use_memo(move || cache_dir().join("covers"));
     let _ = std::fs::create_dir_all(cover_cache());
 
-    // The core is already running: main built it before the window existed,
-    // because the tracing subscriber and the titlebar come out of its config.
     let session = core.session.clone();
     let favorites_service = core.favorites.clone();
     let scrobbler = core.scrobbler.clone();
 
-    // Config reaches the session through the daemon's own write path, which
-    // is the only copy that still holds the credentials this process is never
-    // shown. Pushing the view we hold would blank them until the next save.
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
     let current_song_title = use_signal(String::new);
@@ -483,23 +425,11 @@ fn App() -> Element {
     let is_devices_open = use_signal(|| false);
     let rightbar_width = use_signal(|| 320usize);
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
-    // Config is the one remaining whole-value save: persisting a default that
-    // exists only because the LOAD FAILED would wipe real settings/servers, so
-    // its save stays disarmed unless the load demonstrably succeeded (a fresh
-    // empty DB still counts). Library/playlists/favorites have no such flag
-    // anymore — they're targeted per-row writes, never full-replace.
+
     let mut config_loaded_ok = use_signal(|| false);
     #[cfg(not(target_os = "android"))]
     let close_hides_window = use_signal(|| false);
 
-    // tao calls process::exit() after CloseRequested, killing the debounced
-    // save loops — without this, the last debounce window of queue/store
-    // changes was lost on every quit. The flush must run on a FRESH OS
-    // thread: the main thread sits inside dioxus's tokio context, where
-    // block_on panics ("cannot start a runtime from within a runtime") — the
-    // flush silently never ran. Signals are peeked here (not Send), the
-    // joined thread does the blocking DB work. Idempotent across
-    // CloseRequested/LoopDestroyed.
     #[cfg(not(target_os = "android"))]
     dioxus::desktop::use_wry_event_handler(move |event, _| {
         use dioxus::desktop::tao::event::{Event, WindowEvent};
@@ -513,21 +443,17 @@ fn App() -> Element {
             ) && !*close_hides_window.peek();
         if shutting_down {
             if backend::core().is_some() {
-                // Library/playlists/favorites need no flush — every mutation
-                // already committed as a targeted write when it happened. The
-                // queue is the core's: it owns the store and persists on the
-                // way out, so only the config surface is ours to push.
-                let cfg = (*config_loaded_ok.peek()).then(|| {
-                    let mut cfg = config.peek().clone();
-                    cfg.volume = *volume.peek();
-                    cfg
-                });
+                let cfg = (*config_loaded_ok.peek())
+                    .then(|| {
+                        let mut cfg = config.peek().clone();
+                        cfg.volume = *volume.peek();
+                        cfg
+                    })
+                    .and_then(|config| config_baseline.update(config));
                 exit_flush::persist_on_fresh_thread(cfg);
             }
             backend::shutdown();
-            // After the persists, so they (and any failure warnings) land in
-            // latest.log and the trace. Idempotent across CloseRequested/
-            // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.
+
             crate::logging::shutdown();
         }
     });
@@ -582,8 +508,7 @@ fn App() -> Element {
     let mut selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_title = use_signal(|| None::<String>);
-    // Set with the id, by whichever click had it: the viewer serves more than
-    // one kind and must not read the id to tell which.
+
     let mut discover_selected_playlist_kind = use_signal(|| api::CatalogItemKind::Playlist);
     let mut selected_artist = use_signal(|| None::<String>);
     let search_query = use_signal(String::new);
@@ -611,9 +536,6 @@ fn App() -> Element {
         config_loaded_ok,
     );
 
-    // The cover's colours, for the surfaces tinted with them. The bytes come
-    // from the daemon: a server cover is signed with credentials this process
-    // does not have, so reading the URL here would find nothing.
     use_effect(move || {
         let Some(artwork) = ctrl.current_artwork.read().clone() else {
             palette.set(None);
@@ -630,8 +552,6 @@ fn App() -> Element {
         );
     });
 
-    // Generations handle the rescan task bumps after writing scanned tracks/albums,
-    // so the DB-backed query hooks re-run and the UI refreshes.
     let gens_for_albums = hooks::db_reactivity::use_generations();
     let active_source_row = hooks::sources::use_active_source_info();
 
@@ -663,61 +583,14 @@ fn App() -> Element {
         );
     });
 
-    // Debounced: a settings save is a whole-config write, so a burst of edits must coalesce into one.
-    let mut config_dirty = use_signal(|| 0u64);
-    use_effect(move || {
-        if !*initial_load_done.read() || !*config_loaded_ok.read() {
-            return;
-        }
-        let _ = config.read();
-        config_dirty += 1;
-    });
-    use_effect(move || {
-        if !*initial_load_done.read() || !*config_loaded_ok.read() {
-            return;
-        }
-        let _ = *persisted_volume.read();
-        config_dirty += 1;
-    });
-    #[cfg(not(target_os = "android"))]
-    use_effect(move || {
-        if !*initial_load_done.read() || !*config_loaded_ok.read() {
-            return;
-        }
-        let mut snapshot = config.read().clone();
-        let _ = *persisted_volume.read();
-        snapshot.volume = *volume.peek();
-        exit_flush::stash_config(snapshot);
-    });
-    // Settings are written through the daemon, which owns the file and the
-    // blob: a direct database write would leave its copy stale and lose the
-    // credentials it keeps out of what this process holds.
-    use_future(move || async move {
-        let api = hooks::consume_api();
-        let mut flushed = 0u64;
-        loop {
-            if *config_dirty.peek() == flushed {
-                utils::sleep(std::time::Duration::from_millis(250)).await;
-                continue;
-            }
-            utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
-            flushed = *config_dirty.peek();
-            let mut snapshot = config.peek().clone();
-            snapshot.volume = *volume.peek();
-            match api
-                .set_config(snapshot.clone())
-                .instrument(tracing::info_span!("config.persist"))
-                .await
-            {
-                Ok(view) => {
-                    config_baseline.sent(snapshot);
-                    config_baseline.adopt(config, &view);
-                }
-                Err(error) => tracing::error!(%error, "failed to save settings"),
-            }
-            utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
-        }
-    });
+    settings_persistence::use_settings_persistence(
+        config,
+        config_baseline,
+        initial_load_done,
+        config_loaded_ok,
+        persisted_volume,
+        volume,
+    );
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     use_effect(move || {
@@ -726,8 +599,6 @@ fn App() -> Element {
         win.set_decorations(mode == config::TitlebarMode::System);
     });
 
-    // The daemon set SMTC up before this window existed; move it onto the
-    // window so media controls and taskbar buttons belong to the app.
     #[cfg(target_os = "windows")]
     use_hook(|| {
         player::systemint::attach_window(dioxus::desktop::window().window.hwnd() as isize);
@@ -741,9 +612,6 @@ fn App() -> Element {
         windows_titlebar::install(hwnd);
         windows_titlebar::set_custom_titlebar_enabled(mode == config::TitlebarMode::Custom);
     });
-
-    // Library/playlists/favorites have no save loops anymore — every mutation
-    // commits as a targeted write at the call site and bumps a generation.
 
     #[cfg(not(target_os = "android"))]
     {
@@ -855,16 +723,15 @@ fn App() -> Element {
     let favorites_for_load = favorites_service.clone();
     let scrobbler_for_load = scrobbler.clone();
     use_hook(move || {
-        {
-            let api = backend::api();
+        let api = backend::api();
 
-            spawn(async move {
-                // The queue is restored by the core before the window exists;
-                // the config is all that is left to pull up into the signals.
-                // Everything else is queried on demand by the page hooks.
-                // Config marks itself loaded ONLY on success: its save is the
-                // one remaining whole-value write, and persisting a default
-                // born of a read failure would wipe real settings.
+        spawn(async move {
+
+
+
+
+
+
                 let cfg_loaded = match api
                     .config()
                     .instrument(tracing::info_span!("startup.load_config"))
@@ -891,9 +758,9 @@ fn App() -> Element {
                 }
 
                 initial_load_done.set(true);
-                // Kick one reconcile shortly after startup so pending offline
-                // likes from the previous session push now, not on the first
-                // multi-minute interval; drain queued scrobbles the same way.
+
+
+
                 favorites_for_load.nudge_activate();
                 {
                     let scrobbler = scrobbler_for_load.clone();
@@ -903,11 +770,8 @@ fn App() -> Element {
                     });
                 }
             }.instrument(tracing::info_span!("startup.load")));
-        }
     });
 
-    // Feed daemon events back into the UI: library invalidations re-run the
-    // query hooks, and scan job progress drives the scan indicator.
     {
         let session = session.clone();
         let gens = gens_for_albums;
@@ -966,12 +830,10 @@ fn App() -> Element {
 
     use_effect(move || {
         let route = *current_route.read();
-        // Read detail selections so this re-runs on list<->detail toggle, not just
-        // on route change (album/artist list and detail are the same Route).
+
         let album_sel = selected_album_id.read().clone();
         let artist_sel = selected_artist.read().clone();
-        // A pending section anchor (peeked, so this effect doesn't subscribe to it)
-        // takes over scrolling — skip the saved-scroll restore for this navigation.
+
         if settings_anchor.peek().is_some() {
             return;
         }
@@ -985,9 +847,6 @@ fn App() -> Element {
         ));
     });
 
-    // Scroll Settings to a requested section once the page is on screen, then
-    // clear the request. Subscribes to the anchor so setting it (from any page)
-    // drives the scroll; the restore effect above stands down while it's set.
     use_effect(move || {
         let anchor = settings_anchor.read().clone();
         if let Some(id) = anchor {
@@ -1052,7 +911,7 @@ fn App() -> Element {
         restoring: nav_restoring,
     };
     provide_context(nav_ctrl);
-    // The daemon swaps the queue itself and lists re-query by source; open pages and the back history name the old source's rows.
+
     let mut last_active_source = use_signal(|| None::<String>);
     use_effect(move || {
         let Some(active) = active_source_row
@@ -1072,14 +931,9 @@ fn App() -> Element {
         }
     });
 
-    // Sidebar collapse state. On Android the sidebar is an overlay drawer that
-    // starts collapsed and is toggled by the mobile header hamburger; the
-    // Sidebar component reads this from context.
     let mut is_sidebar_collapsed = use_signal(|| cfg!(target_os = "android"));
     use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
 
-    // Only an edge swipe opens the drawer; horizontal scrolling and sliders
-    // elsewhere on the page must not turn into navigation gestures.
     let mut open_swipe = components::gestures::use_swipe();
     let on_open_swipe = move |evt: TouchEvent| {
         let from_edge = open_swipe
@@ -1131,7 +985,6 @@ fn App() -> Element {
 
     hooks::use_player_task(ctrl);
 
-    // Inject CSS for all custom themes reactively
     let custom_themes_css = use_memo(move || {
         config
             .read()
@@ -1144,7 +997,7 @@ fn App() -> Element {
 
     use_effect(move || {
         let css = custom_themes_css.read().clone();
-        // Serialize as a JSON string literal so no CSS content can escape the JS context
+
         let css_json = serde_json::to_string(&css).unwrap_or_else(|_| "\"\"".to_string());
         let _ = dioxus::document::eval(&format!(
             r#"(function(){{
@@ -1155,10 +1008,6 @@ fn App() -> Element {
         ));
     });
 
-    // matugen and pywal rewrite their output on every wallpaper change, so the
-    // palette is polled rather than read once: picking a new wallpaper recolours
-    // Kopuz in place. Only while the theme is selected, otherwise this is a timer
-    // nobody asked for.
     let mut live_theme_css = use_signal(String::new);
     use_future(move || async move {
         let mut last: Option<(PathBuf, String)> = None;
@@ -1201,14 +1050,10 @@ fn App() -> Element {
         ));
     });
 
-    // Inject a user-picked UI font reactively, mirroring the custom-themes path
-    // above: read the file, inline it as a data: URI, and swap the <style>'s text.
     let custom_font_path = use_memo(move || config.read().custom_font_path.clone());
     use_effect(move || {
         let path = custom_font_path.read().clone();
         spawn(async move {
-            // Read + base64-encode on a blocking worker so a large font never
-            // stalls the render thread this effect runs on.
             let css = tokio::task::spawn_blocking(move || {
                 build_custom_font_css(&path).unwrap_or_default()
             })
@@ -1230,9 +1075,6 @@ fn App() -> Element {
         if theme == "album-art" {
             "theme-default".to_string()
         } else if theme == utils::live_theme::THEME_ID {
-            // A palette can be partial, or not written yet, so the default sits
-            // underneath to keep every var resolving. The injected `.theme-live`
-            // block lands later in <head>, so it still wins.
             format!("theme-default theme-{theme}")
         } else {
             format!("theme-{theme}")
@@ -1303,8 +1145,6 @@ fn App() -> Element {
             } else if !nav_history.peek().is_empty() {
                 nav_ctrl.go_back();
             } else {
-                // Finishing the activity destroys Wry's native runtime; keep
-                // playback and the existing WebView alive when leaving the root.
                 player::systemint::move_task_to_back();
             }
         }
@@ -1359,8 +1199,8 @@ fn App() -> Element {
         div {
             id: "app-root",
             class: "relative z-0 flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
-            // The activity draws edge to edge, so inset the whole column once here
-            // instead of per element. `fixed` overlays escape it and carry their own.
+
+
             style: if cfg!(target_os = "android") {
                 format!("{} padding-top: env(safe-area-inset-top);", background_style)
             } else {
@@ -1429,8 +1269,8 @@ fn App() -> Element {
                 }
             }
 
-            // Switching source clears the error it belonged to, so whatever is
-            // here now is about the source that is playing.
+
+
             if let Some(msg) = ctrl.playback_error.read().clone() {
                     div {
                         class: "flex-shrink-0",
@@ -1536,16 +1376,7 @@ fn App() -> Element {
 
             if config.read().player_bar_position == config::PlayerBarPosition::Top {
                 Bottombar {
-                    config,
-                    current_song_title: current_song_title,
-                    current_song_artist: current_song_artist,
-                    is_playing: is_playing,
                     is_fullscreen: is_fullscreen,
-                    current_song_duration: current_song_duration,
-                    current_song_progress: current_song_progress,
-                    queue: queue,
-                    current_queue_index: current_queue_index,
-                    volume: volume,
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
                     is_devices_open: is_devices_open,
@@ -1660,15 +1491,15 @@ fn App() -> Element {
                                     current_route.set(Route::Album);
                                 },
                                 on_play_album: move |id: String| {
-                                    // Play only — navigation is `on_select_album`'s
-                                    // job (the play buttons even stop_propagation to
-                                    // avoid the card's open-album click). Key on the
-                                    // active source, not an id-prefix sniff —
-                                    // a server's album ids carry their own
-                                    // prefixes and Home only emits the active
-                                    // source's ids anyway.
-                                    // The album is played by name: the daemon
-                                    // holds its tracks and their order.
+
+
+
+
+
+
+
+
+
                                     let mut ctrl = ctrl;
                                     let request = api::SetQueueRequest {
                                         mode: api::QueueMode::Replace,
@@ -1763,17 +1594,17 @@ fn App() -> Element {
                             }
                         },
                         Route::Artist => {
-                            // YT Music gets the rich YT-backed profile (banner, top songs, albums, related) ONLY when an artist is actually selected. The Artists sidebar tab / back-to-list navigation
-                            //  lands with both signals
-                            // cleared — fall through to the library-driven
-                            // grid in that case (populated on a catalog source from followed
-                            // artists + liked-song artists by the library
-                            // sync). A library-backed source keeps the
-                            // library-driven page in all cases.
-                            // Route on the active source's capability, not the
-                            // configured server: a catalog server can be configured while
-                            // a folder source is active, and the rich remote profile must not
-                            // hijack the library-driven artist page.
+
+
+
+
+
+
+
+
+
+
+
                             let remote_profile =
                                 active_caps().artists == api::ArtistPresentation::Remote;
                             if remote_profile && selected_artist.read().is_some() {
@@ -1920,16 +1751,7 @@ fn App() -> Element {
             }
             if config.read().player_bar_position == config::PlayerBarPosition::Bottom {
                 Bottombar {
-                    config,
-                    current_song_title: current_song_title,
-                    current_song_artist: current_song_artist,
-                    is_playing: is_playing,
                     is_fullscreen: is_fullscreen,
-                    current_song_duration: current_song_duration,
-                    current_song_progress: current_song_progress,
-                    queue: queue,
-                    current_queue_index: current_queue_index,
-                    volume: volume,
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
                     is_devices_open: is_devices_open,

@@ -98,7 +98,7 @@ impl Fill {
 /// whatever row its first track was credited to when the album was made.
 async fn fill_derived_albums(pool: &SqlitePool) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    // Each derived album against the first of its tracks, which is the one that made it.
+
     let derived: Vec<(i64, i64, String)> = sqlx::query_as(
         "SELECT al.rowid_pk, t.rowid_pk, t.artist FROM albums al \
            JOIN tracks t ON t.rowid_pk = (SELECT MIN(rowid_pk) FROM tracks \
@@ -135,9 +135,6 @@ const LYRICS_CACHE_DROPPED: i64 = 20260930000007;
 async fn migrate(pool: &SqlitePool, migrator: &sqlx::migrate::Migrator) -> Result<(), DbError> {
     let adapted;
     let migrator = if applied(pool, 20260924000001).await? {
-        // A database from master can already have split server credentials before
-        // seeing this branch's older WebView migration. Apply its equivalent on
-        // the current schema, retaining the original checksum for older installs.
         let mut migrations = migrator.migrations.to_vec();
         for migration in &mut migrations {
             if migration.version == 20260919010000 {
@@ -303,7 +300,7 @@ async fn fill_queue(pool: &SqlitePool) -> Result<(), DbError> {
         .bind(&t.playlist_item_id)
         .execute(&mut *tx)
         .await?;
-        // A row stored before credits existed keeps its names as unlinked credits.
+
         let credits: std::borrow::Cow<[reader::ArtistCredit]> = match t.credits.is_empty() {
             false => t.credits.as_slice().into(),
             true => t
@@ -353,7 +350,7 @@ async fn fill_state(pool: &SqlitePool, settings_path: Option<&Path>) -> Result<(
     let layers = settings_path
         .map(config::store::FileLayers::read)
         .unwrap_or_default();
-    // The file's settings win over the blob's mirror of them, as every load already applied them.
+
     let cfg: config::AppConfig = layers.merge_and_parse(blob)?;
     let name = |value: serde_json::Value| match value {
         serde_json::Value::String(name) => Ok(name),
@@ -498,8 +495,7 @@ async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
         if stored_ck.as_slice() == m.checksum.as_ref() {
             continue;
         }
-        // If either line-ending variant matches the stored checksum, the SQL
-        // (hence schema) is identical — only EOL differs.
+
         let lf = m.sql.replace("\r\n", "\n");
         let crlf = lf.replace('\n', "\r\n");
         let matches_eol_variant = [lf.as_bytes(), crlf.as_bytes()]
@@ -524,12 +520,12 @@ async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
 /// to `<db>.pre-<applied_version>.bak` so a downgrade can restore it. Best-effort.
 pub(super) async fn snapshot_if_pending(path: &Path) {
     if !path.exists() {
-        return; // fresh DB, nothing to snapshot
+        return;
     }
     let Ok(pool) = open_pool(path).await else {
         return;
     };
-    // Max applied version (the table won't exist on a pre-migration legacy DB).
+
     let applied: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
         .fetch_one(&pool)
         .await
@@ -537,7 +533,7 @@ pub(super) async fn snapshot_if_pending(path: &Path) {
     let available = MIGRATOR.iter().map(|m| m.version).max();
     let pending = match (applied, available) {
         (Some(a), Some(v)) => v > a,
-        (None, Some(_)) => false, // fresh/just-created DB with no migrations yet → not a downgrade risk
+        (None, Some(_)) => false,
         _ => false,
     };
     pool.close().await;
@@ -545,10 +541,7 @@ pub(super) async fn snapshot_if_pending(path: &Path) {
         return;
     }
     let stamp = applied.unwrap_or(0);
-    // Keep the first snapshot at this version as the authoritative rollback
-    // point. A retry of the same pending migration (or the EOL reconciler having
-    // since re-stamped `_sqlx_migrations`) must not overwrite it with an
-    // already-modified DB — `backup_name` is deterministic, so guard on it.
+
     if backup_name(path, stamp, "").exists() {
         return;
     }
@@ -600,8 +593,6 @@ pub async fn run_json_import(
     config_dir: &Path,
     settings_path: &Path,
 ) -> Result<ImportReport, DbError> {
-    // Gate on THIS database being empty — no shared sentinel, so each DB
-    // (debug/release) imports once on its own.
     if db_has_data(pool).await? {
         return Ok(ImportReport::default());
     }
@@ -612,9 +603,6 @@ pub async fn run_json_import(
         return Ok(ImportReport::default());
     }
 
-    // Per-file tolerance: a corrupt file (truncated by a power loss, say)
-    // imports as its default and is NOT recorded as consumed, so finalize
-    // leaves it on disk for repair while everything else migrates.
     let mut consumed: Vec<&str> = Vec::new();
     let read_src = |name: &str| legacy_source(config_dir, name);
     let cfg_val: serde_json::Value = match read_src("config.json") {
@@ -671,16 +659,13 @@ pub async fn run_json_import(
     let now = now_secs();
     let mut tx = pool.begin().await?;
 
-    // --- servers + active-server creds, resolving the active server id -----
     let active_server_id = import_servers(&mut tx, &cfg_val, now).await?;
     let server_src = active_server_id.clone();
 
-    // --- app_config blob (minus servers/creds/listen_counts) + listen_counts -
     let imported_config = import_config(&mut tx, &cfg_val, &active_server_id).await?;
     import_listen_counts(&mut tx, &cfg_val, active_server_id.as_deref()).await?;
     import_recently_played(&mut tx, &cfg_val, &active_server_id).await?;
 
-    // The YT sync times become each YT server's stamps, or its first open would re-stream the whole liked library.
     let yt_stamps = [
         ("synced:favorites", lib.last_yt_sync_at),
         ("synced:playlists", lib.last_yt_playlists_sync_at),
@@ -699,11 +684,6 @@ pub async fn run_json_import(
         .await?;
     }
 
-    // Server-scoped rows need a real server id: every reader keys on 'local'
-    // or a servers.id, and a server added later gets a fresh id — rows filed
-    // under a made-up source would be unreachable forever. Signed out at
-    // migration time ⇒ skip them; the server re-syncs everything after
-    // sign-in, and the originals stay in *.json.bak regardless.
     if server_src.is_none()
         && (!lib.jellyfin_tracks.is_empty()
             || !plists.jellyfin_playlists.is_empty()
@@ -714,7 +694,6 @@ pub async fn run_json_import(
         );
     }
 
-    // --- albums (local + server) ------------------------------------------
     for a in &lib.albums {
         insert_album(&mut tx, "local", a).await?;
     }
@@ -724,7 +703,6 @@ pub async fn run_json_import(
         }
     }
 
-    // --- tracks (local + server) ------------------------------------------
     for lt in &lib.tracks {
         if let Some(t) = legacy_to_track(lt) {
             insert_track(&mut tx, "local", &t).await?;
@@ -738,7 +716,6 @@ pub async fn run_json_import(
         }
     }
 
-    // --- artist images -----------------------------------------------------
     let server_sources: Vec<&str> = server_src.as_deref().into_iter().collect();
     let both_sources: Vec<&str> = ["local"]
         .into_iter()
@@ -754,7 +731,6 @@ pub async fn run_json_import(
     import_artist_images(&mut tx, &["local"], "local", &lib.local_artist_images).await?;
     import_artist_images(&mut tx, &both_sources, "custom", &lib.custom_artist_images).await?;
 
-    // --- playlists + membership -------------------------------------------
     for (i, p) in plists.playlists.iter().enumerate() {
         let pk = insert_playlist(
             &mut tx,
@@ -805,7 +781,6 @@ pub async fn run_json_import(
         }
     }
 
-    // --- favorites ---------------------------------------------------------
     for r in &favs.local_favorites {
         insert_favorite(&mut tx, "local", r, now).await?;
     }
@@ -813,9 +788,7 @@ pub async fn run_json_import(
         for r in &favs.jellyfin_favorites {
             insert_favorite(&mut tx, sid, r, now).await?;
         }
-        // The imported set IS the pull baseline — stamp it so the first
-        // reconcile after migration doesn't immediately re-fetch the whole
-        // remote favorites list (a full browse stream on YT).
+
         if !favs.jellyfin_favorites.is_empty() {
             let now_s = now.to_string();
             sqlx::query!(
@@ -829,7 +802,6 @@ pub async fn run_json_import(
         }
     }
 
-    // --- queue snapshot ----------------------------------------------------
     let snapshot = crate::QueueSnapshot {
         version: queue.version.min(u8::MAX as u32) as u8,
         queue: queue.queue.iter().filter_map(legacy_to_track).collect(),
@@ -840,7 +812,6 @@ pub async fn run_json_import(
     };
     super::writes::write_queue(&mut tx, imported_config.active_source.as_str(), &snapshot).await?;
 
-    // Record what this import actually consumed, so finalize never moves aside a skipped corrupt file.
     for file in &consumed {
         sqlx::query!(
             "INSERT INTO kv (name, kind, value) VALUES (?1, 'legacy_import', '') \
@@ -900,10 +871,6 @@ pub async fn finalize_migration(pool: &SqlitePool, config_dir: &Path) -> Result<
     Ok(renamed)
 }
 
-// ---------------------------------------------------------------------------
-// Section importers
-// ---------------------------------------------------------------------------
-
 /// Insert the saved-servers list, then upsert the active server WITH its creds.
 /// Returns the resolved active server id (for `active_server_id` + server-track
 /// source stamping). Creds (tokens/cookies) are handled locally and never logged.
@@ -957,7 +924,6 @@ async fn import_servers(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // Resolve id: explicit, else match a saved server by (url, service), else synth.
     let resolved = opt_str_at(srv, "id")
         .or_else(|| {
             cfg.get("servers")
@@ -1009,7 +975,6 @@ async fn import_config(
         cfg.clone()
     };
     if let Some(obj) = legacy.as_object_mut() {
-        // Servers, creds and counts were imported into their own tables already.
         for key in ["server", "servers", "listen_counts", "active_server_id"] {
             obj.remove(key);
         }
@@ -1061,7 +1026,6 @@ async fn import_listen_counts(
         return Ok(());
     };
     for (k, v) in map {
-        // Legacy server counts all belong to the one server the file knew.
         let (source, key) = match TrackId::from_legacy_path(k) {
             TrackId::Local(path) => ("local", path.to_string_lossy().into_owned()),
             TrackId::Server { item_id, .. } => match active_server {
@@ -1070,8 +1034,7 @@ async fn import_listen_counts(
             },
         };
         let count = v.as_i64().unwrap_or(0);
-        // Accumulate: distinct legacy keys can collapse to one track (the old
-        // "service:id:cover" form re-keyed when a cover changed).
+
         sqlx::query!(
             "INSERT INTO listen_counts (source, track_key, count) VALUES (?1, ?2, ?3) \
              ON CONFLICT(source, track_key) DO UPDATE SET count = count + ?3",
@@ -1105,7 +1068,7 @@ async fn import_recently_played(
         let n = arr.len() as i64;
         for (i, item) in arr.iter().enumerate() {
             if let Some(key) = item.as_str() {
-                let rank = n - i as i64; // newest (i=0) → highest rank
+                let rank = n - i as i64;
                 sqlx::query(
                     "INSERT OR IGNORE INTO recently_played (source, track_key, played_at) VALUES (?1, ?2, ?3)",
                 )
@@ -1126,7 +1089,6 @@ async fn import_artist_images(
     kind: &str,
     map: &HashMap<String, String>,
 ) -> Result<(), DbError> {
-    // The legacy maps are keyed by folded name: the unlinked rows of that name, and a linked one only for a custom photo.
     for source in sources {
         for (artist, image) in map {
             sqlx::query!(
@@ -1280,10 +1242,6 @@ async fn insert_favorite(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Convert a mirrored track to the typed shape. Tolerates BOTH on-disk forms:
 /// the legacy `"path"` string AND the new `"id"`+`"cover"` (a file rewritten by
 /// an intermediate build carries the new shape). Returns `None` for an entry
@@ -1434,11 +1392,6 @@ fn backup_aside(src: &Path) {
         tracing::warn!(error = %e, src = %src.display(), "db: could not back up legacy json");
     }
 }
-
-// ---------------------------------------------------------------------------
-// Legacy on-disk shapes (pre-#347). Only `Track` changed, but the containers
-// embed it, so we mirror the lot to deserialize the old files faithfully.
-// ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 struct LegacyTrack {
@@ -1610,8 +1563,6 @@ mod eol_reconcile_tests {
         let pool = open_pool(&db).await.unwrap();
         run_migrations(&pool, None).await.unwrap();
 
-        // Simulate a DB written by a CRLF build: every stored checksum becomes
-        // the CRLF-variant hash of the same migration SQL.
         for m in MIGRATOR.iter() {
             let crlf = m.sql.replace("\r\n", "\n").replace('\n', "\r\n");
             sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
@@ -1622,12 +1573,10 @@ mod eol_reconcile_tests {
                 .unwrap();
         }
 
-        // Reopen: the EOL-only mismatch must reconcile, not error.
         run_migrations(&pool, None)
             .await
             .expect("CRLF-only checksum mismatch should reconcile");
 
-        // Checksums are now canonical (this binary's).
         let stored: Vec<(i64, Vec<u8>)> =
             sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations")
                 .fetch_all(&pool)
@@ -1638,8 +1587,6 @@ mod eol_reconcile_tests {
             assert_eq!(ck.unwrap().as_slice(), m.checksum.as_ref());
         }
 
-        // A genuine modification (checksum matching neither line ending) must
-        // still be refused.
         sqlx::query(
             "UPDATE _sqlx_migrations SET checksum = ?1 \
              WHERE version = (SELECT MIN(version) FROM _sqlx_migrations)",
@@ -1826,7 +1773,7 @@ mod row_fill_tests {
     async fn the_stored_documents_become_rows_on_the_way_up() {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         run_migrations(&pool, None).await.unwrap();
-        // Back to just before the new tables, with every document an older build left.
+
         for sql in [
             "DROP TABLE queue_shuffle",
             "DROP TABLE queue_credits",

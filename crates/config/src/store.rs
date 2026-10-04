@@ -202,7 +202,6 @@ impl FileLayers {
         let mut overrides = JsonValue::Object(Default::default());
         let mut locked_keys = BTreeSet::new();
 
-        // Under the main file, so a managed file's keys still win over what the app saved beside it.
         if let Some(map) = read_toml_table(&local_path_for(settings_path)) {
             merge_into(&mut overrides, JsonValue::Object(settings_only(map)));
         }
@@ -220,8 +219,6 @@ impl FileLayers {
             file_exists = settings_path.exists();
         }
 
-        // Drop-ins always lock their keys: they out-rank the main file, so a
-        // UI edit saved there could never take effect.
         let dropin_dir = dropin_dir_for(settings_path);
         for path in sorted_toml_files(&dropin_dir) {
             if let Some(map) = read_toml_table(&path) {
@@ -238,7 +235,6 @@ impl FileLayers {
         locked_keys.extend(env_layer.keys().cloned());
         merge_into(&mut overrides, JsonValue::Object(env_layer));
 
-        // The retired key's value now lives in the default folder source.
         if locked_keys.contains("music_directory") {
             locked_keys.insert("local_sources".to_owned());
         }
@@ -339,9 +335,7 @@ pub fn save_settings_file(
         ));
     };
     obj.retain(|key, _| is_setting(key));
-    // A pinned key's value in `cfg_json` is the layer's, merged in on load.
-    // Writing it back would bake the override into the base file, so it would
-    // keep applying once the drop-in/env layer is gone.
+
     if !locked_keys.is_empty() {
         let existing = read_toml_table(&written_path).unwrap_or_default();
         for key in locked_keys {
@@ -367,9 +361,6 @@ pub fn save_settings_file(
     }
     let text = toml::to_string_pretty(&table).map_err(std::io::Error::other)?;
 
-    // Follow a writable symlink to its target instead of replacing the link
-    // with a regular file. (An hjem-managed link points into the store and
-    // never gets here — this is for someone linking the file themselves.)
     let target = std::fs::canonicalize(&written_path).unwrap_or(written_path);
     if let Some(parent) = target.parent()
         && !parent.as_os_str().is_empty()
@@ -474,8 +465,7 @@ fn toml_to_json(value: TomlValue) -> JsonValue {
             .map(JsonValue::Number)
             .unwrap_or(JsonValue::Null),
         TomlValue::Boolean(b) => JsonValue::Bool(b),
-        // No config field is a date; keep the text so it at least deserializes
-        // into a string field instead of vanishing.
+
         TomlValue::Datetime(dt) => JsonValue::String(dt.to_string()),
         TomlValue::Array(items) => JsonValue::Array(items.into_iter().map(toml_to_json).collect()),
         TomlValue::Table(table) => JsonValue::Object(
@@ -891,7 +881,6 @@ mod tests {
             assert!(!written.contains_key(key), "{key} leaked into the file");
         }
 
-        // A file an older build wrote still holds them; no layer may hand them back.
         std::fs::write(
             &path,
             "volume = 0.9\nlastfm_session_key = \"old\"\ntheme = \"nord\"\n",
@@ -922,7 +911,7 @@ mod tests {
         assert_eq!(base["theme"], "gruvbox");
         assert_eq!(base["language"], "de");
         assert_eq!(base["volume"], 0.5);
-        // A writable main file doesn't lock; drop-ins and env do.
+
         assert!(layers.is_locked("theme"));
         assert!(!layers.is_locked("language"));
         assert!(!layers.managed);
@@ -944,7 +933,7 @@ mod tests {
 
         assert_eq!(base["equalizer"]["enabled"], true);
         assert_eq!(base["equalizer"]["preamp_db"], -3.0);
-        // Untouched sub-keys survive the merge.
+
         assert_eq!(base["equalizer"]["bands"], serde_json::json!([1.0]));
     }
 
@@ -977,7 +966,7 @@ mod tests {
         assert_eq!(base["theme"], "nord");
         assert_eq!(base["equalizer"]["enabled"], true);
         assert_eq!(base["music_directory"][1], "/archive");
-        // The path override is not a field.
+
         assert!(base.get("path").is_none());
         assert!(layers.is_locked("equalizer"));
     }
@@ -1106,7 +1095,7 @@ mod tests {
         assert_eq!(cfg.language, "en");
         assert_eq!(cfg.crossfade_seconds, 3);
         assert!(cfg.equalizer.enabled);
-        // Only `enabled` was set, so the rest of the table keeps its defaults.
+
         assert_eq!(cfg.equalizer.bands, AppConfig::default().equalizer.bands);
     }
 
@@ -1116,8 +1105,6 @@ mod tests {
         let path = dir.path().join("settings.toml");
         std::fs::write(
             &path,
-            // `crossfade_seconds` wants an integer and `ui_style` a known
-            // variant — the two ways a hand-written value goes wrong.
             "theme = \"nord\"\ncrossfade_seconds = \"loud\"\nui_style = \"Fancy\"\nlanguage = \"tr\"\n",
         )
         .unwrap();

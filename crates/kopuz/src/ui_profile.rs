@@ -144,8 +144,6 @@ where
     }
 
     fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {
-        // Renders nest strictly (LIFO) on the UI thread; bail on any other
-        // ordering rather than mis-charge an unrelated frame.
         let Some(frame) = STACK.with(|s| {
             let mut stack = s.borrow_mut();
             match stack.last() {
@@ -290,7 +288,7 @@ mod tests {
         let aggs = aggs.lock().unwrap();
         let outer = &aggs["Outer"];
         let inner = &aggs["recompute"];
-        // The outer's only child is `inner`, so this is exact, not timing-dependent.
+
         assert_eq!(outer.self_ns, outer.total_ns - inner.total_ns);
         assert_eq!(inner.self_ns, inner.total_ns);
         assert!(outer.total_ns >= inner.total_ns);
