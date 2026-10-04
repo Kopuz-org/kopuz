@@ -1,10 +1,5 @@
-//! Read queries backing the UI's query hooks (issue #347, step 6).
-//!
-//! Track listings are sorted + filtered + windowed in SQL (only the visible
-//! slice is materialized), so a 20k-row library scrolls without ever holding
-//! the whole list in memory. The track query is built at runtime (dynamic
-//! `ORDER BY`/`WHERE` from the filter) rather than via the `query!` macro;
-//! sort/search clauses are fixed strings, values are always bound.
+//! SQL reads with filtering, sorting, and pagination performed in the database.
+//! Dynamic clauses use fixed SQL fragments; query values are bound parameters.
 
 use reader::models::{Album, Track};
 use sqlx::SqlitePool;

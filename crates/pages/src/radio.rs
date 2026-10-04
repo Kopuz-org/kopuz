@@ -240,7 +240,6 @@ pub fn Radio(props: RadioProps) -> Element {
                     }
                 }
 
-
                 if has_custom {
                     h2 {
                         class: if is_vaxry { "text-[10px] font-bold mb-2" } else { "text-sm font-bold mb-3 uppercase tracking-wider" },
@@ -394,7 +393,6 @@ pub fn Radio(props: RadioProps) -> Element {
                                         }
                                     }
 
-
                                     if expanded_stations.read().contains(&station.id) {
                                         div {
                                             class: "flex flex-wrap items-center gap-2 px-4 pb-3",
@@ -491,7 +489,6 @@ pub fn Radio(props: RadioProps) -> Element {
                         }
                     }
                 }
-
 
                 div { class: "flex items-end justify-between mb-3",
                     h2 {

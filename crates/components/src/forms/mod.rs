@@ -1,5 +1,4 @@
-//! Rendering what the daemon publishes: the text, the glyphs, and the field
-//! lists that stand in for every form a service used to need its own code for.
+//! Render daemon-provided field schemas, labels, and icons.
 
 pub mod schema_form;
 

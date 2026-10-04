@@ -1,28 +1,8 @@
-//! The unified media-source facade (issue #347, Phase 2).
+//! Media backends and source-scoped cache operations.
 //!
-//! [`MediaSource`] is the SINGLE per-source backend: one impl per source kind
-//! (`LocalSource`, the per-remote `JellyfinSource`/`SubsonicSource`/`YtSource`,
-//! and a creds-less `OfflineServerSource`). There is no separate remote-client
-//! trait — a per-remote impl wraps its raw HTTP client directly, so dispatch
-//! happens once in [`resolve`] and adding a service is one new impl.
-//!
-//! The method split is three-way:
-//! * Uniform source-scoped DB ops (favorites, the cache mutators) are default
-//!   methods keyed on [`source`](MediaSource::source) — written once, inherited.
-//! * The ops every source implements but differently (`add_to_playlist`,
-//!   `create_playlist`, `remove_from_playlist`, `resolve_stream`, `validate`,
-//!   `fetch_favorites`, `push_favorite`) are required.
-//! * Optional, capability-gated ops (`reorder_playlist`, and future
-//!   radio/discover/download) default to [`SourceError::Unsupported`]; only a
-//!   source that declares the matching [`Capabilities`] flag overrides them, and
-//!   the UI gates the affordance on that flag so the default is never reached.
-//!
-//! Each impl declares its own [`capabilities`](MediaSource::capabilities) — the
-//! UI reads them off the resolved source instead of branching on `is_server()`
-//! or `match service`. Adding a backend is one impl + its caps literal.
-//!
-//! Reactivity stays out (this crate is Dioxus-free): callers bump generations /
-//! nudge the sync task after a successful op.
+//! [`MediaSource`] implementations handle remote requests and declare supported
+//! operations through [`Capabilities`]. Default cache methods use the backend's
+//! source partition. [`resolve`] constructs the backend for a source.
 
 use async_trait::async_trait;
 
@@ -794,7 +774,7 @@ fn active_server_id(config: &AppConfig) -> Option<String> {
         .or_else(|| config.server.as_ref().and_then(|s| s.id.clone()))
 }
 
-/// Build the per-remote source for `conn` — the ONE place service dispatch happens.
+/// Build the backend for the connection's service.
 fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSource> {
     match conn.service {
         MusicService::Jellyfin => Box::new(JellyfinSource::new(db, source, conn)),
@@ -820,10 +800,7 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
     }
 }
 
-/// The active [`MediaSource`], shared and reference-counted. Held once in a
-/// `Signal<ActiveSource>` (context) and swapped only on a source-switch or cred
-/// rotation, so call sites read the cached handle instead of rebuilding — and
-/// for a server, re-standing-up an HTTP client — on every operation.
+/// Shared backend handle. Reuse it across operations to retain the HTTP client.
 pub type ActiveSource = std::sync::Arc<dyn MediaSource>;
 
 /// The configured server's [`MediaSource`], or `None` when no usable creds

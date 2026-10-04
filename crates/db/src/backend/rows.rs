@@ -1,6 +1,4 @@
-//! sqlx `FromRow` → model mappers (issue #347, step 6). The reverse of the
-//! importer's column writes: rebuild the typed `TrackId`/cover from `source` +
-//! `track_key` + `service` + `cover_path`.
+//! Convert SQLite rows into domain models, reconstructing typed ids and cover refs.
 
 use std::path::PathBuf;
 

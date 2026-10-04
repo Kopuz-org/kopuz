@@ -1,14 +1,4 @@
-//! Source-agnostic cover resolution (issue #347 / #35).
-//!
-//! The UI calls these instead of branching on local-file-vs-remote-URL or
-//! `match service` per row: the source layer owns where a cover *lives* and how
-//! to turn it into a renderable URL. Local resolves the on-disk file to an
-//! `artwork://` asset; a server resolves its remote image URL (per service).
-//!
-//! These are sync free functions, not [`MediaSource`](crate::source::MediaSource)
-//! methods, because they run per-row in long lists — they must not allocate a
-//! `Box<dyn>` per cover. Capabilities are a trait method (resolved once); cover
-//! resolution is a hot, allocation-light function keyed on the config + service.
+//! Resolve local and remote cover references by their own shape.
 
 use std::path::{Path, PathBuf};
 
@@ -167,7 +157,7 @@ pub fn resolve(config: &AppConfig, cover: CoverRef, max_width: u32) -> Option<Co
         }
         CoverRef::None => return None,
     };
-    Some(utils::cover_url_from_string(url))
+    Some(CoverUrl::from(url))
 }
 
 /// Resolve a cover from a stored cover-path ref — album covers and artist-grid

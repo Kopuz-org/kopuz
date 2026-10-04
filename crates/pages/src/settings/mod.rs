@@ -761,7 +761,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     div { class: "space-y-8",
                         {logs_section(config)}
 
-
                         if let Some(panel) = try_consume_context::<DebugPanel>() {
                             {(panel.0)()}
                         }

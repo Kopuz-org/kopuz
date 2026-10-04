@@ -180,7 +180,6 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
                 }
             }
 
-
             div { class: "flex-1 flex flex-col gap-5",
                 div { class: "bg-white/5 rounded-xl p-5",
                     label { class: "block text-xs text-slate-400 mb-1", "{i18n::t(\"theme_name\")}" }

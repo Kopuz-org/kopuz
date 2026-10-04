@@ -1,7 +1,4 @@
-//! Reconstruct the in-memory playlist store/queue from the DB (issue #347). The
-//! legacy `PersistedQueueState::load` can't parse the new `Track` shape, so the
-//! runtime loads these from the DB (the converted source of truth) instead of
-//! re-reading the old JSON.
+//! Reconstruct playlist stores and persisted queues from SQLite.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

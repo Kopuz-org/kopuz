@@ -1,8 +1,4 @@
-//! Legacy JSON → SQLite migration (issue #347). Exercises `run_json_import`
-//! (via `Db::import_legacy_json`) against a real on-disk legacy `config_dir` and
-//! a fresh in-migration DB (`db::init` applies every migration). Each domain is
-//! asserted independently — the importer had no test coverage, and a missing
-//! domain (recently-played) shipped silently.
+//! Legacy JSON import into a fresh SQLite database, with each domain checked separately.
 
 use std::path::PathBuf;
 

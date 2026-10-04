@@ -98,7 +98,6 @@ pub fn PlaylistsPage(
                             is_downloading_all,
                             on_download_all: move |_| {
 
-
                                 let keys: Vec<String> = playlists_res
                                     .read()
                                     .clone()
@@ -657,11 +656,6 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                             handler.call(());
                                         }
                                     }
-
-
-
-
-
 
                                     PlaylistCardAction::Delete => {
                                         hooks::playlist_actions::delete(pid_action.clone());

@@ -1,10 +1,4 @@
-//! Connection resolution + legacy track-id parsing for the remote bridge.
-//!
-//! [`ServerConn`] hydrates the active server's request params from config (used
-//! by [`crate::source`] and [`crate::sync`] to build a remote client), and
-//! [`parse_item_id`] extracts an item id from a legacy `"service:id"` path. The
-//! playlist/favorite mutations that used to live here are now methods on
-//! [`crate::source::MediaSource`].
+//! Resolve server connection parameters and parse legacy `service:id` track paths.
 
 use config::MusicService;
 
@@ -22,13 +16,8 @@ pub struct ServerConn {
 }
 
 impl ServerConn {
-    /// Build connection params from app config for the active server, or
-    /// `None` when a field the active service requires is missing. An access
-    /// token is always required; Jellyfin/Subsonic/Custom additionally require
-    /// a `user_id` (YouTube Music authenticates by cookie only and Spotify by
-    /// OAuth token only, so a missing user_id is fine for both). Centralizing this stops every UI call site from
-    /// coercing an absent user_id into `""` and firing a malformed
-    /// authenticated request that silently fails.
+    /// Resolve the active server, or return `None` if required credentials are
+    /// missing. Jellyfin, Subsonic, and Custom also require a user id.
     pub fn resolve(config: &config::AppConfig) -> Option<Self> {
         let server = config.server.as_ref()?;
         let token = server.access_token.clone()?;

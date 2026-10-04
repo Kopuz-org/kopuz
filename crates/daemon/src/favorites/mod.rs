@@ -1,5 +1,4 @@
-//! FavoritesService: the optimistic toggle and the background reconciler,
-//! ported from `hooks/src/favorites.rs` and `hooks/src/use_sync_task.rs`.
+//! Optimistic favorite updates and background reconciliation with the source.
 
 use crate::error::source_error;
 

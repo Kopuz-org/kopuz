@@ -1,13 +1,4 @@
-//! Kopuz persistence layer (issue #347).
-//!
-//! Owns the SQLite schema and all persistence behind a single async [`Storage`]
-//! trait. Native targets implement it with sqlx; wasm (not a shipped target)
-//! gets a thin in-memory stub so the build stays green. Everything above this
-//! crate (reactive hooks, UI) is driver-agnostic.
-//!
-//! Dependency direction: `db` sits ABOVE `config`/`reader` (it persists their
-//! types), so those crates stay pure model definitions and all save/load lives
-//! here.
+//! SQLite persistence for configuration and library models through [`Storage`].
 
 use std::sync::Arc;
 

@@ -65,17 +65,13 @@ struct LoginResponse {
     #[serde(rename = "AccessToken")]
     access_token: String,
     #[serde(rename = "User")]
-    #[allow(dead_code)]
     user: UserObj,
 }
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct UserObj {
     #[serde(rename = "Id")]
     id: String,
-    #[serde(rename = "Name")]
-    name: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -858,7 +854,7 @@ impl JellyfinClient {
 
 #[cfg(test)]
 mod tests {
-    use super::Item;
+    use super::{Item, LoginResponse};
 
     #[test]
     fn reads_the_normalization_gains() {
@@ -886,5 +882,25 @@ mod tests {
         let item: Item =
             serde_json::from_str(r#"{"Name": "T", "Id": "1", "Type": "Audio"}"#).unwrap();
         assert!(item.replay_gain_info().is_empty());
+    }
+
+    #[test]
+    fn login_response_requires_credentials_but_not_display_name() {
+        let response: LoginResponse = serde_json::from_str(
+            r#"{"AccessToken":"token","User":{"Id":"user-id","Name":"Listener"}}"#,
+        )
+        .unwrap();
+        assert_eq!(response.access_token, "token");
+        assert_eq!(response.user.id, "user-id");
+        assert!(
+            serde_json::from_str::<LoginResponse>(
+                r#"{"AccessToken":"token","User":{"Id":"user-id"}}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            serde_json::from_str::<LoginResponse>(r#"{"AccessToken":"token","User":{}}"#).is_err()
+        );
+        assert!(serde_json::from_str::<LoginResponse>(r#"{"User":{"Id":"user-id"}}"#).is_err());
     }
 }

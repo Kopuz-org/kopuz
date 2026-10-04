@@ -50,12 +50,8 @@ impl LibraryService {
         })
     }
 
-    /// Local filesystem scan, ported from the app's rescan effect: DB-seeded
-    /// working set, per-root scan, retain-by-root, chunked upserts, prune,
-    /// local artist images with self-heal, then cover indexing and (when
-    /// enabled) network cover fetching. The job runner's single-flight
-    /// replaces the app's epoch supersession; cancellation is checked between
-    /// phases and chunks.
+    /// Scan configured roots, reconcile tracks, and update artist images and covers.
+    /// Cancellation is checked between phases and write batches.
     pub async fn run_scan(&self, ctx: &JobCtx, config: &config::AppConfig) -> Result<(), ApiError> {
         let db_error = |error: db::DbError| ApiError::internal(format!("database error: {error}"));
         for (source, configured_dirs) in Self::scan_roots(config) {
@@ -286,9 +282,7 @@ impl LibraryService {
         }
     }
 
-    /// Remote library pull, ported from `sync_server_library`: fetch the
-    /// snapshot, merge manual covers, chunked upserts with invalidations,
-    /// artist images, then prune what the server dropped.
+    /// Refresh the remote library, preserving manual covers and pruning removed rows.
     pub async fn run_remote_sync(
         &self,
         ctx: &JobCtx,

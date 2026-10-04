@@ -229,7 +229,7 @@ where
         );
         let wait_start = Instant::now();
         while wait_start.elapsed() < LYRICS_INFLIGHT_WAIT_TIMEOUT {
-            utils::sleep(LYRICS_INFLIGHT_POLL_INTERVAL).await;
+            tokio::time::sleep(LYRICS_INFLIGHT_POLL_INTERVAL).await;
             if let Some(cached) = lyrics_cache()
                 .lock()
                 .ok()

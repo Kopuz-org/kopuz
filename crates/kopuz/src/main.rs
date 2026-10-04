@@ -727,11 +727,6 @@ fn App() -> Element {
 
         spawn(async move {
 
-
-
-
-
-
                 let cfg_loaded = match api
                     .config()
                     .instrument(tracing::info_span!("startup.load_config"))
@@ -758,8 +753,6 @@ fn App() -> Element {
                 }
 
                 initial_load_done.set(true);
-
-
 
                 favorites_for_load.nudge_activate();
                 {
@@ -1016,7 +1009,7 @@ fn App() -> Element {
                 if last.take().is_some() {
                     live_theme_css.set(String::new());
                 }
-                utils::sleep(std::time::Duration::from_millis(LIVE_THEME_IDLE_POLL_MS)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(LIVE_THEME_IDLE_POLL_MS)).await;
                 continue;
             }
             let path = utils::live_theme::resolve_path(&config.peek().live_theme_path);
@@ -1034,7 +1027,7 @@ fn App() -> Element {
                     .unwrap_or_default();
                 live_theme_css.set(css);
             }
-            utils::sleep(std::time::Duration::from_millis(LIVE_THEME_POLL_MS)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(LIVE_THEME_POLL_MS)).await;
         }
     });
 
@@ -1200,7 +1193,6 @@ fn App() -> Element {
             id: "app-root",
             class: "relative z-0 flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
 
-
             style: if cfg!(target_os = "android") {
                 format!("{} padding-top: env(safe-area-inset-top);", background_style)
             } else {
@@ -1268,8 +1260,6 @@ fn App() -> Element {
                     }
                 }
             }
-
-
 
             if let Some(msg) = ctrl.playback_error.read().clone() {
                     div {
@@ -1492,14 +1482,6 @@ fn App() -> Element {
                                 },
                                 on_play_album: move |id: String| {
 
-
-
-
-
-
-
-
-
                                     let mut ctrl = ctrl;
                                     let request = api::SetQueueRequest {
                                         mode: api::QueueMode::Replace,
@@ -1594,16 +1576,6 @@ fn App() -> Element {
                             }
                         },
                         Route::Artist => {
-
-
-
-
-
-
-
-
-
-
 
                             let remote_profile =
                                 active_caps().artists == api::ArtistPresentation::Remote;

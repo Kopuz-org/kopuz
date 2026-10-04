@@ -1,4 +1,4 @@
-//! Per-server favorites with optimistic dirty tracking (issue #347, step 8).
+//! Per-server favorites with optimistic dirty tracking.
 
 use std::path::PathBuf;
 

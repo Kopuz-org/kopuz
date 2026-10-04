@@ -1,10 +1,4 @@
-//! Search, and the genre tiles beside it.
-//!
-//! The source owns search -- a folder library filters its own rows, a remote
-//! catalog answers over the network -- and the daemon owns the source, so this
-//! is one call. It used to reach for the in-process source and resolve every
-//! cover here, which meant a frontend needed both the source layer and the
-//! credentials that sign a cover URL.
+//! Search results from the daemon and genre tiles derived from library albums.
 
 use dioxus::prelude::*;
 use tracing::Instrument;
