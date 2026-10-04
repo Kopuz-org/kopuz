@@ -14,10 +14,6 @@ pub fn use_config_baseline_provider() -> ConfigBaseline {
     use_context_provider(|| ConfigBaseline(Signal::new(None)))
 }
 
-pub fn use_config_baseline() -> ConfigBaseline {
-    use_context::<ConfigBaseline>()
-}
-
 impl ConfigBaseline {
     pub fn update(self, config: config::AppConfig) -> Option<api::ConfigUpdate> {
         self.0
