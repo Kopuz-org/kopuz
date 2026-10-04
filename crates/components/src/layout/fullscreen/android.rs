@@ -29,8 +29,6 @@ pub(crate) fn FullscreenAndroid(
     let mut skip_swipe = crate::gestures::use_swipe();
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
 
-    // The sheet unmounts as soon as `is_fullscreen` clears, so a close has to
-    // hold it on screen for the length of its own animation first.
     let mut closing = use_signal(|| false);
     let mut close_from = use_signal(|| 0.0_f64);
     let mut begin_close = move |from: f64| {
@@ -131,8 +129,8 @@ pub(crate) fn FullscreenAndroid(
 
     rsx! {
         div {
-            // Above the mobile top bar (z-60) — at z-50 that bar painted over
-            // this sheet's own header, hiding the close button and the tabs.
+
+
             class: "fixed inset-0 z-[70] flex flex-col text-white select-none {sheet_anim}",
             style: "{sheet_style}",
 

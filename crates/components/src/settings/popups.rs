@@ -46,8 +46,7 @@ pub fn AddSourcePopup(
         .cloned()
         .unwrap_or_default();
     let fields = chosen.fields.clone();
-    // A sandboxed daemon cannot open a browser, so a service whose sign-in is
-    // one cannot be saved from here at all.
+
     let needs_browser = check
         .as_ref()
         .is_some_and(|check| check.sign_in == api::SignInKind::Browser);

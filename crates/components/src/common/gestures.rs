@@ -39,8 +39,6 @@ pub fn use_swipe() -> Swipe {
 }
 
 fn first_touch(evt: &TouchEvent) -> Option<(f64, f64)> {
-    // `touches` is empty on touchend (the finger is gone by then), so fall back
-    // to the points that changed in this event.
     let touches = evt.touches();
     let changed = evt.touches_changed();
     let point = touches.first().or_else(|| changed.first())?;

@@ -31,10 +31,6 @@ pub async fn list_playlists(cookies: &str) -> Result<Vec<YtPlaylistSummary>, Str
         return Err("Sign-in prompt returned — cookies expired".to_string());
     }
 
-    // The library playlists view returns a grid of musicTwoRowItemRenderer.
-    // Layout (authenticated): contents.singleColumnBrowseResultsRenderer
-    //   .tabs[0].tabRenderer.content.sectionListRenderer.contents[0]
-    //   .gridRenderer.items[].musicTwoRowItemRenderer
     let items = resp
         .pointer(
             "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/gridRenderer/items",
@@ -55,16 +51,13 @@ pub async fn list_playlists(cookies: &str) -> Result<Vec<YtPlaylistSummary>, Str
             Some(r) => r,
             None => continue,
         };
-        // The browseId of a playlist tile is `VL<playlistId>` — strip the
-        // `VL` prefix to get the raw playlist ID we'll use later.
+
         let raw = row
             .pointer("/navigationEndpoint/browseEndpoint/browseId")
             .and_then(|v| v.as_str());
         let Some(raw) = raw else { continue };
         let id = raw.strip_prefix("VL").unwrap_or(raw).to_string();
-        // YT scatters "New playlist" / "Episodes from podcasts" tiles
-        // through this grid too; both have browseIds that don't start
-        // with the PL/RD/OL/MM prefixes user playlists use. Skip them.
+
         if id.is_empty() || raw == "FEmusic_offline_storage" {
             continue;
         }
@@ -122,9 +115,7 @@ where
     } else {
         format!("VL{playlist_id}")
     };
-    // Public playlists (the ones Discover surfaces) load anonymously.
-    // Empty cookies (anon mode) → None so browse skips SAPISID auth
-    // instead of erroring "SAPISID missing".
+
     let auth = if cookies.is_empty() {
         None
     } else {
@@ -148,9 +139,7 @@ where
             .into_iter()
             .filter(|t| keep_unique(t, &mut seen))
             .collect();
-        // An empty page after dedup means we've stopped making progress;
-        // looping further on a continuation token YT keeps echoing back
-        // would hammer the endpoint indefinitely.
+
         if unique.is_empty() {
             break;
         }

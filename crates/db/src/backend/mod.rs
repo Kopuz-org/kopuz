@@ -87,7 +87,7 @@ impl ImmediateTx {
         let mut conn = self.conn.take().expect("live until commit or drop");
         match sqlx::query("COMMIT").execute(&mut *conn).await {
             Ok(_) => Ok(()),
-            // A refused commit leaves the transaction open on the connection.
+
             Err(error) => {
                 drop(conn.detach());
                 Err(error.into())
@@ -311,6 +311,14 @@ impl ReadStore for Native {
 
     async fn load_queue(&self, source: &crate::Source) -> Result<crate::QueueSnapshot, DbError> {
         dump::load_queue(&self.pool(), source).await
+    }
+
+    async fn albums_recently_added_page(
+        &self,
+        source: &crate::Source,
+        page: crate::Page,
+    ) -> Result<(u32, Vec<reader::Album>), DbError> {
+        queries::albums_recently_added_page(&self.pool(), source, page).await
     }
 
     async fn load_playlists(

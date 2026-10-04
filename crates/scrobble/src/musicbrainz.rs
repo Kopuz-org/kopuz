@@ -6,8 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const MAX_ATTEMPTS: u32 = 6;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
-// playing_now is ephemeral: the next heartbeat replaces it, so retrying a
-// stale submission only delays everything queued behind it.
+
 const PLAYING_NOW_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Serialize)]

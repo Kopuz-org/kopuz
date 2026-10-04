@@ -12,6 +12,7 @@ pub mod boot;
 pub mod catalog;
 pub mod config_service;
 pub mod downloads;
+mod error;
 pub mod external;
 pub mod favorites;
 pub mod folder_scan;

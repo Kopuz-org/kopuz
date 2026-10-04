@@ -15,13 +15,7 @@ async fn post(endpoint: &str, body: Value, cookies: &str) -> Result<Value, Strin
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/{endpoint}?prettyPrint=false"
         ))
-        .header("User-Agent", client.user_agent)
-        .header("Content-Type", "application/json")
-        .header("X-Goog-Api-Format-Version", "1")
-        .header("X-YouTube-Client-Name", client.client_id)
-        .header("X-YouTube-Client-Version", client.client_version)
-        .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
-        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"))
+        .headers(super::innertube::request_headers(client))
         .header("Cookie", cookies)
         .header("Authorization", auth)
         .json(&body)

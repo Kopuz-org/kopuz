@@ -112,9 +112,6 @@ pub fn locate(config: &AppConfig, cover: CoverRef, max_width: u32) -> Option<Loc
         return Some(Located::File(path));
     }
     match resolve(config, cover, max_width)? {
-        // Neither is fetchable: a data URL carries its own bytes, and
-        // `artwork://` is the app's scheme for asking the daemon -- which is
-        // whoever is calling this.
         url if url.starts_with("data:") || url.starts_with("artwork://") => None,
         url => Some(Located::Url(url.as_ref().to_string())),
     }
@@ -271,8 +268,6 @@ mod tests {
 
     #[test]
     fn subsonic_track_without_cover_path_falls_back_to_getcoverart() {
-        // `cover == "none"` is the no-embedded-cover sentinel; the typed
-        // resolver falls back to a signed getCoverArt URL keyed by the track id.
         let track = subsonic_track("TR-42", Some("none"));
         let got = super::track(&subsonic_config(true), &track, 800).expect("fallback cover url");
         let s: &str = &got;
@@ -280,7 +275,6 @@ mod tests {
         assert!(s.contains("TR-42"), "keyed by the track id: {s}");
         assert!(s.contains("alice"), "signed with the username: {s}");
 
-        // Without credentials the fallback can't sign a request → no cover.
         assert!(super::track(&subsonic_config(false), &track, 800).is_none());
     }
 
@@ -303,7 +297,6 @@ mod tests {
             "token-authenticated: {got}"
         );
 
-        // A Jellyfin ref must never resolve against a Subsonic server.
         assert!(
             resolve(
                 &subsonic_config(true),
@@ -333,10 +326,6 @@ mod tests {
 
     #[test]
     fn from_path_resolves_a_remote_ref_while_local_is_active() {
-        // The regression: one frame after switching away from YT, its album covers
-        // (`ytmusic:_:urlhex_<url>`) are still rendered. With Local active they must
-        // resolve to the embedded URL — NOT get fed to the local artwork:// path as
-        // a filename (the artwork server would open() it → ENAMETOOLONG).
         let url = "https://example.com/cover.jpg";
         let reff = format!("ytmusic:_:{}", CoverRef::encode_url(url));
         let got = from_path(&local_active(), Some(Path::new(&reff)), 200).expect("resolves");

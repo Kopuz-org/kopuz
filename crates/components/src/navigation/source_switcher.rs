@@ -21,12 +21,6 @@ pub struct SettingsAnchor(pub Signal<Option<String>>);
 /// Static styles for the switcher (keyframes + classes that read a per-element
 /// `--accent`/`--active` CSS variable). Injected once; rendered with the trigger
 /// so the closed control is styled too.
-// Colours route through two indirection vars set on the wrapper: `--ss-surface`
-// (the popover/tile base) and `--ss-fg` (the foreground). Both follow the active
-// theme palette (`--color-neutral-900` / `--color-white`), and the dimmed tones
-// are `--ss-fg`-based `color-mix` (foreground at reduced alpha), so the switcher
-// harmonises with the theme (e.g. gruvbox) in both UI styles and tracks
-// light/dark. Per-service brand accents stay fixed regardless.
 const SWITCHER_CSS: &str = r#"
 .ss-tr{width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:transparent;border:1px solid color-mix(in oklab,var(--ss-fg) 9%,transparent);cursor:pointer;color:inherit;transition:background .15s,border-color .15s}
 .ss-tr:hover{background:color-mix(in oklab,var(--ss-fg) 6%,transparent)}
@@ -93,10 +87,9 @@ pub fn SourceSwitcher(
     #[props(default)] on_manage: Option<EventHandler<()>>,
 ) -> Element {
     let mut open = use_signal(|| false);
-    // Full switch (loads server creds + syncs config.server), so a sidebar switch
-    // is identical to the Settings one — not just an active_source flip.
+
     let switch = hooks::source_switch::use_switch_source();
-    // Live auth/connection status of the active source, for the status indicator.
+
     let conn = hooks::source_switch::use_connection_status();
     let rows = hooks::sources::use_sources();
     let rows = rows.read().clone().unwrap_or_default();
@@ -107,8 +100,7 @@ pub fn SourceSwitcher(
         .unwrap_or_default();
     let sources = entries(&rows);
     let count = sources.len();
-    // Follow the active theme palette in both UI styles (the chrome does too), so
-    // the switcher harmonises with the theme instead of a fixed dark.
+
     let surface_vars = "--ss-surface:var(--color-neutral-900);--ss-fg:var(--color-white);";
     let (active_label, active_icon, active_accent) = sources
         .iter()
@@ -194,8 +186,8 @@ pub fn SourceSwitcher(
                         div { class: "ss-foot",
                             button {
                                 onclick: move |_| {
-                                    // Ask Settings to land on the sources section instead of
-                                    // restoring its last scroll position.
+
+
                                     if let Some(SettingsAnchor(mut anchor)) =
                                         try_consume_context::<SettingsAnchor>()
                                     {

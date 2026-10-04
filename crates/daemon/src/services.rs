@@ -453,9 +453,6 @@ pub fn settings(server: &ServerView<'_>, config: &AppConfig) -> Vec<FieldSpec> {
             browser_field(browser.as_deref(), None),
         ],
         MusicService::Spotify => {
-            // Spotify hosts playback in a browser rather than signing in
-            // through one, and its Web Playback SDK only works on Chromium —
-            // so this list stays narrower than the sign-in one.
             let mut hosts = vec![ChoiceOption {
                 value: AUTOMATIC.to_string(),
                 label: Text::key("playback_browser_auto"),
@@ -588,7 +585,6 @@ pub fn apply(service: MusicService, draft: &SourceDraft, saved: &mut SavedServer
     saved.service = service;
     saved.name = draft.name.trim().to_string();
     saved.url = match service {
-        // Spotify's address field holds the client id its PKCE flow needs.
         MusicService::Spotify => value(CLIENT_ID),
         MusicService::Clippsly => server::clippsly::BASE_URL.to_string(),
         _ => value(URL).trim_end_matches('/').to_string(),

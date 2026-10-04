@@ -28,6 +28,10 @@ pub struct Downloads {
 }
 
 impl Downloads {
+    pub fn keys(&self) -> &[String] {
+        &self.stored
+    }
+
     pub fn is_stored(&self, key: &str) -> bool {
         self.stored.iter().any(|stored| stored == key)
     }
@@ -44,10 +48,10 @@ impl Downloads {
 pub fn use_downloads() -> Memo<Downloads> {
     let api = use_api();
     let gens = use_generations();
-    let stored = use_resource(move || {
+    let stored = crate::query::use_query(move || {
         let _ = gens.generation(Table::Tracks);
         let api = api.clone();
-        async move { api.downloads().await.unwrap_or_default() }
+        async move { api.downloads().await }
     });
     let job = crate::jobs::use_job_progress(api::JobKind::Download);
     use_memo(move || {

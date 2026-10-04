@@ -28,7 +28,7 @@ fn use_sources_provider() -> Signal<Option<Vec<api::SourceInfo>>> {
         async move { api.sources().await.unwrap_or_default() }
     });
     let mut rows = use_context_provider(|| SourceRows(Signal::new(None))).0;
-    // The daemon's latest probe answers, laid over each fetch: a fetch that left before an answer arrived carries the older one.
+
     let mut heard = use_signal(HashMap::<String, api::SourceState>::new);
     use_effect(move || {
         let mut next = fetched.read().clone();
@@ -58,7 +58,7 @@ fn use_sources_provider() -> Signal<Option<Vec<api::SourceInfo>>> {
                         }
                         heard.write().insert(source, state);
                     }
-                    // Answers may have been lost, so a fresh fetch is trusted over what was heard.
+
                     api::ApiEvent::Resync => {
                         heard.write().clear();
                         fetched.restart();
@@ -87,7 +87,6 @@ pub fn show_active(switched: &api::SourceInfo) {
     };
     for row in rows.iter_mut() {
         if row.id == switched.id {
-            // The status events keep the row's state current; the reply's may predate them.
             let state = row.state.or(switched.state);
             *row = switched.clone();
             row.state = state;

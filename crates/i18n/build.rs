@@ -21,7 +21,6 @@ fn main() {
         }
     }
 
-    // English first, rest alphabetical by display name
     languages.sort_by(|a, b| {
         if a.0 == "en" {
             std::cmp::Ordering::Less

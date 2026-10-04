@@ -9,8 +9,6 @@ use hooks::use_player_controller::PlayerController;
 
 #[component]
 pub(super) fn ConnectivitySection() -> Element {
-    // What is offered, and whether each is connected, is the daemon's answer;
-    // this counter is what asks it again after a change.
     let changed = use_signal(|| 0u64);
     let mut integrations = hooks::integrations::use_integrations();
     use_effect(move || {

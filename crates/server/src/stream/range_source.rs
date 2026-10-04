@@ -103,10 +103,6 @@ impl RangeStreamSource {
             user_agent.unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());
         let client = shared_client(&ua)?;
 
-        // One-byte probe — cheap, and the server returns the full
-        // `Content-Range: bytes 0-0/<TOTAL>` we want. This is the first request
-        // after the gap between tracks, so it is the one a dead pooled
-        // connection strands.
         let resp = send_range(&client, &url, "bytes=0-0")?;
         let status = resp.status();
         if status != reqwest::StatusCode::PARTIAL_CONTENT {
@@ -271,8 +267,7 @@ fn send_range(
     range: &str,
 ) -> IoResult<reqwest::blocking::Response> {
     let send = || client.get(url).header("Range", range).send();
-    // `without_url`: a stream URL can carry credentials in its userinfo, and a
-    // reqwest error prints the URL it failed on.
+
     match send() {
         Ok(response) => return Ok(response),
         Err(error) if error.is_request() || error.is_timeout() => {
@@ -355,8 +350,6 @@ impl Seek for RangeStreamSource {
 }
 
 fn parse_total_size(resp: &reqwest::blocking::Response) -> Option<u64> {
-    // Content-Range: "bytes 0-0/12345" — the part after '/' is the total.
-    // Content-Length on this 206 response is only the one-byte probe length.
     resp.headers()
         .get("content-range")
         .and_then(|value| value.to_str().ok())

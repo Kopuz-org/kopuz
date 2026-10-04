@@ -25,8 +25,6 @@ pub async fn sign_in(
     service: MusicService,
     client_id: String,
 ) -> Result<(String, Option<String>), String> {
-    // CookieManager belongs to the app: a second login must not clear the
-    // cookies of a flow that is already open.
     static SIGNIN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _lock = SIGNIN
         .try_lock()
@@ -67,8 +65,8 @@ pub async fn sign_in(
         result = tokio::time::timeout(std::time::Duration::from_secs(300), async {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                // Opening the activity clears the old jar asynchronously. Do
-                // not accept any cookie until that operation has finished.
+
+
                 if player::systemint::login_is_open()
                     && let Some(header) = player::systemint::login_cookies(cookie_url)
                     && let Some(secret) = credential(service, &header)

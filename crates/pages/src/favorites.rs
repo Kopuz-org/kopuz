@@ -21,9 +21,9 @@ pub fn FavoritesPage(
 
     rsx! {
         div {
-            // Height-constrained column so the server list can window its rows
-            // behind its own scroller (837 favorites in the DOM at once was
-            // the page's frame-rate problem).
+
+
+
             class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
 
             if is_vaxry {

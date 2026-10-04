@@ -145,8 +145,6 @@ where
     fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         let Some(span) = ctx.span(id) else { return };
 
-        // Lineage walks the full registry scope, so ancestors filtered
-        // out of this layer still show up in the path.
         let mut path = String::new();
         for ancestor in span.scope().from_root() {
             if !path.is_empty() {
@@ -191,7 +189,7 @@ where
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
         let Some(span) = ctx.span(&id) else { return };
         let exts = span.extensions();
-        // Absent when the span predates this layer or was filtered out.
+
         let Some(info) = exts.get::<SpanInfo>() else {
             return;
         };
@@ -266,14 +264,12 @@ mod tests {
             ]
         );
 
-        // Every span instance has its own id — b/e pairing can never cross,
-        // even for same-named concurrent siblings or recycled tracing ids.
         let ids: std::collections::HashSet<u64> =
             begins.iter().map(|e| e["id"].as_u64().unwrap()).collect();
         assert_eq!(ids.len(), begins.len());
 
         assert_eq!(begins[1]["args"]["browse_id"], "VLLM");
-        // Every begin closed with a matching end.
+
         assert_eq!(json.iter().filter(|e| e["ph"] == "e").count(), 4);
     }
 }

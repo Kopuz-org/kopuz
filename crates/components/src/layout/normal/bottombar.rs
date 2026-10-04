@@ -10,23 +10,20 @@ use hooks::favorites::toggle_favorite;
 
 #[component]
 pub fn BottombarNormal(
-    mut config: Signal<config::AppConfig>,
-    mut is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
-    mut current_song_duration: Signal<u64>,
-    mut current_song_progress: Signal<u64>,
-    queue: Signal<Vec<api::TrackInfo>>,
-    mut current_queue_index: Signal<usize>,
-    mut current_song_title: Signal<String>,
-    mut current_song_artist: Signal<String>,
-    mut volume: Signal<f32>,
     mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
     is_devices_open: Signal<bool>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
+    let config = ctrl.config;
+    let is_playing = ctrl.is_playing;
+    let current_song_duration = ctrl.current_song_duration;
+    let current_song_progress = ctrl.current_song_progress;
+    let current_song_title = ctrl.current_song_title;
+    let current_song_artist = ctrl.current_song_artist;
+    let volume = ctrl.volume;
     let mut track_menu_open = use_signal(|| false);
-    // A menu left open across a track change would act on the new track.
     let menu_track_key = use_memo(move || {
         ctrl.current_track_snapshot
             .read()
@@ -42,7 +39,6 @@ pub fn BottombarNormal(
     let is_fav = hooks::use_db_queries::use_track_is_favorite(fav_track);
     let crate::CompactMode(mut compact_mode) = use_context::<crate::CompactMode>();
 
-    // Declared outside the `cfg!` branch below so hook order never depends on the target.
     let mut bar_swipe = crate::gestures::use_swipe();
     let on_bar_swipe = move |evt: TouchEvent| {
         use crate::gestures::SwipeDirection;
@@ -67,8 +63,6 @@ pub fn BottombarNormal(
             .unwrap_or_default();
         return rsx! {
             div {
-                // The tab bar underneath owns the bottom safe area; the pill
-                // only needs to clear it.
                 class: "player-bar player-bar-mobile shrink-0 mx-2 mb-2 h-[68px] bg-(--surface-chrome-raised)/95 backdrop-blur-3xl border border-white/10 rounded-[24px] flex items-center px-3 gap-3 relative overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.8)]",
                 onclick: move |_| is_fullscreen.set(true),
                 ontouchstart: move |evt| bar_swipe.start(&evt),

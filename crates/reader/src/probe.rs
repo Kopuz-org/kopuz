@@ -45,8 +45,6 @@ fn read_head_inner(head: &[u8], extension: Option<&str>) -> HeadInfo {
         hint.with_extension(ext);
     }
 
-    // Unseekable with no length, so a reader that would derive a duration by
-    // measuring the file reports none instead of measuring this fragment.
     let source = ReadOnlySource::new(Cursor::new(head));
     let stream = MediaSourceStream::new(Box::new(source), Default::default());
     let Ok(format) = symphonia::default::get_probe().probe(
@@ -108,11 +106,9 @@ pub fn probe_embedded_cover(head: &[u8], extension: Option<&str>) -> CoverProbe 
 }
 
 fn probe_embedded_cover_inner(head: &[u8], extension: Option<&str>) -> CoverProbe {
-    // Properties are what would want the whole file; the tags read here sit at the front.
     let probe =
         || Probe::new(Cursor::new(head)).options(ParseOptions::new().read_properties(false));
 
-    // Magic bytes lead; the extension covers a head too short to identify.
     let tagged = match probe().guess_file_type().map(Probe::read) {
         Ok(Ok(tagged)) => tagged,
         _ => {
@@ -162,7 +158,6 @@ pub fn ogg_duration(head: &HeadInfo, tail: &[u8]) -> Option<u64> {
 
 /// Granule position of the last page in the tail that states one.
 fn last_granule_position(tail: &[u8]) -> Option<u64> {
-    // "OggS", version, header type, then the granule position.
     const GRANULE_AT: usize = 6;
     const HEADER_LEN: usize = GRANULE_AT + 8;
     /// A page on which no packet finishes carries -1, not a position.
@@ -214,7 +209,6 @@ mod tests {
 
     #[test]
     fn last_granule_position_ignores_the_pattern_in_a_payload() {
-        // "OggS" inside packet data, with a version byte no real page has.
         let mut stream = ogg_page(44_100);
         stream.extend_from_slice(b"OggS\x07\x00");
         stream.extend_from_slice(&999_999_999u64.to_le_bytes());
@@ -237,7 +231,6 @@ mod tests {
         };
         assert_eq!(ogg_duration(&vorbis, &ogg_page(44_100 * 3)), Some(3));
 
-        // Opus counts granules at 48 kHz whatever the stream rate says.
         let opus = HeadInfo {
             duration_secs: None,
             sample_rate: Some(24_000),
@@ -257,7 +250,7 @@ mod tests {
             is_opus: false,
         };
         assert_eq!(ogg_duration(&rated, b"not an ogg stream"), None);
-        // Under a second of audio is reported as unknown, not as zero.
+
         assert_eq!(ogg_duration(&rated, &ogg_page(1)), None);
     }
 
@@ -300,7 +293,6 @@ mod tests {
         assert_eq!(cover.bytes, art);
         assert_eq!(cover.extension.as_deref(), Some("jpg"));
 
-        // The magic bytes are enough; no extension needs to be supplied.
         assert!(matches!(
             probe_embedded_cover(&flac(Some(art)), None),
             CoverProbe::Found(_)
@@ -314,7 +306,6 @@ mod tests {
             CoverProbe::None
         );
 
-        // Cut mid picture block, so the art may still be there past the end.
         let head = flac(Some(b"\xff\xd8\xff\xe0 art"));
         assert_eq!(
             probe_embedded_cover(&head[..20], Some("flac")),

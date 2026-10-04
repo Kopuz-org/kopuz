@@ -10,7 +10,7 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-static STASHED: Mutex<Option<config::AppConfig>> = Mutex::new(None);
+static STASHED: Mutex<Option<api::ConfigUpdate>> = Mutex::new(None);
 
 /// How long an exiting process will wait for the config write. Past this the
 /// user is closing a window that will not close, which is worse than losing a
@@ -19,7 +19,7 @@ const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Stash an eligibility-checked config snapshot (guards: `initial_load_done
 /// && config_loaded_ok`).
-pub fn stash_config(config: config::AppConfig) {
+pub fn stash_config(config: api::ConfigUpdate) {
     if let Ok(mut stashed) = STASHED.lock() {
         *stashed = Some(config);
     }
@@ -29,7 +29,7 @@ pub fn stash_config(config: config::AppConfig) {
 /// and join it. A fresh thread is required from both exit paths: the main
 /// thread sits inside dioxus's tokio context where `block_on` panics, and the
 /// ctrlc thread should not host a runtime of unknown stack depth.
-pub fn persist_on_fresh_thread(config: Option<config::AppConfig>) {
+pub fn persist_on_fresh_thread(config: Option<api::ConfigUpdate>) {
     let Some(config) = config else {
         return;
     };

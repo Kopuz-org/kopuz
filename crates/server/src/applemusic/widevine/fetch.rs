@@ -82,8 +82,7 @@ pub fn parse_manifest(xml: &str) -> Result<CdmRelease, String> {
                     buf.clear();
                     continue;
                 }
-                // A malformed entry is worth an error rather than a silent skip:
-                // the alternative is downloading something unverifiable.
+
                 let hash_fn = attr(b"hashFunction").unwrap_or_default();
                 if hash_fn != "sha512" {
                     return Err(format!(
@@ -204,7 +203,7 @@ pub async fn ensure() -> Result<std::path::PathBuf, String> {
         .get_or_init(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
         .clone();
     let _guard = lock.lock().await;
-    // Another task may have finished while we waited for the lock.
+
     if let Some(path) = installed() {
         return Ok(path);
     }
@@ -223,7 +222,7 @@ fn should_prefetch() -> bool {
     if STARTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
         return false;
     }
-    // Nothing to do if it's already here, or if this platform has no CDM at all.
+
     installed().is_none() && gmp_platform().is_some()
 }
 
@@ -237,8 +236,7 @@ pub fn prefetch() {
     if !should_prefetch() {
         return;
     }
-    // Source construction is sync and isn't guaranteed to be inside a runtime;
-    // `tokio::spawn` would panic there, so ask rather than assume.
+
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         tracing::debug!("am.widevine.fetch: no runtime to prefetch on, leaving it to playback");
         return;
@@ -285,8 +283,6 @@ async fn install(release: &CdmRelease) -> Result<std::path::PathBuf, String> {
     verify_sha512(&bytes, &release.sha512)?;
     tracing::debug!("am.widevine.fetch: sha512 verified");
 
-    // Unpack beside the final directory, then rename: a half-written CDM that
-    // looked installed would be loaded on the next run and fail opaquely.
     let staging = root.join(format!("{}.part", release.version));
     let final_dir = root.join(&release.version);
     let _ = std::fs::remove_dir_all(&staging);
@@ -379,8 +375,6 @@ fn extract_cdm(crx: &[u8], dest: &std::path::Path) -> Result<std::path::PathBuf,
     let cursor = std::io::Cursor::new(&crx[offset..]);
     let mut zip = zip::ZipArchive::new(cursor).map_err(|e| format!("open CRX zip: {e}"))?;
 
-    // Prefer the manifest's own answer; fall back to the conventional layout so a
-    // manifest that stops listing platforms doesn't break the fetch outright.
     let wanted_dir = zip
         .index_for_name("manifest.json")
         .and_then(|i| {
@@ -505,11 +499,9 @@ mod tests {
         let size = std::fs::metadata(&path).expect("stat").len();
         assert!(size > 5 * 1024 * 1024, "CDM is only {size} bytes");
 
-        // A second call must reuse it rather than download again.
         let again = ensure().await.expect("reuse the installed CDM");
         assert_eq!(path, again);
 
-        // The real proof: the shim loads it and it signs a challenge.
         let cdm = super::super::Cdm::open(&path)
             .await
             .expect("the fetched CDM should load");
@@ -556,8 +548,7 @@ mod tests {
             "a CDM is tens of MB, got {}",
             release.size
         );
-        // `resolve` logs the version and size; run with RUST_LOG=info to see the
-        // resolved URL rather than printing it (stdout is clippy-denied here).
+
         tracing::info!("am.widevine.fetch: resolved {}", release.url);
     }
 
@@ -574,7 +565,6 @@ mod tests {
 
     #[test]
     fn the_zip_starts_after_the_crx_header() {
-        // "Cr24", version 3, header length 5, five header bytes, then the zip.
         let mut crx = b"Cr24".to_vec();
         crx.extend_from_slice(&3u32.to_le_bytes());
         crx.extend_from_slice(&5u32.to_le_bytes());
@@ -622,7 +612,6 @@ mod tests {
         } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
             assert_eq!(picked.as_deref(), Some("_platform_specific/linux_arm64/"));
         } else {
-            // This manifest only lists Linux; other hosts must not match one.
             assert_eq!(picked, None, "matched a foreign platform: {picked:?}");
         }
     }
@@ -637,7 +626,6 @@ mod tests {
 
     #[test]
     fn the_checksum_gate_rejects_the_wrong_bytes() {
-        // sha512 of "kopuz", checked against the real digest.
         let good = {
             use sha2::{Digest, Sha512};
             hex_lower(&Sha512::digest(b"kopuz"))

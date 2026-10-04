@@ -139,7 +139,6 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
     };
     let onmouseup = move |_| is_resizing.set(false);
 
-    // Discover is a capability of the active source, not a config flag.
     let caps = hooks::sources::use_capabilities();
     let has_discover = use_memo(move || caps().discover);
     let collapsed = if is_android {
@@ -167,9 +166,6 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
             "width: {current_width}px; background: rgba(0, 0, 0, 0.4); --vaxry-sidebar-fg: #fff;"
         )
     } else {
-        // Theme-following surface (not a fixed black overlay) so the Vaxry chrome
-        // harmonises with the active palette and the switcher text stays readable
-        // on light themes.
         format!(
             "width: {current_width}px; background: var(--color-neutral-900); --vaxry-sidebar-fg: var(--color-white);"
         )

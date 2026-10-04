@@ -34,7 +34,6 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
-// Headless deno_core engine (post-WebView). Android keeps the WebView.
 #[cfg(not(target_os = "android"))]
 mod deno_engine;
 #[cfg(not(target_os = "android"))]
@@ -74,8 +73,6 @@ pub fn set_engine(engine: Box<dyn JsEngine>) -> Result<(), Box<dyn JsEngine>> {
 fn engine() -> &'static dyn JsEngine {
     ENGINE
         .get_or_init(|| {
-            // Desktop: headless deno_core isolate. Android has no V8, so it
-            // keeps the WebView engine (or the subprocess fallback).
             #[cfg(not(target_os = "android"))]
             {
                 Box::new(DenoCoreEngine::new()) as Box<dyn JsEngine>
@@ -105,7 +102,7 @@ pub async fn deciphered_url(base_js: &str, format: &Value) -> Result<String, Str
         requests.push(json!({ "type": "sig", "challenges": [s] }));
     }
     if requests.is_empty() {
-        return Ok(url); // plain url, no n — nothing to do
+        return Ok(url);
     }
 
     let responses = solve(base_js, &requests).await?;
@@ -193,7 +190,7 @@ fn fast_program(id: &str, requests: &[Value]) -> Result<String, String> {
 fn standalone_program(base_js: &str, requests: &[Value]) -> Result<String, String> {
     let data = json!({ "type": "player", "player": base_js, "requests": requests });
     let data_json = serde_json::to_string(&data).map_err(|e| format!("encode solver data: {e}"))?;
-    // `print` (JSC/qjs) or `console.log` (node/deno/bun) — whichever exists.
+
     Ok(format!(
         "{}\n(function(){{var __p=(typeof print==='function')?print:function(s){{console.log(s);}};\
          var o=jsc({data_json});__p(JSON.stringify(o.responses));}})();",
@@ -344,8 +341,6 @@ fn pct_encode(s: &str) -> String {
     out
 }
 
-// ---- base.js (player JS) fetch + signatureTimestamp cache --------------
-
 /// Cached `(base_js, signature_timestamp)` with a refresh TTL. `base.js` rotates
 /// every few hours and its `signatureTimestamp` must match, so we re-fetch the
 /// pair periodically instead of pinning it for the whole process — otherwise a
@@ -422,8 +417,6 @@ fn str_between<'a>(haystack: &'a str, start: &str, end: &str) -> Option<&'a str>
     Some(&rest[..j])
 }
 
-// ---- default engine: shell out to a system JS runtime ------------------
-
 #[derive(Clone, Copy)]
 struct Runtime {
     bin: &'static str,
@@ -456,11 +449,11 @@ fn detect_runtime() -> Option<Runtime> {
             cmd.arg("--version")
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
-            // Don't flash a console window on Windows for the version probe.
+
             #[cfg(target_os = "windows")]
             {
                 use std::os::windows::process::CommandExt;
-                cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+                cmd.creation_flags(0x0800_0000);
             }
             cmd.status().map(|s| s.success()).unwrap_or(false)
         })
@@ -486,7 +479,7 @@ impl JsEngine for SubprocessEngine {
                 std::process::id(),
                 SEQ.fetch_add(1, Ordering::Relaxed)
             ));
-            // O_EXCL: never write through a pre-existing (possibly symlinked) path.
+
             {
                 use tokio::io::AsyncWriteExt;
                 let mut f = tokio::fs::OpenOptions::new()
@@ -505,9 +498,9 @@ impl JsEngine for SubprocessEngine {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
-            // Don't flash a console window on Windows for the solver subprocess.
+
             #[cfg(target_os = "windows")]
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            cmd.creation_flags(0x0800_0000);
             let child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
@@ -515,8 +508,7 @@ impl JsEngine for SubprocessEngine {
                     return Err(format!("spawn {}: {e}", rt.bin));
                 }
             };
-            // Bound it — a hung runtime must not stall deciphering. On timeout the
-            // dropped future kills the child (kill_on_drop).
+
             let out =
                 tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
                     .await;
@@ -591,7 +583,7 @@ mod tests {
         assert_eq!(pct_decode("a%3Db%2Fc"), "a=b/c");
         assert_eq!(pct_decode("hello%20world"), "hello world");
         assert_eq!(pct_encode("a=b/c+d"), "a%3Db%2Fc%2Bd");
-        // url-safe chars pass through untouched
+
         assert_eq!(pct_encode("Ab9-_.~"), "Ab9-_.~");
     }
 
@@ -708,7 +700,7 @@ mod tests {
             .max_by_key(|f| f["bitrate"].as_u64().unwrap_or(0))
             .expect("audio format");
         let url = deciphered_url(&player.0, fmt).await.expect("decipher");
-        // A second solve exercises reuse of the warm isolate.
+
         let _ = deciphered_url(&player.0, fmt).await.expect("decipher 2");
         let resp = reqwest::Client::new()
             .get(&url)
@@ -722,8 +714,6 @@ mod tests {
             "deno-deciphered URL must stream"
         );
 
-        // A second isolate in-process — the scenario that segfaulted before the
-        // shared platform init. Both must coexist.
         let pot = super::super::botguard::mint_content_pot(vid)
             .await
             .expect("botguard mint alongside a live decipher isolate");

@@ -25,7 +25,6 @@ pub const WIDEVINE_SYSTEM_ID: [u8; 16] = [
     0xed, 0xef, 0x8b, 0xa9, 0x79, 0xd6, 0x4a, 0xce, 0xa3, 0xc8, 0x27, 0xdc, 0xd5, 0x1d, 0x21, 0xed,
 ];
 
-// MediaDrm API is TODO
 #[cfg(not(target_os = "android"))]
 unsafe extern "C" {
     fn wv_open(so_path: *const c_char) -> c_int;
@@ -128,7 +127,6 @@ impl CdmSession {
     /// `Drop` does the same thing but can only log, so this exists for callers —
     /// tests especially — that need to know a close actually took.
     pub fn close(mut self) -> Result<(), String> {
-        // Emptying the id stops `Drop` closing it a second time.
         let id = std::mem::take(&mut self.id);
         close_session(&id)
     }
@@ -140,8 +138,7 @@ impl Drop for CdmSession {
         if self.id.is_empty() {
             return;
         }
-        // Best-effort: a session that won't close leaks inside the CDM, which is
-        // not worth failing a teardown over, but is worth saying so.
+
         match close_session(&self.id) {
             Ok(()) => tracing::debug!("am.widevine: CDM session closed"),
             Err(e) => tracing::warn!("am.widevine: {e}"),
@@ -197,8 +194,6 @@ impl Cdm {
         )
     }
 
-    // `async` to match the desktop signatures: the callers await these, so a
-    // synchronous stub doesn't compile for Android at all.
     pub async fn open(_path: impl AsRef<Path>) -> Result<Self, String> {
         Self::unsupported()
     }
@@ -342,8 +337,7 @@ impl Cdm {
                 let session = CdmSession {
                     id: unsafe { take(sid, sid_len) },
                 };
-                // Posting the wrong message type to Apple's licence server gets
-                // an opaque numeric rejection, so name the cause here instead.
+
                 match msg_type {
                     Self::LICENSE_REQUEST => Ok((message, session)),
                     Self::INDIVIDUALIZATION_REQUEST => Err(
@@ -422,8 +416,7 @@ impl Cdm {
         };
         match rc {
             0 => Ok(unsafe { take(out, len) }),
-            // 31 + Status::kNoKey — the usual cause is a license that didn't
-            // cover this track's key id.
+
             32 => Err("no key for this track (the license didn't cover its key id)".to_string()),
             n => Err(format!("CENC decrypt failed (code {n})")),
         }
@@ -450,12 +443,12 @@ fn widevine_cenc_header(key_id: &[u8]) -> Vec<u8> {
     }
 
     let mut out = Vec::with_capacity(key_id.len() + 10);
-    out.extend_from_slice(&[0x08, 0x01]); // 1: algorithm = AESCTR
-    out.push(0x12); // 2: key_id, length-delimited
+    out.extend_from_slice(&[0x08, 0x01]);
+    out.push(0x12);
     varint(&mut out, key_id.len() as u64);
     out.extend_from_slice(key_id);
-    out.extend_from_slice(&[0x1a, 0x00]); // 3: provider = ""
-    out.extend_from_slice(&[0x32, 0x00]); // 6: policy = ""
+    out.extend_from_slice(&[0x1a, 0x00]);
+    out.extend_from_slice(&[0x32, 0x00]);
     out
 }
 
@@ -467,12 +460,11 @@ fn widevine_cenc_header(key_id: &[u8]) -> Vec<u8> {
 pub fn build_pssh(key_id: &[u8]) -> Vec<u8> {
     let payload = widevine_cenc_header(key_id);
 
-    // size | 'pssh' | version+flags | system id | data size | data
     let total = 4 + 4 + 4 + 16 + 4 + payload.len();
     let mut box_ = Vec::with_capacity(total);
     box_.extend_from_slice(&(total as u32).to_be_bytes());
     box_.extend_from_slice(b"pssh");
-    box_.extend_from_slice(&[0, 0, 0, 0]); // version 0, no flags
+    box_.extend_from_slice(&[0, 0, 0, 0]);
     box_.extend_from_slice(&WIDEVINE_SYSTEM_ID);
     box_.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     box_.extend_from_slice(&payload);
@@ -491,10 +483,7 @@ mod tests {
         assert_eq!(
             widevine_cenc_header(&[0xAA; 4]),
             vec![
-                0x08, 0x01, // 1: algorithm = AESCTR
-                0x12, 0x04, 0xAA, 0xAA, 0xAA, 0xAA, // 2: key_id
-                0x1a, 0x00, // 3: provider = ""
-                0x32, 0x00, // 6: policy = ""
+                0x08, 0x01, 0x12, 0x04, 0xAA, 0xAA, 0xAA, 0xAA, 0x1a, 0x00, 0x32, 0x00,
             ]
         );
     }
@@ -527,7 +516,7 @@ mod tests {
 
         let data_len = u32::from_be_bytes(b[28..32].try_into().unwrap()) as usize;
         assert_eq!(data_len, b.len() - 32, "data size must match the payload");
-        // The key id must survive into the protobuf payload.
+
         assert!(b[32..].windows(16).any(|w| w == kid));
     }
 
@@ -546,15 +535,13 @@ mod tests {
             .expect("generate a challenge");
 
         assert!(!challenge.is_empty(), "challenge must not be empty");
-        // A ChromeCDM challenge carries the device's model name; its presence
-        // means the CDM signed with its own sealed key rather than erroring out.
+
         assert!(
             challenge.windows(9).any(|w| w == b"ChromeCDM"),
             "challenge should be a ChromeCDM SignedMessage ({} bytes)",
             challenge.len()
         );
 
-        // The session has to be a real id, or nothing can be closed later.
         assert!(!cdm_session.id.is_empty(), "no session id came back");
         cdm_session.close().expect("the session should close");
     }

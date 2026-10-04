@@ -11,8 +11,6 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Executor};
 
 fn unique_db() -> PathBuf {
-    // pid + counter, not just clock: macOS's µs clock let parallel tests
-    // collide on a nanos-only name and delete each other's live DB.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
@@ -35,8 +33,6 @@ async fn seed(db_path: &std::path::Path) {
         .unwrap();
     conn.execute("BEGIN").await.unwrap();
     for i in 0..N {
-        // Artist/album buckets give the sort something to order within; titles
-        // are zero-padded so lexical order matches numeric.
         let key = format!("/music/{i:05}.flac");
         let title = format!("Track {i:05}");
         let artist = format!("Artist {:03}", i % 50);
@@ -64,10 +60,8 @@ async fn windowed_queries_over_20k_tracks() {
 
     let local = TrackFilter::new(Source::default());
 
-    // Count reflects the whole library.
     assert_eq!(db.tracks_count(&local).await.unwrap(), N as u32);
 
-    // A page returns exactly its slice, in Title order.
     let by_title = TrackFilter {
         sort: TrackSort::Title,
         ..local.clone()
@@ -86,7 +80,6 @@ async fn windowed_queries_over_20k_tracks() {
     assert_eq!(page[0].title, "Track 00000");
     assert_eq!(page[99].title, "Track 00099");
 
-    // A deeper window starts where it should — only that slice is materialized.
     let mid = db
         .tracks_page(
             &by_title,
@@ -101,8 +94,6 @@ async fn windowed_queries_over_20k_tracks() {
     assert_eq!(mid[0].title, "Track 12345");
     assert_eq!(mid[9].title, "Track 12354");
 
-    // Search narrows both the page and the count. "Artist 007" tags every 50th
-    // track → 400 of them.
     let search = TrackFilter {
         search: "Artist 007".into(),
         sort: TrackSort::Title,
@@ -122,7 +113,6 @@ async fn windowed_queries_over_20k_tracks() {
     assert_eq!(hits.len(), 5);
     assert!(hits.iter().all(|t| t.artist == "Artist 007"));
 
-    // Sort actually orders: first row by Artist differs from first by Title.
     let by_artist = db
         .tracks_page(
             &TrackFilter {
@@ -172,7 +162,6 @@ async fn windowed_queries_over_20k_tracks() {
         .unwrap();
     assert_eq!(fallback[0].artist, "Artist 000");
 
-    // Reconstructed identity is a local path.
     assert!(matches!(page[0].id, reader::models::TrackId::Local(_)));
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
@@ -224,8 +213,6 @@ async fn recently_added_albums_order_by_date_added() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
 
-    // Written oldest-first, and deliberately neither alphabetical nor its
-    // reverse, so neither ordering can pass by accident.
     for (id, artist) in [("bee", "Bea"), ("cee", "Cara"), ("ann", "Ann")] {
         db.upsert_albums(&Source::default(), &[album(id, id, artist)])
             .await
@@ -241,8 +228,31 @@ async fn recently_added_albums_order_by_date_added() {
     let ids =
         |albums: Vec<reader::Album>| -> Vec<String> { albums.into_iter().map(|a| a.id).collect() };
 
-    // Unstamped rows (a library not rescanned since the added_at migration, or
-    // any server source) still fall back to insertion order.
+    let (total, page) = db
+        .albums_recently_added_page(
+            &Source::default(),
+            db::Page {
+                offset: 1,
+                limit: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(total, 3);
+    assert_eq!(ids(page), ["cee"]);
+    let (total, page) = db
+        .albums_recently_added_page(
+            &Source::default(),
+            db::Page {
+                offset: 9,
+                limit: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(total, 3);
+    assert!(page.is_empty());
+
     assert_eq!(
         ids(db
             .albums_recently_added(&Source::default(), 10)
@@ -258,8 +268,6 @@ async fn recently_added_albums_order_by_date_added() {
         ["ann", "cee"]
     );
 
-    // A stamp outranks insertion order, and it is the album's newest track that
-    // decides: stamping the oldest album's track pulls that album to the front.
     db.stamp_added_at(
         &Source::default(),
         &[("/music/bee.flac".into(), 1_700_000_000)],
@@ -274,8 +282,6 @@ async fn recently_added_albums_order_by_date_added() {
         ["bee", "ann", "cee"]
     );
 
-    // Stamps are written once: a rescan after a tag edit bumped the file's
-    // mtime must not make old music look new.
     db.stamp_added_at(
         &Source::default(),
         &[("/music/cee.flac".into(), 1_800_000_000)],

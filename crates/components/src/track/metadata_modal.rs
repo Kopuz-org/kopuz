@@ -118,8 +118,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     let input_class = "w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/25";
 
     let key = props.track.key.clone();
-    // The editor sends the whole desired state, so a blank number means remove
-    // it -- the patch's `None` already means "unchanged".
+
     let mut do_save = move || {
         if let Some(handler) = props.on_save {
             let track_number = track_no.read().trim().parse::<u32>().ok();

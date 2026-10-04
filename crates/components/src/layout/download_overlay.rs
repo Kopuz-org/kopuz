@@ -21,8 +21,6 @@ pub fn DownloadOverlay() -> Element {
     let downloads = hooks::downloads::use_downloads();
     let mut collapsed = use_signal(|| false);
 
-    // The batch reports keys; the titles come from the library, so a row says
-    // what is downloading rather than an opaque id.
     let statuses = use_resource(move || {
         let api = api.clone();
         let running = downloads.read().running;

@@ -557,13 +557,13 @@ impl api::ConfigApi for LocalApi {
         }
     }
 
-    async fn set_config(&self, config: config::AppConfig) -> Result<api::ConfigView, ApiError> {
+    async fn set_config(&self, update: api::ConfigUpdate) -> Result<api::ConfigView, ApiError> {
         let Some(service) = &self.config else {
             return Err(ApiError::unsupported(
                 "this daemon runs without a config service",
             ));
         };
-        let (view, _, _) = service.set(config).await?;
+        let (view, _, _) = service.set(update).await?;
         Ok(view)
     }
 
@@ -609,8 +609,7 @@ impl api::JobApi for LocalApi {
                 Some(playlists) => playlists.spawn_sync(runner),
                 None => Err(ApiError::unsupported("no playlist service")),
             },
-            // These carry their own request, so they start through their own
-            // method rather than by kind.
+
             api::JobKind::Download | api::JobKind::UrlDownload | api::JobKind::Unknown => {
                 Err(ApiError::unsupported("this job kind has no direct starter"))
             }
@@ -715,8 +714,7 @@ impl api::EventApi for LocalApi {
     fn events(&self) -> api::EventStream {
         use futures_util::StreamExt;
         let rx = self.session.subscribe();
-        // Greets with Resync like the wire implementation, so a consumer
-        // sees the same first message whichever it is talking to.
+
         let greeting = futures_util::stream::once(async { ApiEvent::Resync });
         let live = futures_util::stream::unfold(rx, |mut rx| async move {
             match rx.recv().await {

@@ -70,9 +70,6 @@ mod android_media {
 pub fn use_player_task(
     #[cfg_attr(not(target_os = "android"), allow(unused_variables))] ctrl: PlayerController,
 ) {
-    // The Android notification is not MPRIS: the daemon pushes shuffle and
-    // repeat to the desktop widget itself, but has no Android backend, so
-    // there they are mirrored from here.
     #[cfg(target_os = "android")]
     use_effect(move || {
         let shuffle = *ctrl.shuffle.read();
@@ -84,19 +81,14 @@ pub fn use_player_task(
         player::systemint::update_modes(shuffle, repeat);
     });
 
-    // Android routes media-notification button taps through a JNI callback (no
-    // event queue) and the daemon's os_media task has no Android backend, so
-    // the taps are drained here and dispatched through the controller.
     #[cfg(target_os = "android")]
     {
         use android_media::BgCmd;
         use_hook(move || {
             android_media::init_bg_channel();
-            // Runs on the event loop thread, which is the only place its looper
-            // can be picked up — see `capture_event_loop`.
+
             player::systemint::capture_event_loop();
-            // The keepalive ticker pokes this while the activity is hidden, so
-            // the loop below keeps draining commands and advancing the queue.
+
             player::systemint::set_tokio_waker(|| {
                 if let Some(notify) = android_media::BG_NOTIFY.get() {
                     notify.notify_one();

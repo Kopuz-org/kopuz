@@ -21,13 +21,9 @@ fn build_widevine_shim() {
         .file("shim/widevine_shim.cc")
         .include("vendor")
         .flag_if_supported("-std=c++14")
-        // The vendored Chromium header declares far more of the interface than
-        // this shim uses; unused parameters are inherent to implementing it.
         .flag_if_supported("-Wno-unused-parameter")
         .compile("widevine_shim");
 
-    // The shim needs the C++ runtime, and dlopen on POSIX. MSVC links its own
-    // runtime and resolves LoadLibrary from kernel32, so it needs neither.
     match target_os.as_str() {
         "macos" | "ios" => println!("cargo:rustc-link-lib=dylib=c++"),
         "windows" => {}

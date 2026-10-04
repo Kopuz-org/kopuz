@@ -236,7 +236,6 @@ impl MediaSource for JellyfinSource {
         image_path: &std::path::Path,
         image_tag: Option<&str>,
     ) -> Result<(), SourceError> {
-        // Push the artwork to Jellyfin (best-effort), then record it locally.
         if let Ok(bytes) = std::fs::read(image_path) {
             let ct = match image_path
                 .extension()

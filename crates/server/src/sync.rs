@@ -49,9 +49,7 @@ pub async fn reconcile_favorites(
 ) -> Result<SyncReport, SyncError> {
     let db = source.db();
     let server_id = source.source().as_str();
-    // Decide what there is to do BEFORE any network call — a reconcile with no
-    // pending pushes and a fresh pull must be a complete no-op (not even the
-    // validate request). The DB is the only thing consulted on the quiet path.
+
     let likes = db
         .dirty_favorites(server_id)
         .await
@@ -71,8 +69,7 @@ pub async fn reconcile_favorites(
         .flatten()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    // A stamp in the future (backward clock step) counts as stale, otherwise
-    // pulls would be suppressed until real time catches up to it.
+
     let should_pull =
         matches!(reason, SyncReason::Manual) || last_pull > now || now - last_pull >= PULL_MIN_SECS;
     if likes.is_empty() && unlikes.is_empty() && !should_pull {
@@ -89,12 +86,6 @@ pub async fn reconcile_favorites(
 
     let mut report = SyncReport::default();
 
-    // Push pending likes, then pending unlikes (each resolved on success only,
-    // so a failure is retried next cycle). The pushed refs are remembered: a
-    // pull in the SAME cycle can see a stale remote listing (YT's liked
-    // browse is eventually consistent), and a just-pushed like — now clean —
-    // would otherwise be deleted by the pull, or a just-pushed unlike
-    // resurrected.
     let mut pushed_like_refs: Vec<String> = Vec::new();
     let mut pushed_unlike_refs: std::collections::HashSet<String> =
         std::collections::HashSet::new();
@@ -125,17 +116,13 @@ pub async fn reconcile_favorites(
         }
     }
 
-    // Pull: the remote set becomes the clean baseline; still-pending local rows
-    // survive. fetch_favorites is EXPENSIVE for YT (a full liked-library browse
-    // stream), so the pull is staleness-gated (computed up top): Manual always
-    // pulls; everything else only when the last pull is old.
     if should_pull {
         let mut remote = source.fetch_favorites().await.map_err(|e| match e {
             SourceError::Auth => SyncError::Expired,
             other => SyncError::Unreachable(other.to_string()),
         })?;
         report.pulled = remote.len();
-        // Overlay this cycle's pushes on the (possibly stale) remote listing.
+
         for r in pushed_like_refs {
             if !remote.contains(&r) {
                 remote.push(r);

@@ -117,9 +117,7 @@ fn resolve_url(base: &str, reference: &str) -> String {
             return format!("{base}/{rel}");
         }
         let path_part = base.split('?').next().unwrap_or(base);
-        // Only treat a slash that lies after "scheme://host" as a path
-        // separator — rfind on the whole URL would otherwise match the slash
-        // in "https://" when the base has no path, mangling the result.
+
         let after_scheme_start = scheme_end + 3;
         if let Some(rel) = path_part
             .get(after_scheme_start..)
@@ -128,7 +126,7 @@ fn resolve_url(base: &str, reference: &str) -> String {
             let slash = after_scheme_start + rel;
             return format!("{}/{reference}", &path_part[..slash]);
         }
-        // Host only, no path component: append directly.
+
         return format!("{path_part}/{reference}");
     }
     reference.to_string()
@@ -173,7 +171,7 @@ mod tests {
             resolve_url(base, "https://x.com/s.mp4"),
             "https://x.com/s.mp4"
         );
-        // Base with host only (no path) must not match the scheme's slash.
+
         assert_eq!(
             resolve_url("https://host.com", "seg.mp4"),
             "https://host.com/seg.mp4"

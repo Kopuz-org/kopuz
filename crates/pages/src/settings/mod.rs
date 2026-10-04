@@ -56,8 +56,7 @@ fn BuildInfoCard() -> Element {
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
-    // The sources are the daemon's: it holds their credentials, so the config
-    // this page reads never carries them.
+
     let sources = hooks::sources::use_sources();
     let all_sources = use_memo(move || sources.read().clone().unwrap_or_default());
     let active_server = use_memo(move || {
@@ -144,8 +143,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         );
     };
 
-    // Signing in again on an active server: which flow it is belongs to the
-    // service, and the daemon runs it.
     let mut sign_in_again = move || match active_server() {
         Some(server) if server.sign_in == api::SignInKind::Browser => {
             crate::settings_actions::authenticate(server.id, error, ctrl.playback_error);
@@ -153,8 +150,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         _ => show_login.set(true),
     };
 
-    // The daemon checks the draft as it is typed, so the form knows what is
-    // wrong with it and which sign-in saving it will start.
     use_effect(move || {
         let draft = crate::settings_actions::draft(
             source_name,
@@ -767,8 +762,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 if active_category() == SettingsCategory::Tools {
                     div { class: "space-y-8",
                         {logs_section(config)}
-                        // The app fills this in debug builds; it is the only
-                        // crate that still holds a write-capable database.
+
+
                         if let Some(panel) = try_consume_context::<DebugPanel>() {
                             {(panel.0)()}
                         }

@@ -75,7 +75,7 @@ pub(super) fn within_roots(path: &str, roots: &[String]) -> bool {
     let path = dav_path::normalise(path);
     roots.iter().any(|root| {
         let root = dav_path::normalise(root);
-        // Segment boundary, so "/Music2" doesn't count as inside "/Music".
+
         root == "/"
             || path == root
             || path
@@ -84,7 +84,6 @@ pub(super) fn within_roots(path: &str, roots: &[String]) -> bool {
     })
 }
 
-// Extension fallback: some storage backends label everything octet-stream.
 pub(super) fn is_audio(entry: &FileEntry) -> bool {
     if entry.is_directory {
         return false;
@@ -126,7 +125,6 @@ pub(super) fn extension(name: &str) -> Option<String> {
 fn split_leading_number(stem: &str) -> (String, Option<u32>) {
     let digits: String = stem.chars().take_while(char::is_ascii_digit).collect();
     if digits.is_empty() || digits.len() > 3 {
-        // four or more digits is a year
         return (stem.trim().to_string(), None);
     }
 
@@ -138,7 +136,6 @@ fn split_leading_number(stem: &str) -> (String, Option<u32>) {
         .unwrap_or(rest);
     let title = rest.trim();
 
-    // A bare "01.mp3" keeps the digits rather than ending up titleless.
     if title.is_empty() {
         return (stem.trim().to_string(), digits.parse().ok());
     }
@@ -167,7 +164,7 @@ pub(super) fn group(
     let mut covers: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for entry in entries.iter().filter(|e| is_cover_file(e)) {
         let dir = dav_path::parent(&entry.path);
-        // Earliest COVER_NAMES entry wins, so cover.jpg beats front.png.
+
         match covers.get(&dir) {
             Some(held) if cover_rank(dav_path::name(held)) <= cover_rank(entry.name()) => {}
             _ => {
@@ -206,8 +203,6 @@ pub(super) fn group(
             .unwrap_or_else(|| entry.name().to_string());
         let (title, track_number) = split_leading_number(&stem);
 
-        // The root folder is the library, not an album: loose files under it
-        // would otherwise all group under a "Music" album.
         let album_title = if album_name.is_empty() || album_path == dav_path::normalise(root) {
             "Unknown Album".to_string()
         } else {
@@ -416,7 +411,6 @@ mod tests {
         ];
         let (albums, _) = group("/Music", &entries);
 
-        // No sidecar image, so the album falls back to its first track.
         assert!(albums[0].cover_path.is_none());
         let art = albums[0].art_track.as_ref().expect("art track");
         assert_eq!(art.path, "/Music/A/B/01 - T.mp3");
@@ -428,10 +422,10 @@ mod tests {
         assert!(within_roots("/Music/a/b.mp3", &roots));
         assert!(within_roots("/Music", &roots));
         assert!(within_roots("/Shared/Albums/x.flac", &roots));
-        // A sibling with a shared prefix is outside.
+
         assert!(!within_roots("/Music2/a.mp3", &roots));
         assert!(!within_roots("/Documents/a.mp3", &roots));
-        // No configured roots means the whole account.
+
         assert!(within_roots("/anywhere/a.mp3", &[]));
     }
 }

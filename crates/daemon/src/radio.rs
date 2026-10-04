@@ -158,9 +158,7 @@ impl RadioService {
             let known = registry.get(&manifest.id).is_some();
             let pinned = registry.is_registry_station(&manifest.id);
             found.push(station_info(&manifest, pinned));
-            // Re-inserting a station the registry already holds would demote a
-            // pinned one back to a runtime entry, so a search would silently
-            // unpin whatever it happened to return.
+
             if !known {
                 registry.insert_manifest(manifest);
             }
@@ -203,8 +201,6 @@ impl RadioService {
             .await?;
         self.reload().await?;
         if !pinned {
-            // Unpinning demotes rather than forgets: the station drops out of
-            // the selected list but whatever is playing it keeps working.
             let mut registry = self.registry.write().await;
             registry.insert_manifest(manifest);
             let snapshot = Arc::new(registry.clone());

@@ -67,8 +67,7 @@ pub fn SchemaForm(
         .filter(|field| applies(&values, &fields, field))
         .cloned()
         .collect();
-    // A heading belongs to the first row of its group, so it is only drawn
-    // when the group actually changes -- a hidden row must not eat it.
+
     let mut section: Option<String> = None;
     let mut rows: Vec<(api::FieldSpec, Option<String>)> = Vec::with_capacity(shown.len());
     for field in shown {
@@ -121,7 +120,6 @@ fn Field(
         .map(super::text)
         .unwrap_or_default();
 
-    // A note is only its help text, so it gets no row and no label.
     if matches!(field.kind, api::FieldKind::Note) {
         let text = help.unwrap_or(title);
         return rsx! {

@@ -19,15 +19,39 @@ pub fn use_config_baseline() -> ConfigBaseline {
 }
 
 impl ConfigBaseline {
+    pub fn update(self, config: config::AppConfig) -> Option<api::ConfigUpdate> {
+        self.0
+            .read()
+            .as_ref()
+            .map(|(_, revision)| api::ConfigUpdate {
+                config,
+                expected_revision: *revision,
+            })
+    }
+
     /// Start from the view the app loaded.
     pub fn loaded(mut self, view: &api::ConfigView) {
         self.0.set(Some((view.config.clone(), view.revision)));
     }
 
-    /// Note the config this app just sent, before adopting the view its write answered with.
-    pub fn sent(mut self, config: config::AppConfig) {
-        let revision = self.0.peek().as_ref().map_or(0, |(_, revision)| *revision);
-        self.0.set(Some((config, revision)));
+    /// Acknowledge a save without rolling back a newer event or an edit made during the request.
+    pub fn acknowledge(
+        mut self,
+        mut local: Signal<config::AppConfig>,
+        sent: &config::AppConfig,
+        view: &api::ConfigView,
+    ) {
+        let (daemon, revision) = self
+            .0
+            .peek()
+            .clone()
+            .filter(|(_, revision)| *revision > view.revision)
+            .unwrap_or_else(|| (view.config.clone(), view.revision));
+        let current = local.peek().clone();
+        if let Some((next, _)) = moved(&current, sent, &daemon) {
+            local.set(next);
+        }
+        self.0.set(Some((daemon, revision)));
     }
 
     /// Take into `local` every field a newer `view` moved since the baseline, keeping edits not yet sent.
@@ -35,7 +59,7 @@ impl ConfigBaseline {
         let Some((baseline, revision)) = self.0.peek().clone() else {
             return;
         };
-        // A read that left before a later write answered is older than what the app holds; a daemon that predates revisions sends 0 and is taken as is.
+
         if view.revision != 0 && view.revision <= revision {
             return;
         }
@@ -79,7 +103,9 @@ fn moved(
         if SKIPPED.contains(&key.as_str()) || baseline.get(&key) == Some(&value) {
             continue;
         }
-        local.insert(key.clone(), value.clone());
+        if local.get(&key) == baseline.get(&key) {
+            local.insert(key.clone(), value.clone());
+        }
         baseline.insert(key, value);
         changed = true;
     }
@@ -99,6 +125,17 @@ mod tests {
             prefer_local_lyrics: lyrics,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_conflict_keeps_the_unsent_edit_while_advancing_the_baseline() {
+        let baseline = config(4, false);
+        let local = config(5, false);
+        let daemon = config(6, true);
+        let (next, base) = moved(&local, &baseline, &daemon).expect("remote change");
+        assert_eq!(next.crossfade_seconds, 5);
+        assert!(next.prefer_local_lyrics);
+        assert_eq!(base.crossfade_seconds, 6);
     }
 
     #[test]

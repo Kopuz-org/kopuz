@@ -85,10 +85,6 @@ pub(crate) fn spawn(
     let join = std::thread::Builder::new()
         .name(format!("kopuz-decode-{token}"))
         .spawn(move || {
-            // Symphonia can panic on malformed streams (probe and demux alike).
-            // A dying thread must still report, or the load never resolves and
-            // the session hangs; the seek path additionally recovers panics in
-            // place (see seek_reader).
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 run(token, factory, &msg_tx, &cmd_rx)
             }));
@@ -175,11 +171,7 @@ fn run(
         return fail("no supported audio tracks found".to_string());
     };
     let mut track_id = track.id;
-    // YouTube Music WebM/Opus streams reach the codec layer with channels
-    // empty — symphonia's matroska demuxer doesn't always propagate it, and
-    // both the built-in Opus decoder and the libopus adapter then bail with
-    // "channels required." Parse OpusHead from extra_data, or fall back to
-    // stereo at 48 kHz.
+
     let Some(audio_params) = audio_params_for_track(track) else {
         return fail("no audio codec parameters".to_string());
     };
@@ -207,8 +199,6 @@ fn run(
         replay_gain: replaygain::from_format(format.as_mut()),
     });
 
-    // Wait for the actor's decision. A superseded load simply drops our
-    // command sender, which lands here as an error → exit.
     let mut output = match cmd_rx.recv() {
         Ok(WorkerCmd::Start {
             producer,
@@ -241,10 +231,6 @@ fn run(
         _ => return,
     };
 
-    // A post-EOF seek on a Matroska/WebM stream can't be serviced in place;
-    // rebuild the reader from the buffered bytes and carry on. Local macros so
-    // the reassignment of `format`/`track_id` and the `continue` land in the
-    // decode loop's own scope.
     macro_rules! reprobe_or_fail {
         ($target:expr) => {
             match reprobe_from_buffer(format, &hint, decoder.as_mut(), $target) {
@@ -502,16 +488,11 @@ fn write_all(
     let mut offset = 0;
     while offset < samples.len() {
         if let Some(change) = drain_commands(cmd_rx, output, format, decoder, track_id) {
-            // On seek the rest of this pre-seek block is garbage — drop it.
             return Some(change);
         }
 
         let available = output.producer.slots().min(samples.len() - offset);
         if available == 0 {
-            // A full ring is the decode steady state. Block on the command
-            // channel with a coarse timeout instead of spin-sleeping, so a
-            // Seek/Stop wakes the worker at once; the timeout is safe against
-            // the 1-2s ring (it can't underrun in 100ms).
             match cmd_rx.recv_timeout(Duration::from_millis(100)) {
                 Ok(cmd) => {
                     let mut seeked = false;
@@ -521,7 +502,6 @@ fn write_all(
                         return Some(change);
                     }
                     if seeked {
-                        // The rest of this pre-seek block is garbage — drop it.
                         return Some(FlowChange::Seeked);
                     }
                 }
@@ -552,7 +532,7 @@ fn seek_reader(
         time,
         track_id: Some(track_id),
     };
-    // Symphonia demuxers can panic on malformed streams mid-seek.
+
     let seek_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         format.seek(SeekMode::Coarse, seek_to)
     }));
@@ -561,9 +541,7 @@ fn seek_reader(
             decoder.reset();
             SeekOutcome::Done
         }
-        // Matroska/WebM (all YouTube audio) can't seek once the reader has read
-        // past EOF — it has left the Segment element. Signal a re-probe from
-        // the buffered source rather than stranding the seek in silence.
+
         Ok(Err(e)) => {
             tracing::warn!(error = %e, "seek error; re-probing from buffered source");
             SeekOutcome::NeedsReprobe(target)
@@ -602,7 +580,7 @@ fn reprobe_from_buffer(
         .first_track(TrackType::Audio)
         .map(|t| t.id)
         .ok_or_else(|| "no audio track after re-probe".to_string())?;
-    // The fresh reader is inside the Segment; this seek succeeds.
+
     seek_reader(format.as_mut(), decoder, track_id, target);
     Ok((format, track_id))
 }
@@ -652,10 +630,6 @@ fn audio_buf_to_f32_interleaved<'a>(
     target_sample_rate: u32,
     scratch: &'a mut Scratch,
 ) -> &'a mut [f32] {
-    // Resample against the packet's own declared rate rather than a rate guessed
-    // at probe time: some containers report channels but not sample rate up
-    // front (leaving the probe value unknown), and a chained stream can change
-    // rate mid-playback. Both are only knowable per decoded buffer.
     let source_sample_rate = buf.spec().rate();
     let src_chans = buf.num_planes().max(1);
 
@@ -672,9 +646,6 @@ fn audio_buf_to_f32_interleaved<'a>(
         );
     }
 
-    // Branch so each resample reads/writes distinct scratch fields directly —
-    // routing the source through a `&[f32]` variable would borrow-conflict with
-    // the `&mut resampled` output.
     if source_sample_rate != 0 && source_sample_rate != target_sample_rate {
         let src = if channels_converted {
             &scratch.converted
@@ -707,7 +678,6 @@ fn convert_channels(samples: &[f32], src_channels: usize, dst_channels: usize, o
             if ch < src_channels {
                 out.push(samples[src_offset + ch]);
             } else if src_channels == 1 {
-                // Mono to multi: duplicate
                 out.push(samples[src_offset]);
             } else {
                 out.push(0.0);

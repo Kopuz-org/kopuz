@@ -10,6 +10,8 @@
 //! a reorder. Resolving a key to that track is this service's job, not a
 //! caller's.
 
+use crate::error::{db_error, source_error};
+
 use std::sync::Arc;
 
 use api::{ApiError, PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder, Table};
@@ -19,22 +21,6 @@ use crate::session::SessionHandle;
 pub struct PlaylistService {
     db: db::Db,
     session: SessionHandle,
-}
-
-fn source_error(error: server::source::SourceError) -> ApiError {
-    use api::ErrorCode;
-    use server::source::SourceError;
-    match &error {
-        SourceError::Unsupported(what) => ApiError::unsupported(*what),
-        SourceError::Auth => ApiError::new(ErrorCode::SourceAuthExpired, error.to_string()),
-        SourceError::Connectivity => ApiError::new(ErrorCode::SourceUnreachable, error.to_string()),
-        SourceError::InvalidInput(message) => ApiError::invalid_input(message.clone()),
-        SourceError::Backend(message) => ApiError::internal(message.clone()),
-    }
-}
-
-fn db_error(error: db::DbError) -> ApiError {
-    ApiError::internal(format!("database error: {error}"))
 }
 
 impl PlaylistService {
@@ -57,8 +43,7 @@ impl PlaylistService {
             .load_playlists(&config.active_source)
             .await
             .map_err(db_error)?;
-        // A playlist with no cover of its own borrows its first track's, so
-        // those tracks are fetched once for the whole catalog.
+
         let first_keys: Vec<String> = store
             .playlists
             .iter()
@@ -160,7 +145,7 @@ impl PlaylistService {
             .await
             .map_err(source_error)?;
         self.session.invalidate(Table::Playlists);
-        // A deleted playlist leaves every folder that held it.
+
         self.session.invalidate(Table::Folders);
         Ok(())
     }
@@ -226,37 +211,27 @@ impl PlaylistService {
             .db
             .meta_get("pl_pull", id)
             .await
-            .ok()
-            .flatten()
+            .map_err(db_error)?
             .and_then(|raw| raw.parse().ok())
             .unwrap_or(0);
         if last <= now && now - last < 15 * 60 {
             return Ok(());
         }
 
-        // One epoch for the walk: pages stamp their rows with it and the
-        // closing sweep drops whatever the remote no longer lists.
         let epoch = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|elapsed| elapsed.as_millis() as i64)
             .unwrap_or_default();
         let mut cursor: Option<String> = None;
         let mut position: i64 = 0;
-        let mut completed = true;
+        let mut cursors = std::collections::HashSet::new();
 
         loop {
-            let page = match source.fetch_playlist_entries_page(id, cursor.clone()).await {
-                Ok(page) => page,
-                Err(error) => {
-                    tracing::warn!(%error, playlist = id, "playlist page fetch failed");
-                    completed = false;
-                    break;
-                }
-            };
+            let page = source
+                .fetch_playlist_entries_page(id, cursor.clone())
+                .await
+                .map_err(source_error)?;
             let next = page.next.clone();
-            if page.tracks.is_empty() {
-                break;
-            }
             let page_refs: Vec<reader::PlaylistEntry> = page
                 .tracks
                 .iter()
@@ -264,26 +239,36 @@ impl PlaylistService {
                 .filter(|entry| !entry.key.is_empty())
                 .collect();
             for chunk in page.tracks.chunks(100) {
-                let _ = source.upsert_tracks(chunk).await;
+                source.upsert_tracks(chunk).await.map_err(source_error)?;
             }
-            let _ = source
+            source
                 .upsert_playlist_tracks_page(id, &page_refs, position, epoch)
-                .await;
+                .await
+                .map_err(source_error)?;
             position += page_refs.len() as i64;
             self.session.invalidate(Table::Tracks);
             self.session.invalidate(Table::Playlists);
             match next {
-                Some(next) => cursor = Some(next),
+                Some(next) => {
+                    if !cursors.insert(next.clone()) {
+                        return Err(ApiError::internal("playlist pagination repeated a cursor"));
+                    }
+                    cursor = Some(next);
+                }
                 None => break,
             }
         }
 
-        if completed {
-            let _ = source.sweep_playlist_tracks(id, epoch).await;
-            let _ = source.set_meta("pl_pull", id, &now.to_string()).await;
-            self.session.invalidate(Table::Playlists);
-            self.session.invalidate(Table::Tracks);
-        }
+        source
+            .sweep_playlist_tracks(id, epoch)
+            .await
+            .map_err(source_error)?;
+        source
+            .set_meta("pl_pull", id, &now.to_string())
+            .await
+            .map_err(source_error)?;
+        self.session.invalidate(Table::Playlists);
+        self.session.invalidate(Table::Tracks);
         Ok(())
     }
 
@@ -342,18 +327,25 @@ impl PlaylistService {
     ) -> Result<api::JobRef, ApiError> {
         let service = self.clone();
         runner.start(api::JobKind::PlaylistSync, move |ctx| async move {
-            let source = service.config().active_source;
-            let result = service.sync(&ctx).await;
+            let source = service.active_source();
+            let result = service.sync(&ctx, &source).await;
             if result.is_ok() && !ctx.cancelled() {
-                crate::auto_sync::mark_synced(&service.db, api::JobKind::PlaylistSync, &source)
-                    .await;
+                crate::auto_sync::mark_synced(
+                    &service.db,
+                    api::JobKind::PlaylistSync,
+                    source.source(),
+                )
+                .await;
             }
             result
         })
     }
 
-    async fn sync(&self, ctx: &crate::jobs::JobCtx) -> Result<(), ApiError> {
-        let source = self.active_source();
+    async fn sync(
+        &self,
+        ctx: &crate::jobs::JobCtx,
+        source: &server::source::ActiveSource,
+    ) -> Result<(), ApiError> {
         if !source.capabilities().sync {
             return Err(ApiError::unsupported(
                 "the active source has no playlist sync",
@@ -361,7 +353,7 @@ impl PlaylistService {
         }
         let existing = self
             .db
-            .load_playlists(&self.config().active_source)
+            .load_playlists(source.source())
             .await
             .map_err(db_error)?
             .playlists;
@@ -371,21 +363,20 @@ impl PlaylistService {
         let total = metas.len() as u64;
 
         for meta in &metas {
-            // A manually chosen cover is the user's, not the server's, so it
-            // survives the refresh.
             let existing_cover = existing
                 .iter()
                 .find(|playlist| playlist.id == meta.id)
                 .and_then(|playlist| playlist.cover_path.clone())
                 .map(|path| path.to_string_lossy().into_owned());
-            let _ = source
+            source
                 .upsert_playlist_meta(
                     &meta.id,
                     &meta.name,
                     existing_cover.as_deref(),
                     meta.image_tag.as_deref(),
                 )
-                .await;
+                .await
+                .map_err(source_error)?;
         }
         self.session.invalidate(Table::Playlists);
 
@@ -400,31 +391,8 @@ impl PlaylistService {
                 Some(total),
                 None,
             );
-            let entries = source
-                .fetch_playlist_entries(&meta.id)
-                .await
-                .unwrap_or_default();
-            let track_keys: Vec<reader::PlaylistEntry> = entries
-                .iter()
-                .map(reader::PlaylistEntry::from_track)
-                .filter(|entry| !entry.key.is_empty())
-                .collect();
-            if source
-                .set_playlist_tracks(&meta.id, &track_keys)
-                .await
-                .is_ok()
-            {
-                self.session.invalidate(Table::Playlists);
-            }
-            // Playlists overlap, so a track is only written the first time it
-            // is seen across the whole walk.
-            let fresh: Vec<reader::Track> = entries
-                .into_iter()
-                .filter(|track| seen.insert(track.id.clone()))
-                .collect();
-            for chunk in fresh.chunks(100) {
-                let _ = source.upsert_tracks(chunk).await;
-            }
+            sync_entries(source.as_ref(), &meta.id, &mut seen).await?;
+            self.session.invalidate(Table::Playlists);
             self.session.invalidate(Table::Tracks);
         }
 
@@ -435,10 +403,159 @@ impl PlaylistService {
             .iter()
             .filter(|playlist| !metas.iter().any(|meta| meta.id == playlist.id))
         {
-            let _ = source.delete_playlist(&stale.id).await;
+            source
+                .delete_playlist(&stale.id)
+                .await
+                .map_err(source_error)?;
         }
         self.session.invalidate(Table::Tracks);
         self.session.invalidate(Table::Playlists);
         Ok(())
+    }
+}
+
+async fn sync_entries(
+    source: &dyn server::source::MediaSource,
+    id: &str,
+    seen: &mut std::collections::HashSet<reader::TrackId>,
+) -> Result<(), ApiError> {
+    let entries = source
+        .fetch_playlist_entries(id)
+        .await
+        .map_err(source_error)?;
+    let track_keys: Vec<reader::PlaylistEntry> = entries
+        .iter()
+        .map(reader::PlaylistEntry::from_track)
+        .filter(|entry| !entry.key.is_empty())
+        .collect();
+
+    let fresh: Vec<reader::Track> = entries
+        .into_iter()
+        .filter(|track| seen.insert(track.id.clone()))
+        .collect();
+    for chunk in fresh.chunks(100) {
+        source.upsert_tracks(chunk).await.map_err(source_error)?;
+    }
+    source
+        .set_playlist_tracks(id, &track_keys)
+        .await
+        .map_err(source_error)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sync_entries;
+    use server::source::{AuthOutcome, Capabilities, MediaSource, SourceError, StreamInfo};
+
+    #[derive(Clone, Copy)]
+    enum Reply {
+        FetchFailure,
+        WriteFailure,
+        Empty,
+    }
+
+    struct Source {
+        inner: Box<dyn MediaSource>,
+        reply: Reply,
+    }
+
+    #[async_trait::async_trait]
+    impl MediaSource for Source {
+        fn source(&self) -> &config::Source {
+            self.inner.source()
+        }
+        fn db(&self) -> &db::Db {
+            self.inner.db()
+        }
+        fn capabilities(&self) -> Capabilities {
+            self.inner.capabilities()
+        }
+        async fn add_to_playlist(
+            &self,
+            id: &str,
+            keys: &[String],
+        ) -> Result<Vec<String>, SourceError> {
+            self.inner.add_to_playlist(id, keys).await
+        }
+        async fn create_playlist(
+            &self,
+            name: &str,
+            keys: &[String],
+        ) -> Result<String, SourceError> {
+            self.inner.create_playlist(name, keys).await
+        }
+        async fn remove_from_playlist(
+            &self,
+            id: &str,
+            track: &reader::Track,
+            position: usize,
+        ) -> Result<(), SourceError> {
+            self.inner.remove_from_playlist(id, track, position).await
+        }
+        async fn resolve_stream(&self, key: &str) -> Result<StreamInfo, SourceError> {
+            self.inner.resolve_stream(key).await
+        }
+        async fn validate(&self) -> AuthOutcome {
+            self.inner.validate().await
+        }
+        async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
+            self.inner.fetch_favorites().await
+        }
+        async fn push_favorite(&self, key: &str, on: bool) -> Result<(), SourceError> {
+            self.inner.push_favorite(key, on).await
+        }
+        async fn fetch_playlist_entries(&self, _: &str) -> Result<Vec<reader::Track>, SourceError> {
+            match self.reply {
+                Reply::FetchFailure => Err(SourceError::Connectivity),
+                Reply::Empty => Ok(Vec::new()),
+                Reply::WriteFailure => Ok(vec![
+                    serde_json::from_value(serde_json::json!({
+                        "id": {"Local": "/new.flac"}, "album_id": "album", "title": "New",
+                        "artist": "Artist", "album": "Album", "duration": 60, "khz": 44,
+                        "track_number": null, "disc_number": null
+                    }))
+                    .expect("track"),
+                ]),
+            }
+        }
+        async fn upsert_tracks(&self, tracks: &[reader::Track]) -> Result<(), SourceError> {
+            match self.reply {
+                Reply::WriteFailure => Err(SourceError::Backend("write failed".into())),
+                _ => self.inner.upsert_tracks(tracks).await,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_fetch_or_write_preserves_membership_but_successful_empty_clears_it() {
+        for reply in [Reply::FetchFailure, Reply::WriteFailure, Reply::Empty] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let database = db::init(&dir.path().join("playlist.db")).await.expect("db");
+            let source = Source {
+                inner: server::source::local(database.clone(), config::Source::default()),
+                reply,
+            };
+            let id = source
+                .create_playlist("Saved", &["/old.flac".into()])
+                .await
+                .expect("playlist");
+            let result = sync_entries(&source, &id, &mut Default::default()).await;
+            let entries = database
+                .playlist_entries(source.source(), &id)
+                .await
+                .expect("entries");
+            match reply {
+                Reply::Empty => {
+                    assert!(result.is_ok());
+                    assert!(entries.is_empty());
+                }
+                _ => {
+                    assert!(result.is_err());
+                    assert_eq!(entries.len(), 1);
+                    assert_eq!(entries[0].key, "/old.flac");
+                }
+            }
+        }
     }
 }

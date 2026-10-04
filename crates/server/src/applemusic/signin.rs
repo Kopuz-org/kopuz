@@ -56,8 +56,6 @@ pub async fn launch_signin_and_extract(
         .await
         .map_err(|e| format!("mkdir am-profile: {e}"))?;
 
-    // One lookup for both cases — it resolves a host-spawn command line itself
-    // when running under Flatpak.
     let bin = ip::find_browser_bin(browser, Some(profile.as_path()))
         .await
         .ok_or_else(|| {
