@@ -312,9 +312,6 @@ pub fn FavoritesBody(
                 }
             }
 
-
-
-
             if *is_syncing.read() && caps().favorites_sync == api::FavoritesSyncMode::Instant {
                 div {
                     class: "flex items-center gap-2 text-slate-400 text-sm mb-4",
@@ -322,10 +319,6 @@ pub fn FavoritesBody(
                     span { "{i18n::t(\"syncing_with_server\")}" }
                 }
             }
-
-
-
-
 
             {
                 let is_paginated_sync =
@@ -374,9 +367,6 @@ pub fn FavoritesBody(
                     }
                 } else {
                     {
-
-
-
 
                         let anonymous = active_source_info
                             .read()

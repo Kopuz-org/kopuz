@@ -1,9 +1,5 @@
-//! Legacy-JSON → SQLite importer tests (issue #347, step 3).
-//!
-//! `imports_synthetic_fixture` runs in CI against hand-built fixtures. `smoke_real`
-//! is `#[ignore]` and imports a copy of a real `~/.config/kopuz` when
-//! `KOPUZ_IMPORT_DIR` points at one — handy for validating against live data
-//! without committing it.
+//! Legacy JSON import using synthetic fixtures.
+//! The ignored `smoke_real` test reads a copied config directory from `KOPUZ_IMPORT_DIR`.
 
 use std::path::{Path, PathBuf};
 

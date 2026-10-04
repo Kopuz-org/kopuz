@@ -1,4 +1,4 @@
-//! Batch upsert + scan-reconcile prune (issue #347, step 7).
+//! Batch upserts and scan reconciliation.
 
 use std::path::PathBuf;
 

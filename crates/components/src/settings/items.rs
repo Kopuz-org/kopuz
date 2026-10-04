@@ -46,10 +46,6 @@ pub fn SettingItem(
             }
             if locked {
 
-
-
-
-
                 div {
                     class: "opacity-50 pointer-events-none select-none",
                     inert: true,

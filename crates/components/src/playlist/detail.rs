@@ -85,8 +85,6 @@ pub fn PlaylistDetail(
                 {
                     let pid = pid_for_cover.clone();
 
-
-
                     spawn(async move {
                         let Some(file) = AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
@@ -118,8 +116,6 @@ pub fn PlaylistDetail(
             on_selection_delete: move |keys: Vec<String>| {
                 hooks::library_actions::delete_tracks(keys, caps.delete_from_disk);
             },
-
-
 
             on_remove_from_playlist: move |idx: usize| {
                 hooks::playlist_actions::remove_track(pid_for_remove.clone(), idx);

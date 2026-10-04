@@ -1,10 +1,7 @@
-//! Favorites reconciler (issue #347, step 9): push-before-pull sync between
-//! the DB's per-server favorites and the remote, dispatched through the
-//! [`MediaSource`](crate::source::MediaSource) backend so it's service-agnostic.
+//! Push-before-pull favorites reconciliation through [`MediaSource`].
 //!
-//! Push first so a just-toggled like isn't reverted by the pull; pending rows
-//! that fail to push stay pending and are retried next cycle. The pull replaces
-//! the clean set (dirty rows survive — see `replace_favorites_clean`).
+//! Pending writes are pushed first so a pull cannot revert a recent toggle.
+//! Failed writes remain pending; the pull replaces only clean favorites.
 
 use crate::source::{AuthOutcome, MediaSource, SourceError};
 

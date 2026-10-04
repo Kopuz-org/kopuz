@@ -37,7 +37,7 @@ pub fn url(artwork: Option<&ArtworkRef>, size: Size) -> Option<CoverUrl> {
 /// user's own custom background and a playlist's picked cover still are.
 pub fn stored(value: Option<&str>, size: Size) -> Option<CoverUrl> {
     let stored = value.map(str::trim).filter(|value| !value.is_empty())?;
-    Some(utils::cover_url_from_string(match size {
+    Some(CoverUrl::from(match size {
         Size::Full => at_full_size(stored),
         Size::Thumb => stored.to_string(),
     }))

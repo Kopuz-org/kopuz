@@ -1,21 +1,11 @@
-//! Playlist mutations, from anywhere in the UI.
-//!
-//! Every "add to playlist" menu in the app used to spell the same thing out:
-//! take the active source, call it, and bump a generation by hand if it
-//! worked. The daemon owns the operation and reports the change itself, so
-//! what is left at a call site is which playlist and which tracks.
-//!
-//! A failure toasts rather than being swallowed: the previous inline versions
-//! only bumped `if …is_ok()`, so a rejected write looked like nothing
-//! happening at all.
+//! Playlist mutations through the daemon API, with errors shown as toasts.
 
 use dioxus::prelude::*;
 
 use crate::api::consume_api;
 use crate::toast::toast_error;
 
-/// Add tracks to an existing playlist. Empty keys are a no-op, matching the
-/// old call sites, which all guarded on it.
+/// Add tracks to an existing playlist. Empty keys are a no-op.
 pub fn add_tracks(playlist_id: String, keys: Vec<String>) {
     if keys.is_empty() {
         return;

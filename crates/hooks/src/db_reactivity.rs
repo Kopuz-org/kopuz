@@ -1,14 +1,7 @@
-//! Reactive plumbing over the DB (issue #347, step 5).
+//! Per-table generation counters for invalidating query hooks.
 //!
-//! Per-table generation counters let DB query hooks ([`use_resource`]-based, in
-//! `use_db_queries`) re-run when their table changes, without holding the data
-//! in a giant signal. A writer calls [`Generations::bump`] (or, for streaming
-//! inserts, [`Generations::bump_coalesced`]) after committing; any query keyed on
-//! that table's counter re-runs.
-//!
-//! Coalescing matters for bulk writes: a 20k-row scan that bumped on every batch
-//! would re-render the UI thousands of times. `bump_coalesced` instead sets a
-//! dirty flag that a single ~150ms ticker flushes, capping refreshes at ~6/sec.
+//! Queries subscribe through [`Generations::generation`]. Bulk invalidations use
+//! [`Generations::bump_coalesced`], flushed every 150 ms to limit UI refreshes.
 
 use dioxus::prelude::*;
 
@@ -96,7 +89,7 @@ pub fn use_generations_provider() -> Generations {
 
     use_future(move || async move {
         loop {
-            utils::sleep(std::time::Duration::from_millis(150)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             gens.flush();
         }
     });

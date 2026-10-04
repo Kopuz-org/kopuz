@@ -187,7 +187,6 @@ pub fn SourceSwitcher(
                             button {
                                 onclick: move |_| {
 
-
                                     if let Some(SettingsAnchor(mut anchor)) =
                                         try_consume_context::<SettingsAnchor>()
                                     {

@@ -269,7 +269,7 @@ pub fn EqualizerPanel(
                                             progress,
                                         ));
                                         if step < STEPS {
-                                            utils::sleep(std::time::Duration::from_millis(FRAME_MS)).await;
+                                            tokio::time::sleep(std::time::Duration::from_millis(FRAME_MS)).await;
                                         }
                                     }
                                 });

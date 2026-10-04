@@ -317,10 +317,8 @@ impl PlaylistService {
 impl PlaylistService {
     /// Pull the server's playlists and their contents.
     ///
-    /// Listing first so the tiles appear, then entries per playlist, then a
-    /// full-replace: a playlist the server no longer has is dropped. Ported
-    /// from the page that used to run this in a `use_effect`, where it stopped
-    /// the moment the user navigated away.
+    /// Publish the listing before fetching entries; drop absent playlists
+    /// after the full sync succeeds.
     pub fn spawn_sync(
         self: &Arc<Self>,
         runner: &crate::jobs::JobRunner,

@@ -1,8 +1,4 @@
-//! The `MediaSource` facade (issue #347, Phase 2) over a real temp DB. Exercises
-//! the local impl end-to-end through the public trait — `create_playlist` /
-//! `add_to_playlist` / `set_favorite` route to the DB and read back — so the
-//! facade's wiring is covered without a GUI. The remote impl needs a live
-//! server and is verified against real accounts instead.
+//! Local media-source operations tested through the public trait against SQLite.
 
 use std::path::PathBuf;
 

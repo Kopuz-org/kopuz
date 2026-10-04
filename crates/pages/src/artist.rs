@@ -310,7 +310,6 @@ pub fn Artist(
                         onscroll: move |e| crate::scroll_persist::save("artists", e.scroll_top()),
                         div {
 
-
                             class: if *artists_view_mode.read() == AlbumViewMode::List { "view-list" } else { "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8" },
                             for artist in artists() {
                                 {
@@ -576,8 +575,6 @@ pub fn Artist(
                                 description: String::new(),
                                 cover_url: artist_cover(),
                                 tracks: artist_tracks(),
-
-
 
                                 on_cover_click: move |_| {
                                     #[cfg(not(target_os = "android"))]

@@ -974,7 +974,7 @@ pub fn LyricsView(
                         sleep_duration_ms = 50;
                     }
 
-                    utils::sleep(std::time::Duration::from_millis(sleep_duration_ms)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(sleep_duration_ms)).await;
                 }
             }
         }

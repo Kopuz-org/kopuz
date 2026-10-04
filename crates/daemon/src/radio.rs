@@ -1,10 +1,5 @@
-//! Internet radio: the station registry, station search, and pins.
-//!
-//! The registry used to be built in the UI process, which meant importing
-//! registry URLs, unwrapping stream playlists and holding station manifests
-//! all happened in a frontend -- and only in the one frontend that did it.
-//! It lives here now, rebuilt from config whenever the registry list or the
-//! pins change, and the session plays a station by id.
+//! Internet radio registry, search, and pins. The registry is rebuilt when its
+//! configuration changes; the session plays stations by id.
 
 use std::sync::Arc;
 

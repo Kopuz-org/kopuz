@@ -1,14 +1,5 @@
-//! Configured sources, their credentials, and switching between them.
-//!
-//! This is where a media source is constructed, which is the whole point: a
-//! frontend used to build one, hand it to the daemon, and hold every token it
-//! took to sign in. Now it reads rows and calls methods, and no credential
-//! ever reaches it -- `SourceInfo` says whether a source is authenticated,
-//! never with what.
-//!
-//! Browser sign-in lives here too. It spawns a browser, drives an isolated
-//! profile or a loopback listener, and ends holding a secret, which makes it
-//! system-level work regardless of who triggered it.
+//! Source construction, credentials, switching, and browser sign-in.
+//! Clients receive `SourceInfo` with authentication status, never credentials.
 
 use crate::error::db_error;
 

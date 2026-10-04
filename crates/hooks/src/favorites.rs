@@ -1,9 +1,5 @@
-//! Favourite toggling.
-//!
-//! The optimistic write, the background push and the revert-on-rejection all
-//! live in the daemon now: `set_favorite` records the change, reflects it, and
-//! pushes to the remote, reverting if the remote refuses. What is left here is
-//! which track, and reporting a refusal in words the person can act on.
+//! Favorite commands and error notifications. The daemon owns optimistic updates
+//! and remote reconciliation.
 
 use dioxus::prelude::*;
 

@@ -1,6 +1,4 @@
-//! Batch upserts + scan reconcile (issue #347, step 7). Each call commits as one
-//! transaction so a streaming scan/sync batch lands atomically — a mid-scan quit
-//! keeps everything written so far (no torn whole-file write).
+//! Batch upserts and scan reconciliation. Each batch commits in one transaction.
 
 use reader::models::{Album, Track};
 use sqlx::SqlitePool;

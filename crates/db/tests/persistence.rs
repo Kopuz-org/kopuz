@@ -1,6 +1,4 @@
-//! Targeted persistence ops (issue #347): playlists, favorites, and the queue
-//! are written through scoped ops and read back, and active-server writes
-//! never touch another server's rows.
+//! Scoped writes for playlists, favorites, queues, and active-server state.
 
 use std::path::PathBuf;
 

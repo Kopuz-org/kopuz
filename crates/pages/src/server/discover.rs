@@ -303,8 +303,6 @@ fn SongListShelf(
                                         on_play: move |_| {
                                             current_playing_key.set(Some(key_for_play.clone()));
 
-
-
                                             now_playing.set(None);
                                             ctrl.set_queue_keys(
                                                 keys.clone(),
@@ -552,7 +550,6 @@ fn Card(
                 let api = hooks::consume_api();
                 spawn(async move {
 
-
                     tokio::time::sleep(Duration::from_millis(250)).await;
                     if !*hover_armed.peek() {
                         return;
@@ -646,7 +643,7 @@ fn SongCard(item: CatalogItem, track: TrackInfo) -> Element {
     let thumbnail = hooks::artwork::url(item.artwork.as_ref(), hooks::artwork::Size::Thumb);
     let subtitle = item.subtitle.clone().unwrap_or_default();
     let key = track.key.clone();
-    let start_radio = components::track_row::radio_handler(key.clone());
+    let start_radio = components::radio_actions::track_radio_handler(key.clone());
 
     let is_this_source = now_playing.read().as_deref() == Some(key.as_str());
     let is_playing = *ctrl.is_playing.read();
