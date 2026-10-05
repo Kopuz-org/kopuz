@@ -24,23 +24,103 @@ fn slugify_album_key(value: &str) -> String {
         .replace(|c: char| !c.is_alphanumeric() && c != '_', "")
 }
 
-pub fn make_album_id(album: &str, grouping_key: &str) -> String {
-    let album_key = slugify_album_key(album.trim());
-    let grouping_key = slugify_album_key(grouping_key.trim());
-
-    if !album_key.is_empty() {
-        return format!("alb2_{}_{}_{}", grouping_key.len(), grouping_key, album_key);
-    }
-
-    if grouping_key.is_empty() {
-        "alb2_unknown".to_string()
-    } else {
-        format!("alb2_unknown_{}_{}", grouping_key.len(), grouping_key)
+/// A local album: its title and album artist, else its title and folder; a per-file MBID would split part-tagged releases.
+pub fn make_album_id(album: &str, album_artist: Option<&str>, track_path: &Path) -> String {
+    let title = title_key(album.trim());
+    let artist = album_artist
+        .map(|artist| title_key(artist.trim()))
+        .filter(|artist| !artist.is_empty());
+    match (title.is_empty(), artist) {
+        (false, Some(artist)) => format!("alb3_{}_{artist}_{title}", artist.len()),
+        (false, None) => format!("alb3_dir_{}_{title}", folder_key(track_path)),
+        (true, _) => format!("alb3_dir_{}", folder_key(track_path)),
     }
 }
 
+/// The credit an album with no album artist tag gets when its tracks name more than one artist.
+pub const VARIOUS_ARTISTS: &str = "Various Artists";
+
+/// Whether an album id came from its folder because no file carried an album artist.
+pub(crate) fn is_folder_album(album_id: &str) -> bool {
+    album_id.starts_with("alb3_dir_")
+}
+
+/// Who an album is credited to: its album artist tag, else the one artist all its tracks share, else [`VARIOUS_ARTISTS`].
+pub fn album_credit<'a>(album: &Album, tracks: impl IntoIterator<Item = &'a Track>) -> String {
+    if !is_folder_album(&album.id) {
+        return album.artist.clone();
+    }
+    let mut artists = tracks.into_iter().map(|track| track.artist.trim());
+    let Some(first) = artists.next() else {
+        return album.artist.clone();
+    };
+    if artists.all(|artist| artist.eq_ignore_ascii_case(first)) {
+        first.to_string()
+    } else {
+        VARIOUS_ARTISTS.to_string()
+    }
+}
+
+/// A title's slug, or a hash of it when it is all punctuation ("÷", "+") and the slug would come out empty.
+pub(crate) fn title_key(title: &str) -> String {
+    let slug = slugify_album_key(title);
+    if slug.is_empty() && !title.is_empty() {
+        format!("h{}", fnv(title.as_bytes()))
+    } else {
+        slug
+    }
+}
+
+fn fnv(bytes: &[u8]) -> String {
+    let hash = bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+    });
+    format!("{hash:016x}")
+}
+
+/// The album folder a track sits in, a disc subfolder counting as its parent's.
+pub(crate) fn album_folder(track_path: &Path) -> &Path {
+    let Some(parent) = track_path.parent() else {
+        return Path::new("");
+    };
+    match parent.file_name().and_then(|name| name.to_str()) {
+        Some(name) if super::utils::disc_of(name).is_some() => parent.parent().unwrap_or(parent),
+        _ => parent,
+    }
+}
+
+/// Whether an album id is a folder's alone because its files carry no album tag, so its title is only the folder's name.
+pub(crate) fn is_untitled_album(album_id: &str) -> bool {
+    album_id
+        .strip_prefix("alb3_dir_")
+        .is_some_and(|folder| !folder.contains('_'))
+}
+
+/// The title a file with no album tag takes: its album folder's name.
+fn folder_album_title(track_path: &Path) -> String {
+    album_folder(track_path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Unknown Album".to_string())
+}
+
+/// A slug would merge folders that differ only in punctuation, so the path is hashed (FNV-1a) instead.
+pub(crate) fn folder_key(track_path: &Path) -> String {
+    fnv(album_folder(track_path).to_string_lossy().as_bytes())
+}
+
 pub fn album_id_is_current(album_id: &str) -> bool {
-    album_id.starts_with("alb2_")
+    album_id.starts_with("alb3_")
+}
+
+/// Whether a scan can keep a track as stored: its album id is current, and an untagged file already carries its folder's title rather than an older "Unknown Album".
+pub(crate) fn track_is_current(track: &Track) -> bool {
+    album_id_is_current(&track.album_id)
+        && !(is_untitled_album(&track.album_id)
+            && track
+                .id
+                .local_path()
+                .is_some_and(|path| track.album != folder_album_title(path)))
 }
 
 fn select_best_picture(pictures: &[Picture]) -> Option<&Picture> {
@@ -122,14 +202,6 @@ pub fn extract_metadata(
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string);
 
-    let parent_path = track_path.parent().map(|p| p.to_string_lossy());
-    let grouping_key = album_title
-        .as_deref()
-        .and_then(|title| (!title.trim().is_empty()).then_some(()))
-        .map(|()| album_artist.as_deref().unwrap_or(&artist))
-        .or(parent_path.as_deref())
-        .unwrap_or(&artist);
-
     let title = tag
         .and_then(|t| t.title().map(|t| t.to_string()))
         .or_else(|| {
@@ -159,12 +231,16 @@ pub fn extract_metadata(
     Track {
         id: TrackId::Local(track_path.to_path_buf()),
         cover: None,
-        album_id: make_album_id(album_title.as_deref().unwrap_or(""), grouping_key),
+        album_id: make_album_id(
+            album_title.as_deref().unwrap_or(""),
+            album_artist.as_deref(),
+            track_path,
+        ),
         title,
         artist,
         artists,
         credits: Vec::new(),
-        album: album_title.unwrap_or_else(|| "Unknown Album".to_string()),
+        album: album_title.unwrap_or_else(|| folder_album_title(track_path)),
         khz: sample_rate,
         bitrate: bitrate_kbps,
         duration: properties.duration().as_secs()
@@ -444,21 +520,22 @@ pub fn read_with_symphonia(
     let album_title = find_symphonia_tag(&tags, |t| matches!(t, StandardTag::Album(_)), &["ALBUM"])
         .and_then(symphonia_tag_to_string);
 
-    let album_artist = find_symphonia_tag(
+    let tagged_album_artist = find_symphonia_tag(
         &tags,
         |t| matches!(t, StandardTag::AlbumArtist(_)),
         &["ALBUMARTIST"],
     )
     .and_then(symphonia_tag_to_string)
-    .filter(|value| !value.trim().is_empty())
-    .unwrap_or_else(|| artist.clone());
-
-    let parent_path = track_path.parent().map(|p| p.to_string_lossy());
-    let grouping_key = album_title
-        .as_deref()
-        .and_then(|title| (!title.trim().is_empty()).then_some(album_artist.as_str()))
-        .or(parent_path.as_deref())
-        .unwrap_or(&artist);
+    .filter(|value| !value.trim().is_empty());
+    let album_artist = tagged_album_artist
+        .clone()
+        .unwrap_or_else(|| artist.clone());
+    let musicbrainz_release_id = find_symphonia_tag(
+        &tags,
+        |t| matches!(t, StandardTag::MusicBrainzAlbumId(_)),
+        &["MUSICBRAINZ_ALBUMID"],
+    )
+    .and_then(symphonia_tag_to_string);
 
     let title = find_symphonia_tag(
         &tags,
@@ -481,12 +558,16 @@ pub fn read_with_symphonia(
     let track = Track {
         id: TrackId::Local(track_path.to_path_buf()),
         cover: None,
-        album_id: make_album_id(album_title.as_deref().unwrap_or(""), grouping_key),
+        album_id: make_album_id(
+            album_title.as_deref().unwrap_or(""),
+            tagged_album_artist.as_deref(),
+            track_path,
+        ),
         title,
         artist: artist.clone(),
         artists: vec![artist.clone()],
         credits: Vec::new(),
-        album: album_title.unwrap_or_else(|| "Unknown Album".to_string()),
+        album: album_title.unwrap_or_else(|| folder_album_title(track_path)),
         khz: sample_rate,
         bitrate: bitrate_kbps,
         duration,
@@ -504,12 +585,7 @@ pub fn read_with_symphonia(
         )
         .and_then(symphonia_tag_to_string)
         .and_then(|value| value.parse().ok()),
-        musicbrainz_release_id: find_symphonia_tag(
-            &tags,
-            |t| matches!(t, StandardTag::MusicBrainzAlbumId(_)),
-            &["MUSICBRAINZ_ALBUMID"],
-        )
-        .and_then(symphonia_tag_to_string),
+        musicbrainz_release_id,
         musicbrainz_recording_id: find_symphonia_tag(
             &tags,
             |t| matches!(t, StandardTag::MusicBrainzRecordingId(_)),
@@ -556,34 +632,123 @@ pub fn read_with_symphonia(
 mod tests {
     use super::*;
 
-    #[test]
-    fn album_ids_distinguish_artists_with_the_same_album_title() {
-        let yasar = make_album_id("Divane", "Yaşar");
-        let resul_dindar = make_album_id("Divane", "Resul Dindar");
-
-        assert_ne!(yasar, resul_dindar);
-        assert_eq!(yasar, make_album_id(" divane ", " YAŞAR "));
-        assert!(album_id_is_current(&yasar));
-        assert!(!album_id_is_current("alb_divane"));
+    /// The album id a file with these tags is filed under.
+    fn album_of(path: &str, tags: &[(ItemKey, &str)]) -> String {
+        let mut tag = Tag::new(lofty::tag::TagType::VorbisComments);
+        for (key, value) in tags {
+            tag.insert_text(*key, value.to_string());
+        }
+        extract_metadata(Some(&tag), &FileProperties::default(), Path::new(path), 0).album_id
     }
 
     #[test]
-    fn blank_album_artist_falls_back_to_track_artist_for_grouping() {
-        let mut tag = Tag::new(lofty::tag::TagType::Id3v2);
-        tag.insert_text(ItemKey::TrackArtist, "Track Artist".to_string());
-        tag.insert_text(ItemKey::AlbumTitle, "Shared Album".to_string());
-        tag.insert_text(ItemKey::AlbumArtist, "  \t".to_string());
+    fn an_untagged_file_takes_its_album_folder_as_the_title() {
+        let untagged =
+            |path: &str| extract_metadata(None, &FileProperties::default(), Path::new(path), 0);
+        let track = untagged("/music/Untagged/Syn Cole - Feel Good.flac");
+        assert_eq!(track.album, "Untagged");
+        assert_eq!(track.artist, "Unknown Artist");
+        assert!(
+            is_untitled_album(&track.album_id),
+            "no cover is looked up by the folder's name"
+        );
+        assert!(!is_untitled_album(&album_of(
+            "/music/Untagged/01.flac",
+            &[(ItemKey::AlbumTitle, "Hits")]
+        )));
+        assert_eq!(untagged("/music/Untagged/CD2/01.flac").album, "Untagged");
+    }
 
-        let track = extract_metadata(
-            Some(&tag),
-            &FileProperties::default(),
-            Path::new("/music/track.mp3"),
-            0,
+    #[test]
+    fn album_ids_distinguish_artists_with_the_same_album_title() {
+        let path = Path::new("/music/divane.flac");
+        let yasar = make_album_id("Divane", Some("Yaşar"), path);
+        let resul_dindar = make_album_id("Divane", Some("Resul Dindar"), path);
+
+        assert_ne!(yasar, resul_dindar);
+        assert_eq!(
+            yasar,
+            make_album_id(" divane ", Some(" YAŞAR "), Path::new("/elsewhere/d.flac"))
+        );
+        assert!(album_id_is_current(&yasar));
+        assert!(!album_id_is_current("alb2_6_yaşar_divane"));
+    }
+
+    #[test]
+    fn punctuation_only_titles_and_artists_keep_their_identity() {
+        let path = Path::new("/music/ed/x.flac");
+        let divide = make_album_id("÷", Some("Ed Sheeran"), path);
+        let multiply = make_album_id("×", Some("Ed Sheeran"), path);
+        assert_ne!(divide, multiply);
+        assert_ne!(divide, make_album_id("", Some("Ed Sheeran"), path));
+        assert_ne!(
+            make_album_id("Louden Up Now", Some("!!!"), path),
+            make_album_id("Louden Up Now", None, path),
+            "an all-punctuation album artist still counts"
+        );
+    }
+
+    /// Filing by each track's own artist split a compilation into one album per artist.
+    #[test]
+    fn a_compilation_without_an_album_artist_is_one_album() {
+        let ada = album_of(
+            "/music/Hits/01.flac",
+            &[(ItemKey::TrackArtist, "Ada"), (ItemKey::AlbumTitle, "Hits")],
+        );
+        let bo = album_of(
+            "/music/Hits/02.flac",
+            &[
+                (ItemKey::TrackArtist, "Bo"),
+                (ItemKey::AlbumTitle, "Hits"),
+                (ItemKey::AlbumArtist, "  \t"),
+            ],
+        );
+        let namesake = album_of(
+            "/music/Other Hits/01.flac",
+            &[(ItemKey::TrackArtist, "Ada"), (ItemKey::AlbumTitle, "Hits")],
         );
 
+        assert_eq!(ada, bo, "one folder, one title, one album");
+        assert_ne!(
+            ada, namesake,
+            "the same title in another folder is another album"
+        );
+    }
+
+    #[test]
+    fn a_release_tagged_with_its_mbid_on_some_tracks_stays_one_album() {
+        let tagged = album_of(
+            "/music/a/01.flac",
+            &[
+                (ItemKey::AlbumTitle, "Hits"),
+                (ItemKey::AlbumArtist, "Ada"),
+                (
+                    ItemKey::MusicBrainzReleaseId,
+                    "0b7d5fd4-2a5c-4bd2-8b3e-1c8f2e0d9a11",
+                ),
+            ],
+        );
+        let untagged = album_of(
+            "/music/a/02.flac",
+            &[(ItemKey::AlbumTitle, "Hits"), (ItemKey::AlbumArtist, "Ada")],
+        );
+
+        assert_eq!(tagged, untagged);
+    }
+
+    #[test]
+    fn disc_subfolders_belong_to_their_album_folder() {
+        let tags = [(ItemKey::TrackArtist, "Ada"), (ItemKey::AlbumTitle, "Hits")];
+        let one = album_of("/music/Hits/Disc 1/01.flac", &tags);
+        let two = album_of("/music/Hits/CD2/01.flac", &tags);
+        let loose = album_of("/music/Hits/03.flac", &tags);
+
+        assert_eq!(one, two);
+        assert_eq!(one, loose);
         assert_eq!(
-            track.album_id,
-            make_album_id("Shared Album", "Track Artist")
+            album_of("/music/Hits/Disc 1/01.flac", &[]),
+            album_of("/music/Hits/Disc 2/02.flac", &[]),
+            "an untitled disc is filed by its album folder too"
         );
     }
 

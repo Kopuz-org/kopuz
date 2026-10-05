@@ -166,12 +166,23 @@ impl MutationService {
         // Read back as a scan would, so an edit files the same artists and album a rescan of the file does.
         let reader::ScannedTrack {
             track: mut scanned,
-            album: scanned_album,
+            album: mut scanned_album,
         } = tokio::task::spawn_blocking(move || reader::read_metadata(&path))
             .await
             .map_err(|error| ApiError::internal(format!("tag reader task failed: {error}")))?
             .ok_or_else(|| ApiError::internal("the edited file could not be read back"))?;
         scanned.cover = track.cover.clone();
+        // One file names only its own artist; the album's credit comes from every track it holds.
+        let siblings = self
+            .db
+            .album_tracks(&active, &scanned_album.id)
+            .await
+            .map_err(db_error)?;
+        let members = siblings
+            .iter()
+            .filter(|sibling| sibling.id != scanned.id)
+            .chain(std::iter::once(&scanned));
+        scanned_album.artist = reader::album_credit(&scanned_album, members);
         self.db
             .refile_track(&active, &scanned, &scanned_album, &track.album_id)
             .await
