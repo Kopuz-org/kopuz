@@ -445,14 +445,7 @@ impl CatalogService {
     ) -> Result<server::source::RemoteAlbum, ApiError> {
         let mut album = match source.fetch_album_by_ref(id).await.map_err(source_error)? {
             Some(album) => album,
-            None => match self.saved_album(id).await {
-                Some((title, artist)) => source
-                    .fetch_album_by_meta(&title, &artist)
-                    .await
-                    .map_err(source_error)?
-                    .ok_or_else(|| ApiError::not_found("no such catalog album"))?,
-                None => source.fetch_album(id).await.map_err(source_error)?,
-            },
+            None => source.fetch_album(id).await.map_err(source_error)?,
         };
         crate::wire::listed_by(source.source(), &mut album.tracks);
         self.library.register_transient(&album.tracks);
@@ -738,13 +731,6 @@ impl CatalogService {
         crate::wire::listed_by(source.source(), &mut page.tracks);
         self.library.register_transient(&page.tracks);
         Ok(page)
-    }
-
-    /// The title and artist of a saved album, for a source whose albums are
-    /// stored without a browse id and can only be looked up by name.
-    async fn saved_album(&self, id: &str) -> Option<(String, String)> {
-        let album = self.library.album(id).await.ok().flatten()?;
-        (!album.title.trim().is_empty()).then_some((album.title, album.artist))
     }
 
     /// The seed itself, when the mix did not include it.

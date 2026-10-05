@@ -8,7 +8,6 @@ use super::browse::{self, parse_continuation, parse_page};
 use super::discover::{
     self, BrowsePage, DiscoverItem, DiscoverShelf, LinkKind, PageHeader, ShelfLayout,
 };
-use super::search::synthesize_album_id;
 
 macro_rules! fixture {
     ($name:literal) => {
@@ -440,18 +439,9 @@ fn the_watch_page_names_the_related_tab_and_the_mix() {
     mix.iter().for_each(assert_track);
 }
 
-/// Saved library rows are keyed by this id: by browse id where the row links
-/// one, else by name.
+/// Saved library rows are keyed by the release a row links; a row that links none has no album.
 #[test]
 fn album_ids_are_what_saved_rows_hold() {
-    assert_eq!(
-        synthesize_album_id("Random Access Memories", "Daft Punk"),
-        "ytmusic:album:72616e646f6d20616363657373206d656d6f726965737c646166742070756e6b"
-    );
-    assert_eq!(
-        synthesize_album_id("", "Daft Punk"),
-        "ytmusic:album:singles"
-    );
     let album = discover::parse_album("MPREb_K8qWMWVqXGi", &fixture!("album"));
     let solo: Vec<&Track> = album
         .tracks
@@ -459,8 +449,10 @@ fn album_ids_are_what_saved_rows_hold() {
         .filter(|t| t.artist == "Daft Punk")
         .collect();
     assert!(!solo.is_empty());
-    assert!(solo.iter().all(|t| t.album_id
-        == "ytmusic:album:72616e646f6d20616363657373206d656d6f726965737c646166742070756e6b"));
+    assert!(
+        solo.iter()
+            .all(|t| t.album_id == "ytmusic:album:MPREb_K8qWMWVqXGi")
+    );
 
     let pages = [
         page(&fixture!("home")),
@@ -488,9 +480,8 @@ fn album_ids_are_what_saved_rows_hold() {
     let built: Vec<&Track> = pages.iter().flat_map(all_tracks).chain(&legacy).collect();
     assert!(built.len() > 300, "{} tracks", built.len());
     for track in built {
-        let by_name = synthesize_album_id(&track.album, &track.artist);
         assert!(
-            track.album_id == by_name || track.album_id.starts_with("ytmusic:album:MPRE"),
+            track.album_id.is_empty() || track.album_id.starts_with("ytmusic:album:MPRE"),
             "{:?} by {:?} on {:?} keyed {}",
             track.title,
             track.artist,
@@ -788,8 +779,7 @@ fn search_tracks_and_their_album_ids() {
     assert!(songs.len() >= 10);
     songs.iter().for_each(assert_track);
     for track in &songs {
-        let by_name = synthesize_album_id(&track.album, &track.artist);
-        assert!(track.album_id == by_name || track.album_id.starts_with("ytmusic:album:MPRE"));
+        assert!(track.album_id.is_empty() || track.album_id.starts_with("ytmusic:album:MPRE"));
     }
 }
 

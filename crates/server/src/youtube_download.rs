@@ -11,9 +11,7 @@ use reader::Track;
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
 
-use crate::ytmusic::{
-    YtStreamInfo, clients::WEB_REMIX, discover, innertube, playlists, search::synthesize_album_id,
-};
+use crate::ytmusic::{YtStreamInfo, clients::WEB_REMIX, discover, innertube, playlists};
 
 /// What a pasted link points at.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,7 +188,7 @@ impl YoutubeDownloader {
         Ok(Track {
             id: crate::ytmusic::yt_id(video_id),
             cover: best_thumbnail(details),
-            album_id: synthesize_album_id("", &artist),
+            album_id: String::new(),
             title: text("title").unwrap_or_default().to_string(),
             artists: if artist.is_empty() {
                 Vec::new()
