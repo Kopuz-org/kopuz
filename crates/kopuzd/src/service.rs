@@ -264,10 +264,16 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_albums(
         &self,
-        request: Request<proto::Page>,
+        request: Request<proto::AlbumsRequest>,
     ) -> Result<Response<proto::AlbumPage>, Status> {
-        let page = convert::page_from_proto(Some(request.get_ref()));
-        let albums = self.0.api.albums(page).await.map_err(failed)?;
+        let request = request.get_ref();
+        let query = request
+            .query
+            .as_ref()
+            .map(convert::album_query_from_proto)
+            .unwrap_or_default();
+        let page = convert::page_from_proto(request.page.as_ref());
+        let albums = self.0.api.albums(query, page).await.map_err(failed)?;
         Ok(Response::new(convert::album_page_to_proto(&albums)))
     }
 
@@ -317,10 +323,16 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_artists(
         &self,
-        request: Request<proto::Page>,
+        request: Request<proto::ArtistsRequest>,
     ) -> Result<Response<proto::ArtistPage>, Status> {
-        let page = convert::page_from_proto(Some(request.get_ref()));
-        let artists = self.0.api.artists(page).await.map_err(failed)?;
+        let request = request.get_ref();
+        let query = request
+            .query
+            .as_ref()
+            .map(convert::artist_query_from_proto)
+            .unwrap_or_default();
+        let page = convert::page_from_proto(request.page.as_ref());
+        let artists = self.0.api.artists(query, page).await.map_err(failed)?;
         Ok(Response::new(convert::artist_page_to_proto(&artists)))
     }
 

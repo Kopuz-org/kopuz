@@ -1064,7 +1064,7 @@ async fn run_scan(pair: &Pair) {
 /// The library's artist names and album titles, sorted.
 async fn shelves(api: &dyn KopuzApi) -> (Vec<String>, Vec<String>) {
     let mut artists: Vec<String> = api
-        .artists(Page::default())
+        .artists(api::ArtistQuery::default(), Page::default())
         .await
         .expect("artists")
         .artists
@@ -1072,7 +1072,7 @@ async fn shelves(api: &dyn KopuzApi) -> (Vec<String>, Vec<String>) {
         .map(|artist| artist.name)
         .collect();
     let mut albums: Vec<String> = api
-        .albums(Page::default())
+        .albums(api::AlbumQuery::default(), Page::default())
         .await
         .expect("albums")
         .albums
@@ -1305,8 +1305,9 @@ async fn artists_are_keyed_by_identity_on_both_transports() {
         .await
         .expect("seed credited tracks");
 
-    let artists = pair.local.artists(all).await.expect("local");
-    assert_eq!(artists, pair.wire.artists(all).await.expect("wire"));
+    let query = api::ArtistQuery::default();
+    let artists = pair.local.artists(query.clone(), all).await.expect("local");
+    assert_eq!(artists, pair.wire.artists(query, all).await.expect("wire"));
     let adas: Vec<&api::ArtistInfo> = artists
         .artists
         .iter()
@@ -1399,12 +1400,24 @@ async fn library_reads_agree_across_transports() {
         pair.wire.tracks_by_keys(keys).await.expect("wire"),
     );
     assert_eq!(
-        pair.local.albums(all).await.expect("local"),
-        pair.wire.albums(all).await.expect("wire"),
+        pair.local
+            .albums(api::AlbumQuery::default(), all)
+            .await
+            .expect("local"),
+        pair.wire
+            .albums(api::AlbumQuery::default(), all)
+            .await
+            .expect("wire"),
     );
     assert_eq!(
-        pair.local.artists(all).await.expect("local"),
-        pair.wire.artists(all).await.expect("wire"),
+        pair.local
+            .artists(api::ArtistQuery::default(), all)
+            .await
+            .expect("local"),
+        pair.wire
+            .artists(api::ArtistQuery::default(), all)
+            .await
+            .expect("wire"),
     );
     assert_eq!(
         pair.local.genres().await.expect("local"),
@@ -1458,6 +1471,321 @@ async fn library_reads_agree_across_transports() {
         .await
         .expect("local empty");
     assert!(local_tracks.is_empty());
+}
+
+/// Filters, orders and windows travel the wire intact: whatever the daemon answers in process, the socket answers the same.
+#[tokio::test]
+async fn listing_queries_filter_sort_and_page_the_same_on_both_transports() {
+    use api::{AlbumQuery, AlbumSort, AlbumSortField, ArtistQuery, ArtistSort, ArtistSortField};
+
+    let pair = spawn_pair().await;
+    let source = config::Source::default();
+    let on = |key: &str, title: &str, artist: &str, album_id: &str| Track {
+        title: title.into(),
+        artist: artist.into(),
+        artists: vec![artist.into()],
+        album_id: album_id.into(),
+        ..track(key)
+    };
+    let album = |id: &str, title: &str, artist: &str, genre: &str, year: u16| reader::Album {
+        id: id.into(),
+        title: title.into(),
+        artist: artist.into(),
+        genre: genre.into(),
+        year,
+        cover_path: None,
+        manual_cover: false,
+        artist_id: None,
+        artist_key: None,
+    };
+    pair.database
+        .upsert_tracks(
+            &source,
+            &[
+                on("/q/a1.flac", "Charlie", "Ada", "q-alpha"),
+                on("/q/a2.flac", "Bravo", "Ada", "q-alpha"),
+                on("/q/b1.flac", "Echo", "Boris", "q-beta"),
+                on("/q/c1.flac", "Delta", "Cyd", "q-gamma"),
+            ],
+        )
+        .await
+        .expect("seed tracks");
+    pair.database
+        .upsert_albums(
+            &source,
+            &[
+                album("q-alpha", "Alpha", "Ada", "Rock", 1991),
+                album("q-beta", "beta", "Boris", "Jazz", 2005),
+                album("q-gamma", "Gamma", "Cyd", "Rock", 2020),
+            ],
+        )
+        .await
+        .expect("seed albums");
+    pair.database
+        .set_offline_track("/q/b1.flac", Some("/offline/b1"))
+        .await
+        .expect("mark a download");
+
+    let window = Page {
+        offset: 1,
+        limit: 2,
+    };
+    let everything = Page {
+        offset: 0,
+        limit: 100,
+    };
+    let sorted = |field, descending| vec![AlbumSort { field, descending }];
+    let queries = [
+        AlbumQuery::default(),
+        AlbumQuery {
+            search: Some("ALP".into()),
+            ..Default::default()
+        },
+        AlbumQuery {
+            genre: Some("Rock".into()),
+            sort: sorted(AlbumSortField::Year, true),
+            ..Default::default()
+        },
+        AlbumQuery {
+            year_from: Some(2000),
+            year_to: Some(2010),
+            ..Default::default()
+        },
+        AlbumQuery {
+            sort: vec![
+                AlbumSort {
+                    field: AlbumSortField::TrackCount,
+                    descending: true,
+                },
+                AlbumSort {
+                    field: AlbumSortField::Title,
+                    descending: false,
+                },
+            ],
+            ..Default::default()
+        },
+        AlbumQuery {
+            sort: sorted(AlbumSortField::RecentlyAdded, true),
+            ..Default::default()
+        },
+    ];
+    for query in queries {
+        for page in [everything, window] {
+            let local = pair.local.albums(query.clone(), page).await.expect("local");
+            let wire = pair.wire.albums(query.clone(), page).await.expect("wire");
+            assert_eq!(local, wire, "{query:?} {page:?}");
+        }
+    }
+
+    let by_year = AlbumQuery {
+        sort: sorted(AlbumSortField::Year, true),
+        ..Default::default()
+    };
+    let listed = pair.wire.albums(by_year, window).await.expect("wire");
+    assert_eq!(
+        listed.total, 3,
+        "the total is the filtered set, not the window"
+    );
+    let titles: Vec<&str> = listed.albums.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, ["beta", "Alpha"], "year descending, then cut");
+    let rock = AlbumQuery {
+        genre: Some("Rock".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        pair.wire
+            .albums(rock, everything)
+            .await
+            .expect("wire")
+            .total,
+        2
+    );
+
+    let ada = pair
+        .wire
+        .artists(
+            ArtistQuery {
+                search: Some("ada".into()),
+                ..Default::default()
+            },
+            everything,
+        )
+        .await
+        .expect("wire")
+        .artists
+        .remove(0);
+    assert_eq!((ada.track_count, ada.album_count), (2, 1));
+    let billed = AlbumQuery {
+        artist_key: Some(ada.key),
+        ..Default::default()
+    };
+    let local = pair
+        .local
+        .albums(billed.clone(), everything)
+        .await
+        .expect("local");
+    assert_eq!(
+        local,
+        pair.wire.albums(billed, everything).await.expect("wire")
+    );
+    assert_eq!(local.albums.len(), 1);
+
+    let artist_queries = [
+        ArtistQuery::default(),
+        ArtistQuery {
+            search: Some("o".into()),
+            ..Default::default()
+        },
+        ArtistQuery {
+            sort: vec![ArtistSort {
+                field: ArtistSortField::TrackCount,
+                descending: true,
+            }],
+            ..Default::default()
+        },
+        ArtistQuery {
+            sort: vec![ArtistSort {
+                field: ArtistSortField::AlbumCount,
+                descending: false,
+            }],
+            ..Default::default()
+        },
+        ArtistQuery {
+            sort: vec![ArtistSort {
+                field: ArtistSortField::Name,
+                descending: true,
+            }],
+            ..Default::default()
+        },
+    ];
+    for query in artist_queries {
+        for page in [everything, window] {
+            let local = pair
+                .local
+                .artists(query.clone(), page)
+                .await
+                .expect("local");
+            let wire = pair.wire.artists(query.clone(), page).await.expect("wire");
+            assert_eq!(local, wire, "{query:?} {page:?}");
+        }
+    }
+    let by_tracks = ArtistQuery {
+        sort: vec![ArtistSort {
+            field: ArtistSortField::TrackCount,
+            descending: true,
+        }],
+        ..Default::default()
+    };
+    let top = pair
+        .wire
+        .artists(by_tracks, everything)
+        .await
+        .expect("wire");
+    assert_eq!(top.artists[0].name, "Ada");
+
+    let filters = [
+        TrackFilter {
+            downloaded: Some(true),
+            ..Default::default()
+        },
+        TrackFilter {
+            downloaded: Some(false),
+            ..Default::default()
+        },
+        TrackFilter {
+            year_from: Some(1990),
+            year_to: Some(1999),
+            ..Default::default()
+        },
+        TrackFilter {
+            sort: api::TrackSort::Title,
+            reverse: true,
+            ..Default::default()
+        },
+        TrackFilter {
+            genre: Some("Rock".into()),
+            year_from: Some(2000),
+            reverse: true,
+            ..Default::default()
+        },
+    ];
+    for filter in filters {
+        for page in [everything, window] {
+            let local = pair
+                .local
+                .tracks(filter.clone(), page)
+                .await
+                .expect("local");
+            let wire = pair.wire.tracks(filter.clone(), page).await.expect("wire");
+            assert_eq!(local, wire, "{filter:?} {page:?}");
+        }
+    }
+    let downloaded = pair
+        .wire
+        .tracks(
+            TrackFilter {
+                downloaded: Some(true),
+                ..Default::default()
+            },
+            everything,
+        )
+        .await
+        .expect("wire");
+    let keys: Vec<&str> = downloaded.items.iter().map(|t| t.key.as_str()).collect();
+    assert_eq!(keys, ["/q/b1.flac"]);
+    let nineties = pair
+        .wire
+        .tracks(
+            TrackFilter {
+                year_to: Some(1999),
+                ..Default::default()
+            },
+            everything,
+        )
+        .await
+        .expect("wire");
+    assert_eq!(nineties.total, 2, "the two tracks of the 1991 album");
+    let rock_since_2000 = pair
+        .wire
+        .tracks(
+            TrackFilter {
+                genre: Some("Rock".into()),
+                year_from: Some(2000),
+                ..Default::default()
+            },
+            everything,
+        )
+        .await
+        .expect("wire");
+    let keys: Vec<&str> = rock_since_2000
+        .items
+        .iter()
+        .map(|t| t.key.as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        ["/q/c1.flac"],
+        "a genre listing honours the year bounds too"
+    );
+    let reversed = pair
+        .wire
+        .tracks(
+            TrackFilter {
+                sort: api::TrackSort::Title,
+                reverse: true,
+                ..Default::default()
+            },
+            Page {
+                offset: 0,
+                limit: 1,
+            },
+        )
+        .await
+        .expect("wire");
+    assert_eq!(
+        reversed.items[0].title, "Echo",
+        "a reversed title order starts at the last title"
+    );
 }
 
 #[tokio::test]

@@ -316,10 +316,10 @@ impl api::LibraryApi for GrpcApi {
             .collect())
     }
 
-    async fn albums(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
+    async fn albums(&self, query: api::AlbumQuery, page: Page) -> Result<api::AlbumPage, ApiError> {
         let albums = self
             .client()
-            .get_albums(Request::new(convert::page_to_proto(page)))
+            .get_albums(Request::new(convert::albums_request_to_proto(&query, page)))
             .await
             .map_err(wire_error)?;
         Ok(convert::album_page_from_proto(albums.get_ref()))
@@ -359,10 +359,16 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::track_page_from_proto(tracks.get_ref()))
     }
 
-    async fn artists(&self, page: Page) -> Result<api::ArtistPage, ApiError> {
+    async fn artists(
+        &self,
+        query: api::ArtistQuery,
+        page: Page,
+    ) -> Result<api::ArtistPage, ApiError> {
         let artists = self
             .client()
-            .get_artists(Request::new(convert::page_to_proto(page)))
+            .get_artists(Request::new(convert::artists_request_to_proto(
+                &query, page,
+            )))
             .await
             .map_err(wire_error)?;
         Ok(convert::artist_page_from_proto(artists.get_ref()))

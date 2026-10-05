@@ -10,7 +10,10 @@ use reader::models::{Album, Track};
 use sqlx::SqlitePool;
 
 use super::rows::{AlbumRow, CreditRow, TrackRow};
-use crate::{DbError, Page, Source, TrackFilter, TrackSort};
+use crate::{
+    AlbumQuery, AlbumSortField, ArtistQuery, ArtistSortField, DbError, Listing, Page, Source,
+    TrackFilter, TrackSort,
+};
 
 /// Track columns for a `TrackRow`, `t.`-aliased and read via [`TRACKS_FROM`] so a
 /// local track's `cover_path` (NULL on the row — the cover is owned by the album)
@@ -72,73 +75,161 @@ const TRACKS_FROM: &str = "FROM tracks t LEFT JOIN albums a \
     ON a.source = t.source AND a.source_album_id = t.source_album_id \
     LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk";
 
-fn order_by(sort: &TrackSort) -> String {
+/// A column to order by, and whether it runs high to low.
+type Term = (&'static str, bool);
+
+fn order_terms(sort: &TrackSort) -> Vec<Term> {
+    const TITLE: Term = ("t.title COLLATE NOCASE", false);
+    const ARTIST: Term = ("t.artist COLLATE NOCASE", false);
+    const ALBUM: Term = ("t.album COLLATE NOCASE", false);
+    const DISC: Term = ("t.disc_number", false);
+    const TRACK: Term = ("t.track_number", false);
     match sort {
-        TrackSort::ArtistAlbum => {
-            "t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE".into()
-        }
-        TrackSort::Title => "t.title COLLATE NOCASE".into(),
-        TrackSort::Artist => "t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.track_number".into(),
-        TrackSort::Album => "t.album COLLATE NOCASE, t.disc_number, t.track_number".into(),
-        TrackSort::DateAdded => "t.added_at DESC, t.rowid_pk DESC".into(),
-        TrackSort::PlayCount => "COALESCE(lc.count, 0) DESC, t.title COLLATE NOCASE".into(),
+        TrackSort::ArtistAlbum => vec![ARTIST, ALBUM, DISC, TRACK, TITLE],
+        TrackSort::Title => vec![TITLE],
+        TrackSort::Artist => vec![ARTIST, ALBUM, TRACK],
+        TrackSort::Album => vec![ALBUM, DISC, TRACK],
+        TrackSort::DateAdded => vec![("t.added_at", true), ("t.rowid_pk", true)],
+        TrackSort::PlayCount => vec![("COALESCE(lc.count, 0)", true), TITLE],
         TrackSort::Fields(criteria) => {
             if criteria.is_empty() {
-                return order_by(&TrackSort::ArtistAlbum);
+                return order_terms(&TrackSort::ArtistAlbum);
             }
-            let mut cols: Vec<String> = criteria
-                .iter()
-                .map(|c| {
-                    let dir = match c.direction {
-                        config::SortDirection::Asc => "ASC",
-                        config::SortDirection::Desc => "DESC",
-                    };
-                    // A field may span more than one column (date added falls
-                    // back to insertion order), and each needs its own direction.
-                    let fields: &[&str] = match c.field {
-                        config::TrackSortField::Title => &["t.title COLLATE NOCASE"],
-                        config::TrackSortField::Artist => &["t.artist COLLATE NOCASE"],
-                        config::TrackSortField::Album => &["t.album COLLATE NOCASE"],
-                        config::TrackSortField::Duration => &["t.duration"],
-                        config::TrackSortField::DateAdded => &["t.added_at", "t.rowid_pk"],
-                    };
-                    fields
-                        .iter()
-                        .map(|col| format!("{col} {dir}"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .collect();
+            let mut terms = Vec::new();
+            for criterion in criteria {
+                let desc = criterion.direction == config::SortDirection::Desc;
+                // A field may span more than one column (date added falls
+                // back to insertion order), and each needs its own direction.
+                let fields: &[&'static str] = match criterion.field {
+                    config::TrackSortField::Title => &["t.title COLLATE NOCASE"],
+                    config::TrackSortField::Artist => &["t.artist COLLATE NOCASE"],
+                    config::TrackSortField::Album => &["t.album COLLATE NOCASE"],
+                    config::TrackSortField::Duration => &["t.duration"],
+                    config::TrackSortField::DateAdded => &["t.added_at", "t.rowid_pk"],
+                };
+                terms.extend(fields.iter().map(|col| (*col, desc)));
+            }
             // Stable tail so rows equal on every criterion keep album order.
-            cols.push("t.disc_number".into());
-            cols.push("t.track_number".into());
-            cols.push("t.title COLLATE NOCASE".into());
-            cols.join(", ")
+            terms.extend([DISC, TRACK, TITLE]);
+            terms
         }
     }
 }
 
+fn order_by(sort: &TrackSort, reverse: bool) -> String {
+    order_terms(sort)
+        .into_iter()
+        .map(|(col, desc)| format!("{col} {}", if desc != reverse { "DESC" } else { "ASC" }))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A value bound to a dynamically built query.
+enum Arg {
+    Text(String),
+    Int(i64),
+}
+
+/// A `WHERE` tail and its binds, numbered after `?1`, which every listing spends on the source.
+#[derive(Default)]
+struct Clauses {
+    sql: String,
+    args: Vec<Arg>,
+}
+
+impl Clauses {
+    /// The placeholder for `arg`.
+    fn bind(&mut self, arg: Arg) -> String {
+        self.args.push(arg);
+        format!("?{}", self.args.len() + 1)
+    }
+
+    /// The placeholder numbers a `LIMIT`/`OFFSET` pair takes after the filter's.
+    fn page_slots(&self) -> (usize, usize) {
+        (self.args.len() + 2, self.args.len() + 3)
+    }
+
+    /// An inclusive year range on `col`; a year of 0 is unknown and sits in no range.
+    fn year_range(&mut self, col: &str, from: Option<u16>, to: Option<u16>) -> String {
+        if from.is_none() && to.is_none() {
+            return String::new();
+        }
+        let mut sql = format!(" AND {col} > 0");
+        if let Some(from) = from {
+            let n = self.bind(Arg::Int(from.into()));
+            sql.push_str(&format!(" AND {col} >= {n}"));
+        }
+        if let Some(to) = to {
+            let n = self.bind(Arg::Int(to.into()));
+            sql.push_str(&format!(" AND {col} <= {n}"));
+        }
+        sql
+    }
+}
+
+fn bind_args<'q, O>(
+    mut query: sqlx::query::QueryAs<'q, sqlx::Sqlite, O, sqlx::sqlite::SqliteArguments<'q>>,
+    args: &'q [Arg],
+) -> sqlx::query::QueryAs<'q, sqlx::Sqlite, O, sqlx::sqlite::SqliteArguments<'q>> {
+    for arg in args {
+        query = match arg {
+            Arg::Text(text) => query.bind(text.as_str()),
+            Arg::Int(int) => query.bind(*int),
+        };
+    }
+    query
+}
+
+fn bind_scalar_args<'q, O>(
+    mut query: sqlx::query::QueryScalar<'q, sqlx::Sqlite, O, sqlx::sqlite::SqliteArguments<'q>>,
+    args: &'q [Arg],
+) -> sqlx::query::QueryScalar<'q, sqlx::Sqlite, O, sqlx::sqlite::SqliteArguments<'q>> {
+    for arg in args {
+        query = match arg {
+            Arg::Text(text) => query.bind(text.as_str()),
+            Arg::Int(int) => query.bind(*int),
+        };
+    }
+    query
+}
+
 /// WHERE clause + ordered bind values for a filter (after the `source = ?1` bind).
-fn filter_clauses(filter: &TrackFilter) -> (String, Vec<String>) {
-    let mut sql = String::new();
-    let mut binds = Vec::new();
+fn filter_clauses(filter: &TrackFilter) -> Clauses {
+    let mut c = Clauses::default();
     if !filter.search.trim().is_empty() {
-        let n = binds.len() + 2;
-        sql.push_str(&format!(
-            " AND (t.title LIKE ?{n} ESCAPE '\\' OR t.artist LIKE ?{n} ESCAPE '\\' OR t.album LIKE ?{n} ESCAPE '\\')"
+        let n = c.bind(Arg::Text(format!(
+            "%{}%",
+            escape_like(filter.search.trim())
+        )));
+        c.sql.push_str(&format!(
+            " AND (t.title LIKE {n} ESCAPE '\\' OR t.artist LIKE {n} ESCAPE '\\' OR t.album LIKE {n} ESCAPE '\\')"
         ));
-        binds.push(format!("%{}%", escape_like(filter.search.trim())));
     }
     if let Some(favorite) = filter.favorite {
         // favorites.server_id holds the same string as tracks.source, and
         // favorites.ref holds the track_key, so this needs no extra bind.
         let exists = if favorite { "EXISTS" } else { "NOT EXISTS" };
-        sql.push_str(&format!(
+        c.sql.push_str(&format!(
             " AND {exists} (SELECT 1 FROM favorites f \
               WHERE f.server_id = t.source AND f.ref = t.track_key)"
         ));
     }
-    (sql, binds)
+    if let Some(downloaded) = filter.downloaded {
+        // A downloaded server track is registered under its item id, which is its track_key.
+        let exists = if downloaded { "EXISTS" } else { "NOT EXISTS" };
+        c.sql.push_str(&format!(
+            " AND {exists} (SELECT 1 FROM offline_tracks o WHERE o.item_id = t.track_key)"
+        ));
+    }
+    // A subquery rather than the album join, so the count query needs no join.
+    let years = c.year_range("y.year", filter.year_from, filter.year_to);
+    if !years.is_empty() {
+        c.sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM albums y \
+              WHERE y.source = t.source AND y.source_album_id = t.source_album_id{years})"
+        ));
+    }
+    c
 }
 
 pub async fn tracks_page(
@@ -146,30 +237,25 @@ pub async fn tracks_page(
     filter: &TrackFilter,
     page: Page,
 ) -> Result<Vec<Track>, DbError> {
-    let (clauses, binds) = filter_clauses(filter);
-    let limit_n = binds.len() + 2;
+    let c = filter_clauses(filter);
+    let (limit_n, offset_n) = c.page_slots();
+    let clauses = &c.sql;
+    let order = order_by(&filter.sort, filter.reverse);
     // PlayCount needs the listen_counts join; the other sorts stay join-free
     // so they read straight off the tracks indexes.
     let sql = if filter.sort == TrackSort::PlayCount {
         format!(
             "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
              LEFT JOIN listen_counts lc ON lc.source = t.source AND lc.track_key = t.track_key \
-             WHERE t.source = ?1{clauses} ORDER BY {} LIMIT ?{limit_n} OFFSET ?{}",
-            order_by(&filter.sort),
-            limit_n + 1,
+             WHERE t.source = ?1{clauses} ORDER BY {order} LIMIT ?{limit_n} OFFSET ?{offset_n}",
         )
     } else {
         format!(
-            "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1{clauses} ORDER BY {} LIMIT ?{limit_n} OFFSET ?{}",
-            order_by(&filter.sort),
-            limit_n + 1,
+            "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1{clauses} ORDER BY {order} LIMIT ?{limit_n} OFFSET ?{offset_n}",
         )
     };
-    let mut q = sqlx::query_as::<_, TrackRow>(&sql).bind(filter.source.as_str());
-    for b in &binds {
-        q = q.bind(b);
-    }
-    let rows = q
+    let q = sqlx::query_as::<_, TrackRow>(&sql).bind(filter.source.as_str());
+    let rows = bind_args(q, &c.args)
         .bind(page.limit as i64)
         .bind(page.offset as i64)
         .fetch_all(pool)
@@ -402,13 +488,10 @@ pub async fn search_corpus(pool: &SqlitePool, source: &Source) -> Result<Vec<Tra
 }
 
 pub async fn tracks_count(pool: &SqlitePool, filter: &TrackFilter) -> Result<u32, DbError> {
-    let (clauses, binds) = filter_clauses(filter);
-    let sql = format!("SELECT COUNT(*) FROM tracks t WHERE t.source = ?1{clauses}");
-    let mut q = sqlx::query_scalar::<_, i64>(&sql).bind(filter.source.as_str());
-    for b in &binds {
-        q = q.bind(b);
-    }
-    Ok(q.fetch_one(pool).await?.max(0) as u32)
+    let c = filter_clauses(filter);
+    let sql = format!("SELECT COUNT(*) FROM tracks t WHERE t.source = ?1{}", c.sql);
+    let q = sqlx::query_scalar::<_, i64>(&sql).bind(filter.source.as_str());
+    Ok(bind_scalar_args(q, &c.args).fetch_one(pool).await?.max(0) as u32)
 }
 
 pub async fn tracks_by_keys(
@@ -496,7 +579,9 @@ pub(crate) async fn refresh_from_library(
 pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::ArtistRow>, DbError> {
     let src = source.as_str();
     let rows = sqlx::query!(
-        r#"SELECT ar.key, ar.source_artist_id, ar.name, COUNT(*) AS "tracks!: i64"
+        r#"SELECT ar.key, ar.source_artist_id, ar.name, COUNT(*) AS "tracks!: i64",
+                  (SELECT COUNT(*) FROM albums al
+                    WHERE al.source = ?1 AND al.artist_pk = ar.id) AS "albums!: i64"
              FROM artist_credit_rows cr
              JOIN artists ar ON ar.id = cr.artist_pk
             WHERE cr.source = ?1
@@ -512,10 +597,91 @@ pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<crate::Ar
             source_id: row.source_artist_id,
             name: row.name,
             tracks: row.tracks.max(0) as u32,
+            albums: row.albums.max(0) as u32,
         })
         .collect();
     artists.sort_by_cached_key(|artist| (artist.name.to_lowercase(), artist.key.clone()));
     Ok(artists)
+}
+
+#[derive(sqlx::FromRow)]
+struct ArtistListRow {
+    key: String,
+    source_artist_id: Option<String>,
+    name: String,
+    n_tracks: i64,
+    n_albums: i64,
+}
+
+/// One window of [`artists`]: the name search, the order and the cut all run in SQL.
+pub async fn artists_page(
+    pool: &SqlitePool,
+    query: &ArtistQuery,
+    page: Page,
+) -> Result<Listing<crate::ArtistRow>, DbError> {
+    let mut c = Clauses::default();
+    if !query.search.trim().is_empty() {
+        let n = c.bind(Arg::Text(format!("%{}%", escape_like(query.search.trim()))));
+        c.sql
+            .push_str(&format!(" AND ar.name LIKE {n} ESCAPE '\\'"));
+    }
+    let src = query.source.as_str();
+    let from = "FROM artist_credit_rows cr JOIN artists ar ON ar.id = cr.artist_pk";
+
+    let count_sql = format!(
+        "SELECT COUNT(DISTINCT cr.artist_pk) {from} WHERE cr.source = ?1{}",
+        c.sql
+    );
+    let total = bind_scalar_args(sqlx::query_scalar::<_, i64>(&count_sql).bind(src), &c.args)
+        .fetch_one(pool)
+        .await?;
+
+    let mut order: Vec<String> = query
+        .sort
+        .iter()
+        .map(|sort| {
+            let col = match sort.field {
+                ArtistSortField::Name => "ar.name COLLATE NOCASE",
+                ArtistSortField::TrackCount => "n_tracks",
+                ArtistSortField::AlbumCount => "n_albums",
+            };
+            format!("{col} {}", direction(sort.descending))
+        })
+        .collect();
+    order.push("ar.name COLLATE NOCASE ASC".into());
+    order.push("ar.key ASC".into());
+    let (limit_n, offset_n) = c.page_slots();
+    let sql = format!(
+        "SELECT ar.key, ar.source_artist_id, ar.name, COUNT(*) AS n_tracks, \
+                (SELECT COUNT(*) FROM albums al \
+                  WHERE al.source = ?1 AND al.artist_pk = ar.id) AS n_albums \
+           {from} WHERE cr.source = ?1{} GROUP BY ar.id \
+          ORDER BY {} LIMIT ?{limit_n} OFFSET ?{offset_n}",
+        c.sql,
+        order.join(", "),
+    );
+    let rows = bind_args(sqlx::query_as::<_, ArtistListRow>(&sql).bind(src), &c.args)
+        .bind(i64::from(page.limit))
+        .bind(i64::from(page.offset))
+        .fetch_all(pool)
+        .await?;
+    Ok(Listing {
+        total: total.max(0) as u32,
+        rows: rows
+            .into_iter()
+            .map(|row| crate::ArtistRow {
+                key: row.key,
+                source_id: row.source_artist_id,
+                name: row.name,
+                tracks: row.n_tracks.max(0) as u32,
+                albums: row.n_albums.max(0) as u32,
+            })
+            .collect(),
+    })
+}
+
+fn direction(descending: bool) -> &'static str {
+    if descending { "DESC" } else { "ASC" }
 }
 
 pub async fn artist_keys_unnamed_by_source(
@@ -577,7 +743,9 @@ pub async fn artist(
     let row = sqlx::query!(
         r#"SELECT ar.key, ar.source_artist_id, ar.name,
                   (SELECT COUNT(*) FROM artist_credit_rows cr
-                    WHERE cr.source = ?1 AND cr.artist_pk = ar.id) AS "tracks!: i64"
+                    WHERE cr.source = ?1 AND cr.artist_pk = ar.id) AS "tracks!: i64",
+                  (SELECT COUNT(*) FROM albums al
+                    WHERE al.source = ?1 AND al.artist_pk = ar.id) AS "albums!: i64"
              FROM artists ar WHERE ar.source = ?1 AND ar.key = ?2"#,
         src,
         artist
@@ -589,6 +757,7 @@ pub async fn artist(
         source_id: row.source_artist_id,
         name: row.name,
         tracks: row.tracks.max(0) as u32,
+        albums: row.albums.max(0) as u32,
     }))
 }
 
@@ -674,6 +843,90 @@ pub async fn albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, Db
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// One window of an album listing: filter, order and cut all run in SQL, and `total` counts the filtered set.
+pub async fn albums_page(
+    pool: &SqlitePool,
+    query: &AlbumQuery,
+    page: Page,
+) -> Result<Listing<Album>, DbError> {
+    let mut c = Clauses::default();
+    if !query.search.trim().is_empty() {
+        let n = c.bind(Arg::Text(format!("%{}%", escape_like(query.search.trim()))));
+        c.sql.push_str(&format!(
+            " AND (al.title LIKE {n} ESCAPE '\\' OR al.artist LIKE {n} ESCAPE '\\')"
+        ));
+    }
+    if let Some(genre) = &query.genre {
+        let n = c.bind(Arg::Text(genre.clone()));
+        c.sql.push_str(&format!(" AND al.genre = {n}"));
+    }
+    let years = c.year_range("al.year", query.year_from, query.year_to);
+    c.sql.push_str(&years);
+    if let Some(artist) = &query.artist_key {
+        let n = c.bind(Arg::Text(artist.clone()));
+        c.sql.push_str(&format!(" AND ar.key = {n}"));
+    }
+    let src = query.source.as_str();
+    let from = "FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk";
+
+    let count_sql = format!("SELECT COUNT(*) {from} WHERE al.source = ?1{}", c.sql);
+    let total = bind_scalar_args(sqlx::query_scalar::<_, i64>(&count_sql).bind(src), &c.args)
+        .fetch_one(pool)
+        .await?;
+
+    // Only an order that reads the album's tracks pays for grouping them.
+    let tracked = query.sort.iter().any(|sort| {
+        matches!(
+            sort.field,
+            AlbumSortField::RecentlyAdded | AlbumSortField::TrackCount
+        )
+    });
+    let tracks_join = if tracked {
+        "LEFT JOIN (SELECT source_album_id, MAX(added_at) AS added_at, \
+                           MAX(rowid_pk) AS last_pk, COUNT(*) AS n \
+                      FROM tracks WHERE source = ?1 GROUP BY source_album_id) tc \
+           ON tc.source_album_id = al.source_album_id"
+    } else {
+        ""
+    };
+    let mut order: Vec<String> = Vec::new();
+    for sort in &query.sort {
+        let dir = direction(sort.descending);
+        match sort.field {
+            AlbumSortField::Title => order.push(format!("al.title COLLATE NOCASE {dir}")),
+            AlbumSortField::Artist => order.push(format!("al.artist COLLATE NOCASE {dir}")),
+            AlbumSortField::Year => order.push(format!("al.year {dir}")),
+            AlbumSortField::Genre => order.push(format!("al.genre COLLATE NOCASE {dir}")),
+            AlbumSortField::RecentlyAdded => {
+                order.push(format!("COALESCE(tc.added_at, 0) {dir}"));
+                order.push(format!("COALESCE(tc.last_pk, 0) {dir}"));
+            }
+            AlbumSortField::TrackCount => order.push(format!("COALESCE(tc.n, 0) {dir}")),
+        }
+    }
+    order.push("al.artist COLLATE NOCASE ASC".into());
+    order.push("al.title COLLATE NOCASE ASC".into());
+    order.push("al.rowid_pk ASC".into());
+    let (limit_n, offset_n) = c.page_slots();
+    let sql = format!(
+        "SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, \
+                al.manual_cover, ar.key AS artist_key, ar.source_artist_id AS artist_source_id \
+           {from} {tracks_join} WHERE al.source = ?1{} \
+          ORDER BY {} LIMIT ?{limit_n} OFFSET ?{offset_n}",
+        c.sql,
+        order.join(", "),
+    );
+    let rows = bind_args(sqlx::query_as::<_, AlbumRow>(&sql).bind(src), &c.args)
+        .bind(i64::from(page.limit))
+        .bind(i64::from(page.offset))
+        .fetch_all(pool)
+        .await?;
+    Ok(Listing {
+        total: total.max(0) as u32,
+        rows: rows.into_iter().map(Into::into).collect(),
+    })
 }
 
 /// Albums ordered by the newest track they hold, newest first, on the same

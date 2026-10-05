@@ -3,8 +3,9 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
-    use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_artists,
-    use_favorites, use_playlists, use_recently_added_albums, use_top_genre, use_tracks_by_keys,
+    use_active_source, use_album_tracks, use_albums, use_albums_window, use_artist_sample_tracks,
+    use_artists, use_favorites, use_playlists, use_recently_added_albums, use_top_genre,
+    use_tracks_by_keys,
 };
 use rand::rng;
 use rand::seq::SliceRandom;
@@ -52,6 +53,9 @@ fn track_cover_url(track: &Track) -> Option<String> {
 /// window has to be wide enough to still fill it.
 const RECENTLY_ADDED_WINDOW: u32 = 64;
 
+/// How many of the newest-year albums the New Releases query pulls, wide for the same reason.
+const NEW_RELEASES_WINDOW: u32 = 64;
+
 /// The source-agnostic Home body (sections + hero). Rendered for any
 /// source; the active source decides the data, covers (via the source seam), the
 /// recently-played list, and offline/sync gating.
@@ -73,9 +77,19 @@ pub fn HomeBody(
     // cannot hold hook state of their own.
     let active_card_menu = use_signal(|| None::<String>);
 
-    let albums_res = use_albums(source);
+    let albums_query = use_memo(|| hooks::AlbumQuery {
+        sort: vec![hooks::AlbumSort::new(hooks::AlbumSortField::Title, false)],
+        ..Default::default()
+    });
+    let albums_res = use_albums(source, albums_query);
+    let new_releases_query = use_memo(|| hooks::AlbumQuery {
+        sort: vec![hooks::AlbumSort::new(hooks::AlbumSortField::Year, true)],
+        ..Default::default()
+    });
+    let new_releases_res = use_albums_window(source, new_releases_query, NEW_RELEASES_WINDOW);
     let recently_added_res = use_recently_added_albums(source, RECENTLY_ADDED_WINDOW);
-    let artists_res = use_artists(source);
+    let artists_query = use_memo(hooks::ArtistQuery::default);
+    let artists_res = use_artists(source, artists_query);
     // Photos by artist key, so the Top Artists row shows the picture the daemon holds for each.
     let artist_covers = use_memo(move || {
         artists_res
@@ -129,13 +143,8 @@ pub fn HomeBody(
     });
 
     let source_albums_all = use_memo(move || -> Vec<AlbumCard> {
-        let mut albums = albums_res.read().clone().unwrap_or_default();
-        albums.sort_by(|a, b| {
-            a.title
-                .trim()
-                .to_lowercase()
-                .cmp(&b.title.trim().to_lowercase())
-        });
+        // Title order comes from the daemon.
+        let albums = albums_res.read().clone().unwrap_or_default();
 
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
@@ -191,8 +200,8 @@ pub fn HomeBody(
     });
 
     let new_releases = use_memo(move || -> Vec<AlbumCard> {
-        let mut albums = albums_res.read().clone().unwrap_or_default();
-        albums.sort_by_key(|b| std::cmp::Reverse(b.year));
+        // Newest year first, from the daemon.
+        let albums = new_releases_res.read().clone().unwrap_or_default();
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for album in albums {

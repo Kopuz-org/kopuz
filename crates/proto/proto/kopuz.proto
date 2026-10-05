@@ -36,11 +36,11 @@ service Kopuz {
   rpc GetTracks(TracksRequest) returns (TrackPage);
   rpc GetFolderTracks(FolderRequest) returns (TrackPage);
   rpc GetTracksByKeys(TracksByKeysRequest) returns (TrackList);
-  rpc GetAlbums(Page) returns (AlbumPage);
+  rpc GetAlbums(AlbumsRequest) returns (AlbumPage);
   rpc GetRecentlyAddedAlbums(Page) returns (AlbumPage);
   rpc GetAlbum(AlbumRef) returns (AlbumResponse);
   rpc GetAlbumTracks(AlbumTracksRequest) returns (TrackPage);
-  rpc GetArtists(Page) returns (ArtistPage);
+  rpc GetArtists(ArtistsRequest) returns (ArtistPage);
   rpc GetArtistTracks(ArtistTracksRequest) returns (TrackPage);
   rpc GetArtist(ArtistRequest) returns (ArtistDetail);
   rpc GetArtistSampleTracks(Page) returns (TrackPage);
@@ -504,6 +504,49 @@ message TrackFilter {
   // Set when sort is TRACK_SORT_FIELDS: the first criterion decides, the
   // rest break ties.
   repeated SortCriterion sort_fields = 8;
+  // Only tracks with (true) or without (false) a downloaded copy.
+  optional bool downloaded = 9;
+  // Inclusive bounds on the year of the track's album.
+  optional uint32 year_from = 10;
+  optional uint32 year_to = 11;
+  // Runs the whole ordering backwards.
+  bool reverse = 12;
+}
+
+message AlbumOrder {
+  AlbumOrderField field = 1;
+  bool descending = 2;
+}
+
+// What an album listing selects and how it is ordered; the first order decides
+// and the rest break ties.
+message AlbumQuery {
+  optional string search = 1;
+  optional string genre = 2;
+  optional uint32 year_from = 3;
+  optional uint32 year_to = 4;
+  optional string artist_key = 5;
+  repeated AlbumOrder sort = 6;
+}
+
+message AlbumsRequest {
+  AlbumQuery query = 1;
+  Page page = 2;
+}
+
+message ArtistOrder {
+  ArtistOrderField field = 1;
+  bool descending = 2;
+}
+
+message ArtistQuery {
+  optional string search = 1;
+  repeated ArtistOrder sort = 2;
+}
+
+message ArtistsRequest {
+  ArtistQuery query = 1;
+  Page page = 2;
 }
 
 message SortCriterion {
@@ -570,6 +613,7 @@ message ArtistInfo {
   uint32 track_count = 2;
   optional ArtworkRef artwork = 3;
   string key = 4;
+  uint32 album_count = 5;
 }
 
 message ArtistPage {
@@ -1712,6 +1756,23 @@ enum ArtistSortField {
   ARTIST_SORT_FIELD_NAME = 1;
   ARTIST_SORT_FIELD_TRACKS = 2;
   ARTIST_SORT_FIELD_ALBUMS = 3;
+}
+
+enum AlbumOrderField {
+  ALBUM_ORDER_FIELD_UNSPECIFIED = 0;
+  ALBUM_ORDER_FIELD_TITLE = 1;
+  ALBUM_ORDER_FIELD_ARTIST = 2;
+  ALBUM_ORDER_FIELD_YEAR = 3;
+  ALBUM_ORDER_FIELD_GENRE = 4;
+  ALBUM_ORDER_FIELD_RECENTLY_ADDED = 5;
+  ALBUM_ORDER_FIELD_TRACK_COUNT = 6;
+}
+
+enum ArtistOrderField {
+  ARTIST_ORDER_FIELD_UNSPECIFIED = 0;
+  ARTIST_ORDER_FIELD_NAME = 1;
+  ARTIST_ORDER_FIELD_TRACK_COUNT = 2;
+  ARTIST_ORDER_FIELD_ALBUM_COUNT = 3;
 }
 
 message DaemonStatus {

@@ -23,7 +23,8 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
 
     let source = use_active_source();
-    let albums_res = use_albums(source);
+    let albums_query = use_memo(hooks::AlbumQuery::default);
+    let albums_res = use_albums(source, albums_query);
     let counts_res = use_listen_counts(source);
     let filter = use_memo(move || {
         // The source is the daemon's; naming it here only keeps the memo

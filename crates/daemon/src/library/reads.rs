@@ -7,10 +7,13 @@
 
 use std::path::PathBuf;
 
-use api::{AlbumInfo, AlbumPage, ApiError, ArtistInfo, ArtistPage, Page, SearchResults, TrackPage};
+use api::{
+    AlbumInfo, AlbumPage, AlbumQuery, ApiError, ArtistInfo, ArtistPage, ArtistQuery, Page,
+    SearchResults, TrackPage,
+};
 use reader::Album;
 
-use super::{LibraryService, db_error};
+use super::{LibraryService, album_query, artist_query, db_error, db_page};
 
 /// Paging a fully materialized list. The database returns whole collections
 /// for these (they are small next to the track table), so the window is
@@ -59,6 +62,7 @@ impl ArtistArt {
             ),
             name: artist.name,
             track_count: artist.tracks,
+            album_count: artist.albums,
         }
     }
 }
@@ -129,13 +133,16 @@ impl LibraryService {
         Ok(track.and_then(|track| source.web_url(&track)))
     }
 
-    pub async fn albums(&self, page: Page) -> Result<AlbumPage, ApiError> {
-        let source = self.query_source();
-        let rows = self.db.albums(&source).await.map_err(db_error)?;
-        let (total, items) = window(&rows, page);
+    pub async fn albums(&self, query: AlbumQuery, page: Page) -> Result<AlbumPage, ApiError> {
+        let query = album_query(self.query_source(), query);
+        let listing = self
+            .db
+            .albums_page(&query, db_page(page))
+            .await
+            .map_err(db_error)?;
         Ok(AlbumPage {
-            albums: items.iter().map(album_info).collect(),
-            total,
+            albums: listing.rows.iter().map(album_info).collect(),
+            total: listing.total,
         })
     }
 
@@ -183,17 +190,17 @@ impl LibraryService {
     /// The artist grid. Its artwork chain ends in "one of this artist's album
     /// covers", so the covers and photos are loaded once for the page rather
     /// than per row -- the same walk `ArtworkService` does, on bulk data.
-    pub async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError> {
-        let rows = self
+    pub async fn artists(&self, query: ArtistQuery, page: Page) -> Result<ArtistPage, ApiError> {
+        let query = artist_query(self.query_source(), query);
+        let listing = self
             .db
-            .artists(&self.query_source())
+            .artists_page(&query, db_page(page))
             .await
             .map_err(db_error)?;
-        let (total, items) = window(&rows, page);
         let art = self.artist_art(None).await?;
         Ok(ArtistPage {
-            artists: items.into_iter().map(|row| art.info(row)).collect(),
-            total,
+            artists: listing.rows.into_iter().map(|row| art.info(row)).collect(),
+            total: listing.total,
         })
     }
 

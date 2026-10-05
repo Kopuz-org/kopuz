@@ -9,6 +9,10 @@ pub fn track_filter_to_proto(value: &api::TrackFilter) -> TrackFilter {
         favorite: value.favorite,
         sort: track_sort_to_proto(&value.sort) as i32,
         sort_fields: sort_criteria_to_proto(&value.sort),
+        downloaded: value.downloaded,
+        year_from: value.year_from.map(u32::from),
+        year_to: value.year_to.map(u32::from),
+        reverse: value.reverse,
     }
 }
 
@@ -19,6 +23,92 @@ pub fn track_filter_from_proto(value: &TrackFilter) -> api::TrackFilter {
         genre: value.genre.clone(),
         favorite: value.favorite,
         sort: track_sort_from_proto(value.sort, &value.sort_fields),
+        downloaded: value.downloaded,
+        year_from: value.year_from.map(year_from_proto),
+        year_to: value.year_to.map(year_from_proto),
+        reverse: value.reverse,
+    }
+}
+
+fn year_from_proto(year: u32) -> u16 {
+    year.min(u32::from(u16::MAX)) as u16
+}
+
+pub fn album_query_to_proto(value: &api::AlbumQuery) -> AlbumQuery {
+    AlbumQuery {
+        search: value.search.clone(),
+        genre: value.genre.clone(),
+        year_from: value.year_from.map(u32::from),
+        year_to: value.year_to.map(u32::from),
+        artist_key: value.artist_key.clone(),
+        sort: value
+            .sort
+            .iter()
+            .map(|sort| AlbumOrder {
+                field: album_order_field_to_proto(sort.field) as i32,
+                descending: sort.descending,
+            })
+            .collect(),
+    }
+}
+
+pub fn album_query_from_proto(value: &AlbumQuery) -> api::AlbumQuery {
+    api::AlbumQuery {
+        search: value.search.clone(),
+        genre: value.genre.clone(),
+        year_from: value.year_from.map(year_from_proto),
+        year_to: value.year_to.map(year_from_proto),
+        artist_key: value.artist_key.clone(),
+        sort: value
+            .sort
+            .iter()
+            .map(|sort| api::AlbumSort {
+                field: album_order_field_from_proto(sort.field),
+                descending: sort.descending,
+            })
+            .collect(),
+    }
+}
+
+pub fn albums_request_to_proto(query: &api::AlbumQuery, page: api::Page) -> AlbumsRequest {
+    AlbumsRequest {
+        query: Some(album_query_to_proto(query)),
+        page: Some(page_to_proto(page)),
+    }
+}
+
+pub fn artist_query_to_proto(value: &api::ArtistQuery) -> ArtistQuery {
+    ArtistQuery {
+        search: value.search.clone(),
+        sort: value
+            .sort
+            .iter()
+            .map(|sort| ArtistOrder {
+                field: artist_order_field_to_proto(sort.field) as i32,
+                descending: sort.descending,
+            })
+            .collect(),
+    }
+}
+
+pub fn artist_query_from_proto(value: &ArtistQuery) -> api::ArtistQuery {
+    api::ArtistQuery {
+        search: value.search.clone(),
+        sort: value
+            .sort
+            .iter()
+            .map(|sort| api::ArtistSort {
+                field: artist_order_field_from_proto(sort.field),
+                descending: sort.descending,
+            })
+            .collect(),
+    }
+}
+
+pub fn artists_request_to_proto(query: &api::ArtistQuery, page: api::Page) -> ArtistsRequest {
+    ArtistsRequest {
+        query: Some(artist_query_to_proto(query)),
+        page: Some(page_to_proto(page)),
     }
 }
 
@@ -289,6 +379,7 @@ pub fn artist_info_to_proto(value: &api::ArtistInfo) -> ArtistInfo {
         key: value.key.to_string(),
         name: value.name.clone(),
         track_count: value.track_count,
+        album_count: value.album_count,
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
     }
 }
@@ -298,6 +389,7 @@ pub fn artist_info_from_proto(value: &ArtistInfo) -> api::ArtistInfo {
         key: value.key.clone(),
         name: value.name.clone(),
         track_count: value.track_count,
+        album_count: value.album_count,
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
     }
 }
@@ -440,6 +532,7 @@ mod tests {
                 key: key.clone(),
                 name: "Ada".into(),
                 track_count: 2,
+                album_count: 1,
                 artwork: None,
             },
             albums: vec![api::AlbumInfo {
@@ -451,6 +544,110 @@ mod tests {
         assert_eq!(
             artist_detail_from_proto(&artist_detail_to_proto(&detail)),
             Some(detail)
+        );
+    }
+
+    #[test]
+    fn a_track_filter_round_trips_every_field() {
+        let filter = api::TrackFilter {
+            search: Some("s".into()),
+            album: Some("al-1".into()),
+            genre: Some("Rock".into()),
+            favorite: Some(false),
+            sort: api::TrackSort::Fields(vec![::config::SortCriterion::new(
+                ::config::TrackSortField::Duration,
+                ::config::SortDirection::Desc,
+            )]),
+            downloaded: Some(true),
+            year_from: Some(1990),
+            year_to: Some(1999),
+            reverse: true,
+        };
+        assert_eq!(
+            track_filter_from_proto(&track_filter_to_proto(&filter)),
+            filter
+        );
+        let plain = api::TrackFilter::default();
+        assert_eq!(
+            track_filter_from_proto(&track_filter_to_proto(&plain)),
+            plain,
+            "an absent bound stays absent rather than becoming year 0"
+        );
+    }
+
+    #[test]
+    fn an_album_query_round_trips_every_field() {
+        let query = api::AlbumQuery {
+            search: Some("alp".into()),
+            genre: Some("Rock".into()),
+            year_from: Some(1990),
+            year_to: Some(2005),
+            artist_key: Some("ar-1".into()),
+            sort: vec![
+                api::AlbumSort::new(api::AlbumSortField::RecentlyAdded, true),
+                api::AlbumSort::new(api::AlbumSortField::Title, false),
+            ],
+        };
+        assert_eq!(album_query_from_proto(&album_query_to_proto(&query)), query);
+        let sent = albums_request_to_proto(
+            &query,
+            api::Page {
+                offset: 3,
+                limit: 7,
+            },
+        );
+        assert_eq!(
+            sent.query.as_ref().map(album_query_from_proto),
+            Some(query),
+            "the query rides the request beside its page"
+        );
+        assert_eq!(page_from_proto(sent.page.as_ref()).offset, 3);
+        assert_eq!(
+            album_query_from_proto(&AlbumQuery::default()),
+            api::AlbumQuery::default(),
+            "an empty query lists everything"
+        );
+    }
+
+    #[test]
+    fn an_artist_query_round_trips_every_field() {
+        let query = api::ArtistQuery {
+            search: Some("ada".into()),
+            sort: vec![
+                api::ArtistSort::new(api::ArtistSortField::AlbumCount, true),
+                api::ArtistSort::new(api::ArtistSortField::Name, false),
+            ],
+        };
+        assert_eq!(
+            artist_query_from_proto(&artist_query_to_proto(&query)),
+            query
+        );
+        let sent = artists_request_to_proto(
+            &query,
+            api::Page {
+                offset: 1,
+                limit: 2,
+            },
+        );
+        assert_eq!(
+            sent.query.as_ref().map(artist_query_from_proto),
+            Some(query)
+        );
+        assert_eq!(page_from_proto(sent.page.as_ref()).limit, 2);
+    }
+
+    #[test]
+    fn an_artist_row_carries_its_album_count() {
+        let artist = api::ArtistInfo {
+            key: "ar-1".into(),
+            name: "Ada".into(),
+            track_count: 9,
+            album_count: 4,
+            artwork: None,
+        };
+        assert_eq!(
+            artist_info_from_proto(&artist_info_to_proto(&artist)),
+            artist
         );
     }
 

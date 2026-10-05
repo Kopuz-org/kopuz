@@ -66,8 +66,10 @@ pub fn LibraryPage(
         }
     });
 
-    let albums_res = use_albums(source);
-    let artists_res = use_artists(source);
+    let albums_query = use_memo(hooks::AlbumQuery::default);
+    let artists_query = use_memo(hooks::ArtistQuery::default);
+    let albums_res = use_albums(source, albums_query);
+    let artists_res = use_artists(source, artists_query);
     let playlists_res = use_playlists();
 
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();

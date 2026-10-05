@@ -267,6 +267,14 @@ impl ReadStore for Native {
         queries::artists(&self.pool(), source).await
     }
 
+    async fn artists_page(
+        &self,
+        query: &crate::ArtistQuery,
+        page: crate::Page,
+    ) -> Result<crate::Listing<crate::ArtistRow>, DbError> {
+        queries::artists_page(&self.pool(), query, page).await
+    }
+
     async fn artist_album_covers(
         &self,
         source: &crate::Source,
@@ -300,6 +308,14 @@ impl ReadStore for Native {
 
     async fn albums(&self, source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
         queries::albums(&self.pool(), source).await
+    }
+
+    async fn albums_page(
+        &self,
+        query: &crate::AlbumQuery,
+        page: crate::Page,
+    ) -> Result<crate::Listing<reader::Album>, DbError> {
+        queries::albums_page(&self.pool(), query, page).await
     }
 
     async fn albums_recently_added(

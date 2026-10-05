@@ -101,6 +101,13 @@ pub struct TrackFilter {
     /// Matched against the local favorites mirror, which every source keeps
     /// under its own `source.as_str()` key.
     pub favorite: Option<bool>,
+    /// Restrict to tracks with a downloaded copy (`Some(true)`) or without one (`Some(false)`).
+    pub downloaded: Option<bool>,
+    /// Inclusive bounds on the year of the track's album; a track whose album has no year matches neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Flip every term of `sort`, so the listing runs in exactly the opposite order.
+    pub reverse: bool,
 }
 
 impl TrackFilter {
@@ -110,6 +117,69 @@ impl TrackFilter {
             ..Default::default()
         }
     }
+}
+
+/// A window of a listing, with how many rows the whole filtered set holds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Listing<T> {
+    pub total: u32,
+    pub rows: Vec<T>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlbumSortField {
+    Title,
+    Artist,
+    Year,
+    Genre,
+    /// When the album's newest track was added, on the order [`TrackSort::DateAdded`] uses.
+    RecentlyAdded,
+    TrackCount,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AlbumSort {
+    pub field: AlbumSortField,
+    pub descending: bool,
+}
+
+/// What an album listing selects: one source, a filter, and the order. Filters
+/// and order run in SQL, so `total` and the window both come off the filtered set.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AlbumQuery {
+    pub source: Source,
+    /// Case-insensitive (ASCII) match on the title or the billed artist's text.
+    pub search: String,
+    pub genre: Option<String>,
+    /// Inclusive bounds; an album with no year matches neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Only albums billed to this artist, by key.
+    pub artist_key: Option<String>,
+    /// The first criterion decides, the rest break ties; artist then title settle what is left.
+    pub sort: Vec<AlbumSort>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtistSortField {
+    Name,
+    TrackCount,
+    AlbumCount,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArtistSort {
+    pub field: ArtistSortField,
+    pub descending: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ArtistQuery {
+    pub source: Source,
+    /// Case-insensitive (ASCII) match on the artist's name.
+    pub search: String,
+    /// The first criterion decides, the rest break ties; name then key settle what is left.
+    pub sort: Vec<ArtistSort>,
 }
 
 /// Errors surfaced by the storage layer. String-wrapped so the type is identical
@@ -160,6 +230,8 @@ pub struct ArtistRow {
     pub source_id: Option<String>,
     pub name: String,
     pub tracks: u32,
+    /// The albums billed to this artist.
+    pub albums: u32,
 }
 
 /// Per-artist images: `(overrides, photos)`. `overrides` are user-set custom
@@ -280,6 +352,13 @@ pub trait ReadStore: Send + Sync {
     /// Every artist a track of the source credits, A→Z.
     async fn artists(&self, source: &Source) -> Result<Vec<ArtistRow>, DbError>;
 
+    /// One window of the artists a track of the source credits, filtered and sorted in SQL.
+    async fn artists_page(
+        &self,
+        query: &ArtistQuery,
+        page: Page,
+    ) -> Result<Listing<ArtistRow>, DbError>;
+
     /// One album cover per credited artist: what an artist with no photo renders.
     async fn artist_album_covers(
         &self,
@@ -308,6 +387,13 @@ pub trait ReadStore: Send + Sync {
 
     /// All albums for a source, ordered by artist then title.
     async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
+
+    /// One window of an album listing, filtered and sorted in SQL.
+    async fn albums_page(
+        &self,
+        query: &AlbumQuery,
+        page: Page,
+    ) -> Result<Listing<reader::Album>, DbError>;
 
     /// At most `limit` albums for a source, most recently added first, on the
     /// same order as [`TrackSort::DateAdded`]. It is its own query because

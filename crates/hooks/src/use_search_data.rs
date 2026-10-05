@@ -19,7 +19,8 @@ pub struct SearchData {
 pub fn use_search_data(search_query: Signal<String>) -> SearchData {
     let api = crate::api::use_api();
     let source = crate::use_db_queries::use_active_source();
-    let albums_res = crate::use_db_queries::use_albums(source);
+    let albums_query = use_memo(api::AlbumQuery::default);
+    let albums_res = crate::use_db_queries::use_albums(source, albums_query);
     let gens = crate::db_reactivity::use_generations();
 
     // One representative cover per genre, taken from an album that has one --

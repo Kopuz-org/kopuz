@@ -33,7 +33,8 @@ pub use jobs::{
     DownloadCandidate, DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState,
 };
 pub use library::{
-    AlbumInfo, AlbumPage, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT,
+    AlbumInfo, AlbumPage, AlbumQuery, AlbumSort, AlbumSortField, ArtistCredit, ArtistDetail,
+    ArtistInfo, ArtistPage, ArtistQuery, ArtistSort, ArtistSortField, DEFAULT_PAGE_LIMIT,
     LyricChunkView, LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter,
     TrackInfo, TrackPage, TrackSort,
 };
@@ -109,7 +110,7 @@ pub const DAEMON_OWNED_CONFIG_KEYS: &[&str] = &[
 ];
 
 /// What this build speaks: bump it with any wire change a mismatched peer would misread, never for an added field.
-pub const WIRE_REVISION: u32 = 1;
+pub const WIRE_REVISION: u32 = 2;
 
 /// What a daemon says it is, for a frontend that was not built beside it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -207,19 +208,22 @@ pub trait LibraryApi: Send + Sync {
     /// not hold are skipped rather than erroring.
     async fn tracks_by_keys(&self, keys: Vec<String>) -> Result<Vec<TrackInfo>, ApiError>;
 
-    async fn albums(&self, page: Page) -> Result<AlbumPage, ApiError>;
+    /// A window of the albums `query` selects, in its order; `total` counts the
+    /// whole filtered set.
+    async fn albums(&self, query: AlbumQuery, page: Page) -> Result<AlbumPage, ApiError>;
 
-    /// Albums newest-first by when their tracks were added. Its own call
-    /// because [`LibraryApi::albums`] answers alphabetically, and recency comes
-    /// from each album's newest track — an order no reshuffling of an
-    /// alphabetical page can recover.
+    /// Albums newest-first by when their tracks were added, leaving out any that
+    /// hold no tracks. The same order as [`AlbumSortField::RecentlyAdded`], which
+    /// [`LibraryApi::albums`] can combine with a filter.
     async fn albums_recently_added(&self, page: Page) -> Result<AlbumPage, ApiError>;
 
     async fn album(&self, id: String) -> Result<Option<AlbumInfo>, ApiError>;
 
     async fn album_tracks(&self, id: String, page: Page) -> Result<TrackPage, ApiError>;
 
-    async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError>;
+    /// A window of the artists `query` selects, in its order; `total` counts the
+    /// whole filtered set.
+    async fn artists(&self, query: ArtistQuery, page: Page) -> Result<ArtistPage, ApiError>;
 
     async fn artist_tracks(&self, artist: String, page: Page) -> Result<TrackPage, ApiError>;
 
