@@ -9,8 +9,10 @@ use components::track_list_view::TrackListView;
 use components::view_mode_toggle::ViewModeToggle;
 use config::{AlbumViewMode, AppConfig};
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_active_source, use_album, use_albums, use_tracks_by_keys};
+use hooks::use_db_queries::{
+    use_active_source, use_album, use_album_tracks, use_albums, use_albums_window,
+    use_tracks_by_keys,
+};
 use std::collections::HashSet;
 
 /// Copy a link to the clipboard and flash a small toast. Used by the catalog album
@@ -44,7 +46,8 @@ pub fn Album(
 
     let open_album_menu = use_signal(|| None::<String>);
 
-    let albums_res = use_albums(source);
+    let any_album_query = use_memo(|| Some(hooks::AlbumQuery::default()));
+    let any_album_res = use_albums_window(source, any_album_query, 1);
 
     // First visit to a server with an empty cache → pull once.
     let mut has_fetched = use_signal(|| false);
@@ -52,7 +55,7 @@ pub fn Album(
         if !caps().sync || *has_fetched.read() {
             return;
         }
-        if let Some(albums) = albums_res.read().clone() {
+        if let Some(Ok(albums)) = any_album_res.read().clone() {
             has_fetched.set(true);
             if albums.is_empty() {
                 hooks::jobs::start(hooks::JobKind::LibrarySync);
@@ -99,8 +102,6 @@ fn AlbumGrid(
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
-    let albums_res = use_albums(source);
-
     let album_sort = use_signal(|| config.peek().album_sort.clone());
     use_effect(move || {
         let curr = album_sort.read().clone();
@@ -108,6 +109,13 @@ fn AlbumGrid(
             config.write().album_sort = curr;
         }
     });
+    let albums_query = use_memo(move || {
+        Some(hooks::AlbumQuery {
+            sort: album_sort.read().clone(),
+            ..Default::default()
+        })
+    });
+    let albums_res = use_albums(source, albums_query);
     let view_mode = use_signal(|| config.peek().album_view_mode);
     use_effect(move || {
         let curr = *view_mode.read();
@@ -115,13 +123,8 @@ fn AlbumGrid(
             config.write().album_view_mode = curr;
         }
     });
-    let available_sort_fields = use_memo(move || {
-        hooks::sort::available_album_fields(&albums_res.read().clone().unwrap_or_default())
-    });
 
-    // Offline (server): only albums with downloaded tracks. Album ids come from
-    // the downloaded tracks themselves. The grid dedupes by title — the detail
-    // re-aggregates same-titled albums.
+    // Offline (server): only albums with downloaded tracks, by the album ids those tracks carry.
     let offline_keys = use_memo(move || -> Vec<String> {
         if !(caps().downloads && *is_offline.read()) {
             return Vec::new();
@@ -151,18 +154,17 @@ fn AlbumGrid(
     let albums = use_memo(move || {
         let offline = caps().downloads && *is_offline.read();
         let downloaded = downloaded_album_ids();
-        let mut seen = HashSet::new();
-        let mut albums = albums_res
+        // Albums are keyed by id, so two that share a title are two albums.
+        albums_res
             .read()
             .clone()
+            .and_then(Result::ok)
             .unwrap_or_default()
             .into_iter()
             .filter(|a| !offline || downloaded.contains(&a.id))
-            .filter(|a| seen.insert(a.title.trim().to_lowercase()))
-            .collect::<Vec<_>>();
-        hooks::sort::sort_albums(&mut albums, &album_sort.read());
-        albums
+            .collect::<Vec<_>>()
     });
+    let available_sort_fields = use_memo(move || hooks::sort::available_album_fields(&albums()));
 
     // Restore the grid scroll once after the albums first render; guarded so DB
     // reactivity re-runs don't keep snapping the view back to the saved offset.
@@ -188,7 +190,9 @@ fn AlbumGrid(
             id: "album-grid-scroll",
             class: "flex-1 min-h-0 overflow-y-auto pb-8",
             onscroll: move |e| crate::scroll_persist::save("albums", e.scroll_top()),
-            if albums().is_empty() {
+            if let Some(Err(error)) = albums_res.read().clone() {
+                crate::layout::ReadError { error }
+            } else if albums().is_empty() {
                 p { class: "text-slate-500", "{i18n::t(\"no_albums_found\")}" }
             } else {
                 div {
@@ -260,20 +264,9 @@ fn AlbumGrid(
                                             delete_label: Some(remove_label.clone()),
                                             on_delete: {
                                                 let id = id_for_menu.clone();
-                                                let title = album.title.clone();
                                                 Some(EventHandler::new(move |_| {
                                                     open_album_menu.set(None);
-                                                    if cap.delete_from_disk {
-                                                        hooks::library_actions::delete_album(id.clone(), true);
-                                                    } else {
-                                                        // A server splits one release across
-                                                        // same-titled albums, so dropping the
-                                                        // cache means dropping all of them.
-                                                        let all = albums_res.read().clone().unwrap_or_default();
-                                                        for album in all.iter().filter(|album| album.title == title) {
-                                                            hooks::library_actions::delete_album(album.id.clone(), false);
-                                                        }
-                                                    }
+                                                    hooks::library_actions::delete_album(id.clone(), cap.delete_from_disk);
                                                 }))
                                             },
                                         }
@@ -298,7 +291,6 @@ fn AlbumDetail(
     on_close: EventHandler<()>,
 ) -> Element {
     let nav_ctrl = use_context::<components::NavigationController>();
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
     let api = hooks::use_api();
     let caps = hooks::sources::use_capabilities();
@@ -307,7 +299,7 @@ fn AlbumDetail(
 
     let album_id_memo = use_memo(use_reactive!(|album_id_str| album_id_str));
     let album_res = use_album(source, album_id_memo);
-    let albums_res = use_albums(source);
+    let tracks_res = use_album_tracks(source, album_id_memo);
 
     // Discover albums are opened by the source's own browse id and aren't in the
     // library until saved. When the library has no row for the id, fetch the album
@@ -381,47 +373,6 @@ fn AlbumDetail(
         }
     };
 
-    // The grid dedupes albums by title, so the detail aggregates every
-    // same-titled album's tracks.
-    let info_title = album.title.clone();
-    let matching_ids = use_memo(move || -> Vec<String> {
-        let title = info_title.clone();
-        let ids: Vec<String> = albums_res
-            .read()
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|a| a.title == title)
-            .map(|a| a.id)
-            .collect();
-        ids
-    });
-    let tracks_res = {
-        let api = api.clone();
-        use_resource(move || {
-            let _ = gens.generation(Table::Tracks);
-            let ids = matching_ids();
-            let api = api.clone();
-            async move {
-                let mut out = Vec::new();
-                for id in ids {
-                    let page = api
-                        .album_tracks(
-                            id,
-                            api::Page {
-                                offset: 0,
-                                limit: u32::MAX,
-                            },
-                        )
-                        .await
-                        .unwrap_or_default();
-                    out.extend(page.items);
-                }
-                out
-            }
-        })
-    };
-
     // Catalog sources store albums under a title+artist hash with no
     // browse id, so the library only ever holds the few tracks the user saved —
     // an album page would show 1 of 18 songs. The daemon resolves the saved
@@ -471,24 +422,14 @@ fn AlbumDetail(
             return remote;
         }
 
-        let mut tracks: Vec<api::TrackInfo> = tracks_res
+        // The daemon orders an album by disc, track and title.
+        tracks_res
             .read()
             .clone()
             .unwrap_or_default()
             .into_iter()
             .filter(|t| !offline || conf.offline_tracks.contains_key(&t.key))
-            .collect();
-        tracks.sort_by(|a, b| {
-            a.disc_number
-                .unwrap_or(1)
-                .cmp(&b.disc_number.unwrap_or(1))
-                .then_with(|| {
-                    a.track_number
-                        .unwrap_or(0)
-                        .cmp(&b.track_number.unwrap_or(0))
-                })
-        });
-        tracks
+            .collect::<Vec<api::TrackInfo>>()
     });
 
     let album_title = album.title.clone();

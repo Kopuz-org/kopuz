@@ -132,6 +132,42 @@ pub struct TrackFilter {
     pub genre: Option<String>,
     pub favorite: Option<bool>,
     pub sort: TrackSort,
+    /// Only tracks with a downloaded copy (`Some(true)`), or only those without.
+    pub downloaded: Option<bool>,
+    /// Inclusive bounds on the year of the track's album; an album with no year is in neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Run `sort` backwards (`DateAdded` becomes oldest first); an album or genre keeps its own track order, which this flips.
+    pub reverse: bool,
+}
+
+/// Which albums to list and in what order; the daemon filters and sorts, so
+/// `AlbumPage::total` counts the filtered set. `Default` lists everything by
+/// artist then title.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlbumQuery {
+    /// Matches the title or the billed artist's text, ignoring ASCII case.
+    pub search: Option<String>,
+    pub genre: Option<String>,
+    /// Inclusive bounds; an album with no year is in neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Only albums billed to this artist.
+    pub artist_key: Option<String>,
+    /// Only these albums, by id; an empty list matches none.
+    pub ids: Option<Vec<String>>,
+    /// The first criterion decides and the rest break ties; artist then title settle what is left.
+    pub sort: Vec<config::SortCriterion<config::AlbumSortField>>,
+}
+
+/// Which artists to list and in what order; `ArtistPage::total` counts the
+/// filtered set. `Default` lists everyone by name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistQuery {
+    /// Matches the artist's name, ignoring ASCII case.
+    pub search: Option<String>,
+    /// The first criterion decides and the rest break ties; name then key settle what is left.
+    pub sort: Vec<config::SortCriterion<config::ArtistSortField>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -201,14 +237,15 @@ pub struct ArtistInfo {
     pub key: String,
     pub name: String,
     pub track_count: u32,
+    /// The albums billed to the artist.
+    pub album_count: u32,
     pub artwork: Option<crate::ArtworkRef>,
 }
 
-/// An artist page's header and albums; its tracks page through `artist_tracks`.
+/// An artist page's header; its albums list through `albums` by artist key, its tracks page through `artist_tracks`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtistDetail {
     pub info: ArtistInfo,
-    pub albums: Vec<AlbumInfo>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

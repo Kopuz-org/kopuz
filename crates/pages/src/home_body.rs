@@ -3,8 +3,9 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
-    use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_artists,
-    use_favorites, use_playlists, use_recently_added_albums, use_top_genre, use_tracks_by_keys,
+    use_active_source, use_album_tracks, use_albums, use_albums_window, use_artist_sample_tracks,
+    use_artists, use_favorites, use_playlists, use_recently_added_albums, use_top_genre,
+    use_tracks_by_keys,
 };
 use rand::rng;
 use rand::seq::SliceRandom;
@@ -41,16 +42,39 @@ fn album_cover_url(album: &Album) -> Option<String> {
     hooks::artwork::for_album(album, hooks::artwork::Size::Thumb).map(|cover| cover.to_string())
 }
 
+fn is_known(album: &Album) -> bool {
+    !is_unknown_album(&album.title) && !is_unknown_artist(&album.artist)
+}
+
+fn album_card(album: &Album) -> AlbumCard {
+    (
+        album.id.clone(),
+        album.title.clone(),
+        album.artist.clone(),
+        album_cover_url(album),
+    )
+}
+
+/// A shelf's cards: the first known albums of a listing, in its order.
+fn shelf(albums: &[Album]) -> Vec<AlbumCard> {
+    albums
+        .iter()
+        .filter(|album| is_known(album))
+        .take(SHELF_LEN)
+        .map(album_card)
+        .collect()
+}
+
 /// A track's cover: the row carries its own reference, so a mixed-source list
 /// resolves without asking which service it came from.
 fn track_cover_url(track: &Track) -> Option<String> {
     hooks::artwork::for_track(track, hooks::artwork::Size::Thumb).map(|cover| cover.to_string())
 }
 
-/// How many newest albums the Recently Added query pulls. The row shows 12, but
-/// untitled albums and same-title duplicates are dropped afterwards, so the
-/// window has to be wide enough to still fill it.
-const RECENTLY_ADDED_WINDOW: u32 = 64;
+/// How many albums a shelf query pulls: a shelf shows 12, and dropping the unknown ones still has to fill it.
+const SHELF_WINDOW: u32 = 64;
+
+const SHELF_LEN: usize = 12;
 
 /// The source-agnostic Home body (sections + hero). Rendered for any
 /// source; the active source decides the data, covers (via the source seam), the
@@ -73,9 +97,29 @@ pub fn HomeBody(
     // cannot hold hook state of their own.
     let active_card_menu = use_signal(|| None::<String>);
 
-    let albums_res = use_albums(source);
-    let recently_added_res = use_recently_added_albums(source, RECENTLY_ADDED_WINDOW);
-    let artists_res = use_artists(source);
+    let albums_query = use_memo(|| {
+        Some(hooks::AlbumQuery {
+            sort: vec![config::SortCriterion::new(
+                config::AlbumSortField::Title,
+                config::SortDirection::Asc,
+            )],
+            ..Default::default()
+        })
+    });
+    let albums_res = use_albums(source, albums_query);
+    let new_releases_query = use_memo(|| {
+        Some(hooks::AlbumQuery {
+            sort: vec![config::SortCriterion::new(
+                config::AlbumSortField::Year,
+                config::SortDirection::Desc,
+            )],
+            ..Default::default()
+        })
+    });
+    let new_releases_res = use_albums_window(source, new_releases_query, SHELF_WINDOW);
+    let recently_added_res = use_recently_added_albums(source, SHELF_WINDOW);
+    let artists_query = use_memo(hooks::ArtistQuery::default);
+    let artists_res = use_artists(source, artists_query);
     // Photos by artist key, so the Top Artists row shows the picture the daemon holds for each.
     let artist_covers = use_memo(move || {
         artists_res
@@ -106,8 +150,32 @@ pub fn HomeBody(
     let offline_tracks_res = use_tracks_by_keys(source, offline_keys);
     // Recently-played for the active source (each source keeps its own history).
     let recent_tracks_res = hooks::use_db_queries::use_recently_played(source);
+    // Only the albums the recent tracks are filed under, for the hero and Continue Listening.
+    let recent_albums_query = use_memo(move || {
+        let recent = recent_tracks_res.read();
+        let mut ids: Vec<String> = Vec::new();
+        for track in recent.iter().flatten() {
+            if !track.album_id.trim().is_empty() && !ids.contains(&track.album_id) {
+                ids.push(track.album_id.clone());
+            }
+        }
+        Some(hooks::AlbumQuery {
+            ids: Some(ids),
+            ..Default::default()
+        })
+    });
+    let recent_albums_res = use_albums(source, recent_albums_query);
     let top_genre_res = use_top_genre(source);
+    let made_for_you_query = use_memo(move || {
+        let genre = top_genre_res.read().clone().flatten()?;
+        Some(hooks::AlbumQuery {
+            genre: Some(genre),
+            ..Default::default()
+        })
+    });
+    let made_for_you_res = use_albums_window(source, made_for_you_query, SHELF_WINDOW);
     let artist_samples_res = use_artist_sample_tracks(source, 30);
+    let read_error = use_memo(move || albums_res.read().clone().and_then(Result::err));
 
     // Catalog sources fill an empty cache by syncing; folder sources are populated by the scan.
     let mut fetch_remote = move || {
@@ -119,7 +187,7 @@ pub fn HomeBody(
         if !caps().sync || *has_fetched.read() {
             return;
         }
-        if let Some(albums) = albums_res.read().as_ref() {
+        if let Some(Ok(albums)) = albums_res.read().as_ref() {
             if albums.is_empty() {
                 fetch_remote();
             } else {
@@ -129,17 +197,12 @@ pub fn HomeBody(
     });
 
     let source_albums_all = use_memo(move || -> Vec<AlbumCard> {
-        let mut albums = albums_res.read().clone().unwrap_or_default();
-        albums.sort_by(|a, b| {
-            a.title
-                .trim()
-                .to_lowercase()
-                .cmp(&b.title.trim().to_lowercase())
-        });
-
-        let mut unique_albums = Vec::new();
-        let mut seen_titles = std::collections::HashSet::new();
-
+        // Title order comes from the daemon.
+        let albums = albums_res
+            .read()
+            .clone()
+            .and_then(Result::ok)
+            .unwrap_or_default();
         let offline = caps().downloads && *is_offline.read();
         let downloaded_album_ids: std::collections::HashSet<String> = if offline {
             offline_tracks_res
@@ -153,30 +216,12 @@ pub fn HomeBody(
             std::collections::HashSet::new()
         };
 
-        for album in albums {
-            if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
-                continue;
-            }
-            if offline && !downloaded_album_ids.contains(&album.id) {
-                continue;
-            }
-            if seen_titles.insert(album.title.trim().to_lowercase()) {
-                unique_albums.push(album);
-            }
-        }
-
-        unique_albums
-            .into_iter()
-            .map(|album| {
-                let cover = album_cover_url(&album);
-                (
-                    album.id.clone(),
-                    album.title.clone(),
-                    album.artist.clone(),
-                    cover,
-                )
-            })
-            .collect::<Vec<_>>()
+        albums
+            .iter()
+            .filter(|album| is_known(album))
+            .filter(|album| !offline || downloaded_album_ids.contains(&album.id))
+            .map(album_card)
+            .collect()
     });
 
     let shuffled_albums = use_memo(move || {
@@ -190,71 +235,34 @@ pub fn HomeBody(
         shuffled
     });
 
+    // Newest year first, from the daemon.
     let new_releases = use_memo(move || -> Vec<AlbumCard> {
-        let mut albums = albums_res.read().clone().unwrap_or_default();
-        albums.sort_by_key(|b| std::cmp::Reverse(b.year));
-        let mut unique = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for album in albums {
-            if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
-                continue;
-            }
-            if seen.insert(album.title.trim().to_lowercase()) {
-                unique.push(album);
-            }
-            if unique.len() >= 12 {
-                break;
-            }
-        }
-        unique
-            .into_iter()
-            .map(|album| {
-                let cover = album_cover_url(&album);
-                (
-                    album.id.clone(),
-                    album.title.clone(),
-                    album.artist.clone(),
-                    cover,
-                )
-            })
-            .collect()
+        let albums = new_releases_res
+            .read()
+            .clone()
+            .and_then(Result::ok)
+            .unwrap_or_default();
+        shelf(&albums)
     });
 
+    // Newest first, from the daemon.
     let recently_added = use_memo(move || -> Vec<AlbumCard> {
-        // Already newest-first from the daemon, so this only de-duplicates.
-        let all_albums = recently_added_res.read().clone().unwrap_or_default();
-        let mut unique = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for album in all_albums.iter() {
-            if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
-                continue;
-            }
-            if seen.insert(album.title.trim().to_lowercase()) {
-                unique.push(album.clone());
-            }
-            if unique.len() >= 12 {
-                break;
-            }
-        }
-        unique
-            .into_iter()
-            .map(|album| {
-                let cover = album_cover_url(&album);
-                (
-                    album.id.clone(),
-                    album.title.clone(),
-                    album.artist.clone(),
-                    cover,
-                )
-            })
-            .collect()
+        shelf(&recently_added_res.read().clone().unwrap_or_default())
+    });
+
+    let recent_albums = use_memo(move || {
+        recent_albums_res
+            .read()
+            .clone()
+            .and_then(Result::ok)
+            .unwrap_or_default()
     });
 
     let continue_listening = use_memo(move || {
         let recent_tracks = recent_tracks_res.read().clone().unwrap_or_default();
-        let all_albums = albums_res.read().clone().unwrap_or_default();
+        let recent_albums = recent_albums();
         let album_by_id: HashMap<&str, &Album> =
-            all_albums.iter().map(|a| (a.id.as_str(), a)).collect();
+            recent_albums.iter().map(|a| (a.id.as_str(), a)).collect();
         let mut out: Vec<(Track, Option<Album>, Option<String>)> = Vec::new();
         let mut seen_albums = std::collections::HashSet::new();
         for track in recent_tracks.iter() {
@@ -263,7 +271,7 @@ pub fn HomeBody(
             }
             let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
             if let Some(ref album_ref) = album {
-                if is_unknown_album(&album_ref.title) || is_unknown_artist(&album_ref.artist) {
+                if !is_known(album_ref) {
                     continue;
                 }
             } else if is_unknown_artist(&track.artist) {
@@ -285,9 +293,9 @@ pub fn HomeBody(
 
     let hero_entry = use_memo(move || {
         let recent_tracks = recent_tracks_res.read().clone().unwrap_or_default();
-        let all_albums = albums_res.read().clone().unwrap_or_default();
+        let recent_albums = recent_albums();
         let album_by_id: HashMap<&str, &Album> =
-            all_albums.iter().map(|a| (a.id.as_str(), a)).collect();
+            recent_albums.iter().map(|a| (a.id.as_str(), a)).collect();
 
         for track in recent_tracks.iter() {
             if track.title.trim().is_empty() {
@@ -301,33 +309,15 @@ pub fn HomeBody(
     });
 
     let made_for_you = use_memo(move || -> (String, Vec<AlbumCard>) {
-        let all_albums = albums_res.read().clone().unwrap_or_default();
         let Some(top_genre) = top_genre_res.read().clone().flatten() else {
             return (String::new(), Vec::new());
         };
-        let mut albums: Vec<Album> = all_albums
-            .iter()
-            .filter(|a| {
-                a.genre == top_genre && !is_unknown_album(&a.title) && !is_unknown_artist(&a.artist)
-            })
-            .cloned()
-            .collect();
-        let mut rng = rng();
-        albums.shuffle(&mut rng);
-        albums.truncate(12);
-        let cards = albums
-            .into_iter()
-            .map(|album| {
-                let cover = album_cover_url(&album);
-                (
-                    album.id.clone(),
-                    album.title.clone(),
-                    album.artist.clone(),
-                    cover,
-                )
-            })
-            .collect();
-        (top_genre, cards)
+        let albums = made_for_you_res
+            .read()
+            .clone()
+            .and_then(Result::ok)
+            .unwrap_or_default();
+        (top_genre, shelf(&albums))
     });
 
     let source_artists = use_memo(move || {
@@ -439,6 +429,9 @@ pub fn HomeBody(
 
     rsx! {
         div {
+            if let Some(error) = read_error() {
+                crate::layout::ReadError { error }
+            }
             for (idx, (key, enabled)) in sections.into_iter().enumerate() {
                 {
                     let key_for_render = key.clone();

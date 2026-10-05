@@ -305,6 +305,8 @@ pub fn album_sort_field_to_proto(value: config::AlbumSortField) -> AlbumSortFiel
         config::AlbumSortField::Artist => AlbumSortField::Artist,
         config::AlbumSortField::Year => AlbumSortField::Year,
         config::AlbumSortField::Genre => AlbumSortField::Genre,
+        config::AlbumSortField::RecentlyAdded => AlbumSortField::RecentlyAdded,
+        config::AlbumSortField::TrackCount => AlbumSortField::TrackCount,
     }
 }
 
@@ -314,6 +316,8 @@ pub fn album_sort_field_from_proto(value: i32) -> config::AlbumSortField {
         AlbumSortField::Artist => config::AlbumSortField::Artist,
         AlbumSortField::Year => config::AlbumSortField::Year,
         AlbumSortField::Genre => config::AlbumSortField::Genre,
+        AlbumSortField::RecentlyAdded => config::AlbumSortField::RecentlyAdded,
+        AlbumSortField::TrackCount => config::AlbumSortField::TrackCount,
         AlbumSortField::Unspecified => config::AlbumSortField::Title,
     }
 }

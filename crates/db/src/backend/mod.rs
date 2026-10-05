@@ -125,12 +125,19 @@ async fn open_pool(path: &Path) -> Result<SqlitePool, DbError> {
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(std::time::Duration::from_secs(5))
-        .foreign_keys(true);
+        .foreign_keys(true)
+        .collation("FOLDED", folded_cmp);
     SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(opts)
         .await
         .map_err(Into::into)
+}
+
+/// Listing sort order: Unicode case folding and no surrounding space, where NOCASE folds ASCII only.
+pub(crate) fn folded_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let fold = |text: &str| text.trim().to_lowercase();
+    fold(a).cmp(&fold(b))
 }
 
 fn with_ext(path: &Path, suffix: &str) -> std::path::PathBuf {
@@ -176,14 +183,6 @@ impl ReadStore for Native {
         limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError> {
         queries::artist_tracks(&self.pool(), source, artist, limit).await
-    }
-
-    async fn artist_albums(
-        &self,
-        source: &crate::Source,
-        artist: &str,
-    ) -> Result<Vec<reader::Album>, DbError> {
-        queries::artist_albums(&self.pool(), source, artist).await
     }
 
     async fn artist(
@@ -267,6 +266,14 @@ impl ReadStore for Native {
         queries::artists(&self.pool(), source).await
     }
 
+    async fn artists_page(
+        &self,
+        query: &crate::ArtistQuery,
+        page: crate::Page,
+    ) -> Result<crate::Listing<crate::ArtistRow>, DbError> {
+        queries::artists_page(&self.pool(), query, page).await
+    }
+
     async fn artist_album_covers(
         &self,
         source: &crate::Source,
@@ -300,6 +307,14 @@ impl ReadStore for Native {
 
     async fn albums(&self, source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
         queries::albums(&self.pool(), source).await
+    }
+
+    async fn albums_page(
+        &self,
+        query: &crate::AlbumQuery,
+        page: crate::Page,
+    ) -> Result<crate::Listing<reader::Album>, DbError> {
+        queries::albums_page(&self.pool(), query, page).await
     }
 
     async fn albums_recently_added(
@@ -796,6 +811,19 @@ mod tests {
             .await
             .expect("migrate");
         (dir, pool)
+    }
+
+    #[tokio::test]
+    async fn the_folded_collation_sorts_past_ascii() {
+        let (_dir, pool) = file_pool().await;
+        let names: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM (SELECT 'Zebra' AS name UNION ALL SELECT 'İbrahim' UNION ALL SELECT ' apple' UNION ALL SELECT 'Étoile' UNION ALL SELECT 'élan')
+             ORDER BY name COLLATE FOLDED",
+        )
+        .fetch_all(&pool)
+        .await
+        .expect("sorted");
+        assert_eq!(names, [" apple", "İbrahim", "Zebra", "élan", "Étoile"]);
     }
 
     /// sqlx does not know about a transaction it did not begin, so the guard

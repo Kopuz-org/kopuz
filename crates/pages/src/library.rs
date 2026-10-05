@@ -66,8 +66,10 @@ pub fn LibraryPage(
         }
     });
 
-    let albums_res = use_albums(source);
-    let artists_res = use_artists(source);
+    let albums_query = use_memo(|| Some(hooks::AlbumQuery::default()));
+    let artists_query = use_memo(hooks::ArtistQuery::default);
+    let albums_res = use_albums(source, albums_query);
+    let artists_res = use_artists(source, artists_query);
     let playlists_res = use_playlists();
 
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
@@ -389,12 +391,9 @@ pub fn LibraryPage(
                 {
                     let album_count = albums_res
                         .read()
-                        .clone()
-                        .unwrap_or_default()
-                        .iter()
-                        .map(|a| a.title.to_lowercase())
-                        .collect::<HashSet<_>>()
-                        .len();
+                        .as_ref()
+                        .and_then(|albums| albums.as_ref().ok())
+                        .map_or(0, Vec::len);
                     let artist_count = artists_res.read().as_ref().map(|a| a.len()).unwrap_or(0);
                     let playlist_count = playlists_res
                         .read()

@@ -183,6 +183,7 @@ async fn typed_queries_smoke() {
                 sort: TrackSort::PlayCount,
                 search: String::new(),
                 favorite: None,
+                ..Default::default()
             },
             Page {
                 offset: 0,
@@ -284,6 +285,7 @@ async fn track_filter_selects_favorites_in_sql() {
         sort: TrackSort::Title,
         search: String::new(),
         favorite,
+        ..Default::default()
     };
     let page = Page {
         offset: 0,

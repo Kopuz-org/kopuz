@@ -7,7 +7,6 @@ pub mod metadata;
 pub mod models;
 pub mod probe;
 pub mod scanner;
-pub mod sort;
 pub mod utils;
 
 pub use cover_indexer::{LocalCoverIndexReport, index_local_covers, missing_cover_ids};

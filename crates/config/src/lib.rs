@@ -114,6 +114,9 @@ pub enum AlbumSortField {
     Artist,
     Year,
     Genre,
+    /// When the album's newest track was added.
+    RecentlyAdded,
+    TrackCount,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
