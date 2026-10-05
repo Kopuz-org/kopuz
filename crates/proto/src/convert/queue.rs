@@ -106,6 +106,17 @@ pub fn queue_edit_to_proto(value: &api::QueueEdit) -> QueueEditRequest {
                 keys: keys.clone(),
             })
         }
+        api::QueueEdit::ClearUpcoming => {
+            queue_edit_request::Op::ClearUpcoming(queue_edit_request::ClearUpcoming {})
+        }
+        api::QueueEdit::ReplaceUpcoming { keys } => {
+            queue_edit_request::Op::ReplaceUpcoming(queue_edit_request::ReplaceUpcoming {
+                keys: keys.clone(),
+            })
+        }
+        api::QueueEdit::ShuffleUpcoming => {
+            queue_edit_request::Op::ShuffleUpcoming(queue_edit_request::ShuffleUpcoming {})
+        }
     };
     QueueEditRequest { op: Some(op) }
 }
@@ -127,6 +138,11 @@ pub fn queue_edit_from_proto(value: &QueueEditRequest) -> Option<api::QueueEdit>
             index: insert.index,
             keys: insert.keys.clone(),
         },
+        queue_edit_request::Op::ClearUpcoming(_) => api::QueueEdit::ClearUpcoming,
+        queue_edit_request::Op::ReplaceUpcoming(replace) => api::QueueEdit::ReplaceUpcoming {
+            keys: replace.keys.clone(),
+        },
+        queue_edit_request::Op::ShuffleUpcoming(_) => api::QueueEdit::ShuffleUpcoming,
     })
 }
 
@@ -209,6 +225,30 @@ mod tests {
         let edit = api::QueueEdit::Move { from: 1, to: 3 };
         let back = queue_edit_from_proto(&queue_edit_to_proto(&edit)).expect("edit survives");
         assert_eq!(edit, back);
+    }
+
+    #[test]
+    fn every_queue_edit_round_trips() {
+        let edits = [
+            api::QueueEdit::Jump { index: 1 },
+            api::QueueEdit::JumpPhysical { index: 2 },
+            api::QueueEdit::Move { from: 1, to: 3 },
+            api::QueueEdit::Remove { index: 4 },
+            api::QueueEdit::Insert {
+                index: 2,
+                keys: vec!["a".into(), "b".into()],
+            },
+            api::QueueEdit::ClearUpcoming,
+            api::QueueEdit::ReplaceUpcoming {
+                keys: vec!["x".into(), "y".into()],
+            },
+            api::QueueEdit::ReplaceUpcoming { keys: Vec::new() },
+            api::QueueEdit::ShuffleUpcoming,
+        ];
+        for edit in edits {
+            let back = queue_edit_from_proto(&queue_edit_to_proto(&edit)).expect("edit survives");
+            assert_eq!(edit, back);
+        }
     }
 
     #[test]

@@ -2434,3 +2434,93 @@ async fn mute_is_the_same_on_both_transports() {
         }
     }
 }
+
+/// The upcoming edits are one daemon command each; both transports must land them on the same queue.
+#[tokio::test]
+async fn upcoming_edits_agree_across_transports() {
+    let pair = spawn_pair().await;
+    let keys: Vec<String> = (0..12).map(|i| format!("/lib/u{i:02}.flac")).collect();
+    pair.local
+        .set_queue(SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: QueueContext::Tracks { keys: keys.clone() },
+            start_index: Some(0),
+            shuffle: Some(false),
+        })
+        .await
+        .expect("seed the queue");
+    pair.wire
+        .queue_edit(QueueEdit::Jump { index: 2 })
+        .await
+        .expect("jump over the wire");
+
+    let first = pair
+        .wire
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("shuffle over the wire");
+    let second = pair
+        .local
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("shuffle locally");
+    assert_eq!(second.rev, first.rev + 1, "each edit is one publish");
+    let local = pair.local.queue_snapshot().await.expect("local snapshot");
+    let wire = pair.wire.queue_snapshot().await.expect("wire snapshot");
+    for snapshot in [&local, &wire] {
+        let got: Vec<String> = snapshot.items.iter().map(|i| i.key.clone()).collect();
+        assert_eq!(
+            got[..3],
+            keys[..3],
+            "history and the playing track stay put"
+        );
+        assert_eq!(snapshot.position, Some(2));
+        let mut rest = got[3..].to_vec();
+        rest.sort();
+        assert_eq!(rest, keys[3..], "the same tracks, reordered");
+    }
+    assert_eq!(
+        local.items.iter().map(|i| &i.key).collect::<Vec<_>>(),
+        wire.items.iter().map(|i| &i.key).collect::<Vec<_>>(),
+    );
+
+    pair.wire
+        .queue_edit(QueueEdit::ReplaceUpcoming {
+            keys: vec!["/lib/x.flac".into(), "/lib/y.flac".into()],
+        })
+        .await
+        .expect("replace over the wire");
+    let mut expected = keys[..3].to_vec();
+    expected.extend(["/lib/x.flac".to_string(), "/lib/y.flac".to_string()]);
+    for snapshot in [
+        pair.local.queue_snapshot().await.expect("local snapshot"),
+        pair.wire.queue_snapshot().await.expect("wire snapshot"),
+    ] {
+        let got: Vec<String> = snapshot.items.iter().map(|i| i.key.clone()).collect();
+        assert_eq!(got, expected);
+    }
+
+    pair.wire
+        .queue_edit(QueueEdit::ClearUpcoming)
+        .await
+        .expect("clear over the wire");
+    let snapshot = pair.local.queue_snapshot().await.expect("snapshot");
+    assert_eq!(snapshot.items.len(), 3);
+    assert_eq!(snapshot.position, Some(2));
+
+    // With nothing upcoming both transports accept the edit and neither publishes.
+    let rev = pair.local.player_state().await.expect("state").rev;
+    for edit in [
+        QueueEdit::ClearUpcoming,
+        QueueEdit::ShuffleUpcoming,
+        QueueEdit::ReplaceUpcoming { keys: Vec::new() },
+    ] {
+        let local = pair
+            .local
+            .queue_edit(edit.clone())
+            .await
+            .expect("local no-op");
+        let wire = pair.wire.queue_edit(edit).await.expect("wire no-op");
+        assert_eq!((local.rev, wire.rev), (rev, rev));
+    }
+}

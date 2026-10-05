@@ -799,6 +799,37 @@ impl Session {
         self.player.set_volume(self.output_volume());
     }
 
+    /// First play-order position the upcoming edits own: past the playing track, and past the one a crossfade is already fading into.
+    fn upcoming_from(&self) -> usize {
+        if self.model.is_empty() {
+            return 0;
+        }
+        let faded_into = self
+            .pending_transition
+            .as_ref()
+            .map_or(0, |pending| pending.to_position);
+        self.model.current_position().max(faded_into) + 1
+    }
+
+    async fn materialize_keys(&self, keys: Vec<String>) -> Result<Vec<reader::Track>, ApiError> {
+        let tracks = tokio::time::timeout(
+            MATERIALIZE_TIMEOUT,
+            self.materializer
+                .materialize(&QueueContext::Tracks { keys }),
+        )
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                api::ErrorCode::SourceUnreachable,
+                "timed out resolving the tracks to queue",
+            )
+        })??;
+        if tracks.is_empty() {
+            return Err(ApiError::not_found("none of those keys are in the library"));
+        }
+        Ok(tracks)
+    }
+
     async fn handle_queue_edit(
         &mut self,
         edit: QueueEdit,
@@ -820,22 +851,34 @@ impl Session {
                 if index > len {
                     return Err(ApiError::invalid_input("queue position out of range"));
                 }
-                let tracks = tokio::time::timeout(
-                    MATERIALIZE_TIMEOUT,
-                    self.materializer
-                        .materialize(&QueueContext::Tracks { keys: keys.clone() }),
-                )
-                .await
-                .map_err(|_| {
-                    ApiError::new(
-                        api::ErrorCode::SourceUnreachable,
-                        "timed out resolving the tracks to insert",
-                    )
-                })??;
-                if tracks.is_empty() {
-                    return Err(ApiError::not_found("none of those keys are in the library"));
-                }
+                let tracks = self.materialize_keys(keys).await?;
                 self.model.insert_at(index, tracks);
+                Ok(self.publish(state_tx, true))
+            }
+            QueueEdit::ClearUpcoming => {
+                if !self.model.clear_from(self.upcoming_from()) {
+                    return Ok(CommandAck { rev: self.rev });
+                }
+                Ok(self.publish(state_tx, true))
+            }
+            QueueEdit::ReplaceUpcoming { keys } => {
+                let from = self.upcoming_from();
+                if keys.is_empty() {
+                    if !self.model.clear_from(from) {
+                        return Ok(CommandAck { rev: self.rev });
+                    }
+                    return Ok(self.publish(state_tx, true));
+                }
+                let tracks = self.materialize_keys(keys).await?;
+                self.model.replace_from(from, tracks);
+                Ok(self.publish(state_tx, true))
+            }
+            QueueEdit::ShuffleUpcoming => {
+                let from = self.upcoming_from();
+                if len <= from + 1 {
+                    return Ok(CommandAck { rev: self.rev });
+                }
+                self.model.shuffle_from(from);
                 Ok(self.publish(state_tx, true))
             }
             QueueEdit::Jump { index } => {

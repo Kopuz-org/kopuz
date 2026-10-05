@@ -87,6 +87,14 @@ pub enum QueueEdit {
         index: u32,
         keys: Vec<String>,
     },
+    /// Drop everything after the current play position (and after a track mid-crossfade is fading into); a no-op when nothing is upcoming.
+    ClearUpcoming,
+    /// Keep history and the current track, replace the rest with `keys` in the order given, shuffle or not; empty `keys` clears.
+    ReplaceUpcoming {
+        keys: Vec<String>,
+    },
+    /// Randomise only what plays after the current track: under shuffle the permutation tail (unshuffled order untouched), otherwise the queue order itself.
+    ShuffleUpcoming,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -2845,3 +2845,382 @@ async fn muting_reaches_the_integration_that_owns_playback() {
     assert_eq!(stub.calls(), vec!["volume:0.5", "volume:0", "volume:0.5"]);
     assert!(!harness.api.player_state().await.unwrap().muted);
 }
+
+fn queue_changes(events: &mut tokio::sync::broadcast::Receiver<ApiEvent>) -> usize {
+    let mut changes = 0;
+    while let Ok(event) = events.try_recv() {
+        if matches!(event, ApiEvent::QueueChanged { .. }) {
+            changes += 1;
+        }
+    }
+    changes
+}
+
+async fn titles_and_position(api: &LocalApi) -> (Vec<String>, Option<u32>) {
+    let snapshot = api.queue_snapshot().await.expect("snapshot");
+    let titles = snapshot.items.iter().map(|t| t.title.clone()).collect();
+    (titles, snapshot.position)
+}
+
+async fn plain_harness(keys: &[&str], playing: u32) -> Harness {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(keys))
+        .await
+        .expect("set queue");
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: playing })
+        .await
+        .expect("jump");
+    harness
+}
+
+async fn shuffle_off(api: &LocalApi) {
+    api.player_command(PlayerCommand::SetMode {
+        shuffle: Some(false),
+        loop_mode: None,
+    })
+    .await
+    .expect("shuffle off");
+}
+
+const TEN: [&str; 10] = [
+    "track-0", "track-1", "track-2", "track-3", "track-4", "track-5", "track-6", "track-7",
+    "track-8", "track-9",
+];
+
+#[tokio::test]
+async fn clear_upcoming_drops_only_what_follows_the_current_track() {
+    let harness = plain_harness(&TEN, 3).await;
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ClearUpcoming)
+        .await
+        .expect("clear upcoming");
+
+    let (titles, position) = titles_and_position(&harness.api).await;
+    assert_eq!(titles, vec!["track-0", "track-1", "track-2", "track-3"]);
+    assert_eq!(position, Some(3));
+    assert_eq!(queue_changes(&mut events), 1, "one edit, one QueueChanged");
+
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 1 })
+        .await
+        .expect("history survives the edit");
+}
+
+#[tokio::test]
+async fn clear_upcoming_under_shuffle_keeps_the_played_order_and_the_unshuffled_queue() {
+    let harness = shuffled_harness().await;
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 3 })
+        .await
+        .expect("jump");
+    let before = harness.api.queue_snapshot().await.expect("snapshot");
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ClearUpcoming)
+        .await
+        .expect("clear upcoming");
+
+    let after = harness.api.queue_snapshot().await.expect("snapshot");
+    let titles = |snapshot: &api::QueueSnapshot| -> Vec<String> {
+        snapshot.items.iter().map(|t| t.title.clone()).collect()
+    };
+    assert_eq!(titles(&after), titles(&before)[..4].to_vec());
+    assert_eq!(after.position, Some(3));
+    assert!(after.shuffle);
+    let mut permutation = after.shuffle_order.clone();
+    permutation.sort_unstable();
+    assert_eq!(
+        permutation,
+        vec![0, 1, 2, 3],
+        "a permutation of what is left"
+    );
+    assert_eq!(queue_changes(&mut events), 1);
+
+    shuffle_off(&harness.api).await;
+    let (unshuffled, position) = titles_and_position(&harness.api).await;
+    let mut expected = titles(&after);
+    expected.sort();
+    assert_eq!(
+        unshuffled, expected,
+        "survivors keep their unshuffled order"
+    );
+    assert_eq!(
+        unshuffled[position.expect("position") as usize],
+        titles(&after)[3]
+    );
+}
+
+#[tokio::test]
+async fn clear_upcoming_with_nothing_upcoming_is_a_quiet_no_op() {
+    let harness = plain_harness(&["track-0", "track-1"], 1).await;
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ClearUpcoming)
+        .await
+        .expect("nothing to clear is not an error");
+
+    assert_eq!(queue_changes(&mut events), 0);
+    assert_eq!(
+        titles_and_position(&harness.api).await,
+        (vec!["track-0".to_string(), "track-1".to_string()], Some(1))
+    );
+
+    let empty = self::harness(|_| {});
+    empty
+        .api
+        .queue_edit(QueueEdit::ClearUpcoming)
+        .await
+        .expect("an empty queue has nothing upcoming");
+    assert_eq!(titles_and_position(&empty.api).await, (Vec::new(), None));
+}
+
+#[tokio::test]
+async fn replace_upcoming_swaps_the_tail_in_the_order_given() {
+    let harness = plain_harness(&TEN, 2).await;
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming {
+            keys: vec!["new-b".into(), "new-a".into()],
+        })
+        .await
+        .expect("replace upcoming");
+
+    let (titles, position) = titles_and_position(&harness.api).await;
+    assert_eq!(
+        titles,
+        vec!["track-0", "track-1", "track-2", "new-b", "new-a"]
+    );
+    assert_eq!(position, Some(2));
+    assert_eq!(queue_changes(&mut events), 1);
+}
+
+#[tokio::test]
+async fn replace_upcoming_under_shuffle_plays_the_new_tracks_in_the_order_given() {
+    let harness = shuffled_harness().await;
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 2 })
+        .await
+        .expect("jump");
+    let before = harness.api.queue_snapshot().await.expect("snapshot");
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming {
+            keys: vec!["new-b".into(), "new-a".into(), "new-c".into()],
+        })
+        .await
+        .expect("replace upcoming");
+
+    let (titles, position) = titles_and_position(&harness.api).await;
+    let mut expected: Vec<String> = before.items[..3].iter().map(|t| t.title.clone()).collect();
+    expected.extend(["new-b", "new-a", "new-c"].map(String::from));
+    assert_eq!(titles, expected);
+    assert_eq!(position, Some(2));
+    assert_eq!(queue_changes(&mut events), 1);
+
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    let mut permutation = snapshot.shuffle_order.clone();
+    permutation.sort_unstable();
+    assert_eq!(permutation, (0..6).collect::<Vec<u32>>());
+
+    shuffle_off(&harness.api).await;
+    let (unshuffled, _) = titles_and_position(&harness.api).await;
+    let mut kept: Vec<String> = before.items[..3].iter().map(|t| t.title.clone()).collect();
+    kept.sort();
+    kept.extend(["new-b", "new-a", "new-c"].map(String::from));
+    assert_eq!(
+        unshuffled, kept,
+        "new tracks join the unshuffled queue at its end"
+    );
+}
+
+#[tokio::test]
+async fn replace_upcoming_with_no_keys_clears_and_with_nothing_upcoming_appends() {
+    let harness = plain_harness(&["track-0", "track-1", "track-2"], 0).await;
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming { keys: Vec::new() })
+        .await
+        .expect("empty replacement clears");
+    assert_eq!(
+        titles_and_position(&harness.api).await,
+        (vec!["track-0".to_string()], Some(0))
+    );
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming { keys: Vec::new() })
+        .await
+        .expect("nothing to clear");
+    assert_eq!(queue_changes(&mut events), 0);
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming {
+            keys: vec!["next".into()],
+        })
+        .await
+        .expect("nothing to replace, so the tracks are appended");
+    assert_eq!(
+        titles_and_position(&harness.api).await,
+        (vec!["track-0".to_string(), "next".to_string()], Some(0))
+    );
+    assert_eq!(queue_changes(&mut events), 1);
+}
+
+#[tokio::test]
+async fn shuffle_upcoming_reorders_only_what_follows_the_current_track() {
+    let keys: Vec<String> = (0..20).map(|n| format!("track-{n}")).collect();
+    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let harness = plain_harness(&keys, 4).await;
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("shuffle upcoming");
+
+    let (titles, position) = titles_and_position(&harness.api).await;
+    assert_eq!(position, Some(4));
+    assert_eq!(titles[..5], keys[..5], "history and current are untouched");
+    assert_ne!(titles[5..], keys[5..], "the upcoming order changed");
+    let mut rest = titles[5..].to_vec();
+    rest.sort_by_key(|title| title[6..].parse::<u32>().expect("track number"));
+    assert_eq!(rest, keys[5..], "the same tracks, reordered");
+    assert_eq!(queue_changes(&mut events), 1);
+}
+
+#[tokio::test]
+async fn shuffle_upcoming_under_shuffle_leaves_the_unshuffled_queue_alone() {
+    let harness = shuffled_harness().await;
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 1 })
+        .await
+        .expect("jump");
+    let before = harness.api.queue_snapshot().await.expect("snapshot");
+    let titles = |snapshot: &api::QueueSnapshot| -> Vec<String> {
+        snapshot.items.iter().map(|t| t.title.clone()).collect()
+    };
+    let mut events = harness.api.session.subscribe();
+
+    let mut changed = false;
+    for _ in 0..5 {
+        harness
+            .api
+            .queue_edit(QueueEdit::ShuffleUpcoming)
+            .await
+            .expect("shuffle upcoming");
+        let after = harness.api.queue_snapshot().await.expect("snapshot");
+        assert_eq!(titles(&after)[..2], titles(&before)[..2]);
+        assert_eq!(after.position, Some(1));
+        let mut rest = titles(&after)[2..].to_vec();
+        rest.sort();
+        let mut expected = titles(&before)[2..].to_vec();
+        expected.sort();
+        assert_eq!(rest, expected);
+        for (position, physical) in after.shuffle_order.iter().enumerate() {
+            assert_eq!(after.items[position].title, format!("track-{physical}"));
+        }
+        changed |= titles(&after) != titles(&before);
+    }
+    assert!(changed, "five shuffles of six tracks never moved anything");
+    assert_eq!(queue_changes(&mut events), 5, "one QueueChanged per edit");
+
+    shuffle_off(&harness.api).await;
+    let (unshuffled, _) = titles_and_position(&harness.api).await;
+    assert_eq!(
+        unshuffled,
+        (0..8).map(|n| format!("track-{n}")).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn shuffle_upcoming_with_fewer_than_two_upcoming_is_a_quiet_no_op() {
+    let harness = plain_harness(&["track-0", "track-1", "track-2"], 1).await;
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("one upcoming track has nothing to shuffle against");
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 2 })
+        .await
+        .expect("jump");
+    let jumped = queue_changes(&mut events);
+    harness
+        .api
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("empty upcoming");
+
+    assert_eq!(jumped, 1, "only the jump announced anything");
+    assert_eq!(queue_changes(&mut events), 0);
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        vec!["track-0", "track-1", "track-2"]
+    );
+
+    let empty = self::harness(|_| {});
+    empty
+        .api
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("an empty queue has nothing upcoming");
+}
+
+#[tokio::test]
+async fn upcoming_edits_during_a_crossfade_spare_the_track_fading_in() {
+    let harness = harness(|config| config.crossfade_seconds = 1);
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1", "track-2", "track-3"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    armed_crossfade(&harness).await;
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming {
+            keys: vec!["later".into()],
+        })
+        .await
+        .expect("replace upcoming mid-crossfade");
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        vec!["track-0", "track-1", "later"]
+    );
+
+    let state = drive_until(&harness, "crossfade committed", |state| {
+        state.queue.index == Some(1) && state.fading.is_none()
+    })
+    .await;
+    assert_eq!(
+        state.track.as_ref().map(|track| track.title.as_str()),
+        Some("track-1")
+    );
+}

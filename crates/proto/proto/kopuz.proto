@@ -429,7 +429,16 @@ message QueueEditRequest {
     // named track plays now and the rest follows it.
     Jump jump_physical = 4;
     Insert insert = 5;
+    // Everything after the current play position.
+    ClearUpcoming clear_upcoming = 6;
+    ReplaceUpcoming replace_upcoming = 7;
+    ShuffleUpcoming shuffle_upcoming = 8;
   }
+  message ClearUpcoming {}
+  message ReplaceUpcoming {
+    repeated string keys = 1;
+  }
+  message ShuffleUpcoming {}
   message Jump {
     uint32 index = 1;
   }
