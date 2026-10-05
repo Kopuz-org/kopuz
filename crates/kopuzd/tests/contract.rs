@@ -158,9 +158,11 @@ async fn spawn_pair() -> Pair {
     sources.watch_active(session.config_watch());
     let integrations = daemon::IntegrationService::new(config_service.clone());
     let downloader = daemon::UrlDownloadService::new(config_service.clone());
+    let prefs = daemon::PrefsService::new(database.clone(), session.clone());
     let build_api = |session: SessionHandle| {
         LocalApi::new(session)
             .with_config(config_service.clone())
+            .with_prefs(prefs.clone())
             .with_library(library.clone())
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
@@ -548,6 +550,192 @@ async fn patch_config_touches_only_named_keys_across_transports() {
         assert_eq!(wire.code, local.code, "{}", refused.key);
     }
     assert_eq!(pair.local.config().await.expect("view"), written);
+}
+
+fn pref(key: &str, value: Option<&str>) -> api::PrefEntry {
+    api::PrefEntry {
+        key: key.into(),
+        value: value.map(Into::into),
+    }
+}
+
+fn stored(key: &str, value: &str) -> api::FrontendPref {
+    api::FrontendPref {
+        key: key.into(),
+        value: value.into(),
+    }
+}
+
+async fn next_prefs_event(
+    events: &mut tokio::sync::broadcast::Receiver<ApiEvent>,
+) -> (String, Vec<String>) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(ApiEvent::FrontendPrefsChanged { frontend, keys }) = events.recv().await {
+                break (frontend, keys);
+            }
+        }
+    })
+    .await
+    .expect("prefs-changed event")
+}
+
+#[tokio::test]
+async fn frontend_prefs_are_namespaced_and_agree_across_transports() {
+    let pair = spawn_pair().await;
+    let mut events = pair.session.subscribe();
+    assert!(
+        pair.wire
+            .frontend_prefs("gpui".into())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    pair.wire
+        .set_frontend_prefs(
+            "gpui".into(),
+            vec![
+                pref("skin", Some("dark")),
+                pref("layout", Some("{\"cols\": [1, 2]}")),
+                pref("blank", Some("")),
+            ],
+        )
+        .await
+        .expect("wire write");
+    assert_eq!(
+        next_prefs_event(&mut events).await,
+        (
+            "gpui".to_string(),
+            vec![
+                "skin".to_string(),
+                "layout".to_string(),
+                "blank".to_string()
+            ]
+        )
+    );
+
+    pair.local
+        .set_frontend_prefs("dioxus".into(), vec![pref("skin", Some("light"))])
+        .await
+        .expect("local write");
+    assert_eq!(
+        next_prefs_event(&mut events).await,
+        ("dioxus".to_string(), vec!["skin".to_string()])
+    );
+
+    let expected = vec![
+        stored("blank", ""),
+        stored("layout", "{\"cols\": [1, 2]}"),
+        stored("skin", "dark"),
+    ];
+    assert_eq!(
+        pair.local.frontend_prefs("gpui".into()).await.unwrap(),
+        expected
+    );
+    assert_eq!(
+        pair.wire.frontend_prefs("gpui".into()).await.unwrap(),
+        expected
+    );
+    assert_eq!(
+        pair.tcp.frontend_prefs("gpui".into()).await.unwrap(),
+        expected
+    );
+    assert_eq!(
+        pair.wire.frontend_prefs("dioxus".into()).await.unwrap(),
+        vec![stored("skin", "light")]
+    );
+
+    // A delete and a rewrite of an unchanged value: only the delete changed anything.
+    pair.wire
+        .set_frontend_prefs(
+            "gpui".into(),
+            vec![
+                pref("blank", None),
+                pref("skin", Some("dark")),
+                pref("never", None),
+            ],
+        )
+        .await
+        .expect("delete over the wire");
+    assert_eq!(
+        next_prefs_event(&mut events).await,
+        ("gpui".to_string(), vec!["blank".to_string()])
+    );
+    assert_eq!(
+        pair.local.frontend_prefs("gpui".into()).await.unwrap(),
+        vec![
+            stored("layout", "{\"cols\": [1, 2]}"),
+            stored("skin", "dark")
+        ]
+    );
+
+    // A write that changes nothing emits nothing.
+    pair.local
+        .set_frontend_prefs("gpui".into(), vec![pref("skin", Some("dark"))])
+        .await
+        .expect("no-op write");
+    pair.local
+        .set_frontend_prefs("gpui".into(), vec![pref("skin", Some("darker"))])
+        .await
+        .expect("real write");
+    assert_eq!(
+        next_prefs_event(&mut events).await,
+        ("gpui".to_string(), vec!["skin".to_string()]),
+        "the no-op write was silent"
+    );
+}
+
+#[tokio::test]
+async fn frontend_prefs_refuse_bad_input_identically_and_store_nothing() {
+    let pair = spawn_pair().await;
+    let mut events = pair.session.subscribe();
+    let too_long = "k".repeat(api::MAX_PREF_KEY_BYTES + 1);
+    let huge = "v".repeat(api::MAX_PREF_VALUE_BYTES + 1);
+    let cases: Vec<(String, Vec<api::PrefEntry>)> = vec![
+        (String::new(), vec![pref("k", Some("v"))]),
+        ("f".repeat(api::MAX_PREF_FRONTEND_BYTES + 1), vec![]),
+        ("gpui".into(), vec![pref("", Some("v"))]),
+        ("gpui".into(), vec![pref(&too_long, Some("v"))]),
+        ("gpui".into(), vec![pref("big", Some(&huge))]),
+        ("gpui".into(), vec![pref("k", Some("1")), pref("k", None)]),
+        // One bad entry refuses the good one before it.
+        (
+            "gpui".into(),
+            vec![pref("good", Some("v")), pref("", Some("v"))],
+        ),
+    ];
+    for (frontend, entries) in cases {
+        let local = pair
+            .local
+            .set_frontend_prefs(frontend.clone(), entries.clone())
+            .await
+            .expect_err("local refuses");
+        let wire = pair
+            .wire
+            .set_frontend_prefs(frontend, entries)
+            .await
+            .expect_err("wire refuses");
+        assert_eq!(local.code, ErrorCode::InvalidInput);
+        assert_eq!(wire.code, local.code);
+    }
+    for api in [&pair.local as &dyn KopuzApi, &pair.wire] {
+        assert_eq!(
+            api.frontend_prefs(String::new()).await.unwrap_err().code,
+            ErrorCode::InvalidInput
+        );
+        assert!(api.frontend_prefs("gpui".into()).await.unwrap().is_empty());
+    }
+
+    // Nothing was announced for any refused write.
+    pair.local
+        .set_frontend_prefs("gpui".into(), vec![pref("after", Some("v"))])
+        .await
+        .expect("a valid write");
+    assert_eq!(
+        next_prefs_event(&mut events).await,
+        ("gpui".to_string(), vec!["after".to_string()])
+    );
 }
 
 #[tokio::test]

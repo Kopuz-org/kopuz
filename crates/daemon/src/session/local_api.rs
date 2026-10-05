@@ -9,6 +9,7 @@ pub struct LocalApi {
     pub(super) started: std::time::Instant,
     pub(super) library: Option<Arc<crate::library::LibraryService>>,
     pub(super) config: Option<Arc<crate::config_service::ConfigService>>,
+    pub(super) prefs: Option<Arc<crate::prefs::PrefsService>>,
     pub(super) jobs: Option<Arc<crate::jobs::JobRunner>>,
     pub(super) downloads: Option<Arc<crate::downloads::DownloadsService>>,
     pub(super) favorites: Option<Arc<crate::favorites::FavoritesService>>,
@@ -30,6 +31,7 @@ impl LocalApi {
             started: std::time::Instant::now(),
             library: None,
             config: None,
+            prefs: None,
             jobs: None,
             downloads: None,
             favorites: None,
@@ -53,6 +55,17 @@ impl LocalApi {
     pub fn with_config(mut self, config: Arc<crate::config_service::ConfigService>) -> Self {
         self.config = Some(config);
         self
+    }
+
+    pub fn with_prefs(mut self, prefs: Arc<crate::prefs::PrefsService>) -> Self {
+        self.prefs = Some(prefs);
+        self
+    }
+
+    fn prefs(&self) -> Result<&crate::prefs::PrefsService, ApiError> {
+        self.prefs
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without a prefs service"))
     }
 
     pub fn with_jobs(mut self, jobs: Arc<crate::jobs::JobRunner>) -> Self {
@@ -593,6 +606,21 @@ impl api::ConfigApi for LocalApi {
             uptime_secs: self.started.elapsed().as_secs(),
             proto_revision: api::WIRE_REVISION,
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl api::PrefsApi for LocalApi {
+    async fn frontend_prefs(&self, frontend: String) -> Result<Vec<api::FrontendPref>, ApiError> {
+        self.prefs()?.get(&frontend).await
+    }
+
+    async fn set_frontend_prefs(
+        &self,
+        frontend: String,
+        entries: Vec<api::PrefEntry>,
+    ) -> Result<(), ApiError> {
+        self.prefs()?.set(&frontend, entries).await
     }
 }
 

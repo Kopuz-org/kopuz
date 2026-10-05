@@ -1098,6 +1098,39 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::config_view_to_proto(&view)))
     }
 
+    async fn get_frontend_prefs(
+        &self,
+        request: Request<proto::GetFrontendPrefsRequest>,
+    ) -> Result<Response<proto::FrontendPrefsList>, Status> {
+        let prefs = self
+            .0
+            .api
+            .frontend_prefs(request.into_inner().frontend)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::FrontendPrefsList {
+            prefs: prefs.iter().map(convert::frontend_pref_to_proto).collect(),
+        }))
+    }
+
+    async fn set_frontend_prefs(
+        &self,
+        request: Request<proto::SetFrontendPrefsRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        let entries = request
+            .entries
+            .iter()
+            .map(convert::pref_entry_from_proto)
+            .collect();
+        self.0
+            .api
+            .set_frontend_prefs(request.frontend, entries)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     async fn preview_equalizer(
         &self,
         request: Request<proto::EqualizerSettings>,

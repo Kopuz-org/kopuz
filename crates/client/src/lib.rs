@@ -753,6 +753,38 @@ impl api::ConfigApi for GrpcApi {
 }
 
 #[async_trait::async_trait]
+impl api::PrefsApi for GrpcApi {
+    async fn frontend_prefs(&self, frontend: String) -> Result<Vec<api::FrontendPref>, ApiError> {
+        let list = self
+            .client()
+            .get_frontend_prefs(Request::new(proto::GetFrontendPrefsRequest { frontend }))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .prefs
+            .iter()
+            .map(convert::frontend_pref_from_proto)
+            .collect())
+    }
+
+    async fn set_frontend_prefs(
+        &self,
+        frontend: String,
+        entries: Vec<api::PrefEntry>,
+    ) -> Result<(), ApiError> {
+        self.client()
+            .set_frontend_prefs(Request::new(proto::SetFrontendPrefsRequest {
+                frontend,
+                entries: entries.iter().map(convert::pref_entry_to_proto).collect(),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
 impl api::JobApi for GrpcApi {
     async fn start_job(&self, kind: JobKind) -> Result<JobRef, ApiError> {
         let job = self

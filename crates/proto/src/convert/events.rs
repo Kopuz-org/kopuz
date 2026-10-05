@@ -56,6 +56,12 @@ pub fn event_to_proto(value: &api::ApiEvent) -> Event {
                 revision: *revision,
             })
         }
+        api::ApiEvent::FrontendPrefsChanged { frontend, keys } => {
+            event::Kind::FrontendPrefsChanged(FrontendPrefsChanged {
+                frontend: frontend.clone(),
+                keys: keys.clone(),
+            })
+        }
         api::ApiEvent::SourceStatus { source, state } => {
             event::Kind::SourceStatus(SourceStatusEvent {
                 source: source.clone(),
@@ -116,6 +122,10 @@ pub fn event_from_proto(value: &Event) -> Option<api::ApiEvent> {
         event::Kind::ConfigChanged(changed) => api::ApiEvent::ConfigChanged {
             keys: changed.keys.clone(),
             revision: changed.revision,
+        },
+        event::Kind::FrontendPrefsChanged(changed) => api::ApiEvent::FrontendPrefsChanged {
+            frontend: changed.frontend.clone(),
+            keys: changed.keys.clone(),
         },
         event::Kind::SourceStatus(status) => api::ApiEvent::SourceStatus {
             source: status.source.clone(),
@@ -181,6 +191,10 @@ mod tests {
             api::ApiEvent::ConfigChanged {
                 keys: vec!["volume".into()],
                 revision: 9,
+            },
+            api::ApiEvent::FrontendPrefsChanged {
+                frontend: "gpui".into(),
+                keys: vec!["skin".into(), "columns".into()],
             },
             api::ApiEvent::SourceStatus {
                 source: "jellyfin".into(),

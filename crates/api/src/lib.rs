@@ -17,6 +17,7 @@ mod library;
 mod mutations;
 mod player;
 mod playlists;
+mod prefs;
 mod queue;
 mod radio;
 pub mod schema;
@@ -42,6 +43,10 @@ pub use player::{
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
 };
 pub use playlists::{PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder};
+pub use prefs::{
+    FrontendPref, MAX_PREF_ENTRIES_PER_CALL, MAX_PREF_FRONTEND_BYTES, MAX_PREF_KEY_BYTES,
+    MAX_PREF_VALUE_BYTES, PrefEntry,
+};
 pub use queue::{
     QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow, SetQueueRequest,
 };
@@ -556,6 +561,25 @@ pub enum Handshake {
     Mismatched { daemon: u32, client: u32 },
 }
 
+/// Where a frontend keeps its own UI preferences, namespaced by frontend name.
+#[async_trait::async_trait]
+pub trait PrefsApi: Send + Sync {
+    /// Every preference stored for `frontend`, key-ordered. A frontend that
+    /// stored nothing gets an empty list.
+    async fn frontend_prefs(&self, frontend: String) -> Result<Vec<FrontendPref>, ApiError>;
+
+    /// Store (`Some`) or delete (`None`) each entry's key, all or none. An
+    /// empty `frontend` or key, one over the `MAX_PREF_*` limits, or a key
+    /// named twice refuses the whole call with `invalid_input`. Once it
+    /// commits, `ApiEvent::FrontendPrefsChanged` names the keys whose stored
+    /// value actually changed; a call that changes nothing emits nothing.
+    async fn set_frontend_prefs(
+        &self,
+        frontend: String,
+        entries: Vec<PrefEntry>,
+    ) -> Result<(), ApiError>;
+}
+
 /// Subscribe to the state stream. Every subscriber gets every event from the
 /// moment of subscription; a snapshot fetch plus this stream is the complete
 /// synchronization story.
@@ -576,6 +600,7 @@ pub trait KopuzApi:
     + JobApi
     + SourceApi
     + ConfigApi
+    + PrefsApi
     + EventApi
     + Send
     + Sync
@@ -590,6 +615,7 @@ impl<T> KopuzApi for T where
         + JobApi
         + SourceApi
         + ConfigApi
+        + PrefsApi
         + EventApi
         + Send
         + Sync
@@ -602,7 +628,7 @@ impl<T> KopuzApi for T where
 pub mod prelude {
     pub use super::{
         ArtworkApi, ConfigApi, EventApi, JobApi, KopuzApi, LibraryApi, PlayerApi, PlaylistApi,
-        SourceApi,
+        PrefsApi, SourceApi,
     };
 }
 

@@ -13,6 +13,7 @@ use crate::{DbError, ReadStore, Storage};
 
 mod cfg_store;
 mod dump;
+mod frontend_prefs;
 mod migrations;
 mod queries;
 mod rows;
@@ -372,6 +373,10 @@ impl ReadStore for Native {
     async fn scrobble_queue_all(&self) -> Result<Vec<crate::QueuedScrobbleRow>, DbError> {
         scrobble_queue::all(&self.pool()).await
     }
+
+    async fn frontend_prefs(&self, frontend: &str) -> Result<Vec<(String, String)>, DbError> {
+        frontend_prefs::all(&self.pool(), frontend).await
+    }
 }
 
 #[async_trait::async_trait]
@@ -587,6 +592,14 @@ impl Storage for Native {
 
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError> {
         writes::set_pinned_station(&self.pool(), id, manifest).await
+    }
+
+    async fn set_frontend_prefs(
+        &self,
+        frontend: &str,
+        entries: &[(String, Option<String>)],
+    ) -> Result<Vec<String>, DbError> {
+        frontend_prefs::set(&self.pool(), frontend, entries).await
     }
 
     async fn cache_lyrics(

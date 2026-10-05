@@ -254,6 +254,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
         LocalApi::new(session.clone())
             .with_library(library.clone())
             .with_config(config_service.clone())
+            .with_prefs(crate::PrefsService::new(database.clone(), session.clone()))
             .with_jobs(jobs.clone())
             .with_favorites(favorites.clone())
             .with_downloads(downloads)

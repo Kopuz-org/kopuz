@@ -370,6 +370,9 @@ pub trait ReadStore: Send + Sync {
 
     /// The whole offline scrobble backlog, oldest listen first (drain order).
     async fn scrobble_queue_all(&self) -> Result<Vec<QueuedScrobbleRow>, DbError>;
+
+    /// One frontend's stored preferences as `(key, value)`, key-ordered. The values are opaque to the daemon.
+    async fn frontend_prefs(&self, frontend: &str) -> Result<Vec<(String, String)>, DbError>;
 }
 
 /// The persistence API: every mutation plus admin/dev ops, layered on top of the
@@ -557,6 +560,13 @@ pub trait Storage: ReadStore {
 
     /// Pin (`Some` manifest) a station after the others, or unpin it (`None`).
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError>;
+
+    /// Set (`Some`) or delete (`None`) a frontend's preferences in one transaction; answers the keys whose stored value changed.
+    async fn set_frontend_prefs(
+        &self,
+        frontend: &str,
+        entries: &[(String, Option<String>)],
+    ) -> Result<Vec<String>, DbError>;
 
     /// Store a lyrics lookup's conclusion; `None` records a miss stamped now.
     async fn cache_lyrics(

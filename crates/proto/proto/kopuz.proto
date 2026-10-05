@@ -105,6 +105,8 @@ service Kopuz {
   rpc SetConfig(SetConfigRequest) returns (ConfigView);
   rpc PatchConfig(PatchConfigRequest) returns (ConfigView);
   rpc PreviewEqualizer(EqualizerSettings) returns (Unit);
+  rpc GetFrontendPrefs(GetFrontendPrefsRequest) returns (FrontendPrefsList);
+  rpc SetFrontendPrefs(SetFrontendPrefsRequest) returns (Unit);
 
   rpc GetSources(GetSourcesRequest) returns (SourceList);
   rpc GetServices(GetServicesRequest) returns (ServiceList);
@@ -197,6 +199,7 @@ message Event {
     Notice notice = 11;
     // The reconnect gap exceeded the replay ring: refetch snapshots.
     Unit resync = 12;
+    FrontendPrefsChanged frontend_prefs_changed = 13;
   }
 }
 
@@ -243,6 +246,12 @@ message ConfigChanged {
   repeated string keys = 1;
   // The ConfigView.revision this change produced.
   uint64 revision = 2;
+}
+
+// Keys of one frontend's preferences whose stored value changed (set or deleted).
+message FrontendPrefsChanged {
+  string frontend = 1;
+  repeated string keys = 2;
 }
 
 message SourceStatusEvent {
@@ -1371,6 +1380,31 @@ message ConfigField {
 // Changes only the named keys; every other key stays as the daemon holds it.
 message PatchConfigRequest {
   repeated ConfigField fields = 1;
+}
+
+message GetFrontendPrefsRequest {
+  string frontend = 1;
+}
+
+// One stored preference; the value is opaque to the daemon.
+message FrontendPref {
+  string key = 1;
+  string value = 2;
+}
+
+message FrontendPrefsList {
+  repeated FrontendPref prefs = 1;
+}
+
+// An unset value deletes the key.
+message PrefEntry {
+  string key = 1;
+  optional string value = 2;
+}
+
+message SetFrontendPrefsRequest {
+  string frontend = 1;
+  repeated PrefEntry entries = 2;
 }
 
 
