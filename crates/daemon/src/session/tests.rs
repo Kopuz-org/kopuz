@@ -2158,6 +2158,61 @@ async fn a_track_list_row_repins_the_shuffle_around_itself() {
     assert_eq!(play_order(&harness.api).await[0], "track-6");
 }
 
+#[tokio::test]
+async fn the_snapshot_lists_a_shuffled_queue_in_play_order() {
+    let harness = shuffled_harness().await;
+    let titles = |snapshot: &api::QueueSnapshot| -> Vec<String> {
+        snapshot.items.iter().map(|t| t.title.clone()).collect()
+    };
+
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    assert!(snapshot.shuffle);
+    assert_eq!(titles(&snapshot), play_order(&harness.api).await);
+    assert_eq!(snapshot.shuffle_order.len(), 8);
+    let mut sorted = snapshot.shuffle_order.clone();
+    sorted.sort_unstable();
+    assert_eq!(sorted, (0..8).collect::<Vec<u32>>(), "a full permutation");
+    for (position, physical) in snapshot.shuffle_order.iter().enumerate() {
+        assert_eq!(
+            snapshot.items[position].title,
+            format!("track-{physical}"),
+            "shuffle_order[{position}] names the unshuffled index"
+        );
+    }
+    assert_eq!(snapshot.position, Some(0));
+
+    harness
+        .api
+        .queue_edit(QueueEdit::JumpPhysical { index: 6 })
+        .await
+        .expect("jump");
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    let position = snapshot.position.expect("position") as usize;
+    assert_eq!(snapshot.items[position].title, "track-6");
+    assert_eq!(snapshot.shuffle_order[position], 6);
+    assert_eq!(titles(&snapshot), play_order(&harness.api).await);
+
+    harness
+        .api
+        .player_command(PlayerCommand::SetMode {
+            shuffle: Some(false),
+            loop_mode: None,
+        })
+        .await
+        .expect("shuffle off");
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    assert!(!snapshot.shuffle && snapshot.shuffle_order.is_empty());
+    assert_eq!(
+        titles(&snapshot),
+        (0..8).map(|i| format!("track-{i}")).collect::<Vec<_>>()
+    );
+    let position = snapshot.position.expect("position") as usize;
+    assert_eq!(
+        snapshot.items[position].title, "track-6",
+        "still playing it"
+    );
+}
+
 /// A local playlist has no remote listing, so refreshing one must not reach
 /// the epoch sweep that drops whatever the remote no longer lists -- for
 /// Local that is every entry it has. Reachable from any client: the gRPC

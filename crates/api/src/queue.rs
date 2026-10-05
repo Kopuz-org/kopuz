@@ -115,6 +115,7 @@ pub struct QueueSnapshot {
     /// For each play-order position, the index it has in the unshuffled
     /// queue. Empty while shuffle is off.
     pub shuffle_order: Vec<u32>,
+    /// Play-order index into `items` of the current track; the same space as `QueueEdit` and `QueueWindow`.
     pub position: Option<u32>,
     pub shuffle: bool,
 }

@@ -33,10 +33,11 @@ const MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 const PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 const PROGRESS_STEP_SECS: u64 = 5;
 
-/// The embedded frontend's raw view of the queue model.
+/// The queue as `api::QueueSnapshot` reports it: tracks in play order, `position` a play-order index.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct QueueMirrorSnapshot {
     pub tracks: Vec<Track>,
+    /// Unshuffled index of each play-order position; empty while shuffle is off.
     pub shuffle_order: Vec<usize>,
     pub position: usize,
     pub shuffle: bool,
@@ -374,8 +375,7 @@ impl SessionHandle {
         let _ = self.cmd_tx.send(SessionCmd::SetActiveSource(source));
     }
 
-    /// The raw queue plus its permutation, for the embedded frontend's
-    /// signal mirror. Wire clients use `queue_window`.
+    /// The whole queue in play order plus its permutation, behind `queue_snapshot`.
     pub(crate) async fn queue_mirror(&self) -> QueueMirrorSnapshot {
         let (tx, rx) = oneshot::channel();
         if self.cmd_tx.send(SessionCmd::QueueMirror(tx)).is_err() {
@@ -640,9 +640,10 @@ impl Session {
                 self.publish(state_tx, false);
             }
             SessionCmd::QueueMirror(reply) => {
+                let (tracks, shuffle_order) = self.model.play_order();
                 let _ = reply.send(QueueMirrorSnapshot {
-                    tracks: self.model.items().to_vec(),
-                    shuffle_order: self.model.shuffle_order().to_vec(),
+                    tracks,
+                    shuffle_order,
                     position: self.model.current_position(),
                     shuffle: self.model.shuffle(),
                 });

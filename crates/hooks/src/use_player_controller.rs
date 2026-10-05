@@ -22,8 +22,10 @@ pub struct PlayerController {
     pub is_loading: Memo<bool>,
     pub(crate) loading: Signal<bool>,
     pub history: Signal<Vec<usize>>,
+    /// The queue in play order, as the daemon reports it; never reorder it client-side.
     pub queue: Signal<Vec<Track>>,
     pub shuffle: Signal<bool>,
+    /// Unshuffled index of each `queue` row; empty while shuffle is off.
     pub shuffle_order: Signal<Vec<usize>>,
     pub loop_mode: Signal<LoopMode>,
     pub current_queue_index: Signal<usize>,
@@ -82,17 +84,8 @@ impl PlayerController {
         });
     }
 
-    /// Retrieves the queue index for a given index, taking into account the shuffle state.
-    pub fn get_queue_index(&self, idx: usize) -> Option<usize> {
-        if *self.shuffle.peek() {
-            self.shuffle_order.peek().get(idx).cloned()
-        } else {
-            Some(idx)
-        }
-    }
-
+    /// The track at a play-order position; `queue` already holds play order.
     pub fn get_track_at(&self, idx: usize) -> Option<Track> {
-        let idx = self.get_queue_index(idx)?;
         self.queue.peek().get(idx).cloned()
     }
 
