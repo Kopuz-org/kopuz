@@ -12,6 +12,7 @@ impl Session {
         self.rev += 1;
         if queue_changed {
             self.queue_rev = self.rev;
+            self.refresh_album_context();
             // Only a queue with something in it replaces one that could not be read; a shuffle toggle on nothing does not.
             if !self.model.items().is_empty() {
                 self.queue_unread = false;
@@ -29,6 +30,28 @@ impl Session {
         let _ = state_tx.send(state.clone());
         self.emit(ApiEvent::PlayerState(Box::new(state)));
         CommandAck { rev: self.rev }
+    }
+
+    pub(super) fn album_context_for_token(&self, token: u64) -> bool {
+        let position = match self.pending_transition.as_ref() {
+            Some(pending) if pending.to_token == token => pending.to_position,
+            _ => self.model.current_position(),
+        };
+        self.model
+            .track_at(position)
+            .is_some_and(|track| self.model.album_context_at(position, &track.album_id))
+    }
+
+    fn refresh_album_context(&self) {
+        let visible = self.visible_token();
+        self.player
+            .set_album_context(visible, self.album_context_for_token(visible));
+        if let Some(pending) = &self.pending_transition {
+            self.player.set_album_context(
+                pending.to_token,
+                self.album_context_for_token(pending.to_token),
+            );
+        }
     }
 
     /// Sole event egress. A subscriber that falls behind the channel is

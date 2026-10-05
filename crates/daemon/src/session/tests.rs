@@ -259,6 +259,141 @@ fn replace(keys: &[&str]) -> SetQueueRequest {
     }
 }
 
+fn replay_gain_harness(provider: FactoryOverride) -> Harness {
+    struct GainLibrary;
+    #[async_trait::async_trait]
+    impl QueueMaterializer for GainLibrary {
+        async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
+            let mut tracks = StubLibrary.materialize(context).await?;
+            for track in &mut tracks {
+                track.album_id = "album".into();
+                track.replay_gain = config::ReplayGainInfo {
+                    track_gain_db: Some(-6.0),
+                    album_gain_db: Some(-12.0),
+                    ..Default::default()
+                };
+            }
+            Ok(tracks)
+        }
+    }
+    let sink = FakeSinkHandle::default();
+    let player = Player::try_with_sink(Box::new(FakeSink(sink.clone()))).unwrap();
+    let mut services = PlaybackServices::default();
+    services.config.crossfade_seconds = 0;
+    services.config.volume = 1.0;
+    services.config.replay_gain.mode = config::ReplayGainMode::Auto;
+    let session =
+        SessionHandle::spawn_with_factory(Arc::new(GainLibrary), player, services, provider);
+    Harness {
+        api: LocalApi::new(session),
+        sink,
+    }
+}
+
+async fn wait_replay_gain(harness: &Harness, db: f32) {
+    let expected = (10_000.0 / 32_768.0) * 10.0_f32.powf(db / 20.0);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let peak = harness
+            .sink
+            .pull(1024)
+            .into_iter()
+            .fold(0.0_f32, |p, s| p.max(s.abs()));
+        if (peak - expected).abs() < expected * 0.01 {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "gain {db} dB: {peak} vs {expected}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn replay_gain_auto_follows_shuffle_and_queue_edits() {
+    let harness = replay_gain_harness(Arc::new(|_| Some(wav_factory(6))));
+    harness.api.set_queue(replace(&["a", "b"])).await.unwrap();
+    wait_committed(&harness.api).await;
+    wait_replay_gain(&harness, -12.0).await;
+    for shuffle in [true, false] {
+        harness
+            .api
+            .player_command(PlayerCommand::SetMode {
+                shuffle: Some(shuffle),
+                loop_mode: None,
+            })
+            .await
+            .unwrap();
+        wait_replay_gain(&harness, if shuffle { -6.0 } else { -12.0 }).await;
+    }
+    harness
+        .api
+        .queue_edit(QueueEdit::Remove { index: 1 })
+        .await
+        .unwrap();
+    wait_replay_gain(&harness, -6.0).await;
+    harness
+        .api
+        .set_queue(enqueue(QueueMode::Append, &["b"]))
+        .await
+        .unwrap();
+    wait_replay_gain(&harness, -12.0).await;
+}
+
+#[tokio::test]
+async fn replay_gain_settings_reach_playing_audio_through_config_api() {
+    let mut harness = harness(|config| config.volume = 1.0);
+    let dir = tempfile::tempdir().unwrap();
+    let database = db::init(&dir.path().join("test.db")).await.unwrap();
+    let config = harness.api.session.config_rx.borrow().clone();
+    let service = Arc::new(crate::config_service::ConfigService::new(
+        database,
+        dir.path().join("settings.toml"),
+        config,
+    ));
+    service.attach_session(harness.api.session.clone());
+    harness.api = harness.api.with_config(service);
+    harness.api.set_queue(replace(&["untagged"])).await.unwrap();
+    wait_committed(&harness.api).await;
+    wait_replay_gain(&harness, 0.0).await;
+
+    for (mode, preamp, expected) in [
+        (config::ReplayGainMode::Track, -12.0, -12.0),
+        (config::ReplayGainMode::Album, -6.0, -6.0),
+        (config::ReplayGainMode::Off, -12.0, 0.0),
+        (config::ReplayGainMode::Auto, -12.0, -12.0),
+    ] {
+        let mut next = harness.api.config().await.unwrap().config;
+        next.replay_gain.mode = mode;
+        next.replay_gain.preamp_db = preamp;
+        harness.api.set_config(next).await.unwrap();
+        wait_replay_gain(&harness, expected).await;
+    }
+}
+
+#[tokio::test]
+async fn replay_gain_auto_refreshes_while_the_decoder_is_probing() {
+    let gate = Arc::new((Mutex::new(true), Condvar::new()));
+    let provider_gate = gate.clone();
+    let harness = replay_gain_harness(Arc::new(move |_| {
+        Some(gated_factory(6, provider_gate.clone()))
+    }));
+    harness.api.set_queue(replace(&["a", "b"])).await.unwrap();
+    harness
+        .api
+        .player_command(PlayerCommand::SetMode {
+            shuffle: Some(true),
+            loop_mode: None,
+        })
+        .await
+        .unwrap();
+    *gate.0.lock().unwrap() = false;
+    gate.1.notify_all();
+    wait_committed(&harness.api).await;
+    wait_replay_gain(&harness, -6.0).await;
+}
+
 fn enqueue(mode: QueueMode, keys: &[&str]) -> SetQueueRequest {
     SetQueueRequest {
         mode,

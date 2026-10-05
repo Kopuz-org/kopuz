@@ -473,27 +473,6 @@ impl ReplayGainInfo {
     pub fn is_empty(&self) -> bool {
         self.track_gain_db.is_none() && self.album_gain_db.is_none()
     }
-
-    /// Fill in whichever gain this one is missing from `other`. Used to back a
-    /// stream's own tags with the values the media server reported, which is
-    /// all a transcoded stream has left. A gain keeps the peak measured with
-    /// it, since a peak from another analysis cannot bound it.
-    pub fn or(self, other: Self) -> Self {
-        let track = match self.track_gain_db {
-            Some(_) => self,
-            None => other,
-        };
-        let album = match self.album_gain_db {
-            Some(_) => self,
-            None => other,
-        };
-        Self {
-            track_gain_db: track.track_gain_db,
-            track_peak: track.track_peak,
-            album_gain_db: album.album_gain_db,
-            album_peak: album.album_peak,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -536,6 +515,17 @@ impl ReplayGainSettings {
     /// queue is currently walking an album, which is what [`ReplayGainMode::Auto`]
     /// switches on.
     pub fn linear_gain(&self, info: ReplayGainInfo, album_context: bool) -> f32 {
+        self.linear_gain_with_fallback(info, ReplayGainInfo::default(), album_context)
+    }
+
+    /// Prefer stream tags to service metadata for each gain, keeping the peak
+    /// from the same analysis even when falling back between track and album.
+    pub fn linear_gain_with_fallback(
+        &self,
+        stream: ReplayGainInfo,
+        service: ReplayGainInfo,
+        album_context: bool,
+    ) -> f32 {
         let prefer_album = match self.mode {
             ReplayGainMode::Off => return 1.0,
             ReplayGainMode::Track => false,
@@ -545,16 +535,26 @@ impl ReplayGainSettings {
 
         // An album peak bounds every track on the album, so it can stand in for a
         // missing track peak; a track peak is too low to bound the album gain.
-        let album = info.album_gain_db.map(|db| (Some(db), info.album_peak));
-        let track = info
-            .track_gain_db
-            .map(|db| (Some(db), info.track_peak.or(info.album_peak)));
+        let album = |info: ReplayGainInfo| info.album_gain_db.map(|db| (Some(db), info.album_peak));
+        let track = |info: ReplayGainInfo| {
+            info.track_gain_db
+                .map(|db| (Some(db), info.track_peak.or(info.album_peak)))
+        };
+        let album = album(stream).or_else(|| album(service));
+        let track = track(stream).or_else(|| track(service));
         let (gain_db, peak) = if prefer_album {
             album.or(track)
         } else {
             track.or(album)
         }
-        .unwrap_or((None, info.album_peak.or(info.track_peak)));
+        .unwrap_or((
+            None,
+            stream
+                .album_peak
+                .or(stream.track_peak)
+                .or(service.album_peak)
+                .or(service.track_peak),
+        ));
 
         let db = gain_db
             .filter(|db| db.is_finite())
@@ -1329,14 +1329,40 @@ mod tests {
     #[test]
     fn backing_values_keep_each_gain_with_its_own_peak() {
         let stream = ReplayGainInfo {
-            track_gain_db: Some(-4.0),
+            track_gain_db: Some(6.0),
             ..Default::default()
         };
-        let merged = stream.or(tagged());
-        assert_eq!(merged.track_gain_db, Some(-4.0));
-        assert_eq!(merged.track_peak, None);
-        assert_eq!(merged.album_gain_db, Some(-3.0));
-        assert_eq!(merged.album_peak, Some(0.9));
+        let mut settings = ReplayGainSettings {
+            mode: ReplayGainMode::Track,
+            ..Default::default()
+        };
+        assert_close(
+            settings.linear_gain_with_fallback(stream, tagged(), false),
+            10.0_f32.powf(6.0 / 20.0),
+        );
+        settings.mode = ReplayGainMode::Album;
+        assert_close(
+            settings.linear_gain_with_fallback(stream, tagged(), true),
+            10.0_f32.powf(-3.0 / 20.0),
+        );
+    }
+
+    #[test]
+    fn an_album_peak_from_the_same_analysis_bounds_track_gain() {
+        let stream = ReplayGainInfo {
+            track_gain_db: Some(6.0),
+            album_peak: Some(0.8),
+            ..Default::default()
+        };
+        let settings = ReplayGainSettings {
+            mode: ReplayGainMode::Track,
+            ..Default::default()
+        };
+        assert_close(settings.linear_gain(stream, false), 1.25);
+        assert_close(
+            settings.linear_gain_with_fallback(ReplayGainInfo::default(), stream, false),
+            1.25,
+        );
     }
 
     #[test]

@@ -88,7 +88,7 @@ pub struct SubsonicSong {
 }
 
 /// The OpenSubsonic `replayGain` object. `baseGain` is deliberately unread:
-/// it exists for Ogg Opus output gain, which the decoder already applies.
+/// it exists for Ogg Opus output gain, which the decode worker already applies.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubsonicReplayGain {

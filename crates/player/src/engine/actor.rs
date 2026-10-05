@@ -134,6 +134,7 @@ struct Session {
     /// The track's own tagged values, kept so a settings change can recompute
     /// the factor for a session that is already playing.
     replay_gain: ReplayGainInfo,
+    service_replay_gain: ReplayGainInfo,
     /// Whether this track was loaded as part of an album run; picks the album
     /// gain under `ReplayGainMode::Auto`.
     album_context: bool,
@@ -381,7 +382,38 @@ impl Actor {
                 {
                     session.gain.store(
                         settings
-                            .linear_gain(session.replay_gain, session.album_context)
+                            .linear_gain_with_fallback(
+                                session.replay_gain,
+                                session.service_replay_gain,
+                                session.album_context,
+                            )
+                            .to_bits(),
+                        Ordering::Relaxed,
+                    );
+                }
+            }
+            Command::SetAlbumContext {
+                token,
+                album_context,
+            } => {
+                if let Some(pending) = self.pending.as_mut()
+                    && pending.plan.token == token
+                {
+                    pending.plan.album_context = album_context;
+                }
+                for session in [self.current.as_mut(), self.fading.as_mut()]
+                    .into_iter()
+                    .flatten()
+                    .filter(|session| session.token == token)
+                {
+                    session.album_context = album_context;
+                    session.gain.store(
+                        self.replay_gain_settings
+                            .linear_gain_with_fallback(
+                                session.replay_gain,
+                                session.service_replay_gain,
+                                album_context,
+                            )
                             .to_bits(),
                         Ordering::Relaxed,
                     );
@@ -653,10 +685,9 @@ impl Actor {
 
         // The stream's own tags describe the exact bytes being decoded, so
         // they win; the server's values fill in what a transcode stripped.
-        let replay_gain = replay_gain.or(service_replay_gain);
         let gain = Arc::new(AtomicU32::new(
             self.replay_gain_settings
-                .linear_gain(replay_gain, album_context)
+                .linear_gain_with_fallback(replay_gain, service_replay_gain, album_context)
                 .to_bits(),
         ));
         let RingParts {
@@ -685,6 +716,7 @@ impl Actor {
             played,
             gain,
             replay_gain,
+            service_replay_gain,
             album_context,
             base_micros: start_at.unwrap_or(Duration::ZERO).as_micros() as u64,
             duration,

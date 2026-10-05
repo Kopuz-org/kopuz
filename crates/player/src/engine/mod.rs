@@ -98,6 +98,10 @@ pub enum Command {
     SetChannelMode(ChannelMode),
     SetEqualizer(EqualizerSettings),
     SetReplayGain(ReplayGainSettings),
+    SetAlbumContext {
+        token: u64,
+        album_context: bool,
+    },
     SetDeviceChangeBehavior(config::DeviceChangeBehavior),
     SetSampleRateMode(config::SampleRateMode),
     SetDuration(Duration),

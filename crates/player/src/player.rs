@@ -239,6 +239,14 @@ impl Player {
         self.engine.send(Command::SetReplayGain(settings));
     }
 
+    /// Refresh the queue context without reloading a playing or probing track.
+    pub fn set_album_context(&self, token: u64, album_context: bool) {
+        self.engine.send(Command::SetAlbumContext {
+            token,
+            album_context,
+        });
+    }
+
     /// Whether playback keeps going or holds paused after migrating to a new
     /// output device.
     pub fn set_device_change_behavior(&self, behavior: config::DeviceChangeBehavior) {

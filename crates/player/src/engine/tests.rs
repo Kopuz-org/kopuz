@@ -364,6 +364,157 @@ fn service_replay_gain_levels_a_stream_without_tags() {
 }
 
 #[test]
+fn opus_header_gain_is_independent_of_replay_gain_and_survives_seek() {
+    let mut reference = 0.0_f32;
+    for (header_db, replay_gain_on) in [(0_i16, false), (-6, false), (6, false), (-6, true)] {
+        let (sink, engine) = spawn_engine();
+        if replay_gain_on {
+            engine.send(Command::SetReplayGain(config::ReplayGainSettings {
+                mode: config::ReplayGainMode::Track,
+                fallback_gain_db: -6.0,
+                ..Default::default()
+            }));
+        }
+        let mut bytes = include_bytes!("testdata/tone_live.webm").to_vec();
+        let header = bytes
+            .windows(8)
+            .position(|bytes| bytes == b"OpusHead")
+            .unwrap();
+        bytes[header + 16..header + 18].copy_from_slice(&(header_db * 256).to_le_bytes());
+        let factory: SourceFactory =
+            Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
+        load(&engine, 1, factory, Duration::from_secs(2));
+        let mut peak = 0.0_f32;
+        wait_until("Opus audio", || {
+            peak = sink
+                .pull(4096)
+                .into_iter()
+                .fold(0.0_f32, |p, s| p.max(s.abs()));
+            peak > 0.0
+        });
+        if header_db == 0 {
+            reference = peak;
+        }
+        let total_db = f32::from(header_db) - if replay_gain_on { 6.0 } else { 0.0 };
+        let expected = reference * 10.0_f32.powf(total_db / 20.0);
+        assert!(
+            (peak - expected).abs() < expected * 0.03,
+            "{header_db} dB: {peak} vs {expected}"
+        );
+
+        wait_until("Opus EOF", || {
+            sink.pull(4096);
+            engine.status().phase == Phase::Ended
+        });
+        engine.send(Command::Seek {
+            position: Duration::from_millis(500),
+            token: Some(1),
+        });
+        wait_until("Opus audio after seek", || {
+            peak = sink
+                .pull(4096)
+                .into_iter()
+                .fold(0.0_f32, |p, s| p.max(s.abs()));
+            peak > 0.0
+        });
+        assert!(
+            (peak - expected).abs() < expected * 0.03,
+            "seek: {peak} vs {expected}"
+        );
+        engine.shutdown();
+    }
+}
+
+#[test]
+fn opus_replay_gain_tags_reach_the_audio_output() {
+    // ffmpeg -f lavfi -i sine=frequency=440:duration=0.25 -c:a libopus
+    // -metadata R128_TRACK_GAIN=-2816 -metadata R128_ALBUM_GAIN=-4352
+    // -bsf:a opus_metadata=gain=-1536 tone_replaygain.opus
+    // The tone peaks at 0.125 before encoding. Header: -6 dB; tags, after
+    // the R128 reference offset: track -6 dB and album -12 dB.
+    for (mode, total_db) in [
+        (config::ReplayGainMode::Off, -6.0_f32),
+        (config::ReplayGainMode::Track, -12.0),
+        (config::ReplayGainMode::Album, -18.0),
+    ] {
+        let (sink, engine) = spawn_engine();
+        engine.send(Command::SetReplayGain(config::ReplayGainSettings {
+            mode,
+            fallback_gain_db: 10.0,
+            ..Default::default()
+        }));
+        let bytes = include_bytes!("testdata/tone_replaygain.opus").to_vec();
+        let factory: SourceFactory =
+            Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
+        load(&engine, 1, factory, Duration::from_millis(250));
+        let mut peak = 0.0_f32;
+        wait_until("tagged Opus audio", || {
+            peak = sink
+                .pull(4096)
+                .into_iter()
+                .fold(0.0_f32, |p, s| p.max(s.abs()));
+            peak > 0.0
+        });
+        let expected = 0.125 * 10.0_f32.powf(total_db / 20.0);
+        assert!(
+            (peak - expected).abs() < expected * 0.05,
+            "{mode:?}: {peak} vs {expected}"
+        );
+        engine.shutdown();
+    }
+}
+
+#[test]
+fn album_context_updates_both_sessions_during_a_crossfade() {
+    let (sink, engine) = spawn_engine();
+    engine.send(Command::SetReplayGain(config::ReplayGainSettings {
+        mode: config::ReplayGainMode::Auto,
+        ..Default::default()
+    }));
+    for token in [1, 2] {
+        let mut bytes = wav_bytes(5 * 44_100, 44_100, 2);
+        for sample in bytes[44..].chunks_exact_mut(2) {
+            sample.copy_from_slice(&10_000_i16.to_le_bytes());
+        }
+        let (reply, received) = tokio::sync::oneshot::channel();
+        engine.send(Command::Load(LoadRequest {
+            token,
+            factory: Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes)))),
+            duration: Duration::from_secs(5),
+            transition: if token == 1 {
+                Transition::Immediate
+            } else {
+                Transition::Crossfade(Duration::from_secs(2))
+            },
+            start_at: None,
+            album_context: true,
+            service_replay_gain: config::ReplayGainInfo {
+                track_gain_db: Some(-6.0),
+                album_gain_db: Some(-12.0),
+                ..Default::default()
+            },
+            reply: Some(reply),
+        }));
+        received.blocking_recv().unwrap().unwrap();
+    }
+    assert!(engine.status().fading.is_some());
+    let expected = (10_000.0 / 32_768.0) * 10.0_f32.powf(-6.0 / 20.0);
+    for token in [1, 2] {
+        engine.send(Command::SetAlbumContext {
+            token,
+            album_context: false,
+        });
+    }
+    wait_until("both fading sessions use track gain", || {
+        let samples = sink.pull(1024);
+        samples
+            .iter()
+            .all(|sample| (*sample - expected).abs() < expected * 0.01)
+    });
+    engine.shutdown();
+}
+
+#[test]
 fn resampled_source_plays_full_duration() {
     // The worker must resample from the buffer's own declared rate. With the old
     // unwrap_or(device_rate) fallback a 22.05kHz source on a 44.1kHz device was
