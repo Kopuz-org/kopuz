@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use super::clients::{ORIGIN_YOUTUBE_MUSIC, WEB_REMIX};
 use super::innertube::{http_client, sapisid_hash};
-use super::search::synthesize_album_id;
+use super::search::album_id as album_id_of;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiscoverHome {
@@ -352,6 +352,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
     let mut artist = String::new();
     let mut credits: Vec<ArtistCredit> = Vec::new();
     let mut album = String::new();
+    let mut album_id = String::new();
     let mut flex_duration: Option<u64> = None;
     for c in &cols {
         match c {
@@ -376,7 +377,10 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
                 artist = text.clone();
                 credits = linked.clone();
             }
-            RowColumn::Album { text } if album.is_empty() => album = text.clone(),
+            RowColumn::Album { text, browse_id } if album.is_empty() => {
+                album = text.clone();
+                album_id = browse_id.as_deref().map(album_id_of).unwrap_or_default();
+            }
             RowColumn::Duration { secs } if flex_duration.is_none() => {
                 flex_duration = Some(*secs);
             }
@@ -412,7 +416,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
     Some(Track {
         id: super::yt_id(video_id.clone()),
         cover,
-        album_id: synthesize_album_id(&album, &artist),
+        album_id,
         title,
         artist,
         album,
@@ -455,6 +459,9 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
     let year = pick_album_year(header);
     let thumbnail = best_album_thumbnail(header).map(normalize_yt_thumbnail);
     let audio_playlist_id_header = header.and_then(find_audio_playlist_id);
+    let album_id = super::search::album_browse_id(browse_id)
+        .map(|id| album_id_of(&id))
+        .unwrap_or_default();
 
     let mut tracks = Vec::new();
     let mut audio_pid_from_rows: Option<String> = None;
@@ -485,8 +492,13 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
                     }
                 }
             }
-            if let Some(track) = parse_album_row(row, &title, artist.as_ref(), thumbnail.as_deref())
-            {
+            if let Some(track) = parse_album_row(
+                row,
+                &album_id,
+                &title,
+                artist.as_ref(),
+                thumbnail.as_deref(),
+            ) {
                 tracks.push(track);
             }
         }
@@ -677,6 +689,7 @@ fn best_album_thumbnail(header: Option<&Value>) -> Option<String> {
 
 fn parse_album_row(
     row: &Value,
+    album_id: &str,
     album_title: &str,
     album_artist: Option<&ArtistCredit>,
     album_thumbnail: Option<&str>,
@@ -744,11 +757,10 @@ fn parse_album_row(
     let cover = album_thumbnail
         .map(|u| u.to_string())
         .filter(|u| !u.is_empty());
-    let album_id = synthesize_album_id(album_title, &primary_artist);
     Some(Track {
         id: super::yt_id(video_id.clone()),
         cover,
-        album_id,
+        album_id: album_id.to_string(),
         title,
         artist: primary_artist,
         album: album_title.to_string(),
@@ -997,11 +1009,10 @@ fn build_song_track(video_id: &str, title: &str, subtitle: &str, thumbnail: Opti
         vec![primary_artist.clone()]
     };
     let cover = thumbnail.map(|u| u.to_string()).filter(|u| !u.is_empty());
-    let album_id = synthesize_album_id("", &primary_artist);
     Track {
         id: super::yt_id(video_id),
         cover,
-        album_id,
+        album_id: String::new(),
         title: title.to_string(),
         artist: primary_artist,
         album: String::new(),
@@ -1100,6 +1111,8 @@ pub(crate) enum RowColumn {
     },
     Album {
         text: String,
+        /// The `MPRE…` release the column links, absent when it links only the album's playlist.
+        browse_id: Option<String>,
     },
     Duration {
         secs: u64,
@@ -1198,7 +1211,10 @@ fn classify_flex_columns(row: &Value) -> Vec<RowColumn> {
                     break;
                 }
                 if bid.starts_with("MPRE") {
-                    out.push(RowColumn::Album { text: text.clone() });
+                    out.push(RowColumn::Album {
+                        text: text.clone(),
+                        browse_id: Some(bid.to_string()),
+                    });
                     classified = true;
                     break;
                 }
@@ -1209,7 +1225,10 @@ fn classify_flex_columns(row: &Value) -> Vec<RowColumn> {
                 .and_then(|v| v.as_str())
                 && pid.starts_with("OLAK5uy_")
             {
-                out.push(RowColumn::Album { text: text.clone() });
+                out.push(RowColumn::Album {
+                    text: text.clone(),
+                    browse_id: None,
+                });
                 classified = true;
                 break;
             }
@@ -1277,8 +1296,49 @@ fn normalize_yt_thumbnail(url: String) -> String {
 
 #[cfg(test)]
 mod credit_tests {
-    use super::{RowColumn, classify_flex_columns, pick_album_artist};
+    use super::{
+        RowColumn, classify_flex_columns, parse_album, parse_artist_song_row, pick_album_artist,
+    };
     use serde_json::{Value, json};
+
+    fn title_column() -> Value {
+        json!({ "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{
+            "text": "Song",
+            "navigationEndpoint": { "watchEndpoint": { "videoId": "vid" } }
+        }] } } })
+    }
+
+    #[test]
+    fn an_artist_song_files_under_the_release_its_album_column_links() {
+        let linked = json!({ "flexColumns": [
+            title_column(),
+            column(&[("Ada", Some("UCada"))]),
+            column(&[("Hits", Some("MPREb_one"))]),
+        ] });
+        let track = parse_artist_song_row(&linked).expect("a song row");
+        assert_eq!(track.album, "Hits");
+        assert_eq!(track.album_id, "ytmusic:album:MPREb_one");
+
+        let unlinked =
+            json!({ "flexColumns": [title_column(), column(&[("Ada", Some("UCada"))])] });
+        let track = parse_artist_song_row(&unlinked).expect("a song row");
+        assert_eq!(track.album_id, "");
+    }
+
+    #[test]
+    fn an_album_page_track_files_under_the_album_it_was_fetched_by() {
+        let row = json!({ "musicResponsiveListItemRenderer": {
+            "flexColumns": [title_column(), column(&[("Ada", Some("UCada"))])]
+        } });
+        let resp = json!({ "contents": { "twoColumnBrowseResultsRenderer": {
+            "secondaryContents": { "sectionListRenderer": { "contents": [
+                { "musicShelfRenderer": { "contents": [row] } }
+            ] } }
+        } } });
+        let album = parse_album("MPREb_one", &resp);
+        assert_eq!(album.tracks.len(), 1);
+        assert_eq!(album.tracks[0].album_id, "ytmusic:album:MPREb_one");
+    }
 
     fn column(runs: &[(&str, Option<&str>)]) -> Value {
         let runs: Vec<Value> = runs
@@ -1294,7 +1354,7 @@ mod credit_tests {
         json!({ "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": runs } } })
     }
 
-    /// The joined text has to stay put: the album id is synthesized from it.
+    /// The joined text is the byline as shown, while each channel stays its own credit.
     #[test]
     fn a_two_artist_column_keeps_each_channel_but_one_joined_name() {
         let row = json!({
