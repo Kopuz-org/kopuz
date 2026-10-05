@@ -10,13 +10,14 @@ use components::selection_bar::SelectionBar;
 use components::sort_control::SortControl;
 use components::view_mode_toggle::ViewModeToggle;
 use config::{
-    AlbumSortField, AlbumViewMode, AppConfig, ArtistSortField, ArtistViewOrder, SortDirection,
+    AlbumSortField, AlbumViewMode, AppConfig, ArtistSortField, ArtistViewOrder, SortCriterion,
+    SortDirection,
 };
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
     use_active_source, use_albums, use_artist, use_artist_tracks, use_artists, use_tracks_by_keys,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 #[component]
 pub fn Artist(
@@ -47,12 +48,9 @@ pub fn Artist(
     let is_offline = use_context::<Signal<bool>>();
     let downloads = hooks::downloads::use_downloads();
 
-    let albums_res = use_albums(source);
-    let artists_res = use_artists(source);
     let open_artist = use_memo(move || artist.read().clone());
     let artist_tracks_res = use_artist_tracks(source, open_artist);
     let artist_res = use_artist(source, open_artist);
-    hooks::artist_images::use_artist_photo_fetch(artists_res);
 
     // Server + offline: keys of tracks downloaded for offline, used to restrict the
     // artist/album listing to what's actually available. Empty otherwise (cheap).
@@ -94,6 +92,32 @@ pub fn Artist(
         }
     });
 
+    let artists_query = use_memo(move || hooks::ArtistQuery {
+        sort: artist_sort.read().clone(),
+        ..Default::default()
+    });
+    let artists_res = use_artists(source, artists_query);
+    hooks::artist_images::use_artist_photo_fetch(artists_res);
+
+    // The grid view has no artist open, so it asks for no albums.
+    let artist_albums_query = use_memo(move || {
+        let artist_key = open_artist.read().clone()?;
+        let mut sort = album_sort.read().clone();
+        // With every criterion removed a discography still reads newest first.
+        if sort.is_empty() {
+            sort = vec![
+                SortCriterion::new(AlbumSortField::Year, SortDirection::Desc),
+                SortCriterion::new(AlbumSortField::Title, SortDirection::Asc),
+            ];
+        }
+        Some(hooks::AlbumQuery {
+            artist_key: Some(artist_key),
+            sort,
+            ..Default::default()
+        })
+    });
+    let artist_albums_res = use_albums(source, artist_albums_query);
+
     let album_view_mode = use_signal(|| config.peek().artist_album_view_mode);
     use_effect(move || {
         let curr = *album_view_mode.read();
@@ -127,7 +151,6 @@ pub fn Artist(
     // resolved by the cover seam.
     let artists = use_memo(move || -> Vec<api::ArtistInfo> {
         let listed = artists_res.read().clone().unwrap_or_default();
-        let albums = albums_res.read().clone().unwrap_or_default();
         let offline = caps().downloads && *is_offline.read();
 
         let downloaded: HashSet<String> = if offline {
@@ -140,46 +163,14 @@ pub fn Artist(
         } else {
             HashSet::new()
         };
-        let mut album_counts: HashMap<String, u32> = HashMap::new();
-        for artist in albums.iter().filter_map(|album| album.artist_key.clone()) {
-            *album_counts.entry(artist).or_default() += 1;
-        }
-
-        let mut shown: Vec<api::ArtistInfo> = match offline {
+        // Already in the stacked order the daemon was asked for.
+        match offline {
             true => listed
                 .into_iter()
                 .filter(|artist| downloaded.contains(&artist.key))
                 .collect(),
             false => listed,
-        };
-        // Sort by the stacked criteria; the name, then the key, break remaining ties.
-        let criteria = artist_sort.read().clone();
-        let albums_of =
-            |artist: &api::ArtistInfo| album_counts.get(&artist.key).copied().unwrap_or(0);
-        shown.sort_by(|a, b| {
-            let by_name = || {
-                a.name
-                    .to_lowercase()
-                    .cmp(&b.name.to_lowercase())
-                    .then_with(|| a.key.cmp(&b.key))
-            };
-            for c in &criteria {
-                let ord = match c.field {
-                    ArtistSortField::Name => by_name(),
-                    ArtistSortField::Tracks => a.track_count.cmp(&b.track_count),
-                    ArtistSortField::Albums => albums_of(a).cmp(&albums_of(b)),
-                };
-                let ord = match c.direction {
-                    SortDirection::Asc => ord,
-                    SortDirection::Desc => ord.reverse(),
-                };
-                if ord != std::cmp::Ordering::Equal {
-                    return ord;
-                }
-            }
-            by_name()
-        });
-        shown
+        }
     });
 
     // Restore the grid's scroll position once, after the artist list first
@@ -230,9 +221,6 @@ pub fn Artist(
     });
 
     let artist_albums = use_memo(move || {
-        let Some(detail) = artist_res.read().clone().flatten().and_then(Result::ok) else {
-            return Vec::new();
-        };
         let offline = caps().downloads && *is_offline.read();
         let downloaded_ids: HashSet<String> = if offline {
             offline_tracks_res
@@ -245,15 +233,14 @@ pub fn Artist(
         } else {
             HashSet::new()
         };
-        let mut albums: Vec<_> = detail
-            .albums
+        artist_albums_res
+            .read()
+            .clone()
+            .and_then(Result::ok)
+            .unwrap_or_default()
             .into_iter()
             .filter(|a| !offline || downloaded_ids.contains(&a.id))
-            .collect();
-        hooks::sort::sort_albums(&mut albums, &album_sort.read());
-        let mut seen = HashSet::new();
-        albums.retain(|album| seen.insert(album.title.trim().to_lowercase()));
-        albums
+            .collect::<Vec<_>>()
     });
 
     // Every album here shares the artist, so that field would never break a tie.
@@ -267,7 +254,8 @@ pub fn Artist(
     let load_error = use_memo(move || {
         let detail = artist_res.read().clone().flatten().and_then(Result::err);
         let tracks = artist_tracks_res.read().clone().and_then(Result::err);
-        detail.or(tracks).map(|error| match error.code {
+        let albums = artist_albums_res.read().clone().and_then(Result::err);
+        detail.or(tracks).or(albums).map(|error| match error.code {
             api::ErrorCode::NotFound => i18n::t("artist_not_found"),
             _ => i18n::t_with("artist_load_failed", &[("error", error.to_string())]),
         })

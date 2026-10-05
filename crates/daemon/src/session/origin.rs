@@ -24,6 +24,14 @@ enum Stored {
         genre: Option<String>,
         favorite: Option<bool>,
         sort: StoredSort,
+        #[serde(default)]
+        downloaded: Option<bool>,
+        #[serde(default)]
+        year_from: Option<u16>,
+        #[serde(default)]
+        year_to: Option<u16>,
+        #[serde(default)]
+        reverse: bool,
     },
     Radio {
         station_id: String,
@@ -92,6 +100,10 @@ pub(super) fn encode(context: &QueueContext) -> Option<String> {
             genre: filter.genre.clone(),
             favorite: filter.favorite,
             sort: (&filter.sort).into(),
+            downloaded: filter.downloaded,
+            year_from: filter.year_from,
+            year_to: filter.year_to,
+            reverse: filter.reverse,
         },
         QueueContext::Radio {
             station_id,
@@ -126,6 +138,10 @@ pub(super) fn decode(stored: &str) -> Option<QueueContext> {
             genre,
             favorite,
             sort,
+            downloaded,
+            year_from,
+            year_to,
+            reverse,
         } => QueueContext::Filter {
             filter: TrackFilter {
                 search,
@@ -133,6 +149,10 @@ pub(super) fn decode(stored: &str) -> Option<QueueContext> {
                 genre,
                 favorite,
                 sort: sort.into(),
+                downloaded,
+                year_from,
+                year_to,
+                reverse,
             },
         },
         Stored::Radio {
@@ -170,6 +190,10 @@ mod tests {
                         config::TrackSortField::Title,
                         config::SortDirection::Desc,
                     )]),
+                    downloaded: Some(false),
+                    year_from: Some(1990),
+                    year_to: Some(1999),
+                    reverse: true,
                 },
             },
             QueueContext::Filter {
@@ -186,6 +210,22 @@ mod tests {
             let stored = encode(&context).expect("a container is stored");
             assert_eq!(decode(&stored), Some(context));
         }
+    }
+
+    #[test]
+    fn an_origin_stored_before_the_new_filters_still_reads() {
+        let stored = r#"{"kind":"filter","search":null,"album":null,"genre":"g","favorite":true,"sort":"Title"}"#;
+        assert_eq!(
+            decode(stored),
+            Some(QueueContext::Filter {
+                filter: TrackFilter {
+                    genre: Some("g".into()),
+                    favorite: Some(true),
+                    sort: TrackSort::Title,
+                    ..Default::default()
+                },
+            })
+        );
     }
 
     #[test]

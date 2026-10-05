@@ -358,8 +358,8 @@ impl api::LibraryApi for LocalApi {
         self.library()?.tracks_by_keys(&keys).await
     }
 
-    async fn albums(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
-        self.library()?.albums(page).await
+    async fn albums(&self, query: api::AlbumQuery, page: Page) -> Result<api::AlbumPage, ApiError> {
+        self.library()?.albums(query, page).await
     }
 
     async fn albums_recently_added(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
@@ -374,8 +374,12 @@ impl api::LibraryApi for LocalApi {
         self.library()?.album_tracks(&id, page).await
     }
 
-    async fn artists(&self, page: Page) -> Result<api::ArtistPage, ApiError> {
-        self.library()?.artists(page).await
+    async fn artists(
+        &self,
+        query: api::ArtistQuery,
+        page: Page,
+    ) -> Result<api::ArtistPage, ApiError> {
+        self.library()?.artists(query, page).await
     }
 
     async fn catalog(&self, continuation: Option<String>) -> Result<api::CatalogPage, ApiError> {
