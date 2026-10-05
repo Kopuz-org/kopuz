@@ -1,5 +1,4 @@
-//! Which orderings a list offers. The ordering itself is the daemon's: a page
-//! hands it the person's criteria in an `AlbumQuery` or `ArtistQuery`.
+//! Which orderings a list offers; the ordering itself is the daemon's.
 
 use api::AlbumInfo;
 use config::AlbumSortField;

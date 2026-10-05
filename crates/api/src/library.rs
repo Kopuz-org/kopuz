@@ -141,9 +141,7 @@ pub struct TrackFilter {
     pub reverse: bool,
 }
 
-/// Which albums to list and in what order; the daemon filters and sorts, so
-/// `AlbumPage::total` counts the filtered set. `Default` lists everything by
-/// artist then title.
+/// Which albums to list and in what order; `AlbumPage::total` counts the filtered set.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AlbumQuery {
     /// Matches the title or the billed artist's text, ignoring ASCII case.
@@ -160,8 +158,7 @@ pub struct AlbumQuery {
     pub sort: Vec<config::SortCriterion<config::AlbumSortField>>,
 }
 
-/// Which artists to list and in what order; `ArtistPage::total` counts the
-/// filtered set. `Default` lists everyone by name.
+/// Which artists to list and in what order; `ArtistPage::total` counts the filtered set.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ArtistQuery {
     /// Matches the artist's name, ignoring ASCII case.
