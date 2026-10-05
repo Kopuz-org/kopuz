@@ -23,6 +23,7 @@ use crate::sources::source_error;
 pub struct PlaylistService {
     db: db::Db,
     session: SessionHandle,
+    favorites: std::sync::OnceLock<Arc<crate::FavoritesService>>,
 }
 
 fn db_error(error: db::DbError) -> ApiError {
@@ -31,7 +32,16 @@ fn db_error(error: db::DbError) -> ApiError {
 
 impl PlaylistService {
     pub fn new(db: db::Db, session: SessionHandle) -> Arc<Self> {
-        Arc::new(Self { db, session })
+        Arc::new(Self {
+            db,
+            session,
+            favorites: std::sync::OnceLock::new(),
+        })
+    }
+
+    /// Late-bound like the artwork service's siblings; without it a sync skips the favorites pull.
+    pub fn attach_favorites(&self, favorites: Arc<crate::FavoritesService>) {
+        let _ = self.favorites.set(favorites);
     }
 
     fn config(&self) -> config::AppConfig {
@@ -391,6 +401,19 @@ impl PlaylistService {
             return Err(ApiError::unsupported(
                 "the active source has no playlist sync",
             ));
+        }
+        // A server's liked-songs playlist is built from its favorites, so those come first; nobody asked for them, so the pull keeps its staleness gate.
+        if let Some(favorites) = self.favorites.get()
+            && let Err(error) = favorites
+                .sync(
+                    server::sync::SyncReason::Interval,
+                    crate::favorites::Import::UnlessRecent,
+                    Some(ctx),
+                )
+                .await
+        {
+            // Only the code: a Subsonic error's text holds the request URL, token and salt included.
+            tracing::warn!(code = ?error.code, "favorites pull before the playlist sync failed");
         }
         let existing = self
             .db

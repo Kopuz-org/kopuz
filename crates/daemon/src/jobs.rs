@@ -49,6 +49,10 @@ impl JobCtx {
         self.cancelled.load(Ordering::Relaxed)
     }
 
+    pub fn kind(&self) -> JobKind {
+        self.kind
+    }
+
     pub fn progress(
         &self,
         phase: &str,
