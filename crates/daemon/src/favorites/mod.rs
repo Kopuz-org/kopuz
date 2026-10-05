@@ -182,9 +182,14 @@ impl FavoritesService {
 
     /// What a favorites sync does, run inside another job: push pending likes, then import.
     pub(crate) async fn refresh(&self, ctx: &crate::jobs::JobCtx) -> Result<(), ApiError> {
+        let source = self.session.config_watch().borrow().active_source.clone();
         ctx.progress("reconciling favorites", None, None, None);
         let reconciled = self.reconcile(SyncReason::Manual).await;
         self.pull(Some(ctx), true).await?;
+        // It did a favorites sync's work, so the scheduler must not run one again right after.
+        if reconciled.is_ok() && !ctx.cancelled() {
+            crate::auto_sync::mark_synced(&self.db, JobKind::FavoritesSync, &source).await;
+        }
         reconciled
     }
 

@@ -407,17 +407,20 @@ async fn the_daemons_own_syncs_are_automatic_on_every_transport() {
         .expect("config saved");
     spawn_auto_sync(&pair);
 
-    for kind in [
-        api::JobKind::LibrarySync,
-        api::JobKind::PlaylistSync,
-        api::JobKind::FavoritesSync,
-    ] {
+    for kind in [api::JobKind::LibrarySync, api::JobKind::PlaylistSync] {
         assert!(wait_job(&pair.local, kind).await.automatic, "{kind:?}");
         assert!(
             wait_job(&pair.wire, kind).await.automatic,
             "{kind:?} on the wire"
         );
     }
+    // The playlist sync pulls favorites itself, so none is scheduled beside it.
+    let jobs = pair.local.jobs().await.expect("jobs");
+    assert!(
+        jobs.iter()
+            .all(|job| job.kind != api::JobKind::FavoritesSync),
+        "{jobs:?}"
+    );
 }
 
 #[tokio::test]

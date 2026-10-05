@@ -127,7 +127,12 @@ impl Syncs {
         }
         let source = &config.active_source;
         let plan = plan(&self.db, source, interval(config)).await;
+        // A playlist sync pulls favorites first, so a favorites sync due beside it would pull them twice.
+        let playlists_due = plan.due.contains(&JobKind::PlaylistSync);
         for kind in plan.due {
+            if playlists_due && kind == JobKind::FavoritesSync {
+                continue;
+            }
             let started = match kind {
                 JobKind::LibrarySync => self
                     .library
