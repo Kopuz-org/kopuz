@@ -2020,3 +2020,43 @@ mod row_fill_tests {
         assert_eq!(missed_at, 42);
     }
 }
+
+#[cfg(test)]
+mod master_order_tests {
+    use super::*;
+
+    /// The newest migration master ships; ours numbered below it reach a database master made only after it.
+    const MASTER_NEWEST: i64 = 20261009000000;
+
+    fn ours_before_master(version: i64) -> bool {
+        (20261006000000..20261007000000).contains(&version)
+    }
+
+    #[tokio::test]
+    async fn a_database_master_migrated_applies_ours_numbered_before_its_newest() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|m| m.version <= MASTER_NEWEST && !ours_before_master(m.version))
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool, None).await.unwrap();
+
+        let versions: Vec<i64> =
+            sqlx::query_scalar("SELECT version FROM _sqlx_migrations WHERE success = 1")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(versions.len(), MIGRATOR.iter().count());
+        assert!(versions.iter().any(|version| ours_before_master(*version)));
+    }
+}
