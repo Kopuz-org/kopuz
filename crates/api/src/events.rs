@@ -96,6 +96,11 @@ pub enum ApiEvent {
     ConfigChanged {
         keys: Vec<String>,
     },
+    /// A frontend's stored preferences changed (set or deleted) in these keys; re-read what you hold.
+    FrontendPrefsChanged {
+        frontend: String,
+        keys: Vec<String>,
+    },
     SourceStatus {
         source: String,
         state: SourceState,
