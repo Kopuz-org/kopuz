@@ -58,7 +58,11 @@ impl CoverFetcher {
             .albums
             .iter()
             .enumerate()
-            .filter(|(_, album)| missing_ids.contains(&album.id) && album.title != "Unknown Album")
+            .filter(|(_, album)| {
+                missing_ids.contains(&album.id)
+                    && album.title != "Unknown Album"
+                    && !crate::metadata::is_untitled_album(&album.id)
+            })
             .map(|(i, _)| i)
             .collect();
 

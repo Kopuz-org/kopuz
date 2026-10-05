@@ -8,6 +8,7 @@ use std::path::Path;
 
 use nextcloud::FileEntry;
 use nextcloud::files::path as dav_path;
+use reader::utils::disc_of;
 
 /// Fallback when the server reports no usable content type.
 const AUDIO_EXTENSIONS: &[&str] = &[
@@ -143,19 +144,6 @@ fn split_leading_number(stem: &str) -> (String, Option<u32>) {
         return (stem.trim().to_string(), digits.parse().ok());
     }
     (title.to_string(), digits.parse().ok())
-}
-
-/// Disc number from a "Disc 2" or "CD2" directory name.
-fn disc_of(dir_name: &str) -> Option<u32> {
-    let lower = dir_name.to_ascii_lowercase();
-    let rest = lower
-        .strip_prefix("disc")
-        .or_else(|| lower.strip_prefix("disk"))
-        .or_else(|| lower.strip_prefix("cd"))?;
-    rest.trim_start_matches([' ', '-', '_'])
-        .parse::<u32>()
-        .ok()
-        .filter(|n| *n > 0)
 }
 
 /// Group a flat listing by directory: album is the container (or grandparent,
@@ -304,14 +292,6 @@ mod tests {
             ("1999 remaster".to_string(), None)
         );
         assert_eq!(split_leading_number("01"), ("01".to_string(), Some(1)));
-    }
-    #[test]
-    fn disc_of_parses_disc_folder_names() {
-        assert_eq!(disc_of("Disc 2"), Some(2));
-        assert_eq!(disc_of("disk3"), Some(3));
-        assert_eq!(disc_of("CD-1"), Some(1));
-        assert_eq!(disc_of("Live in Tokyo"), None);
-        assert_eq!(disc_of("Disc"), None);
     }
     #[test]
     fn group_builds_albums_and_tracks() {

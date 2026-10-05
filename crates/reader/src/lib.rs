@@ -10,7 +10,9 @@ pub mod scanner;
 pub mod utils;
 
 pub use cover_indexer::{LocalCoverIndexReport, index_local_covers, missing_cover_ids};
-pub use metadata::{ScannedTrack, read, read_cover, read_metadata, write_tags};
+pub use metadata::{
+    ScannedTrack, VARIOUS_ARTISTS, album_credit, read, read_cover, read_metadata, write_tags,
+};
 pub use models::{
     Album, ArtistCredit, ArtistImageRef, Counterpart, CoverChange, CoverRef, FavoritesStore,
     Library, PlaylistEntry, PlaylistFolder, PlaylistStore, SharedSegment, Track, TrackEdits,
