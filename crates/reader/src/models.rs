@@ -172,6 +172,11 @@ pub struct Track {
     /// Every credit in billing order; a queue stored before credits existed has only `artists`.
     #[serde(default)]
     pub credits: Vec<ArtistCredit>,
+    /// ReplayGain values the source reported. Media servers publish them so a
+    /// transcoded stream still levels; local files leave this empty, since the
+    /// player reads their tags off the file it is decoding.
+    #[serde(default)]
+    pub replay_gain: config::ReplayGainInfo,
 }
 
 /// One credited artist, and the source whose listing it came from, since an id means nothing to another.
@@ -598,6 +603,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: Vec::new(),
+            replay_gain: config::ReplayGainInfo::default(),
             credits: Vec::new(),
         }
     }

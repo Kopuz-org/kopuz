@@ -24,6 +24,10 @@ pub struct TrackRow {
     pub mb_release_id: Option<String>,
     pub mb_recording_id: Option<String>,
     pub mb_track_id: Option<String>,
+    pub rg_track_gain: Option<f64>,
+    pub rg_track_peak: Option<f64>,
+    pub rg_album_gain: Option<f64>,
+    pub rg_album_peak: Option<f64>,
 }
 
 /// One credit of a track, with the artist row it is filed under.
@@ -68,6 +72,12 @@ impl TrackRow {
             playlist_item_id: None,
             artists: credits.iter().map(|credit| credit.name.clone()).collect(),
             credits,
+            replay_gain: config::ReplayGainInfo {
+                track_gain_db: self.rg_track_gain.map(|v| v as f32),
+                track_peak: self.rg_track_peak.map(|v| v as f32),
+                album_gain_db: self.rg_album_gain.map(|v| v as f32),
+                album_peak: self.rg_album_peak.map(|v| v as f32),
+            },
         }
     }
 }
@@ -153,6 +163,7 @@ impl QueueTrackRow {
             playlist_item_id: self.playlist_item_id,
             artists: credits.iter().map(|credit| credit.name.clone()).collect(),
             credits,
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 }

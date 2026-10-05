@@ -147,6 +147,7 @@ fn test_track(key: &String) -> Track {
             Vec::new()
         },
         artists: vec![],
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 
@@ -1676,6 +1677,7 @@ fn external_track(title: &str) -> Track {
         playlist_item_id: None,
         credits: Vec::new(),
         artists: Vec::new(),
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 

@@ -536,6 +536,7 @@ mod tests {
             playlist_item_id: None,
             credits: Vec::new(),
             artists: vec![],
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 

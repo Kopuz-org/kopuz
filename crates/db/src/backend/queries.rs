@@ -27,7 +27,8 @@ const TRACK_COLUMNS: &str = "t.rowid_pk, t.track_key, t.service, \
     COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS cover_path, \
     t.source_album_id, t.title, \
     t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
-    mb.release_id AS mb_release_id, mb.recording_id AS mb_recording_id, mb.track_id AS mb_track_id";
+    mb.release_id AS mb_release_id, mb.recording_id AS mb_recording_id, mb.track_id AS mb_track_id, \
+    t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak";
 
 /// The rows as tracks, their credits read in one query for the lot.
 async fn with_credits(pool: &SqlitePool, rows: Vec<TrackRow>) -> Result<Vec<Track>, DbError> {
@@ -188,7 +189,8 @@ pub async fn album_tracks(
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
                   t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
                   t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?"
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak
              FROM tracks t
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
@@ -218,7 +220,8 @@ pub async fn artist_tracks(
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
                   t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
                   t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?"
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak
              FROM tracks t
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
@@ -269,7 +272,8 @@ pub async fn genre_tracks(
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
                   t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
                   t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?"
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak
              FROM tracks t
              JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
@@ -303,7 +307,8 @@ pub async fn folder_tracks(
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
                   t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
                   t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?"
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak
              FROM tracks t
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
@@ -331,7 +336,8 @@ pub async fn artist_sample_tracks(
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
                   t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
                   t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?"
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak
              FROM tracks t
              JOIN (SELECT MIN(s.rowid_pk) AS track_pk,
                           COALESCE(
@@ -381,7 +387,8 @@ pub async fn search_corpus(pool: &SqlitePool, source: &Source) -> Result<Vec<Tra
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
                   t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
                   t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?"
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak
              FROM tracks t
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
@@ -420,7 +427,8 @@ pub async fn tracks_by_keys(
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
                   t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
                   t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?"
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak
              FROM tracks t
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
@@ -457,7 +465,8 @@ pub(crate) async fn refresh_from_library(
                   COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS "cover_path?: String",
                   t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,
                   t.track_number, t.disc_number,
-                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?"
+                  mb.release_id AS "mb_release_id?", mb.recording_id AS "mb_recording_id?", mb.track_id AS "mb_track_id?",
+                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak
              FROM tracks t
              LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id
              LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk
@@ -751,6 +760,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: credits.iter().map(|name| name.to_string()).collect(),
+            replay_gain: config::ReplayGainInfo::default(),
             credits: Vec::new(),
         }
     }

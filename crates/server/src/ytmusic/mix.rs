@@ -253,6 +253,7 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
         playlist_item_id: None,
         credits: Vec::new(),
         artists,
+        replay_gain: config::ReplayGainInfo::default(),
     })
 }
 

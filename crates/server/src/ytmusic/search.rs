@@ -640,6 +640,7 @@ fn parsed_to_track(p: ParsedRow) -> Track {
         playlist_item_id: None,
         artists: p.artists.iter().map(|c| c.name.clone()).collect(),
         credits: p.artists,
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 

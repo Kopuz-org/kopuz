@@ -426,6 +426,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists,
+        replay_gain: config::ReplayGainInfo::default(),
         credits,
     })
 }
@@ -761,6 +762,7 @@ fn parse_album_row(
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists,
+        replay_gain: config::ReplayGainInfo::default(),
         credits,
     })
 }
@@ -1014,6 +1016,7 @@ fn build_song_track(video_id: &str, title: &str, subtitle: &str, thumbnail: Opti
         playlist_item_id: None,
         credits: Vec::new(),
         artists,
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 

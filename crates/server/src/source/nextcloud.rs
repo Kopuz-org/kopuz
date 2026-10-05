@@ -226,6 +226,7 @@ impl MediaSource for NextcloudSource {
                     playlist_item_id: None,
                     credits: Vec::new(),
                     artists: vec![track.artist],
+                    replay_gain: config::ReplayGainInfo::default(),
                 }
             })
             .collect();

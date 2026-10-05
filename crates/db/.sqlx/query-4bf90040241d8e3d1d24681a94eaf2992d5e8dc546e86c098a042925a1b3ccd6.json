@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT t.rowid_pk AS \"rowid_pk!\", t.track_key, t.service,\n                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS \"cover_path?: String\",\n                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,\n                  t.track_number, t.disc_number,\n                  mb.release_id AS \"mb_release_id?\", mb.recording_id AS \"mb_recording_id?\", mb.track_id AS \"mb_track_id?\"\n             FROM tracks t\n             JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id\n             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk\n            WHERE t.source = ?1 AND a.genre = ?2\n            ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_number, t.track_number",
+  "query": "SELECT t.rowid_pk AS \"rowid_pk!\", t.track_key, t.service,\n                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS \"cover_path?: String\",\n                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,\n                  t.track_number, t.disc_number,\n                  mb.release_id AS \"mb_release_id?\", mb.recording_id AS \"mb_recording_id?\", mb.track_id AS \"mb_track_id?\",\n                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak\n             FROM tracks t\n             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id\n             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk\n            WHERE t.source = ?1 AND t.track_key LIKE ?2 ESCAPE '\\'\n            ORDER BY t.track_key",
   "describe": {
     "columns": [
       {
@@ -82,6 +82,26 @@
         "name": "mb_track_id?",
         "ordinal": 15,
         "type_info": "Text"
+      },
+      {
+        "name": "rg_track_gain",
+        "ordinal": 16,
+        "type_info": "Float"
+      },
+      {
+        "name": "rg_track_peak",
+        "ordinal": 17,
+        "type_info": "Float"
+      },
+      {
+        "name": "rg_album_gain",
+        "ordinal": 18,
+        "type_info": "Float"
+      },
+      {
+        "name": "rg_album_peak",
+        "ordinal": 19,
+        "type_info": "Float"
       }
     ],
     "parameters": {
@@ -103,8 +123,12 @@
       true,
       true,
       true,
+      true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "cbdd076f2698a788db90b0d3b12f5d36df8c84f3ed1be2928313a2b3510800c0"
+  "hash": "4bf90040241d8e3d1d24681a94eaf2992d5e8dc546e86c098a042925a1b3ccd6"
 }

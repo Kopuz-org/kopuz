@@ -74,18 +74,24 @@ async fn upsert_track(
     let bitrate = t.bitrate as i64;
     let track_number = t.track_number.map(|n| n as i64);
     let disc_number = t.disc_number.map(|n| n as i64);
+    let rg_track_gain = t.replay_gain.track_gain_db.map(f64::from);
+    let rg_track_peak = t.replay_gain.track_peak.map(f64::from);
+    let rg_album_gain = t.replay_gain.album_gain_db.map(f64::from);
+    let rg_album_peak = t.replay_gain.album_peak.map(f64::from);
     // A remote row is dated when first seen; a local one takes its file's time from the scan.
     let pk = sqlx::query_scalar!(
         "INSERT INTO tracks \
                (source, track_key, path, service, source_album_id, title, artist, album, duration, \
-                khz, bitrate, track_number, disc_number, cover_path, added_at) \
+                khz, bitrate, track_number, disc_number, cover_path, added_at, \
+                rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
-                     CASE WHEN ?4 IS NULL THEN 0 ELSE unixepoch() END) \
+                     CASE WHEN ?4 IS NULL THEN 0 ELSE unixepoch() END, ?15, ?16, ?17, ?18) \
              ON CONFLICT(source, track_key) DO UPDATE SET \
                path=?3, service=?4, \
                source_album_id=CASE WHEN ?5 != '' THEN ?5 ELSE tracks.source_album_id END, \
                title=?6, artist=?7, album=?8, duration=?9, \
-               khz=?10, bitrate=?11, track_number=?12, disc_number=?13, cover_path=?14 \
+               khz=?10, bitrate=?11, track_number=?12, disc_number=?13, cover_path=?14, \
+               rg_track_gain=?15, rg_track_peak=?16, rg_album_gain=?17, rg_album_peak=?18 \
              RETURNING rowid_pk AS \"pk!: i64\"",
         src,
         track_key,
@@ -100,7 +106,11 @@ async fn upsert_track(
         bitrate,
         track_number,
         disc_number,
-        t.cover
+        t.cover,
+        rg_track_gain,
+        rg_track_peak,
+        rg_album_gain,
+        rg_album_peak
     )
     .fetch_one(&mut **tx)
     .await?;

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT t.rowid_pk AS \"rowid_pk!\", t.track_key, t.service,\n                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS \"cover_path?: String\",\n                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,\n                  t.track_number, t.disc_number,\n                  mb.release_id AS \"mb_release_id?\", mb.recording_id AS \"mb_recording_id?\", mb.track_id AS \"mb_track_id?\"\n             FROM tracks t\n             JOIN (SELECT MIN(s.rowid_pk) AS track_pk,\n                          COALESCE(\n                            (SELECT c.artist_pk FROM track_credits c\n                              WHERE c.track_pk = s.rowid_pk AND TRIM(c.name) = TRIM(s.artist) COLLATE NOCASE\n                              ORDER BY c.position LIMIT 1),\n                            (SELECT c.artist_pk FROM track_credits c\n                              WHERE c.track_pk = s.rowid_pk AND c.position = 0)) AS billed\n                     FROM tracks s\n                    WHERE s.source = ?1\n                    GROUP BY billed) first ON first.track_pk = t.rowid_pk\n             JOIN artists ar ON ar.id = first.billed\n             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id\n             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk\n            ORDER BY ar.name COLLATE NOCASE\n            LIMIT ?2",
+  "query": "SELECT t.rowid_pk AS \"rowid_pk!\", t.track_key, t.service,\n                  COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS \"cover_path?: String\",\n                  t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate,\n                  t.track_number, t.disc_number,\n                  mb.release_id AS \"mb_release_id?\", mb.recording_id AS \"mb_recording_id?\", mb.track_id AS \"mb_track_id?\",\n                  t.rg_track_gain, t.rg_track_peak, t.rg_album_gain, t.rg_album_peak\n             FROM tracks t\n             LEFT JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id\n             LEFT JOIN track_musicbrainz mb ON mb.track_pk = t.rowid_pk\n            WHERE t.source = ?1 AND t.rowid_pk IN (\n                  SELECT track_pk FROM artist_credit_rows\n                   WHERE source = ?1 AND artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2))\n            ORDER BY t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE\n            LIMIT ?3",
   "describe": {
     "columns": [
       {
@@ -82,10 +82,30 @@
         "name": "mb_track_id?",
         "ordinal": 15,
         "type_info": "Text"
+      },
+      {
+        "name": "rg_track_gain",
+        "ordinal": 16,
+        "type_info": "Float"
+      },
+      {
+        "name": "rg_track_peak",
+        "ordinal": 17,
+        "type_info": "Float"
+      },
+      {
+        "name": "rg_album_gain",
+        "ordinal": 18,
+        "type_info": "Float"
+      },
+      {
+        "name": "rg_album_peak",
+        "ordinal": 19,
+        "type_info": "Float"
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 3
     },
     "nullable": [
       true,
@@ -103,8 +123,12 @@
       true,
       true,
       true,
+      true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "00b1ea896f9d58565b5619de51ed0707bc568a182a5dafda7944d7456c79d0ef"
+  "hash": "d2dccaa79301a4f373c98eb5397ed3f55177d4d4094cf6becdc859bd6f76052a"
 }
