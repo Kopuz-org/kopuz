@@ -1792,7 +1792,7 @@ impl Session {
         };
         let tx = self.cmd_tx.clone();
         tokio::spawn(async move {
-            if let Some(path) = load::fetch_cover_to_temp(&url).await {
+            if let Some(path) = load::fetch_cover_to_temp(&url, &url).await {
                 let _ = tx.send(SessionCmd::ExternalArtworkFetched(path));
             }
         });

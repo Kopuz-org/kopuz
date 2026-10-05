@@ -292,6 +292,7 @@ impl Session {
             .map(|url| {
                 (
                     url.to_string(),
+                    temp_cover_key(&prepared.track, url),
                     NowPlayingMeta {
                         title: prepared.track.title.clone(),
                         artist: prepared.track.artist.clone(),
@@ -321,10 +322,10 @@ impl Session {
         });
         let token = prepared.token;
         #[cfg(target_os = "macos")]
-        if let Some((url, mut meta)) = artwork_fetch {
+        if let Some((url, key, mut meta)) = artwork_fetch {
             let artwork_tx = self.cmd_tx.clone();
             tokio::spawn(async move {
-                let Some(path) = fetch_cover_to_temp(&url).await else {
+                let Some(path) = fetch_cover_to_temp(&url, &key).await else {
                     return;
                 };
                 meta.artwork = Some(path);
@@ -515,13 +516,22 @@ pub(super) fn now_playing_artwork(
     }
 }
 
-/// Download a cover to a temp file named by its URL hash, so repeated plays
+/// What a temp cover file is named by: a Subsonic cover's id, whose URL is signed afresh on every play, else its URL.
+#[cfg(target_os = "macos")]
+pub(super) fn temp_cover_key(track: &Track, url: &str) -> String {
+    match reader::CoverRef::for_track(track) {
+        reader::CoverRef::SubsonicItem { item_id } => format!("subsonic|{item_id}"),
+        _ => url.to_string(),
+    }
+}
+
+/// Download a cover to a temp file named by a hash of `key`, so repeated plays
 /// of the same album reuse the file instead of growing the temp dir. MPRIS
 /// `mpris:artUrl` wants a file too, not just macOS Now Playing.
-pub(super) async fn fetch_cover_to_temp(url: &str) -> Option<String> {
+pub(super) async fn fetch_cover_to_temp(url: &str, key: &str) -> Option<String> {
     use sha2::{Digest as _, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(url.as_bytes());
+    hasher.update(key.as_bytes());
     let digest = hasher.finalize();
     let mut name = String::from("kopuz_cover_");
     for byte in &digest[..12] {
