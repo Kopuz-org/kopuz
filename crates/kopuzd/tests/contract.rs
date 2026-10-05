@@ -34,6 +34,15 @@ impl QueueMaterializer for StubLibrary {
                 .filter(|key| !key.contains("nope"))
                 .map(|key| track(key))
                 .collect()),
+            // Any other context resolves to two tracks named after its album, playlist or station.
+            QueueContext::Album { id } | QueueContext::Playlist { id } => Ok(vec![
+                track(&format!("/lib/{id}-0")),
+                track(&format!("/lib/{id}-1")),
+            ]),
+            QueueContext::Radio { station_id, .. } => Ok(vec![
+                track(&format!("/lib/{station_id}-0")),
+                track(&format!("/lib/{station_id}-1")),
+            ]),
             _ => Err(ApiError::unsupported("stub resolves raw tracks only")),
         }
     }
@@ -2269,6 +2278,159 @@ async fn both_transports_shake_hands_on_this_revision() {
         match handshake.expect("status") {
             api::Handshake::Ready(status) => assert_eq!(status.proto_revision, api::WIRE_REVISION),
             mismatched => panic!("{mismatched:?}"),
+        }
+    }
+}
+
+/// "Playing from" is the daemon's: whoever built the queue, every transport reads the same origin, and a raw track list has none.
+#[tokio::test]
+async fn a_queue_origin_is_the_same_on_both_transports() {
+    let pair = spawn_pair().await;
+    let from = |mode, context| SetQueueRequest {
+        mode,
+        context,
+        start_index: None,
+        shuffle: None,
+    };
+    let origin = async |api: &LocalApi| api.player_state().await.expect("state").queue.context;
+
+    let album = QueueContext::Album { id: "a".into() };
+    pair.wire
+        .set_queue(from(QueueMode::Replace, album.clone()))
+        .await
+        .expect("set queue over the wire");
+    assert_eq!(origin(&pair.local).await, Some(album.clone()));
+    assert_eq!(
+        pair.wire.player_state().await.expect("state").queue.context,
+        Some(album.clone())
+    );
+    let local = pair.local.queue_snapshot().await.expect("local snapshot");
+    let wire = pair.wire.queue_snapshot().await.expect("wire snapshot");
+    assert_eq!(local.context, Some(album.clone()));
+    assert_eq!(local, wire);
+
+    // Edits and appended tracks leave it alone, whichever transport made them.
+    pair.wire
+        .set_queue(from(
+            QueueMode::Append,
+            QueueContext::Tracks {
+                keys: vec!["/lib/extra.flac".into()],
+            },
+        ))
+        .await
+        .expect("append over the wire");
+    pair.local
+        .queue_edit(QueueEdit::Move { from: 2, to: 0 })
+        .await
+        .expect("move");
+    assert_eq!(
+        pair.wire.queue_snapshot().await.expect("snapshot").context,
+        Some(album)
+    );
+
+    let playlist = QueueContext::Playlist { id: "p".into() };
+    pair.local
+        .set_queue(from(QueueMode::Replace, playlist.clone()))
+        .await
+        .expect("set queue");
+    assert_eq!(
+        pair.wire.queue_snapshot().await.expect("snapshot").context,
+        Some(playlist)
+    );
+
+    let radio = QueueContext::Radio {
+        station_id: "s".into(),
+        stream_id: "st".into(),
+    };
+    pair.wire
+        .set_queue(from(QueueMode::Replace, radio.clone()))
+        .await
+        .expect("set queue");
+    assert_eq!(
+        pair.local.queue_snapshot().await.expect("snapshot").context,
+        Some(radio)
+    );
+
+    pair.wire
+        .set_queue(replace(&["/lib/raw-0", "/lib/raw-1"]))
+        .await
+        .expect("set queue");
+    assert_eq!(origin(&pair.local).await, None);
+    wait_state(&pair.local, "committed", |state| {
+        matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    let local = normalized(pair.local.player_state().await.expect("state"));
+    assert_eq!(
+        local,
+        normalized(pair.wire.player_state().await.expect("state"))
+    );
+}
+
+/// Mute is the daemon's: either transport sets it, both read it, and the level to return to is untouched.
+#[tokio::test]
+async fn mute_is_the_same_on_both_transports() {
+    use futures_util::StreamExt;
+    let pair = spawn_pair().await;
+    let level = pair.local.player_state().await.expect("state").volume;
+    assert!(!pair.wire.player_state().await.expect("state").muted);
+
+    pair.wire
+        .player_command(PlayerCommand::SetMuted { muted: true })
+        .await
+        .expect("mute over the wire");
+    for state in [
+        pair.local.player_state().await.expect("local"),
+        pair.wire.player_state().await.expect("wire"),
+    ] {
+        assert!(state.muted);
+        assert_eq!(state.volume, level);
+    }
+    assert_eq!(
+        normalized(pair.local.player_state().await.expect("local")),
+        normalized(pair.wire.player_state().await.expect("wire"))
+    );
+
+    // Setting a level unmutes, whichever transport asks.
+    pair.local
+        .player_command(PlayerCommand::SetVolume { volume: 0.25 })
+        .await
+        .expect("set volume");
+    let state = pair.wire.player_state().await.expect("wire");
+    assert!((state.muted, state.volume) == (false, 0.25));
+
+    pair.local
+        .set_queue(SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: QueueContext::Album { id: "a".into() },
+            start_index: None,
+            shuffle: None,
+        })
+        .await
+        .expect("set queue");
+    let mut events = pair.wire.events();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut heard = false;
+    while !heard {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for a player_state event with the mute and origin"
+        );
+        pair.wire
+            .player_command(PlayerCommand::SetMuted { muted: true })
+            .await
+            .expect("mute");
+        while let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(500), events.next()).await
+        {
+            if let ApiEvent::PlayerState(state) = event
+                && state.muted
+                && state.volume == 0.25
+                && state.queue.context.is_some()
+            {
+                heard = true;
+                break;
+            }
         }
     }
 }

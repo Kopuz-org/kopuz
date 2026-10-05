@@ -1290,15 +1290,16 @@ async fn write_queue_position(
     let progress = snap.progress_secs as i64;
     let shuffle_on = snap.shuffle_enabled as i64;
     sqlx::query!(
-        "INSERT INTO queue_state (source, version, current_queue_index, progress_secs, shuffle_enabled) \
-         VALUES (?1, ?2, ?3, ?4, ?5) \
+        "INSERT INTO queue_state (source, version, current_queue_index, progress_secs, shuffle_enabled, origin) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
          ON CONFLICT(source) DO UPDATE SET version = ?2, current_queue_index = ?3, \
-           progress_secs = ?4, shuffle_enabled = ?5",
+           progress_secs = ?4, shuffle_enabled = ?5, origin = ?6",
         source,
         version,
         current,
         progress,
-        shuffle_on
+        shuffle_on,
+        snap.origin
     )
     .execute(&mut *conn)
     .await?;

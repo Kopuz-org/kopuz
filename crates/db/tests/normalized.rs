@@ -569,6 +569,7 @@ async fn a_queue_round_trips_through_its_rows() {
         progress_secs: 40,
         shuffle_order: vec![1, 0, 9],
         shuffle_enabled: true,
+        origin: Some(r#"{"kind":"album","id":"a"}"#.into()),
     };
 
     db.save_queue(&Source::default(), &saved).await.unwrap();
@@ -588,6 +589,7 @@ async fn a_queue_round_trips_through_its_rows() {
         ),
         (1, 40, true)
     );
+    assert_eq!(restored.origin, saved.origin);
 }
 
 #[tokio::test]
@@ -617,6 +619,40 @@ async fn a_position_save_leaves_the_rows_alone() {
         (restored.current_queue_index, restored.progress_secs),
         (1, 12)
     );
+}
+
+#[tokio::test]
+async fn each_sources_queue_keeps_its_own_origin() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let local = Source::default();
+    let server = Source::Server("srv-1".into());
+    let queued = |origin: Option<&str>| db::QueueSnapshot {
+        version: 1,
+        queue: vec![track("t1", Vec::new())],
+        origin: origin.map(str::to_owned),
+        ..Default::default()
+    };
+    db.save_queue(&local, &queued(Some("from-local")))
+        .await
+        .unwrap();
+    db.save_queue(&server, &queued(None)).await.unwrap();
+    assert_eq!(
+        db.load_queue(&local).await.unwrap().origin.as_deref(),
+        Some("from-local")
+    );
+    assert_eq!(db.load_queue(&server).await.unwrap().origin, None);
+
+    // A position-only save carries the origin too, so a save that only moved the playhead cannot lose it.
+    db.save_queue_position(&local, &queued(Some("renamed")))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.load_queue(&local).await.unwrap().origin.as_deref(),
+        Some("renamed")
+    );
+
+    db.clear_queue(&local).await.unwrap();
+    assert_eq!(db.load_queue(&local).await.unwrap().origin, None);
 }
 
 /// Downloads and pins are written a row at a time, so a whole-config save must neither store nor erase them.

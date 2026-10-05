@@ -96,7 +96,7 @@ pub struct ExternalDevice {
     pub active: bool,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct QueueSummary {
     pub rev: u64,
     pub length: u32,
@@ -104,6 +104,8 @@ pub struct QueueSummary {
     pub index: Option<u32>,
     pub shuffle: bool,
     pub loop_mode: LoopMode,
+    /// The container the queue was built from ("playing from"); None for a raw track list.
+    pub context: Option<crate::QueueContext>,
 }
 
 /// The player snapshot (`GetPlayerState`) and the `player_state` event payload.
@@ -117,7 +119,10 @@ pub struct PlayerState {
     pub track: Option<crate::TrackInfo>,
     pub position: Option<PositionAnchor>,
     pub queue: QueueSummary,
+    /// The level to return to: muting leaves it alone.
     pub volume: f32,
+    /// Output is silenced while `volume` is kept; a `SetVolume` clears it.
+    pub muted: bool,
     pub buffered: Vec<BufferedRange>,
     pub fading: Option<FadingState>,
     pub external: Option<ExternalPlayback>,
@@ -139,6 +144,9 @@ pub enum PlayerCommand {
     },
     SetVolume {
         volume: f32,
+    },
+    SetMuted {
+        muted: bool,
     },
     SetMode {
         shuffle: Option<bool>,

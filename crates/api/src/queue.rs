@@ -46,6 +46,13 @@ pub enum QueueContext {
     },
 }
 
+impl QueueContext {
+    /// Whether a queue built from this one is "playing from" something: every context but a raw track list names a container.
+    pub fn names_container(&self) -> bool {
+        !matches!(self, Self::Tracks { .. })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetQueueRequest {
     pub mode: QueueMode,
@@ -118,4 +125,6 @@ pub struct QueueSnapshot {
     /// Play-order index into `items` of the current track; the same space as `QueueEdit` and `QueueWindow`.
     pub position: Option<u32>,
     pub shuffle: bool,
+    /// As `QueueSummary::context`.
+    pub context: Option<QueueContext>,
 }

@@ -57,6 +57,8 @@ pub struct QueueSnapshot {
     pub progress_secs: u64,
     pub shuffle_order: Vec<usize>,
     pub shuffle_enabled: bool,
+    /// What the queue was built from, opaque here: the daemon encodes and decodes it.
+    pub origin: Option<String>,
 }
 
 /// What the lyrics cache holds for a key: the words, or a miss and when it was recorded.
