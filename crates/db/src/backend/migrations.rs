@@ -2008,3 +2008,94 @@ mod row_fill_tests {
         assert_eq!(missed_at, 42);
     }
 }
+
+#[cfg(test)]
+mod album_identity_tests {
+    use super::*;
+
+    const SUBSONIC_ALBUM_IDS: i64 = 20261006000002;
+
+    /// A pool migrated to just before `version`, to seed with what an older build wrote.
+    async fn migrated_before(version: i64) -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let before = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|m| m.version < version)
+                    .cloned()
+                    .collect(),
+            ),
+            ..sqlx::migrate::Migrator::DEFAULT
+        };
+        before.run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn rows(pool: &SqlitePool, sql: &str) -> Vec<(String, String)> {
+        sqlx::query_as(sql).fetch_all(pool).await.unwrap()
+    }
+
+    /// Each signed id becomes the server's album id, and two rows that meet on one merge into the synced row.
+    #[tokio::test]
+    async fn subsonic_album_ids_lose_their_signed_cover() {
+        let pool = migrated_before(SUBSONIC_ALBUM_IDS).await;
+        sqlx::raw_sql(
+            "INSERT INTO servers (id, name, url, service, updated_at) VALUES \
+               ('nav', 'n', '', 'Custom', 0), ('sub', 's', '', 'Subsonic', 0), ('jf', 'j', '', 'Jellyfin', 0); \
+             INSERT INTO albums (source, source_album_id, title, artist, derived) VALUES \
+               ('nav', 'custom:al-1:urlhex_bb', 'From a playlist', 'Ada', 1), \
+               ('nav', 'custom:al-1:urlhex_aa', 'One', 'Ada', 0), \
+               ('nav', 'custom:al-2:urlhex_cc', 'Two', 'Ada', 0), \
+               ('sub', 'subsonic:al-1:none', 'Other server', 'Bo', 0), \
+               ('jf', 'custom:al-9:urlhex_ee', 'Not Subsonic', 'Cy', 0); \
+             INSERT INTO tracks (source, track_key, source_album_id) VALUES \
+               ('nav', 't1', 'custom:al-1:urlhex_aa'), \
+               ('nav', 't2', 'custom:al-1:urlhex_bb'), \
+               ('nav', 't3', 'custom:al-2:urlhex_cc'), \
+               ('nav', 't4', 'custom:al-3:urlhex_dd'), \
+               ('sub', 't5', 'subsonic:al-1:none'), \
+               ('jf', 't6', 'custom:al-9:urlhex_ee'); \
+             INSERT INTO queue_tracks (source, position, track_key, service, source_album_id, title, artist, album, khz, bitrate) VALUES \
+               ('nav', 0, 't3', 'Custom', 'custom:al-2:urlhex_ff', 'a', 'Ada', 'Two', 0, 0);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool, None).await.unwrap();
+
+        assert_eq!(
+            rows(
+                &pool,
+                "SELECT source_album_id, title FROM albums ORDER BY source, source_album_id"
+            )
+            .await,
+            [
+                ("custom:al-9:urlhex_ee".into(), "Not Subsonic".into()),
+                ("custom:al-1".into(), "One".into()),
+                ("custom:al-2".into(), "Two".into()),
+                ("subsonic:al-1".into(), "Other server".into()),
+            ]
+        );
+        assert_eq!(
+            rows(
+                &pool,
+                "SELECT track_key, source_album_id FROM tracks ORDER BY track_key"
+            )
+            .await,
+            [
+                ("t1".into(), "custom:al-1".into()),
+                ("t2".into(), "custom:al-1".into()),
+                ("t3".into(), "custom:al-2".into()),
+                ("t4".into(), "custom:al-3".into()),
+                ("t5".into(), "subsonic:al-1".into()),
+                ("t6".into(), "custom:al-9:urlhex_ee".into()),
+            ]
+        );
+        assert_eq!(
+            rows(&pool, "SELECT track_key, source_album_id FROM queue_tracks").await,
+            [("t3".into(), "custom:al-2".into())]
+        );
+    }
+}

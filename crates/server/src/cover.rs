@@ -40,33 +40,6 @@ pub(crate) fn jellyfin_item_url(
     )
 }
 
-fn subsonic_item_url(
-    server_url: &str,
-    item_id: &str,
-    access_token: Option<&str>,
-    max_width: u32,
-    quality: u32,
-) -> Option<String> {
-    if server_url.is_empty() || item_id.is_empty() {
-        return None;
-    }
-    let mut url = reqwest::Url::parse(&format!(
-        "{}/rest/getCoverArt.view",
-        server_url.trim_end_matches('/')
-    ))
-    .ok()?;
-    {
-        let mut pairs = url.query_pairs_mut();
-        pairs.append_pair("id", item_id);
-        pairs.append_pair("size", &max_width.to_string());
-        pairs.append_pair("quality", &quality.to_string());
-        if let Some(token) = access_token {
-            pairs.append_pair("access_token", token);
-        }
-    }
-    Some(url.to_string())
-}
-
 pub fn remote_artwork_url_at_size(url: String, max_width: u32) -> String {
     let Ok(mut parsed) = reqwest::Url::parse(&url) else {
         return url;
@@ -137,36 +110,26 @@ pub fn resolve(config: &AppConfig, cover: CoverRef, max_width: u32) -> Option<Co
                 80,
             )
         }
-        CoverRef::SubsonicItem { item_id, signed } => {
+        CoverRef::SubsonicItem { item_id } => {
             let server = server.filter(|server| {
                 matches!(
                     server.service,
                     MusicService::Subsonic | MusicService::Custom
                 )
             })?;
-            if signed {
-                let (Some(password), Some(username)) =
-                    (server.access_token.as_deref(), server.user_id.as_deref())
-                else {
-                    return None;
-                };
-                crate::subsonic::cover_art_url(
-                    &server.url,
-                    username,
-                    password,
-                    &item_id,
-                    Some(max_width),
-                )
-                .ok()?
-            } else {
-                subsonic_item_url(
-                    &server.url,
-                    &item_id,
-                    server.access_token.as_deref(),
-                    max_width,
-                    80,
-                )?
-            }
+            let (Some(password), Some(username)) =
+                (server.access_token.as_deref(), server.user_id.as_deref())
+            else {
+                return None;
+            };
+            crate::subsonic::cover_art_url(
+                &server.url,
+                username,
+                password,
+                &item_id,
+                Some(max_width),
+            )
+            .ok()?
         }
         CoverRef::None => return None,
     };
@@ -285,23 +248,26 @@ mod tests {
     }
 
     #[test]
-    fn subsonic_item_without_the_sentinel_uses_the_token_lookup() {
-        let got = resolve(
-            &subsonic_config(true),
-            CoverRef::SubsonicItem {
-                item_id: "AL-7".to_string(),
-                signed: false,
-            },
-            512,
-        )
-        .expect("cover url");
-        assert!(got.contains("getCoverArt"), "got: {got}");
-        assert!(got.contains("id=AL-7"), "keyed by the item: {got}");
-        assert!(got.contains("size=512"), "sized by the view: {got}");
+    fn a_stored_subsonic_cover_id_is_signed_when_resolved() {
+        let stored = CoverRef::stored_item_ref(MusicService::Subsonic, "AL-7", None);
+        let got =
+            from_path(&subsonic_config(true), Some(Path::new(&stored)), 512).expect("cover url");
+        let parsed = reqwest::Url::parse(&got).expect("valid cover URL");
+        let param = |name: &str| {
+            parsed
+                .query_pairs()
+                .find_map(|(key, value)| (key == name).then(|| value.into_owned()))
+        };
+        assert_eq!(parsed.path(), "/rest/getCoverArt.view");
+        assert_eq!(param("id").as_deref(), Some("AL-7"), "keyed by the item");
+        assert_eq!(param("size").as_deref(), Some("512"), "sized by the view");
+        assert_eq!(param("u").as_deref(), Some("alice"));
         assert!(
-            got.contains("access_token=pw"),
-            "token-authenticated: {got}"
+            param("t").is_some() && param("s").is_some(),
+            "signed: {got}"
         );
+        assert!(param("p").is_none() && param("access_token").is_none());
+        assert!(from_path(&subsonic_config(false), Some(Path::new(&stored)), 512).is_none());
 
         // A Jellyfin ref must never resolve against a Subsonic server.
         assert!(
