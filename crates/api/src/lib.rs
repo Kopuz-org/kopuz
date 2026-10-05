@@ -208,21 +208,17 @@ pub trait LibraryApi: Send + Sync {
     /// not hold are skipped rather than erroring.
     async fn tracks_by_keys(&self, keys: Vec<String>) -> Result<Vec<TrackInfo>, ApiError>;
 
-    /// A window of the albums `query` selects, in its order; `total` counts the
-    /// whole filtered set.
+    /// A window of the albums `query` selects; `total` counts the whole filtered set.
     async fn albums(&self, query: AlbumQuery, page: Page) -> Result<AlbumPage, ApiError>;
 
-    /// Albums newest-first by when their tracks were added, leaving out any that
-    /// hold no tracks. The same order as [`AlbumSortField::RecentlyAdded`], which
-    /// [`LibraryApi::albums`] can combine with a filter.
+    /// Non-empty albums newest-first, the order of [`AlbumSortField::RecentlyAdded`].
     async fn albums_recently_added(&self, page: Page) -> Result<AlbumPage, ApiError>;
 
     async fn album(&self, id: String) -> Result<Option<AlbumInfo>, ApiError>;
 
     async fn album_tracks(&self, id: String, page: Page) -> Result<TrackPage, ApiError>;
 
-    /// A window of the artists `query` selects, in its order; `total` counts the
-    /// whole filtered set.
+    /// A window of the artists `query` selects; `total` counts the whole filtered set.
     async fn artists(&self, query: ArtistQuery, page: Page) -> Result<ArtistPage, ApiError>;
 
     async fn artist_tracks(&self, artist: String, page: Page) -> Result<TrackPage, ApiError>;
@@ -529,12 +525,7 @@ pub trait ConfigApi: Send + Sync {
     /// with `invalid_input`.
     async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError>;
 
-    /// Change only the named top-level keys, leaving every other key as the
-    /// daemon holds it, so a client with a stale copy cannot revert another
-    /// client's change. An unknown key, a daemon-owned key
-    /// ([`DAEMON_OWNED_CONFIG_KEYS`]), a value that does not fit its key, or a
-    /// locked key whose value would change refuses the whole patch with
-    /// `invalid_input`.
+    /// Change only the named keys, so a stale client cannot revert another's; one bad key refuses all.
     async fn patch_config(&self, fields: Vec<ConfigField>) -> Result<ConfigView, ApiError>;
 
     /// Hear an equalizer setting without keeping it. The engine applies it
@@ -570,15 +561,10 @@ pub enum Handshake {
 /// Where a frontend keeps its own UI preferences, namespaced by frontend name.
 #[async_trait::async_trait]
 pub trait PrefsApi: Send + Sync {
-    /// Every preference stored for `frontend`, key-ordered. A frontend that
-    /// stored nothing gets an empty list.
+    /// Every preference stored for `frontend`, key-ordered.
     async fn frontend_prefs(&self, frontend: String) -> Result<Vec<FrontendPref>, ApiError>;
 
-    /// Store (`Some`) or delete (`None`) each entry's key, all or none. An
-    /// empty `frontend` or key, one over the `MAX_PREF_*` limits, or a key
-    /// named twice refuses the whole call with `invalid_input`. Once it
-    /// commits, `ApiEvent::FrontendPrefsChanged` names the keys whose stored
-    /// value actually changed; a call that changes nothing emits nothing.
+    /// Store (`Some`) or delete (`None`) each key, all or none; the event names only keys that changed.
     async fn set_frontend_prefs(
         &self,
         frontend: String,

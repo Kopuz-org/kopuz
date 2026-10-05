@@ -1,6 +1,4 @@
-//! Album, artist and track listings filter, sort and page in SQL: the filter
-//! decides `total`, the order is the one asked for in the direction asked for,
-//! and a window is cut only after both.
+//! Listings filter, sort and page in SQL: the filter decides `total`, and a window is cut after both.
 
 use db::{
     AlbumQuery, AlbumSort, AlbumSortField, ArtistQuery, ArtistSort, ArtistSortField, Page, Source,
@@ -51,13 +49,6 @@ fn album(id: &str, title: &str, artist: &str, genre: &str, year: u16) -> Album {
 }
 
 /// Five albums over three artists; `beta` is lower-case to prove the order folds case.
-///
-///  album   artist  genre  year  tracks (oldest to newest added)
-///  Alpha   Ada     Rock   1991  a1 a2 a3
-///  beta    Boris   Jazz   2005  b1 b2
-///  Delta   Ada     Rock   2005  d1
-///  Epsilon Cyd     -      0     e1
-///  100% Pure Cyd   Pop    2020  p1
 async fn library() -> (db::Db, tempfile::TempDir, Source) {
     let dir = tempfile::tempdir().unwrap();
     let database = db::init(&dir.path().join("listing.db")).await.unwrap();

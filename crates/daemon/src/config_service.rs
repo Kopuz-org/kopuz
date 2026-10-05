@@ -254,10 +254,7 @@ impl ConfigService {
         }
     }
 
-    /// Apply only the named keys onto the held config, so a writer with a stale
-    /// copy cannot revert a key it never touched. The whole patch is refused if
-    /// any key is unknown, daemon-owned or locked (a locked key is refused only
-    /// when its value differs, as in [`Self::set`]), or any value does not fit.
+    /// Apply only the named keys, so a stale writer cannot revert a key it never touched.
     pub async fn patch(&self, fields: Vec<api::ConfigField>) -> Result<ConfigView, ApiError> {
         let mut held = self.current.write().await;
         let mut map = config_map(&held.config)?;

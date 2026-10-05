@@ -98,8 +98,7 @@ fn order_terms(sort: &TrackSort) -> Vec<Term> {
             let mut terms = Vec::new();
             for criterion in criteria {
                 let desc = criterion.direction == config::SortDirection::Desc;
-                // A field may span more than one column (date added falls
-                // back to insertion order), and each needs its own direction.
+                // Date added falls back to insertion order, and each column needs its own direction.
                 let fields: &[&'static str] = match criterion.field {
                     config::TrackSortField::Title => &["t.title COLLATE NOCASE"],
                     config::TrackSortField::Artist => &["t.artist COLLATE NOCASE"],

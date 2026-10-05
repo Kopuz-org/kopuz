@@ -107,8 +107,7 @@ pub struct TrackFilter {
     pub reverse: bool,
 }
 
-/// What an album listing can be ordered by. `RecentlyAdded` is when the
-/// album's newest track was added; `descending` makes it newest first.
+/// What an album listing can be ordered by; `RecentlyAdded` is its newest track's added time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlbumSortField {
     Title,
@@ -145,9 +144,7 @@ impl From<config::SortCriterion<config::AlbumSortField>> for AlbumSort {
     }
 }
 
-/// Which albums to list and in what order; the daemon filters and sorts, so
-/// `AlbumPage::total` counts the filtered set. `Default` lists everything by
-/// artist then title.
+/// Which albums to list and in what order; `AlbumPage::total` counts the filtered set.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AlbumQuery {
     /// Matches the title or the billed artist's text, ignoring ASCII case.
@@ -194,8 +191,7 @@ impl From<config::SortCriterion<config::ArtistSortField>> for ArtistSort {
     }
 }
 
-/// Which artists to list and in what order; `ArtistPage::total` counts the
-/// filtered set. `Default` lists everyone by name.
+/// Which artists to list and in what order; `ArtistPage::total` counts the filtered set.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ArtistQuery {
     /// Matches the artist's name, ignoring ASCII case.

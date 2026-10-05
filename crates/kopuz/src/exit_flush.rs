@@ -17,18 +17,14 @@ static STASHED: Mutex<Option<Vec<api::ConfigField>>> = Mutex::new(None);
 /// settings change made in the last moment.
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Stash the settings keys not yet sent (guards: `initial_load_done &&
-/// config_loaded_ok`), so an exit write names only what this app changed.
+/// Stash the settings keys not yet sent, so an exit write names only what this app changed.
 pub fn stash_config(fields: Vec<api::ConfigField>) {
     if let Ok(mut stashed) = STASHED.lock() {
         *stashed = Some(fields);
     }
 }
 
-/// Persist unsent settings keys through the core on a fresh OS thread with its
-/// own runtime and join it. A fresh thread is required from both exit paths: the main
-/// thread sits inside dioxus's tokio context where `block_on` panics, and the
-/// ctrlc thread should not host a runtime of unknown stack depth.
+/// Persist unsent keys on a fresh thread: `block_on` panics inside dioxus's tokio context.
 pub fn persist_on_fresh_thread(fields: Option<Vec<api::ConfigField>>) {
     let Some(fields) = fields.filter(|fields| !fields.is_empty()) else {
         return;

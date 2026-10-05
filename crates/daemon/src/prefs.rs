@@ -1,8 +1,4 @@
-//! Per-frontend preferences: bounded, namespaced strings the daemon keeps and never interprets.
-//!
-//! A write is validated whole before anything is stored, and the change event
-//! goes out only after the transaction commits, so a client that hears it
-//! always reads the new values.
+//! Per-frontend preferences: bounded strings the daemon keeps, announcing a write only after it commits.
 
 use std::collections::HashSet;
 use std::sync::Arc;

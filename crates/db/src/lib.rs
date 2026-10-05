@@ -143,8 +143,7 @@ pub struct AlbumSort {
     pub descending: bool,
 }
 
-/// What an album listing selects: one source, a filter, and the order. Filters
-/// and order run in SQL, so `total` and the window both come off the filtered set.
+/// What an album listing selects; filter and order run in SQL, so `total` counts the filtered set.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AlbumQuery {
     pub source: Source,

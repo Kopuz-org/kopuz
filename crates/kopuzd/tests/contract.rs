@@ -3019,7 +3019,8 @@ async fn upcoming_edits_agree_across_transports() {
         .queue_edit(QueueEdit::ShuffleUpcoming)
         .await
         .expect("shuffle locally");
-    assert_eq!(second.rev, first.rev + 1, "each edit is one publish");
+    // The jump's load can publish between the two edits, so only the order is fixed.
+    assert!(second.rev > first.rev, "each edit publishes");
     let local = pair.local.queue_snapshot().await.expect("local snapshot");
     let wire = pair.wire.queue_snapshot().await.expect("wire snapshot");
     for snapshot in [&local, &wire] {

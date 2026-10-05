@@ -1,8 +1,4 @@
-//! Per-frontend preferences: UI state a frontend keeps in the daemon instead of its own files.
-//!
-//! The daemon stores each value as the opaque string the frontend gave it and
-//! never parses it; what a key means, and what format its value has, is the
-//! frontend's own business.
+//! Per-frontend preferences: opaque strings a frontend keeps in the daemon instead of its own files.
 
 /// Longest `frontend` name, in bytes.
 pub const MAX_PREF_FRONTEND_BYTES: usize = 64;
