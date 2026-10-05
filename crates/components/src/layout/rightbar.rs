@@ -74,22 +74,7 @@ pub fn Rightbar(
     let up_next_text = i18n::t("up_next").to_string();
     let lyrics_text = i18n::t("lyrics").to_string();
 
-    let items = {
-        let q = queue.read();
-        let is_shuffle = *ctrl.shuffle.read();
-
-        if is_shuffle {
-            ctrl.shuffle_order
-                .read()
-                .iter()
-                .filter_map(|&qi| q.get(qi).cloned())
-                .collect::<Vec<_>>()
-        } else {
-            (0..q.len())
-                .filter_map(|qi| q.get(qi).cloned())
-                .collect::<Vec<_>>()
-        }
-    };
+    let items = queue.read().clone();
 
     if !*is_rightbar_open.read() {
         return rsx! { div {} };

@@ -1903,6 +1903,45 @@ async fn an_account_picture_is_absent_identically_without_an_account() {
     assert_eq!(local.map(|e| e.code), wire.map(|e| e.code));
 }
 
+/// With shuffle on, both transports list the rows in play order and `shuffle_order` maps them back.
+#[tokio::test]
+async fn shuffled_snapshot_is_play_order_on_both_transports() {
+    let pair = spawn_pair().await;
+    let keys: Vec<String> = (0..8).map(|i| format!("/lib/s{i}.flac")).collect();
+    pair.local
+        .set_queue(SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: QueueContext::Tracks { keys: keys.clone() },
+            start_index: Some(0),
+            shuffle: Some(true),
+        })
+        .await
+        .expect("seed a shuffled queue");
+
+    let local = pair.local.queue_snapshot().await.expect("local snapshot");
+    let wire = pair.wire.queue_snapshot().await.expect("wire snapshot");
+    assert!(local.shuffle);
+    assert_eq!(local, wire);
+    assert_eq!(local.shuffle_order.len(), keys.len());
+    for (position, physical) in local.shuffle_order.iter().enumerate() {
+        assert_eq!(local.items[position].key, keys[*physical as usize]);
+    }
+    let window = pair
+        .wire
+        .queue_window(Page::default())
+        .await
+        .expect("window");
+    assert_eq!(
+        window
+            .items
+            .iter()
+            .map(|i| &i.track.key)
+            .collect::<Vec<_>>(),
+        wire.items.iter().map(|t| &t.key).collect::<Vec<_>>(),
+        "the window and the snapshot agree on play order"
+    );
+}
+
 /// Neither service is configured in this harness, so both transports must
 /// agree on saying so rather than one erroring and the other answering
 /// empty -- the failure mode a second implementation would inherit.
