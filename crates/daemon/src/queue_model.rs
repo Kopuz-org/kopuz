@@ -96,11 +96,11 @@ impl QueueModel {
     }
 
     /// Whether the queue is walking an album at `position`: a neighbour in play
-    /// order belongs to the same album. Shuffle scatters an album, so this
-    /// reads false there, which is what ReplayGain's auto mode wants: a
-    /// shuffled mix should level track to track.
+    /// order belongs to the same album. Always false under shuffle, even when
+    /// two tracks of one album land side by side: ReplayGain's auto mode
+    /// should level a shuffled mix track to track.
     pub fn album_context_at(&self, position: usize, album_id: &str) -> bool {
-        if album_id.is_empty() {
+        if self.shuffle || album_id.is_empty() {
             return false;
         }
         let shares_album = |other: usize| {

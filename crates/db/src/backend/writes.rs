@@ -1339,11 +1339,17 @@ async fn write_queue_rows(
         let bitrate = t.bitrate as i64;
         let track_number = t.track_number.map(|n| n as i64);
         let disc_number = t.disc_number.map(|n| n as i64);
+        let rg_track_gain = t.replay_gain.track_gain_db.map(f64::from);
+        let rg_track_peak = t.replay_gain.track_peak.map(f64::from);
+        let rg_album_gain = t.replay_gain.album_gain_db.map(f64::from);
+        let rg_album_peak = t.replay_gain.album_peak.map(f64::from);
         sqlx::query!(
             "INSERT INTO queue_tracks (source, position, track_key, service, source_album_id, title, \
                artist, album, duration, khz, bitrate, track_number, disc_number, cover_path, \
-               mb_release_id, mb_recording_id, mb_track_id, playlist_item_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+               mb_release_id, mb_recording_id, mb_track_id, playlist_item_id, \
+               rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, \
+                     ?19, ?20, ?21, ?22)",
             source,
             position,
             track_key,
@@ -1361,7 +1367,11 @@ async fn write_queue_rows(
             t.musicbrainz_release_id,
             t.musicbrainz_recording_id,
             t.musicbrainz_track_id,
-            t.playlist_item_id
+            t.playlist_item_id,
+            rg_track_gain,
+            rg_track_peak,
+            rg_album_gain,
+            rg_album_peak
         )
         .execute(&mut *conn)
         .await?;

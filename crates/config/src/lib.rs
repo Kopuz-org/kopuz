@@ -474,15 +474,24 @@ impl ReplayGainInfo {
         self.track_gain_db.is_none() && self.album_gain_db.is_none()
     }
 
-    /// Fill in whatever this one is missing from `other`, field by field.
-    /// Used to back a stream's own tags with the values the media server
-    /// reported, which is all a transcoded stream has left.
+    /// Fill in whichever gain this one is missing from `other`. Used to back a
+    /// stream's own tags with the values the media server reported, which is
+    /// all a transcoded stream has left. A gain keeps the peak measured with
+    /// it, since a peak from another analysis cannot bound it.
     pub fn or(self, other: Self) -> Self {
+        let track = match self.track_gain_db {
+            Some(_) => self,
+            None => other,
+        };
+        let album = match self.album_gain_db {
+            Some(_) => self,
+            None => other,
+        };
         Self {
-            track_gain_db: self.track_gain_db.or(other.track_gain_db),
-            track_peak: self.track_peak.or(other.track_peak),
-            album_gain_db: self.album_gain_db.or(other.album_gain_db),
-            album_peak: self.album_peak.or(other.album_peak),
+            track_gain_db: track.track_gain_db,
+            track_peak: track.track_peak,
+            album_gain_db: album.album_gain_db,
+            album_peak: album.album_peak,
         }
     }
 }
@@ -534,17 +543,18 @@ impl ReplayGainSettings {
             ReplayGainMode::Auto => album_context,
         };
 
+        // An album peak bounds every track on the album, so it can stand in for a
+        // missing track peak; a track peak is too low to bound the album gain.
+        let album = info.album_gain_db.map(|db| (Some(db), info.album_peak));
+        let track = info
+            .track_gain_db
+            .map(|db| (Some(db), info.track_peak.or(info.album_peak)));
         let (gain_db, peak) = if prefer_album {
-            (
-                info.album_gain_db.or(info.track_gain_db),
-                info.album_peak.or(info.track_peak),
-            )
+            album.or(track)
         } else {
-            (
-                info.track_gain_db.or(info.album_gain_db),
-                info.track_peak.or(info.album_peak),
-            )
-        };
+            track.or(album)
+        }
+        .unwrap_or((None, info.album_peak.or(info.track_peak)));
 
         let db = gain_db
             .filter(|db| db.is_finite())
@@ -1298,6 +1308,35 @@ mod tests {
             settings.linear_gain(ReplayGainInfo::default(), false),
             10.0_f32.powf(-2.0 / 20.0),
         );
+    }
+
+    #[test]
+    fn a_track_peak_never_bounds_the_album_gain() {
+        let info = ReplayGainInfo {
+            track_gain_db: Some(-6.0),
+            track_peak: Some(0.5),
+            album_gain_db: Some(6.0),
+            album_peak: None,
+        };
+        let settings = ReplayGainSettings {
+            mode: ReplayGainMode::Album,
+            prevent_clipping: true,
+            ..Default::default()
+        };
+        assert_close(settings.linear_gain(info, false), 10.0_f32.powf(6.0 / 20.0));
+    }
+
+    #[test]
+    fn backing_values_keep_each_gain_with_its_own_peak() {
+        let stream = ReplayGainInfo {
+            track_gain_db: Some(-4.0),
+            ..Default::default()
+        };
+        let merged = stream.or(tagged());
+        assert_eq!(merged.track_gain_db, Some(-4.0));
+        assert_eq!(merged.track_peak, None);
+        assert_eq!(merged.album_gain_db, Some(-3.0));
+        assert_eq!(merged.album_peak, Some(0.9));
     }
 
     #[test]

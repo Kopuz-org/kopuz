@@ -297,9 +297,31 @@ fn apply_gain(samples: &mut [f32], gain: f32) {
     if !gain.is_finite() || (gain - 1.0).abs() < f32::EPSILON {
         return;
     }
-    for sample in samples.iter_mut() {
-        *sample *= gain;
+    if gain <= 1.0 {
+        for sample in samples.iter_mut() {
+            *sample *= gain;
+        }
+        return;
     }
+    // A boost can push peaks past full scale, and nothing downstream clamps
+    // unless the EQ is on, so round them off instead of letting the device clip.
+    for sample in samples.iter_mut() {
+        *sample = soft_limit(*sample * gain);
+    }
+}
+
+const LIMIT_KNEE: f32 = 0.9;
+
+/// Leaves the signal alone below the knee and bends everything above it
+/// smoothly towards, never past, full scale.
+fn soft_limit(sample: f32) -> f32 {
+    let magnitude = sample.abs();
+    if magnitude <= LIMIT_KNEE {
+        return sample;
+    }
+    let headroom = 1.0 - LIMIT_KNEE;
+    let limited = LIMIT_KNEE + headroom * ((magnitude - LIMIT_KNEE) / headroom).tanh();
+    limited.copysign(sample)
 }
 
 fn read_into(consumer: &mut rtrb::Consumer<f32>, out: &mut [f32]) -> usize {
@@ -366,5 +388,24 @@ fn apply_channel_mode_in_place(samples: &mut [f32], channels: usize, mode: Chann
 
     for frame in samples.chunks_exact_mut(channels.max(1)) {
         apply_channel_mode_to_frame(frame, mode);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_gain, soft_limit};
+
+    #[test]
+    fn a_boost_never_pushes_past_full_scale() {
+        let mut samples = [0.5, -0.5, 0.95, -0.95, 1.0];
+        apply_gain(&mut samples, 4.0);
+        assert!(samples.iter().all(|s| s.abs() <= 1.0));
+        assert!(samples[0] > 0.9 && samples[1] < -0.9);
+    }
+
+    #[test]
+    fn the_limiter_leaves_quiet_samples_alone() {
+        assert_eq!(soft_limit(0.3), 0.3);
+        assert_eq!(soft_limit(-0.9), -0.9);
     }
 }

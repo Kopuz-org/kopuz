@@ -7,3 +7,10 @@ ALTER TABLE tracks ADD COLUMN rg_track_gain REAL;
 ALTER TABLE tracks ADD COLUMN rg_track_peak REAL;
 ALTER TABLE tracks ADD COLUMN rg_album_gain REAL;
 ALTER TABLE tracks ADD COLUMN rg_album_peak REAL;
+
+-- A restored queue replays rows the library may never have stored, so it keeps
+-- the server's values too.
+ALTER TABLE queue_tracks ADD COLUMN rg_track_gain REAL;
+ALTER TABLE queue_tracks ADD COLUMN rg_track_peak REAL;
+ALTER TABLE queue_tracks ADD COLUMN rg_album_gain REAL;
+ALTER TABLE queue_tracks ADD COLUMN rg_album_peak REAL;

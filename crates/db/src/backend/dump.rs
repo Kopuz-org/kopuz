@@ -134,7 +134,7 @@ pub async fn load_queue(
         super::rows::QueueTrackRow,
         "SELECT position, track_key, service, source_album_id, title, artist, album, duration, \
            khz, bitrate, track_number, disc_number, cover_path, mb_release_id, mb_recording_id, \
-           mb_track_id, playlist_item_id \
+           mb_track_id, playlist_item_id, rg_track_gain, rg_track_peak, rg_album_gain, rg_album_peak \
          FROM queue_tracks WHERE source = ?1 ORDER BY position",
         src
     )
