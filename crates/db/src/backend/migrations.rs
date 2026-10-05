@@ -2014,6 +2014,7 @@ mod album_identity_tests {
     use super::*;
 
     const SUBSONIC_ALBUM_IDS: i64 = 20261006000002;
+    const YTMUSIC_NAMED_ALBUMS: i64 = 20261006000003;
 
     /// A pool migrated to just before `version`, to seed with what an older build wrote.
     async fn migrated_before(version: i64) -> SqlitePool {
@@ -2096,6 +2097,70 @@ mod album_identity_tests {
         assert_eq!(
             rows(&pool, "SELECT track_key, source_album_id FROM queue_tracks").await,
             [("t3".into(), "custom:al-2".into())]
+        );
+    }
+
+    /// An album minted from a row's names goes and its tracks keep none; a linked release stays.
+    #[tokio::test]
+    async fn youtube_albums_minted_from_names_are_dropped() {
+        let pool = migrated_before(YTMUSIC_NAMED_ALBUMS).await;
+        sqlx::raw_sql(
+            "INSERT INTO servers (id, name, url, service, updated_at) VALUES \
+               ('yt', 'y', '', 'YtMusic', 0), ('jf', 'j', '', 'Jellyfin', 0); \
+             INSERT INTO albums (source, source_album_id, title, artist, derived) VALUES \
+               ('yt', 'ytmusic:album:MPREb_one', 'Hits', 'Ada', 1), \
+               ('yt', 'ytmusic:album:68697473', 'Hits', 'Ada', 1), \
+               ('yt', 'ytmusic:album:singles', 'Singles', 'Bo', 1), \
+               ('jf', 'ytmusic:album:6a66', 'Kept', 'Cy', 0); \
+             INSERT INTO tracks (source, track_key, source_album_id) VALUES \
+               ('yt', 'v1', 'ytmusic:album:MPREb_one'), \
+               ('yt', 'v2', 'ytmusic:album:68697473'), \
+               ('yt', 'v3', 'ytmusic:album:singles'), \
+               ('jf', 'j1', 'ytmusic:album:6a66'); \
+             INSERT INTO queue_tracks (source, position, track_key, service, source_album_id, title, artist, album, khz, bitrate) VALUES \
+               ('yt', 0, 'v1', 'YtMusic', 'ytmusic:album:MPREb_one', 'a', 'Ada', 'Hits', 0, 0), \
+               ('yt', 1, 'v3', 'YtMusic', 'ytmusic:album:singles', 'b', 'Bo', '', 0, 0);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        run_migrations(&pool, None).await.unwrap();
+
+        assert_eq!(
+            rows(
+                &pool,
+                "SELECT source, source_album_id FROM albums ORDER BY source, source_album_id"
+            )
+            .await,
+            [
+                ("jf".into(), "ytmusic:album:6a66".into()),
+                ("yt".into(), "ytmusic:album:MPREb_one".into()),
+            ]
+        );
+        assert_eq!(
+            rows(
+                &pool,
+                "SELECT track_key, source_album_id FROM tracks ORDER BY track_key"
+            )
+            .await,
+            [
+                ("j1".into(), "ytmusic:album:6a66".into()),
+                ("v1".into(), "ytmusic:album:MPREb_one".into()),
+                ("v2".into(), String::new()),
+                ("v3".into(), String::new()),
+            ]
+        );
+        assert_eq!(
+            rows(
+                &pool,
+                "SELECT track_key, source_album_id FROM queue_tracks ORDER BY position"
+            )
+            .await,
+            [
+                ("v1".into(), "ytmusic:album:MPREb_one".into()),
+                ("v3".into(), String::new()),
+            ]
         );
     }
 }

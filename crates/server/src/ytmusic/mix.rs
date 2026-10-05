@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use super::clients::WEB_REMIX;
 use super::innertube::sapisid_hash;
-use super::search::synthesize_album_id;
+use super::search::{linked_album, runs_with_browse};
 
 const ORIGIN: &str = "https://music.youtube.com";
 
@@ -189,30 +189,30 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
         .unwrap_or("")
         .to_string();
 
-    let byline: Vec<String> = row
-        .pointer("/longBylineText/runs")
-        .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
-                .filter(|s| !matches!(*s, " • " | " & " | ", "))
-                .map(|s| s.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
+    let byline = runs_with_browse(row.pointer("/longBylineText/runs"));
 
     // For songs (has_album): byline = [artist, album, year-or-views, likes]
     // For videos:            byline = [artist, views, likes]
-    let primary_artist = byline.first().cloned().unwrap_or_default();
+    let primary_artist = byline
+        .first()
+        .map(|(text, _)| text.clone())
+        .unwrap_or_default();
     let artists = if primary_artist.is_empty() {
         Vec::new()
     } else {
         vec![primary_artist.clone()]
     };
-    let album = if has_album {
-        byline.get(1).cloned().unwrap_or_default()
-    } else {
-        String::new()
+    // The album is the run that links one; its text alone names no release.
+    let (album, album_id) = match linked_album(&byline) {
+        Some(linked) => linked,
+        None if has_album => (
+            byline
+                .get(1)
+                .map(|(text, _)| text.clone())
+                .unwrap_or_default(),
+            String::new(),
+        ),
+        None => (String::new(), String::new()),
     };
 
     let duration = row
@@ -233,7 +233,6 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
         .map(normalize_yt_thumbnail);
 
     let cover = thumbnail.filter(|u| !u.is_empty());
-    let album_id = synthesize_album_id(&album, &primary_artist);
 
     Some(Track {
         id: super::yt_id(video_id.to_string()),
@@ -468,5 +467,51 @@ fn collect_video_byline_channels(v: &Value, video_id: &str, out: &mut Vec<(Strin
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod album_tests {
+    use super::parse_queue_row;
+    use serde_json::json;
+
+    fn queue_row(byline: serde_json::Value) -> serde_json::Value {
+        json!({
+            "videoId": "vid",
+            "navigationEndpoint": { "watchEndpoint": { "watchEndpointMusicSupportedConfigs": {
+                "watchEndpointMusicConfig": { "musicVideoType": "MUSIC_VIDEO_TYPE_ATV" }
+            } } },
+            "title": { "runs": [{ "text": "Song" }] },
+            "longBylineText": { "runs": byline },
+        })
+    }
+
+    #[test]
+    fn a_queue_row_files_under_the_release_its_byline_links() {
+        let track = parse_queue_row(&queue_row(json!([
+            { "text": "Ada" },
+            { "text": " • " },
+            { "text": "Hits", "navigationEndpoint": { "browseEndpoint": { "browseId": "MPREb_one" } } },
+            { "text": " • " },
+            { "text": "2021" }
+        ])))
+        .expect("a song row");
+        assert_eq!(track.album, "Hits");
+        assert_eq!(track.album_id, "ytmusic:album:MPREb_one");
+    }
+
+    /// The text still shows; it is the id that would have been a guess.
+    #[test]
+    fn an_unlinked_album_name_files_under_no_album() {
+        let track = parse_queue_row(&queue_row(json!([
+            { "text": "Ada" },
+            { "text": " • " },
+            { "text": "Hits" },
+            { "text": " • " },
+            { "text": "2021" }
+        ])))
+        .expect("a song row");
+        assert_eq!(track.album, "Hits");
+        assert_eq!(track.album_id, "");
     }
 }
