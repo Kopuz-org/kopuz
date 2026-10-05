@@ -180,6 +180,14 @@ impl FavoritesService {
         })
     }
 
+    /// What a favorites sync does, run inside another job: push pending likes, then import.
+    pub(crate) async fn refresh(&self, ctx: &crate::jobs::JobCtx) -> Result<(), ApiError> {
+        ctx.progress("reconciling favorites", None, None, None);
+        let reconciled = self.reconcile(SyncReason::Manual).await;
+        self.pull(Some(ctx), true).await?;
+        reconciled
+    }
+
     async fn reconcile(&self, reason: SyncReason) -> Result<(), ApiError> {
         let config = self.session.config_watch().borrow().clone();
         let Some(source) = server::source::configured_server(self.db.clone(), &config) else {

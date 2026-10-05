@@ -169,6 +169,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     let favorites = FavoritesService::new(database.clone(), session.clone());
     favorites.spawn_reconciler();
     let playlists = crate::PlaylistService::new(database.clone(), session.clone());
+    playlists.attach_favorites(favorites.clone());
     spawn_volume_persistence(&session, config_service.clone());
     crate::os_media::spawn(&session);
     crate::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
