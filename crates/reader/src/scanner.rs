@@ -316,16 +316,16 @@ mod tests {
     #[test]
     fn merge_carries_cover_state_from_matching_legacy_album() {
         let manual_cover = PathBuf::from("/covers/manual.jpg");
-        let mut legacy_album = album("alb_divane");
+        let mut legacy_album = album("alb2_6_yaşar_divane");
         legacy_album.title = "Divane".to_string();
         legacy_album.artist = "Yaşar".to_string();
         legacy_album.cover_path = Some(manual_cover.clone());
         legacy_album.manual_cover = true;
-        let mut scanned_album = album("alb2_6_yaşar_divane");
+        let mut scanned_album = album("alb3_6_yaşar_divane");
         scanned_album.title = "Divane".to_string();
         scanned_album.artist = "Yaşar".to_string();
         let mut library = Library {
-            tracks: vec![track("/music/divane.flac", "alb_divane", "Divane")],
+            tracks: vec![track("/music/divane.flac", "alb2_6_yaşar_divane", "Divane")],
             albums: vec![legacy_album],
             ..Default::default()
         };
@@ -333,12 +333,12 @@ mod tests {
         merge_scanned_tracks(
             &mut library,
             vec![ScannedTrack {
-                track: track("/music/divane.flac", "alb2_6_yaşar_divane", "Divane"),
+                track: track("/music/divane.flac", "alb3_6_yaşar_divane", "Divane"),
                 album: scanned_album,
             }],
         );
 
-        assert_eq!(library.tracks[0].album_id, "alb2_6_yaşar_divane");
+        assert_eq!(library.tracks[0].album_id, "alb3_6_yaşar_divane");
         assert_eq!(library.albums.len(), 2);
         assert_eq!(library.albums[1].cover_path, Some(manual_cover));
         assert!(library.albums[1].manual_cover);
@@ -350,7 +350,7 @@ mod tests {
         legacy_album.title = "Divane".to_string();
         legacy_album.artist = "Yaşar".to_string();
         legacy_album.cover_path = Some(PathBuf::from("/covers/wrong-artist.jpg"));
-        let mut scanned_album = album("alb2_6_yaşar_divane");
+        let mut scanned_album = album("alb3_6_yaşar_divane");
         scanned_album.title = "Divane".to_string();
         scanned_album.artist = "Yaşar".to_string();
         let mut library = Library {
@@ -361,7 +361,7 @@ mod tests {
         merge_scanned_tracks(
             &mut library,
             vec![ScannedTrack {
-                track: track("/music/divane.flac", "alb2_6_yaşar_divane", "Divane"),
+                track: track("/music/divane.flac", "alb3_6_yaşar_divane", "Divane"),
                 album: scanned_album,
             }],
         );

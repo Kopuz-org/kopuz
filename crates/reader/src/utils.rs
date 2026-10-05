@@ -104,6 +104,19 @@ pub fn is_artist_image_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Disc number from a "Disc 2" or "CD2" directory name.
+pub fn disc_of(dir_name: &str) -> Option<u32> {
+    let lower = dir_name.to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("disc")
+        .or_else(|| lower.strip_prefix("disk"))
+        .or_else(|| lower.strip_prefix("cd"))?;
+    rest.trim_start_matches([' ', '-', '_'])
+        .parse::<u32>()
+        .ok()
+        .filter(|n| *n > 0)
+}
+
 pub fn save_cover(
     album_id: &str,
     data: &[u8],
@@ -123,6 +136,15 @@ pub fn save_cover(
 mod tests {
     use super::*;
     use std::fs::File;
+
+    #[test]
+    fn disc_of_parses_disc_folder_names() {
+        assert_eq!(disc_of("Disc 2"), Some(2));
+        assert_eq!(disc_of("disk3"), Some(3));
+        assert_eq!(disc_of("CD-1"), Some(1));
+        assert_eq!(disc_of("Live in Tokyo"), None);
+        assert_eq!(disc_of("Disc"), None);
+    }
 
     #[test]
     fn test_find_folder_cover() {
