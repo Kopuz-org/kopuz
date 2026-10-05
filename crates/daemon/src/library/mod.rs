@@ -14,7 +14,7 @@ use reader::Track;
 use server::source::RadioPage;
 use tokio::sync::watch;
 
-use crate::jobs::{JobCtx, JobRunner};
+use crate::jobs::{JobCtx, JobRunner, Trigger};
 use crate::session::{QueueMaterializer, SessionHandle};
 
 pub struct LibraryService {

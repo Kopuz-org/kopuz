@@ -982,3 +982,9 @@ connection_step_playback_token = poki kalama
 connection_step_passed = pona
 connection_step_failed = pakala
 connection_step_skipped = weka
+
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d

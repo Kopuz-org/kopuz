@@ -975,3 +975,9 @@ connection_step_playback_token = இயக்க டோக்கன்
 connection_step_passed = தேர்ச்சி
 connection_step_failed = தோல்வி
 connection_step_skipped = தவிர்க்கப்பட்டது
+
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d

@@ -981,3 +981,9 @@ connection_step_playback_token = Lejátszási token
 connection_step_passed = Sikeres
 connection_step_failed = Sikertelen
 connection_step_skipped = Kihagyva
+
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d

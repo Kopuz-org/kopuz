@@ -981,3 +981,9 @@ connection_step_playback_token = Wiedergabe-Token
 connection_step_passed = Bestanden
 connection_step_failed = Fehlgeschlagen
 connection_step_skipped = Übersprungen
+
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d

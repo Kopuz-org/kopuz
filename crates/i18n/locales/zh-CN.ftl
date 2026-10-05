@@ -981,3 +981,9 @@ connection_step_playback_token = 播放令牌
 connection_step_passed = 通过
 connection_step_failed = 失败
 connection_step_skipped = 已跳过
+
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d

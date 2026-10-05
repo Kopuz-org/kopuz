@@ -975,3 +975,9 @@ connection_step_playback_token = Uppspelningstoken
 connection_step_passed = Godkänt
 connection_step_failed = Misslyckades
 connection_step_skipped = Hoppades över
+
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d

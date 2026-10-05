@@ -987,3 +987,9 @@ connection_step_playback_token = رمز التشغيل
 connection_step_passed = نجح
 connection_step_failed = فشل
 connection_step_skipped = تم التخطي
+
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d

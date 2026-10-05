@@ -1,6 +1,7 @@
 //! `LocalApi`: the in-process implementation of [`api::KopuzApi`].
 
 use super::*;
+use crate::jobs::Trigger;
 
 /// In-process implementation of [`api::KopuzApi`] over a running session.
 pub struct LocalApi {
@@ -39,13 +40,13 @@ impl LocalApi {
             let started = match kind {
                 api::JobKind::LibrarySync => library
                     .as_ref()
-                    .map(|library| library.spawn_remote_sync(&runner)),
+                    .map(|library| library.spawn_remote_sync(&runner, Trigger::User)),
                 api::JobKind::PlaylistSync => playlists
                     .as_ref()
-                    .map(|playlists| playlists.spawn_sync(&runner)),
+                    .map(|playlists| playlists.spawn_sync(&runner, Trigger::User)),
                 api::JobKind::FavoritesSync => favorites
                     .as_ref()
-                    .map(|favorites| favorites.spawn_sync(&runner)),
+                    .map(|favorites| favorites.spawn_sync(&runner, Trigger::User)),
                 _ => None,
             };
             started.unwrap_or_else(|| Err(ApiError::unsupported("no service for this sync")))
@@ -745,19 +746,19 @@ impl api::JobApi for LocalApi {
         };
         match kind {
             api::JobKind::Scan => match &self.library {
-                Some(library) => library.spawn_scan(runner),
+                Some(library) => library.spawn_scan(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no library service")),
             },
             api::JobKind::LibrarySync => match &self.library {
-                Some(library) => library.spawn_remote_sync(runner),
+                Some(library) => library.spawn_remote_sync(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no library service")),
             },
             api::JobKind::FavoritesSync => match &self.favorites {
-                Some(favorites) => favorites.spawn_sync(runner),
+                Some(favorites) => favorites.spawn_sync(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no favorites service")),
             },
             api::JobKind::PlaylistSync => match &self.playlists {
-                Some(playlists) => playlists.spawn_sync(runner),
+                Some(playlists) => playlists.spawn_sync(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no playlist service")),
             },
             // These carry their own request, so they start through their own
@@ -1091,6 +1092,7 @@ mod start_syncs_tests {
             kind,
             ok: true,
             error: None,
+            automatic: false,
         }
     }
 

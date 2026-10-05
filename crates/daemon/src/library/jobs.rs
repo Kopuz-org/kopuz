@@ -25,17 +25,25 @@ fn added_at_stamps(tracks: &[reader::Track]) -> Vec<(String, i64)> {
 }
 
 impl LibraryService {
-    pub fn spawn_scan(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
+    pub fn spawn_scan(
+        self: &Arc<Self>,
+        runner: &JobRunner,
+        trigger: Trigger,
+    ) -> Result<JobRef, ApiError> {
         let service = self.clone();
-        runner.start(JobKind::Scan, move |ctx| async move {
+        runner.start_as(JobKind::Scan, trigger, move |ctx| async move {
             let config = service.current_config();
             service.run_scan(&ctx, &config).await
         })
     }
 
-    pub fn spawn_remote_sync(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
+    pub fn spawn_remote_sync(
+        self: &Arc<Self>,
+        runner: &JobRunner,
+        trigger: Trigger,
+    ) -> Result<JobRef, ApiError> {
         let service = self.clone();
-        runner.start(JobKind::LibrarySync, move |ctx| async move {
+        runner.start_as(JobKind::LibrarySync, trigger, move |ctx| async move {
             let config = service.current_config();
             let result = service.run_remote_sync(&ctx, &config).await;
             if result.is_ok() && !ctx.cancelled() {

@@ -981,3 +981,9 @@ connection_step_playback_token = Διακριτικό αναπαραγωγής
 connection_step_passed = Επιτυχία
 connection_step_failed = Αποτυχία
 connection_step_skipped = Παραλείφθηκε
+
+sync_interval = Sync and rescan every
+sync_interval_never = Never
+sync_interval_minutes = { $count } min
+sync_interval_hours = { $count } h
+sync_interval_days = { $count } d

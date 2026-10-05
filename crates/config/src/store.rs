@@ -808,6 +808,7 @@ mod tests {
             }],
             pinned_stations: vec!["https://example.invalid/station.json".into()],
             prefer_local_lyrics: true,
+            sync_interval_minutes: 90,
             ..Default::default()
         };
 
@@ -854,6 +855,7 @@ mod tests {
         assert_eq!(restored.cover_fetch_strategy, cfg.cover_fetch_strategy);
         assert_eq!(restored.radio_registries, cfg.radio_registries);
         assert_eq!(restored.prefer_local_lyrics, cfg.prefer_local_lyrics);
+        assert_eq!(restored.sync_interval_minutes, cfg.sync_interval_minutes);
 
         assert_eq!(
             restored.volume,
