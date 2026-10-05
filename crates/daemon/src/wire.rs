@@ -126,6 +126,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec!["Ada".into()],
+            replay_gain: config::ReplayGainInfo::default(),
             credits,
         }
     }

@@ -38,6 +38,7 @@ fn track(path: &str, artist: &str, credits: Vec<ArtistCredit>) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: vec![artist.into()],
+        replay_gain: config::ReplayGainInfo::default(),
         credits,
     }
 }

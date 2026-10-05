@@ -299,11 +299,11 @@ async fn replay_gain_round_trips_and_clears() {
         album_gain_db: Some(-5.25),
         album_peak: None,
     };
-    db.upsert_tracks(&Source::Local, &[track.clone()])
+    db.upsert_tracks(&Source::default(), std::slice::from_ref(&track))
         .await
         .unwrap();
 
-    let filter = TrackFilter::new(Source::Local);
+    let filter = TrackFilter::new(Source::default());
     let stored = db
         .tracks_page(
             &filter,
@@ -319,7 +319,7 @@ async fn replay_gain_round_trips_and_clears() {
     // A re-sync from a server that stopped reporting gain must clear the row,
     // not leave the old values to level a re-encoded file.
     track.replay_gain = config::ReplayGainInfo::default();
-    db.upsert_tracks(&Source::Local, &[track.clone()])
+    db.upsert_tracks(&Source::default(), std::slice::from_ref(&track))
         .await
         .unwrap();
     let stored = db

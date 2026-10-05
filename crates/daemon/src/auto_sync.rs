@@ -168,6 +168,7 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec!["a".into()],
+            replay_gain: config::ReplayGainInfo::default(),
             credits: Vec::new(),
         };
         db.upsert_tracks(&server(), &[track]).await.expect("upsert");

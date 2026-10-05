@@ -1493,7 +1493,7 @@ message Config {
   bool lyrics_offset_auto = 66;
   bool lyrics_depth_blur = 67;
   uint32 lyrics_depth_blur_strength = 68;
-  ReplayGainSettings replay_gain = 69;
+  ReplayGainSettings replay_gain = 70;
 }
 
 enum AlbumViewMode {

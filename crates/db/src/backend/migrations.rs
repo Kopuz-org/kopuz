@@ -1817,6 +1817,7 @@ mod row_fill_tests {
             playlist_item_id: None,
             artists: vec!["Ada".into()],
             credits: vec![reader::ArtistCredit::linked("Ada", "UC-ada")],
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 
@@ -1855,6 +1856,10 @@ mod row_fill_tests {
             "DROP INDEX idx_artists_key",
             "ALTER TABLE artists DROP COLUMN key",
             "ALTER TABLE artists DROP COLUMN named_by_source",
+            "ALTER TABLE tracks DROP COLUMN rg_track_gain",
+            "ALTER TABLE tracks DROP COLUMN rg_track_peak",
+            "ALTER TABLE tracks DROP COLUMN rg_album_gain",
+            "ALTER TABLE tracks DROP COLUMN rg_album_peak",
             "DELETE FROM _sqlx_migrations WHERE version >= 20260930000000",
         ] {
             sqlx::query(sql).execute(&pool).await.unwrap();
