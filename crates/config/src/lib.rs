@@ -900,6 +900,15 @@ pub struct AppConfig {
     /// Scales the depth-of-field ramp, in percent (100 = the built-in ramp).
     #[serde(default = "default_depth_blur_strength")]
     pub lyrics_depth_blur_strength: u8,
+    /// Minutes between the daemon's own library syncs and folder rescans; 0 turns them off.
+    #[serde(default = "default_sync_interval_minutes")]
+    pub sync_interval_minutes: u32,
+}
+
+pub const DEFAULT_SYNC_INTERVAL_MINUTES: u32 = 24 * 60;
+
+fn default_sync_interval_minutes() -> u32 {
+    DEFAULT_SYNC_INTERVAL_MINUTES
 }
 
 fn default_theme() -> String {
@@ -1099,6 +1108,7 @@ impl Default for AppConfig {
             lyrics_offset_auto: true,
             lyrics_depth_blur: true,
             lyrics_depth_blur_strength: default_depth_blur_strength(),
+            sync_interval_minutes: default_sync_interval_minutes(),
         }
     }
 }
@@ -1482,5 +1492,15 @@ mod tests {
         config.set_folders_for("srv", Vec::new());
         assert!(config.folders_for("srv").is_empty());
         assert!(!config.server_folders.contains_key("srv"));
+    }
+
+    /// Settings saved before the key existed keep syncing daily rather than never.
+    #[test]
+    fn a_settings_file_without_a_sync_interval_reads_as_a_day() {
+        let config: AppConfig = serde_json::from_str("{}").expect("empty settings parse");
+        assert_eq!(config.sync_interval_minutes, 24 * 60);
+        let never: AppConfig =
+            serde_json::from_str(r#"{"sync_interval_minutes":0}"#).expect("explicit zero parses");
+        assert_eq!(never.sync_interval_minutes, 0);
     }
 }

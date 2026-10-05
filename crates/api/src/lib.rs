@@ -154,6 +154,8 @@ pub struct JobStatus {
     pub total: Option<u64>,
     pub message: Option<String>,
     pub error: Option<ErrorBody>,
+    /// Started by the daemon's own schedule rather than by a user.
+    pub automatic: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

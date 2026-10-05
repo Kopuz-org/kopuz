@@ -239,6 +239,8 @@ message JobProgress {
   optional uint64 current = 4;
   optional uint64 total = 5;
   optional string message = 6;
+  // Started by the daemon's own schedule rather than by a user.
+  bool automatic = 7;
 }
 
 message JobFinished {
@@ -246,6 +248,7 @@ message JobFinished {
   JobKind kind = 2;
   bool ok = 3;
   optional ErrorBody error = 4;
+  bool automatic = 5;
 }
 
 message ConfigChanged {
@@ -1270,6 +1273,7 @@ message JobStatus {
   optional uint64 total = 6;
   optional string message = 7;
   optional ErrorBody error = 8;
+  bool automatic = 9;
 }
 
 // What tool fetches the URL, and every option beyond the format, is the
@@ -1563,6 +1567,8 @@ message Config {
   bool lyrics_depth_blur = 67;
   uint32 lyrics_depth_blur_strength = 68;
   ReplayGainSettings replay_gain = 70;
+  // Absent from a peer that predates it, which must not read as 0 (never).
+  optional uint32 sync_interval_minutes = 71;
 }
 
 enum AlbumViewMode {

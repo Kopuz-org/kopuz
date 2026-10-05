@@ -38,17 +38,20 @@ pub fn event_to_proto(value: &api::ApiEvent) -> Event {
             current: progress.current,
             total: progress.total,
             message: progress.message.clone(),
+            automatic: progress.automatic,
         }),
         api::ApiEvent::JobFinished {
             id,
             kind,
             ok,
             error,
+            automatic,
         } => event::Kind::JobFinished(JobFinished {
             id: id.clone(),
             kind: job_kind_to_proto(*kind) as i32,
             ok: *ok,
             error: error.as_ref().map(error_body_to_proto),
+            automatic: *automatic,
         }),
         api::ApiEvent::ConfigChanged { keys, revision } => {
             event::Kind::ConfigChanged(ConfigChanged {
@@ -112,12 +115,14 @@ pub fn event_from_proto(value: &Event) -> Option<api::ApiEvent> {
             current: progress.current,
             total: progress.total,
             message: progress.message.clone(),
+            automatic: progress.automatic,
         }),
         event::Kind::JobFinished(finished) => api::ApiEvent::JobFinished {
             id: finished.id.clone(),
             kind: job_kind_from_proto(finished.kind),
             ok: finished.ok,
             error: finished.error.as_ref().map(error_body_from_proto),
+            automatic: finished.automatic,
         },
         event::Kind::ConfigChanged(changed) => api::ApiEvent::ConfigChanged {
             keys: changed.keys.clone(),
@@ -178,6 +183,7 @@ mod tests {
                 current: Some(1),
                 total: Some(2),
                 message: Some("f".into()),
+                automatic: true,
             }),
             api::ApiEvent::JobFinished {
                 id: "j".into(),
@@ -187,6 +193,14 @@ mod tests {
                     code: api::ErrorCode::Conflict,
                     message: "busy".into(),
                 }),
+                automatic: false,
+            },
+            api::ApiEvent::JobFinished {
+                id: "k".into(),
+                kind: api::JobKind::LibrarySync,
+                ok: true,
+                error: None,
+                automatic: true,
             },
             api::ApiEvent::ConfigChanged {
                 keys: vec!["volume".into()],

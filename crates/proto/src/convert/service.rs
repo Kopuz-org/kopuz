@@ -25,6 +25,7 @@ pub fn job_status_to_proto(value: &api::JobStatus) -> JobStatus {
         total: value.total,
         message: value.message.clone(),
         error: value.error.as_ref().map(error_body_to_proto),
+        automatic: value.automatic,
     }
 }
 
@@ -38,6 +39,7 @@ pub fn job_status_from_proto(value: &JobStatus) -> api::JobStatus {
         total: value.total,
         message: value.message.clone(),
         error: value.error.as_ref().map(error_body_from_proto),
+        automatic: value.automatic,
     }
 }
 
@@ -124,6 +126,58 @@ mod tests {
             revision: 7,
         };
         assert_eq!(config_view_from_proto(&config_view_to_proto(&view)), view);
+    }
+
+    #[test]
+    fn a_job_status_keeps_whether_it_was_automatic() {
+        for automatic in [false, true] {
+            let status = api::JobStatus {
+                id: "job-1".into(),
+                kind: api::JobKind::LibrarySync,
+                state: api::JobState::Running,
+                phase: "persisting".into(),
+                current: Some(3),
+                total: Some(9),
+                message: None,
+                error: None,
+                automatic,
+            };
+            assert_eq!(job_status_from_proto(&job_status_to_proto(&status)), status);
+        }
+    }
+
+    /// A daemon too old to know the field sends nothing, which must read as a user's job.
+    #[test]
+    fn a_job_from_an_older_daemon_is_not_automatic() {
+        let old = JobStatus {
+            id: "job-1".into(),
+            ..Default::default()
+        };
+        assert!(!job_status_from_proto(&old).automatic);
+    }
+
+    #[test]
+    fn the_sync_interval_survives_the_wire() {
+        for minutes in [0, 15, ::config::DEFAULT_SYNC_INTERVAL_MINUTES, u32::MAX] {
+            let config = ::config::AppConfig {
+                sync_interval_minutes: minutes,
+                ..Default::default()
+            };
+            assert_eq!(
+                config_from_proto(&config_to_proto(&config)).sync_interval_minutes,
+                minutes
+            );
+        }
+    }
+
+    /// A peer too old to know the field sends nothing, which must not read as "never sync".
+    #[test]
+    fn an_absent_sync_interval_is_the_default() {
+        let old = Config::default();
+        assert_eq!(
+            config_from_proto(&old).sync_interval_minutes,
+            ::config::DEFAULT_SYNC_INTERVAL_MINUTES
+        );
     }
 
     /// A daemon too old to know the field sends nothing, which must not read as revision 1.

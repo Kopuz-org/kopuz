@@ -638,6 +638,7 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
         lyrics_offset_auto: value.lyrics_offset_auto,
         lyrics_depth_blur: value.lyrics_depth_blur,
         lyrics_depth_blur_strength: u32::from(value.lyrics_depth_blur_strength),
+        sync_interval_minutes: Some(value.sync_interval_minutes),
     }
 }
 
@@ -742,6 +743,9 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
         lyrics_offset_auto: value.lyrics_offset_auto,
         lyrics_depth_blur: value.lyrics_depth_blur,
         lyrics_depth_blur_strength: value.lyrics_depth_blur_strength.min(u32::from(u8::MAX)) as u8,
+        sync_interval_minutes: value
+            .sync_interval_minutes
+            .unwrap_or(config::DEFAULT_SYNC_INTERVAL_MINUTES),
         ..Default::default()
     }
 }

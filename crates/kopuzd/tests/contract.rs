@@ -104,6 +104,10 @@ struct Pair {
     tcp: client::GrpcApi,
     tcp_address: String,
     jobs: Arc<JobRunner>,
+    config_service: Arc<ConfigService>,
+    library: Arc<LibraryService>,
+    favorites: Arc<FavoritesService>,
+    playlists: Arc<daemon::PlaylistService>,
     database: db::Db,
     session: SessionHandle,
     _dir: tempfile::TempDir,
@@ -204,6 +208,10 @@ async fn spawn_pair() -> Pair {
         tcp: client::GrpcApi::connect_tcp(&tcp_address, token.secret()).expect("tcp client"),
         tcp_address,
         jobs,
+        config_service,
+        library,
+        favorites,
+        playlists,
         database,
         session,
         _dir: dir,
@@ -255,6 +263,225 @@ async fn panicked_jobs_finish_as_failed_and_emit_an_event() {
     })
     .await
     .expect("job-finished event");
+}
+
+async fn wait_job(api: &dyn KopuzApi, kind: api::JobKind) -> api::JobStatus {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let jobs = api.jobs().await.expect("jobs");
+            if let Some(status) = jobs.into_iter().find(|status| status.kind == kind) {
+                return status;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the job shows up")
+}
+
+async fn all_jobs_settled(api: &dyn KopuzApi) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let jobs = api.jobs().await.expect("jobs");
+            if jobs.iter().all(|job| job.state != api::JobState::Running) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("jobs settle");
+}
+
+#[tokio::test]
+async fn a_job_says_whether_the_daemons_schedule_started_it_on_every_transport() {
+    use futures_util::StreamExt;
+    let pair = spawn_pair().await;
+    let mut wire_events = pair.wire.events();
+
+    let user = pair
+        .wire
+        .start_job(api::JobKind::Scan)
+        .await
+        .expect("a user's scan starts");
+    let scheduled = pair
+        .jobs
+        .start_as(
+            api::JobKind::Download,
+            daemon::jobs::Trigger::Schedule,
+            |_| async { Ok(()) },
+        )
+        .expect("a scheduled job starts");
+    all_jobs_settled(&pair.local).await;
+
+    let local = pair.local.jobs().await.expect("local jobs");
+    assert_eq!(local, pair.wire.jobs().await.expect("wire jobs"));
+    assert_eq!(local, pair.tcp.jobs().await.expect("tcp jobs"));
+    let flag = |id: &str| {
+        local
+            .iter()
+            .find(|job| job.id == id)
+            .map(|job| job.automatic)
+    };
+    assert_eq!(flag(&user.job_id), Some(false));
+    assert_eq!(flag(&scheduled.job_id), Some(true));
+
+    // The stream joins at the live position, so keep starting jobs until its events flow.
+    let (mut manual_seen, mut scheduled_seen) = (false, false);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !(manual_seen && scheduled_seen) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for JobFinished events"
+        );
+        let _ = pair.wire.start_job(api::JobKind::Scan).await;
+        let _ = pair.jobs.start_as(
+            api::JobKind::Download,
+            daemon::jobs::Trigger::Schedule,
+            |_| async { Ok(()) },
+        );
+        while let Ok(Some(event)) =
+            tokio::time::timeout(Duration::from_millis(300), wire_events.next()).await
+        {
+            match event {
+                ApiEvent::JobFinished {
+                    kind: api::JobKind::Scan,
+                    automatic,
+                    ..
+                } => {
+                    assert!(!automatic, "a scan the user asked for");
+                    manual_seen = true;
+                }
+                ApiEvent::JobFinished {
+                    kind: api::JobKind::Download,
+                    automatic,
+                    ..
+                } => {
+                    assert!(automatic, "a job the schedule started");
+                    scheduled_seen = true;
+                }
+                ApiEvent::JobProgress(progress) => {
+                    assert_eq!(progress.automatic, progress.kind == api::JobKind::Download);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn config_with_active_jellyfin(minutes: u32) -> impl FnOnce(&mut config::AppConfig) + Send {
+    move |config| {
+        config.server = Some(config::MusicServer {
+            name: "unreachable".into(),
+            url: "http://127.0.0.1:9".into(),
+            access_token: Some("token".into()),
+            user_id: Some("user".into()),
+            id: Some("srv-1".into()),
+            ..Default::default()
+        });
+        config.active_source = config::Source::Server("srv-1".into());
+        config.sync_interval_minutes = minutes;
+    }
+}
+
+fn spawn_auto_sync(pair: &Pair) {
+    daemon::auto_sync::spawn(
+        pair.database.clone(),
+        pair.jobs.clone(),
+        pair.library.clone(),
+        pair.playlists.clone(),
+        pair.favorites.clone(),
+        pair.session.config_watch(),
+    );
+}
+
+#[tokio::test]
+async fn the_daemons_own_syncs_are_automatic_on_every_transport() {
+    let pair = spawn_pair().await;
+    pair.config_service
+        .mutate_state(
+            &["server", "active_source", "sync_interval_minutes"],
+            config_with_active_jellyfin(60),
+        )
+        .await
+        .expect("config saved");
+    spawn_auto_sync(&pair);
+
+    for kind in [
+        api::JobKind::LibrarySync,
+        api::JobKind::PlaylistSync,
+        api::JobKind::FavoritesSync,
+    ] {
+        assert!(wait_job(&pair.local, kind).await.automatic, "{kind:?}");
+        assert!(
+            wait_job(&pair.wire, kind).await.automatic,
+            "{kind:?} on the wire"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_zero_sync_interval_starts_no_syncs() {
+    let pair = spawn_pair().await;
+    pair.config_service
+        .mutate_state(
+            &["server", "active_source", "sync_interval_minutes"],
+            config_with_active_jellyfin(0),
+        )
+        .await
+        .expect("config saved");
+    spawn_auto_sync(&pair);
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(pair.local.jobs().await.expect("jobs").is_empty());
+
+    // Raising it from 0 is a change the running schedule must notice.
+    pair.local
+        .patch_config(vec![config_field("sync_interval_minutes", "60")])
+        .await
+        .expect("interval set");
+    assert!(
+        wait_job(&pair.wire, api::JobKind::LibrarySync)
+            .await
+            .automatic,
+        "the schedule re-armed"
+    );
+}
+
+#[tokio::test]
+async fn the_daemons_own_folder_scan_is_automatic_and_a_users_is_not() {
+    let pair = spawn_pair().await;
+    let music = tempfile::tempdir().expect("tempdir");
+    pair.config_service
+        .mutate_state(&["local_sources"], |config| {
+            config.local_sources = vec![config::SavedLocalSource::default_library(vec![
+                music.path().to_path_buf(),
+            ])];
+        })
+        .await
+        .expect("config saved");
+    daemon::folder_scan::spawn(
+        pair.jobs.clone(),
+        pair.library.clone(),
+        pair.session.config_watch(),
+        pair.session.subscribe(),
+        true,
+    );
+    let scheduled = wait_job(&pair.local, api::JobKind::Scan).await;
+    assert!(scheduled.automatic);
+    all_jobs_settled(&pair.local).await;
+
+    let user = pair
+        .wire
+        .start_job(api::JobKind::Scan)
+        .await
+        .expect("a user's scan starts");
+    let jobs = pair.wire.jobs().await.expect("wire jobs");
+    let started = jobs
+        .iter()
+        .find(|job| job.id == user.job_id)
+        .expect("the user's scan is listed");
+    assert!(!started.automatic);
 }
 
 fn replace(keys: &[&str]) -> SetQueueRequest {
@@ -458,7 +685,7 @@ async fn config_view_and_set_agree_across_transports() {
 
     let local_view = pair.local.config().await.expect("local view");
     let wire_view = pair.wire.config().await.expect("wire view");
-    // The whole 68-field surface has to survive the proto round trip for
+    // The whole config surface has to survive the proto round trip for
     // these to be equal, so this is the guard on every field mapping.
     assert_eq!(local_view, wire_view);
     assert!(local_view.config.lastfm_session_key.is_empty());
