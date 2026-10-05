@@ -30,6 +30,8 @@ use utils::artwork_image::{
 };
 const MAX_REMOTE_ARTWORK_BYTES: usize = 32 * 1024 * 1024;
 const REMOTE_ARTWORK_TIMEOUT: Duration = Duration::from_secs(15);
+/// A cover cached by item id rather than URL never sees its URL change, so it is fetched again after this.
+const REMOTE_ARTWORK_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// The version an [`ArtworkRef`] carries: a hash of the resolved cover
 /// reference, so it changes when and only when the picture would -- a photo
@@ -72,7 +74,11 @@ pub fn artist_cover(
     if let Some(photo) = photos.get(&identity) {
         return match photo {
             reader::ArtistImageRef::Local(path) => CoverRef::Local(path.clone()),
-            reader::ArtistImageRef::Remote(url) => CoverRef::EmbeddedUrl(url.clone()),
+            // A Subsonic photo is kept as its cover id and signed when fetched; anything else is a plain URL.
+            reader::ArtistImageRef::Remote(url) => match CoverRef::parse(url) {
+                CoverRef::None | CoverRef::Local(_) => CoverRef::EmbeddedUrl(url.clone()),
+                typed => typed,
+            },
         };
     }
     match album_cover.filter(|_| library_view) {
@@ -194,6 +200,17 @@ fn hash_name(input: &str) -> String {
     name
 }
 
+/// What a proxied cover is cached under: its URL, unless signing salts that afresh on every request.
+fn remote_cache_name(server: Option<&config::MusicServer>, cover: &CoverRef, url: &str) -> String {
+    match cover {
+        CoverRef::SubsonicItem { item_id } => {
+            let server = server.map_or("", |server| server.url.as_str());
+            hash_name(&format!("subsonic|{server}|{item_id}"))
+        }
+        _ => hash_name(url),
+    }
+}
+
 /// Applies the shared resize policy to a fetched remote cover, the way
 /// `local_payload` does to one off disk. A cover that will not decode is
 /// served as it arrived, which is what the local path does too.
@@ -254,9 +271,14 @@ impl ArtworkService {
         let width = if hq { HQ_MAX } else { THUMB_MAX };
         let cover = self.cover_for(target, &sources).await?;
         let missing = || ApiError::not_found("no artwork for this entity");
-        match server::cover::locate(sources.server.as_ref(), cover, width).ok_or_else(missing)? {
+        match server::cover::locate(sources.server.as_ref(), cover.clone(), width)
+            .ok_or_else(missing)?
+        {
             Located::File(path) => self.local_payload(&path.to_string_lossy(), hq).await,
-            Located::Url(url) => self.proxied_payload(&url, hq).await,
+            Located::Url(url) => {
+                let cache_name = remote_cache_name(sources.server.as_ref(), &cover, &url);
+                self.proxied_payload(&url, &cache_name, hq).await
+            }
         }
     }
 
@@ -417,16 +439,47 @@ impl ArtworkService {
     ///
     /// The width handed to `locate` is only a hint a service may ignore, so the
     /// shared resize policy is applied here too rather than trusting the origin.
-    async fn proxied_payload(&self, url: &str, hq: bool) -> Result<ArtworkPayload, ApiError> {
+    async fn proxied_payload(
+        &self,
+        url: &str,
+        cache_name: &str,
+        hq: bool,
+    ) -> Result<ArtworkPayload, ApiError> {
         let cache_path = self.cache_dir.join(format!(
-            "remote_{}_{}",
+            "remote_{}_{cache_name}",
             if hq { "hq" } else { "thumb" },
-            hash_name(url)
         ));
-        if let Ok(bytes) = tokio::fs::read(&cache_path).await {
-            let content_type = sniff_content_type(&bytes);
-            return Ok(self.payload(bytes, content_type));
+        let cached = tokio::fs::read(&cache_path).await.ok();
+        let fresh = tokio::fs::metadata(&cache_path)
+            .await
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|written| written.elapsed().ok())
+            .is_some_and(|age| age < REMOTE_ARTWORK_TTL);
+        if let Some(bytes) = cached.as_ref().filter(|_| fresh) {
+            let content_type = sniff_content_type(bytes);
+            return Ok(self.payload(bytes.clone(), content_type));
         }
+        match self.download(url, hq).await {
+            Ok((bytes, content_type)) => {
+                if let Some(parent) = cache_path.parent() {
+                    let _ = tokio::fs::create_dir_all(parent).await;
+                }
+                let _ = tokio::fs::write(&cache_path, &bytes).await;
+                Ok(self.payload(bytes, content_type))
+            }
+            // A stale cover beats none while the server is away.
+            Err(error) => match cached {
+                Some(bytes) => {
+                    let content_type = sniff_content_type(&bytes);
+                    Ok(self.payload(bytes, content_type))
+                }
+                None => Err(error),
+            },
+        }
+    }
+
+    async fn download(&self, url: &str, hq: bool) -> Result<(Vec<u8>, &'static str), ApiError> {
         let mut response = self
             .http
             .get(url)
@@ -455,12 +508,7 @@ impl ArtworkService {
             }
             bytes.extend_from_slice(&chunk);
         }
-        let (bytes, content_type) = resize_remote(bytes, hq).await;
-        if let Some(parent) = cache_path.parent() {
-            let _ = tokio::fs::create_dir_all(parent).await;
-        }
-        let _ = tokio::fs::write(&cache_path, &bytes).await;
-        Ok(self.payload(bytes, content_type))
+        Ok(resize_remote(bytes, hq).await)
     }
 
     fn payload(&self, bytes: Vec<u8>, content_type: &'static str) -> ArtworkPayload {
@@ -534,6 +582,36 @@ mod tests {
             artists: vec![],
             replay_gain: config::ReplayGainInfo::default(),
         }
+    }
+
+    #[test]
+    fn a_signed_cover_is_cached_under_its_id_not_its_salted_url() {
+        let server = config::MusicServer {
+            url: "https://sub.example".into(),
+            service: config::MusicService::Subsonic,
+            ..Default::default()
+        };
+        let server = Some(&server);
+        let cover = CoverRef::SubsonicItem {
+            item_id: "al-1".into(),
+        };
+        assert_eq!(
+            remote_cache_name(
+                server,
+                &cover,
+                "https://sub.example/rest/getCoverArt.view?s=a"
+            ),
+            remote_cache_name(
+                server,
+                &cover,
+                "https://sub.example/rest/getCoverArt.view?s=b"
+            ),
+        );
+        let url = "https://img.example/x.jpg";
+        assert_eq!(
+            remote_cache_name(server, &CoverRef::EmbeddedUrl(url.into()), url),
+            hash_name(url)
+        );
     }
 
     #[test]
