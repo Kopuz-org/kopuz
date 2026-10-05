@@ -599,6 +599,20 @@ impl QueueModel {
             .filter_map(|pos| self.track_at(pos).cloned().map(|t| (pos, t)))
             .collect()
     }
+
+    /// The whole queue in play order, with the permutation behind it (empty while shuffle is off).
+    pub fn play_order(&mut self) -> (Vec<Track>, Vec<usize>) {
+        if !self.shuffle {
+            return (self.items.clone(), Vec::new());
+        }
+        self.repair_shuffle_order();
+        let tracks = self
+            .shuffle_order
+            .iter()
+            .filter_map(|&idx| self.items.get(idx).cloned())
+            .collect();
+        (tracks, self.shuffle_order.clone())
+    }
 }
 
 #[cfg(test)]

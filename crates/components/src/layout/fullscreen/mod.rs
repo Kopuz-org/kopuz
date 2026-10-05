@@ -11,24 +11,7 @@ use background::use_fullscreen_background;
 use config::AppConfig;
 use desktop::FullscreenDesktop;
 use dioxus::prelude::*;
-use hooks::use_player_controller::PlayerController;
 use lyrics::use_fullscreen_lyrics;
-
-fn display_order_items(
-    ctrl: &PlayerController,
-    queue: &Signal<Vec<api::TrackInfo>>,
-) -> Vec<api::TrackInfo> {
-    let q = queue.read();
-    if *ctrl.shuffle.read() {
-        ctrl.shuffle_order
-            .read()
-            .iter()
-            .filter_map(|&qi| q.get(qi).cloned())
-            .collect()
-    } else {
-        (0..q.len()).filter_map(|qi| q.get(qi).cloned()).collect()
-    }
-}
 
 #[component]
 pub fn Fullscreen(
@@ -50,12 +33,11 @@ pub fn Fullscreen(
         return rsx! { div {} };
     }
 
-    let ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
 
     let lyrics = use_fullscreen_lyrics();
     let (background_style, cover_background) = use_fullscreen_background(palette);
-    let items = display_order_items(&ctrl, &queue);
+    let items = queue.read().clone();
 
     if cfg!(target_os = "android") {
         rsx! {

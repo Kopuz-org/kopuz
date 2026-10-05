@@ -100,6 +100,7 @@ pub struct ExternalDevice {
 pub struct QueueSummary {
     pub rev: u64,
     pub length: u32,
+    /// Play-order position of the current track, as in `QueueSnapshot::position`.
     pub index: Option<u32>,
     pub shuffle: bool,
     pub loop_mode: LoopMode,
