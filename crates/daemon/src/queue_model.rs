@@ -338,9 +338,7 @@ impl QueueModel {
         }
     }
 
-    /// Drop every track from play-order position `from` on, so the model never
-    /// holds a track the queue no longer shows. History entries at or past
-    /// `from` pointed at what is gone and go with it.
+    /// Drop every track from play-order position `from` on, with the history entries that pointed there.
     fn drop_from(&mut self, from: usize) {
         if self.shuffle {
             self.repair_shuffle_order();
@@ -367,26 +365,20 @@ impl QueueModel {
         self.history.retain(|&position| position < from);
     }
 
-    /// Remove everything from play-order position `from` on. Returns whether
-    /// anything was removed.
+    /// Remove everything from play-order position `from` on; whether anything went.
     pub fn clear_from(&mut self, from: usize) -> bool {
         let had = self.items.len() > from;
         self.drop_from(from);
         had
     }
 
-    /// Swap everything from play-order position `from` on for `tracks`, in the
-    /// order given: under shuffle the permutation tail is the new tracks in
-    /// that order, not a reshuffle of them.
+    /// Swap everything from play-order position `from` on for `tracks`, kept in the order given.
     pub fn replace_from(&mut self, from: usize, tracks: Vec<Track>) {
         self.drop_from(from);
         self.add(tracks);
     }
 
-    /// Randomise the play order from position `from` on. Under shuffle that is
-    /// the permutation tail, so the unshuffled order is left alone; without
-    /// shuffle it reorders the queue itself, because there the queue is the
-    /// play order. History entries in the tail follow their tracks.
+    /// Randomise play order from `from` on: the permutation tail under shuffle, the queue itself without.
     pub fn shuffle_from(&mut self, from: usize) {
         use rand::seq::SliceRandom;
         if self.shuffle {
