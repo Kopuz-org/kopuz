@@ -9,7 +9,7 @@ use api::{ApiError, ApiEvent, ErrorCode, FavoritesView, JobKind, JobRef, Table};
 use server::sync::{SyncError, SyncReason, reconcile_favorites};
 use tokio::sync::Notify;
 
-use crate::jobs::JobRunner;
+use crate::jobs::{JobRunner, Trigger};
 use crate::session::SessionHandle;
 
 mod pull;
@@ -155,9 +155,13 @@ impl FavoritesService {
     /// Push what is pending, then import what the remote holds. Both halves
     /// are one job because a caller only ever wants "make these agree", and
     /// pushing after importing would fight the epoch sweep.
-    pub fn spawn_sync(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
+    pub fn spawn_sync(
+        self: &Arc<Self>,
+        runner: &JobRunner,
+        trigger: Trigger,
+    ) -> Result<JobRef, ApiError> {
         let service = self.clone();
-        runner.start(JobKind::FavoritesSync, move |ctx| async move {
+        runner.start_as(JobKind::FavoritesSync, trigger, move |ctx| async move {
             let source = service
                 .session
                 .config_watch()

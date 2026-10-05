@@ -610,7 +610,7 @@ impl UrlDownloadService {
 
         if failures.len() < tracks.len()
             && let Some((library, jobs)) = self.rescan.get()
-            && let Err(error) = library.spawn_scan(jobs)
+            && let Err(error) = library.spawn_scan(jobs, crate::jobs::Trigger::User)
         {
             tracing::debug!(%error, "no rescan after the download");
         }

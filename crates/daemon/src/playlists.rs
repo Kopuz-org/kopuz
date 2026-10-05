@@ -339,9 +339,10 @@ impl PlaylistService {
     pub fn spawn_sync(
         self: &Arc<Self>,
         runner: &crate::jobs::JobRunner,
+        trigger: crate::jobs::Trigger,
     ) -> Result<api::JobRef, ApiError> {
         let service = self.clone();
-        runner.start(api::JobKind::PlaylistSync, move |ctx| async move {
+        runner.start_as(api::JobKind::PlaylistSync, trigger, move |ctx| async move {
             let source = service.config().active_source;
             let result = service.sync(&ctx).await;
             if result.is_ok() && !ctx.cancelled() {
