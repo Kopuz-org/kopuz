@@ -265,7 +265,7 @@ impl ConfigService {
                     field.key
                 )));
             }
-            if api::DAEMON_OWNED_CONFIG_KEYS.contains(&field.key.as_str()) {
+            if config::DAEMON_OWNED_KEYS.contains(&field.key.as_str()) {
                 return Err(ApiError::invalid_input(format!(
                     "settings key is owned by the daemon: {}",
                     field.key
@@ -735,11 +735,11 @@ mod patch_tests {
                 .is_empty();
             assert_eq!(
                 kept,
-                api::DAEMON_OWNED_CONFIG_KEYS.contains(&key.as_str()),
+                config::DAEMON_OWNED_KEYS.contains(&key.as_str()),
                 "{key}"
             );
         }
-        let known: Vec<_> = api::DAEMON_OWNED_CONFIG_KEYS
+        let known: Vec<_> = config::DAEMON_OWNED_KEYS
             .iter()
             .filter(|key| !base.contains_key(**key))
             .collect();

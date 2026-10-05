@@ -35,6 +35,34 @@ pub struct RegistryEntry {
 pub const DEFAULT_REGISTRY_URL: &str =
     "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json";
 
+/// Keys (as serialized) the daemon owns, which `patch_config` refuses and a patching client must never send.
+pub const DAEMON_OWNED_KEYS: &[&str] = &[
+    "volume",
+    "auto_fetch_covers",
+    "cover_fetch_strategy",
+    "server",
+    "servers",
+    "active_source",
+    "local_sources",
+    "server_folders",
+    "musicbrainz_token",
+    "lastfm_api_key",
+    "lastfm_api_secret",
+    "lastfm_session_key",
+    "librefm_api_key",
+    "librefm_api_secret",
+    "librefm_session_key",
+    "offline_tracks",
+    "pinned_stations",
+    "spotify_browser",
+    "spotify_prefer_active_device",
+    "discord_presence",
+    "discord_presence_paused",
+    "discord_presence_source",
+    "ytdlp_output_dir",
+    "ytdlp_options",
+    "ytdlp_history",
+];
 pub fn default_radio_registries() -> Vec<RegistryEntry> {
     vec![RegistryEntry {
         url: DEFAULT_REGISTRY_URL.to_string(),

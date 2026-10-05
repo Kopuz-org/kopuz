@@ -85,8 +85,7 @@ fn patch_of(baseline: &config::AppConfig, local: &config::AppConfig) -> Vec<api:
     local
         .into_iter()
         .filter(|(key, value)| {
-            !api::DAEMON_OWNED_CONFIG_KEYS.contains(&key.as_str())
-                && baseline.get(key) != Some(value)
+            !config::DAEMON_OWNED_KEYS.contains(&key.as_str()) && baseline.get(key) != Some(value)
         })
         .map(|(key, value)| api::ConfigField {
             key,

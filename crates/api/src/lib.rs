@@ -80,35 +80,6 @@ pub struct ConfigField {
     pub json: String,
 }
 
-/// Keys (as serialized) the daemon owns, which `patch_config` refuses and a patching client must never send.
-pub const DAEMON_OWNED_CONFIG_KEYS: &[&str] = &[
-    "volume",
-    "auto_fetch_covers",
-    "cover_fetch_strategy",
-    "server",
-    "servers",
-    "active_source",
-    "local_sources",
-    "server_folders",
-    "musicbrainz_token",
-    "lastfm_api_key",
-    "lastfm_api_secret",
-    "lastfm_session_key",
-    "librefm_api_key",
-    "librefm_api_secret",
-    "librefm_session_key",
-    "offline_tracks",
-    "pinned_stations",
-    "spotify_browser",
-    "spotify_prefer_active_device",
-    "discord_presence",
-    "discord_presence_paused",
-    "discord_presence_source",
-    "ytdlp_output_dir",
-    "ytdlp_options",
-    "ytdlp_history",
-];
-
 /// What this build speaks: bump it with any wire change a mismatched peer would misread, never for an added field.
 pub const WIRE_REVISION: u32 = 2;
 
