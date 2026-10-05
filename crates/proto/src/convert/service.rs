@@ -57,6 +57,20 @@ pub fn config_view_from_proto(value: &ConfigView) -> api::ConfigView {
     }
 }
 
+pub fn config_field_to_proto(value: &api::ConfigField) -> ConfigField {
+    ConfigField {
+        key: value.key.clone(),
+        json: value.json.clone(),
+    }
+}
+
+pub fn config_field_from_proto(value: &ConfigField) -> api::ConfigField {
+    api::ConfigField {
+        key: value.key.clone(),
+        json: value.json.clone(),
+    }
+}
+
 pub fn daemon_status_to_proto(value: &api::DaemonStatus) -> DaemonStatus {
     DaemonStatus {
         version: value.version.clone(),
@@ -88,6 +102,28 @@ mod tests {
             daemon_status_from_proto(&daemon_status_to_proto(&status)),
             status
         );
+    }
+
+    #[test]
+    fn a_config_field_survives_the_wire() {
+        let field = api::ConfigField {
+            key: "theme".into(),
+            json: "\"nord\"".into(),
+        };
+        assert_eq!(
+            config_field_from_proto(&config_field_to_proto(&field)),
+            field
+        );
+    }
+
+    #[test]
+    fn a_config_view_keeps_its_revision() {
+        let view = api::ConfigView {
+            config: ::config::AppConfig::default(),
+            locked_keys: vec!["theme".into()],
+            revision: 7,
+        };
+        assert_eq!(config_view_from_proto(&config_view_to_proto(&view)), view);
     }
 
     /// A daemon too old to know the field sends nothing, which must not read as revision 1.

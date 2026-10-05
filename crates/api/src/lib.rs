@@ -67,6 +67,42 @@ pub struct ConfigView {
     pub revision: u64,
 }
 
+/// One top-level `AppConfig` key and its new value as JSON, for [`ConfigApi::patch_config`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfigField {
+    pub key: String,
+    pub json: String,
+}
+
+/// Keys (as serialized) the daemon owns, which `patch_config` refuses and a patching client must never send.
+pub const DAEMON_OWNED_CONFIG_KEYS: &[&str] = &[
+    "volume",
+    "auto_fetch_covers",
+    "cover_fetch_strategy",
+    "server",
+    "servers",
+    "active_source",
+    "local_sources",
+    "server_folders",
+    "musicbrainz_token",
+    "lastfm_api_key",
+    "lastfm_api_secret",
+    "lastfm_session_key",
+    "librefm_api_key",
+    "librefm_api_secret",
+    "librefm_session_key",
+    "offline_tracks",
+    "pinned_stations",
+    "spotify_browser",
+    "spotify_prefer_active_device",
+    "discord_presence",
+    "discord_presence_paused",
+    "discord_presence_source",
+    "ytdlp_output_dir",
+    "ytdlp_options",
+    "ytdlp_history",
+];
+
 /// What this build speaks: bump it with any wire change a mismatched peer would misread, never for an added field.
 pub const WIRE_REVISION: u32 = 1;
 
@@ -482,6 +518,14 @@ pub trait ConfigApi: Send + Sync {
     /// with `invalid_input`.
     async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError>;
 
+    /// Change only the named top-level keys, leaving every other key as the
+    /// daemon holds it, so a client with a stale copy cannot revert another
+    /// client's change. An unknown key, a daemon-owned key
+    /// ([`DAEMON_OWNED_CONFIG_KEYS`]), a value that does not fit its key, or a
+    /// locked key whose value would change refuses the whole patch with
+    /// `invalid_input`.
+    async fn patch_config(&self, fields: Vec<ConfigField>) -> Result<ConfigView, ApiError>;
+
     /// Hear an equalizer setting without keeping it. The engine applies it
     /// live; nothing is written, so cancelling a preview is doing nothing.
     async fn preview_equalizer(&self, equalizer: config::EqualizerSettings)
@@ -574,6 +618,9 @@ mod handshake_tests {
             unreachable!()
         }
         async fn set_config(&self, _: config::AppConfig) -> Result<ConfigView, ApiError> {
+            unreachable!()
+        }
+        async fn patch_config(&self, _: Vec<ConfigField>) -> Result<ConfigView, ApiError> {
             unreachable!()
         }
         async fn preview_equalizer(&self, _: config::EqualizerSettings) -> Result<(), ApiError> {

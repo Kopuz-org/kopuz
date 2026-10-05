@@ -103,6 +103,7 @@ service Kopuz {
   rpc GetDownloadStatuses(GetDownloadStatusesRequest) returns (DownloadStatusList);
   rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
   rpc SetConfig(SetConfigRequest) returns (ConfigView);
+  rpc PatchConfig(PatchConfigRequest) returns (ConfigView);
   rpc PreviewEqualizer(EqualizerSettings) returns (Unit);
 
   rpc GetSources(GetSourcesRequest) returns (SourceList);
@@ -240,6 +241,8 @@ message JobFinished {
 
 message ConfigChanged {
   repeated string keys = 1;
+  // The ConfigView.revision this change produced.
+  uint64 revision = 2;
 }
 
 message SourceStatusEvent {
@@ -1357,6 +1360,17 @@ message ConfigView {
 // want, send it back. A locked key whose value actually differs is refused.
 message SetConfigRequest {
   Config config = 1;
+}
+
+// A top-level AppConfig key and its new value as JSON.
+message ConfigField {
+  string key = 1;
+  string json = 2;
+}
+
+// Changes only the named keys; every other key stays as the daemon holds it.
+message PatchConfigRequest {
+  repeated ConfigField fields = 1;
 }
 
 

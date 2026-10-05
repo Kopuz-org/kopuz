@@ -108,6 +108,7 @@ enum SessionCmd {
     SetConfig {
         config: Box<config::AppConfig>,
         changed: Vec<String>,
+        revision: u64,
     },
     QueueUnread,
     PreviewEqualizer(config::EqualizerSettings),
@@ -407,10 +408,16 @@ impl SessionHandle {
         let _ = self.cmd_tx.send(SessionCmd::PreviewEqualizer(equalizer));
     }
 
-    pub(crate) fn set_config(&self, config: config::AppConfig, changed: Vec<String>) {
+    pub(crate) fn set_config(
+        &self,
+        config: config::AppConfig,
+        changed: Vec<String>,
+        revision: u64,
+    ) {
         let _ = self.cmd_tx.send(SessionCmd::SetConfig {
             config: Box::new(config),
             changed,
+            revision,
         });
     }
 
@@ -600,11 +607,15 @@ impl Session {
                 let result = self.handle_restore(*snapshot, state_tx);
                 let _ = reply.send(result);
             }
-            SessionCmd::SetConfig { config, changed } => {
+            SessionCmd::SetConfig {
+                config,
+                changed,
+                revision,
+            } => {
                 if config.active_source != self.config.active_source {
                     self.swap_queue(&config, state_tx).await;
                 }
-                self.apply_config(*config, changed, state_tx);
+                self.apply_config(*config, changed, revision, state_tx);
             }
             SessionCmd::QueueUnread => self.queue_unread = true,
             SessionCmd::PreviewEqualizer(equalizer) => self.player.set_equalizer(equalizer),
@@ -1137,6 +1148,7 @@ impl Session {
         &mut self,
         config: config::AppConfig,
         changed: Vec<String>,
+        revision: u64,
         state_tx: &watch::Sender<PlayerState>,
     ) {
         for key in &changed {
@@ -1158,7 +1170,10 @@ impl Session {
         }
         self.config = config;
         let _ = self.config_tx.send(self.config.clone());
-        self.emit(ApiEvent::ConfigChanged { keys: changed });
+        self.emit(ApiEvent::ConfigChanged {
+            keys: changed,
+            revision,
+        });
         self.publish(state_tx, false);
     }
 

@@ -475,6 +475,81 @@ async fn config_view_and_set_agree_across_transports() {
     assert!(written.config.servers.is_empty());
 }
 
+fn config_field(key: &str, json: &str) -> api::ConfigField {
+    api::ConfigField {
+        key: key.into(),
+        json: json.into(),
+    }
+}
+
+#[tokio::test]
+async fn patch_config_touches_only_named_keys_across_transports() {
+    let pair = spawn_pair().await;
+    let mut events = pair.session.subscribe();
+    let stale = pair.wire.config().await.expect("wire view");
+
+    let other = pair
+        .local
+        .patch_config(vec![config_field("crossfade_seconds", "7")])
+        .await
+        .expect("local patch");
+    assert_eq!(other.config.crossfade_seconds, 7);
+    assert!(other.revision > stale.revision);
+
+    // The wire client never saw the crossfade change; its patch must not undo it.
+    let written = pair
+        .wire
+        .patch_config(vec![
+            config_field("theme", "\"nord\""),
+            config_field("offline_quality", "\"Kbps160\""),
+        ])
+        .await
+        .expect("wire patch");
+    assert_eq!(written.config.theme, "nord");
+    assert_eq!(written.config.crossfade_seconds, 7);
+    assert_eq!(
+        written.config.offline_quality,
+        config::OfflineQuality::Kbps160
+    );
+    assert!(written.revision > other.revision);
+    assert_eq!(pair.local.config().await.expect("local view"), written);
+    assert_eq!(pair.tcp.config().await.expect("tcp view"), written);
+
+    let heard = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(ApiEvent::ConfigChanged { keys, revision }) = events.recv().await
+                && revision == written.revision
+            {
+                break keys;
+            }
+        }
+    })
+    .await
+    .expect("config-changed event carries the view revision");
+    assert!(heard.contains(&"theme".to_string()));
+
+    for refused in [
+        config_field("no_such_key", "1"),
+        config_field("volume", "0.5"),
+        config_field("lastfm_session_key", "\"x\""),
+        config_field("theme", "{"),
+    ] {
+        let local = pair
+            .local
+            .patch_config(vec![refused.clone()])
+            .await
+            .expect_err("local refuses");
+        let wire = pair
+            .wire
+            .patch_config(vec![refused.clone()])
+            .await
+            .expect_err("wire refuses");
+        assert_eq!(local.code, api::ErrorCode::InvalidInput, "{}", refused.key);
+        assert_eq!(wire.code, local.code, "{}", refused.key);
+    }
+    assert_eq!(pair.local.config().await.expect("view"), written);
+}
+
 #[tokio::test]
 async fn favorites_round_trip_across_transports() {
     let pair = spawn_pair().await;

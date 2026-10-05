@@ -81,7 +81,7 @@ impl ConfigService {
                 &held.config,
             ))));
         }
-        session.set_config(held.config.clone(), changed);
+        session.set_config(held.config.clone(), changed, held.revision);
     }
 
     async fn save(&self, config: &config::AppConfig) -> Result<(), ApiError> {
@@ -229,23 +229,71 @@ impl ConfigService {
         if changed.is_empty() {
             return Ok((self.view_of(&held), held.config.clone(), Vec::new()));
         }
+        self.refuse_locked(&changed)?;
+
+        self.save(&updated).await?;
+        held.config = updated.clone();
+        self.publish(&mut held, changed.clone());
+        Ok((self.view_of(&held), updated, changed))
+    }
+
+    fn refuse_locked(&self, changed: &[String]) -> Result<(), ApiError> {
         let locked = self.locked_keys();
         let refused: Vec<&str> = changed
             .iter()
             .filter(|key| locked.contains(*key))
             .map(String::as_str)
             .collect();
-        if !refused.is_empty() {
-            return Err(ApiError::invalid_input(format!(
+        if refused.is_empty() {
+            Ok(())
+        } else {
+            Err(ApiError::invalid_input(format!(
                 "keys locked by a managed settings file: {}",
                 refused.join(", ")
-            )));
+            )))
         }
+    }
+
+    /// Apply only the named keys onto the held config, so a writer with a stale
+    /// copy cannot revert a key it never touched. The whole patch is refused if
+    /// any key is unknown, daemon-owned or locked (a locked key is refused only
+    /// when its value differs, as in [`Self::set`]), or any value does not fit.
+    pub async fn patch(&self, fields: Vec<api::ConfigField>) -> Result<ConfigView, ApiError> {
+        let mut held = self.current.write().await;
+        let mut map = config_map(&held.config)?;
+        for field in fields {
+            if !map.contains_key(&field.key) {
+                return Err(ApiError::invalid_input(format!(
+                    "unknown settings key: {}",
+                    field.key
+                )));
+            }
+            if api::DAEMON_OWNED_CONFIG_KEYS.contains(&field.key.as_str()) {
+                return Err(ApiError::invalid_input(format!(
+                    "settings key is owned by the daemon: {}",
+                    field.key
+                )));
+            }
+            let value = serde_json::from_str(&field.json).map_err(|error| {
+                ApiError::invalid_input(format!("settings value for {}: {error}", field.key))
+            })?;
+            map.insert(field.key, value);
+        }
+        let patched: config::AppConfig = serde_json::from_value(serde_json::Value::Object(map))
+            .map_err(|error| ApiError::invalid_input(format!("settings value: {error}")))?;
+        // A lossy JSON round trip of a key nobody named must not leak into the save.
+        let updated = with_daemon_owned_fields(patched, &held.config);
+
+        let changed = changed_keys(&held.config, &updated)?;
+        if changed.is_empty() {
+            return Ok(self.view_of(&held));
+        }
+        self.refuse_locked(&changed)?;
 
         self.save(&updated).await?;
-        held.config = updated.clone();
-        self.publish(&mut held, changed.clone());
-        Ok((self.view_of(&held), updated, changed))
+        held.config = updated;
+        self.publish(&mut held, changed);
+        Ok(self.view_of(&held))
     }
 
     /// Persist the engine's own volume. It is not a caller-set key -- the
@@ -344,6 +392,16 @@ fn stripped(config: &config::AppConfig) -> config::AppConfig {
     view
 }
 
+fn config_map(
+    config: &config::AppConfig,
+) -> Result<serde_json::Map<String, serde_json::Value>, ApiError> {
+    match serde_json::to_value(config) {
+        Ok(serde_json::Value::Object(map)) => Ok(map),
+        Ok(_) => Err(ApiError::internal("config is not a JSON object")),
+        Err(error) => Err(ApiError::internal(error.to_string())),
+    }
+}
+
 /// Which top-level keys differ. Serialization is an implementation detail
 /// here -- it never reaches the wire -- and it keeps this from being 78
 /// hand-written comparisons that drift the moment a field is added.
@@ -351,14 +409,7 @@ fn changed_keys(
     current: &config::AppConfig,
     updated: &config::AppConfig,
 ) -> Result<Vec<String>, ApiError> {
-    let to_map = |config: &config::AppConfig| -> Result<serde_json::Map<_, _>, ApiError> {
-        match serde_json::to_value(config) {
-            Ok(serde_json::Value::Object(map)) => Ok(map),
-            Ok(_) => Err(ApiError::internal("config is not a JSON object")),
-            Err(error) => Err(ApiError::internal(error.to_string())),
-        }
-    };
-    let (before, after) = (to_map(current)?, to_map(updated)?);
+    let (before, after) = (config_map(current)?, config_map(updated)?);
     Ok(after
         .into_iter()
         .filter(|(key, value)| before.get(key) != Some(value))
@@ -566,5 +617,162 @@ mod tests {
             config::FetchStrategy::LastFmOnly
         );
         assert_eq!(changed, vec!["theme".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod patch_tests {
+    use super::*;
+
+    fn field(key: &str, json: &str) -> api::ConfigField {
+        api::ConfigField {
+            key: key.into(),
+            json: json.into(),
+        }
+    }
+
+    async fn service(dir: &tempfile::TempDir) -> ConfigService {
+        let database = db::init(&dir.path().join("patch.db")).await.expect("db");
+        ConfigService::new(
+            database,
+            dir.path().join("settings.toml"),
+            config::AppConfig::default(),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_patch_of_one_key_leaves_a_key_another_writer_changed() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let service = service(&dir).await;
+        let stale = service.view().await.expect("view");
+
+        let mut other = stale.config.clone();
+        other.crossfade_seconds = 9;
+        service.set(other).await.expect("another writer");
+
+        let view = service
+            .patch(vec![field("theme", "\"nord\"")])
+            .await
+            .expect("patch");
+        assert_eq!(view.config.theme, "nord");
+        assert_eq!(view.config.crossfade_seconds, 9);
+        assert!(view.revision > stale.revision);
+        let stored = service.snapshot().await;
+        assert_eq!(
+            (stored.theme.as_str(), stored.crossfade_seconds),
+            ("nord", 9)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_patch_persists_and_an_unchanged_one_does_not_bump_the_revision() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let service = service(&dir).await;
+        let before = service.view().await.expect("view");
+
+        let same = serde_json::to_string(&before.config.hero_height).expect("json");
+        let view = service
+            .patch(vec![field("hero_height", &same)])
+            .await
+            .expect("no-op patch");
+        assert_eq!(view.revision, before.revision);
+
+        let view = service
+            .patch(vec![field("hero_height", "321")])
+            .await
+            .expect("patch");
+        assert_eq!(view.revision, before.revision + 1);
+        let reloaded = service.db.load_config().await.expect("load").expect("some");
+        assert_eq!(reloaded.hero_height, 321);
+    }
+
+    #[tokio::test]
+    async fn unknown_daemon_owned_and_misfit_keys_are_refused_whole() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let service = service(&dir).await;
+        let before = service.view().await.expect("view");
+
+        for refused in [
+            field("no_such_key", "1"),
+            field("volume", "0.5"),
+            field("lastfm_session_key", "\"stolen\""),
+            field("servers", "[]"),
+            field("hero_height", "\"tall\""),
+            field("hero_height", "not json"),
+        ] {
+            let err = service
+                .patch(vec![field("theme", "\"nord\""), refused.clone()])
+                .await
+                .expect_err("refused");
+            assert_eq!(err.code, api::ErrorCode::InvalidInput, "{}", refused.key);
+        }
+
+        let after = service.view().await.expect("view");
+        assert_eq!(
+            after, before,
+            "a refused patch changes nothing, not even its good keys"
+        );
+    }
+
+    #[test]
+    fn the_published_daemon_owned_keys_match_what_a_whole_write_keeps() {
+        let current = config::AppConfig::default();
+        let base = config_map(&current).expect("map");
+        for (key, value) in &base {
+            let perturbed = match value {
+                serde_json::Value::Bool(flag) => serde_json::Value::Bool(!flag),
+                serde_json::Value::Number(number) => match number.as_u64() {
+                    Some(whole) => serde_json::json!(whole + 1),
+                    None => serde_json::json!(number.as_f64().unwrap_or_default() + 1.0),
+                },
+                serde_json::Value::String(text) => serde_json::json!(format!("{text}x")),
+                _ => continue,
+            };
+            let mut map = base.clone();
+            map.insert(key.clone(), perturbed);
+            let Ok(incoming) = serde_json::from_value(serde_json::Value::Object(map)) else {
+                continue;
+            };
+            let kept = changed_keys(&current, &with_daemon_owned_fields(incoming, &current))
+                .expect("keys")
+                .is_empty();
+            assert_eq!(
+                kept,
+                api::DAEMON_OWNED_CONFIG_KEYS.contains(&key.as_str()),
+                "{key}"
+            );
+        }
+        let known: Vec<_> = api::DAEMON_OWNED_CONFIG_KEYS
+            .iter()
+            .filter(|key| !base.contains_key(**key))
+            .collect();
+        assert!(known.is_empty(), "not AppConfig keys: {known:?}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_patch_of_a_locked_key_is_refused_but_its_neighbours_are_not() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let settings = dir.path().join("settings.toml");
+        std::fs::write(&settings, "theme = \"pinned\"\n").expect("write settings");
+        std::fs::set_permissions(&settings, {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::Permissions::from_mode(0o444)
+        })
+        .expect("chmod");
+        let database = db::init(&dir.path().join("locked.db")).await.expect("db");
+        let service = ConfigService::new(database, settings, config::AppConfig::default());
+
+        let err = service
+            .patch(vec![field("theme", "\"other\"")])
+            .await
+            .expect_err("locked");
+        assert_eq!(err.code, api::ErrorCode::InvalidInput);
+
+        let view = service
+            .patch(vec![field("crossfade_seconds", "6")])
+            .await
+            .expect("neighbour");
+        assert_eq!(view.config.crossfade_seconds, 6);
     }
 }

@@ -50,8 +50,11 @@ pub fn event_to_proto(value: &api::ApiEvent) -> Event {
             ok: *ok,
             error: error.as_ref().map(error_body_to_proto),
         }),
-        api::ApiEvent::ConfigChanged { keys } => {
-            event::Kind::ConfigChanged(ConfigChanged { keys: keys.clone() })
+        api::ApiEvent::ConfigChanged { keys, revision } => {
+            event::Kind::ConfigChanged(ConfigChanged {
+                keys: keys.clone(),
+                revision: *revision,
+            })
         }
         api::ApiEvent::SourceStatus { source, state } => {
             event::Kind::SourceStatus(SourceStatusEvent {
@@ -112,6 +115,7 @@ pub fn event_from_proto(value: &Event) -> Option<api::ApiEvent> {
         },
         event::Kind::ConfigChanged(changed) => api::ApiEvent::ConfigChanged {
             keys: changed.keys.clone(),
+            revision: changed.revision,
         },
         event::Kind::SourceStatus(status) => api::ApiEvent::SourceStatus {
             source: status.source.clone(),
@@ -176,6 +180,7 @@ mod tests {
             },
             api::ApiEvent::ConfigChanged {
                 keys: vec!["volume".into()],
+                revision: 9,
             },
             api::ApiEvent::SourceStatus {
                 source: "jellyfin".into(),

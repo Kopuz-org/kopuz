@@ -567,6 +567,18 @@ impl api::ConfigApi for LocalApi {
         Ok(view)
     }
 
+    async fn patch_config(
+        &self,
+        fields: Vec<api::ConfigField>,
+    ) -> Result<api::ConfigView, ApiError> {
+        let Some(service) = &self.config else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without a config service",
+            ));
+        };
+        service.patch(fields).await
+    }
+
     async fn preview_equalizer(
         &self,
         equalizer: config::EqualizerSettings,

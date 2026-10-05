@@ -1084,6 +1084,20 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::config_view_to_proto(&view)))
     }
 
+    async fn patch_config(
+        &self,
+        request: Request<proto::PatchConfigRequest>,
+    ) -> Result<Response<proto::ConfigView>, Status> {
+        let fields = request
+            .get_ref()
+            .fields
+            .iter()
+            .map(convert::config_field_from_proto)
+            .collect();
+        let view = self.0.api.patch_config(fields).await.map_err(failed)?;
+        Ok(Response::new(convert::config_view_to_proto(&view)))
+    }
+
     async fn preview_equalizer(
         &self,
         request: Request<proto::EqualizerSettings>,

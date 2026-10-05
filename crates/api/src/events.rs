@@ -95,6 +95,8 @@ pub enum ApiEvent {
     },
     ConfigChanged {
         keys: Vec<String>,
+        /// The `ConfigView.revision` this change produced.
+        revision: u64,
     },
     SourceStatus {
         source: String,

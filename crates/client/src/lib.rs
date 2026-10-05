@@ -720,6 +720,17 @@ impl api::ConfigApi for GrpcApi {
         Ok(convert::config_view_from_proto(view.get_ref()))
     }
 
+    async fn patch_config(&self, fields: Vec<api::ConfigField>) -> Result<ConfigView, ApiError> {
+        let view = self
+            .client()
+            .patch_config(Request::new(proto::PatchConfigRequest {
+                fields: fields.iter().map(convert::config_field_to_proto).collect(),
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::config_view_from_proto(view.get_ref()))
+    }
+
     async fn preview_equalizer(
         &self,
         equalizer: config::EqualizerSettings,

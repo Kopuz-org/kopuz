@@ -1535,13 +1535,13 @@ async fn switching_sources_parks_and_resumes_each_queue() {
     wait_committed(&api).await;
     let on_a_titles = queue_titles(&api).await;
 
-    session.set_config(on_b.clone(), vec!["active_source".into()]);
+    session.set_config(on_b.clone(), vec!["active_source".into()], 0);
     session.persist_now().await;
     assert!(queue_titles(&api).await.is_empty(), "B was never visited");
     api.set_queue(replace(&["b-0"])).await.expect("set queue");
     wait_committed(&api).await;
 
-    session.set_config(on_a.clone(), vec!["active_source".into()]);
+    session.set_config(on_a.clone(), vec!["active_source".into()], 0);
     session.persist_now().await;
     assert_eq!(
         queue_titles(&api).await,
@@ -1549,7 +1549,7 @@ async fn switching_sources_parks_and_resumes_each_queue() {
         "A resumes its own queue"
     );
 
-    session.set_config(on_b, vec!["active_source".into()]);
+    session.set_config(on_b, vec!["active_source".into()], 0);
     session.persist_now().await;
     assert_eq!(queue_titles(&api).await.len(), 1, "and B its own");
 }
@@ -1601,6 +1601,7 @@ async fn leaving_a_deleted_source_parks_nothing() {
     session.set_config(
         deleted,
         vec!["local_sources".into(), "active_source".into()],
+        0,
     );
     session.persist_now().await;
 
@@ -1886,7 +1887,7 @@ async fn switching_source_releases_the_integration_that_owned_playback() {
     harness
         .api
         .session
-        .set_config(elsewhere, vec!["active_source".into()]);
+        .set_config(elsewhere, vec!["active_source".into()], 0);
     let state = wait_state(&harness.api, "playback handed back", |state| {
         state.external.is_none()
     })
@@ -1975,7 +1976,7 @@ async fn an_unreadable_queue_is_not_saved_over() {
             .count()
     };
 
-    session.set_config(on_b.clone(), vec!["active_source".into()]);
+    session.set_config(on_b.clone(), vec!["active_source".into()], 0);
     session.persist_now().await;
     assert!(queue_titles(&api).await.is_empty());
     api.player_command(PlayerCommand::SetVolume { volume: 0.3 })
@@ -1988,11 +1989,11 @@ async fn an_unreadable_queue_is_not_saved_over() {
     .await
     .expect("a shuffle toggle on nothing builds no queue");
     session.persist_now().await;
-    session.set_config(on_a, vec!["active_source".into()]);
+    session.set_config(on_a, vec!["active_source".into()], 0);
     session.persist_now().await;
     assert_eq!(saves_of_b(), 0, "nothing was saved over B's queue");
 
-    session.set_config(on_b, vec!["active_source".into()]);
+    session.set_config(on_b, vec!["active_source".into()], 0);
     session.persist_now().await;
     api.set_queue(replace(&["b-new"])).await.expect("set queue");
     wait_committed(&api).await;
