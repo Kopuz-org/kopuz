@@ -1,11 +1,5 @@
-//! The single track-actions menu.
-//!
-//! Every surface that shows a track (library rows, the queue, the player bar,
-//! home cards) opens this one component, so the action set, ordering and
-//! wording stay identical wherever a track appears. A surface passes handlers
-//! only for the actions it can perform; everything it omits is left out of the
-//! menu rather than shown disabled, because a surface never gains the ability
-//! mid-session.
+//! Shared track actions for rows, the queue, player bars, and home cards.
+//! Optional handlers enable actions owned by the calling surface.
 
 use crate::NavigationController;
 use crate::dots_menu::{DotsMenu, MenuAction};
@@ -101,8 +95,6 @@ pub fn TrackActionsMenu(props: TrackActionsMenuProps) -> Element {
     let on_start_radio = track_radio_handler(props.track.key.clone());
     let is_open = props.is_open.unwrap_or_else(|| *local_open.read());
 
-    // Handlers are hoisted out of `props` so the rsx closures capture Copy
-    // values instead of the whole (non-Copy) props struct.
     let on_open = props.on_open;
     let on_close = props.on_close;
     let on_add_to_playlist = props.on_add_to_playlist;
@@ -178,8 +170,6 @@ pub fn TrackActionsMenu(props: TrackActionsMenuProps) -> Element {
         ));
     }
 
-    // `on_download` is only wired by sources that support downloads, so its
-    // presence is the gate: no separate capability check needed here.
     if on_download.is_some() {
         let action = if props.is_downloading {
             MenuAction::new(i18n::t("downloading"), "fa-solid fa-spinner fa-spin")
@@ -203,8 +193,6 @@ pub fn TrackActionsMenu(props: TrackActionsMenuProps) -> Element {
         ));
     }
 
-    // Only the local source can delete a file, so on every remote source this
-    // entry could be shown but never do anything.
     if on_delete.is_some() && capabilities.delete_from_disk {
         entries.push((
             Action::Delete,
@@ -212,8 +200,7 @@ pub fn TrackActionsMenu(props: TrackActionsMenuProps) -> Element {
         ));
     }
 
-    let dispatch_entries: Vec<Action> = entries.iter().map(|(action, _)| *action).collect();
-    let actions: Vec<MenuAction> = entries.into_iter().map(|(_, item)| item).collect();
+    let (dispatch_entries, actions): (Vec<Action>, Vec<MenuAction>) = entries.into_iter().unzip();
 
     let dispatch_track = props.track.clone();
     let add_key = props.track.key.clone();
@@ -272,9 +259,6 @@ pub fn TrackActionsMenu(props: TrackActionsMenuProps) -> Element {
                     }
                     Action::GoToAlbum => nav_ctrl.navigate_to_album(track.album_id.clone()),
                     Action::Download => {
-                        // "Downloading..." is a status row, not an action. The
-                        // queue discards a repeat request, but the menu should
-                        // not be leaning on that to stay correct.
                         if !is_downloading
                             && let Some(handler) = on_download
                         {

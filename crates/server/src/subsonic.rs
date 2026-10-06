@@ -915,7 +915,7 @@ mod tests {
     #[test]
     fn a_song_without_the_object_reports_nothing() {
         let song: SubsonicSong = serde_json::from_str(r#"{"id": "1", "title": "T"}"#).unwrap();
-        assert!(song.replay_gain_info().is_empty());
+        assert_eq!(song.replay_gain_info(), config::ReplayGainInfo::default());
     }
 
     /// Captured from Navidrome 0.63.2, trimmed to the fields this crate reads.

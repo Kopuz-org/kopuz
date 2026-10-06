@@ -56,7 +56,6 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
     const ITEM_HEIGHT: f64 = 60.0;
 
     let mut total_rows = use_signal(|| 0_usize);
-    // One open menu at a time: rows are a loop, so per-row hooks are not an option.
     let mut active_menu_track = use_signal(|| None::<String>);
     let page = use_memo(move || {
         let info = components::virtual_scroll::use_virtual_scroll(
