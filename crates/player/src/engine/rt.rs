@@ -293,8 +293,6 @@ fn apply_gain(samples: &mut [f32], gain: f32) {
         }
         return;
     }
-    // A boost can push peaks past full scale, and nothing downstream clamps
-    // unless the EQ is on, so round them off instead of letting the device clip.
     for sample in samples.iter_mut() {
         *sample = soft_limit(*sample * gain);
     }

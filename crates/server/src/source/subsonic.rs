@@ -29,12 +29,7 @@ impl SubsonicSource {
     }
 }
 
-/// Convert a Subsonic song into a `Track`, resolving its own cover and album
-/// instead of a preloaded one. Shared by playlist entries and radio results,
-/// where each song can belong to a different album.
-/// The artists a song credits. An OpenSubsonic server lists them one by one, so
-/// a collaboration files under each artist; a plain Subsonic server only names
-/// the joined `billed` string, which stays one credit.
+/// Use OpenSubsonic's individual artist credits, falling back to the billed name.
 fn credits_of(song: &crate::subsonic::SubsonicSong, billed: &str) -> Vec<reader::ArtistCredit> {
     let listed: Vec<reader::ArtistCredit> = song
         .artists
@@ -54,6 +49,7 @@ fn credits_of(song: &crate::subsonic::SubsonicSong, billed: &str) -> Vec<reader:
     }
 }
 
+/// Convert a playlist or radio song, resolving its own cover and album.
 fn song_to_track(
     client: &SubsonicClient,
     service: MusicService,

@@ -303,8 +303,6 @@ async fn replay_gain_round_trips_and_clears() {
         .unwrap();
     assert_eq!(stored[0].replay_gain, track.replay_gain);
 
-    // A re-sync from a server that stopped reporting gain must clear the row,
-    // not leave the old values to level a re-encoded file.
     track.replay_gain = config::ReplayGainInfo::default();
     db.upsert_tracks(&Source::default(), std::slice::from_ref(&track))
         .await
@@ -319,8 +317,7 @@ async fn replay_gain_round_trips_and_clears() {
         )
         .await
         .unwrap();
-    assert!(stored[0].replay_gain.is_empty());
-    assert_eq!(stored[0].replay_gain.track_peak, None);
+    assert_eq!(stored[0].replay_gain, config::ReplayGainInfo::default());
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

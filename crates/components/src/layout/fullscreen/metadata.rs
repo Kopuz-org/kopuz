@@ -14,7 +14,6 @@ pub(crate) fn TrackMetadata(
 ) -> Element {
     let ctrl = use_context::<PlayerController>();
     let mut track_menu_open = use_signal(|| false);
-    // A menu left open across a track change would act on the new track.
     let menu_track_key = use_memo(move || {
         ctrl.current_track_snapshot
             .read()
