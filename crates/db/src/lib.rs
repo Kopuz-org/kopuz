@@ -57,6 +57,8 @@ pub struct QueueSnapshot {
     pub progress_secs: u64,
     pub shuffle_order: Vec<usize>,
     pub shuffle_enabled: bool,
+    /// What the queue was built from, opaque here: the daemon encodes and decodes it.
+    pub origin: Option<String>,
 }
 
 /// What the lyrics cache holds for a key: the words, or a miss and when it was recorded.
@@ -99,6 +101,13 @@ pub struct TrackFilter {
     /// Matched against the local favorites mirror, which every source keeps
     /// under its own `source.as_str()` key.
     pub favorite: Option<bool>,
+    /// Restrict to tracks with a downloaded copy (`Some(true)`) or without one (`Some(false)`).
+    pub downloaded: Option<bool>,
+    /// Inclusive bounds on the year of the track's album; a track whose album has no year matches neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Flip every term of `sort`, so the listing runs in exactly the opposite order.
+    pub reverse: bool,
 }
 
 impl TrackFilter {
@@ -108,6 +117,68 @@ impl TrackFilter {
             ..Default::default()
         }
     }
+}
+
+/// A window of a listing, with how many rows the whole filtered set holds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Listing<T> {
+    pub total: u32,
+    pub rows: Vec<T>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlbumSortField {
+    Title,
+    Artist,
+    Year,
+    Genre,
+    /// When the album's newest track was added, on the order [`TrackSort::DateAdded`] uses.
+    RecentlyAdded,
+    TrackCount,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AlbumSort {
+    pub field: AlbumSortField,
+    pub descending: bool,
+}
+
+/// What an album listing selects; filter and order run in SQL, so `total` counts the filtered set.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AlbumQuery {
+    pub source: Source,
+    /// Case-insensitive (ASCII) match on the title or the billed artist's text.
+    pub search: String,
+    pub genre: Option<String>,
+    /// Inclusive bounds; an album with no year matches neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Only albums billed to this artist, by key.
+    pub artist_key: Option<String>,
+    /// The first criterion decides, the rest break ties; artist then title settle what is left.
+    pub sort: Vec<AlbumSort>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtistSortField {
+    Name,
+    TrackCount,
+    AlbumCount,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ArtistSort {
+    pub field: ArtistSortField,
+    pub descending: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ArtistQuery {
+    pub source: Source,
+    /// Case-insensitive (ASCII) match on the artist's name.
+    pub search: String,
+    /// The first criterion decides, the rest break ties; name then key settle what is left.
+    pub sort: Vec<ArtistSort>,
 }
 
 /// Errors surfaced by the storage layer. String-wrapped so the type is identical
@@ -158,6 +229,8 @@ pub struct ArtistRow {
     pub source_id: Option<String>,
     pub name: String,
     pub tracks: u32,
+    /// The albums billed to this artist.
+    pub albums: u32,
 }
 
 /// Per-artist images: `(overrides, photos)`. `overrides` are user-set custom
@@ -278,6 +351,13 @@ pub trait ReadStore: Send + Sync {
     /// Every artist a track of the source credits, A→Z.
     async fn artists(&self, source: &Source) -> Result<Vec<ArtistRow>, DbError>;
 
+    /// One window of the artists a track of the source credits, filtered and sorted in SQL.
+    async fn artists_page(
+        &self,
+        query: &ArtistQuery,
+        page: Page,
+    ) -> Result<Listing<ArtistRow>, DbError>;
+
     /// One album cover per credited artist: what an artist with no photo renders.
     async fn artist_album_covers(
         &self,
@@ -306,6 +386,13 @@ pub trait ReadStore: Send + Sync {
 
     /// All albums for a source, ordered by artist then title.
     async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
+
+    /// One window of an album listing, filtered and sorted in SQL.
+    async fn albums_page(
+        &self,
+        query: &AlbumQuery,
+        page: Page,
+    ) -> Result<Listing<reader::Album>, DbError>;
 
     /// At most `limit` albums for a source, most recently added first, on the
     /// same order as [`TrackSort::DateAdded`]. It is its own query because
@@ -370,6 +457,9 @@ pub trait ReadStore: Send + Sync {
 
     /// The whole offline scrobble backlog, oldest listen first (drain order).
     async fn scrobble_queue_all(&self) -> Result<Vec<QueuedScrobbleRow>, DbError>;
+
+    /// One frontend's stored preferences as `(key, value)`, key-ordered. The values are opaque to the daemon.
+    async fn frontend_prefs(&self, frontend: &str) -> Result<Vec<(String, String)>, DbError>;
 }
 
 /// The persistence API: every mutation plus admin/dev ops, layered on top of the
@@ -557,6 +647,13 @@ pub trait Storage: ReadStore {
 
     /// Pin (`Some` manifest) a station after the others, or unpin it (`None`).
     async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError>;
+
+    /// Set (`Some`) or delete (`None`) a frontend's preferences in one transaction; answers the keys whose stored value changed.
+    async fn set_frontend_prefs(
+        &self,
+        frontend: &str,
+        entries: &[(String, Option<String>)],
+    ) -> Result<Vec<String>, DbError>;
 
     /// Store a lyrics lookup's conclusion; `None` records a miss stamped now.
     async fn cache_lyrics(

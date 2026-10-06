@@ -160,6 +160,16 @@ impl Kopuz for KopuzGrpc {
         .await
     }
 
+    async fn set_muted(
+        &self,
+        request: Request<proto::SetMuted>,
+    ) -> Result<Response<proto::MutationResult>, Status> {
+        self.player_mutation(api::PlayerCommand::SetMuted {
+            muted: request.get_ref().muted,
+        })
+        .await
+    }
+
     async fn set_mode(
         &self,
         request: Request<proto::SetMode>,
@@ -254,10 +264,16 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_albums(
         &self,
-        request: Request<proto::Page>,
+        request: Request<proto::AlbumsRequest>,
     ) -> Result<Response<proto::AlbumPage>, Status> {
-        let page = convert::page_from_proto(Some(request.get_ref()));
-        let albums = self.0.api.albums(page).await.map_err(failed)?;
+        let request = request.get_ref();
+        let query = request
+            .query
+            .as_ref()
+            .map(convert::album_query_from_proto)
+            .unwrap_or_default();
+        let page = convert::page_from_proto(request.page.as_ref());
+        let albums = self.0.api.albums(query, page).await.map_err(failed)?;
         Ok(Response::new(convert::album_page_to_proto(&albums)))
     }
 
@@ -307,10 +323,16 @@ impl Kopuz for KopuzGrpc {
 
     async fn get_artists(
         &self,
-        request: Request<proto::Page>,
+        request: Request<proto::ArtistsRequest>,
     ) -> Result<Response<proto::ArtistPage>, Status> {
-        let page = convert::page_from_proto(Some(request.get_ref()));
-        let artists = self.0.api.artists(page).await.map_err(failed)?;
+        let request = request.get_ref();
+        let query = request
+            .query
+            .as_ref()
+            .map(convert::artist_query_from_proto)
+            .unwrap_or_default();
+        let page = convert::page_from_proto(request.page.as_ref());
+        let artists = self.0.api.artists(query, page).await.map_err(failed)?;
         Ok(Response::new(convert::artist_page_to_proto(&artists)))
     }
 
@@ -1082,6 +1104,53 @@ impl Kopuz for KopuzGrpc {
             .await
             .map_err(failed)?;
         Ok(Response::new(convert::config_view_to_proto(&view)))
+    }
+
+    async fn patch_config(
+        &self,
+        request: Request<proto::PatchConfigRequest>,
+    ) -> Result<Response<proto::ConfigView>, Status> {
+        let fields = request
+            .get_ref()
+            .fields
+            .iter()
+            .map(convert::config_field_from_proto)
+            .collect();
+        let view = self.0.api.patch_config(fields).await.map_err(failed)?;
+        Ok(Response::new(convert::config_view_to_proto(&view)))
+    }
+
+    async fn get_frontend_prefs(
+        &self,
+        request: Request<proto::GetFrontendPrefsRequest>,
+    ) -> Result<Response<proto::FrontendPrefsList>, Status> {
+        let prefs = self
+            .0
+            .api
+            .frontend_prefs(request.into_inner().frontend)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::FrontendPrefsList {
+            prefs: prefs.iter().map(convert::frontend_pref_to_proto).collect(),
+        }))
+    }
+
+    async fn set_frontend_prefs(
+        &self,
+        request: Request<proto::SetFrontendPrefsRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        let entries = request
+            .entries
+            .iter()
+            .map(convert::pref_entry_from_proto)
+            .collect();
+        self.0
+            .api
+            .set_frontend_prefs(request.frontend, entries)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
     }
 
     async fn preview_equalizer(

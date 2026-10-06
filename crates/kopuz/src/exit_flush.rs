@@ -10,27 +10,23 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-static STASHED: Mutex<Option<config::AppConfig>> = Mutex::new(None);
+static STASHED: Mutex<Option<Vec<api::ConfigField>>> = Mutex::new(None);
 
 /// How long an exiting process will wait for the config write. Past this the
 /// user is closing a window that will not close, which is worse than losing a
 /// settings change made in the last moment.
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Stash an eligibility-checked config snapshot (guards: `initial_load_done
-/// && config_loaded_ok`).
-pub fn stash_config(config: config::AppConfig) {
+/// Stash the settings keys not yet sent, so an exit write names only what this app changed.
+pub fn stash_config(fields: Vec<api::ConfigField>) {
     if let Ok(mut stashed) = STASHED.lock() {
-        *stashed = Some(config);
+        *stashed = Some(fields);
     }
 }
 
-/// Persist a config through the core on a fresh OS thread with its own runtime
-/// and join it. A fresh thread is required from both exit paths: the main
-/// thread sits inside dioxus's tokio context where `block_on` panics, and the
-/// ctrlc thread should not host a runtime of unknown stack depth.
-pub fn persist_on_fresh_thread(config: Option<config::AppConfig>) {
-    let Some(config) = config else {
+/// Persist unsent keys on a fresh thread: `block_on` panics inside dioxus's tokio context.
+pub fn persist_on_fresh_thread(fields: Option<Vec<api::ConfigField>>) {
+    let Some(fields) = fields.filter(|fields| !fields.is_empty()) else {
         return;
     };
     let api = crate::backend::api();
@@ -42,7 +38,7 @@ pub fn persist_on_fresh_thread(config: Option<config::AppConfig>) {
             return;
         };
         runtime.block_on(async move {
-            let write = tokio::time::timeout(FLUSH_TIMEOUT, api.set_config(config));
+            let write = tokio::time::timeout(FLUSH_TIMEOUT, api.patch_config(fields));
             match write.await {
                 Ok(Err(error)) => tracing::warn!(%error, "config flush on exit failed"),
                 Err(_) => tracing::warn!("config flush on exit timed out"),
@@ -57,12 +53,12 @@ pub fn persist_on_fresh_thread(config: Option<config::AppConfig>) {
 /// no-op before the startup loads complete, so an early Ctrl+C cannot wipe
 /// saved state.
 pub fn flush_stashed_blocking() {
-    let config = match STASHED.lock() {
+    let fields = match STASHED.lock() {
         Ok(stashed) => stashed.clone(),
         Err(_) => return,
     };
     if crate::backend::core().is_some() {
-        persist_on_fresh_thread(config);
+        persist_on_fresh_thread(fields);
     }
     crate::backend::shutdown();
 }

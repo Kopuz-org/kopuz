@@ -1,6 +1,7 @@
 //! `LocalApi`: the in-process implementation of [`api::KopuzApi`].
 
 use super::*;
+use crate::jobs::Trigger;
 
 /// In-process implementation of [`api::KopuzApi`] over a running session.
 pub struct LocalApi {
@@ -9,6 +10,7 @@ pub struct LocalApi {
     pub(super) started: std::time::Instant,
     pub(super) library: Option<Arc<crate::library::LibraryService>>,
     pub(super) config: Option<Arc<crate::config_service::ConfigService>>,
+    pub(super) prefs: Option<Arc<crate::prefs::PrefsService>>,
     pub(super) jobs: Option<Arc<crate::jobs::JobRunner>>,
     pub(super) downloads: Option<Arc<crate::downloads::DownloadsService>>,
     pub(super) favorites: Option<Arc<crate::favorites::FavoritesService>>,
@@ -30,6 +32,7 @@ impl LocalApi {
             started: std::time::Instant::now(),
             library: None,
             config: None,
+            prefs: None,
             jobs: None,
             downloads: None,
             favorites: None,
@@ -53,6 +56,17 @@ impl LocalApi {
     pub fn with_config(mut self, config: Arc<crate::config_service::ConfigService>) -> Self {
         self.config = Some(config);
         self
+    }
+
+    pub fn with_prefs(mut self, prefs: Arc<crate::prefs::PrefsService>) -> Self {
+        self.prefs = Some(prefs);
+        self
+    }
+
+    fn prefs(&self) -> Result<&crate::prefs::PrefsService, ApiError> {
+        self.prefs
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without a prefs service"))
     }
 
     pub fn with_jobs(mut self, jobs: Arc<crate::jobs::JobRunner>) -> Self {
@@ -294,6 +308,7 @@ impl api::PlayerApi for LocalApi {
                 .collect(),
             position: (!mirror.tracks.is_empty()).then_some(mirror.position as u32),
             shuffle: mirror.shuffle,
+            context: mirror.context,
         })
     }
 
@@ -343,8 +358,8 @@ impl api::LibraryApi for LocalApi {
         self.library()?.tracks_by_keys(&keys).await
     }
 
-    async fn albums(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
-        self.library()?.albums(page).await
+    async fn albums(&self, query: api::AlbumQuery, page: Page) -> Result<api::AlbumPage, ApiError> {
+        self.library()?.albums(query, page).await
     }
 
     async fn albums_recently_added(&self, page: Page) -> Result<api::AlbumPage, ApiError> {
@@ -359,8 +374,12 @@ impl api::LibraryApi for LocalApi {
         self.library()?.album_tracks(&id, page).await
     }
 
-    async fn artists(&self, page: Page) -> Result<api::ArtistPage, ApiError> {
-        self.library()?.artists(page).await
+    async fn artists(
+        &self,
+        query: api::ArtistQuery,
+        page: Page,
+    ) -> Result<api::ArtistPage, ApiError> {
+        self.library()?.artists(query, page).await
     }
 
     async fn catalog(&self, continuation: Option<String>) -> Result<api::CatalogPage, ApiError> {
@@ -567,6 +586,18 @@ impl api::ConfigApi for LocalApi {
         Ok(view)
     }
 
+    async fn patch_config(
+        &self,
+        fields: Vec<api::ConfigField>,
+    ) -> Result<api::ConfigView, ApiError> {
+        let Some(service) = &self.config else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without a config service",
+            ));
+        };
+        service.patch(fields).await
+    }
+
     async fn preview_equalizer(
         &self,
         equalizer: config::EqualizerSettings,
@@ -585,6 +616,21 @@ impl api::ConfigApi for LocalApi {
 }
 
 #[async_trait::async_trait]
+impl api::PrefsApi for LocalApi {
+    async fn frontend_prefs(&self, frontend: String) -> Result<Vec<api::FrontendPref>, ApiError> {
+        self.prefs()?.get(&frontend).await
+    }
+
+    async fn set_frontend_prefs(
+        &self,
+        frontend: String,
+        entries: Vec<api::PrefEntry>,
+    ) -> Result<(), ApiError> {
+        self.prefs()?.set(&frontend, entries).await
+    }
+}
+
+#[async_trait::async_trait]
 impl api::JobApi for LocalApi {
     async fn start_job(&self, kind: api::JobKind) -> Result<api::JobRef, ApiError> {
         let Some(runner) = &self.jobs else {
@@ -594,19 +640,19 @@ impl api::JobApi for LocalApi {
         };
         match kind {
             api::JobKind::Scan => match &self.library {
-                Some(library) => library.spawn_scan(runner),
+                Some(library) => library.spawn_scan(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no library service")),
             },
             api::JobKind::LibrarySync => match &self.library {
-                Some(library) => library.spawn_remote_sync(runner),
+                Some(library) => library.spawn_remote_sync(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no library service")),
             },
             api::JobKind::FavoritesSync => match &self.favorites {
-                Some(favorites) => favorites.spawn_sync(runner),
+                Some(favorites) => favorites.spawn_sync(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no favorites service")),
             },
             api::JobKind::PlaylistSync => match &self.playlists {
-                Some(playlists) => playlists.spawn_sync(runner),
+                Some(playlists) => playlists.spawn_sync(runner, Trigger::User),
                 None => Err(ApiError::unsupported("no playlist service")),
             },
             // These carry their own request, so they start through their own

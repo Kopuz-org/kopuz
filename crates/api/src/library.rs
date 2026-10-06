@@ -98,6 +98,106 @@ pub struct TrackFilter {
     pub genre: Option<String>,
     pub favorite: Option<bool>,
     pub sort: TrackSort,
+    /// Only tracks with a downloaded copy (`Some(true)`), or only those without.
+    pub downloaded: Option<bool>,
+    /// Inclusive bounds on the year of the track's album; an album with no year is in neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Run `sort` backwards: every term flips, so `DateAdded` becomes oldest first.
+    pub reverse: bool,
+}
+
+/// What an album listing can be ordered by; `RecentlyAdded` is its newest track's added time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlbumSortField {
+    Title,
+    Artist,
+    Year,
+    Genre,
+    RecentlyAdded,
+    TrackCount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlbumSort {
+    pub field: AlbumSortField,
+    pub descending: bool,
+}
+
+impl AlbumSort {
+    pub fn new(field: AlbumSortField, descending: bool) -> Self {
+        Self { field, descending }
+    }
+}
+
+impl From<config::SortCriterion<config::AlbumSortField>> for AlbumSort {
+    fn from(value: config::SortCriterion<config::AlbumSortField>) -> Self {
+        Self {
+            field: match value.field {
+                config::AlbumSortField::Title => AlbumSortField::Title,
+                config::AlbumSortField::Artist => AlbumSortField::Artist,
+                config::AlbumSortField::Year => AlbumSortField::Year,
+                config::AlbumSortField::Genre => AlbumSortField::Genre,
+            },
+            descending: value.direction == config::SortDirection::Desc,
+        }
+    }
+}
+
+/// Which albums to list and in what order; `AlbumPage::total` counts the filtered set.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AlbumQuery {
+    /// Matches the title or the billed artist's text, ignoring ASCII case.
+    pub search: Option<String>,
+    pub genre: Option<String>,
+    /// Inclusive bounds; an album with no year is in neither.
+    pub year_from: Option<u16>,
+    pub year_to: Option<u16>,
+    /// Only albums billed to this artist.
+    pub artist_key: Option<String>,
+    /// The first criterion decides and the rest break ties; artist then title settle what is left.
+    pub sort: Vec<AlbumSort>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtistSortField {
+    Name,
+    TrackCount,
+    AlbumCount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtistSort {
+    pub field: ArtistSortField,
+    pub descending: bool,
+}
+
+impl ArtistSort {
+    pub fn new(field: ArtistSortField, descending: bool) -> Self {
+        Self { field, descending }
+    }
+}
+
+impl From<config::SortCriterion<config::ArtistSortField>> for ArtistSort {
+    fn from(value: config::SortCriterion<config::ArtistSortField>) -> Self {
+        Self {
+            field: match value.field {
+                config::ArtistSortField::Name => ArtistSortField::Name,
+                config::ArtistSortField::Tracks => ArtistSortField::TrackCount,
+                config::ArtistSortField::Albums => ArtistSortField::AlbumCount,
+            },
+            descending: value.direction == config::SortDirection::Desc,
+        }
+    }
+}
+
+/// Which artists to list and in what order; `ArtistPage::total` counts the filtered set.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArtistQuery {
+    /// Matches the artist's name, ignoring ASCII case.
+    pub search: Option<String>,
+    /// The first criterion decides and the rest break ties; name then key settle what is left.
+    pub sort: Vec<ArtistSort>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -167,6 +267,8 @@ pub struct ArtistInfo {
     pub key: String,
     pub name: String,
     pub track_count: u32,
+    /// The albums billed to the artist.
+    pub album_count: u32,
     pub artwork: Option<crate::ArtworkRef>,
 }
 

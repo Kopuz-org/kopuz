@@ -87,6 +87,7 @@ pub fn queue_summary_to_proto(value: &api::QueueSummary) -> QueueSummary {
         index: value.index,
         shuffle: value.shuffle,
         r#loop: loop_to_proto(value.loop_mode) as i32,
+        context: value.context.as_ref().map(queue_context_to_proto),
     }
 }
 
@@ -98,6 +99,7 @@ pub fn queue_summary_from_proto(value: Option<&QueueSummary>) -> api::QueueSumma
         index: value.index,
         shuffle: value.shuffle,
         loop_mode: loop_from_proto(value.r#loop),
+        context: value.context.as_ref().and_then(queue_context_from_proto),
     }
 }
 
@@ -111,6 +113,7 @@ pub fn player_state_to_proto(value: &api::PlayerState) -> PlayerState {
         position: value.position.as_ref().map(anchor_to_proto),
         queue: Some(queue_summary_to_proto(&value.queue)),
         volume: value.volume,
+        muted: value.muted,
         buffered: value.buffered.iter().map(buffered_to_proto).collect(),
         fading: value.fading.as_ref().map(|fading| FadingState {
             from_token: fading.from_token,
@@ -136,6 +139,7 @@ pub fn player_state_from_proto(value: &PlayerState) -> api::PlayerState {
         position: value.position.as_ref().map(anchor_from_proto),
         queue: queue_summary_from_proto(value.queue.as_ref()),
         volume: value.volume,
+        muted: value.muted,
         buffered: value.buffered.iter().map(buffered_from_proto).collect(),
         // A fade with no outgoing track has nothing to keep on screen.
         fading: value.fading.as_ref().and_then(|fading| {

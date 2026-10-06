@@ -40,6 +40,8 @@ pub struct JobProgress {
     pub current: Option<u64>,
     pub total: Option<u64>,
     pub message: Option<String>,
+    /// Started by the daemon's own schedule rather than by a user.
+    pub automatic: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,8 +94,17 @@ pub enum ApiEvent {
         kind: JobKind,
         ok: bool,
         error: Option<ErrorBody>,
+        /// Started by the daemon's own schedule rather than by a user.
+        automatic: bool,
     },
     ConfigChanged {
+        keys: Vec<String>,
+        /// The `ConfigView.revision` this change produced.
+        revision: u64,
+    },
+    /// A frontend's stored preferences changed (set or deleted) in these keys; re-read what you hold.
+    FrontendPrefsChanged {
+        frontend: String,
         keys: Vec<String>,
     },
     SourceStatus {

@@ -22,6 +22,7 @@ use crate::playback::network_factory;
 use crate::queue_model::{NextOutcome, QueueModel};
 
 mod load;
+mod origin;
 mod reconciler;
 
 use load::{LoadFailure, LoadFinished, PreparedLoad};
@@ -33,13 +34,15 @@ const MATERIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 const PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 const PROGRESS_STEP_SECS: u64 = 5;
 
-/// The embedded frontend's raw view of the queue model.
+/// The queue as `api::QueueSnapshot` reports it: tracks in play order, `position` a play-order index.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct QueueMirrorSnapshot {
     pub tracks: Vec<Track>,
+    /// Unshuffled index of each play-order position; empty while shuffle is off.
     pub shuffle_order: Vec<usize>,
     pub position: usize,
     pub shuffle: bool,
+    pub context: Option<QueueContext>,
 }
 
 /// Resolves a wire queue context into concrete tracks daemon-side.
@@ -107,6 +110,7 @@ enum SessionCmd {
     SetConfig {
         config: Box<config::AppConfig>,
         changed: Vec<String>,
+        revision: u64,
     },
     QueueUnread,
     PreviewEqualizer(config::EqualizerSettings),
@@ -195,6 +199,8 @@ impl SessionHandle {
             rev: 0,
             queue_rev: 0,
             volume: services.config.volume,
+            muted: false,
+            origin: None,
             epoch: Instant::now(),
             events: events.clone(),
             materializer: materializer.clone(),
@@ -374,8 +380,7 @@ impl SessionHandle {
         let _ = self.cmd_tx.send(SessionCmd::SetActiveSource(source));
     }
 
-    /// The raw queue plus its permutation, for the embedded frontend's
-    /// signal mirror. Wire clients use `queue_window`.
+    /// The whole queue in play order plus its permutation, behind `queue_snapshot`.
     pub(crate) async fn queue_mirror(&self) -> QueueMirrorSnapshot {
         let (tx, rx) = oneshot::channel();
         if self.cmd_tx.send(SessionCmd::QueueMirror(tx)).is_err() {
@@ -407,10 +412,16 @@ impl SessionHandle {
         let _ = self.cmd_tx.send(SessionCmd::PreviewEqualizer(equalizer));
     }
 
-    pub(crate) fn set_config(&self, config: config::AppConfig, changed: Vec<String>) {
+    pub(crate) fn set_config(
+        &self,
+        config: config::AppConfig,
+        changed: Vec<String>,
+        revision: u64,
+    ) {
         let _ = self.cmd_tx.send(SessionCmd::SetConfig {
             config: Box::new(config),
             changed,
+            revision,
         });
     }
 
@@ -508,7 +519,11 @@ struct Session {
     error: Option<api::ErrorBody>,
     rev: u64,
     queue_rev: u64,
+    /// The level unmuting returns to; the engine plays at zero while `muted`.
     volume: f32,
+    muted: bool,
+    /// The container the queue was built from; None for a raw track list.
+    origin: Option<QueueContext>,
     epoch: Instant,
     events: broadcast::Sender<ApiEvent>,
     materializer: Arc<dyn QueueMaterializer>,
@@ -600,11 +615,15 @@ impl Session {
                 let result = self.handle_restore(*snapshot, state_tx);
                 let _ = reply.send(result);
             }
-            SessionCmd::SetConfig { config, changed } => {
+            SessionCmd::SetConfig {
+                config,
+                changed,
+                revision,
+            } => {
                 if config.active_source != self.config.active_source {
                     self.swap_queue(&config, state_tx).await;
                 }
-                self.apply_config(*config, changed, state_tx);
+                self.apply_config(*config, changed, revision, state_tx);
             }
             SessionCmd::QueueUnread => self.queue_unread = true,
             SessionCmd::PreviewEqualizer(equalizer) => self.player.set_equalizer(equalizer),
@@ -640,11 +659,13 @@ impl Session {
                 self.publish(state_tx, false);
             }
             SessionCmd::QueueMirror(reply) => {
+                let (tracks, shuffle_order) = self.model.play_order();
                 let _ = reply.send(QueueMirrorSnapshot {
-                    tracks: self.model.items().to_vec(),
-                    shuffle_order: self.model.shuffle_order().to_vec(),
+                    tracks,
+                    shuffle_order,
                     position: self.model.current_position(),
                     shuffle: self.model.shuffle(),
+                    context: self.origin.clone(),
                 });
             }
             SessionCmd::Persist(reply) => {
@@ -697,8 +718,15 @@ impl Session {
                 }
                 return Ok(self.publish(state_tx, shuffle.is_some()));
             }
-            if let PlayerCommand::SetVolume { volume } = command {
-                self.volume = volume.clamp(0.0, 1.0);
+            if matches!(
+                command,
+                PlayerCommand::SetVolume { .. } | PlayerCommand::SetMuted { .. }
+            ) {
+                self.apply_volume_command(command);
+                self.dispatch_external(PlayerCommand::SetVolume {
+                    volume: self.output_volume(),
+                });
+                return Ok(self.publish(state_tx, false));
             }
             self.dispatch_external(command);
             return Ok(self.publish(state_tx, false));
@@ -718,9 +746,8 @@ impl Session {
             PlayerCommand::Previous => self.play_previous(state_tx)?,
             PlayerCommand::Stop => self.stop(state_tx),
             PlayerCommand::Seek { position_ms } => self.seek(position_ms, state_tx)?,
-            PlayerCommand::SetVolume { volume } => {
-                self.volume = volume.clamp(0.0, 1.0);
-                self.player.set_volume(self.volume);
+            PlayerCommand::SetVolume { .. } | PlayerCommand::SetMuted { .. } => {
+                self.apply_volume_command(command);
             }
             PlayerCommand::SetMode { shuffle, loop_mode } => {
                 queue_changed = shuffle.is_some();
@@ -754,6 +781,55 @@ impl Session {
         Ok(self.publish(state_tx, queue_changed))
     }
 
+    /// What the output plays at: silence while muted, else the level kept in `volume`.
+    fn output_volume(&self) -> f32 {
+        if self.muted { 0.0 } else { self.volume }
+    }
+
+    /// Setting a level unmutes, since touching the volume means wanting to hear it.
+    fn apply_volume_command(&mut self, command: PlayerCommand) {
+        match command {
+            PlayerCommand::SetVolume { volume } => {
+                self.volume = volume.clamp(0.0, 1.0);
+                self.muted = false;
+            }
+            PlayerCommand::SetMuted { muted } => self.muted = muted,
+            _ => return,
+        }
+        self.player.set_volume(self.output_volume());
+    }
+
+    /// First play-order position the upcoming edits own: past the playing track, and past the one a crossfade is already fading into.
+    fn upcoming_from(&self) -> usize {
+        if self.model.is_empty() {
+            return 0;
+        }
+        let faded_into = self
+            .pending_transition
+            .as_ref()
+            .map_or(0, |pending| pending.to_position);
+        self.model.current_position().max(faded_into) + 1
+    }
+
+    async fn materialize_keys(&self, keys: Vec<String>) -> Result<Vec<reader::Track>, ApiError> {
+        let tracks = tokio::time::timeout(
+            MATERIALIZE_TIMEOUT,
+            self.materializer
+                .materialize(&QueueContext::Tracks { keys }),
+        )
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                api::ErrorCode::SourceUnreachable,
+                "timed out resolving the tracks to queue",
+            )
+        })??;
+        if tracks.is_empty() {
+            return Err(ApiError::not_found("none of those keys are in the library"));
+        }
+        Ok(tracks)
+    }
+
     async fn handle_queue_edit(
         &mut self,
         edit: QueueEdit,
@@ -775,22 +851,34 @@ impl Session {
                 if index > len {
                     return Err(ApiError::invalid_input("queue position out of range"));
                 }
-                let tracks = tokio::time::timeout(
-                    MATERIALIZE_TIMEOUT,
-                    self.materializer
-                        .materialize(&QueueContext::Tracks { keys: keys.clone() }),
-                )
-                .await
-                .map_err(|_| {
-                    ApiError::new(
-                        api::ErrorCode::SourceUnreachable,
-                        "timed out resolving the tracks to insert",
-                    )
-                })??;
-                if tracks.is_empty() {
-                    return Err(ApiError::not_found("none of those keys are in the library"));
-                }
+                let tracks = self.materialize_keys(keys).await?;
                 self.model.insert_at(index, tracks);
+                Ok(self.publish(state_tx, true))
+            }
+            QueueEdit::ClearUpcoming => {
+                if !self.model.clear_from(self.upcoming_from()) {
+                    return Ok(CommandAck { rev: self.rev });
+                }
+                Ok(self.publish(state_tx, true))
+            }
+            QueueEdit::ReplaceUpcoming { keys } => {
+                let from = self.upcoming_from();
+                if keys.is_empty() {
+                    if !self.model.clear_from(from) {
+                        return Ok(CommandAck { rev: self.rev });
+                    }
+                    return Ok(self.publish(state_tx, true));
+                }
+                let tracks = self.materialize_keys(keys).await?;
+                self.model.replace_from(from, tracks);
+                Ok(self.publish(state_tx, true))
+            }
+            QueueEdit::ShuffleUpcoming => {
+                let from = self.upcoming_from();
+                if len <= from + 1 {
+                    return Ok(CommandAck { rev: self.rev });
+                }
+                self.model.shuffle_from(from);
                 Ok(self.publish(state_tx, true))
             }
             QueueEdit::Jump { index } => {
@@ -901,6 +989,11 @@ impl Session {
                 "queue materialization timed out",
             )
         })??;
+        let origin = request
+            .context
+            .names_container()
+            .then(|| request.context.clone());
+        let was_empty = self.model.is_empty();
         match request.mode {
             QueueMode::Replace => {
                 let mut candidate = self.model.clone();
@@ -920,9 +1013,11 @@ impl Session {
                     });
                     let idx = candidate.jump_to(start.min(len - 1));
                     self.start_immediate_load(candidate, idx)?;
+                    self.origin = origin.clone();
                 } else {
                     self.model = candidate;
                     self.stop_playback();
+                    self.origin = None;
                 }
             }
             // Appending lands past every existing position, so a pending
@@ -935,6 +1030,10 @@ impl Session {
                 Some(pending) => self.model.insert_at(pending.to_position + 1, tracks),
                 None => self.model.insert_next(tracks),
             },
+        }
+        // Adding to a queue is an edit that keeps its origin; only an empty one becomes what was added.
+        if request.mode != QueueMode::Replace && was_empty && !self.model.is_empty() {
+            self.origin = origin;
         }
         Ok(self.publish(state_tx, true))
     }
@@ -1136,13 +1235,14 @@ impl Session {
         &mut self,
         config: config::AppConfig,
         changed: Vec<String>,
+        revision: u64,
         state_tx: &watch::Sender<PlayerState>,
     ) {
         for key in &changed {
             match key.as_str() {
                 "volume" => {
                     self.volume = config.volume.clamp(0.0, 1.0);
-                    self.player.set_volume(self.volume);
+                    self.player.set_volume(self.output_volume());
                 }
                 "equalizer" => self.player.set_equalizer(config.equalizer.clone()),
                 "replay_gain" => self.player.set_replay_gain(config.replay_gain),
@@ -1157,7 +1257,10 @@ impl Session {
         }
         self.config = config;
         let _ = self.config_tx.send(self.config.clone());
-        self.emit(ApiEvent::ConfigChanged { keys: changed });
+        self.emit(ApiEvent::ConfigChanged {
+            keys: changed,
+            revision,
+        });
         self.publish(state_tx, false);
     }
 
@@ -1284,6 +1387,7 @@ impl Session {
                 PlayerCommand::Next
                 | PlayerCommand::Previous
                 | PlayerCommand::Toggle
+                | PlayerCommand::SetMuted { .. }
                 | PlayerCommand::SetMode { .. } => Ok(()),
             };
             if let Err(error) = result {
@@ -1378,6 +1482,11 @@ impl Session {
             snapshot.shuffle_order,
             snapshot.shuffle_enabled,
         );
+        self.origin = snapshot
+            .origin
+            .as_deref()
+            .filter(|_| !self.model.is_empty())
+            .and_then(origin::decode);
         if let Some(position) = restored
             && let Some(track) = self.model.track_at(position).cloned()
         {
@@ -1416,6 +1525,7 @@ impl Session {
             progress_secs,
             shuffle_order: self.model.shuffle_order().to_vec(),
             shuffle_enabled: self.model.shuffle(),
+            origin: self.origin.as_ref().and_then(origin::encode),
         }
     }
 

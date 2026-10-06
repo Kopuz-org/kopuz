@@ -17,6 +17,7 @@ mod library;
 mod mutations;
 mod player;
 mod playlists;
+mod prefs;
 mod queue;
 mod radio;
 pub mod schema;
@@ -32,7 +33,8 @@ pub use jobs::{
     DownloadCandidate, DownloadHistoryEntry, DownloadItemState, DownloadItemStatus, DownloadState,
 };
 pub use library::{
-    AlbumInfo, AlbumPage, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT,
+    AlbumInfo, AlbumPage, AlbumQuery, AlbumSort, AlbumSortField, ArtistCredit, ArtistDetail,
+    ArtistInfo, ArtistPage, ArtistQuery, ArtistSort, ArtistSortField, DEFAULT_PAGE_LIMIT,
     LyricChunkView, LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter,
     TrackInfo, TrackPage, TrackSort,
 };
@@ -42,6 +44,10 @@ pub use player::{
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
 };
 pub use playlists::{PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder};
+pub use prefs::{
+    FrontendPref, MAX_PREF_ENTRIES_PER_CALL, MAX_PREF_FRONTEND_BYTES, MAX_PREF_KEY_BYTES,
+    MAX_PREF_VALUE_BYTES, PrefEntry,
+};
 pub use queue::{
     QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow, SetQueueRequest,
 };
@@ -67,8 +73,15 @@ pub struct ConfigView {
     pub revision: u64,
 }
 
+/// One top-level `AppConfig` key and its new value as JSON, for [`ConfigApi::patch_config`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfigField {
+    pub key: String,
+    pub json: String,
+}
+
 /// What this build speaks: bump it with any wire change a mismatched peer would misread, never for an added field.
-pub const WIRE_REVISION: u32 = 1;
+pub const WIRE_REVISION: u32 = 2;
 
 /// What a daemon says it is, for a frontend that was not built beside it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -113,6 +126,8 @@ pub struct JobStatus {
     pub total: Option<u64>,
     pub message: Option<String>,
     pub error: Option<ErrorBody>,
+    /// Started by the daemon's own schedule rather than by a user.
+    pub automatic: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -164,19 +179,18 @@ pub trait LibraryApi: Send + Sync {
     /// not hold are skipped rather than erroring.
     async fn tracks_by_keys(&self, keys: Vec<String>) -> Result<Vec<TrackInfo>, ApiError>;
 
-    async fn albums(&self, page: Page) -> Result<AlbumPage, ApiError>;
+    /// A window of the albums `query` selects; `total` counts the whole filtered set.
+    async fn albums(&self, query: AlbumQuery, page: Page) -> Result<AlbumPage, ApiError>;
 
-    /// Albums newest-first by when their tracks were added. Its own call
-    /// because [`LibraryApi::albums`] answers alphabetically, and recency comes
-    /// from each album's newest track — an order no reshuffling of an
-    /// alphabetical page can recover.
+    /// Non-empty albums newest-first, the order of [`AlbumSortField::RecentlyAdded`].
     async fn albums_recently_added(&self, page: Page) -> Result<AlbumPage, ApiError>;
 
     async fn album(&self, id: String) -> Result<Option<AlbumInfo>, ApiError>;
 
     async fn album_tracks(&self, id: String, page: Page) -> Result<TrackPage, ApiError>;
 
-    async fn artists(&self, page: Page) -> Result<ArtistPage, ApiError>;
+    /// A window of the artists `query` selects; `total` counts the whole filtered set.
+    async fn artists(&self, query: ArtistQuery, page: Page) -> Result<ArtistPage, ApiError>;
 
     async fn artist_tracks(&self, artist: String, page: Page) -> Result<TrackPage, ApiError>;
 
@@ -482,6 +496,9 @@ pub trait ConfigApi: Send + Sync {
     /// with `invalid_input`.
     async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError>;
 
+    /// Change only the named keys, so a stale client cannot revert another's; one bad key refuses all.
+    async fn patch_config(&self, fields: Vec<ConfigField>) -> Result<ConfigView, ApiError>;
+
     /// Hear an equalizer setting without keeping it. The engine applies it
     /// live; nothing is written, so cancelling a preview is doing nothing.
     async fn preview_equalizer(&self, equalizer: config::EqualizerSettings)
@@ -512,6 +529,20 @@ pub enum Handshake {
     Mismatched { daemon: u32, client: u32 },
 }
 
+/// Where a frontend keeps its own UI preferences, namespaced by frontend name.
+#[async_trait::async_trait]
+pub trait PrefsApi: Send + Sync {
+    /// Every preference stored for `frontend`, key-ordered.
+    async fn frontend_prefs(&self, frontend: String) -> Result<Vec<FrontendPref>, ApiError>;
+
+    /// Store (`Some`) or delete (`None`) each key, all or none; the event names only keys that changed.
+    async fn set_frontend_prefs(
+        &self,
+        frontend: String,
+        entries: Vec<PrefEntry>,
+    ) -> Result<(), ApiError>;
+}
+
 /// Subscribe to the state stream. Every subscriber gets every event from the
 /// moment of subscription; a snapshot fetch plus this stream is the complete
 /// synchronization story.
@@ -532,6 +563,7 @@ pub trait KopuzApi:
     + JobApi
     + SourceApi
     + ConfigApi
+    + PrefsApi
     + EventApi
     + Send
     + Sync
@@ -546,6 +578,7 @@ impl<T> KopuzApi for T where
         + JobApi
         + SourceApi
         + ConfigApi
+        + PrefsApi
         + EventApi
         + Send
         + Sync
@@ -558,7 +591,7 @@ impl<T> KopuzApi for T where
 pub mod prelude {
     pub use super::{
         ArtworkApi, ConfigApi, EventApi, JobApi, KopuzApi, LibraryApi, PlayerApi, PlaylistApi,
-        SourceApi,
+        PrefsApi, SourceApi,
     };
 }
 
@@ -574,6 +607,9 @@ mod handshake_tests {
             unreachable!()
         }
         async fn set_config(&self, _: config::AppConfig) -> Result<ConfigView, ApiError> {
+            unreachable!()
+        }
+        async fn patch_config(&self, _: Vec<ConfigField>) -> Result<ConfigView, ApiError> {
             unreachable!()
         }
         async fn preview_equalizer(&self, _: config::EqualizerSettings) -> Result<(), ApiError> {

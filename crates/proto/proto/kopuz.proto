@@ -26,6 +26,7 @@ service Kopuz {
   rpc Stop(StopRequest) returns (MutationResult);
   rpc Seek(Seek) returns (MutationResult);
   rpc SetVolume(SetVolume) returns (MutationResult);
+  rpc SetMuted(SetMuted) returns (MutationResult);
   rpc SetMode(SetMode) returns (MutationResult);
 
   rpc GetStatus(GetStatusRequest) returns (DaemonStatus);
@@ -35,11 +36,11 @@ service Kopuz {
   rpc GetTracks(TracksRequest) returns (TrackPage);
   rpc GetFolderTracks(FolderRequest) returns (TrackPage);
   rpc GetTracksByKeys(TracksByKeysRequest) returns (TrackList);
-  rpc GetAlbums(Page) returns (AlbumPage);
+  rpc GetAlbums(AlbumsRequest) returns (AlbumPage);
   rpc GetRecentlyAddedAlbums(Page) returns (AlbumPage);
   rpc GetAlbum(AlbumRef) returns (AlbumResponse);
   rpc GetAlbumTracks(AlbumTracksRequest) returns (TrackPage);
-  rpc GetArtists(Page) returns (ArtistPage);
+  rpc GetArtists(ArtistsRequest) returns (ArtistPage);
   rpc GetArtistTracks(ArtistTracksRequest) returns (TrackPage);
   rpc GetArtist(ArtistRequest) returns (ArtistDetail);
   rpc GetArtistSampleTracks(Page) returns (TrackPage);
@@ -103,7 +104,10 @@ service Kopuz {
   rpc GetDownloadStatuses(GetDownloadStatusesRequest) returns (DownloadStatusList);
   rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
   rpc SetConfig(SetConfigRequest) returns (ConfigView);
+  rpc PatchConfig(PatchConfigRequest) returns (ConfigView);
   rpc PreviewEqualizer(EqualizerSettings) returns (Unit);
+  rpc GetFrontendPrefs(GetFrontendPrefsRequest) returns (FrontendPrefsList);
+  rpc SetFrontendPrefs(SetFrontendPrefsRequest) returns (Unit);
 
   rpc GetSources(GetSourcesRequest) returns (SourceList);
   rpc GetServices(GetServicesRequest) returns (ServiceList);
@@ -170,6 +174,11 @@ message SetVolume {
   float volume = 1;
 }
 
+// Silences output while PlayerState.volume stays the level to return to.
+message SetMuted {
+  bool muted = 1;
+}
+
 message SetMode {
   optional bool shuffle = 1;
   optional LoopMode loop = 2;
@@ -196,6 +205,7 @@ message Event {
     Notice notice = 11;
     // The reconnect gap exceeded the replay ring: refetch snapshots.
     Unit resync = 12;
+    FrontendPrefsChanged frontend_prefs_changed = 13;
   }
 }
 
@@ -229,6 +239,8 @@ message JobProgress {
   optional uint64 current = 4;
   optional uint64 total = 5;
   optional string message = 6;
+  // Started by the daemon's own schedule rather than by a user.
+  bool automatic = 7;
 }
 
 message JobFinished {
@@ -236,10 +248,19 @@ message JobFinished {
   JobKind kind = 2;
   bool ok = 3;
   optional ErrorBody error = 4;
+  bool automatic = 5;
 }
 
 message ConfigChanged {
   repeated string keys = 1;
+  // The ConfigView.revision this change produced.
+  uint64 revision = 2;
+}
+
+// Keys of one frontend's preferences whose stored value changed (set or deleted).
+message FrontendPrefsChanged {
+  string frontend = 1;
+  repeated string keys = 2;
 }
 
 message SourceStatusEvent {
@@ -276,6 +297,8 @@ message PlayerState {
   optional uint64 output_latency_ms = 13;
   // What is playing, the same row the queue holds.
   optional TrackInfo row = 14;
+  // Output is silenced; `volume` is still the level unmuting returns to.
+  bool muted = 15;
 }
 
 // phase is engine truth; intent is what the daemon is trying to do.
@@ -349,6 +372,8 @@ message QueueSummary {
   optional uint32 index = 3;
   bool shuffle = 4;
   LoopMode loop = 5;
+  // The container the queue was built from; absent for a raw track list.
+  optional QueueContext context = 6;
 }
 
 // ---------------- queue ----------------
@@ -407,7 +432,16 @@ message QueueEditRequest {
     // named track plays now and the rest follows it.
     Jump jump_physical = 4;
     Insert insert = 5;
+    // Everything after the current play position.
+    ClearUpcoming clear_upcoming = 6;
+    ReplaceUpcoming replace_upcoming = 7;
+    ShuffleUpcoming shuffle_upcoming = 8;
   }
+  message ClearUpcoming {}
+  message ReplaceUpcoming {
+    repeated string keys = 1;
+  }
+  message ShuffleUpcoming {}
   message Jump {
     uint32 index = 1;
   }
@@ -453,6 +487,8 @@ message QueueSnapshot {
   repeated uint32 shuffle_order = 3;
   optional uint32 position = 4;
   bool shuffle = 5;
+  // As QueueSummary.context.
+  optional QueueContext context = 6;
 }
 
 // ---------------- library ----------------
@@ -468,6 +504,49 @@ message TrackFilter {
   // Set when sort is TRACK_SORT_FIELDS: the first criterion decides, the
   // rest break ties.
   repeated SortCriterion sort_fields = 8;
+  // Only tracks with (true) or without (false) a downloaded copy.
+  optional bool downloaded = 9;
+  // Inclusive bounds on the year of the track's album.
+  optional uint32 year_from = 10;
+  optional uint32 year_to = 11;
+  // Runs the whole ordering backwards.
+  bool reverse = 12;
+}
+
+message AlbumOrder {
+  AlbumOrderField field = 1;
+  bool descending = 2;
+}
+
+// What an album listing selects and how it is ordered; the first order decides
+// and the rest break ties.
+message AlbumQuery {
+  optional string search = 1;
+  optional string genre = 2;
+  optional uint32 year_from = 3;
+  optional uint32 year_to = 4;
+  optional string artist_key = 5;
+  repeated AlbumOrder sort = 6;
+}
+
+message AlbumsRequest {
+  AlbumQuery query = 1;
+  Page page = 2;
+}
+
+message ArtistOrder {
+  ArtistOrderField field = 1;
+  bool descending = 2;
+}
+
+message ArtistQuery {
+  optional string search = 1;
+  repeated ArtistOrder sort = 2;
+}
+
+message ArtistsRequest {
+  ArtistQuery query = 1;
+  Page page = 2;
 }
 
 message SortCriterion {
@@ -534,6 +613,7 @@ message ArtistInfo {
   uint32 track_count = 2;
   optional ArtworkRef artwork = 3;
   string key = 4;
+  uint32 album_count = 5;
 }
 
 message ArtistPage {
@@ -1237,6 +1317,7 @@ message JobStatus {
   optional uint64 total = 6;
   optional string message = 7;
   optional ErrorBody error = 8;
+  bool automatic = 9;
 }
 
 // What tool fetches the URL, and every option beyond the format, is the
@@ -1357,6 +1438,42 @@ message ConfigView {
 // want, send it back. A locked key whose value actually differs is refused.
 message SetConfigRequest {
   Config config = 1;
+}
+
+// A top-level AppConfig key and its new value as JSON.
+message ConfigField {
+  string key = 1;
+  string json = 2;
+}
+
+// Changes only the named keys; every other key stays as the daemon holds it.
+message PatchConfigRequest {
+  repeated ConfigField fields = 1;
+}
+
+message GetFrontendPrefsRequest {
+  string frontend = 1;
+}
+
+// One stored preference; the value is opaque to the daemon.
+message FrontendPref {
+  string key = 1;
+  string value = 2;
+}
+
+message FrontendPrefsList {
+  repeated FrontendPref prefs = 1;
+}
+
+// An unset value deletes the key.
+message PrefEntry {
+  string key = 1;
+  optional string value = 2;
+}
+
+message SetFrontendPrefsRequest {
+  string frontend = 1;
+  repeated PrefEntry entries = 2;
 }
 
 
@@ -1494,6 +1611,8 @@ message Config {
   bool lyrics_depth_blur = 67;
   uint32 lyrics_depth_blur_strength = 68;
   ReplayGainSettings replay_gain = 70;
+  // Absent from a peer that predates it, which must not read as 0 (never).
+  optional uint32 sync_interval_minutes = 71;
 }
 
 enum AlbumViewMode {
@@ -1637,6 +1756,23 @@ enum ArtistSortField {
   ARTIST_SORT_FIELD_NAME = 1;
   ARTIST_SORT_FIELD_TRACKS = 2;
   ARTIST_SORT_FIELD_ALBUMS = 3;
+}
+
+enum AlbumOrderField {
+  ALBUM_ORDER_FIELD_UNSPECIFIED = 0;
+  ALBUM_ORDER_FIELD_TITLE = 1;
+  ALBUM_ORDER_FIELD_ARTIST = 2;
+  ALBUM_ORDER_FIELD_YEAR = 3;
+  ALBUM_ORDER_FIELD_GENRE = 4;
+  ALBUM_ORDER_FIELD_RECENTLY_ADDED = 5;
+  ALBUM_ORDER_FIELD_TRACK_COUNT = 6;
+}
+
+enum ArtistOrderField {
+  ARTIST_ORDER_FIELD_UNSPECIFIED = 0;
+  ARTIST_ORDER_FIELD_NAME = 1;
+  ARTIST_ORDER_FIELD_TRACK_COUNT = 2;
+  ARTIST_ORDER_FIELD_ALBUM_COUNT = 3;
 }
 
 message DaemonStatus {

@@ -13,7 +13,7 @@ use api::{ApiError, JobKind, JobRef, Page, QueueContext, Table, TrackFilter, Tra
 use reader::Track;
 use tokio::sync::watch;
 
-use crate::jobs::{JobCtx, JobRunner};
+use crate::jobs::{JobCtx, JobRunner, Trigger};
 use crate::session::{QueueMaterializer, SessionHandle};
 
 pub struct LibraryService {
@@ -70,6 +70,58 @@ fn map_sort(sort: api::TrackSort) -> db::TrackSort {
         api::TrackSort::DateAdded => db::TrackSort::DateAdded,
         api::TrackSort::PlayCount => db::TrackSort::PlayCount,
         api::TrackSort::Fields(fields) => db::TrackSort::Fields(fields),
+    }
+}
+
+fn db_page(page: Page) -> db::Page {
+    db::Page {
+        offset: page.offset,
+        limit: page.limit,
+    }
+}
+
+fn album_query(source: config::Source, query: api::AlbumQuery) -> db::AlbumQuery {
+    db::AlbumQuery {
+        source,
+        search: query.search.unwrap_or_default(),
+        genre: query.genre,
+        year_from: query.year_from,
+        year_to: query.year_to,
+        artist_key: query.artist_key,
+        sort: query
+            .sort
+            .into_iter()
+            .map(|sort| db::AlbumSort {
+                field: match sort.field {
+                    api::AlbumSortField::Title => db::AlbumSortField::Title,
+                    api::AlbumSortField::Artist => db::AlbumSortField::Artist,
+                    api::AlbumSortField::Year => db::AlbumSortField::Year,
+                    api::AlbumSortField::Genre => db::AlbumSortField::Genre,
+                    api::AlbumSortField::RecentlyAdded => db::AlbumSortField::RecentlyAdded,
+                    api::AlbumSortField::TrackCount => db::AlbumSortField::TrackCount,
+                },
+                descending: sort.descending,
+            })
+            .collect(),
+    }
+}
+
+fn artist_query(source: config::Source, query: api::ArtistQuery) -> db::ArtistQuery {
+    db::ArtistQuery {
+        source,
+        search: query.search.unwrap_or_default(),
+        sort: query
+            .sort
+            .into_iter()
+            .map(|sort| db::ArtistSort {
+                field: match sort.field {
+                    api::ArtistSortField::Name => db::ArtistSortField::Name,
+                    api::ArtistSortField::TrackCount => db::ArtistSortField::TrackCount,
+                    api::ArtistSortField::AlbumCount => db::ArtistSortField::AlbumCount,
+                },
+                descending: sort.descending,
+            })
+            .collect(),
     }
 }
 
@@ -272,6 +324,38 @@ impl LibraryService {
                     .collect();
                 rows.retain(|track| favorites.contains(track.id.key().as_ref()) == favorite);
             }
+            if let Some(downloaded) = filter.downloaded {
+                let config = self.current_config();
+                rows.retain(|track| {
+                    config.offline_tracks.contains_key(track.id.key().as_ref()) == downloaded
+                });
+            }
+            if filter.year_from.is_some() || filter.year_to.is_some() {
+                let in_range = self
+                    .db
+                    .albums_page(
+                        &db::AlbumQuery {
+                            source: self.query_source(),
+                            year_from: filter.year_from,
+                            year_to: filter.year_to,
+                            ..Default::default()
+                        },
+                        db::Page {
+                            offset: 0,
+                            limit: u32::MAX,
+                        },
+                    )
+                    .await
+                    .map_err(db_error)?
+                    .rows
+                    .into_iter()
+                    .map(|album| album.id)
+                    .collect::<std::collections::HashSet<_>>();
+                rows.retain(|track| in_range.contains(&track.album_id));
+            }
+            if filter.reverse {
+                rows.reverse();
+            }
             let total = rows.len() as u32;
             let items = rows
                 .into_iter()
@@ -286,16 +370,14 @@ impl LibraryService {
             sort: map_sort(filter.sort),
             search: filter.search.unwrap_or_default(),
             favorite: filter.favorite,
+            downloaded: filter.downloaded,
+            year_from: filter.year_from,
+            year_to: filter.year_to,
+            reverse: filter.reverse,
         };
         let items = self
             .db
-            .tracks_page(
-                &db_filter,
-                db::Page {
-                    offset: page.offset,
-                    limit: page.limit,
-                },
-            )
+            .tracks_page(&db_filter, db_page(page))
             .await
             .map_err(db_error)?;
         let total = self.db.tracks_count(&db_filter).await.map_err(db_error)?;
@@ -689,7 +771,7 @@ mod tests {
         assert_eq!(page.items[0].title, "song 4");
 
         let ada = library
-            .artists(Page::default())
+            .artists(api::ArtistQuery::default(), Page::default())
             .await
             .expect("artist grid")
             .artists

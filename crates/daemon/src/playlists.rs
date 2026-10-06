@@ -19,6 +19,7 @@ use crate::session::SessionHandle;
 pub struct PlaylistService {
     db: db::Db,
     session: SessionHandle,
+    favorites: std::sync::OnceLock<Arc<crate::FavoritesService>>,
 }
 
 fn source_error(error: server::source::SourceError) -> ApiError {
@@ -39,7 +40,16 @@ fn db_error(error: db::DbError) -> ApiError {
 
 impl PlaylistService {
     pub fn new(db: db::Db, session: SessionHandle) -> Arc<Self> {
-        Arc::new(Self { db, session })
+        Arc::new(Self {
+            db,
+            session,
+            favorites: std::sync::OnceLock::new(),
+        })
+    }
+
+    /// Late-bound like the artwork service's siblings; without it a sync skips the favorites pull.
+    pub fn attach_favorites(&self, favorites: Arc<crate::FavoritesService>) {
+        let _ = self.favorites.set(favorites);
     }
 
     fn config(&self) -> config::AppConfig {
@@ -339,9 +349,10 @@ impl PlaylistService {
     pub fn spawn_sync(
         self: &Arc<Self>,
         runner: &crate::jobs::JobRunner,
+        trigger: crate::jobs::Trigger,
     ) -> Result<api::JobRef, ApiError> {
         let service = self.clone();
-        runner.start(api::JobKind::PlaylistSync, move |ctx| async move {
+        runner.start_as(api::JobKind::PlaylistSync, trigger, move |ctx| async move {
             let source = service.config().active_source;
             let result = service.sync(&ctx).await;
             if result.is_ok() && !ctx.cancelled() {
@@ -358,6 +369,12 @@ impl PlaylistService {
             return Err(ApiError::unsupported(
                 "the active source has no playlist sync",
             ));
+        }
+        // A server's liked-songs playlist is built from its favorites, so those come first.
+        if let Some(favorites) = self.favorites.get()
+            && let Err(error) = favorites.refresh(ctx).await
+        {
+            tracing::warn!(%error, "favorites pull before the playlist sync failed");
         }
         let existing = self
             .db

@@ -66,8 +66,10 @@ pub fn LibraryPage(
         }
     });
 
-    let albums_res = use_albums(source);
-    let artists_res = use_artists(source);
+    let albums_query = use_memo(hooks::AlbumQuery::default);
+    let artists_query = use_memo(hooks::ArtistQuery::default);
+    let albums_res = use_albums(source, albums_query);
+    let artists_res = use_artists(source, artists_query);
     let playlists_res = use_playlists();
 
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
@@ -140,10 +142,9 @@ pub fn LibraryPage(
     // to the requested offset would shift those rows until the fetch completes.
     let (top_pad, bottom_pad) = window_padding(total_tracks, &window_rows);
     let all_selected = !is_empty && selected_tracks.read().len() >= total_tracks;
-    let currently_playing_idx: Option<usize> = {
+    let current_uid = {
         let current_index = *ctrl.current_queue_index.read();
-        ctrl.get_queue_index(current_index)
-            .filter(|_| ctrl.queue.read().len() == total_tracks)
+        ctrl.get_track_at(current_index).map(|t| t.uid)
     };
 
     let tracks_nodes = {
@@ -163,13 +164,7 @@ pub fn LibraryPage(
                 let track_path = track.key.clone();
                 let track_select = track.key.clone();
                 let track_key = track.uid.clone();
-                let is_currently_playing = currently_playing_idx == Some(idx)
-                    && ctrl
-                        .queue
-                        .read()
-                        .get(idx)
-                        .map(|q| q.uid == track.uid)
-                        .unwrap_or(false);
+                let is_currently_playing = current_uid.as_deref() == Some(track.uid.as_str());
                 let is_menu_open = active_menu_track.read().as_ref() == Some(&track.uid);
                 let is_selected = selected_tracks.read().contains(&track_path);
                 let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);

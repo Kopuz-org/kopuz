@@ -527,6 +527,23 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+
+                        SettingItem {
+                            title: i18n::t("sync_interval").to_string(),
+                            config_key: "sync_interval_minutes",
+                            control: rsx! {
+                                AppSelect {
+                                    class: "settings-select",
+                                    value: config.read().sync_interval_minutes.to_string(),
+                                    options: sync_interval_options(config.read().sync_interval_minutes),
+                                    on_change: move |value: String| {
+                                        if let Ok(minutes) = value.parse::<u32>() {
+                                            config.write().sync_interval_minutes = minutes;
+                                        }
+                                    },
+                                }
+                            }
+                        }
                     }
 
                     if active_category() == SettingsCategory::Customization {
@@ -784,6 +801,31 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             }
         }
     }
+}
+
+const SYNC_INTERVAL_PRESETS: [u32; 6] = [0, 60, 6 * 60, 12 * 60, 24 * 60, 7 * 24 * 60];
+
+fn sync_interval_label(minutes: u32) -> String {
+    let (key, count) = match minutes {
+        0 => return i18n::t("sync_interval_never").to_string(),
+        m if m % (24 * 60) == 0 => ("sync_interval_days", m / (24 * 60)),
+        m if m % 60 == 0 => ("sync_interval_hours", m / 60),
+        m => ("sync_interval_minutes", m),
+    };
+    i18n::t_with(key, &[("count", count.to_string())])
+}
+
+/// The presets, plus the current value when a settings file set one that is not among them.
+fn sync_interval_options(current: u32) -> Vec<(String, String)> {
+    let mut minutes = SYNC_INTERVAL_PRESETS.to_vec();
+    if !minutes.contains(&current) {
+        minutes.push(current);
+        minutes.sort_unstable();
+    }
+    minutes
+        .into_iter()
+        .map(|m| (m.to_string(), sync_interval_label(m)))
+        .collect()
 }
 
 /// The active server's folder picker, or `None` unless it browses a folder

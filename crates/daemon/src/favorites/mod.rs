@@ -9,7 +9,7 @@ use api::{ApiError, ApiEvent, ErrorCode, FavoritesView, JobKind, JobRef, Table};
 use server::sync::{SyncError, SyncReason, reconcile_favorites};
 use tokio::sync::Notify;
 
-use crate::jobs::JobRunner;
+use crate::jobs::{JobRunner, Trigger};
 use crate::session::SessionHandle;
 
 mod pull;
@@ -155,9 +155,13 @@ impl FavoritesService {
     /// Push what is pending, then import what the remote holds. Both halves
     /// are one job because a caller only ever wants "make these agree", and
     /// pushing after importing would fight the epoch sweep.
-    pub fn spawn_sync(self: &Arc<Self>, runner: &JobRunner) -> Result<JobRef, ApiError> {
+    pub fn spawn_sync(
+        self: &Arc<Self>,
+        runner: &JobRunner,
+        trigger: Trigger,
+    ) -> Result<JobRef, ApiError> {
         let service = self.clone();
-        runner.start(JobKind::FavoritesSync, move |ctx| async move {
+        runner.start_as(JobKind::FavoritesSync, trigger, move |ctx| async move {
             let source = service
                 .session
                 .config_watch()
@@ -174,6 +178,19 @@ impl FavoritesService {
             }
             reconciled
         })
+    }
+
+    /// What a favorites sync does, run inside another job: push pending likes, then import.
+    pub(crate) async fn refresh(&self, ctx: &crate::jobs::JobCtx) -> Result<(), ApiError> {
+        let source = self.session.config_watch().borrow().active_source.clone();
+        ctx.progress("reconciling favorites", None, None, None);
+        let reconciled = self.reconcile(SyncReason::Manual).await;
+        self.pull(Some(ctx), true).await?;
+        // It did a favorites sync's work, so the scheduler must not run one again right after.
+        if reconciled.is_ok() && !ctx.cancelled() {
+            crate::auto_sync::mark_synced(&self.db, JobKind::FavoritesSync, &source).await;
+        }
+        reconciled
     }
 
     async fn reconcile(&self, reason: SyncReason) -> Result<(), ApiError> {

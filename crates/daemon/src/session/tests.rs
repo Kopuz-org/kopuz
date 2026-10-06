@@ -100,7 +100,26 @@ impl QueueMaterializer for StubLibrary {
     async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
         match context {
             QueueContext::Tracks { keys } => Ok(keys.iter().map(test_track).collect()),
-            _ => Err(ApiError::unsupported("stub resolves raw tracks only")),
+            container => {
+                let name = match container {
+                    QueueContext::Album { id }
+                    | QueueContext::Playlist { id }
+                    | QueueContext::PlaylistRadio { id } => id.clone(),
+                    QueueContext::Artist { artist } => artist.clone(),
+                    QueueContext::Genre { name } => name.clone(),
+                    QueueContext::Radio { station_id, .. } => station_id.clone(),
+                    QueueContext::TrackRadio { key } => key.clone(),
+                    QueueContext::Filter { .. } | QueueContext::Tracks { .. } => "filter".into(),
+                };
+                // A container named "empty" has nothing in it.
+                if name == "empty" {
+                    return Ok(Vec::new());
+                }
+                Ok([format!("{name}-0"), format!("{name}-1")]
+                    .iter()
+                    .map(test_track)
+                    .collect())
+            }
         }
     }
 }
@@ -1437,6 +1456,7 @@ async fn restore_seeds_a_paused_resume_point_and_play_continues_there() {
         progress_secs: 2,
         shuffle_order: Vec::new(),
         shuffle_enabled: false,
+        origin: None,
     };
     harness
         .api
@@ -1535,13 +1555,13 @@ async fn switching_sources_parks_and_resumes_each_queue() {
     wait_committed(&api).await;
     let on_a_titles = queue_titles(&api).await;
 
-    session.set_config(on_b.clone(), vec!["active_source".into()]);
+    session.set_config(on_b.clone(), vec!["active_source".into()], 0);
     session.persist_now().await;
     assert!(queue_titles(&api).await.is_empty(), "B was never visited");
     api.set_queue(replace(&["b-0"])).await.expect("set queue");
     wait_committed(&api).await;
 
-    session.set_config(on_a.clone(), vec!["active_source".into()]);
+    session.set_config(on_a.clone(), vec!["active_source".into()], 0);
     session.persist_now().await;
     assert_eq!(
         queue_titles(&api).await,
@@ -1549,7 +1569,7 @@ async fn switching_sources_parks_and_resumes_each_queue() {
         "A resumes its own queue"
     );
 
-    session.set_config(on_b, vec!["active_source".into()]);
+    session.set_config(on_b, vec!["active_source".into()], 0);
     session.persist_now().await;
     assert_eq!(queue_titles(&api).await.len(), 1, "and B its own");
 }
@@ -1601,6 +1621,7 @@ async fn leaving_a_deleted_source_parks_nothing() {
     session.set_config(
         deleted,
         vec!["local_sources".into(), "active_source".into()],
+        0,
     );
     session.persist_now().await;
 
@@ -1886,7 +1907,7 @@ async fn switching_source_releases_the_integration_that_owned_playback() {
     harness
         .api
         .session
-        .set_config(elsewhere, vec!["active_source".into()]);
+        .set_config(elsewhere, vec!["active_source".into()], 0);
     let state = wait_state(&harness.api, "playback handed back", |state| {
         state.external.is_none()
     })
@@ -1975,7 +1996,7 @@ async fn an_unreadable_queue_is_not_saved_over() {
             .count()
     };
 
-    session.set_config(on_b.clone(), vec!["active_source".into()]);
+    session.set_config(on_b.clone(), vec!["active_source".into()], 0);
     session.persist_now().await;
     assert!(queue_titles(&api).await.is_empty());
     api.player_command(PlayerCommand::SetVolume { volume: 0.3 })
@@ -1988,11 +2009,11 @@ async fn an_unreadable_queue_is_not_saved_over() {
     .await
     .expect("a shuffle toggle on nothing builds no queue");
     session.persist_now().await;
-    session.set_config(on_a, vec!["active_source".into()]);
+    session.set_config(on_a, vec!["active_source".into()], 0);
     session.persist_now().await;
     assert_eq!(saves_of_b(), 0, "nothing was saved over B's queue");
 
-    session.set_config(on_b, vec!["active_source".into()]);
+    session.set_config(on_b, vec!["active_source".into()], 0);
     session.persist_now().await;
     api.set_queue(replace(&["b-new"])).await.expect("set queue");
     wait_committed(&api).await;
@@ -2158,6 +2179,61 @@ async fn a_track_list_row_repins_the_shuffle_around_itself() {
     assert_eq!(play_order(&harness.api).await[0], "track-6");
 }
 
+#[tokio::test]
+async fn the_snapshot_lists_a_shuffled_queue_in_play_order() {
+    let harness = shuffled_harness().await;
+    let titles = |snapshot: &api::QueueSnapshot| -> Vec<String> {
+        snapshot.items.iter().map(|t| t.title.clone()).collect()
+    };
+
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    assert!(snapshot.shuffle);
+    assert_eq!(titles(&snapshot), play_order(&harness.api).await);
+    assert_eq!(snapshot.shuffle_order.len(), 8);
+    let mut sorted = snapshot.shuffle_order.clone();
+    sorted.sort_unstable();
+    assert_eq!(sorted, (0..8).collect::<Vec<u32>>(), "a full permutation");
+    for (position, physical) in snapshot.shuffle_order.iter().enumerate() {
+        assert_eq!(
+            snapshot.items[position].title,
+            format!("track-{physical}"),
+            "shuffle_order[{position}] names the unshuffled index"
+        );
+    }
+    assert_eq!(snapshot.position, Some(0));
+
+    harness
+        .api
+        .queue_edit(QueueEdit::JumpPhysical { index: 6 })
+        .await
+        .expect("jump");
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    let position = snapshot.position.expect("position") as usize;
+    assert_eq!(snapshot.items[position].title, "track-6");
+    assert_eq!(snapshot.shuffle_order[position], 6);
+    assert_eq!(titles(&snapshot), play_order(&harness.api).await);
+
+    harness
+        .api
+        .player_command(PlayerCommand::SetMode {
+            shuffle: Some(false),
+            loop_mode: None,
+        })
+        .await
+        .expect("shuffle off");
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    assert!(!snapshot.shuffle && snapshot.shuffle_order.is_empty());
+    assert_eq!(
+        titles(&snapshot),
+        (0..8).map(|i| format!("track-{i}")).collect::<Vec<_>>()
+    );
+    let position = snapshot.position.expect("position") as usize;
+    assert_eq!(
+        snapshot.items[position].title, "track-6",
+        "still playing it"
+    );
+}
+
 /// A local playlist has no remote listing, so refreshing one must not reach
 /// the epoch sweep that drops whatever the remote no longer lists -- for
 /// Local that is every entry it has. Reachable from any client: the gRPC
@@ -2296,4 +2372,855 @@ async fn stored_volume(database: &db::Db) -> f32 {
         .expect("load")
         .expect("stored config")
         .volume
+}
+
+fn from_context(mode: QueueMode, context: QueueContext) -> SetQueueRequest {
+    SetQueueRequest {
+        mode,
+        context,
+        start_index: None,
+        shuffle: None,
+    }
+}
+
+fn album(id: &str) -> QueueContext {
+    QueueContext::Album { id: id.into() }
+}
+
+fn playlist(id: &str) -> QueueContext {
+    QueueContext::Playlist { id: id.into() }
+}
+
+async fn origin_of(api: &LocalApi) -> Option<QueueContext> {
+    api.player_state().await.expect("state").queue.context
+}
+
+#[tokio::test]
+async fn a_queue_built_from_a_container_remembers_it() {
+    let harness = harness(|_| {});
+    let containers = [
+        album("a"),
+        QueueContext::Artist {
+            artist: "UC-x".into(),
+        },
+        QueueContext::Genre { name: "g".into() },
+        playlist("p"),
+        QueueContext::Filter {
+            filter: api::TrackFilter {
+                favorite: Some(true),
+                ..Default::default()
+            },
+        },
+        QueueContext::Radio {
+            station_id: "s".into(),
+            stream_id: "st".into(),
+        },
+        QueueContext::TrackRadio { key: "k".into() },
+        QueueContext::PlaylistRadio { id: "p".into() },
+    ];
+    for context in containers {
+        harness
+            .api
+            .set_queue(from_context(QueueMode::Replace, context.clone()))
+            .await
+            .expect("set queue");
+        assert_eq!(origin_of(&harness.api).await, Some(context.clone()));
+        let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+        assert_eq!(snapshot.context, Some(context));
+    }
+}
+
+#[tokio::test]
+async fn a_raw_track_queue_has_no_origin_and_replaces_one() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["t-0", "t-1"]))
+        .await
+        .expect("set queue");
+    assert_eq!(origin_of(&harness.api).await, None);
+
+    harness
+        .api
+        .set_queue(from_context(QueueMode::Replace, album("a")))
+        .await
+        .expect("set queue");
+    assert_eq!(origin_of(&harness.api).await, Some(album("a")));
+
+    harness
+        .api
+        .set_queue(replace(&["t-0"]))
+        .await
+        .expect("set queue");
+    assert_eq!(origin_of(&harness.api).await, None);
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    assert_eq!(snapshot.context, None);
+}
+
+#[tokio::test]
+async fn queue_edits_keep_the_origin() {
+    let harness = harness(|_| {});
+    let api = &harness.api;
+    api.set_queue(from_context(QueueMode::Replace, album("a")))
+        .await
+        .expect("set queue");
+
+    api.set_queue(enqueue(QueueMode::Append, &["x"]))
+        .await
+        .expect("append");
+    api.set_queue(from_context(QueueMode::Append, album("b")))
+        .await
+        .expect("append another container");
+    api.set_queue(from_context(QueueMode::PlayNext, playlist("p")))
+        .await
+        .expect("play next");
+    assert_eq!(origin_of(api).await, Some(album("a")));
+
+    for edit in [
+        QueueEdit::Insert {
+            index: 1,
+            keys: vec!["i".into()],
+        },
+        QueueEdit::Move { from: 4, to: 5 },
+        QueueEdit::Remove { index: 6 },
+        QueueEdit::Jump { index: 2 },
+        QueueEdit::JumpPhysical { index: 1 },
+    ] {
+        api.queue_edit(edit.clone()).await.expect("edit");
+        assert_eq!(origin_of(api).await, Some(album("a")), "{edit:?}");
+    }
+    api.player_command(PlayerCommand::SetMode {
+        shuffle: Some(true),
+        loop_mode: Some(LoopMode::Queue),
+    })
+    .await
+    .expect("mode");
+    assert_eq!(origin_of(api).await, Some(album("a")));
+    let snapshot = api.queue_snapshot().await.expect("snapshot");
+    assert_eq!(snapshot.context, Some(album("a")));
+}
+
+/// Adding to a queue is an edit, so only a queue with nothing in it becomes what was added.
+#[tokio::test]
+async fn adding_to_an_empty_queue_adopts_its_origin() {
+    let harness = harness(|_| {});
+    let api = &harness.api;
+    api.set_queue(from_context(QueueMode::Append, album("empty")))
+        .await
+        .expect("append nothing");
+    api.set_queue(enqueue(QueueMode::Append, &["x"]))
+        .await
+        .expect("append raw");
+    assert_eq!(origin_of(api).await, None, "a raw list names no container");
+
+    api.set_queue(replace(&[])).await.expect("clear");
+    api.set_queue(from_context(QueueMode::Append, album("a")))
+        .await
+        .expect("append");
+    assert_eq!(origin_of(api).await, Some(album("a")));
+
+    api.set_queue(replace(&[])).await.expect("clear");
+    api.set_queue(from_context(QueueMode::PlayNext, playlist("p")))
+        .await
+        .expect("play next");
+    assert_eq!(origin_of(api).await, Some(playlist("p")));
+}
+
+#[tokio::test]
+async fn a_replace_that_fails_keeps_the_origin() {
+    let provider: FactoryOverride = Arc::new(|track| {
+        (!track.title.starts_with("unavailable-server:"))
+            .then(|| wav_factory(track.duration.min(6)))
+    });
+    let harness = harness_with_provider(|_| {}, provider);
+    harness
+        .api
+        .set_queue(from_context(QueueMode::Replace, album("a")))
+        .await
+        .expect("set queue");
+
+    let error = harness
+        .api
+        .set_queue(from_context(
+            QueueMode::Replace,
+            album("unavailable-server:x"),
+        ))
+        .await
+        .expect_err("unavailable replacement is rejected");
+    assert_eq!(error.code, ErrorCode::SourceUnreachable);
+    assert_eq!(origin_of(&harness.api).await, Some(album("a")));
+}
+
+#[tokio::test]
+async fn emptying_the_queue_drops_the_origin() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(from_context(QueueMode::Replace, album("a")))
+        .await
+        .expect("set queue");
+
+    harness
+        .api
+        .set_queue(from_context(QueueMode::Replace, album("empty")))
+        .await
+        .expect("replace with a container with nothing in it");
+    assert_eq!(harness.api.player_state().await.unwrap().queue.length, 0);
+    assert_eq!(origin_of(&harness.api).await, None);
+}
+
+#[tokio::test]
+async fn the_origin_is_saved_with_the_queue() {
+    let store = Arc::new(MemoryStore {
+        saved: Mutex::new(Vec::new()),
+    });
+    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
+        .expect("headless player starts");
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        PlaybackServices {
+            queue_store: Some(store.clone()),
+            ..Default::default()
+        },
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let api = LocalApi::new(session.clone());
+    let last_saved = || {
+        let saved = store.saved.lock().expect("store lock");
+        saved.last().expect("a snapshot").1.origin.clone()
+    };
+
+    api.set_queue(from_context(QueueMode::Replace, playlist("p")))
+        .await
+        .expect("set queue");
+    session.persist_now().await;
+    assert_eq!(
+        last_saved().as_deref().and_then(origin::decode),
+        Some(playlist("p"))
+    );
+
+    api.set_queue(replace(&["t-0"])).await.expect("set queue");
+    session.persist_now().await;
+    assert_eq!(last_saved(), None);
+}
+
+#[tokio::test]
+async fn a_restored_queue_remembers_where_it_came_from() {
+    let harness = harness(|_| {});
+    let snapshot = |origin: Option<String>, keys: &[&str]| db::QueueSnapshot {
+        version: 1,
+        queue: keys
+            .iter()
+            .map(|key| test_track(&(*key).to_string()))
+            .collect(),
+        origin,
+        ..Default::default()
+    };
+    let stored = origin::encode(&album("a"));
+    assert!(stored.is_some());
+
+    let restore = |snapshot| harness.api.session.restore_queue(snapshot);
+    restore(snapshot(stored.clone(), &["a-0", "a-1"]))
+        .await
+        .expect("restore");
+    assert_eq!(origin_of(&harness.api).await, Some(album("a")));
+    let snapshot_now = harness.api.queue_snapshot().await.expect("snapshot");
+    assert_eq!(snapshot_now.context, Some(album("a")));
+
+    restore(snapshot(Some("not an origin".into()), &["a-0", "a-1"]))
+        .await
+        .expect("restore");
+    assert_eq!(
+        origin_of(&harness.api).await,
+        None,
+        "an unreadable origin is dropped"
+    );
+    assert_eq!(harness.api.player_state().await.unwrap().queue.length, 2);
+
+    restore(snapshot(stored, &[])).await.expect("restore");
+    assert_eq!(
+        origin_of(&harness.api).await,
+        None,
+        "an empty queue has no origin"
+    );
+}
+
+#[tokio::test]
+async fn each_source_keeps_its_own_origin_across_a_switch() {
+    let store = Arc::new(MemoryStore {
+        saved: Mutex::new(Vec::new()),
+    });
+    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
+        .expect("headless player starts");
+    let mut on_a = config::AppConfig::default();
+    on_a.local_sources.push(config::SavedLocalSource {
+        id: "local:b".into(),
+        name: "B".into(),
+        directories: Vec::new(),
+    });
+    let mut on_b = on_a.clone();
+    on_b.active_source = config::Source::LocalLibrary("local:b".into());
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        PlaybackServices {
+            config: on_a.clone(),
+            queue_store: Some(store.clone()),
+            ..Default::default()
+        },
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let api = LocalApi::new(session.clone());
+    let switch = |to: &config::AppConfig| {
+        session.set_config(to.clone(), vec!["active_source".into()], 0);
+        session.persist_now()
+    };
+
+    api.set_queue(from_context(QueueMode::Replace, album("a")))
+        .await
+        .expect("set queue");
+    switch(&on_b).await;
+    assert_eq!(origin_of(&api).await, None, "B was never visited");
+    api.set_queue(from_context(QueueMode::Replace, playlist("p")))
+        .await
+        .expect("set queue");
+
+    switch(&on_a).await;
+    assert_eq!(origin_of(&api).await, Some(album("a")));
+    switch(&on_b).await;
+    assert_eq!(origin_of(&api).await, Some(playlist("p")));
+}
+
+/// Whether the sink is being fed sound, polled until it is (or is not) so the engine has time to see the command.
+async fn wait_output(harness: &Harness, audible: bool) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let heard = harness.sink.pull(2048).iter().any(|sample| *sample != 0.0);
+        if heard == audible {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the output never became audible={audible}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn muting_silences_the_engine_and_keeps_the_level() {
+    let harness = harness(|config| config.volume = 0.5);
+    harness
+        .api
+        .set_queue(replace(&["track-0"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    wait_output(&harness, true).await;
+
+    harness
+        .api
+        .player_command(PlayerCommand::SetMuted { muted: true })
+        .await
+        .expect("mute");
+    let state = harness.api.player_state().await.expect("state");
+    assert!(state.muted);
+    assert_eq!(state.volume, 0.5, "the level to return to is kept");
+    assert_eq!(state.phase, ApiPhase::Playing, "muting is not pausing");
+    wait_output(&harness, false).await;
+
+    harness
+        .api
+        .player_command(PlayerCommand::SetMuted { muted: false })
+        .await
+        .expect("unmute");
+    let state = harness.api.player_state().await.expect("state");
+    assert!(!state.muted);
+    assert_eq!(state.volume, 0.5);
+    wait_output(&harness, true).await;
+}
+
+/// Touching the level means wanting to hear it, so a `SetVolume` while muted unmutes; a level set from config does not.
+#[tokio::test]
+async fn setting_a_level_while_muted_unmutes_and_muting_leaves_the_level() {
+    let harness = harness(|config| config.volume = 0.5);
+    let api = &harness.api;
+    let mute = |muted| api.player_command(PlayerCommand::SetMuted { muted });
+
+    mute(true).await.expect("mute");
+    mute(true).await.expect("muting again changes nothing");
+    let state = api.player_state().await.expect("state");
+    assert!(state.muted);
+    assert_eq!(state.volume, 0.5);
+
+    harness.api.session.set_config(
+        config::AppConfig {
+            volume: 0.9,
+            ..Default::default()
+        },
+        vec!["volume".into()],
+        1,
+    );
+    let state = wait_state(api, "the configured level", |state| state.volume == 0.9).await;
+    assert!(state.muted, "a stored level is not a request to hear it");
+
+    api.player_command(PlayerCommand::SetVolume { volume: 0.3 })
+        .await
+        .expect("set volume");
+    let state = api.player_state().await.expect("state");
+    assert!(!state.muted);
+    assert_eq!(state.volume, 0.3);
+
+    mute(false).await.expect("unmuting what is not muted");
+    assert_eq!(api.player_state().await.unwrap().volume, 0.3);
+}
+
+/// What persistence stores is the level to return to, so a restart after muting does not come back silent at zero.
+#[tokio::test]
+async fn muting_does_not_change_the_volume_that_is_persisted() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("volume.db")).await.expect("db");
+    let service = crate::ConfigService::new(
+        database.clone(),
+        dir.path().join("settings.toml"),
+        config::AppConfig {
+            volume: 0.8,
+            ..Default::default()
+        },
+    );
+    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
+        .expect("headless player starts");
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        PlaybackServices::default(),
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    service
+        .mutate_state(&[], |_| {})
+        .await
+        .expect("seed the database");
+    let api = LocalApi::new(session.clone());
+    api.player_command(PlayerCommand::SetVolume { volume: 0.2 })
+        .await
+        .expect("set volume");
+    api.player_command(PlayerCommand::SetMuted { muted: true })
+        .await
+        .expect("mute");
+
+    crate::boot::flush_volume(&session, &service).await;
+
+    assert_eq!(stored_volume(&database).await, 0.2);
+}
+
+#[tokio::test]
+async fn muting_reaches_the_integration_that_owns_playback() {
+    let harness = harness(|_| {});
+    let stub = Arc::new(StubExternal::default());
+    harness.api.session.attach_external(stub.clone());
+    harness.api.session.report_external(crate::ExternalReport {
+        track: Some(external_track("remote")),
+        position_ms: 1000,
+        playing: true,
+        ..Default::default()
+    });
+    wait_state(&harness.api, "external track shown", |state| {
+        state.track.is_some()
+    })
+    .await;
+
+    for command in [
+        PlayerCommand::SetVolume { volume: 0.5 },
+        PlayerCommand::SetMuted { muted: true },
+        PlayerCommand::SetMuted { muted: false },
+    ] {
+        harness
+            .api
+            .player_command(command)
+            .await
+            .expect("command accepted");
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(stub.calls(), vec!["volume:0.5", "volume:0", "volume:0.5"]);
+    assert!(!harness.api.player_state().await.unwrap().muted);
+}
+
+fn queue_changes(events: &mut tokio::sync::broadcast::Receiver<ApiEvent>) -> usize {
+    let mut changes = 0;
+    while let Ok(event) = events.try_recv() {
+        if matches!(event, ApiEvent::QueueChanged { .. }) {
+            changes += 1;
+        }
+    }
+    changes
+}
+
+async fn titles_and_position(api: &LocalApi) -> (Vec<String>, Option<u32>) {
+    let snapshot = api.queue_snapshot().await.expect("snapshot");
+    let titles = snapshot.items.iter().map(|t| t.title.clone()).collect();
+    (titles, snapshot.position)
+}
+
+async fn plain_harness(keys: &[&str], playing: u32) -> Harness {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(keys))
+        .await
+        .expect("set queue");
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: playing })
+        .await
+        .expect("jump");
+    harness
+}
+
+async fn shuffle_off(api: &LocalApi) {
+    api.player_command(PlayerCommand::SetMode {
+        shuffle: Some(false),
+        loop_mode: None,
+    })
+    .await
+    .expect("shuffle off");
+}
+
+const TEN: [&str; 10] = [
+    "track-0", "track-1", "track-2", "track-3", "track-4", "track-5", "track-6", "track-7",
+    "track-8", "track-9",
+];
+
+#[tokio::test]
+async fn clear_upcoming_drops_only_what_follows_the_current_track() {
+    let harness = plain_harness(&TEN, 3).await;
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ClearUpcoming)
+        .await
+        .expect("clear upcoming");
+
+    let (titles, position) = titles_and_position(&harness.api).await;
+    assert_eq!(titles, vec!["track-0", "track-1", "track-2", "track-3"]);
+    assert_eq!(position, Some(3));
+    assert_eq!(queue_changes(&mut events), 1, "one edit, one QueueChanged");
+
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 1 })
+        .await
+        .expect("history survives the edit");
+}
+
+#[tokio::test]
+async fn clear_upcoming_under_shuffle_keeps_the_played_order_and_the_unshuffled_queue() {
+    let harness = shuffled_harness().await;
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 3 })
+        .await
+        .expect("jump");
+    let before = harness.api.queue_snapshot().await.expect("snapshot");
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ClearUpcoming)
+        .await
+        .expect("clear upcoming");
+
+    let after = harness.api.queue_snapshot().await.expect("snapshot");
+    let titles = |snapshot: &api::QueueSnapshot| -> Vec<String> {
+        snapshot.items.iter().map(|t| t.title.clone()).collect()
+    };
+    assert_eq!(titles(&after), titles(&before)[..4].to_vec());
+    assert_eq!(after.position, Some(3));
+    assert!(after.shuffle);
+    let mut permutation = after.shuffle_order.clone();
+    permutation.sort_unstable();
+    assert_eq!(
+        permutation,
+        vec![0, 1, 2, 3],
+        "a permutation of what is left"
+    );
+    assert_eq!(queue_changes(&mut events), 1);
+
+    shuffle_off(&harness.api).await;
+    let (unshuffled, position) = titles_and_position(&harness.api).await;
+    let mut expected = titles(&after);
+    expected.sort();
+    assert_eq!(
+        unshuffled, expected,
+        "survivors keep their unshuffled order"
+    );
+    assert_eq!(
+        unshuffled[position.expect("position") as usize],
+        titles(&after)[3]
+    );
+}
+
+#[tokio::test]
+async fn clear_upcoming_with_nothing_upcoming_is_a_quiet_no_op() {
+    let harness = plain_harness(&["track-0", "track-1"], 1).await;
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ClearUpcoming)
+        .await
+        .expect("nothing to clear is not an error");
+
+    assert_eq!(queue_changes(&mut events), 0);
+    assert_eq!(
+        titles_and_position(&harness.api).await,
+        (vec!["track-0".to_string(), "track-1".to_string()], Some(1))
+    );
+
+    let empty = self::harness(|_| {});
+    empty
+        .api
+        .queue_edit(QueueEdit::ClearUpcoming)
+        .await
+        .expect("an empty queue has nothing upcoming");
+    assert_eq!(titles_and_position(&empty.api).await, (Vec::new(), None));
+}
+
+#[tokio::test]
+async fn replace_upcoming_swaps_the_tail_in_the_order_given() {
+    let harness = plain_harness(&TEN, 2).await;
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming {
+            keys: vec!["new-b".into(), "new-a".into()],
+        })
+        .await
+        .expect("replace upcoming");
+
+    let (titles, position) = titles_and_position(&harness.api).await;
+    assert_eq!(
+        titles,
+        vec!["track-0", "track-1", "track-2", "new-b", "new-a"]
+    );
+    assert_eq!(position, Some(2));
+    assert_eq!(queue_changes(&mut events), 1);
+}
+
+#[tokio::test]
+async fn replace_upcoming_under_shuffle_plays_the_new_tracks_in_the_order_given() {
+    let harness = shuffled_harness().await;
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 2 })
+        .await
+        .expect("jump");
+    let before = harness.api.queue_snapshot().await.expect("snapshot");
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming {
+            keys: vec!["new-b".into(), "new-a".into(), "new-c".into()],
+        })
+        .await
+        .expect("replace upcoming");
+
+    let (titles, position) = titles_and_position(&harness.api).await;
+    let mut expected: Vec<String> = before.items[..3].iter().map(|t| t.title.clone()).collect();
+    expected.extend(["new-b", "new-a", "new-c"].map(String::from));
+    assert_eq!(titles, expected);
+    assert_eq!(position, Some(2));
+    assert_eq!(queue_changes(&mut events), 1);
+
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    let mut permutation = snapshot.shuffle_order.clone();
+    permutation.sort_unstable();
+    assert_eq!(permutation, (0..6).collect::<Vec<u32>>());
+
+    shuffle_off(&harness.api).await;
+    let (unshuffled, _) = titles_and_position(&harness.api).await;
+    let mut kept: Vec<String> = before.items[..3].iter().map(|t| t.title.clone()).collect();
+    kept.sort();
+    kept.extend(["new-b", "new-a", "new-c"].map(String::from));
+    assert_eq!(
+        unshuffled, kept,
+        "new tracks join the unshuffled queue at its end"
+    );
+}
+
+#[tokio::test]
+async fn replace_upcoming_with_no_keys_clears_and_with_nothing_upcoming_appends() {
+    let harness = plain_harness(&["track-0", "track-1", "track-2"], 0).await;
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming { keys: Vec::new() })
+        .await
+        .expect("empty replacement clears");
+    assert_eq!(
+        titles_and_position(&harness.api).await,
+        (vec!["track-0".to_string()], Some(0))
+    );
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming { keys: Vec::new() })
+        .await
+        .expect("nothing to clear");
+    assert_eq!(queue_changes(&mut events), 0);
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming {
+            keys: vec!["next".into()],
+        })
+        .await
+        .expect("nothing to replace, so the tracks are appended");
+    assert_eq!(
+        titles_and_position(&harness.api).await,
+        (vec!["track-0".to_string(), "next".to_string()], Some(0))
+    );
+    assert_eq!(queue_changes(&mut events), 1);
+}
+
+#[tokio::test]
+async fn shuffle_upcoming_reorders_only_what_follows_the_current_track() {
+    let keys: Vec<String> = (0..20).map(|n| format!("track-{n}")).collect();
+    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let harness = plain_harness(&keys, 4).await;
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("shuffle upcoming");
+
+    let (titles, position) = titles_and_position(&harness.api).await;
+    assert_eq!(position, Some(4));
+    assert_eq!(titles[..5], keys[..5], "history and current are untouched");
+    assert_ne!(titles[5..], keys[5..], "the upcoming order changed");
+    let mut rest = titles[5..].to_vec();
+    rest.sort_by_key(|title| title[6..].parse::<u32>().expect("track number"));
+    assert_eq!(rest, keys[5..], "the same tracks, reordered");
+    assert_eq!(queue_changes(&mut events), 1);
+}
+
+#[tokio::test]
+async fn shuffle_upcoming_under_shuffle_leaves_the_unshuffled_queue_alone() {
+    let harness = shuffled_harness().await;
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 1 })
+        .await
+        .expect("jump");
+    let before = harness.api.queue_snapshot().await.expect("snapshot");
+    let titles = |snapshot: &api::QueueSnapshot| -> Vec<String> {
+        snapshot.items.iter().map(|t| t.title.clone()).collect()
+    };
+    let mut events = harness.api.session.subscribe();
+
+    let mut changed = false;
+    for _ in 0..5 {
+        harness
+            .api
+            .queue_edit(QueueEdit::ShuffleUpcoming)
+            .await
+            .expect("shuffle upcoming");
+        let after = harness.api.queue_snapshot().await.expect("snapshot");
+        assert_eq!(titles(&after)[..2], titles(&before)[..2]);
+        assert_eq!(after.position, Some(1));
+        let mut rest = titles(&after)[2..].to_vec();
+        rest.sort();
+        let mut expected = titles(&before)[2..].to_vec();
+        expected.sort();
+        assert_eq!(rest, expected);
+        for (position, physical) in after.shuffle_order.iter().enumerate() {
+            assert_eq!(after.items[position].title, format!("track-{physical}"));
+        }
+        changed |= titles(&after) != titles(&before);
+    }
+    assert!(changed, "five shuffles of six tracks never moved anything");
+    assert_eq!(queue_changes(&mut events), 5, "one QueueChanged per edit");
+
+    shuffle_off(&harness.api).await;
+    let (unshuffled, _) = titles_and_position(&harness.api).await;
+    assert_eq!(
+        unshuffled,
+        (0..8).map(|n| format!("track-{n}")).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn shuffle_upcoming_with_fewer_than_two_upcoming_is_a_quiet_no_op() {
+    let harness = plain_harness(&["track-0", "track-1", "track-2"], 1).await;
+    let mut events = harness.api.session.subscribe();
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("one upcoming track has nothing to shuffle against");
+    harness
+        .api
+        .queue_edit(QueueEdit::Jump { index: 2 })
+        .await
+        .expect("jump");
+    let jumped = queue_changes(&mut events);
+    harness
+        .api
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("empty upcoming");
+
+    assert_eq!(jumped, 1, "only the jump announced anything");
+    assert_eq!(queue_changes(&mut events), 0);
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        vec!["track-0", "track-1", "track-2"]
+    );
+
+    let empty = self::harness(|_| {});
+    empty
+        .api
+        .queue_edit(QueueEdit::ShuffleUpcoming)
+        .await
+        .expect("an empty queue has nothing upcoming");
+}
+
+#[tokio::test]
+async fn upcoming_edits_during_a_crossfade_spare_the_track_fading_in() {
+    let harness = harness(|config| config.crossfade_seconds = 1);
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1", "track-2", "track-3"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    armed_crossfade(&harness).await;
+
+    harness
+        .api
+        .queue_edit(QueueEdit::ReplaceUpcoming {
+            keys: vec!["later".into()],
+        })
+        .await
+        .expect("replace upcoming mid-crossfade");
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        vec!["track-0", "track-1", "later"]
+    );
+
+    let state = drive_until(&harness, "crossfade committed", |state| {
+        state.queue.index == Some(1) && state.fading.is_none()
+    })
+    .await;
+    assert_eq!(
+        state.track.as_ref().map(|track| track.title.as_str()),
+        Some("track-1")
+    );
 }

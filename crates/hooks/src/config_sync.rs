@@ -24,10 +24,38 @@ impl ConfigBaseline {
         self.0.set(Some((view.config.clone(), view.revision)));
     }
 
-    /// Note the config this app just sent, before adopting the view its write answered with.
-    pub fn sent(mut self, config: config::AppConfig) {
-        let revision = self.0.peek().as_ref().map_or(0, |(_, revision)| *revision);
-        self.0.set(Some((config, revision)));
+    /// The keys of `local` that differ from the baseline, as a patch; a key the daemon owns is never in it.
+    pub fn pending(self, local: &config::AppConfig) -> Vec<api::ConfigField> {
+        match &*self.0.peek() {
+            Some((baseline, _)) => patch_of(baseline, local),
+            None => Vec::new(),
+        }
+    }
+
+    /// Like [`Self::pending`], but re-runs the calling effect when the baseline moves.
+    pub fn pending_tracked(self, local: &config::AppConfig) -> Vec<api::ConfigField> {
+        match &*self.0.read() {
+            Some((baseline, _)) => patch_of(baseline, local),
+            None => Vec::new(),
+        }
+    }
+
+    /// Note the fields this app just sent, before adopting the view its write answered with.
+    pub fn sent(mut self, fields: &[api::ConfigField]) {
+        let Some((baseline, revision)) = self.0.peek().clone() else {
+            return;
+        };
+        let Some(mut map) = fields_of(&baseline) else {
+            return;
+        };
+        for field in fields {
+            if let Ok(value) = serde_json::from_str(&field.json) {
+                map.insert(field.key.clone(), value);
+            }
+        }
+        if let Some(next) = rebuild(map) {
+            self.0.set(Some((next, revision)));
+        }
     }
 
     /// Take into `local` every field a newer `view` moved since the baseline, keeping edits not yet sent.
@@ -50,7 +78,23 @@ impl ConfigBaseline {
     }
 }
 
-fn fields(config: &config::AppConfig) -> Option<Map<String, Value>> {
+fn patch_of(baseline: &config::AppConfig, local: &config::AppConfig) -> Vec<api::ConfigField> {
+    let (Some(baseline), Some(local)) = (fields_of(baseline), fields_of(local)) else {
+        return Vec::new();
+    };
+    local
+        .into_iter()
+        .filter(|(key, value)| {
+            !config::DAEMON_OWNED_KEYS.contains(&key.as_str()) && baseline.get(key) != Some(value)
+        })
+        .map(|(key, value)| api::ConfigField {
+            key,
+            json: value.to_string(),
+        })
+        .collect()
+}
+
+fn fields_of(config: &config::AppConfig) -> Option<Map<String, Value>> {
     match serde_json::to_value(config) {
         Ok(Value::Object(map)) => Some(map),
         Ok(_) => None,
@@ -73,9 +117,9 @@ fn moved(
     baseline: &config::AppConfig,
     daemon: &config::AppConfig,
 ) -> Option<(config::AppConfig, config::AppConfig)> {
-    let (mut local, mut baseline) = (fields(local)?, fields(baseline)?);
+    let (mut local, mut baseline) = (fields_of(local)?, fields_of(baseline)?);
     let mut changed = false;
-    for (key, value) in fields(daemon)? {
+    for (key, value) in fields_of(daemon)? {
         if SKIPPED.contains(&key.as_str()) || baseline.get(&key) == Some(&value) {
             continue;
         }
@@ -144,5 +188,44 @@ mod tests {
             ..baseline.clone()
         };
         assert!(moved(&baseline, &baseline, &daemon).is_none());
+    }
+}
+
+#[cfg(test)]
+mod patch_tests {
+    use super::patch_of;
+
+    #[test]
+    fn only_the_keys_that_moved_are_sent() {
+        let baseline = config::AppConfig::default();
+        let local = config::AppConfig {
+            crossfade_seconds: 5,
+            theme: "nord".into(),
+            ..baseline.clone()
+        };
+        let mut keys: Vec<_> = patch_of(&baseline, &local)
+            .into_iter()
+            .map(|field| (field.key, field.json))
+            .collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![
+                ("crossfade_seconds".to_string(), "5".to_string()),
+                ("theme".to_string(), "\"nord\"".to_string()),
+            ]
+        );
+        assert!(patch_of(&baseline, &baseline).is_empty());
+    }
+
+    #[test]
+    fn a_key_the_daemon_owns_is_never_sent() {
+        let baseline = config::AppConfig::default();
+        let local = config::AppConfig {
+            volume: 0.1,
+            lastfm_session_key: "k".into(),
+            ..baseline.clone()
+        };
+        assert!(patch_of(&baseline, &local).is_empty());
     }
 }

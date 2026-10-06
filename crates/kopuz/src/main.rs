@@ -540,12 +540,9 @@ fn App() -> Element {
                 // already committed as a targeted write when it happened. The
                 // queue is the core's: it owns the store and persists on the
                 // way out, so only the config surface is ours to push.
-                let cfg = (*config_loaded_ok.peek()).then(|| {
-                    let mut cfg = config.peek().clone();
-                    cfg.volume = *volume.peek();
-                    cfg
-                });
-                exit_flush::persist_on_fresh_thread(cfg);
+                let unsent = (*config_loaded_ok.peek())
+                    .then(|| config_baseline.pending(&config.peek().clone()));
+                exit_flush::persist_on_fresh_thread(unsent);
             }
             backend::shutdown();
             // After the persists, so they (and any failure warnings) land in
@@ -686,7 +683,7 @@ fn App() -> Element {
         );
     });
 
-    // Debounced: a settings save is a whole-config write, so a burst of edits must coalesce into one.
+    // Debounced so a burst of edits coalesces into one patch of the keys that changed.
     let mut config_dirty = use_signal(|| 0u64);
     use_effect(move || {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
@@ -707,10 +704,8 @@ fn App() -> Element {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
-        let mut snapshot = config.read().clone();
-        let _ = *persisted_volume.read();
-        snapshot.volume = *volume.peek();
-        exit_flush::stash_config(snapshot);
+        let snapshot = config.read().clone();
+        exit_flush::stash_config(config_baseline.pending_tracked(&snapshot));
     });
     // Settings are written through the daemon, which owns the file and the
     // blob: a direct database write would leave its copy stale and lose the
@@ -725,15 +720,18 @@ fn App() -> Element {
             }
             utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
             flushed = *config_dirty.peek();
-            let mut snapshot = config.peek().clone();
-            snapshot.volume = *volume.peek();
+            let snapshot = config.peek().clone();
+            let fields = config_baseline.pending(&snapshot);
+            if fields.is_empty() {
+                continue;
+            }
             match api
-                .set_config(snapshot.clone())
+                .patch_config(fields.clone())
                 .instrument(tracing::info_span!("config.persist"))
                 .await
             {
                 Ok(view) => {
-                    config_baseline.sent(snapshot);
+                    config_baseline.sent(&fields);
                     config_baseline.adopt(config, &view);
                 }
                 Err(error) => tracing::error!(%error, "failed to save settings"),

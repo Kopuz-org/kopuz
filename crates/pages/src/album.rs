@@ -44,7 +44,8 @@ pub fn Album(
 
     let open_album_menu = use_signal(|| None::<String>);
 
-    let albums_res = use_albums(source);
+    let albums_query = use_memo(hooks::AlbumQuery::default);
+    let albums_res = use_albums(source, albums_query);
 
     // First visit to a server with an empty cache → pull once.
     let mut has_fetched = use_signal(|| false);
@@ -99,8 +100,6 @@ fn AlbumGrid(
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
     let is_offline = use_context::<Signal<bool>>();
-    let albums_res = use_albums(source);
-
     let album_sort = use_signal(|| config.peek().album_sort.clone());
     use_effect(move || {
         let curr = album_sort.read().clone();
@@ -108,6 +107,11 @@ fn AlbumGrid(
             config.write().album_sort = curr;
         }
     });
+    let albums_query = use_memo(move || hooks::AlbumQuery {
+        sort: album_sort.read().iter().copied().map(Into::into).collect(),
+        ..Default::default()
+    });
+    let albums_res = use_albums(source, albums_query);
     let view_mode = use_signal(|| config.peek().album_view_mode);
     use_effect(move || {
         let curr = *view_mode.read();
@@ -152,16 +156,14 @@ fn AlbumGrid(
         let offline = caps().downloads && *is_offline.read();
         let downloaded = downloaded_album_ids();
         let mut seen = HashSet::new();
-        let mut albums = albums_res
+        albums_res
             .read()
             .clone()
             .unwrap_or_default()
             .into_iter()
             .filter(|a| !offline || downloaded.contains(&a.id))
             .filter(|a| seen.insert(a.title.trim().to_lowercase()))
-            .collect::<Vec<_>>();
-        hooks::sort::sort_albums(&mut albums, &album_sort.read());
-        albums
+            .collect::<Vec<_>>()
     });
 
     // Restore the grid scroll once after the albums first render; guarded so DB
@@ -307,7 +309,8 @@ fn AlbumDetail(
 
     let album_id_memo = use_memo(use_reactive!(|album_id_str| album_id_str));
     let album_res = use_album(source, album_id_memo);
-    let albums_res = use_albums(source);
+    let albums_query = use_memo(hooks::AlbumQuery::default);
+    let albums_res = use_albums(source, albums_query);
 
     // Discover albums are opened by the source's own browse id and aren't in the
     // library until saved. When the library has no row for the id, fetch the album

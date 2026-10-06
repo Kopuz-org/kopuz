@@ -46,6 +46,13 @@ pub enum QueueContext {
     },
 }
 
+impl QueueContext {
+    /// Whether a queue built from this one is "playing from" something: every context but a raw track list names a container.
+    pub fn names_container(&self) -> bool {
+        !matches!(self, Self::Tracks { .. })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetQueueRequest {
     pub mode: QueueMode,
@@ -80,6 +87,14 @@ pub enum QueueEdit {
         index: u32,
         keys: Vec<String>,
     },
+    /// Drop everything after the current play position (and after a track mid-crossfade is fading into); a no-op when nothing is upcoming.
+    ClearUpcoming,
+    /// Keep history and the current track, replace the rest with `keys` in the order given, shuffle or not; empty `keys` clears.
+    ReplaceUpcoming {
+        keys: Vec<String>,
+    },
+    /// Randomise only what plays after the current track: under shuffle the permutation tail (unshuffled order untouched), otherwise the queue order itself.
+    ShuffleUpcoming,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,6 +130,9 @@ pub struct QueueSnapshot {
     /// For each play-order position, the index it has in the unshuffled
     /// queue. Empty while shuffle is off.
     pub shuffle_order: Vec<u32>,
+    /// Play-order index into `items` of the current track; the same space as `QueueEdit` and `QueueWindow`.
     pub position: Option<u32>,
     pub shuffle: bool,
+    /// As `QueueSummary::context`.
+    pub context: Option<QueueContext>,
 }

@@ -173,6 +173,46 @@ pub fn notice_level_from_proto(value: i32) -> api::NoticeLevel {
     }
 }
 
+pub fn album_order_field_to_proto(value: api::AlbumSortField) -> AlbumOrderField {
+    match value {
+        api::AlbumSortField::Title => AlbumOrderField::Title,
+        api::AlbumSortField::Artist => AlbumOrderField::Artist,
+        api::AlbumSortField::Year => AlbumOrderField::Year,
+        api::AlbumSortField::Genre => AlbumOrderField::Genre,
+        api::AlbumSortField::RecentlyAdded => AlbumOrderField::RecentlyAdded,
+        api::AlbumSortField::TrackCount => AlbumOrderField::TrackCount,
+    }
+}
+
+/// An order this build does not know falls back to the title, as an unspecified one does.
+pub fn album_order_field_from_proto(value: i32) -> api::AlbumSortField {
+    match AlbumOrderField::try_from(value).unwrap_or(AlbumOrderField::Unspecified) {
+        AlbumOrderField::Artist => api::AlbumSortField::Artist,
+        AlbumOrderField::Year => api::AlbumSortField::Year,
+        AlbumOrderField::Genre => api::AlbumSortField::Genre,
+        AlbumOrderField::RecentlyAdded => api::AlbumSortField::RecentlyAdded,
+        AlbumOrderField::TrackCount => api::AlbumSortField::TrackCount,
+        AlbumOrderField::Title | AlbumOrderField::Unspecified => api::AlbumSortField::Title,
+    }
+}
+
+pub fn artist_order_field_to_proto(value: api::ArtistSortField) -> ArtistOrderField {
+    match value {
+        api::ArtistSortField::Name => ArtistOrderField::Name,
+        api::ArtistSortField::TrackCount => ArtistOrderField::TrackCount,
+        api::ArtistSortField::AlbumCount => ArtistOrderField::AlbumCount,
+    }
+}
+
+/// An order this build does not know falls back to the name, as an unspecified one does.
+pub fn artist_order_field_from_proto(value: i32) -> api::ArtistSortField {
+    match ArtistOrderField::try_from(value).unwrap_or(ArtistOrderField::Unspecified) {
+        ArtistOrderField::TrackCount => api::ArtistSortField::TrackCount,
+        ArtistOrderField::AlbumCount => api::ArtistSortField::AlbumCount,
+        ArtistOrderField::Name | ArtistOrderField::Unspecified => api::ArtistSortField::Name,
+    }
+}
+
 pub fn track_sort_to_proto(value: &api::TrackSort) -> TrackSort {
     match value {
         api::TrackSort::Default => TrackSort::Unspecified,
@@ -249,6 +289,41 @@ mod tests {
             assert_eq!(kind, job_kind_from_proto(job_kind_to_proto(kind) as i32));
         }
         assert_eq!(job_kind_from_proto(404), api::JobKind::Unknown);
+    }
+
+    #[test]
+    fn every_listing_order_round_trips() {
+        for field in [
+            api::AlbumSortField::Title,
+            api::AlbumSortField::Artist,
+            api::AlbumSortField::Year,
+            api::AlbumSortField::Genre,
+            api::AlbumSortField::RecentlyAdded,
+            api::AlbumSortField::TrackCount,
+        ] {
+            assert_eq!(
+                field,
+                album_order_field_from_proto(album_order_field_to_proto(field) as i32)
+            );
+        }
+        for field in [
+            api::ArtistSortField::Name,
+            api::ArtistSortField::TrackCount,
+            api::ArtistSortField::AlbumCount,
+        ] {
+            assert_eq!(
+                field,
+                artist_order_field_from_proto(artist_order_field_to_proto(field) as i32)
+            );
+        }
+        assert_eq!(
+            album_order_field_from_proto(404),
+            api::AlbumSortField::Title
+        );
+        assert_eq!(
+            artist_order_field_from_proto(404),
+            api::ArtistSortField::Name
+        );
     }
 
     #[test]
