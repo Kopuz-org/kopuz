@@ -42,12 +42,9 @@ pub enum CoverRef {
         item_id: String,
         tag: Option<String>,
     },
+    /// A `getCoverArt` id, signed when it is resolved so no credential is ever stored.
     SubsonicItem {
         item_id: String,
-        /// Ask for the item's own art over a fully signed request. Set when the
-        /// source recorded no cover key at all — that lookup doesn't accept the
-        /// query-token form every other Subsonic ref resolves with.
-        signed: bool,
     },
     EmbeddedUrl(String),
     None,
@@ -283,7 +280,6 @@ impl CoverRef {
             },
             MusicService::Subsonic | MusicService::Custom => Self::SubsonicItem {
                 item_id: item_id.to_string(),
-                signed: false,
             },
             MusicService::YtMusic
             | MusicService::SoundCloud
@@ -326,14 +322,12 @@ impl CoverRef {
                 Some(cover) => Self::remote_item(service, &item_id, Some(cover)),
                 None => Self::parse(&track.album_id),
             },
+            // The sync found no cover key for this song, but its own art is still worth asking for.
             MusicService::Subsonic | MusicService::Custom
                 if track.cover.as_deref() == Some(Self::NO_COVER) =>
             {
-                // The sync found no cover key for this song. Its own art is
-                // still worth asking for — but only over a signed request.
                 Self::SubsonicItem {
                     item_id: item_id.into_owned(),
-                    signed: true,
                 }
             }
             MusicService::Subsonic | MusicService::Custom => {
@@ -564,7 +558,6 @@ mod tests {
             CoverRef::parse("subsonic:cover-1"),
             CoverRef::SubsonicItem {
                 item_id: "cover-1".to_string(),
-                signed: false
             }
         );
         assert_eq!(
@@ -684,16 +677,23 @@ mod tests {
             )),
             CoverRef::SubsonicItem {
                 item_id: "song-1".to_string(),
-                signed: true
             }
         );
-
-        // Absent (rather than sentinel) → the plain token-authenticated lookup.
         assert_eq!(
             CoverRef::for_track(&track(MusicService::Custom, "song-1", None, "")),
             CoverRef::SubsonicItem {
                 item_id: "song-1".to_string(),
-                signed: false
+            }
+        );
+    }
+
+    #[test]
+    fn a_subsonic_cover_art_id_in_the_cover_slot_names_that_art() {
+        let cover = CoverRef::stored_item_ref(MusicService::Custom, "al-7_0", None);
+        assert_eq!(
+            CoverRef::for_track(&track(MusicService::Custom, "song-1", Some(&cover), "")),
+            CoverRef::SubsonicItem {
+                item_id: "al-7_0".to_string(),
             }
         );
     }
@@ -723,14 +723,12 @@ mod tests {
                 MusicService::Subsonic,
                 CoverRef::SubsonicItem {
                     item_id: "item-1".to_string(),
-                    signed: false,
                 },
             ),
             (
                 MusicService::Custom,
                 CoverRef::SubsonicItem {
                     item_id: "item-1".to_string(),
-                    signed: false,
                 },
             ),
         ] {

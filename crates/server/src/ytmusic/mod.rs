@@ -117,18 +117,6 @@ impl YouTubeMusicClient {
         discover::artist_header(channel_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
-    /// Resolve a saved album (title + artist) back to its YT album browse id
-    /// (`MPRE…`). Library YT albums carry no browse id, so the album page calls
-    /// this on demand before [`fetch_album_tracks`](Self::fetch_album_tracks)
-    /// to show the album's complete track list.
-    pub async fn resolve_album_browse_id(
-        &self,
-        album: &str,
-        artist: &str,
-    ) -> Result<Option<String>, String> {
-        search::resolve_album_browse_id(album, artist, self.cookies.as_deref()).await
-    }
-
     /// List the user's saved playlists (everything under Library →
     /// Playlists, minus the Liked Music auto-playlist). Returns summary
     /// rows; call [`get_playlist_entries`] for the tracks of any given

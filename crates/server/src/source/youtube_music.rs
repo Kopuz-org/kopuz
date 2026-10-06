@@ -167,31 +167,7 @@ impl MediaSource for YtSource {
     }
 
     async fn fetch_album_by_ref(&self, id: &str) -> Result<Option<RemoteAlbum>, SourceError> {
-        // Resolve the id (raw browse id, `ytmusic:album:MPRE…`, or a synthesized
-        // `ytmusic:album:<hash>`) to a real browse id before fetching.
-        let browse_id = if let Some(bid) = crate::ytmusic::search::album_browse_id(id) {
-            Some(bid)
-        } else if let Some((album, artist)) = crate::ytmusic::search::synth_album_parts(id) {
-            self.resolve_album_browse_id(&album, &artist).await?
-        } else {
-            None
-        };
-        let Some(browse_id) = browse_id else {
-            return Ok(None);
-        };
-        Ok(self
-            .fetch_album(&browse_id)
-            .await
-            .ok()
-            .filter(|a| !a.tracks.is_empty()))
-    }
-
-    async fn fetch_album_by_meta(
-        &self,
-        title: &str,
-        artist: &str,
-    ) -> Result<Option<RemoteAlbum>, SourceError> {
-        let Some(browse_id) = self.resolve_album_browse_id(title, artist).await? else {
+        let Some(browse_id) = crate::ytmusic::search::album_browse_id(id) else {
             return Ok(None);
         };
         Ok(self
@@ -208,17 +184,6 @@ impl MediaSource for YtSource {
     ) -> Result<(Vec<reader::Track>, Option<String>), SourceError> {
         self.client
             .playlist_page(playlist_id, cursor.as_deref())
-            .await
-            .map_err(SourceError::from)
-    }
-
-    async fn resolve_album_browse_id(
-        &self,
-        album: &str,
-        artist: &str,
-    ) -> Result<Option<String>, SourceError> {
-        self.client
-            .resolve_album_browse_id(album, artist)
             .await
             .map_err(SourceError::from)
     }

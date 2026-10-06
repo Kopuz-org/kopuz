@@ -234,27 +234,9 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("album"))
     }
 
-    /// Resolve an opened album reference — a raw browse id, a `ytmusic:album:MPRE…`
-    /// (search rows with an album link), or a synthesized `ytmusic:album:<hash>`
-    /// (search rows without one) — to its full remote album. `None` when it can't
-    /// be resolved or has no tracks. The id→browse-id→album dance lives here so the
-    /// UI never reaches into the per-service catalog. Default unsupported; only
-    /// catalog remotes (YT) override.
+    /// The full remote album an opened album id names, or `None` when it names none with tracks.
     async fn fetch_album_by_ref(&self, _id: &str) -> Result<Option<RemoteAlbum>, SourceError> {
         Err(SourceError::unsupported("album by ref"))
-    }
-
-    /// Resolve a saved album's title + artist to its full remote album (header +
-    /// every track) for the YT-Music-style album page — the local library stores
-    /// YT albums by hash with no browse id, so the page needs the remote listing.
-    /// `None` when it can't be resolved or has no tracks. Default unsupported; only
-    /// catalog remotes (YT) override.
-    async fn fetch_album_by_meta(
-        &self,
-        _title: &str,
-        _artist: &str,
-    ) -> Result<Option<RemoteAlbum>, SourceError> {
-        Err(SourceError::unsupported("album by meta"))
     }
 
     /// One page of a remote playlist: `cursor = None` for the first page, then
@@ -268,18 +250,6 @@ pub trait MediaSource: Send + Sync {
         _cursor: Option<String>,
     ) -> Result<(Vec<reader::Track>, Option<String>), SourceError> {
         Err(SourceError::unsupported("playlist paging"))
-    }
-
-    /// Resolve a saved album's title + artist to a remote album browse id, so
-    /// the album page can fetch the album's full track list (the local library
-    /// stores YT albums by hash, with no browse id). Default unsupported; only
-    /// catalog remotes (YT) override.
-    async fn resolve_album_browse_id(
-        &self,
-        _album: &str,
-        _artist: &str,
-    ) -> Result<Option<String>, SourceError> {
-        Err(SourceError::unsupported("album browse id"))
     }
 
     /// A remote artist profile (banner, top songs, albums, related) by channel

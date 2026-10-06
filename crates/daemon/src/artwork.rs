@@ -194,6 +194,20 @@ fn hash_name(input: &str) -> String {
     name
 }
 
+/// What a proxied cover is cached under: its URL, unless signing salts that afresh on every request.
+fn remote_cache_name(config: &config::AppConfig, cover: &CoverRef, url: &str) -> String {
+    match cover {
+        CoverRef::SubsonicItem { item_id } => {
+            let server = config
+                .server
+                .as_ref()
+                .map_or("", |server| server.url.as_str());
+            hash_name(&format!("subsonic|{server}|{item_id}"))
+        }
+        _ => hash_name(url),
+    }
+}
+
 /// Applies the shared resize policy to a fetched remote cover, the way
 /// `local_payload` does to one off disk. A cover that will not decode is
 /// served as it arrived, which is what the local path does too.
@@ -254,9 +268,12 @@ impl ArtworkService {
         let width = if hq { HQ_MAX } else { THUMB_MAX };
         let cover = self.cover_for(target, &config).await?;
         let missing = || ApiError::not_found("no artwork for this entity");
-        match server::cover::locate(&config, cover, width).ok_or_else(missing)? {
+        match server::cover::locate(&config, cover.clone(), width).ok_or_else(missing)? {
             Located::File(path) => self.local_payload(&path.to_string_lossy(), hq).await,
-            Located::Url(url) => self.proxied_payload(&url, hq).await,
+            Located::Url(url) => {
+                let cache_name = remote_cache_name(&config, &cover, &url);
+                self.proxied_payload(&url, &cache_name, hq).await
+            }
         }
     }
 
@@ -421,11 +438,15 @@ impl ArtworkService {
     ///
     /// The width handed to `locate` is only a hint a service may ignore, so the
     /// shared resize policy is applied here too rather than trusting the origin.
-    async fn proxied_payload(&self, url: &str, hq: bool) -> Result<ArtworkPayload, ApiError> {
+    async fn proxied_payload(
+        &self,
+        url: &str,
+        cache_name: &str,
+        hq: bool,
+    ) -> Result<ArtworkPayload, ApiError> {
         let cache_path = self.cache_dir.join(format!(
-            "remote_{}_{}",
+            "remote_{}_{cache_name}",
             if hq { "hq" } else { "thumb" },
-            hash_name(url)
         ));
         if let Ok(bytes) = tokio::fs::read(&cache_path).await {
             let content_type = sniff_content_type(&bytes);
@@ -538,6 +559,38 @@ mod tests {
             artists: vec![],
             replay_gain: config::ReplayGainInfo::default(),
         }
+    }
+
+    #[test]
+    fn a_signed_cover_is_cached_under_its_id_not_its_salted_url() {
+        let config = config::AppConfig {
+            server: Some(config::MusicServer {
+                url: "https://sub.example".into(),
+                service: config::MusicService::Subsonic,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let cover = CoverRef::SubsonicItem {
+            item_id: "al-1".into(),
+        };
+        assert_eq!(
+            remote_cache_name(
+                &config,
+                &cover,
+                "https://sub.example/rest/getCoverArt.view?s=a"
+            ),
+            remote_cache_name(
+                &config,
+                &cover,
+                "https://sub.example/rest/getCoverArt.view?s=b"
+            ),
+        );
+        let url = "https://img.example/x.jpg";
+        assert_eq!(
+            remote_cache_name(&config, &CoverRef::EmbeddedUrl(url.into()), url),
+            hash_name(url)
+        );
     }
 
     #[test]
