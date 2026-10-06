@@ -185,8 +185,6 @@ fn run(
             &audio_params,
             &AudioDecoderOptions::default(),
         ) {
-            // The libopus adapter consumes pre-skip but does not apply the
-            // OpusHead gain. Keep this codec gain independent of ReplayGain.
             Ok(d) => (d, opus_output_gain(audio_params.extra_data.as_deref())),
             Err(e) => return fail(format!("symphonia codec error: {e}")),
         },
@@ -593,6 +591,7 @@ pub(crate) fn parse_opushead_channels(extra: &[u8]) -> Option<u8> {
     }
 }
 
+/// Decode the OpusHead gain that the libopus adapter leaves unapplied, independently of ReplayGain.
 fn opus_output_gain(extra: Option<&[u8]>) -> f32 {
     let Some(header) = extra.filter(|extra| extra.len() >= 19 && extra.starts_with(b"OpusHead"))
     else {

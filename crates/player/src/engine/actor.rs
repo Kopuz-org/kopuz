@@ -365,8 +365,6 @@ impl Actor {
             }
             Command::SetReplayGain(settings) => {
                 self.replay_gain_settings = settings;
-                // Sessions publish their gain through a shared cell, so both
-                // sides of an in-flight crossfade re-level without a reload.
                 for session in [self.current.as_ref(), self.fading.as_ref()]
                     .into_iter()
                     .flatten()
@@ -641,8 +639,6 @@ impl Actor {
             (config, None, false)
         };
 
-        // The stream's own tags describe the exact bytes being decoded, so
-        // they win; the server's values fill in what a transcode stripped.
         let gain = Arc::new(AtomicU32::new(
             self.replay_gain_settings
                 .linear_gain_with_fallback(replay_gain, service_replay_gain, album_context)

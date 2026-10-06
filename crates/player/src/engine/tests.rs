@@ -285,8 +285,6 @@ fn replay_gain_settings_scale_the_playing_track() {
         ungained > 0.0
     });
 
-    // The WAV carries no tags, so the fallback gain is what a track without
-    // ReplayGain data gets. -6 dB halves the amplitude.
     engine.send(Command::SetReplayGain(config::ReplayGainSettings {
         mode: config::ReplayGainMode::Track,
         prevent_clipping: false,
@@ -317,8 +315,6 @@ fn service_replay_gain_levels_a_stream_without_tags() {
         fallback_gain_db: 0.0,
     }));
 
-    // A bare WAV, as a transcoding server would serve it: no tags at all, so
-    // only what the server reported is left to level by.
     let (factory, duration) = wav_factory(5.0);
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     engine.send(Command::Load(LoadRequest {
@@ -349,7 +345,6 @@ fn service_replay_gain_levels_a_stream_without_tags() {
         peak > 0.0
     });
 
-    // The WAV's own peak is 10_000/32_768; -6 dB halves it.
     let expected = (10_000.0 / 32_768.0) * 0.5;
     assert!(
         (peak - expected).abs() < expected * 0.1,
@@ -421,13 +416,15 @@ fn opus_header_gain_is_independent_of_replay_gain_and_survives_seek() {
     }
 }
 
+/// Fixture: a 0.125-peak tone with -6 dB header gain and -6/-12 dB track/album gains.
+/// Regenerate with:
+/// ```sh
+/// ffmpeg -f lavfi -i sine=frequency=440:duration=0.25 -c:a libopus \
+///   -metadata R128_TRACK_GAIN=-2816 -metadata R128_ALBUM_GAIN=-4352 \
+///   -bsf:a opus_metadata=gain=-1536 tone_replaygain.opus
+/// ```
 #[test]
 fn opus_replay_gain_tags_reach_the_audio_output() {
-    // ffmpeg -f lavfi -i sine=frequency=440:duration=0.25 -c:a libopus
-    // -metadata R128_TRACK_GAIN=-2816 -metadata R128_ALBUM_GAIN=-4352
-    // -bsf:a opus_metadata=gain=-1536 tone_replaygain.opus
-    // The tone peaks at 0.125 before encoding. Header: -6 dB; tags, after
-    // the R128 reference offset: track -6 dB and album -12 dB.
     for (mode, total_db) in [
         (config::ReplayGainMode::Off, -6.0_f32),
         (config::ReplayGainMode::Track, -12.0),

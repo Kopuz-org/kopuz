@@ -112,24 +112,17 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
 
     rsx! {
         div {
-            // `cursor-default` because rows that own a menu are often drag
-            // handles carrying `cursor-grab`, and `cursor` inherits.
             class: if props.is_open {
                 "relative dots-menu-root cursor-default"
             } else {
                 "relative cursor-default"
             },
-            // On the root, not the panel: focus stays on the trigger when the
-            // menu opens by click, so a keydown on the panel would never fire.
             onkeydown: move |evt| {
                 if props.is_open && evt.key() == Key::Escape {
                     evt.stop_propagation();
                     props.on_close.call(());
                 }
             },
-            // A press inside the menu must never reach the row behind it: the
-            // draggable rows arm a drag on mousedown and a long-press on
-            // touchstart, and either one swallows the click on a menu entry.
             onmousedown: move |evt| evt.stop_propagation(),
             ontouchstart: move |evt| evt.stop_propagation(),
 
@@ -142,7 +135,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                 onmounted: move |evt| trigger_element.set(Some(evt)),
                 onclick: move |evt| {
                     evt.stop_propagation();
-                    // Anchor to the button, never to a stale right-click point.
                     clear_context_point();
                     panel_geometry.set(None);
                     if props.is_open {
@@ -172,8 +164,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                     },
                     style: "{panel_style}",
                     role: "menu",
-                    // Focusable only so a pointer-opened menu can be given
-                    // focus below; it stays out of the tab order.
                     tabindex: "-1",
                     onmounted: {
                         let anchor = props.anchor.clone();
@@ -183,8 +173,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                             let trigger_evt = trigger_element.peek().clone();
                             let anchor = anchor.clone();
                             let placement = placement.clone();
-                            // Consumed on mount so the next open falls back to
-                            // the trigger unless another right-click sets it.
                             let pointer = take_context_point();
                             async move {
                                 if sheet {
@@ -197,10 +185,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                                     return;
                                 };
                                 let (left, top) = if let Some((x, y)) = position.or(pointer) {
-                                    // Opened at a point rather than from the
-                                    // trigger: the point is the corner the panel
-                                    // grows away from, mirrored in RTL so it
-                                    // still opens inwards.
                                     let left = if is_rtl { x - panel_rect.width() } else { x };
                                     (left, y)
                                 } else {
@@ -229,11 +213,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                                     panel_rect.height(),
                                 )));
                                 if pointer.is_some() {
-                                    // A right-click leaves focus wherever it
-                                    // was, so Escape would never reach the root
-                                    // handler. A click-opened menu keeps focus
-                                    // on the trigger, which is already inside
-                                    // the root, so it is left alone.
                                     let _ = panel_evt.set_focus(true).await;
                                 }
                             }

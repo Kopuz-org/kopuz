@@ -858,7 +858,6 @@ mod tests {
         let info = item.replay_gain_info();
         assert_eq!(info.track_gain_db, Some(-7.5));
         assert_eq!(info.album_gain_db, Some(-5.25));
-        // Jellyfin publishes no peaks, so clip prevention stays inert here.
         assert_eq!(info.track_peak, None);
         assert_eq!(info.album_peak, None);
     }
@@ -867,7 +866,7 @@ mod tests {
     fn an_item_from_an_older_server_reports_nothing() {
         let item: Item =
             serde_json::from_str(r#"{"Name": "T", "Id": "1", "Type": "Audio"}"#).unwrap();
-        assert!(item.replay_gain_info().is_empty());
+        assert_eq!(item.replay_gain_info(), config::ReplayGainInfo::default());
     }
 
     #[test]

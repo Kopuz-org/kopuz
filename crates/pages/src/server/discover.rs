@@ -656,8 +656,6 @@ fn SongCard(item: CatalogItem, track: TrackInfo) -> Element {
 
     rsx! {
         div {
-            // A transformed card is the containing block for the menu's fixed
-            // panel and playlist overlay, so the hover lift is off while it is open.
             class: if menu_open() {
                 "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out group"
             } else {

@@ -1,9 +1,4 @@
-//! ReplayGain tag extraction.
-//!
-//! The values ride in the container's own metadata, so they are read off the
-//! probed stream rather than the library database: local files, direct-played
-//! server files and downloaded copies all go through the same path, and a
-//! service that strips or rewrites tags is reflected truthfully.
+//! Read ReplayGain from the decoded stream's metadata, including R128 tags in Opus files.
 
 use config::ReplayGainInfo;
 use symphonia::core::formats::FormatReader;
@@ -26,27 +21,25 @@ fn from_tags(tags: &[Tag]) -> ReplayGainInfo {
         track_gain_db: gain_db(
             tags,
             |t| matches!(t, StandardTag::ReplayGainTrackGain(_)),
-            &["REPLAYGAIN_TRACK_GAIN"],
+            "REPLAYGAIN_TRACK_GAIN",
         ),
         track_peak: peak(
             tags,
             |t| matches!(t, StandardTag::ReplayGainTrackPeak(_)),
-            &["REPLAYGAIN_TRACK_PEAK"],
+            "REPLAYGAIN_TRACK_PEAK",
         ),
         album_gain_db: gain_db(
             tags,
             |t| matches!(t, StandardTag::ReplayGainAlbumGain(_)),
-            &["REPLAYGAIN_ALBUM_GAIN"],
+            "REPLAYGAIN_ALBUM_GAIN",
         ),
         album_peak: peak(
             tags,
             |t| matches!(t, StandardTag::ReplayGainAlbumPeak(_)),
-            &["REPLAYGAIN_ALBUM_PEAK"],
+            "REPLAYGAIN_ALBUM_PEAK",
         ),
     };
 
-    // Opus files tagged by opusenc/rsgain carry R128 instead; symphonia has no
-    // standard tag for it, so match the raw key.
     if info.track_gain_db.is_none() {
         info.track_gain_db = r128_gain_db(tags, "R128_TRACK_GAIN");
     }
@@ -60,9 +53,9 @@ fn from_tags(tags: &[Tag]) -> ReplayGainInfo {
 fn gain_db(
     tags: &[Tag],
     matches_std: impl Fn(&StandardTag) -> bool,
-    fallback_keys: &[&str],
+    fallback_key: &str,
 ) -> Option<f32> {
-    find(tags, matches_std, fallback_keys)
+    find(tags, matches_std, fallback_key)
         .and_then(tag_value)
         .as_deref()
         .and_then(parse_gain_db)
@@ -71,9 +64,9 @@ fn gain_db(
 fn peak(
     tags: &[Tag],
     matches_std: impl Fn(&StandardTag) -> bool,
-    fallback_keys: &[&str],
+    fallback_key: &str,
 ) -> Option<f32> {
-    find(tags, matches_std, fallback_keys)
+    find(tags, matches_std, fallback_key)
         .and_then(tag_value)
         .as_deref()
         .and_then(|value| value.trim().parse::<f32>().ok())
@@ -81,7 +74,7 @@ fn peak(
 }
 
 fn r128_gain_db(tags: &[Tag], key: &str) -> Option<f32> {
-    find(tags, |_| false, &[key])
+    find(tags, |_| false, key)
         .and_then(tag_value)
         .as_deref()
         .and_then(|value| value.trim().parse::<i32>().ok())
@@ -91,16 +84,13 @@ fn r128_gain_db(tags: &[Tag], key: &str) -> Option<f32> {
 fn find<'a>(
     tags: &'a [Tag],
     matches_std: impl Fn(&StandardTag) -> bool,
-    fallback_keys: &[&str],
+    fallback_key: &str,
 ) -> Option<&'a Tag> {
     tags.iter()
         .find(|tag| tag.std.as_ref().is_some_and(&matches_std))
         .or_else(|| {
-            tags.iter().find(|tag| {
-                fallback_keys
-                    .iter()
-                    .any(|key| tag.raw.key.eq_ignore_ascii_case(key))
-            })
+            tags.iter()
+                .find(|tag| tag.raw.key.eq_ignore_ascii_case(fallback_key))
         })
 }
 

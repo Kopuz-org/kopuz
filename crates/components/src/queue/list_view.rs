@@ -63,11 +63,6 @@ pub fn QueueRow(
             class: "{row_class}",
             style: match layout {
                 LayoutMode::Fullscreen => "",
-                // content-visibility applies paint containment, which makes the
-                // row a containing block for the menu's fixed-position panel and
-                // clips it to a 52px box, so the menu opens invisibly. Drop the
-                // containment for as long as the menu is up, as the album and
-                // artist cards do.
                 LayoutMode::Rightbar if menu_open() => "content-visibility: visible; contain: none;",
                 LayoutMode::Rightbar => "content-visibility: auto; contain-intrinsic-size: 0 52px;",
             },
@@ -155,8 +150,6 @@ pub fn QueueRow(
                     is_open: Some(menu_open()),
                     on_open: Some(EventHandler::new(move |_| menu_open.set(true))),
                     on_close: Some(EventHandler::new(move |_| menu_open.set(false))),
-                    // Queueing a track that is already in the queue would just
-                    // duplicate it; reordering is what this surface offers.
                     show_queue_actions: false,
                     on_remove_from_queue: (!is_active).then(|| EventHandler::new(move |_| {
                         ctrl.remove_queue_item(queue_idx);

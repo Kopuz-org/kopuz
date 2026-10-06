@@ -131,8 +131,6 @@ pub fn BottombarNormal(
         PlayerBarPosition::Top => "border-b border-white/5",
     };
 
-    // The bar sits against one edge of the window, so the menu has to open
-    // away from it.
     let menu_placement = match position {
         PlayerBarPosition::Bottom => "top",
         PlayerBarPosition::Top => "bottom",
