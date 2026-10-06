@@ -134,6 +134,21 @@ impl RangeStreamSource {
         self.total_size
     }
 
+    /// Ask for the last byte. googlevideo can serve the head of a stream and
+    /// answer 403 past it, so passing the head probe says nothing about deep
+    /// reads, and the first one is symphonia's own read of the webm tail.
+    pub fn check_tail(&self) -> IoResult<()> {
+        let last = self.total_size.saturating_sub(1);
+        let resp = send_range(&self.client, &self.url, &format!("bytes={last}-{last}"))?;
+        if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            return Err(IoError::new(
+                ErrorKind::PermissionDenied,
+                format!("tail range refused (HTTP {})", resp.status()),
+            ));
+        }
+        Ok(())
+    }
+
     fn install_chunk(&mut self, start: u64, bytes: Vec<u8>) {
         let end = start + bytes.len() as u64;
         self.chunk = bytes;

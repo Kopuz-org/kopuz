@@ -31,15 +31,34 @@ pub(crate) fn network_factory(
                 );
                 Ok(decoder::from_stream_with_hint(stream, "ogg"))
             } else if let Some((fmt, range_safe)) = yt_format {
-                if range_safe {
-                    // YT: HTTP Range-backed source. Symphonia can seek freely
-                    // (Matroska Cues at the end, scrub anywhere) and startup
-                    // probes only fetch the ~512 KiB they need.
+                // YT: HTTP Range-backed source. Symphonia can seek freely
+                // (Matroska Cues at the end, scrub anywhere) and startup
+                // probes only fetch the ~512 KiB they need. A URL the
+                // resolver called range-safe can still have its deep ranges
+                // refused (issue #731), so the tail is checked first.
+                let open_ranged = || {
                     let range = server::stream::range_source::RangeStreamSource::new_with_progress(
-                        stream_url,
-                        yt_user_agent,
-                        buffer_progress,
+                        stream_url.clone(),
+                        yt_user_agent.clone(),
+                        buffer_progress.clone(),
                     )?;
+                    range.check_tail()?;
+                    Ok::<_, std::io::Error>(range)
+                };
+                let range = match range_safe {
+                    false => None,
+                    true => match open_ranged() {
+                        Ok(range) => Some(range),
+                        Err(error) => {
+                            tracing::warn!(
+                                %error,
+                                "no range support; streaming sequentially without seeking"
+                            );
+                            None
+                        }
+                    },
+                };
+                if let Some(range) = range {
                     let len = Some(range.total_size());
                     let (source, mut hint) = decoder::from_stream_with_len(range, len);
                     hint.with_extension(fmt.extension());
