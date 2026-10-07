@@ -151,19 +151,21 @@ pub fn Radio(props: RadioProps) -> Element {
 
                 if is_vaxry {
                     div { class: "mb-6 flex items-end justify-between",
-                        div {
-                            p {
-                                class: "text-[10px] font-bold mb-1",
-                                style: "color: rgba(255,255,255,0.35);",
-                                "{i18n::t(\"discover\")}"
-                            }
-                            h1 {
-                                class: "text-2xl font-semibold tracking-tight text-white",
-                                "{i18n::t(\"radio\")}"
+                        if !cfg!(target_os = "android") {
+                            div {
+                                p {
+                                    class: "text-[10px] font-bold mb-1",
+                                    style: "color: rgba(255,255,255,0.35);",
+                                    "{i18n::t(\"discover\")}"
+                                }
+                                h1 {
+                                    class: "text-2xl font-semibold tracking-tight text-white",
+                                    "{i18n::t(\"radio\")}"
+                                }
                             }
                         }
                         // Search — Vaxry
-                        div { class: "relative w-64",
+                        div { class: if cfg!(target_os = "android") { "relative w-full" } else { "relative w-64" },
                             i {
                                 class: "fa-solid fa-magnifying-glass absolute top-1/2 -translate-y-1/2 text-xs",
                                 style: "left: 12px; color: rgba(255,255,255,0.3);",

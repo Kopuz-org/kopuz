@@ -148,18 +148,21 @@ pub fn PlaylistsPage(
                     }
                 }
             } else {
-                div { class: if is_vaxry { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
-                    if is_vaxry {
-                        div {
-                            p {
-                                class: "text-[10px] font-bold mb-0.5",
-                                style: "color: rgba(255,255,255,0.35);",
-                                "{i18n::t(\"library\")}"
+                div { class: if cfg!(target_os = "android") { "flex items-center justify-end mb-2" } else if is_vaxry { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
+                    // The app header already names the page on Android.
+                    if !cfg!(target_os = "android") {
+                        if is_vaxry {
+                            div {
+                                p {
+                                    class: "text-[10px] font-bold mb-0.5",
+                                    style: "color: rgba(255,255,255,0.35);",
+                                    "{i18n::t(\"library\")}"
+                                }
+                                h1 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"playlists\")}" }
                             }
-                            h1 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"playlists\")}" }
+                        } else {
+                            h1 { class: "text-3xl font-semibold tracking-tight text-white", "{i18n::t(\"playlists\")}" }
                         }
-                    } else {
-                        h1 { class: "text-3xl font-semibold tracking-tight text-white", "{i18n::t(\"playlists\")}" }
                     }
                     div { class: "flex items-center gap-1",
                         if caps().folders {

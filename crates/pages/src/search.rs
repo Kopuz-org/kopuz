@@ -43,7 +43,7 @@ pub fn Search(
 
     rsx! {
         div {
-            class: if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "p-8 absolute inset-0 flex flex-col" },
+            class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "p-8 absolute inset-0 flex flex-col" },
 
             if *show_playlist_modal.read() {
                 PlaylistModal {
