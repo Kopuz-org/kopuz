@@ -68,6 +68,11 @@ pub struct DotsMenuProps {
     pub icon: String,
     /// Accessible name for the icon-only trigger.
     pub aria_label: String,
+    /// What the menu acts on, heading the sheet it opens as on Android.
+    #[props(default)]
+    pub title: String,
+    #[props(default)]
+    pub subtitle: String,
 }
 
 /// The panel measures itself pinned to the viewport origin, because `left`/`right`
@@ -85,7 +90,9 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
         "w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-colors {}",
         props.button_class
     );
+    let sheet = cfg!(target_os = "android");
     let panel_style = match *panel_geometry.read() {
+        _ if sheet => String::new(),
         Some((left, top, width, height)) => format!(
             "position: fixed; left: clamp(8px, {left}px, calc(100vw - {width}px - 8px)); top: clamp(8px, {top}px, calc(100vh - {height}px - 8px)); visibility: visible;"
         ),
@@ -138,7 +145,7 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
 
             if props.is_open {
                 div {
-                    class: "fixed inset-0 dots-menu-backdrop",
+                    class: if sheet { "fixed inset-0 dots-menu-backdrop bg-black/60" } else { "fixed inset-0 dots-menu-backdrop" },
                     aria_hidden: "true",
                     onclick: move |evt| {
                         evt.stop_propagation();
@@ -147,7 +154,11 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                 }
 
                 div {
-                    class: "w-auto flex flex-col bg-neutral-900 border border-white/10 rounded-lg dots-menu-panel py-1 shadow-xl",
+                    class: if sheet {
+                        "flex flex-col dots-menu-panel dots-menu-sheet kopuz-sheet-in"
+                    } else {
+                        "w-auto flex flex-col bg-neutral-900 border border-white/10 rounded-lg dots-menu-panel py-1 shadow-xl"
+                    },
                     style: "{panel_style}",
                     role: "menu",
                     // Focusable only so a pointer-opened menu can be given
@@ -158,6 +169,9 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                         let placement = props.placement.clone();
                         let position = props.position;
                         move |panel_evt: MountedEvent| {
+                            if sheet {
+                                take_context_point();
+                            }
                             let trigger_evt = trigger_element.peek().clone();
                             let anchor = anchor.clone();
                             let placement = placement.clone();
@@ -165,6 +179,9 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                             // the trigger unless another right-click sets it.
                             let pointer = take_context_point();
                             async move {
+                                if sheet {
+                                    return;
+                                }
                                 let Ok(panel_rect) = panel_evt.get_client_rect().await else {
                                     return;
                                 };
@@ -213,6 +230,15 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                     },
                     onclick: move |evt| evt.stop_propagation(),
 
+                    if sheet && !props.title.is_empty() {
+                        div { class: "dots-menu-sheet-heading",
+                            span { class: "truncate text-white font-medium", "{props.title}" }
+                            if !props.subtitle.is_empty() {
+                                span { class: "truncate text-xs text-white/50", "{props.subtitle}" }
+                            }
+                        }
+                    }
+
                     for (idx, action) in props.actions.iter().enumerate() {
                         {
                             let label = action.label.clone();
@@ -228,7 +254,11 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                                     key: "{idx}",
                                     r#type: "button",
                                     role: "menuitem",
-                                    class: "px-4 py-2 text-sm cursor-pointer {text_color} hover:bg-white/10 flex items-center gap-2 transition-colors whitespace-nowrap",
+                                    class: if sheet {
+                                        "dots-menu-sheet-item {text_color}"
+                                    } else {
+                                        "px-4 py-2 text-sm cursor-pointer {text_color} hover:bg-white/10 flex items-center gap-2 transition-colors whitespace-nowrap"
+                                    },
                                     onclick: move |_| {
                                         panel_geometry.set(None);
                                         props.on_action.call(idx);

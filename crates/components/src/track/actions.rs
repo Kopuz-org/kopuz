@@ -224,6 +224,8 @@ pub fn TrackActionsMenu(props: TrackActionsMenuProps) -> Element {
             actions,
             is_open,
             aria_label: i18n::t_with("more_actions_for", &[("name", props.track.title.clone())]),
+            title: props.track.title.clone(),
+            subtitle: props.track.artist.clone(),
             button_class: props.button_class.clone(),
             anchor: props.anchor.clone(),
             placement: props.placement.clone(),
