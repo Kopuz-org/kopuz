@@ -17,6 +17,17 @@ pub fn open_at_pointer(evt: &Event<MouseData>) {
     }
 }
 
+/// Close the open menu or option sheet through its own backdrop, reporting
+/// whether there was one, so Android's back gesture dismisses it first.
+pub async fn close_open_sheet() -> bool {
+    document::eval(
+        "const b = document.querySelector('.dots-menu-backdrop, .app-select-sheet-backdrop'); if (b) { b.click(); return true; } return false;",
+    )
+    .join::<bool>()
+    .await
+    .unwrap_or(false)
+}
+
 fn take_context_point() -> Option<(f64, f64)> {
     CONTEXT_POINT.lock().ok().and_then(|mut slot| slot.take())
 }
@@ -169,9 +180,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                         let placement = props.placement.clone();
                         let position = props.position;
                         move |panel_evt: MountedEvent| {
-                            if sheet {
-                                take_context_point();
-                            }
                             let trigger_evt = trigger_element.peek().clone();
                             let anchor = anchor.clone();
                             let placement = placement.clone();
@@ -180,6 +188,9 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                             let pointer = take_context_point();
                             async move {
                                 if sheet {
+                                    if pointer.is_some() {
+                                        let _ = panel_evt.set_focus(true).await;
+                                    }
                                     return;
                                 }
                                 let Ok(panel_rect) = panel_evt.get_client_rect().await else {

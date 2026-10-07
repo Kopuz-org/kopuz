@@ -1307,6 +1307,9 @@ fn App() -> Element {
         let mut settings_subpage = settings_subpage;
         loop {
             player::systemint::wait_back_pressed().await;
+            if components::dots_menu::close_open_sheet().await {
+                continue;
+            }
             if *show_quick_search.peek() {
                 show_quick_search.set(false);
             } else if *is_devices_open.peek() {
