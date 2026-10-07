@@ -1589,6 +1589,7 @@ enum UiStyle {
   UI_STYLE_UNSPECIFIED = 0;
   UI_STYLE_NORMAL = 1;
   UI_STYLE_VAXRY = 2;
+  UI_STYLE_MATERIAL3 = 3;
 }
 
 enum EqPreset {

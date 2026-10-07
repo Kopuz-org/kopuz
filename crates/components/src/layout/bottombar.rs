@@ -29,7 +29,7 @@ pub fn Bottombar(
     set_queue_drag_enabled(c);
 
     match config.read().ui_style {
-        UiStyle::Normal => rsx! {
+        UiStyle::Normal | UiStyle::Material3 => rsx! {
             BottombarNormal {
                 config, is_playing, is_fullscreen,
                 current_song_duration, current_song_progress, queue, current_queue_index,

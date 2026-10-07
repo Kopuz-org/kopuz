@@ -12,7 +12,7 @@ use crate::shared::fmt_time;
 pub struct CompactMode(pub Signal<bool>);
 
 /// Style-dependent classes so the mini player visually relates to the active
-/// UI style (Normal vs Vaxry), mirroring how the bottom bar splits.
+/// UI style, mirroring how the bottom bar splits.
 struct CompactSkin {
     container: &'static str,
     title: &'static str,
@@ -42,6 +42,15 @@ fn skin_for(style: UiStyle) -> CompactSkin {
             play_icon: "text-sm",
             ctrl_btn: "w-9 h-9 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
             progress_fill: "bg-white/90",
+        },
+        UiStyle::Material3 => CompactSkin {
+            container: "material3-compact",
+            title: "text-sm font-medium truncate leading-tight",
+            cover: "rounded-xl",
+            play_btn: "playback-play w-12 h-12 flex items-center justify-center rounded-2xl",
+            play_icon: "text-lg",
+            ctrl_btn: "w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10",
+            progress_fill: "material3-progress",
         },
     }
 }
@@ -101,11 +110,11 @@ pub fn CompactPlayer() -> Element {
             if !cover.is_empty() {
                 img {
                     src: "{cover}",
-                    class: "absolute inset-0 w-full h-full object-cover scale-125 blur-2xl opacity-40 pointer-events-none",
+                    class: "compact-backdrop absolute inset-0 w-full h-full object-cover scale-125 blur-2xl opacity-40 pointer-events-none",
                 }
             }
             div {
-                class: "absolute inset-0 bg-gradient-to-r from-black/90 via-black/75 to-black/90 pointer-events-none",
+                class: "compact-backdrop absolute inset-0 bg-gradient-to-r from-black/90 via-black/75 to-black/90 pointer-events-none",
             }
 
             div {

@@ -671,6 +671,23 @@ mod tests {
     }
 
     #[test]
+    fn material_style_and_system_colors_survive_a_settings_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let cfg = AppConfig {
+            ui_style: crate::UiStyle::Material3,
+            theme: "system".into(),
+            ..Default::default()
+        };
+        save_settings_file(&path, &serde_json::to_value(cfg).unwrap(), &BTreeSet::new()).unwrap();
+        let restored = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env())
+            .merge_and_parse(serde_json::json!({}))
+            .unwrap();
+        assert_eq!(restored.ui_style, crate::UiStyle::Material3);
+        assert_eq!(restored.theme, "system");
+    }
+
+    #[test]
     fn default_config_round_trips_through_the_settings_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");

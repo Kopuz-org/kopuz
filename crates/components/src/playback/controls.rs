@@ -268,7 +268,8 @@ pub fn TransportButtons(is_playing: Signal<bool>, variant: ControlsVariant) -> E
 
     rsx! {
         div {
-            class: classes.wrapper,
+            class: "playback-controls {classes.wrapper}",
+            "data-fullscreen": variant == ControlsVariant::Fullscreen,
             dir: "ltr",
             style: if variant == ControlsVariant::Fullscreen { "max-width: 640px;" } else { "" },
             button {
@@ -285,7 +286,8 @@ pub fn TransportButtons(is_playing: Signal<bool>, variant: ControlsVariant) -> E
                     i { class: "fa-solid fa-backward-step {classes.step_icon}" }
                 }
                 button {
-                    class: classes.play,
+                    class: "playback-play {classes.play}",
+                    aria_label: if *is_playing.read() { i18n::t("pause") } else { i18n::t("play") },
                     onclick: move |_| ctrl.toggle(),
                     i { class: if *is_playing.read() { format!("fa-solid fa-pause {}", classes.play_icon_size) } else { format!("fa-solid fa-play {} ml-1", classes.play_icon_size) } }
                 }
@@ -392,14 +394,14 @@ pub fn SeekSlider(
                 dir: "ltr",
                 span { class: "text-[10px] text-slate-500 w-8 text-right font-mono", "{fmt_time(display_progress)}" }
                 div {
-                    class: format!("flex-1 h-1 bg-white/10 rounded-full relative {}", if can_seek { "group cursor-pointer" } else { "" }),
+                    class: format!("playback-slider flex-1 h-1 bg-white/10 rounded-full relative {}", if can_seek { "group cursor-pointer" } else { "" }),
                     PlaybackBufferIndicator {
                         ranges: buffered_ranges.clone(),
                         played_percent: progress_percent,
                         loading: is_loading,
                     }
                     div {
-                        class: "absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
+                        class: "playback-slider-fill absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
                         style: "width: {progress_percent}%",
                             div { class: "absolute -right-1.5 -top-1 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity" }
                     }
@@ -485,10 +487,10 @@ pub fn VolumeSlider(
                     i { class: if is_muted { "fa-solid fa-volume-xmark text-xs" } else { "fa-solid fa-volume-high text-xs" } }
                 }
                 div {
-                    class: "w-24 h-1 bg-white/10 rounded-full group/vol cursor-pointer relative",
+                    class: "playback-slider w-24 h-1 bg-white/10 rounded-full group/vol cursor-pointer relative",
                     onwheel: move |evt| on_wheel.call(evt),
                     div {
-                        class: "absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
+                        class: "playback-slider-fill absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
                         style: "width: {volume_percent}%",
                         div { class: "absolute -right-1.5 -top-1 w-3 h-3 bg-white rounded-full opacity-0 group-hover/vol:opacity-100 transition-opacity" }
                     }

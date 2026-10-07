@@ -653,6 +653,17 @@ pub enum UiStyle {
     Normal,
     #[serde(alias = "Modern")]
     Vaxry,
+    Material3,
+}
+
+impl UiStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Vaxry => "vaxry",
+            Self::Material3 => "material3",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]

@@ -7,6 +7,7 @@ pub fn page_container_class(ui_style: &UiStyle) -> &'static str {
         match ui_style {
             UiStyle::Vaxry => "px-6 pt-6 absolute inset-0 flex flex-col",
             UiStyle::Normal => "px-8 pt-8 absolute inset-0 flex flex-col",
+            UiStyle::Material3 => "px-6 pt-6 absolute inset-0 flex flex-col",
         }
     }
 }

@@ -32,6 +32,7 @@ webbrowser = { workspace = true }
 kopuzd = { workspace = true }
 client = { workspace = true }
 futures-util = { workspace = true }
+wallpaper = { version = "3.2", default-features = false }
 
 [target.'cfg(target_os = "android")'.dependencies]
 dioxus = { workspace = true, features = ["mobile"] }
@@ -65,6 +66,7 @@ percent-encoding = { workspace = true }
 image = { workspace = true }
 utils = { workspace = true }
 rand = { workspace = true }
+material-colors = "0.4.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 i18n = { workspace = true }
@@ -73,6 +75,7 @@ reqwest = { workspace = true, features = ["json"] }
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "settings"] }
 webkit2gtk = { workspace = true, features = ["v2_16"] }
 libloading = { workspace = true }
 
@@ -116,6 +119,7 @@ base64 = "0.22"
 default = []
 
 [dev-dependencies]
+tempfile = { workspace = true }
 axum = { version = "0.7.9", default-features = false, features = ["http1", "tokio"] }
 async-trait = { workspace = true }
 tower = { workspace = true }

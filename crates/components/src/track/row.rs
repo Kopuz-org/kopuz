@@ -118,7 +118,7 @@ pub fn TrackRow(
                 // Fixed height, not padding: the virtual scroller lays its spacers
                 // out in multiples of one row, so this cannot vary with whether
                 // artwork is switched on.
-                class: "flex items-center gap-3 px-2 h-14 rounded-lg active:bg-white/10 transition-colors select-none",
+                class: "track-row flex items-center gap-3 px-2 h-14 rounded-lg active:bg-white/10 transition-colors select-none",
                 style: if is_currently_playing {
                     format!("background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
                 } else {
@@ -210,7 +210,7 @@ pub fn TrackRow(
     if is_vaxry {
         return rsx! {
                 div {
-                    class: "track-row-draggable grid px-2 py-1.5 rounded-lg mx-1 group cursor-grab active:cursor-grabbing transition-colors hover:bg-white/5 select-none",
+                    class: "track-row track-row-draggable grid px-2 py-1.5 rounded-lg mx-1 group cursor-grab active:cursor-grabbing transition-colors hover:bg-white/5 select-none",
                     style: if is_currently_playing {
                         format!("grid-template-columns: {columns_vaxry}; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
                     } else {
@@ -478,7 +478,7 @@ pub fn TrackRow(
     // normal UI
     return rsx! {
         div {
-            class: "track-row-draggable grid items-center h-14 p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none cursor-grab active:cursor-grabbing",
+            class: "track-row track-row-draggable grid items-center h-14 p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none cursor-grab active:cursor-grabbing",
             style: if is_currently_playing {
                 format!("grid-template-columns: {columns_normal}; column-gap: {column_gap}; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
             } else {
