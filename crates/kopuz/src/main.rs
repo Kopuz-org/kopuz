@@ -1034,6 +1034,8 @@ fn App() -> Element {
     ));
     provide_context(scroll_positions);
     provide_context(components::source_switcher::SettingsAnchor(settings_anchor));
+    let mut settings_subpage = use_signal(|| None::<String>);
+    provide_context(components::tabbar::SettingsSubpage(settings_subpage));
     let mut nav_history = use_signal(Vec::<components::NavSnapshot>::new);
     let mut nav_restoring = use_signal(|| false);
     let mut nav_last = use_signal(|| None::<components::NavSnapshot>);
@@ -1302,6 +1304,7 @@ fn App() -> Element {
     use_future(move || async move {
         let mut is_devices_open = is_devices_open;
         let mut is_rightbar_open = is_rightbar_open;
+        let mut settings_subpage = settings_subpage;
         loop {
             player::systemint::wait_back_pressed().await;
             if *show_quick_search.peek() {
@@ -1314,6 +1317,9 @@ fn App() -> Element {
                 is_fullscreen.set(false);
             } else if !*is_sidebar_collapsed.peek() {
                 is_sidebar_collapsed.set(true);
+            } else if *current_route.peek() == Route::Settings && settings_subpage.peek().is_some()
+            {
+                settings_subpage.set(None);
             } else if !nav_history.peek().is_empty() {
                 nav_ctrl.go_back();
             } else {
@@ -1611,6 +1617,9 @@ fn App() -> Element {
                                 Route::Playlists => selected_playlist_id.read().is_some(),
                                 _ => false,
                             };
+                            let settings_title = (*current_route.read() == Route::Settings)
+                                .then(|| settings_subpage.read().clone())
+                                .flatten();
                             let page_title = match *current_route.read() {
                                 Route::Home => i18n::t("home"),
                                 Route::Search => i18n::t("search"),
@@ -1619,7 +1628,7 @@ fn App() -> Element {
                                 Route::Artist => if is_details { i18n::t("artist") } else { i18n::t("artists") },
                                 Route::Playlists => i18n::t("playlists"),
                                 Route::Favorites => i18n::t("favorites"),
-                                Route::Settings => i18n::t("settings"),
+                                Route::Settings => settings_title.clone().unwrap_or_else(|| i18n::t("settings")),
                                 _ => i18n::t("home"),
                             };
                             let has_image_background = config.read().cover_art_background
@@ -1630,6 +1639,12 @@ fn App() -> Element {
                                         button {
                                             class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
                                             onclick: move |_| nav_ctrl.go_back(),
+                                            i { class: "fa-solid fa-arrow-left text-lg" }
+                                        }
+                                    } else if settings_title.is_some() {
+                                        button {
+                                            class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
+                                            onclick: move |_| settings_subpage.set(None),
                                             i { class: "fa-solid fa-arrow-left text-lg" }
                                         }
                                     } else {

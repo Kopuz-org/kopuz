@@ -1,14 +1,18 @@
 mod desktop_tools;
+mod index;
 mod navigation;
 mod sections;
 
 use desktop_tools::{logs_section, theme_editor_section};
+use index::SettingsIndex;
 use navigation::{SettingsCategory, SettingsNavigation};
-use sections::{ConnectivitySection, DownloadsSection, MetadataSection, PlayerSection};
+use sections::{
+    ConnectivitySection, DownloadsSection, EqualizerSection, MetadataSection, PlayerSection,
+};
 
 use components::settings_items::{
     AppSelect, BackBehaviorSelector, LanguageSelector, RadioRegistryDropdown, SettingItem,
-    SettingsSection, SourceSettings, ThemeSelector, ToggleSetting,
+    SettingsGroup, SettingsSection, SourceSettings, ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddSourcePopup, LoginPopup};
 use components::settings_remote_folders::RemoteFolderSettings;
@@ -79,12 +83,40 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let is_loading = use_signal(|| false);
     let mut active_category = use_signal(|| SettingsCategory::General);
     let settings_anchor = try_consume_context::<components::source_switcher::SettingsAnchor>();
+    let subpage = try_consume_context::<components::tabbar::SettingsSubpage>()
+        .map(|components::tabbar::SettingsSubpage(subpage)| subpage);
+
+    let mut open_category = move |category: SettingsCategory| {
+        active_category.set(category);
+        if cfg!(target_os = "android")
+            && let Some(mut subpage) = subpage
+        {
+            subpage.set(Some(category.title()));
+        }
+        let _ = document::eval(
+            "requestAnimationFrame(() => document.getElementById('settings-category-content')?.scrollIntoView({ block: 'start' }))",
+        );
+    };
 
     use_effect(move || {
         if settings_anchor.is_some_and(|components::source_switcher::SettingsAnchor(anchor)| {
             anchor.read().as_deref() == Some("settings-media-servers")
         }) {
-            active_category.set(SettingsCategory::Library);
+            open_category(SettingsCategory::Library);
+        }
+    });
+
+    use_effect(move || {
+        if cfg!(target_os = "android") && subpage.is_some_and(|subpage| subpage.read().is_none()) {
+            let _ = document::eval(
+                "requestAnimationFrame(() => document.getElementById('settings-index')?.scrollIntoView({ block: 'start' }))",
+            );
+        }
+    });
+
+    use_drop(move || {
+        if let Some(mut subpage) = subpage {
+            subpage.set(None);
         }
     });
 
@@ -173,9 +205,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         );
     };
 
+    let is_android = cfg!(target_os = "android");
+    let showing_index = is_android && subpage.is_none_or(|subpage| subpage.read().is_none());
+
     rsx! {
-        div { class: if cfg!(target_os = "android") { "px-3 pt-2 pb-6 w-full max-w-7xl mx-auto" } else if config.read().settings_layout == config::SettingsLayout::TopBar { "settings-page settings-layout-topbar px-6 py-7 w-full max-w-7xl mx-auto" } else { "settings-page settings-layout-cd px-6 py-7 w-full max-w-7xl mx-auto" },
-            if !cfg!(target_os = "android") {
+        div { class: if is_android { "px-3 pt-2 pb-6 w-full max-w-7xl mx-auto" } else if config.read().settings_layout == config::SettingsLayout::TopBar { "settings-page settings-layout-topbar px-6 py-7 w-full max-w-7xl mx-auto" } else { "settings-page settings-layout-cd px-6 py-7 w-full max-w-7xl mx-auto" },
+            if !is_android {
                 h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
 
@@ -186,25 +221,38 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 }
             }
 
+            if showing_index {
+                SettingsIndex {
+                    config,
+                    active_source: all_sources().into_iter().find(|source| source.active),
+                    on_select: open_category,
+                }
+            } else {
             div { class: "settings-workspace",
-                SettingsNavigation {
-                    selected: active_category(),
-                    on_select: move |category| {
-                        active_category.set(category);
-                        let _ = document::eval(
-                            "requestAnimationFrame(() => document.getElementById('settings-category-content')?.scrollIntoView({ block: 'start' }))"
-                        );
-                    },
+                if !is_android {
+                    SettingsNavigation {
+                        selected: active_category(),
+                        on_select: open_category,
+                    }
                 }
                 main { id: "settings-category-content", class: "settings-category-content",
                 if matches!(active_category(), SettingsCategory::General | SettingsCategory::Customization | SettingsCategory::Library) {
                     SettingsSection {
-                    title: match active_category() {
-                        SettingsCategory::Customization => i18n::t("appearance").to_string(),
-                        SettingsCategory::Library => i18n::t("library").to_string(),
-                        _ => i18n::t("general").to_string(),
-                    },
+                    title: active_category().title(),
                     if active_category() == SettingsCategory::Customization {
+                        SettingsGroup { label: i18n::t("settings_group_theme") }
+                        SettingItem {
+                            title: i18n::t("settings_group_theme").to_string(),
+                            config_key: "theme",
+                            control: rsx! {
+                                ThemeSelector {
+                                    current_theme: config.read().theme.clone(),
+                                    on_change: move |theme| {
+                                        config.write().theme = theme;
+                                    }
+                                }
+                            }
+                        }
                         SettingItem {
                             title: i18n::t("language").to_string(),
                             config_key: "language",
@@ -214,21 +262,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     on_change: move |lang: String| {
                                         config.write().language = lang.clone();
                                         i18n::set_locale(&lang);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if active_category() == SettingsCategory::Customization {
-                        SettingItem {
-                            title: i18n::t("appearance").to_string(),
-                            config_key: "theme",
-                            control: rsx! {
-                                ThemeSelector {
-                                    current_theme: config.read().theme.clone(),
-                                    on_change: move |theme| {
-                                        config.write().theme = theme;
                                     }
                                 }
                             }
@@ -274,7 +307,46 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        if cfg!(not(target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("custom_font").to_string(),
+                                config_key: "custom_font_path",
+                                control: rsx! {
+                                    div { class: "flex items-center gap-2",
+                                        if !config.read().custom_font_path.is_empty() {
+                                            span {
+                                                class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
+                                                "{config.read().custom_font_path}"
+                                            }
+                                            button {
+                                                class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
+                                                onclick: move |_| config.write().custom_font_path = String::new(),
+                                                "{i18n::t(\"remove\")}"
+                                            }
+                                        }
+                                        button {
+                                            class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors",
+                                            onclick: move |_| {
+                                                #[cfg(not(target_os = "android"))]
+                                                spawn(async move {
+                                                    if let Some(file) = rfd::AsyncFileDialog::new()
+                                                        .add_filter("Fonts", &["ttf", "otf", "woff", "woff2"])
+                                                        .pick_file()
+                                                        .await
+                                                    {
+                                                        config.write().custom_font_path =
+                                                            file.path().display().to_string();
+                                                    }
+                                                });
+                                            },
+                                            "{i18n::t(\"choose_font\")}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
+                        SettingsGroup { label: i18n::t("settings_group_background") }
                         SettingItem {
                             title: i18n::t("cover_art_background").to_string(),
                             config_key: "cover_art_background",
@@ -323,52 +395,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        if cfg!(not(target_os = "android")) {
-                            SettingItem {
-                                title: i18n::t("custom_font").to_string(),
-                                config_key: "custom_font_path",
-                                control: rsx! {
-                                    div { class: "flex items-center gap-2",
-                                        if !config.read().custom_font_path.is_empty() {
-                                            span {
-                                                class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
-                                                "{config.read().custom_font_path}"
-                                            }
-                                            button {
-                                                class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
-                                                onclick: move |_| config.write().custom_font_path = String::new(),
-                                                "{i18n::t(\"remove\")}"
-                                            }
-                                        }
-                                        button {
-                                            class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors",
-                                            onclick: move |_| {
-                                                #[cfg(not(target_os = "android"))]
-                                                spawn(async move {
-                                                    if let Some(file) = rfd::AsyncFileDialog::new()
-                                                        .add_filter("Fonts", &["ttf", "otf", "woff", "woff2"])
-                                                        .pick_file()
-                                                        .await
-                                                    {
-                                                        config.write().custom_font_path =
-                                                            file.path().display().to_string();
-                                                    }
-                                                });
-                                            },
-                                            "{i18n::t(\"choose_font\")}"
-                                        }
-                                    }
-                                }
-                            }
-                        }
                         if config.read().cover_art_background
                             || !config.read().custom_background_path.is_empty()
                         {
                                 SettingItem {
                                     title: i18n::t("cover_art_darkening").to_string(),
                                     config_key: "cover_art_darkening",
+                                    nested: true,
                                     control: rsx! {
-                                        div { class: "flex items-center gap-3 min-w-[220px]",
+                                        div { class: "settings-slider flex items-center gap-3 min-w-[220px]",
                                             input {
                                                 r#type: "range",
                                                 min: "0",
@@ -393,8 +428,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 SettingItem {
                                     title: i18n::t("cover_art_blur").to_string(),
                                     config_key: "cover_art_blur",
+                                    nested: true,
                                     control: rsx! {
-                                        div { class: "flex items-center gap-3 min-w-[220px]",
+                                        div { class: "settings-slider flex items-center gap-3 min-w-[220px]",
                                             input {
                                                 r#type: "range",
                                                 min: "0",
@@ -417,6 +453,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     }
                                 }
                         }
+
+                        SettingsGroup { label: i18n::t("lyrics") }
                         SettingItem {
                             title: i18n::t("lyrics_depth_blur").to_string(),
                             config_key: "lyrics_depth_blur",
@@ -431,8 +469,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             SettingItem {
                                 title: i18n::t("lyrics_depth_blur_strength").to_string(),
                                 config_key: "lyrics_depth_blur_strength",
+                                nested: true,
                                 control: rsx! {
-                                    div { class: "flex items-center gap-3 min-w-[220px]",
+                                    div { class: "settings-slider flex items-center gap-3 min-w-[220px]",
                                         input {
                                             r#type: "range",
                                             min: "10",
@@ -450,6 +489,143 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         span {
                                             class: "text-xs font-mono text-white/80 w-16 text-right",
                                             "{config.read().lyrics_depth_blur_strength}%"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        SettingsGroup { label: i18n::t("settings_group_interface") }
+                        SettingItem {
+                            title: i18n::t("reduce_animations").to_string(),
+                            config_key: "reduce_animations",
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().reduce_animations,
+                                    on_change: move |val| config.write().reduce_animations = val,
+                                }
+                            }
+                        }
+                        if cfg!(not(target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("fullscreen_use_player_bar").to_string(),
+                                config_key: "fullscreen_use_player_bar",
+                                control: rsx! {
+                                    ToggleSetting {
+                                        enabled: config.read().fullscreen_use_player_bar,
+                                        on_change: move |val| config.write().fullscreen_use_player_bar = val,
+                                    }
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("show_source_toggle").to_string(),
+                            config_key: "show_source_toggle",
+                                control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().show_source_toggle,
+                                    on_change: move |val| config.write().show_source_toggle = val,
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("show_row_images").to_string(),
+                            config_key: "show_row_images",
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().show_row_images,
+                                    on_change: move |val| config.write().show_row_images = val,
+                                }
+                            }
+                        }
+                        if cfg!(any(target_os = "linux", target_os = "windows")) {
+                            SettingItem {
+                                title: i18n::t("titlebar_mode").to_string(),
+                                config_key: "titlebar_mode",
+                                control: rsx! {
+                                    {
+                                        let current_mode = config.read().titlebar_mode;
+                                        rsx! {
+                                            AppSelect {
+                                                class: "settings-select",
+                                                value: match current_mode { config::TitlebarMode::System => "system", config::TitlebarMode::Off => "off", config::TitlebarMode::Custom => "custom" }.to_string(),
+                                                options: vec![("custom".into(), i18n::t("titlebar_custom")), ("system".into(), i18n::t("titlebar_system")), ("off".into(), i18n::t("titlebar_off"))],
+                                                on_change: move |value: String| {
+                                                    config.write().titlebar_mode = match value.as_str() {
+                                                        "system" => config::TitlebarMode::System,
+                                                        "off" => config::TitlebarMode::Off,
+                                                        _ => config::TitlebarMode::Custom,
+                                                    };
+                                                },
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("ui_style").to_string(),
+                            config_key: "ui_style",
+                            control: rsx! {
+                                {
+                                    let current_style = config.read().ui_style;
+                                    rsx! {
+                                        AppSelect {
+                                            class: "settings-select",
+                                            value: (if current_style == config::UiStyle::Vaxry { "vaxry" } else { "normal" }).to_string(),
+                                            options: vec![("normal".into(), i18n::t("ui_normal")), ("vaxry".into(), i18n::t("ui_vaxry"))],
+                                            on_change: move |value: String| {
+                                                config.write().ui_style = match value.as_str() {
+                                                    "vaxry" => config::UiStyle::Vaxry,
+                                                    _ => config::UiStyle::Normal,
+                                                };
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("player_bar_position").to_string(),
+                            config_key: "player_bar_position",
+                            control: rsx! {
+                                {
+                                    let current_position = config.read().player_bar_position;
+                                    rsx! {
+                                        AppSelect {
+                                            class: "settings-select",
+                                            value: (if current_position == config::PlayerBarPosition::Top { "top" } else { "bottom" }).to_string(),
+                                            options: vec![("bottom".into(), i18n::t("position_bottom")), ("top".into(), i18n::t("position_top"))],
+                                            on_change: move |value: String| {
+                                                config.write().player_bar_position = match value.as_str() {
+                                                    "top" => config::PlayerBarPosition::Top,
+                                                    _ => config::PlayerBarPosition::Bottom,
+                                                };
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if !is_android {
+                            SettingItem {
+                                title: i18n::t("settings_layout").to_string(),
+                                config_key: "settings_layout",
+                                control: rsx! {
+                                    {
+                                        let current_layout = config.read().settings_layout;
+                                        rsx! {
+                                            AppSelect {
+                                                class: "settings-select",
+                                                value: (if current_layout == config::SettingsLayout::TopBar { "topbar" } else { "cd" }).to_string(),
+                                                options: vec![("cd".into(), i18n::t("settings_layout_cd")), ("topbar".into(), i18n::t("settings_layout_topbar"))],
+                                                on_change: move |value: String| {
+                                                    config.write().settings_layout = match value.as_str() {
+                                                        "topbar" => config::SettingsLayout::TopBar,
+                                                        _ => config::SettingsLayout::Cd,
+                                                    };
+                                                },
+                                            }
                                         }
                                     }
                                 }
@@ -528,31 +704,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             }
                         }
                     }
-
-                    if active_category() == SettingsCategory::Customization {
-                        SettingItem {
-                            title: i18n::t("reduce_animations").to_string(),
-                            config_key: "reduce_animations",
-                            control: rsx! {
-                                ToggleSetting {
-                                    enabled: config.read().reduce_animations,
-                                    on_change: move |val| config.write().reduce_animations = val,
-                                }
-                            }
-                        }
-                        if cfg!(not(target_os = "android")) {
-                            SettingItem {
-                                title: i18n::t("fullscreen_use_player_bar").to_string(),
-                                config_key: "fullscreen_use_player_bar",
-                                control: rsx! {
-                                    ToggleSetting {
-                                        enabled: config.read().fullscreen_use_player_bar,
-                                        on_change: move |val| config.write().fullscreen_use_player_bar = val,
-                                    }
-                                }
-                            }
-                        }
-                    }
                     if active_category() == SettingsCategory::General {
                         SettingItem {
                             title: i18n::t("auto_check_updates").to_string(),
@@ -576,125 +727,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                    }
-                    if active_category() == SettingsCategory::Customization {
-                        SettingItem {
-                            title: i18n::t("show_source_toggle").to_string(),
-                            config_key: "show_source_toggle",
-                                control: rsx! {
-                                ToggleSetting {
-                                    enabled: config.read().show_source_toggle,
-                                    on_change: move |val| config.write().show_source_toggle = val,
-                                }
-                            }
-                        }
-                    }
-                    if active_category() == SettingsCategory::Customization {
-                        SettingItem {
-                            title: i18n::t("show_row_images").to_string(),
-                            config_key: "show_row_images",
-                            control: rsx! {
-                                ToggleSetting {
-                                    enabled: config.read().show_row_images,
-                                    on_change: move |val| config.write().show_row_images = val,
-                                }
-                            }
-                        }
-                    }
-                    if active_category() == SettingsCategory::Customization {
-                        if cfg!(any(target_os = "linux", target_os = "windows")) {
-                            SettingItem {
-                                title: i18n::t("titlebar_mode").to_string(),
-                                config_key: "titlebar_mode",
-                                control: rsx! {
-                                    {
-                                        let current_mode = config.read().titlebar_mode;
-                                        rsx! {
-                                            AppSelect {
-                                                class: "settings-select",
-                                                value: match current_mode { config::TitlebarMode::System => "system", config::TitlebarMode::Off => "off", config::TitlebarMode::Custom => "custom" }.to_string(),
-                                                options: vec![("custom".into(), i18n::t("titlebar_custom")), ("system".into(), i18n::t("titlebar_system")), ("off".into(), i18n::t("titlebar_off"))],
-                                                on_change: move |value: String| {
-                                                    config.write().titlebar_mode = match value.as_str() {
-                                                        "system" => config::TitlebarMode::System,
-                                                        "off" => config::TitlebarMode::Off,
-                                                        _ => config::TitlebarMode::Custom,
-                                                    };
-                                                },
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("ui_style").to_string(),
-                            config_key: "ui_style",
-                            control: rsx! {
-                                {
-                                    let current_style = config.read().ui_style;
-                                    rsx! {
-                                        AppSelect {
-                                            class: "settings-select",
-                                            value: (if current_style == config::UiStyle::Vaxry { "vaxry" } else { "normal" }).to_string(),
-                                            options: vec![("normal".into(), i18n::t("ui_normal")), ("vaxry".into(), i18n::t("ui_vaxry"))],
-                                            on_change: move |value: String| {
-                                                config.write().ui_style = match value.as_str() {
-                                                    "vaxry" => config::UiStyle::Vaxry,
-                                                    _ => config::UiStyle::Normal,
-                                                };
-                                            },
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("player_bar_position").to_string(),
-                            config_key: "player_bar_position",
-                            control: rsx! {
-                                {
-                                    let current_position = config.read().player_bar_position;
-                                    rsx! {
-                                        AppSelect {
-                                            class: "settings-select",
-                                            value: (if current_position == config::PlayerBarPosition::Top { "top" } else { "bottom" }).to_string(),
-                                            options: vec![("bottom".into(), i18n::t("position_bottom")), ("top".into(), i18n::t("position_top"))],
-                                            on_change: move |value: String| {
-                                                config.write().player_bar_position = match value.as_str() {
-                                                    "top" => config::PlayerBarPosition::Top,
-                                                    _ => config::PlayerBarPosition::Bottom,
-                                                };
-                                            },
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("settings_layout").to_string(),
-                            config_key: "settings_layout",
-                            control: rsx! {
-                                {
-                                    let current_layout = config.read().settings_layout;
-                                    rsx! {
-                                        AppSelect {
-                                            class: "settings-select",
-                                            value: (if current_layout == config::SettingsLayout::TopBar { "topbar" } else { "cd" }).to_string(),
-                                            options: vec![("cd".into(), i18n::t("settings_layout_cd")), ("topbar".into(), i18n::t("settings_layout_topbar"))],
-                                            on_change: move |value: String| {
-                                                config.write().settings_layout = match value.as_str() {
-                                                    "topbar" => config::SettingsLayout::TopBar,
-                                                    _ => config::SettingsLayout::Cd,
-                                                };
-                                            },
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if active_category() == SettingsCategory::General {
                         SettingItem {
                             title: i18n::t("back_behavior").to_string(),
                             config_key: "back_behavior",
@@ -726,6 +758,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 if active_category() == SettingsCategory::Player {
                     PlayerSection { config }
                 }
+                if active_category() == SettingsCategory::Equalizer {
+                    EqualizerSection { config }
+                }
                 if active_category() == SettingsCategory::Tools {
                     div { class: "space-y-8",
                         {logs_section(config)}
@@ -736,6 +771,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
                     }
                 }
+            }
             }
             }
 

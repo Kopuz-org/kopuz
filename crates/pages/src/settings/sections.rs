@@ -1,6 +1,7 @@
 use components::settings_items::{
-    ChannelModeSelector, DeviceChangeBehaviorSelector, EqualizerPanel, GainSlider,
-    ReplayGainModeSelector, SampleRateModeSelector, SettingItem, SettingsSection, ToggleSetting,
+    AppSelect, ChannelModeSelector, DeviceChangeBehaviorSelector, EqualizerPanel, GainSlider,
+    ReplayGainModeSelector, SampleRateModeSelector, SettingItem, SettingsGroup, SettingsSection,
+    ToggleSetting,
 };
 use config::{AppConfig, LYRICS_OFFSET_LIMIT_MS, OfflineQuality, ReplayGainMode};
 use dioxus::prelude::*;
@@ -74,18 +75,16 @@ pub(super) fn DownloadsSection(mut config: Signal<AppConfig>) -> Element {
                 title: i18n::t("download_quality").to_string(),
                 config_key: "offline_quality",
                 control: rsx! {
-                    select {
-                        class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                        onchange: move |evt| {
-                            config.write().offline_quality = OfflineQuality::from_value_str(&evt.value());
+                    AppSelect {
+                        class: "settings-select",
+                        value: config.read().offline_quality.value_str().to_string(),
+                        options: OfflineQuality::ALL
+                            .iter()
+                            .map(|q| (q.value_str().to_string(), q.label().to_string()))
+                            .collect::<Vec<_>>(),
+                        on_change: move |value: String| {
+                            config.write().offline_quality = OfflineQuality::from_value_str(&value);
                         },
-                        for q in OfflineQuality::ALL {
-                            option {
-                                value: q.value_str(),
-                                selected: *q == config.read().offline_quality,
-                                "{q.label()}"
-                            }
-                        }
                     }
                 }
             }
@@ -111,9 +110,9 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
         format!("{lyrics_offset:+} ms")
     };
     let lyrics_offset_class = if lyrics_offset_auto {
-        "flex items-center gap-3 min-w-[220px] opacity-40"
+        "settings-slider flex items-center gap-3 min-w-[220px] opacity-40"
     } else {
-        "flex items-center gap-3 min-w-[220px]"
+        "settings-slider flex items-center gap-3 min-w-[220px]"
     };
 
     rsx! {
@@ -189,7 +188,6 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
 
 #[component]
 pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
-    let ctrl = use_context::<PlayerController>();
     let crossfade_label = if config.read().crossfade_seconds == 0 {
         i18n::t("crossfade_off")
     } else {
@@ -198,11 +196,12 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
 
     rsx! {
         SettingsSection { title: i18n::t("player_settings").to_string(),
+            SettingsGroup { label: i18n::t("settings_group_playback") }
             SettingItem {
                 title: i18n::t("crossfade").to_string(),
                 config_key: "crossfade_seconds",
                 control: rsx! {
-                    div { class: "flex items-center gap-3 min-w-[220px]",
+                    div { class: "settings-slider flex items-center gap-3 min-w-[220px]",
                         input {
                             r#type: "range",
                             min: "0",
@@ -224,33 +223,37 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                     }
                 }
             }
-            SettingItem {
-                title: i18n::t("volume_scroll_step").to_string(),
-                config_key: "volume_scroll_step",
-                control: rsx! {
-                    div { class: "flex items-center gap-3 min-w-[220px]",
-                        input {
-                            r#type: "range",
-                            min: "1",
-                            max: "50",
-                            step: "1",
-                            value: format!("{}", (config.read().volume_scroll_step * 100.0).round() as i32),
-                            class: "w-40",
-                            style: "accent-color: var(--color-indigo-500);",
-                            oninput: move |evt| {
-                                if let Ok(pct) = evt.value().parse::<i32>() {
-                                    let clamped = pct.clamp(1, 50);
-                                    config.write().volume_scroll_step = clamped as f32 / 100.0;
+            // Mouse wheel only.
+            if !cfg!(target_os = "android") {
+                SettingItem {
+                    title: i18n::t("volume_scroll_step").to_string(),
+                    config_key: "volume_scroll_step",
+                    control: rsx! {
+                        div { class: "settings-slider flex items-center gap-3 min-w-[220px]",
+                            input {
+                                r#type: "range",
+                                min: "1",
+                                max: "50",
+                                step: "1",
+                                value: format!("{}", (config.read().volume_scroll_step * 100.0).round() as i32),
+                                class: "w-40",
+                                style: "accent-color: var(--color-indigo-500);",
+                                oninput: move |evt| {
+                                    if let Ok(pct) = evt.value().parse::<i32>() {
+                                        let clamped = pct.clamp(1, 50);
+                                        config.write().volume_scroll_step = clamped as f32 / 100.0;
+                                    }
                                 }
                             }
-                        }
-                        span {
-                            class: "text-xs font-mono text-white/80 w-16 text-right",
-                            "{(config.read().volume_scroll_step * 100.0).round() as i32}%"
+                            span {
+                                class: "text-xs font-mono text-white/80 w-16 text-right",
+                                "{(config.read().volume_scroll_step * 100.0).round() as i32}%"
+                            }
                         }
                     }
                 }
             }
+            SettingsGroup { label: i18n::t("settings_group_output") }
             SettingItem {
                 title: i18n::t("channel_mode").to_string(),
                 config_key: "channel_mode",
@@ -259,68 +262,6 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                         current: config.read().channel_mode,
                         on_change: move |mode| {
                             config.write().channel_mode = mode;
-                        }
-                    }
-                }
-            }
-            SettingItem {
-                title: i18n::t("replay_gain").to_string(),
-                config_key: "replay_gain",
-                control: rsx! {
-                    ReplayGainModeSelector {
-                        current: config.read().replay_gain.mode,
-                        on_change: move |mode| {
-                            let mut settings = config.peek().replay_gain;
-                            settings.mode = mode;
-                            config.write().replay_gain = settings;
-                        }
-                    }
-                }
-            }
-            if config.read().replay_gain.mode != ReplayGainMode::Off {
-                SettingItem {
-                    title: i18n::t("replay_gain_prevent_clipping").to_string(),
-                    config_key: "replay_gain",
-                    control: rsx! {
-                        ToggleSetting {
-                            enabled: config.read().replay_gain.prevent_clipping,
-                            on_change: move |enabled| {
-                                let mut settings = config.peek().replay_gain;
-                                settings.prevent_clipping = enabled;
-                                config.write().replay_gain = settings;
-                            }
-                        }
-                    }
-                }
-                SettingItem {
-                    title: i18n::t("replay_gain_preamp").to_string(),
-                    config_key: "replay_gain",
-                    control: rsx! {
-                        GainSlider {
-                            value: config.read().replay_gain.preamp_db,
-                            min: -15.0,
-                            max: 15.0,
-                            on_change: move |db| {
-                                let mut settings = config.peek().replay_gain;
-                                settings.preamp_db = db;
-                                config.write().replay_gain = settings;
-                            }
-                        }
-                    }
-                }
-                SettingItem {
-                    title: i18n::t("replay_gain_fallback").to_string(),
-                    config_key: "replay_gain",
-                    control: rsx! {
-                        GainSlider {
-                            value: config.read().replay_gain.fallback_gain_db,
-                            min: -15.0,
-                            max: 15.0,
-                            on_change: move |db| {
-                                let mut settings = config.peek().replay_gain;
-                                settings.fallback_gain_db = db;
-                                config.write().replay_gain = settings;
-                            }
                         }
                     }
                 }
@@ -349,19 +290,104 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                     }
                 }
             }
+            SettingsGroup { label: i18n::t("settings_group_loudness") }
             SettingItem {
-                title: i18n::t("equalizer").to_string(),
-                config_key: "equalizer",
-                stacked: true,
+                title: i18n::t("replay_gain").to_string(),
+                config_key: "replay_gain",
                 control: rsx! {
-                    EqualizerPanel {
-                        current: config.read().equalizer.clone(),
-                        on_preview: move |equalizer: config::EqualizerSettings| {
-                            ctrl.preview_equalizer(equalizer);
-                        },
-                        on_commit: move |equalizer: config::EqualizerSettings| {
-                            config.write().equalizer = equalizer;
+                    ReplayGainModeSelector {
+                        current: config.read().replay_gain.mode,
+                        on_change: move |mode| {
+                            let mut settings = config.peek().replay_gain;
+                            settings.mode = mode;
+                            config.write().replay_gain = settings;
                         }
+                    }
+                }
+            }
+            if config.read().replay_gain.mode != ReplayGainMode::Off {
+                SettingItem {
+                    title: i18n::t("replay_gain_prevent_clipping").to_string(),
+                    config_key: "replay_gain",
+                    nested: true,
+                    control: rsx! {
+                        ToggleSetting {
+                            enabled: config.read().replay_gain.prevent_clipping,
+                            on_change: move |enabled| {
+                                let mut settings = config.peek().replay_gain;
+                                settings.prevent_clipping = enabled;
+                                config.write().replay_gain = settings;
+                            }
+                        }
+                    }
+                }
+                SettingItem {
+                    title: i18n::t("replay_gain_preamp").to_string(),
+                    config_key: "replay_gain",
+                    nested: true,
+                    control: rsx! {
+                        GainSlider {
+                            value: config.read().replay_gain.preamp_db,
+                            min: -15.0,
+                            max: 15.0,
+                            on_change: move |db| {
+                                let mut settings = config.peek().replay_gain;
+                                settings.preamp_db = db;
+                                config.write().replay_gain = settings;
+                            }
+                        }
+                    }
+                }
+                SettingItem {
+                    title: i18n::t("replay_gain_fallback").to_string(),
+                    config_key: "replay_gain",
+                    nested: true,
+                    control: rsx! {
+                        GainSlider {
+                            value: config.read().replay_gain.fallback_gain_db,
+                            min: -15.0,
+                            max: 15.0,
+                            on_change: move |db| {
+                                let mut settings = config.peek().replay_gain;
+                                settings.fallback_gain_db = db;
+                                config.write().replay_gain = settings;
+                            }
+                        }
+                    }
+                }
+            }
+            if !cfg!(target_os = "android") {
+                EqualizerItem { config }
+            }
+        }
+    }
+}
+
+#[component]
+pub(super) fn EqualizerSection(config: Signal<AppConfig>) -> Element {
+    rsx! {
+        SettingsSection { title: i18n::t("equalizer").to_string(),
+            EqualizerItem { config }
+        }
+    }
+}
+
+#[component]
+fn EqualizerItem(mut config: Signal<AppConfig>) -> Element {
+    let ctrl = use_context::<PlayerController>();
+    rsx! {
+        SettingItem {
+            title: i18n::t("equalizer").to_string(),
+            config_key: "equalizer",
+            stacked: true,
+            control: rsx! {
+                EqualizerPanel {
+                    current: config.read().equalizer.clone(),
+                    on_preview: move |equalizer: config::EqualizerSettings| {
+                        ctrl.preview_equalizer(equalizer);
+                    },
+                    on_commit: move |equalizer: config::EqualizerSettings| {
+                        config.write().equalizer = equalizer;
                     }
                 }
             }

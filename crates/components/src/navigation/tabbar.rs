@@ -37,6 +37,10 @@ const TABS: &[Tab] = &[
     },
 ];
 
+/// Title of the Settings category open as a page on Android; `None` on the list.
+#[derive(Clone, Copy)]
+pub struct SettingsSubpage(pub Signal<Option<String>>);
+
 /// Whether the tab bar already offers this route. The drawer drops these on
 /// Android so the two bars never list the same destination twice.
 pub fn is_tab_route(route: Route) -> bool {
