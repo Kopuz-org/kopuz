@@ -690,6 +690,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         div { id: "settings-media-servers",
                             SettingItem {
                                 title: i18n::t("sources").to_string(),
+                                stacked: true,
                                 control: rsx! {
                                     SourceSettings {
                                         sources: all_sources(),

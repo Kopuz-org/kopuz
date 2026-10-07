@@ -15,7 +15,7 @@ pub fn MultiDirectoryPicker(
     let no_folders_text = i18n::t("no_music_folders");
 
     rsx! {
-        div { class: "flex flex-col gap-2 w-full",
+        div { class: "flex flex-col gap-2 min-w-0 w-full",
             if current_paths.is_empty() {
                 p { class: "text-xs text-slate-500 italic", "{no_folders_text}" }
             }
@@ -25,9 +25,10 @@ pub fn MultiDirectoryPicker(
                     let row_key = format!("{i}-{display}");
                     rsx! {
                         div { key: "{row_key}",
-                            class: "flex items-center justify-between gap-3 bg-white/5 p-2 rounded w-full",
+                            class: "flex items-center justify-between gap-3 bg-white/5 p-2 rounded min-w-0 w-full",
                             span {
-                                class: "text-xs text-slate-400 font-mono truncate flex-1",
+                                class: "text-xs text-slate-400 font-mono truncate min-w-0 flex-1",
+                                title: "{display}",
                                 "{display}"
                             }
                             button {
@@ -122,7 +123,7 @@ pub fn SourceSettings(
     let conn = hooks::source_switch::use_connection_status();
 
     rsx! {
-        div { class: "flex flex-col gap-2 w-full",
+        div { class: "flex flex-col gap-2 min-w-0 w-full",
             if sources.is_empty() {
                 p { class: "text-xs text-white/50 italic", "{i18n::t(\"no_saved_servers\")}" }
             }
@@ -150,13 +151,13 @@ pub fn SourceSettings(
                     let needs_host = srv.capabilities.browser_playback && !host_access;
                     rsx! {
                         div { key: "{srv.id}",
-                            class: "flex flex-col gap-2 bg-white/5 p-2 rounded w-full",
-                            div { class: "flex items-center justify-between gap-4 w-full",
-                            div { class: "min-w-0 flex-1",
-                                div { class: "flex items-center gap-2",
-                                    p { class: "text-sm font-medium text-white truncate", "{srv.name}" }
+                            class: "flex flex-col gap-2 bg-white/5 p-2 rounded min-w-0 w-full",
+                            div { class: "flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 w-full",
+                            div { class: "min-w-0 w-full flex-1",
+                                div { class: "flex flex-wrap items-center gap-2",
+                                    p { class: "min-w-0 text-sm font-medium text-white break-words", "{srv.name}" }
                                     if is_active {
-                                        span { class: "text-[10px] px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
+                                        span { class: "shrink-0 text-[10px] px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
                                             "{active_text}"
                                         }
                                     }
@@ -184,7 +185,7 @@ pub fn SourceSettings(
                                     }
                                 }
                             }
-                            div { class: "flex items-center gap-2 shrink-0",
+                            div { class: "flex flex-wrap items-center gap-2 shrink-0",
                                 if !is_active {
                                     button {
                                         onclick: move |_| on_switch.call(id_switch.clone()),

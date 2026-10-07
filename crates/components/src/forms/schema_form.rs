@@ -277,7 +277,11 @@ fn Field(
         }
     };
 
-    let stacked = matches!(field.kind, api::FieldKind::Radio { .. });
+    let stacked = matches!(
+        field.kind,
+        api::FieldKind::Radio { .. } | api::FieldKind::Directories
+    ) || (cfg!(target_os = "android")
+        && !matches!(field.kind, api::FieldKind::Toggle));
     let config_key = field.config_key.clone().unwrap_or_default();
     rsx! {
         if let Some(heading) = heading {
