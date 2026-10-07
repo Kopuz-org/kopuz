@@ -1628,6 +1628,9 @@ fn App() -> Element {
                                 Route::Artist => if is_details { i18n::t("artist") } else { i18n::t("artists") },
                                 Route::Playlists => i18n::t("playlists"),
                                 Route::Favorites => i18n::t("favorites"),
+                                Route::Discover | Route::DiscoverPlaylist => i18n::t("discover"),
+                                Route::Radio => i18n::t("radio"),
+                                Route::Activity => i18n::t("activity"),
                                 Route::Settings => settings_title.clone().unwrap_or_else(|| i18n::t("settings")),
                                 _ => i18n::t("home"),
                             };
