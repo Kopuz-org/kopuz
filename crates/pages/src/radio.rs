@@ -77,8 +77,6 @@ pub fn Radio(props: RadioProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = props.config;
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
-    // A phone has no room for the description column, so a row is the
-    // station and its play controls.
     let phone = cfg!(target_os = "android");
     let station_cols = if phone {
         "40px minmax(0, 1fr) auto"

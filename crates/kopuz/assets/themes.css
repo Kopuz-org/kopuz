@@ -1171,7 +1171,6 @@ select:disabled {
     transform: scaleX(-1);
 }
 
-/* A contained or transformed ancestor would pin the fixed option sheet to it. */
 [data-platform="android"] .settings-category-content {
     contain: none;
     animation: none;
@@ -1356,7 +1355,6 @@ select:disabled {
     padding: 0.5rem 0.75rem;
 }
 
-/* Keep a drag on the sheet's backdrop from scrolling the page behind. */
 #main-scroll-area:has(.app-select-sheet) .overflow-y-auto {
     overflow: hidden;
 }
