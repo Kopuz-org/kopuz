@@ -34,23 +34,13 @@ mod desktop_shell;
 #[cfg(not(target_os = "android"))]
 mod exit_flush;
 mod logging;
+mod static_assets;
 #[cfg(not(target_os = "android"))]
 mod ui_profile;
 mod updates;
 #[cfg(target_os = "windows")]
 mod windows_titlebar;
 
-const FAVICON: &str = include_str!(concat!(env!("OUT_DIR"), "/favicon.uri"));
-// CSS/fonts are compiled in (not `asset!()`-collected) so styling works under a
-// bare `cargo run` — see `build.rs::embed_fonts`, which bakes the font data: URIs.
-// The `OUT_DIR` ones pass through it; main.css does too, for its nasin-nanpa
-// @font-face (themes/tailwind/reduced have no font refs, so they're verbatim).
-const MAIN_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/main.css"));
-const THEME_CSS: &str = include_str!("../assets/themes.css");
-const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
-const REDUCED_ANIMATIONS_CSS: &str = include_str!("../assets/reduced-animations.css");
-const FONT_AWESOME_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/fontawesome.css"));
-const JETBRAINS_MONO_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/jetbrains-mono.css"));
 #[cfg(target_os = "windows")]
 const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::folder());
 /// Store saves (config/library/playlists/favorites) are full-replace and
@@ -128,20 +118,6 @@ fn WindowsToolbarIconAssets() -> Element {
 #[component]
 fn WindowsToolbarIconAssets() -> Element {
     rsx! {}
-}
-
-#[component]
-fn StaticHeadAssets() -> Element {
-    rsx! {
-        document::Link { rel: "icon", href: FAVICON }
-        document::Style { {MAIN_CSS} }
-        document::Style { {THEME_CSS} }
-        document::Style { {TAILWIND_CSS} }
-        document::Style { {REDUCED_ANIMATIONS_CSS} }
-        // fonts
-        document::Style { {JETBRAINS_MONO_CSS} }
-        document::Style { {FONT_AWESOME_CSS} }
-    }
 }
 
 /// Hand the Android trust store to rustls before anything opens a TLS
@@ -247,6 +223,7 @@ fn main() -> std::process::ExitCode {
             .with_custom_head(
                 "<style>html,body{background:#000;margin:0;padding:0}body{opacity:0}</style>"
                     .to_string()
+                    + &static_assets::head()
                     + desktop_shell::UNGATE_EDITS_FROM_FRAME_CLOCK,
             )
             .with_background_color((0, 0, 0, 255))
@@ -358,7 +335,7 @@ fn main() -> std::process::ExitCode {
 </script>"#;
 
         let config = dioxus::mobile::Config::new()
-            .with_custom_head(APPLY_EDITS_WITHOUT_RAF.to_string())
+            .with_custom_head(static_assets::head() + APPLY_EDITS_WITHOUT_RAF)
             .with_background_color((0, 0, 0, 255));
 
         dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
@@ -1377,8 +1354,6 @@ fn App() -> Element {
     });
 
     rsx! {
-        // we use this component here to prevent re-diffing to prevent warns in console
-        StaticHeadAssets {}
         WindowsToolbarIconAssets {}
 
         div {
