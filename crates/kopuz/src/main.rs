@@ -1636,7 +1636,8 @@ fn App() -> Element {
                                 Route::Radio => i18n::t("radio"),
                                 Route::Activity => i18n::t("activity"),
                                 Route::Settings => settings_title.clone().unwrap_or_else(|| i18n::t("settings")),
-                                _ => i18n::t("home"),
+                                #[cfg(not(target_os = "android"))]
+                                Route::Downloader | Route::ThemeEditor => i18n::t("home"),
                             };
                             let has_image_background = config.read().cover_art_background
                                 || !config.read().custom_background_path.is_empty();
