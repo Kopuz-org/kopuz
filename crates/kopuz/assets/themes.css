@@ -1007,8 +1007,13 @@ select:disabled {
 
 @media (max-width: 640px) {
     .settings-toggle {
-        width: 9.5rem;
+        width: auto;
+        min-width: 9.5rem;
         flex: none;
+    }
+
+    .settings-toggle > button {
+        padding-inline: 0.625rem;
     }
 
     .settings-row:has(.settings-slider) {
