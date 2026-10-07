@@ -15,7 +15,11 @@ pub(super) enum SettingsCategory {
 
 impl SettingsCategory {
     pub(super) fn title(self) -> String {
-        i18n::t(match self {
+        i18n::t(self.title_key())
+    }
+
+    pub(super) fn title_key(self) -> &'static str {
+        match self {
             Self::General => "general",
             Self::Customization => "appearance",
             Self::Library => "library",
@@ -25,7 +29,7 @@ impl SettingsCategory {
             Self::Player => "player_settings",
             Self::Equalizer => "equalizer",
             Self::Tools => "logs",
-        })
+        }
     }
 }
 

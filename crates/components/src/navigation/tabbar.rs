@@ -37,9 +37,10 @@ const TABS: &[Tab] = &[
     },
 ];
 
-/// Title of the Settings category open as a page on Android; `None` on the list.
+/// i18n key of the Settings category open as a page on Android; a key so the
+/// header follows a language change.
 #[derive(Clone, Copy)]
-pub struct SettingsSubpage(pub Signal<Option<String>>);
+pub struct SettingsSubpage(pub Signal<Option<&'static str>>);
 
 /// Whether the tab bar already offers this route. The drawer drops these on
 /// Android so the two bars never list the same destination twice.

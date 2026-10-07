@@ -1034,7 +1034,7 @@ fn App() -> Element {
     ));
     provide_context(scroll_positions);
     provide_context(components::source_switcher::SettingsAnchor(settings_anchor));
-    let mut settings_subpage = use_signal(|| None::<String>);
+    let mut settings_subpage = use_signal(|| None::<&'static str>);
     provide_context(components::tabbar::SettingsSubpage(settings_subpage));
     let mut nav_history = use_signal(Vec::<components::NavSnapshot>::new);
     let mut nav_restoring = use_signal(|| false);
@@ -1618,8 +1618,9 @@ fn App() -> Element {
                                 _ => false,
                             };
                             let settings_title = (*current_route.read() == Route::Settings)
-                                .then(|| settings_subpage.read().clone())
-                                .flatten();
+                                .then(|| *settings_subpage.read())
+                                .flatten()
+                                .map(i18n::t);
                             let page_title = match *current_route.read() {
                                 Route::Home => i18n::t("home"),
                                 Route::Search => i18n::t("search"),

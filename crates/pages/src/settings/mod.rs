@@ -91,7 +91,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         if cfg!(target_os = "android")
             && let Some(mut subpage) = subpage
         {
-            subpage.set(Some(category.title()));
+            subpage.set(Some(category.title_key()));
         }
         let _ = document::eval(
             "requestAnimationFrame(() => document.getElementById('settings-category-content')?.scrollIntoView({ block: 'start' }))",
