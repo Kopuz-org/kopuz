@@ -72,8 +72,6 @@ pub fn Fullscreen(
                 current_queue_index,
                 items,
                 lyrics,
-                volume,
-                persisted_volume,
                 background_style,
                 cover_background,
             }

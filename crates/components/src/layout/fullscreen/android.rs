@@ -1,6 +1,6 @@
 use super::metadata::TrackMetadata;
 use crate::lyrics_view::LyricsView;
-use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, VolumeSlider};
+use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons};
 use crate::queue_list_view::QueueListView;
 use config::AppConfig;
 use dioxus::prelude::*;
@@ -19,8 +19,6 @@ pub(crate) fn FullscreenAndroid(
     current_queue_index: Signal<usize>,
     items: Vec<api::TrackInfo>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
-    volume: Signal<f32>,
-    persisted_volume: Signal<f32>,
     background_style: Memo<String>,
     cover_background: Memo<Option<String>>,
 ) -> Element {
@@ -28,6 +26,8 @@ pub(crate) fn FullscreenAndroid(
     let tab = *active_tab.read();
 
     let mut swipe = crate::gestures::use_swipe();
+    let mut skip_swipe = crate::gestures::use_swipe();
+    let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
 
     // The sheet unmounts as soon as `is_fullscreen` clears, so a close has to
     // hold it on screen for the length of its own animation first.
@@ -169,16 +169,29 @@ pub(crate) fn FullscreenAndroid(
                 if tab == 0 {
                     div {
                         class: "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]",
-                        TrackMetadata {
-                            is_fullscreen,
-                            current_song_title,
-                            current_song_artist,
-                            current_song_album,
-                            current_song_bitrate,
+                        div {
+                            class: "w-full flex-1 min-h-0 flex flex-col",
+                            ontouchstart: move |evt| skip_swipe.start(&evt),
+                            ontouchmove: move |evt| skip_swipe.update(&evt),
+                            ontouchend: move |evt| {
+                                let mut ctrl = ctrl;
+                                match skip_swipe.finish(&evt) {
+                                    Some(crate::gestures::SwipeDirection::Left) => ctrl.play_next(),
+                                    Some(crate::gestures::SwipeDirection::Right) => ctrl.play_prev(),
+                                    _ => {}
+                                }
+                            },
+                            ontouchcancel: move |_| skip_swipe.reset(),
+                            TrackMetadata {
+                                is_fullscreen,
+                                current_song_title,
+                                current_song_artist,
+                                current_song_album,
+                                current_song_bitrate,
+                            }
                         }
                         SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Fullscreen }
                         TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
-                        VolumeSlider { config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
                     }
                 } else if tab == 1 {
                     QueueListView {
