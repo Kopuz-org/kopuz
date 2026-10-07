@@ -221,7 +221,6 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                     }
                 }
             }
-            // Mouse wheel only.
             if !cfg!(target_os = "android") {
                 SettingItem {
                     title: i18n::t("volume_scroll_step").to_string(),

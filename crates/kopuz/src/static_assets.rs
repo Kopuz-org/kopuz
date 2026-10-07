@@ -1,6 +1,6 @@
+//! Embed styles and fonts so startup does not depend on Dioxus asset collection.
+
 const FAVICON: &str = include_str!(concat!(env!("OUT_DIR"), "/favicon.uri"));
-// CSS/fonts are compiled in (not `asset!()`-collected) so styling works under a
-// bare `cargo run` — see `build.rs::embed_fonts`, which bakes the font data: URIs.
 const MAIN_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/main.css"));
 const THEME_CSS: &str = include_str!("../assets/themes.css");
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
@@ -11,8 +11,8 @@ const JETBRAINS_MONO_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/jetbrai
 /// Put static assets in the initial document. `document::Style` sends the CSS
 /// and embedded fonts over the WebView's JavaScript bridge after the first DOM
 /// edits, allowing an unstyled frame and delaying font decoding on Android.
+/// An explicit UTF-8 charset preserves non-ASCII CSS content.
 pub fn head() -> String {
-    // Dioxus's default index has no charset; raw CSS must decode as UTF-8.
     let mut head = String::from("<meta charset=\"utf-8\">");
     head.push_str("<link rel=\"icon\" href=\"");
     head.push_str(FAVICON);

@@ -431,8 +431,6 @@ body {
     overscroll-behavior-y: contain;
 }
 
-/* Tailwind only applies hover variants under `(hover: hover)`, so on a touch
-   screen a control revealed by hover stays invisible while still taking taps. */
 [data-platform="android"] button.group-hover\:opacity-100,
 [data-platform="android"] .group-hover\:opacity-100:has(button):not(nav *) {
     opacity: 1;

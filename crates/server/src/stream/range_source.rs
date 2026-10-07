@@ -130,9 +130,8 @@ impl RangeStreamSource {
         self.total_size
     }
 
-    /// Ask for the last byte. googlevideo can serve the head of a stream and
-    /// answer 403 past it, so passing the head probe says nothing about deep
-    /// reads, and the first one is symphonia's own read of the webm tail.
+    /// Verify that the stream's last byte is accessible before enabling seeks.
+    /// A successful head request does not guarantee access to later ranges.
     pub fn check_tail(&self) -> IoResult<()> {
         let last = self.total_size.saturating_sub(1);
         let resp = send_range(&self.client, &self.url, &format!("bytes={last}-{last}"))?;
