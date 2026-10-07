@@ -1642,12 +1642,14 @@ fn App() -> Element {
                                     if is_details {
                                         button {
                                             class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
+                                            aria_label: i18n::t("go_back"),
                                             onclick: move |_| nav_ctrl.go_back(),
                                             i { class: "fa-solid fa-arrow-left text-lg" }
                                         }
                                     } else if settings_title.is_some() {
                                         button {
                                             class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
+                                            aria_label: i18n::t("go_back"),
                                             onclick: move |_| settings_subpage.set(None),
                                             i { class: "fa-solid fa-arrow-left text-lg" }
                                         }

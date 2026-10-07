@@ -375,6 +375,7 @@ fn DrawerNowPlaying() -> Element {
             button {
                 class: "w-10 h-10 flex items-center justify-center active:scale-90 transition-transform",
                 style: "color: var(--vaxry-sidebar-fg);",
+                aria_label: if *ctrl.is_playing.read() { i18n::t("pause") } else { i18n::t("play") },
                 onclick: move |_| ctrl.toggle(),
                 i { class: if *ctrl.is_playing.read() { "fa-solid fa-pause" } else { "fa-solid fa-play" } }
             }
