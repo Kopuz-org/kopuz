@@ -77,6 +77,14 @@ pub fn Radio(props: RadioProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = props.config;
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
+    // A phone has no room for the description column, so a row is the
+    // station and its play controls.
+    let phone = cfg!(target_os = "android");
+    let station_cols = if phone {
+        "40px minmax(0, 1fr) auto"
+    } else {
+        "48px 1fr 1.5fr 180px"
+    };
     let api = hooks::use_api();
 
     // Search / filter
@@ -254,8 +262,8 @@ pub fn Radio(props: RadioProps) -> Element {
                     if has_custom {
                         div { class: "flex flex-col mb-8",
                             div {
-                                class: "grid px-4 py-2 text-[10px] font-bold border-b mb-1",
-                                style: "grid-template-columns: 48px 1fr 1.5fr 180px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
+                                class: if phone { "hidden" } else { "grid px-4 py-2 text-[10px] font-bold border-b mb-1" },
+                                style: "grid-template-columns: {station_cols}; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
                                 div {}
                                 div { class: "text-left", "{i18n::t(\"radio_station_col\")}" }
                                 div { class: "text-left", "{i18n::t(\"radio_description_col\")}" }
@@ -276,7 +284,7 @@ pub fn Radio(props: RadioProps) -> Element {
 
                                     div {
                                         class: "grid items-center px-4 py-2.5",
-                                        style: "grid-template-columns: 48px 1fr 1.5fr 180px;",
+                                        style: "grid-template-columns: {station_cols};",
 
                                         div { class: "flex items-center justify-center",
                                             div {
@@ -296,7 +304,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                             }
                                         }
 
-                                        div { class: "flex items-center justify-start text-left min-w-0 pr-4 gap-2",
+                                        div { class: if phone { "hidden" } else { "flex items-center justify-start text-left min-w-0 pr-4 gap-2" },
                                             span {
                                                 class: "text-sm truncate",
                                                 style: "color: rgba(255,255,255,0.4);",
@@ -328,7 +336,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                                     i { class: "fa-solid fa-play text-xs" }
                                                 }
                                             } else {
-                                                if station.streams.len() == 2 {
+                                                if station.streams.len() == 2 && !phone {
                                                     for stream in &station.streams {
                                                         button {
                                                             class: "inline-flex items-center gap-2 h-8 px-4 rounded-full text-sm font-medium transition-all hover:opacity-90 active:scale-95 whitespace-nowrap",
@@ -563,7 +571,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                         div {
                                             key: "{st.id}",
                                             class: "grid items-center px-4 py-2.5 rounded-lg mx-1 group cursor-pointer transition-colors hover:bg-white/[0.04]",
-                                            style: "grid-template-columns: 48px 1fr 1.5fr 180px;",
+                                            style: "grid-template-columns: {station_cols};",
                                             onclick: {
                                                 let st = st.clone();
                                                 move |_| {
@@ -598,7 +606,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                                 }
                                             }
 
-                                            div { class: "flex items-center justify-start text-left min-w-0 pr-4 gap-2",
+                                            div { class: if phone { "hidden" } else { "flex items-center justify-start text-left min-w-0 pr-4 gap-2" },
                                                 span {
                                                     class: "text-sm truncate",
                                                     style: "color: rgba(255,255,255,0.4);",
