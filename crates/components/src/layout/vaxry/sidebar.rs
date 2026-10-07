@@ -240,8 +240,6 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                                 span {
                                     class: if is_android { "text-[10px] font-bold uppercase tracking-wider" } else { "text-[10px] font-bold" },
                                     style: "color: color-mix(in oklab, var(--vaxry-sidebar-fg) 25%, transparent);",
-                                    // The tab bar takes Home and Search, which leaves
-                                    // Discover as the only item of a "Discover" section.
                                     if is_android && *section_key == "discover" {
                                         "{i18n::t(\"browse\")}"
                                     } else {

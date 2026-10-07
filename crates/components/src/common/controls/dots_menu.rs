@@ -79,7 +79,7 @@ pub struct DotsMenuProps {
     pub icon: String,
     /// Accessible name for the icon-only trigger.
     pub aria_label: String,
-    /// What the menu acts on, heading the sheet it opens as on Android.
+    /// Heading for the Android action sheet.
     #[props(default)]
     pub title: String,
     #[props(default)]

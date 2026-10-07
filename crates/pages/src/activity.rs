@@ -107,7 +107,6 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
 
     rsx! {
         div { class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
-            // The app header names the page and a phone has no room for the columns.
             if !cfg!(target_os = "android") {
                 div { class: "max-w-[1600px] mx-auto w-full shrink-0",
                     div { class: "mb-8 flex items-end justify-between",

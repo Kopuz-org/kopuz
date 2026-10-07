@@ -145,7 +145,6 @@ pub fn PlaylistsPage(
                 }
             } else {
                 div { class: if cfg!(target_os = "android") { "flex items-center justify-end mb-2" } else if is_vaxry { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
-                    // The app header already names the page on Android.
                     if !cfg!(target_os = "android") {
                         if is_vaxry {
                             div {
