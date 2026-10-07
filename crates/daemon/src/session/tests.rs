@@ -1118,6 +1118,29 @@ async fn move_during_a_crossfade_follows_the_incoming_track() {
 }
 
 #[tokio::test]
+async fn a_running_crossfade_publishes_a_live_anchor_for_the_outgoing_track() {
+    let harness = harness(|config| config.crossfade_seconds = 1);
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    let state = drive_until(&harness, "running crossfade", |state| {
+        state.fading.is_some() && matches!(state.intent, Intent::Committed { token: 2 })
+    })
+    .await;
+
+    let fading = state.fading.expect("fading");
+    let anchor = state.position.expect("anchor during the fade");
+    assert!(anchor.playing, "a client keeps counting through the fade");
+    assert!(
+        anchor.ms.abs_diff(fading.position_ms) < 300,
+        "the anchor is the outgoing track's live position: {anchor:?} vs {fading:?}"
+    );
+}
+
+#[tokio::test]
 async fn seek_during_crossfade_is_guarded_to_the_visible_token() {
     let harness = harness(|config| config.crossfade_seconds = 1);
     harness

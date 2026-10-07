@@ -377,18 +377,24 @@ impl Session {
                     .pending_transition
                     .as_ref()
                     .is_some_and(|pending| pending.to_token == finished.token);
+                let mut fading_from = None;
                 if matching_transition {
                     if outcome.crossfaded {
                         if let Some(pending) = self.pending_transition.as_mut() {
                             // Keep the visible queue/track outgoing until the
                             // authoritative TrackSwitched event.
                             pending.stage = TransitionStage::Fading;
+                            fading_from = Some(pending.from_token);
                         }
                     } else {
                         self.commit_transition_model(finished.token);
                     }
                 }
                 self.publish(state_tx, false);
+                // The outgoing track stays on screen through the fade, so clients get a live anchor for it to keep counting.
+                if let Some(from_token) = fading_from {
+                    self.publish_position_anchor(state_tx, Some(from_token), None, true);
+                }
                 if self.pending_transition.is_none()
                     && self.phase != ApiPhase::Idle
                     && self.position_token != Some(finished.token)
