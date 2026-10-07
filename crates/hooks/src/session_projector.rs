@@ -98,16 +98,11 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
         set_if_changed(&mut ctrl.current_queue_index, index as usize);
     }
 
-    // During a crossfade the outgoing track stays on screen and drives the
-    // seek bar; otherwise the committed track does.
-    let (shown, fading_secs) = match &state.fading {
-        Some(fading) => (
-            Some(&fading.track),
-            Some(fading.position_ms as f64 / 1000.0),
-        ),
-        None => (state.track.as_ref(), None),
+    // During a crossfade the outgoing track stays on screen; the daemon's anchor follows it.
+    let shown = match &state.fading {
+        Some(fading) => Some(&fading.track),
+        None => state.track.as_ref(),
     };
-    set_if_changed(&mut ctrl.fading_progress, fading_secs);
 
     match shown {
         Some(now) => {
@@ -132,14 +127,12 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
         }
     }
 
-    if state.fading.is_none() {
-        match local_anchor(&state, clock) {
-            Some((ms, instant, anchor_playing, progress_secs)) => {
-                set_if_changed(&mut ctrl.engine_anchor, Some((ms, instant, anchor_playing)));
-                set_if_changed(&mut ctrl.current_song_progress, progress_secs);
-            }
-            None => set_if_changed(&mut ctrl.engine_anchor, None),
+    match local_anchor(&state, clock) {
+        Some((ms, instant, anchor_playing, progress_secs)) => {
+            set_if_changed(&mut ctrl.engine_anchor, Some((ms, instant, anchor_playing)));
+            set_if_changed(&mut ctrl.current_song_progress, progress_secs);
         }
+        None => set_if_changed(&mut ctrl.engine_anchor, None),
     }
 
     let buffered: Vec<BufferedRange> = state

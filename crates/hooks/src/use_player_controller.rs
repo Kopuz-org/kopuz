@@ -43,7 +43,6 @@ pub struct PlayerController {
     pub playback_error: Signal<Option<String>>,
     pub browse_loading: Signal<bool>,
     pub(crate) engine_anchor: Signal<Option<(u64, std::time::Instant, bool)>>,
-    pub(crate) fading_progress: Signal<Option<f64>>,
     /// The picture for what is playing, as a reference the daemon resolves.
     /// Every surface that paints the cover reads it through hooks::artwork.
     pub current_artwork: Signal<Option<api::ArtworkRef>>,
@@ -413,9 +412,6 @@ impl PlayerController {
     }
 
     pub fn displayed_progress_secs_f64(&self) -> f64 {
-        if let Some(fading) = *self.fading_progress.peek() {
-            return fading;
-        }
         if let Some((ms, at, playing)) = *self.engine_anchor.peek() {
             let mut pos = ms as f64 / 1000.0;
             if playing {
@@ -480,7 +476,6 @@ pub fn use_player_controller(
     let buffered_ranges = use_signal(Vec::<BufferedRange>::new);
     let playback_error = use_signal(|| None::<String>);
     let engine_anchor = use_signal(|| None::<(u64, std::time::Instant, bool)>);
-    let fading_progress = use_signal(|| None::<f64>);
     let output_latency_ms = use_signal(|| 0u64);
     let current_artwork = use_signal(|| None::<api::ArtworkRef>);
     let external_device = use_signal(|| None::<String>);
@@ -510,7 +505,6 @@ pub fn use_player_controller(
         playback_error,
         browse_loading,
         engine_anchor,
-        fading_progress,
         current_artwork,
         external_device,
         output_latency_ms,
