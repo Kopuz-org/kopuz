@@ -244,7 +244,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
         }
 
         div {
-            class: "{root_class}",
+            class: "app-sidebar {root_class}",
             style: "{root_style}",
             ontouchstart: move |evt| if is_android { drawer_swipe.start(&evt) },
             ontouchmove: move |evt| if is_android { drawer_swipe.update(&evt) },
@@ -288,7 +288,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                 }
 
                 nav {
-                    class: "flex-1 px-3 space-y-1",
+                    class: "app-sidebar-nav flex-1 px-3 space-y-1",
                     for (idx, item) in ordered_items.into_iter().enumerate() {
                         SidebarLink {
                             key: "{item.key}",
@@ -395,28 +395,31 @@ fn SidebarLink(
 
     rsx! {
         div { class: "flex items-center group",
-            a {
-                class: "flex flex-1 items-center {alignment_class} relative p-3 rounded-lg transition-all duration-200 cursor-pointer {active_class}",
+            button {
+                r#type: "button",
+                class: "app-sidebar-link flex flex-1 items-center {alignment_class} relative p-3 rounded-lg transition-all duration-200 cursor-pointer {active_class}",
+                aria_label: i18n::t(item.key),
+                aria_current: if active { "page" } else { "false" },
                 title: if is_collapsed { i18n::t(item.key) } else { String::new() },
                 onclick: move |evt| onclick.call(evt),
 
                 div {
-                    class: "flex items-center justify-center w-6 h-6 shrink-0 transition-transform group-active:scale-95",
+                    class: "app-sidebar-icon flex items-center justify-center w-6 h-6 shrink-0 transition-transform group-active:scale-95",
                     i { class: "{item.icon} text-lg" }
                 }
 
                 if !is_collapsed {
                     span {
-                        class: "ml-4 text-sm font-medium tracking-tight {opacity_class} transition-opacity",
+                        class: "app-sidebar-label ml-4 text-sm font-medium tracking-tight {opacity_class} transition-opacity",
                         "{i18n::t(item.key)}"
                     }
                 }
 
                 div {
                     class: if active {
-                        "{indicator_base} h-6 bg-white"
+                        "app-sidebar-indicator {indicator_base} h-6 bg-white"
                     } else {
-                        "{indicator_base} h-0 bg-white/40 group-hover:h-4"
+                        "app-sidebar-indicator {indicator_base} h-0 bg-white/40 group-hover:h-4"
                     }
                 }
             }

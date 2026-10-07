@@ -179,7 +179,7 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
         config::UiStyle::Vaxry => rsx! {
             crate::vaxry::showcase::ShowcaseVaxry { ..props }
         },
-        config::UiStyle::Normal => rsx! {
+        config::UiStyle::Normal | config::UiStyle::Material3 => rsx! {
             crate::normal::showcase::ShowcaseNormal { ..props }
         },
     }

@@ -20,7 +20,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                 on_navigate: props.on_navigate,
             }
         },
-        config::UiStyle::Normal => rsx! {
+        config::UiStyle::Normal | config::UiStyle::Material3 => rsx! {
             crate::normal::sidebar::SidebarNormal {
                 current_route: props.current_route,
                 on_navigate: props.on_navigate,

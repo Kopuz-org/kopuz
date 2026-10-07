@@ -342,6 +342,7 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
         .collect();
     custom.sort_by(|a, b| a.1.cmp(&b.1));
     let mut options = vec![
+        ("system".into(), i18n::t("system_colors")),
         ("album-art".into(), i18n::t("album_art_gradient")),
         ("default".into(), i18n::t("default_theme")),
         ("amoled".into(), i18n::t("amoled_black")),
@@ -420,11 +421,13 @@ pub fn ToggleSetting(enabled: bool, on_change: EventHandler<bool>) -> Element {
             button {
                 class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {enable_class}",
                 onclick: move |_| on_change.call(true),
+                aria_pressed: enabled,
                 "{i18n::t(\"enabled\")}"
             }
             button {
                 class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {disable_class}",
                 onclick: move |_| on_change.call(false),
+                aria_pressed: !enabled,
                 "{i18n::t(\"disabled\")}"
             }
         }
@@ -471,12 +474,14 @@ pub fn BackBehaviorSelector(
                 class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {rewind_class}",
                 title: "{i18n::t(\"back_behavior_rewind\")}",
                 onclick: move |_| on_change.call(BackBehavior::RewindThenPrev),
+                aria_pressed: is_rewind,
                 "{i18n::t(\"back_behavior_rewind\")}"
             }
             button {
                 class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {always_class}",
                 title: "{i18n::t(\"back_behavior_always_prev\")}",
                 onclick: move |_| on_change.call(BackBehavior::AlwaysPrev),
+                aria_pressed: !is_rewind,
                 "{i18n::t(\"back_behavior_always_prev\")}"
             }
         }

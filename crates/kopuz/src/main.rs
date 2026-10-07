@@ -35,6 +35,7 @@ mod desktop_shell;
 #[cfg(not(target_os = "android"))]
 mod exit_flush;
 mod logging;
+mod material3;
 mod settings_persistence;
 mod static_assets;
 #[cfg(not(target_os = "android"))]
@@ -1067,7 +1068,7 @@ fn App() -> Element {
         let theme = config.read().theme.clone();
         if theme == "album-art" {
             "theme-default".to_string()
-        } else if theme == utils::live_theme::THEME_ID {
+        } else if theme == utils::live_theme::THEME_ID || theme == "system" {
             format!("theme-default theme-{theme}")
         } else {
             format!("theme-{theme}")
@@ -1092,7 +1093,7 @@ fn App() -> Element {
         {
             utils::color::get_background_style(palette.read().as_deref())
         } else {
-            "background-color: var(--color-black); background-image: none;".to_string()
+            "background-color: var(--md-sys-color-surface, var(--color-black)); background-image: none;".to_string()
         }
     });
 
@@ -1188,6 +1189,7 @@ fn App() -> Element {
 
     rsx! {
         WindowsToolbarIconAssets {}
+        material3::SystemColors { config, artwork: palette }
 
         div {
             id: "app-root",
@@ -1200,6 +1202,7 @@ fn App() -> Element {
             },
             dir: "{dir}",
             "data-platform": if cfg!(target_os = "android") { "android" } else { "desktop" },
+            "data-ui-style": config.read().ui_style.as_str(),
             "data-reduce-animations": "{reduce_animations}",
             tabindex: "0",
             autofocus: true,
@@ -1373,7 +1376,7 @@ fn App() -> Element {
                 }
             }
             div {
-                class: "{content_row_class}",
+                class: "app-content {content_row_class}",
                 ontouchstart: move |evt| open_swipe.start(&evt),
                 ontouchmove: move |evt| open_swipe.update(&evt),
                 ontouchend: on_open_swipe,

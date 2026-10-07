@@ -231,6 +231,7 @@ pub fn ui_style_to_proto(value: config::UiStyle) -> UiStyle {
     match value {
         config::UiStyle::Normal => UiStyle::Normal,
         config::UiStyle::Vaxry => UiStyle::Vaxry,
+        config::UiStyle::Material3 => UiStyle::Material3,
     }
 }
 
@@ -238,6 +239,7 @@ pub fn ui_style_from_proto(value: i32) -> config::UiStyle {
     match UiStyle::try_from(value).unwrap_or(UiStyle::Unspecified) {
         UiStyle::Normal => config::UiStyle::Normal,
         UiStyle::Vaxry => config::UiStyle::Vaxry,
+        UiStyle::Material3 => config::UiStyle::Material3,
         UiStyle::Unspecified => config::UiStyle::default(),
     }
 }
@@ -743,5 +745,32 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
         lyrics_depth_blur: value.lyrics_depth_blur,
         lyrics_depth_blur_strength: value.lyrics_depth_blur_strength.min(u32::from(u8::MAX)) as u8,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use prost::Message;
+
+    #[test]
+    fn appearance_survives_the_wire_round_trip() {
+        for ui_style in [
+            config::UiStyle::Normal,
+            config::UiStyle::Vaxry,
+            config::UiStyle::Material3,
+        ] {
+            let original = config::AppConfig {
+                ui_style,
+                theme: "system".into(),
+                ..Default::default()
+            };
+            let bytes = config_to_proto(&original).encode_to_vec();
+            let restored = config_from_proto(&Config::decode(bytes.as_slice()).unwrap());
+            assert_eq!(restored.ui_style, ui_style);
+            assert_eq!(restored.theme, original.theme);
+        }
+        assert_eq!(ui_style_from_proto(1), config::UiStyle::Normal);
+        assert_eq!(ui_style_from_proto(2), config::UiStyle::Vaxry);
     }
 }

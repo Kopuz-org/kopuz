@@ -16,10 +16,18 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import moe.kopuz.kopuz.MediaReceiver
 import moe.kopuz.kopuz.MediaSessionHelper
+import moe.kopuz.kopuz.SystemColors
 
 typealias BuildConfig = moe.kopuz.kopuz.BuildConfig
 
 class MainActivity : WryActivity() {
+    private var systemColorsEnabled = false
+
+    fun setSystemColorsEnabled(enabled: Boolean) {
+        systemColorsEnabled = enabled
+        enableEdgeToEdge()
+    }
+
     // Dioxus owns page history; WebView history is not the in-app back stack.
     override val handleBackNavigation: Boolean = false
 
@@ -53,9 +61,11 @@ class MainActivity : WryActivity() {
             window.isNavigationBarContrastEnforced = false
         }
         WindowCompat.getInsetsController(window, window.decorView).apply {
-            // Dark UI → light (white) status/nav icons.
-            isAppearanceLightStatusBars = false
-            isAppearanceLightNavigationBars = false
+            val light = systemColorsEnabled &&
+                resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK !=
+                Configuration.UI_MODE_NIGHT_YES
+            isAppearanceLightStatusBars = light
+            isAppearanceLightNavigationBars = light
         }
     }
 
@@ -81,6 +91,7 @@ class MainActivity : WryActivity() {
      */
     override fun onWebViewCreate(webView: android.webkit.WebView) {
         this.webView = webView
+        webView.addJavascriptInterface(SystemColors(this), "KopuzSystemColors")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             webView.setRendererPriorityPolicy(
                 android.webkit.WebView.RENDERER_PRIORITY_IMPORTANT,

@@ -3,6 +3,7 @@
 const FAVICON: &str = include_str!(concat!(env!("OUT_DIR"), "/favicon.uri"));
 const MAIN_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/main.css"));
 const THEME_CSS: &str = include_str!("../assets/themes.css");
+const MATERIAL3_CSS: &str = include_str!("../assets/material3.css");
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 const REDUCED_ANIMATIONS_CSS: &str = include_str!("../assets/reduced-animations.css");
 const FONT_AWESOME_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/fontawesome.css"));
@@ -21,6 +22,7 @@ pub fn head() -> String {
         ("main", MAIN_CSS),
         ("themes", THEME_CSS),
         ("tailwind", TAILWIND_CSS),
+        ("material3", MATERIAL3_CSS),
         ("reduced-animations", REDUCED_ANIMATIONS_CSS),
         ("jetbrains-mono", JETBRAINS_MONO_CSS),
         ("fontawesome", FONT_AWESOME_CSS),

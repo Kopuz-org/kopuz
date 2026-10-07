@@ -202,9 +202,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
     let is_android = cfg!(target_os = "android");
     let showing_index = is_android && subpage.is_none_or(|subpage| subpage.read().is_none());
+    let is_material3 = config.read().ui_style == config::UiStyle::Material3;
 
     rsx! {
-        div { class: if is_android { "px-3 pt-2 pb-6 w-full max-w-7xl mx-auto" } else if config.read().settings_layout == config::SettingsLayout::TopBar { "settings-page settings-layout-topbar px-6 py-7 w-full max-w-7xl mx-auto" } else { "settings-page settings-layout-cd px-6 py-7 w-full max-w-7xl mx-auto" },
+        div { class: if is_android { "px-3 pt-2 pb-6 w-full max-w-7xl mx-auto" } else if is_material3 || config.read().settings_layout == config::SettingsLayout::TopBar { "settings-page settings-layout-topbar px-6 py-7 w-full max-w-7xl mx-auto" } else { "settings-page settings-layout-cd px-6 py-7 w-full max-w-7xl mx-auto" },
             if !is_android {
                 h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
@@ -567,11 +568,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     rsx! {
                                         AppSelect {
                                             class: "settings-select",
-                                            value: (if current_style == config::UiStyle::Vaxry { "vaxry" } else { "normal" }).to_string(),
-                                            options: vec![("normal".into(), i18n::t("ui_normal")), ("vaxry".into(), i18n::t("ui_vaxry"))],
+                                            value: current_style.as_str().to_string(),
+                                            options: vec![("normal".into(), i18n::t("ui_normal")), ("vaxry".into(), i18n::t("ui_vaxry")), ("material3".into(), i18n::t("ui_material3"))],
                                             on_change: move |value: String| {
                                                 config.write().ui_style = match value.as_str() {
                                                     "vaxry" => config::UiStyle::Vaxry,
+                                                    "material3" => config::UiStyle::Material3,
                                                     _ => config::UiStyle::Normal,
                                                 };
                                             },
@@ -602,7 +604,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        if !is_android {
+                        if !is_android && !is_material3 {
                             SettingItem {
                                 title: i18n::t("settings_layout").to_string(),
                                 config_key: "settings_layout",

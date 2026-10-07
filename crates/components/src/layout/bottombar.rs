@@ -21,7 +21,7 @@ pub fn Bottombar(
     set_queue_drag_enabled(c);
 
     match config.read().ui_style {
-        UiStyle::Normal => rsx! {
+        UiStyle::Normal | UiStyle::Material3 => rsx! {
             BottombarNormal {
                 is_fullscreen,
                 persisted_volume, is_rightbar_open, is_devices_open,
