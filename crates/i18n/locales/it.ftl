@@ -856,3 +856,4 @@ settings_group_background = Background
 settings_group_interface = Interface
 settings_group_output = Output
 settings_group_loudness = Loudness
+browse = Browse

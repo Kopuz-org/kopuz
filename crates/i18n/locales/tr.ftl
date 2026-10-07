@@ -863,3 +863,4 @@ settings_group_background = Arka plan
 settings_group_interface = Arayüz
 settings_group_output = Çıkış
 settings_group_loudness = Ses yüksekliği
+browse = Göz at
