@@ -93,11 +93,20 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
         }
     }
 
+    // A phone has no room for the title beside the cover, so it stacks under it.
+    let phone = cfg!(target_os = "android");
+    let cover_size = if phone { "w-32 h-32" } else { "w-44 h-44" };
+    let cover_cursor = if props.on_cover_click.is_some() {
+        "cursor-pointer"
+    } else {
+        ""
+    };
+
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
-            div { class: "flex items-end gap-6 mb-8 px-6 pt-6 shrink-0",
+            div { class: if phone { "flex flex-col items-center text-center gap-3 mb-3 px-4 pt-2 shrink-0" } else { "flex items-end gap-6 mb-8 px-6 pt-6 shrink-0" },
                 div {
-                    class: if props.on_cover_click.is_some() { "w-44 h-44 rounded-xl overflow-hidden shrink-0 shadow-2xl bg-white/5 cursor-pointer" } else { "w-44 h-44 rounded-xl overflow-hidden shrink-0 shadow-2xl bg-white/5" },
+                    class: "{cover_size} rounded-xl overflow-hidden shrink-0 shadow-2xl bg-white/5 {cover_cursor}",
                     style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
                     onclick: move |_| {
                         if let Some(ref h) = props.on_cover_click {
@@ -119,7 +128,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                     }
                 }
 
-                div { class: "flex flex-col gap-1 pb-1 min-w-0",
+                div { class: if phone { "flex flex-col items-center gap-1 w-full min-w-0" } else { "flex flex-col gap-1 pb-1 min-w-0" },
                     if !props.description.is_empty() {
                         if let Some(on_description_click) = props.on_description_click {
                             button {
@@ -136,7 +145,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                             }
                         }
                     }
-                    h1 { class: "text-4xl font-semibold tracking-tight text-white truncate mb-1", "{props.name}" }
+                    h1 { class: if phone { "text-2xl font-semibold tracking-tight text-white line-clamp-2 mb-1" } else { "text-4xl font-semibold tracking-tight text-white truncate mb-1" }, "{props.name}" }
                     p {
                         class: "text-sm mb-3",
                         style: "color: var(--color-white); opacity: 0.45;",
@@ -154,7 +163,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                         }
                     }
 
-                    div { class: "flex items-center gap-2 flex-wrap",
+                    div { class: if phone { "flex items-center justify-center gap-2 flex-wrap" } else { "flex items-center gap-2 flex-wrap" },
                         if !props.tracks.is_empty() {
                             button {
                                 class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
