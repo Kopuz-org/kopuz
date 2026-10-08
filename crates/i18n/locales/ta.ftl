@@ -433,6 +433,7 @@ replay_gain_mode_auto = தானியங்கி
 replay_gain_prevent_clipping = ஒலிச் சிதைவைத் தடு
 replay_gain_preamp = முன் பெருக்கம்
 replay_gain_fallback = இயல்புநிலைப் பெருக்கம்
+replay_gain_youtube_loudness = YouTube Music ஒலியளவைச் சீரமை
 move_to_folder = கோப்புறைக்கு நகர்த்து
 no_folders_yet = இன்னும் கோப்புறைகள் இல்லை.
 folder_name = கோப்புறை பெயர்...

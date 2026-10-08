@@ -371,6 +371,7 @@ impl MediaSource for YtSource {
             duration_secs: info.duration_secs,
             bitrate: info.bitrate,
             content_length: info.content_length,
+            loudness_db: info.loudness_db,
         })
     }
 

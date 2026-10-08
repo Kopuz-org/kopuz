@@ -375,6 +375,7 @@ replay_gain_mode_auto = ona a
 replay_gain_prevent_clipping = o pini e pakala kalama
 replay_gain_preamp = wawa open
 replay_gain_fallback = wawa pi nasin open
+replay_gain_youtube_loudness = o sama e kalama pi YouTube Music
 move_to_folder = 󱥄󱤂 󱤉 󱤕
 no_folders_yet = 󱤕 󱤧 󱤬 󱤂.
 folder_name = 󱥂 󱤉 󱤕...

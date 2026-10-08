@@ -346,6 +346,7 @@ replay_gain_mode_auto = Otomatik
 replay_gain_prevent_clipping = Kırpılmayı önle
 replay_gain_preamp = Ön yükseltme
 replay_gain_fallback = Varsayılan kazanç
+replay_gain_youtube_loudness = YouTube Music ses düzeyini normalleştir
 move_to_folder = Klasöre Taşı
 no_folders_yet = Henüz klasör yok.
 folder_name = Klasör adı...

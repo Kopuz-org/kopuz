@@ -346,6 +346,7 @@ replay_gain_mode_auto = 自动
 replay_gain_prevent_clipping = 防止削波
 replay_gain_preamp = 前置增益
 replay_gain_fallback = 默认增益
+replay_gain_youtube_loudness = YouTube Music 音量标准化
 move_to_folder = 移动到文件夹
 no_folders_yet = 还没有文件夹。
 folder_name = 文件夹名称...

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use arc_swap::ArcSwap;
 use config::{ChannelMode, EqualizerSettings, ReplayGainInfo, ReplayGainSettings};
 
-use super::rt::{Retired, RtCmd, RtSession, RtState};
+use super::rt::{GainRamp, Retired, RtCmd, RtSession, RtState};
 use super::sink::{AudioSink, DataCallbackFactory, SinkConfig};
 use super::worker::{WorkerCmd, WorkerHandle, WorkerMsg};
 use super::{
@@ -188,6 +188,7 @@ fn make_ring(config: SinkConfig, gain: Arc<AtomicU32>) -> RingParts {
         rt_session: RtSession {
             consumer,
             played,
+            applied_gain: GainRamp::new(f32::from_bits(gain.load(Ordering::Relaxed))),
             gain,
         },
     }

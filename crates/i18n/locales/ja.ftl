@@ -352,6 +352,7 @@ replay_gain_mode_auto = 自動
 replay_gain_prevent_clipping = クリッピングを防ぐ
 replay_gain_preamp = プリアンプ
 replay_gain_fallback = 既定のゲイン
+replay_gain_youtube_loudness = YouTube Music の音量を正規化
 move_to_folder = フォルダーに移動
 no_folders_yet = フォルダーがまだありません。
 folder_name = フォルダー名...

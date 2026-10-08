@@ -124,6 +124,7 @@ impl SubsonicSong {
             album_peak: gain
                 .album_peak
                 .filter(|peak| peak.is_finite() && *peak > 0.0),
+            loudness_db: None,
         }
     }
 }

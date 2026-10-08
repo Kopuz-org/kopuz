@@ -296,12 +296,14 @@ fn replay_gain_settings_scale_the_playing_track() {
         prevent_clipping: false,
         preamp_db: 0.0,
         fallback_gain_db: -6.0,
+        normalize_loudness: true,
     }));
 
+    // The change ramps in, so wait for a block past the ramp.
     let mut gained = ungained;
     wait_until("gain applied to the live session", || {
         gained = peak(&sink);
-        gained > 0.0 && gained < ungained * 0.75
+        gained > 0.0 && gained < ungained * 0.6
     });
     assert!(
         (gained - ungained * 0.5).abs() < ungained * 0.15,
@@ -319,6 +321,7 @@ fn service_replay_gain_levels_a_stream_without_tags() {
         prevent_clipping: false,
         preamp_db: 0.0,
         fallback_gain_db: 0.0,
+        normalize_loudness: true,
     }));
 
     // A bare WAV, as a transcoding server would serve it: no tags at all, so
@@ -361,6 +364,62 @@ fn service_replay_gain_levels_a_stream_without_tags() {
     );
 
     engine.shutdown();
+}
+
+#[test]
+fn service_loudness_attenuates_and_its_absence_is_unity() {
+    let peak_with = |loudness_db: Option<f32>| {
+        let (sink, engine) = spawn_engine();
+        let (factory, duration) = wav_factory(5.0);
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        engine.send(Command::Load(LoadRequest {
+            token: 1,
+            factory,
+            duration,
+            transition: Transition::Immediate,
+            start_at: None,
+            album_context: false,
+            service_replay_gain: config::ReplayGainInfo {
+                loudness_db,
+                ..Default::default()
+            },
+            reply: Some(reply_tx),
+        }));
+        reply_rx
+            .blocking_recv()
+            .expect("load reply")
+            .expect("load ok");
+        let mut peak = 0.0_f32;
+        wait_until("non-silent audio", || {
+            peak = sink
+                .pull(4410)
+                .into_iter()
+                .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
+            peak > 0.0
+        });
+        engine.shutdown();
+        peak
+    };
+
+    // The WAV's own peak is 10_000/32_768, unchanged without a loudness.
+    let full = 10_000.0 / 32_768.0;
+    let untouched = peak_with(None);
+    assert!(
+        (untouched - full).abs() < 1e-4,
+        "expected {full}, got {untouched}"
+    );
+
+    // 6 dB above the reference halves the amplitude.
+    let attenuated = peak_with(Some(6.0));
+    let expected = full * 10.0_f32.powf(-6.0 / 20.0);
+    assert!(
+        (attenuated - expected).abs() < expected * 0.05,
+        "expected ~{expected}, got {attenuated}"
+    );
+
+    // A quiet track is never boosted.
+    let quiet = peak_with(Some(-6.0));
+    assert!((quiet - full).abs() < 1e-4, "expected {full}, got {quiet}");
 }
 
 #[test]

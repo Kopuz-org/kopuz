@@ -433,6 +433,7 @@ replay_gain_mode_auto = Automatisch
 replay_gain_prevent_clipping = Vervorming voorkomen
 replay_gain_preamp = Voorversterking
 replay_gain_fallback = Standaardversterking
+replay_gain_youtube_loudness = YouTube Music normaliseren
 move_to_folder = Naar map verplaatsen
 no_folders_yet = Nog geen mappen.
 folder_name = Mapnaam...

@@ -433,6 +433,7 @@ replay_gain_mode_auto = Automatisk
 replay_gain_prevent_clipping = Förhindra klippning
 replay_gain_preamp = Förförstärkning
 replay_gain_fallback = Standardförstärkning
+replay_gain_youtube_loudness = Normalisera YouTube Music
 move_to_folder = Flytta till katalog
 no_folders_yet = Inga kataloger ännu.
 folder_name = Katalognamn...

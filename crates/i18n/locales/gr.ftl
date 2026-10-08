@@ -346,6 +346,7 @@ replay_gain_mode_auto = Αυτόματη
 replay_gain_prevent_clipping = Αποφυγή ψαλιδισμού
 replay_gain_preamp = Προενίσχυση
 replay_gain_fallback = Προεπιλεγμένη ενίσχυση
+replay_gain_youtube_loudness = Κανονικοποίηση έντασης YouTube Music
 move_to_folder = Μετακίνηση σε φάκελο
 no_folders_yet = Δεν υπάρχουν φάκελοι ακόμα.
 folder_name = Όνομα φακέλου...

@@ -433,6 +433,7 @@ replay_gain_mode_auto = ഓട്ടോമാറ്റിക്
 replay_gain_prevent_clipping = ക്ലിപ്പിംഗ് തടയുക
 replay_gain_preamp = പ്രീ-ആംപ്
 replay_gain_fallback = സ്ഥിരസ്ഥിതി ഗെയിൻ
+replay_gain_youtube_loudness = YouTube Music വോളിയം നോർമലൈസ് ചെയ്യുക
 move_to_folder = ഫോൾഡറിലേക്ക് നീക്കുക
 no_folders_yet = ഇതുവരെ ഫോൾഡറുകളൊന്നുമില്ല.
 folder_name = ഫോൾഡർ പേര്...

@@ -346,6 +346,7 @@ replay_gain_mode_auto = Automatikus
 replay_gain_prevent_clipping = Torzítás megelőzése
 replay_gain_preamp = Előerősítés
 replay_gain_fallback = Alapértelmezett erősítés
+replay_gain_youtube_loudness = YouTube Music hangerejének normalizálása
 move_to_folder = Áthelyezés mappába
 no_folders_yet = Még nincsenek mappák.
 folder_name = Mappanév...

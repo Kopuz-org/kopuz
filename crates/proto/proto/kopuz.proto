@@ -1412,6 +1412,8 @@ message ReplayGainSettings {
   bool prevent_clipping = 2;
   float preamp_db = 3;
   float fallback_gain_db = 4;
+  // Absent means on, so an older peer keeps the default.
+  optional bool normalize_loudness = 5;
 }
 
 message AlbumSortCriterion {

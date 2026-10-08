@@ -247,6 +247,7 @@ impl MediaSource for NextcloudSource {
             duration_secs: None,
             bitrate: None,
             content_length: None,
+            loudness_db: None,
         })
     }
 

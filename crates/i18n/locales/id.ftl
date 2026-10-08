@@ -433,6 +433,7 @@ replay_gain_mode_auto = Otomatis
 replay_gain_prevent_clipping = Cegah kliping
 replay_gain_preamp = Pra-penguat
 replay_gain_fallback = Penguatan bawaan
+replay_gain_youtube_loudness = Normalisasi YouTube Music
 move_to_folder = Pindahkan ke Folder
 no_folders_yet = Tidak ada folder.
 folder_name = Nama folder...

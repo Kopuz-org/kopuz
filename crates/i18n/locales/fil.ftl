@@ -433,6 +433,7 @@ replay_gain_mode_auto = Awtomatiko
 replay_gain_prevent_clipping = Iwasan ang clipping
 replay_gain_preamp = Pre-amp
 replay_gain_fallback = Default na gain
+replay_gain_youtube_loudness = I-normalize ang YouTube Music
 move_to_folder = Ilipat sa Folder
 no_folders_yet = Wala pang folder.
 folder_name = Pangalan ng folder...

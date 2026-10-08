@@ -347,6 +347,7 @@ replay_gain_mode_auto = Автоматически
 replay_gain_prevent_clipping = Предотвращать клиппинг
 replay_gain_preamp = Предусиление
 replay_gain_fallback = Стандартное усиление
+replay_gain_youtube_loudness = Нормализовать громкость YouTube Music
 move_to_folder = Переместить в папку
 no_folders_yet = Пока нет папок.
 folder_name = Имя папки...

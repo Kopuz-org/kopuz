@@ -346,6 +346,7 @@ replay_gain_mode_auto = 자동
 replay_gain_prevent_clipping = 클리핑 방지
 replay_gain_preamp = 프리앰프
 replay_gain_fallback = 기본 게인
+replay_gain_youtube_loudness = YouTube Music 음량 정규화
 move_to_folder = 폴더로 이동
 no_folders_yet = 아직 폴더가 없습니다.
 folder_name = 폴더 이름...

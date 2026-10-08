@@ -433,6 +433,7 @@ replay_gain_mode_auto = Tự động
 replay_gain_prevent_clipping = Ngăn méo tiếng
 replay_gain_preamp = Tiền khuếch đại
 replay_gain_fallback = Độ lợi mặc định
+replay_gain_youtube_loudness = Chuẩn hóa âm lượng YouTube Music
 move_to_folder = Di chuyển vào thư mục
 no_folders_yet = Chưa có thư mục.
 folder_name = Tên thư mục...

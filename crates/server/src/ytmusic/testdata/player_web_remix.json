@@ -1,0 +1,131 @@
+{
+  "playabilityStatus": {
+    "status": "OK"
+  },
+  "playerConfig": {
+    "audioConfig": {
+      "loudnessDb": -6.1099997,
+      "perceptualLoudnessDb": -13.11,
+      "enablePerFormatLoudness": true,
+      "trackAbsoluteLoudnessLkfs": -13.11,
+      "loudnessTargetLkfs": -7,
+      "loudnessNormalizationConfig": {
+        "applyStatefulNormalization": false,
+        "preserveStatefulLoudnessTarget": true,
+        "maxStatefulTimeThresholdSec": 300,
+        "minimumLoudnessTargetLkfs": -31
+      }
+    }
+  },
+  "streamingData": {
+    "adaptiveFormats": [
+      {
+        "itag": 140,
+        "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+        "bitrate": 130598,
+        "initRange": {
+          "start": "0",
+          "end": "722"
+        },
+        "indexRange": {
+          "start": "723",
+          "end": "1102"
+        },
+        "lastModified": "1723024658816079",
+        "contentLength": "4586956",
+        "quality": "tiny",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 129494,
+        "highReplication": true,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "approxDurationMs": "283376",
+        "audioSampleRate": "44100",
+        "audioChannels": 2,
+        "loudnessDb": -6.1099997,
+        "trackAbsoluteLoudnessLkfs": -13.11,
+        "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+      },
+      {
+        "itag": 249,
+        "mimeType": "audio/webm; codecs=\"opus\"",
+        "bitrate": 55307,
+        "initRange": {
+          "start": "0",
+          "end": "265"
+        },
+        "indexRange": {
+          "start": "266",
+          "end": "754"
+        },
+        "lastModified": "1723024664177867",
+        "contentLength": "1809444",
+        "quality": "tiny",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 51088,
+        "audioQuality": "AUDIO_QUALITY_LOW",
+        "approxDurationMs": "283341",
+        "audioSampleRate": "48000",
+        "audioChannels": 2,
+        "loudnessDb": -6.12,
+        "trackAbsoluteLoudnessLkfs": -13.12,
+        "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+      },
+      {
+        "itag": 250,
+        "mimeType": "audio/webm; codecs=\"opus\"",
+        "bitrate": 72016,
+        "initRange": {
+          "start": "0",
+          "end": "265"
+        },
+        "indexRange": {
+          "start": "266",
+          "end": "755"
+        },
+        "lastModified": "1723024664180582",
+        "contentLength": "2396250",
+        "quality": "tiny",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 67656,
+        "audioQuality": "AUDIO_QUALITY_LOW",
+        "approxDurationMs": "283341",
+        "audioSampleRate": "48000",
+        "audioChannels": 2,
+        "loudnessDb": -6.12,
+        "trackAbsoluteLoudnessLkfs": -13.12,
+        "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+      },
+      {
+        "itag": 251,
+        "mimeType": "audio/webm; codecs=\"opus\"",
+        "bitrate": 142787,
+        "initRange": {
+          "start": "0",
+          "end": "265"
+        },
+        "indexRange": {
+          "start": "266",
+          "end": "755"
+        },
+        "lastModified": "1723024664160977",
+        "contentLength": "4773628",
+        "quality": "tiny",
+        "projectionType": "RECTANGULAR",
+        "averageBitrate": 134781,
+        "audioQuality": "AUDIO_QUALITY_MEDIUM",
+        "approxDurationMs": "283341",
+        "audioSampleRate": "48000",
+        "audioChannels": 2,
+        "loudnessDb": -6.12,
+        "trackAbsoluteLoudnessLkfs": -13.12,
+        "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+      }
+    ]
+  },
+  "videoDetails": {
+    "videoId": "IluRBvnYMoY",
+    "title": "Give Life Back to Music (Official Audio)",
+    "author": "Daft Punk",
+    "lengthSeconds": "283"
+  }
+}

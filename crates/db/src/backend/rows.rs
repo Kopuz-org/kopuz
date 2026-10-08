@@ -77,6 +77,7 @@ impl TrackRow {
                 track_peak: self.rg_track_peak.map(|v| v as f32),
                 album_gain_db: self.rg_album_gain.map(|v| v as f32),
                 album_peak: self.rg_album_peak.map(|v| v as f32),
+                loudness_db: None,
             },
         }
     }
@@ -172,6 +173,7 @@ impl QueueTrackRow {
                 track_peak: self.rg_track_peak.map(|v| v as f32),
                 album_gain_db: self.rg_album_gain.map(|v| v as f32),
                 album_peak: self.rg_album_peak.map(|v| v as f32),
+                loudness_db: None,
             },
         }
     }

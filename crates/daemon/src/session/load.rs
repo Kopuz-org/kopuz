@@ -569,6 +569,7 @@ impl ClassifiedLoad {
 
         let mut duration_secs = None;
         let mut bitrate = None;
+        let mut loudness_db = None;
         let factory: SourceFactory = match source {
             ClassifiedSource::Factory(factory) => factory,
             ClassifiedSource::Local(path) => Box::new(move || {
@@ -620,6 +621,7 @@ impl ClassifiedLoad {
                         })?;
                         duration_secs = info.duration_secs;
                         bitrate = info.bitrate;
+                        loudness_db = info.loudness_db;
                         (info.url, info.format, info.user_agent)
                     }
                     ResolvedStreamRef::SoundCloudHls(_)
@@ -648,6 +650,7 @@ impl ClassifiedLoad {
         if let Some(bits_per_second) = bitrate {
             self.track.bitrate = (bits_per_second / 1000) as u16;
         }
+        self.track.replay_gain.loudness_db = loudness_db;
 
         Ok(PreparedLoad {
             token: self.token,

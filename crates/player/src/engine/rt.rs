@@ -26,6 +26,52 @@ pub(crate) struct RtSession {
     /// preamp tweak is heard on the current track without a reload. Per session
     /// because a crossfade has two tracks in flight, each with its own gain.
     pub gain: Arc<AtomicU32>,
+    pub applied_gain: GainRamp,
+}
+
+/// How long a change to a session's gain takes to land. A step change of
+/// gain mid-stream is an audible click.
+const GAIN_RAMP_SECONDS: f32 = 0.05;
+
+/// The gain the callback is actually applying to a session, walked towards
+/// the session's gain cell over [`GAIN_RAMP_SECONDS`].
+pub(crate) struct GainRamp {
+    current: f32,
+    target: f32,
+    step: f32,
+}
+
+impl GainRamp {
+    /// Starts settled, so a fresh session plays at its gain from the first
+    /// sample.
+    pub(crate) fn new(gain: f32) -> Self {
+        let gain = if gain.is_finite() { gain } else { 1.0 };
+        Self {
+            current: gain,
+            target: gain,
+            step: 0.0,
+        }
+    }
+
+    fn apply(&mut self, samples: &mut [f32], target: f32, channels: usize, ramp_frames: f32) {
+        let target = if target.is_finite() { target } else { 1.0 };
+        if target != self.target {
+            self.target = target;
+            self.step = (target - self.current).abs() / ramp_frames.max(1.0);
+        }
+        if self.current == self.target {
+            apply_gain(samples, self.current);
+            return;
+        }
+        for frame in samples.chunks_mut(channels.max(1)) {
+            self.current = if self.current < self.target {
+                (self.current + self.step).min(self.target)
+            } else {
+                (self.current - self.step).max(self.target)
+            };
+            apply_gain(frame, self.current);
+        }
+    }
 }
 
 pub(crate) enum RtCmd {
@@ -76,6 +122,7 @@ pub(crate) struct RtState {
     scratch_active: Vec<f32>,
     scratch_fading: Vec<f32>,
     channels: usize,
+    gain_ramp_frames: f32,
 }
 
 pub(crate) fn volume_bits(volume: f32) -> u32 {
@@ -110,6 +157,7 @@ impl RtState {
             scratch_active: vec![0.0; SCRATCH_FRAMES * channels],
             scratch_fading: vec![0.0; SCRATCH_FRAMES * channels],
             channels,
+            gain_ramp_frames: sample_rate as f32 * GAIN_RAMP_SECONDS,
         }
     }
 
@@ -121,6 +169,8 @@ impl RtState {
             return;
         }
 
+        let channels = self.channels;
+        let ramp_frames = self.gain_ramp_frames;
         let read = if self.fade.is_some() && self.fading.is_some() {
             self.process_fade(data)
         } else {
@@ -129,7 +179,7 @@ impl RtState {
                 .map(|session| {
                     let read = read_into(&mut session.consumer, data);
                     session.played.fetch_add(read as u64, Ordering::Relaxed);
-                    apply_gain(&mut data[..read], session_gain(session));
+                    apply_session_gain(session, &mut data[..read], channels, ramp_frames);
                     read
                 })
                 .unwrap_or(0)
@@ -191,6 +241,7 @@ impl RtState {
     /// Returns the number of samples written from the start of `data`.
     fn process_fade(&mut self, data: &mut [f32]) -> usize {
         let channels = self.channels;
+        let ramp_frames = self.gain_ramp_frames;
         let chunk_capacity = SCRATCH_FRAMES * channels;
         let mut written = 0;
         let mut fade_completed: Option<u64> = None;
@@ -210,7 +261,7 @@ impl RtState {
                 .map(|s| {
                     let read = read_into(&mut s.consumer, active_scratch);
                     s.played.fetch_add(read as u64, Ordering::Relaxed);
-                    apply_gain(&mut active_scratch[..read], session_gain(s));
+                    apply_session_gain(s, &mut active_scratch[..read], channels, ramp_frames);
                     read
                 })
                 .unwrap_or(0);
@@ -224,7 +275,7 @@ impl RtState {
                     // session, and a seek-cancelled fade installs a fresh ring.
                     let read = read_into(&mut s.consumer, fading_scratch);
                     s.played.fetch_add(read as u64, Ordering::Relaxed);
-                    apply_gain(&mut fading_scratch[..read], session_gain(s));
+                    apply_session_gain(s, &mut fading_scratch[..read], channels, ramp_frames);
                     read
                 })
                 .unwrap_or(0);
@@ -289,8 +340,16 @@ impl RtState {
     }
 }
 
-fn session_gain(session: &RtSession) -> f32 {
-    f32::from_bits(session.gain.load(Ordering::Relaxed))
+fn apply_session_gain(
+    session: &mut RtSession,
+    samples: &mut [f32],
+    channels: usize,
+    ramp_frames: f32,
+) {
+    let target = f32::from_bits(session.gain.load(Ordering::Relaxed));
+    session
+        .applied_gain
+        .apply(samples, target, channels, ramp_frames);
 }
 
 fn apply_gain(samples: &mut [f32], gain: f32) {
@@ -393,7 +452,28 @@ fn apply_channel_mode_in_place(samples: &mut [f32], channels: usize, mode: Chann
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_gain, soft_limit};
+    use super::{GainRamp, apply_gain, soft_limit};
+
+    #[test]
+    fn a_gain_change_ramps_instead_of_stepping() {
+        let mut ramp = GainRamp::new(1.0);
+        let mut samples = [1.0_f32; 8];
+        ramp.apply(&mut samples, 0.5, 2, 4.0);
+        assert_eq!(samples, [0.875, 0.875, 0.75, 0.75, 0.625, 0.625, 0.5, 0.5]);
+
+        let mut settled = [1.0_f32; 4];
+        ramp.apply(&mut settled, 0.5, 2, 4.0);
+        assert_eq!(settled, [0.5; 4]);
+    }
+
+    #[test]
+    fn unity_gain_leaves_samples_untouched() {
+        let mut ramp = GainRamp::new(1.0);
+        let mut samples = [0.25_f32, -0.75, 0.999, -1.0];
+        let original = samples;
+        ramp.apply(&mut samples, 1.0, 2, 4.0);
+        assert_eq!(samples, original);
+    }
 
     #[test]
     fn a_boost_never_pushes_past_full_scale() {

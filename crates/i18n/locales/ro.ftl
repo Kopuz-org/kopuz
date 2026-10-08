@@ -346,6 +346,7 @@ replay_gain_mode_auto = Automată
 replay_gain_prevent_clipping = Previne distorsiunea
 replay_gain_preamp = Preamplificare
 replay_gain_fallback = Amplificare implicită
+replay_gain_youtube_loudness = Normalizează YouTube Music
 move_to_folder = Mută în folder
 no_folders_yet = Niciun folder încă.
 folder_name = Numele folderului...

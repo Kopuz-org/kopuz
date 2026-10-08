@@ -298,6 +298,7 @@ async fn replay_gain_round_trips_and_clears() {
         track_peak: Some(0.98),
         album_gain_db: Some(-5.25),
         album_peak: None,
+        loudness_db: None,
     };
     db.upsert_tracks(&Source::default(), std::slice::from_ref(&track))
         .await

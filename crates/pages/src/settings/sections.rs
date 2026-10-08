@@ -305,6 +305,20 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                     }
                 }
             }
+            SettingItem {
+                title: i18n::t("replay_gain_youtube_loudness").to_string(),
+                config_key: "replay_gain",
+                control: rsx! {
+                    ToggleSetting {
+                        enabled: config.read().replay_gain.normalize_loudness,
+                        on_change: move |enabled| {
+                            let mut settings = config.peek().replay_gain;
+                            settings.normalize_loudness = enabled;
+                            config.write().replay_gain = settings;
+                        }
+                    }
+                }
+            }
             if config.read().replay_gain.mode != ReplayGainMode::Off {
                 SettingItem {
                     title: i18n::t("replay_gain_prevent_clipping").to_string(),

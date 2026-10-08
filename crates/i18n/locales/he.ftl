@@ -346,6 +346,7 @@ replay_gain_mode_auto = אוטומטי
 replay_gain_prevent_clipping = מניעת קטיעה
 replay_gain_preamp = הגברה מקדימה
 replay_gain_fallback = הגברת ברירת מחדל
+replay_gain_youtube_loudness = נרמול עוצמת YouTube Music
 move_to_folder = העבר לתיקייה
 no_folders_yet = עדיין אין תיקיות.
 folder_name = שם תיקייה...

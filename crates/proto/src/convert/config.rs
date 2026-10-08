@@ -472,6 +472,7 @@ pub fn replay_gain_to_proto(value: config::ReplayGainSettings) -> ReplayGainSett
         prevent_clipping: value.prevent_clipping,
         preamp_db: value.preamp_db,
         fallback_gain_db: value.fallback_gain_db,
+        normalize_loudness: Some(value.normalize_loudness),
     }
 }
 
@@ -484,6 +485,7 @@ pub fn replay_gain_from_proto(value: Option<&ReplayGainSettings>) -> config::Rep
         prevent_clipping: value.prevent_clipping,
         preamp_db: value.preamp_db,
         fallback_gain_db: value.fallback_gain_db,
+        normalize_loudness: value.normalize_loudness.unwrap_or(true),
     }
 }
 

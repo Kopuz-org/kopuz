@@ -352,6 +352,7 @@ replay_gain_mode_auto = تلقائي
 replay_gain_prevent_clipping = منع القَصّ
 replay_gain_preamp = تضخيم مسبق
 replay_gain_fallback = الكسب الافتراضي
+replay_gain_youtube_loudness = تسوية مستوى صوت YouTube Music
 move_to_folder = نقل إلى مجلد
 no_folders_yet = لا توجد مجلدات بعد.
 folder_name = اسم المجلد...

@@ -174,6 +174,8 @@ pub struct StreamInfo {
     pub duration_secs: Option<u64>,
     pub bitrate: Option<u32>,
     pub content_length: Option<u64>,
+    /// See [`config::ReplayGainInfo::loudness_db`].
+    pub loudness_db: Option<f32>,
 }
 
 pub struct PlaylistMeta {

@@ -62,6 +62,9 @@ pub struct YtStreamInfo {
     /// playing — a range-backed source would fail outright instead of playing
     /// sequentially (issue #386).
     pub range_safe: bool,
+    /// `playerConfig.audioConfig.loudnessDb`: how far above YouTube's
+    /// reference loudness the track is, in dB.
+    pub loudness_db: Option<f32>,
 }
 
 /// The visitor id every player call carries, held for the process and kept
@@ -519,7 +522,27 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         bitrate: Some(bitrate as u32),
         itag,
         range_safe: true,
+        loudness_db: loudness_db(json),
     })
+}
+
+/// The level YouTube Music's web player normalises to; WEB_REMIX's
+/// `loudnessDb` is the track's loudness above it. VISIONOS sends no
+/// `loudnessDb` and states its own -14 LKFS target, so the track's absolute
+/// loudness is rebased onto this one, and a queue that mixes the two clients
+/// is levelled to one reference.
+const YTM_LOUDNESS_TARGET_LKFS: f64 = -7.0;
+
+fn loudness_db(json: &Value) -> Option<f32> {
+    let audio = json.pointer("/playerConfig/audioConfig")?;
+    audio
+        .get("trackAbsoluteLoudnessLkfs")
+        .or_else(|| audio.get("perceptualLoudnessDb"))
+        .and_then(Value::as_f64)
+        .map(|lkfs| lkfs - YTM_LOUDNESS_TARGET_LKFS)
+        .or_else(|| audio.get("loudnessDb").and_then(Value::as_f64))
+        .map(|db| db as f32)
+        .filter(|db| db.is_finite())
 }
 
 /// Best audio format by bitrate, regardless of whether it's `signatureCipher`
@@ -580,6 +603,7 @@ fn stream_info_from(
         bitrate,
         itag,
         range_safe: true,
+        loudness_db: loudness_db(json),
     })
 }
 
@@ -722,6 +746,62 @@ mod tests {
         assert_eq!(info.itag, Some(774));
         assert_eq!(info.bitrate, Some(270204));
         assert_eq!(info.duration_secs, Some(212));
+    }
+
+    /// A WEB_REMIX `player` response for Daft Punk's "Give Life Back to
+    /// Music", trimmed to the fields the resolver reads.
+    #[test]
+    fn a_recorded_player_response_carries_its_loudness() {
+        let json: Value =
+            serde_json::from_str(include_str!("testdata/player_web_remix.json")).unwrap();
+        let fmt = pick_best_audio(&json).expect("an audio format");
+        let info = stream_info_from(&json, fmt, "https://x/y".into(), WEB_REMIX)
+            .expect("should build stream info");
+        let loudness = info.loudness_db.expect("loudnessDb");
+        assert!((loudness - -6.11).abs() < 1e-3, "{loudness}");
+    }
+
+    /// VISIONOS states the absolute loudness and a -14 LKFS target, with no
+    /// `loudnessDb`; it lands on the same scale as WEB_REMIX.
+    #[test]
+    fn visionos_loudness_is_rebased_onto_the_web_target() {
+        let json = json!({ "playerConfig": { "audioConfig": {
+            "perceptualLoudnessDb": -5.24,
+            "trackAbsoluteLoudnessLkfs": -5.24,
+            "loudnessTargetLkfs": -14
+        }}});
+        let loudness = loudness_db(&json).expect("loudness");
+        assert!((loudness - 1.76).abs() < 1e-3, "{loudness}");
+
+        let only_relative = json!({ "playerConfig": { "audioConfig": { "loudnessDb": 2.5 }}});
+        assert_eq!(loudness_db(&only_relative), Some(2.5));
+    }
+
+    #[test]
+    fn a_response_without_loudness_carries_none() {
+        let json = json!({ "videoDetails": { "lengthSeconds": "212" } });
+        let fmt = json!({ "itag": 251, "mimeType": "audio/webm; codecs=\"opus\"" });
+        let info = stream_info_from(&json, &fmt, "https://x/y".into(), WEB_REMIX).unwrap();
+        assert_eq!(info.loudness_db, None);
+    }
+
+    /// Resolves a loud track anonymously (Skrillex, "Bangarang", about
+    /// -5 LKFS) and logs the loudness and the gain it maps to.
+    #[tokio::test]
+    #[ignore = "hits live YouTube"]
+    async fn resolve_reports_loudness() {
+        let info = resolve("YJVmu6yttiw", None)
+            .await
+            .expect("resolve should succeed");
+        let loudness = info.loudness_db.expect("loudnessDb");
+        let gain = config::loudness_gain(loudness);
+        tracing::info!(
+            loudness,
+            gain,
+            gain_db = 20.0 * gain.log10(),
+            "resolved loudness"
+        );
+        assert!(gain < 1.0, "a track this loud is turned down");
     }
 
     /// End-to-end: resolve a public track (decipher via the SubprocessEngine)

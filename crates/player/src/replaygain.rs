@@ -43,6 +43,7 @@ fn from_tags(tags: &[Tag]) -> ReplayGainInfo {
             |t| matches!(t, StandardTag::ReplayGainAlbumPeak(_)),
             &["REPLAYGAIN_ALBUM_PEAK"],
         ),
+        loudness_db: None,
     };
 
     // Opus files tagged by opusenc/rsgain carry R128 instead; symphonia has no
