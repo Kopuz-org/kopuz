@@ -333,7 +333,7 @@ async fn do_search(
     Ok(walk_tracks(&resp))
 }
 
-fn walk_tracks(resp: &Value) -> Vec<Track> {
+pub(super) fn walk_tracks(resp: &Value) -> Vec<Track> {
     let shelves = resp
         .pointer("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
         .and_then(|v| v.as_array());

@@ -90,6 +90,14 @@ fn capabilities(source: &dyn server::source::MediaSource) -> SourceCapabilities 
                 icon: api::Icon::Class(page.icon.to_string()),
             })
             .collect(),
+        search_filters: source
+            .search_filters()
+            .into_iter()
+            .map(|filter| api::SearchFilter {
+                id: filter.id.to_string(),
+                label: api::Text::key(filter.label),
+            })
+            .collect(),
     }
 }
 

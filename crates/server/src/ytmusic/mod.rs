@@ -345,6 +345,21 @@ impl YouTubeMusicClient {
         browse::fetch_related(video_id, self.cookies.as_deref()).await
     }
 
+    pub async fn search_page(
+        &self,
+        query: &str,
+        filter: Option<&'static browse::search::Filter>,
+    ) -> Result<browse::search::SearchPage, String> {
+        browse::fetch_search(query, filter, self.cookies.as_deref()).await
+    }
+
+    pub async fn search_suggestions(
+        &self,
+        query: &str,
+    ) -> Result<Vec<browse::search::Suggestion>, String> {
+        browse::fetch_suggestions(query, self.cookies.as_deref()).await
+    }
+
     pub async fn fetch_album_tracks(&self, browse_id: &str) -> Result<Vec<Track>, String> {
         discover::fetch_album_tracks(browse_id, self.cookies.as_deref().unwrap_or("")).await
     }

@@ -169,6 +169,14 @@ pub struct CatalogPageEntry {
     pub icon: &'static str,
 }
 
+/// A search filter a source offers: the id a client passes back and the
+/// translation key of its label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchFilterEntry {
+    pub id: &'static str,
+    pub label: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthOutcome {
     Valid,

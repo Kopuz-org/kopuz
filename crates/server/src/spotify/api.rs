@@ -361,6 +361,7 @@ pub async fn discover_home(access: &str) -> Result<crate::ytmusic::discover::Dis
             .collect(),
         layout: ShelfLayout::Carousel,
         continuation: None,
+        search_filter: None,
     };
 
     let mut shelves = Vec::new();

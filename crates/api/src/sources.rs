@@ -54,6 +54,14 @@ pub struct PageEntry {
     pub icon: Icon,
 }
 
+/// A way to narrow a search, such as to songs or to podcasts. `id` is what
+/// [`crate::SearchRequest::filter`] takes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchFilter {
+    pub id: String,
+    pub label: Text,
+}
+
 /// What the active source supports. Every "should this button exist?" question
 /// in a frontend is answered from here, so none of them branches on a service
 /// name.
@@ -86,6 +94,9 @@ pub struct SourceCapabilities {
     pub favorites_sync: FavoritesSyncMode,
     /// The catalog pages it offers, in the order to list them.
     pub pages: Vec<PageEntry>,
+    /// The filters its search takes, in the order to offer them. Empty when
+    /// its search is only ever the unfiltered one.
+    pub search_filters: Vec<SearchFilter>,
 }
 
 /// What making a source usable takes.

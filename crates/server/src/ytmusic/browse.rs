@@ -8,6 +8,7 @@
 //! renamed field degrades to an absent value rather than a lost page.
 
 mod items;
+pub mod search;
 mod shelves;
 
 use serde_json::{Value, json};
@@ -172,6 +173,45 @@ pub(crate) fn tag_continuations(page: &mut BrowsePage, endpoint: Endpoint, visit
     page.shelves
         .iter_mut()
         .for_each(|shelf| tag(&mut shelf.continuation));
+}
+
+/// Search, all of it or under one filter, or more of a filtered search.
+#[tracing::instrument(name = "yt.search_page", skip(cookies))]
+pub async fn fetch_search(
+    query: &str,
+    filter: Option<&'static search::Filter>,
+    cookies: Option<&str>,
+) -> Result<search::SearchPage, String> {
+    let mut payload = json!({ "query": query });
+    if let Some(filter) = filter {
+        payload["params"] = filter.params().into();
+    }
+    let response = innertube::post(WEB_REMIX, "search", payload, cookies).await?;
+    let mut page = search::parse_search(filter, &response);
+    let visitor = innertube::extract_visitor_data(&response);
+    if let Some(token) = page.continuation.take() {
+        page.continuation = Some(Continuation::write(
+            Endpoint::Search,
+            visitor.as_deref(),
+            &token,
+        ));
+    }
+    Ok(page)
+}
+
+#[tracing::instrument(name = "yt.search_suggestions", skip(cookies))]
+pub async fn fetch_suggestions(
+    query: &str,
+    cookies: Option<&str>,
+) -> Result<Vec<search::Suggestion>, String> {
+    let response = innertube::post(
+        WEB_REMIX,
+        "music/get_search_suggestions",
+        json!({ "input": query }),
+        cookies,
+    )
+    .await?;
+    Ok(search::parse_suggestions(&response))
 }
 
 /// A song's Related tab: the watch page names it, and it browses like any page.
@@ -345,6 +385,7 @@ fn more_items(
             items,
             layout,
             continuation: next,
+            search_filter: None,
         }],
         ..BrowsePage::default()
     }
@@ -483,6 +524,7 @@ mod tests {
             items,
             layout: ShelfLayout::List,
             continuation: Some(next.to_string()),
+            search_filter: None,
         };
         let page_item = DiscoverItem::Page {
             page_id: "FEmusic_charts".into(),

@@ -119,6 +119,7 @@ pub fn catalog_shelf_to_proto(value: &api::CatalogShelf) -> CatalogShelf {
         layout: shelf_layout_to_proto(value.layout) as i32,
         more_kind: catalog_item_kind_to_proto(value.more_kind) as i32,
         continuation: value.continuation.clone(),
+        search_filter: value.search_filter.clone(),
     }
 }
 
@@ -132,6 +133,7 @@ pub fn catalog_shelf_from_proto(value: &CatalogShelf) -> api::CatalogShelf {
         layout: shelf_layout_from_proto(value.layout),
         more_kind: catalog_item_kind_from_proto(value.more_kind),
         continuation: value.continuation.clone(),
+        search_filter: value.search_filter.clone(),
     }
 }
 

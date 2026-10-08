@@ -76,6 +76,9 @@ pub struct CatalogShelf {
     /// More items for this shelf: pass it back as the request's
     /// `continuation`, and the answer's one shelf continues this one.
     pub continuation: Option<String>,
+    /// On the results of a search's "all" filter, the filter that shows
+    /// every result of this shelf's kind.
+    pub search_filter: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

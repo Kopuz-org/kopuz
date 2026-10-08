@@ -470,3 +470,185 @@ fn album_ids_are_what_saved_rows_hold() {
         );
     }
 }
+
+#[test]
+fn search_all() {
+    use super::browse::search::{FILTERS, parse_search};
+    let results = parse_search(None, &fixture!("search_all"));
+    assert!(results.continuation.is_none());
+    let top = &results.shelves[0];
+    assert_eq!(top.layout, ShelfLayout::Hero);
+    assert!(matches!(&top.items[0], DiscoverItem::Artist { name, .. } if name == "Daft Punk"));
+    assert!(tracks(top).len() >= 2);
+
+    // YouTube sends the rest as one untitled row per result; they come back
+    // as one shelf per kind, in the web app's order.
+    let shelves: Vec<(&str, ShelfLayout, Option<&str>)> = results.shelves[1..]
+        .iter()
+        .map(|s| (s.title.as_str(), s.layout, s.search_filter))
+        .collect();
+    let expected: Vec<(&str, ShelfLayout, Option<&str>)> = [
+        ("Songs", ShelfLayout::List, "songs"),
+        ("Videos", ShelfLayout::List, "videos"),
+        ("Albums", ShelfLayout::Carousel, "albums"),
+        ("Artists", ShelfLayout::Carousel, "artists"),
+        (
+            "Community playlists",
+            ShelfLayout::Carousel,
+            "community_playlists",
+        ),
+        (
+            "Featured playlists",
+            ShelfLayout::Carousel,
+            "featured_playlists",
+        ),
+        ("Episodes", ShelfLayout::List, "episodes"),
+        ("Profiles", ShelfLayout::Carousel, "profiles"),
+        ("Podcasts", ShelfLayout::Carousel, "podcasts"),
+    ]
+    .into_iter()
+    .map(|(title, layout, id)| (title, layout, Some(id)))
+    .collect();
+    assert_eq!(shelves, expected);
+    assert!(
+        expected
+            .iter()
+            .all(|(_, _, id)| FILTERS.iter().any(|f| Some(f.id) == *id))
+    );
+
+    let page = BrowsePage {
+        shelves: results.shelves,
+        ..BrowsePage::default()
+    };
+    assert_shelves(&page);
+    let kinds = |title: &str, check: fn(&DiscoverItem) -> bool| {
+        assert!(titled(&page, title).items.iter().all(check), "{title}");
+    };
+    kinds(
+        "Songs",
+        |i| matches!(i, DiscoverItem::Song(t) if !t.credits.is_empty()),
+    );
+    kinds("Videos", |i| matches!(i, DiscoverItem::Video(_)));
+    kinds("Episodes", |i| matches!(i, DiscoverItem::Episode { .. }));
+    kinds("Albums", |i| matches!(i, DiscoverItem::Album { .. }));
+    kinds(
+        "Featured playlists",
+        |i| matches!(i, DiscoverItem::Playlist { playlist_id, .. } if playlist_id.starts_with("RDCLAK")),
+    );
+    kinds(
+        "Profiles",
+        |i| matches!(i, DiscoverItem::Artist { subtitle: Some(s), .. } if s.starts_with("Profile")),
+    );
+    kinds("Podcasts", |i| matches!(i, DiscoverItem::Podcast { .. }));
+}
+
+/// Each filter answers with one shelf of its own kind, and most continue.
+#[test]
+fn search_filters() {
+    use super::browse::search::{filter, parse_search};
+    type IsKind = fn(&DiscoverItem) -> bool;
+    let cases: [(&str, Value, IsKind); 9] = [
+        (
+            "songs",
+            fixture!("search_songs"),
+            |i| matches!(i, DiscoverItem::Song(t) if t.duration > 0 && !t.album.is_empty()),
+        ),
+        (
+            "videos",
+            fixture!("search_videos"),
+            |i| matches!(i, DiscoverItem::Video(t) if t.duration > 0),
+        ),
+        ("albums", fixture!("search_albums"), |i| {
+            matches!(i, DiscoverItem::Album { .. })
+        }),
+        ("artists", fixture!("search_artists"), |i| {
+            matches!(i, DiscoverItem::Artist { .. })
+        }),
+        (
+            "community_playlists",
+            fixture!("search_community_playlists"),
+            |i| matches!(i, DiscoverItem::Playlist { .. }),
+        ),
+        (
+            "featured_playlists",
+            fixture!("search_featured_playlists"),
+            |i| matches!(i, DiscoverItem::Playlist { playlist_id, .. } if playlist_id.starts_with("RDCLAK")),
+        ),
+        ("podcasts", fixture!("search_podcasts"), |i| {
+            matches!(i, DiscoverItem::Podcast { .. })
+        }),
+        // An episode row gives its release date and show, but no length.
+        (
+            "episodes",
+            fixture!("search_episodes"),
+            |i| matches!(i, DiscoverItem::Episode { track, published: Some(_), .. } if !track.artist.is_empty()),
+        ),
+        ("profiles", fixture!("search_profiles"), |i| {
+            matches!(i, DiscoverItem::Artist { .. })
+        }),
+    ];
+    for (id, response, is_kind) in cases {
+        let results = parse_search(filter(id), &response);
+        assert_eq!(results.shelves.len(), 1, "{id}");
+        let shelf = &results.shelves[0];
+        assert_eq!(shelf.layout, ShelfLayout::List, "{id}");
+        assert!(shelf.items.len() >= 5, "{id}");
+        assert!(shelf.items.iter().all(is_kind), "{id}");
+        shelf
+            .items
+            .iter()
+            .filter_map(track_of)
+            .for_each(assert_track);
+        // The one shelf's continuation is the results', so nothing is left on it.
+        assert!(shelf.continuation.is_none(), "{id}");
+        // Artists and featured playlists fit on one page.
+        if !matches!(id, "artists" | "featured_playlists") {
+            assert!(results.continuation.is_some(), "{id}");
+        }
+    }
+}
+
+#[test]
+fn search_continuation() {
+    let more =
+        super::browse::search::continued(parse_continuation(&fixture!("search_continuation")));
+    assert_eq!(more.shelves.len(), 1);
+    assert!(more.shelves[0].items.len() >= 10);
+    more.shelves[0]
+        .items
+        .iter()
+        .filter_map(track_of)
+        .for_each(assert_track);
+    assert!(more.continuation.is_some());
+}
+
+#[test]
+fn suggestions() {
+    use super::browse::search::{Suggestion, parse_suggestions};
+    let suggestions = parse_suggestions(&fixture!("suggestions"));
+    let queries = suggestions
+        .iter()
+        .filter(|s| matches!(s, Suggestion::Query { .. }))
+        .count();
+    let items = suggestions
+        .iter()
+        .filter(|s| matches!(s, Suggestion::Item(_)))
+        .count();
+    assert!(queries >= 3 && items >= 3, "{suggestions:?}");
+    assert!(
+        matches!(&suggestions[0], Suggestion::Query { text, .. } if text.starts_with("daft p"))
+    );
+}
+
+/// What the legacy search reads out of the same answers: tracks, which the
+/// Discover search and the library sync still use.
+#[test]
+fn search_tracks_and_their_album_ids() {
+    let songs = super::search::walk_tracks(&fixture!("search_songs"));
+    assert!(songs.len() >= 10);
+    songs.iter().for_each(assert_track);
+    for track in &songs {
+        let by_name = synthesize_album_id(&track.album, &track.artist);
+        assert!(track.album_id == by_name || track.album_id.starts_with("ytmusic:album:MPRE"));
+    }
+}

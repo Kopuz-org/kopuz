@@ -48,6 +48,7 @@ service Kopuz {
   rpc GetGenreTracks(GenreTracksRequest) returns (TrackPage);
   rpc GetRecentTracks(Page) returns (TrackPage);
   rpc Search(SearchRequest) returns (SearchResults);
+  rpc GetSearchSuggestions(SearchSuggestionsRequest) returns (SearchSuggestions);
   rpc GetTrackWebUrl(TrackWebUrlRequest) returns (WebUrl);
   rpc GetAlbumWebUrl(AlbumWebUrlRequest) returns (WebUrl);
   rpc GetCatalog(CatalogRequest) returns (CatalogPage);
@@ -571,6 +572,24 @@ message GenreTracksRequest {
 
 message SearchRequest {
   string query = 1;
+  // One of the source's search filters; absent is its plain search.
+  optional string filter = 2;
+  optional string continuation = 3;
+}
+
+message SearchSuggestionsRequest {
+  string query = 1;
+}
+
+// A query to run, or with item, a direct hit to open.
+message SearchSuggestion {
+  string text = 1;
+  bool from_history = 2;
+  optional CatalogItem item = 3;
+}
+
+message SearchSuggestions {
+  repeated SearchSuggestion suggestions = 1;
 }
 
 message TrackWebUrlRequest {
@@ -594,6 +613,10 @@ message RefreshArtistArtworkRequest {
 message SearchResults {
   repeated TrackInfo tracks = 1;
   repeated AlbumInfo albums = 2;
+  // A filtered search's results.
+  repeated CatalogShelf shelves = 3;
+  optional string continuation = 4;
+  optional string correction = 5;
 }
 
 // ---------------- settings schema ----------------
@@ -741,6 +764,13 @@ message SourceCapabilities {
   bool search_radio = 18;
   // The catalog pages it offers, in the order to list them.
   repeated PageEntry pages = 19;
+  // The filters its search takes, in the order to offer them.
+  repeated SearchFilter search_filters = 25;
+}
+
+message SearchFilter {
+  string id = 1;
+  Text label = 2;
 }
 
 // A catalog page a frontend can link to; opened as CATALOG_ITEM_PAGE with id.
@@ -1014,6 +1044,8 @@ message CatalogShelf {
   CatalogItemKind more_kind = 7;
   // More items for this shelf.
   optional string continuation = 8;
+  // On a search's "all" results, the filter showing every result of its kind.
+  optional string search_filter = 9;
 }
 
 // A filter over a page; id opens the filtered page as CATALOG_ITEM_PAGE.

@@ -1305,6 +1305,52 @@ async fn catalog_pages_agree_across_transports() {
     assert_eq!(local.err().map(|e| e.code), wire.err().map(|e| e.code));
 }
 
+/// A search with no filter is the plain search on both transports; a filter
+/// the source never offered, and a suggestion it cannot give, fail the same
+/// way on both rather than one of them answering empty.
+#[tokio::test]
+async fn search_filters_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    let plain = api::SearchRequest::new("seed");
+    let local = pair
+        .local
+        .search(plain.clone())
+        .await
+        .expect("local search");
+    let wire = pair.wire.search(plain).await.expect("wire search");
+    assert_eq!(local, wire);
+    assert!(
+        !local.tracks.is_empty(),
+        "the plain search still finds rows"
+    );
+    assert!(local.shelves.is_empty() && local.continuation.is_none());
+
+    let caps = pair
+        .wire
+        .sources()
+        .await
+        .expect("sources")
+        .into_iter()
+        .find(|source| source.active)
+        .expect("an active source")
+        .capabilities;
+    assert!(caps.search_filters.is_empty());
+
+    let filtered = api::SearchRequest::filtered("seed", "songs");
+    assert_eq!(
+        pair.local
+            .search(filtered.clone())
+            .await
+            .err()
+            .map(|e| e.code),
+        pair.wire.search(filtered).await.err().map(|e| e.code),
+    );
+    let local = pair.local.search_suggestions("se".into()).await;
+    let wire = pair.wire.search_suggestions("se".into()).await;
+    assert_eq!(local.map_err(|e| e.code), wire.map_err(|e| e.code));
+}
+
 /// Deleting from disk is the one API call that destroys something outside
 /// the database, so its guard has to hold identically on both transports.
 #[tokio::test]

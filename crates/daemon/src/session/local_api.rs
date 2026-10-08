@@ -445,8 +445,18 @@ impl api::LibraryApi for LocalApi {
         self.library()?.recent_tracks(page).await
     }
 
-    async fn search(&self, query: String) -> Result<api::SearchResults, ApiError> {
-        self.library()?.search(&query).await
+    async fn search(&self, request: api::SearchRequest) -> Result<api::SearchResults, ApiError> {
+        match (&request.filter, &request.continuation) {
+            (None, None) => self.library()?.search(&request.query).await,
+            _ => self.catalog()?.search(request).await,
+        }
+    }
+
+    async fn search_suggestions(
+        &self,
+        query: String,
+    ) -> Result<Vec<api::SearchSuggestion>, ApiError> {
+        self.catalog()?.search_suggestions(&query).await
     }
 
     async fn track_web_url(&self, key: String) -> Result<Option<String>, ApiError> {
