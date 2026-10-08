@@ -5,8 +5,8 @@ use db::Db;
 use crate::server_ops::ServerConn;
 
 use super::{
-    AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync, MediaSource,
-    PlaylistMeta, PlaylistOps, RadioSeeds, SourceError, StreamInfo,
+    AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync, LibraryActions,
+    MediaSource, PlaylistMeta, PlaylistOps, RadioSeeds, SourceError, StreamInfo,
 };
 
 pub(super) struct SoundcloudSource {
@@ -55,6 +55,7 @@ impl MediaSource for SoundcloudSource {
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Paginated,
+            library_actions: LibraryActions::NONE,
         }
     }
 

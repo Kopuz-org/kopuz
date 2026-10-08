@@ -37,7 +37,7 @@ fn tracks(shelf: &DiscoverShelf) -> Vec<&Track> {
 
 fn track_of(item: &DiscoverItem) -> Option<&Track> {
     match item {
-        DiscoverItem::Song(track) | DiscoverItem::Video(track) => Some(track),
+        DiscoverItem::Song(track, _) | DiscoverItem::Video(track, _) => Some(track),
         DiscoverItem::Episode { track, .. } => Some(track),
         _ => None,
     }
@@ -450,7 +450,7 @@ fn album_ids_are_what_saved_rows_hold() {
         .chain(discover::parse_initial(&fixture!("home")).shelves)
         .flat_map(|shelf| shelf.items)
         .filter_map(|item| match item {
-            DiscoverItem::Song(track) => Some(*track),
+            DiscoverItem::Song(track, _) => Some(*track),
             _ => None,
         })
         .chain(album.tracks.iter().cloned())
@@ -468,6 +468,96 @@ fn album_ids_are_what_saved_rows_hold() {
             track.album,
             track.album_id
         );
+    }
+}
+
+/// The refs and states the library actions take, as a page signed out still
+/// draws them: like states on rows, save toggles on albums and playlists, and
+/// the channel a subscribe button names. Signed out, no song carries a library
+/// token, so none may claim one.
+#[test]
+fn library_action_refs_ride_on_the_items_and_headers() {
+    use super::actions::{ItemRef, read_ref};
+    use super::discover::Rating;
+
+    let artist = discover::parse_artist("UC_kRDKYrUlrbtrSiyu5Tflg", &fixture!("artist"));
+    assert_eq!(
+        artist.actions.follow_ref.as_deref(),
+        Some("UC_kRDKYrUlrbtrSiyu5Tflg")
+    );
+    assert_eq!(artist.actions.followed, Some(false));
+
+    let album = discover::parse_album("MPREb_K8qWMWVqXGi", &fixture!("album"));
+    let audio = album
+        .audio_playlist_id
+        .as_deref()
+        .expect("an audio playlist");
+    assert_eq!(
+        album.actions.save_ref.as_deref().and_then(read_ref),
+        Some(ItemRef::Playlist(audio))
+    );
+    assert_eq!(album.actions.saved, Some(false));
+
+    let playlist = browse::page_header(&fixture!("playlist")).expect("a header");
+    assert!(!playlist.title.is_empty());
+    assert_eq!(
+        playlist.actions.save_ref.as_deref(),
+        Some("playlist:PL4fGSI1pDJn6O1LS0XSdF3RyO0Rq_LDeI")
+    );
+    assert_eq!(playlist.actions.saved, Some(false));
+    assert_eq!(playlist.privacy, None, "someone else's playlist");
+
+    let playlist_page = page(&fixture!("playlist"));
+    let rows: Vec<(&Track, &discover::ItemActions)> = playlist_page
+        .shelves
+        .iter()
+        .flat_map(|shelf| &shelf.items)
+        .filter_map(|item| match item {
+            DiscoverItem::Song(track, actions) | DiscoverItem::Video(track, actions) => {
+                Some((&**track, actions))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(rows.len() >= 50);
+    for (track, actions) in &rows {
+        assert_eq!(actions.rate_ref.as_deref(), Some(track.id.key().as_ref()));
+        assert_eq!(actions.save_ref, None);
+        assert_eq!(actions.history_token, None);
+    }
+    assert!(
+        rows.iter()
+            .any(|(_, actions)| actions.rating == Some(Rating::Indifferent))
+    );
+
+    let releases = page(&fixture!("new_releases"));
+    let albums: Vec<&discover::ItemActions> = releases
+        .shelves
+        .iter()
+        .flat_map(|shelf| &shelf.items)
+        .filter_map(|item| match item {
+            DiscoverItem::Album { actions, .. } => Some(actions),
+            _ => None,
+        })
+        .collect();
+    assert!(!albums.is_empty());
+    for actions in albums {
+        let save_ref = actions.save_ref.as_deref().expect("an album saves");
+        assert!(save_ref.starts_with("playlist:OLAK5uy_"), "{save_ref}");
+        assert_eq!(actions.saved, Some(false));
+    }
+
+    let charts = page(&fixture!("charts"));
+    for item in &titled(&charts, "Top artists").items {
+        let DiscoverItem::Artist {
+            channel_id,
+            actions,
+            ..
+        } = item
+        else {
+            panic!("not an artist: {item:?}");
+        };
+        assert_eq!(actions.follow_ref.as_ref(), Some(channel_id));
     }
 }
 
@@ -526,9 +616,9 @@ fn search_all() {
     };
     kinds(
         "Songs",
-        |i| matches!(i, DiscoverItem::Song(t) if !t.credits.is_empty()),
+        |i| matches!(i, DiscoverItem::Song(t, _) if !t.credits.is_empty()),
     );
-    kinds("Videos", |i| matches!(i, DiscoverItem::Video(_)));
+    kinds("Videos", |i| matches!(i, DiscoverItem::Video(..)));
     kinds("Episodes", |i| matches!(i, DiscoverItem::Episode { .. }));
     kinds("Albums", |i| matches!(i, DiscoverItem::Album { .. }));
     kinds(
@@ -551,12 +641,12 @@ fn search_filters() {
         (
             "songs",
             fixture!("search_songs"),
-            |i| matches!(i, DiscoverItem::Song(t) if t.duration > 0 && !t.album.is_empty()),
+            |i| matches!(i, DiscoverItem::Song(t, _) if t.duration > 0 && !t.album.is_empty()),
         ),
         (
             "videos",
             fixture!("search_videos"),
-            |i| matches!(i, DiscoverItem::Video(t) if t.duration > 0),
+            |i| matches!(i, DiscoverItem::Video(t, _) if t.duration > 0),
         ),
         ("albums", fixture!("search_albums"), |i| {
             matches!(i, DiscoverItem::Album { .. })

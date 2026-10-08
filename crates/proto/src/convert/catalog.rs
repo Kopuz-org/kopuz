@@ -85,6 +85,68 @@ pub fn catalog_chip_from_proto(value: &CatalogChip) -> api::CatalogChip {
     }
 }
 
+pub fn rating_to_proto(value: api::Rating) -> Rating {
+    match value {
+        api::Rating::None => Rating::None,
+        api::Rating::Like => Rating::Like,
+        api::Rating::Dislike => Rating::Dislike,
+    }
+}
+
+/// `None` for a rating the peer did not set or this build does not know.
+pub fn rating_from_proto(value: i32) -> Option<api::Rating> {
+    match Rating::try_from(value) {
+        Ok(Rating::None) => Some(api::Rating::None),
+        Ok(Rating::Like) => Some(api::Rating::Like),
+        Ok(Rating::Dislike) => Some(api::Rating::Dislike),
+        Ok(Rating::Unspecified) | Err(_) => None,
+    }
+}
+
+pub fn playlist_privacy_to_proto(value: api::PlaylistPrivacy) -> PlaylistPrivacy {
+    match value {
+        api::PlaylistPrivacy::Private => PlaylistPrivacy::Private,
+        api::PlaylistPrivacy::Unlisted => PlaylistPrivacy::Unlisted,
+        api::PlaylistPrivacy::Public => PlaylistPrivacy::Public,
+    }
+}
+
+pub fn playlist_privacy_from_proto(value: i32) -> Option<api::PlaylistPrivacy> {
+    match PlaylistPrivacy::try_from(value) {
+        Ok(PlaylistPrivacy::Private) => Some(api::PlaylistPrivacy::Private),
+        Ok(PlaylistPrivacy::Unlisted) => Some(api::PlaylistPrivacy::Unlisted),
+        Ok(PlaylistPrivacy::Public) => Some(api::PlaylistPrivacy::Public),
+        Ok(PlaylistPrivacy::Unspecified) | Err(_) => None,
+    }
+}
+
+pub fn catalog_actions_to_proto(value: &api::CatalogActions) -> CatalogActions {
+    CatalogActions {
+        rate_ref: value.rate_ref.clone(),
+        rating: value.rating.map(|rating| rating_to_proto(rating) as i32),
+        save_ref: value.save_ref.clone(),
+        saved: value.saved,
+        follow_ref: value.follow_ref.clone(),
+        followed: value.followed,
+        history_token: value.history_token.clone(),
+    }
+}
+
+pub fn catalog_actions_from_proto(value: Option<&CatalogActions>) -> api::CatalogActions {
+    let Some(value) = value else {
+        return api::CatalogActions::default();
+    };
+    api::CatalogActions {
+        rate_ref: value.rate_ref.clone(),
+        rating: value.rating.and_then(rating_from_proto),
+        save_ref: value.save_ref.clone(),
+        saved: value.saved,
+        follow_ref: value.follow_ref.clone(),
+        followed: value.followed,
+        history_token: value.history_token.clone(),
+    }
+}
+
 pub fn catalog_item_to_proto(value: &api::CatalogItem) -> CatalogItem {
     CatalogItem {
         kind: catalog_item_kind_to_proto(value.kind) as i32,
@@ -94,6 +156,7 @@ pub fn catalog_item_to_proto(value: &api::CatalogItem) -> CatalogItem {
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
         track: value.track.as_ref().map(track_info_to_proto),
         accent: value.accent.clone(),
+        actions: Some(catalog_actions_to_proto(&value.actions)),
     }
 }
 
@@ -106,6 +169,7 @@ pub fn catalog_item_from_proto(value: &CatalogItem) -> api::CatalogItem {
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
         track: value.track.as_ref().map(track_info_from_proto),
         accent: value.accent.clone(),
+        actions: catalog_actions_from_proto(value.actions.as_ref()),
     }
 }
 
@@ -185,6 +249,10 @@ pub fn catalog_detail_to_proto(value: &api::CatalogDetail) -> CatalogDetail {
         artist_key: value.artist_key.as_ref().map(ToString::to_string),
         header: catalog_header_to_proto(value.header) as i32,
         chips: value.chips.iter().map(catalog_chip_to_proto).collect(),
+        actions: Some(catalog_actions_to_proto(&value.actions)),
+        privacy: value
+            .privacy
+            .map(|privacy| playlist_privacy_to_proto(privacy) as i32),
     }
 }
 
@@ -204,6 +272,8 @@ pub fn catalog_detail_from_proto(value: &CatalogDetail) -> api::CatalogDetail {
         artist_key: value.artist_key.clone(),
         header: catalog_header_from_proto(value.header),
         chips: value.chips.iter().map(catalog_chip_from_proto).collect(),
+        actions: catalog_actions_from_proto(value.actions.as_ref()),
+        privacy: value.privacy.and_then(playlist_privacy_from_proto),
     }
 }
 
@@ -334,6 +404,15 @@ mod tests {
                     }),
                     track: None,
                     accent: None,
+                    actions: api::CatalogActions {
+                        rate_ref: Some("playlist:OLAK1".into()),
+                        rating: Some(api::Rating::Dislike),
+                        save_ref: Some("playlist:OLAK1".into()),
+                        saved: Some(true),
+                        follow_ref: None,
+                        followed: None,
+                        history_token: Some("HISTORY".into()),
+                    },
                 }],
                 ..Default::default()
             }],
@@ -345,6 +424,13 @@ mod tests {
             kind: api::CatalogItemKind::Page,
             id: "FEmusic_moods".into(),
             title: "Moods".into(),
+            actions: api::CatalogActions {
+                follow_ref: Some("UCabc".into()),
+                followed: Some(false),
+                rating: Some(api::Rating::None),
+                ..Default::default()
+            },
+            privacy: Some(api::PlaylistPrivacy::Unlisted),
             header: api::CatalogHeader::Title,
             chips: vec![api::CatalogChip {
                 id: "FEmusic_home?p".into(),

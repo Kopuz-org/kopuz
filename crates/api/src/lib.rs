@@ -24,8 +24,8 @@ mod sources;
 
 pub use artwork::{ArtworkData, ArtworkRef, ArtworkRequest, ArtworkTarget};
 pub use catalog::{
-    CatalogChip, CatalogDetail, CatalogDetailRequest, CatalogHeader, CatalogItem, CatalogItemKind,
-    CatalogPage, CatalogShelf, ShelfLayout,
+    CatalogActions, CatalogChip, CatalogDetail, CatalogDetailRequest, CatalogHeader, CatalogItem,
+    CatalogItemKind, CatalogPage, CatalogShelf, Rating, ShelfLayout,
 };
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
@@ -42,7 +42,10 @@ pub use player::{
     BufferedRange, ExternalDevice, ExternalPlayback, FadingState, Intent, LoopMode, Phase,
     PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
 };
-pub use playlists::{PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder};
+pub use playlists::{
+    PlaylistCatalog, PlaylistEdit, PlaylistFolderInfo, PlaylistInfo, PlaylistPrivacy,
+    PlaylistReorder,
+};
 pub use queue::{
     QueueContext, QueueEdit, QueueItem, QueueMode, QueueSnapshot, QueueWindow, SetQueueRequest,
 };
@@ -263,6 +266,25 @@ pub trait LibraryApi: Send + Sync {
     /// it holds for the track, so the local favorite row is cleared with it.
     async fn dont_recommend(&self, key: String) -> Result<(), ApiError>;
 
+    /// Rate a song, an album or a playlist, by a [`CatalogActions::rate_ref`]
+    /// or a track's key. Gated by [`SourceCapabilities::rate`]. A like on a
+    /// song is its favorite, so the local favorite row follows the rating.
+    async fn rate(&self, item_ref: String, rating: Rating) -> Result<(), ApiError>;
+
+    /// Follow an artist, or stop following one, by a
+    /// [`CatalogActions::follow_ref`]. Gated by [`SourceCapabilities::follow`].
+    async fn follow(&self, artist_ref: String, follow: bool) -> Result<(), ApiError>;
+
+    /// Save an album, a playlist or a song to the source's library, or take
+    /// it out, by a [`CatalogActions::save_ref`]. Gated by
+    /// [`SourceCapabilities::save`].
+    async fn save(&self, item_ref: String, saved: bool) -> Result<(), ApiError>;
+
+    /// Take one row out of the source's listening history, by its
+    /// [`CatalogActions::history_token`]. Gated by
+    /// [`SourceCapabilities::remove_from_history`].
+    async fn remove_from_history(&self, token: String) -> Result<(), ApiError>;
+
     /// Rewrite one track's tags, and its embedded cover with them. Only
     /// files have tags to edit; a server track answers `unsupported`.
     async fn update_track_metadata(&self, patch: TrackMetadataPatch)
@@ -295,6 +317,11 @@ pub trait PlaylistApi: Send + Sync {
     async fn create_playlist(&self, name: String, keys: Vec<String>) -> Result<String, ApiError>;
 
     async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError>;
+
+    /// Change what an edit names and keep the rest. A description or a
+    /// privacy needs [`SourceCapabilities::playlist_details`], and is pushed
+    /// to the source along with any new name.
+    async fn edit_playlist(&self, id: String, edit: PlaylistEdit) -> Result<(), ApiError>;
 
     async fn delete_playlist(&self, id: String) -> Result<(), ApiError>;
 

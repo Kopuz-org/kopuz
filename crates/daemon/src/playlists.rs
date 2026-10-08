@@ -12,7 +12,10 @@
 
 use std::sync::Arc;
 
-use api::{ApiError, PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder, Table};
+use api::{
+    ApiError, PlaylistCatalog, PlaylistEdit, PlaylistFolderInfo, PlaylistInfo, PlaylistPrivacy,
+    PlaylistReorder, Table,
+};
 
 use crate::session::SessionHandle;
 
@@ -152,6 +155,38 @@ impl PlaylistService {
             .map_err(source_error)?;
         self.session.invalidate(Table::Playlists);
         Ok(())
+    }
+
+    /// A name alone is a rename, held here. A description or a privacy is
+    /// the source's to keep, so the whole edit goes to it first, name and all.
+    pub async fn edit(&self, id: &str, edit: PlaylistEdit) -> Result<(), ApiError> {
+        use server::ytmusic::discover::Privacy;
+        if edit.description.is_some() || edit.privacy.is_some() {
+            let source = self.active_source();
+            if !source.capabilities().library_actions.playlist_details {
+                return Err(ApiError::unsupported("playlist details"));
+            }
+            let details = server::source::PlaylistDetails {
+                name: edit.name.clone(),
+                description: edit.description,
+                privacy: edit.privacy.map(|privacy| match privacy {
+                    PlaylistPrivacy::Private => Privacy::Private,
+                    PlaylistPrivacy::Unlisted => Privacy::Unlisted,
+                    PlaylistPrivacy::Public => Privacy::Public,
+                }),
+            };
+            source
+                .edit_playlist(id, &details)
+                .await
+                .map_err(source_error)?;
+        }
+        match edit.name {
+            Some(name) => self.rename(id, &name).await,
+            None => {
+                self.session.invalidate(Table::Playlists);
+                Ok(())
+            }
+        }
     }
 
     pub async fn delete(&self, id: &str) -> Result<(), ApiError> {

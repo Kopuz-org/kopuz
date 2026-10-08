@@ -297,18 +297,42 @@ pub(crate) fn parse_page(response: &Value) -> Option<BrowsePage> {
     let mut found = lead;
     found.extend(shelves::sections(&list["contents"]));
 
-    let header = header.unwrap_or_default();
-    Some(BrowsePage {
+    let mut page = headed(header.unwrap_or_default());
+    page.description = page.description.or(about);
+    page.chips = chips(&list["header"]["chipCloudRenderer"]);
+    page.shelves = found;
+    page.continuation = continuation(list);
+    Some(page)
+}
+
+fn headed(header: shelves::Header) -> BrowsePage {
+    BrowsePage {
         header: header.kind,
         title: header.title,
         subtitle: header.subtitle,
-        description: header.description.or(about),
+        description: header.description,
         thumbnail: header.thumbnail,
         playback_id: header.playback_id,
-        chips: chips(&list["header"]["chipCloudRenderer"]),
-        shelves: found,
-        continuation: continuation(list),
-    })
+        actions: header.actions,
+        privacy: header.privacy,
+        ..BrowsePage::default()
+    }
+}
+
+/// Only the header of a page, as a page with nothing else filled in: what a
+/// playlist's first page says about the playlist beside its tracks.
+pub(crate) fn page_header(response: &Value) -> Option<BrowsePage> {
+    let primary = &response["contents"]["twoColumnBrowseResultsRenderer"]["tabs"][0]["tabRenderer"]
+        ["content"]["sectionListRenderer"]["contents"];
+    shelves::header(&response["header"])
+        .or_else(|| {
+            primary
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find_map(shelves::header)
+        })
+        .map(headed)
 }
 
 /// A continuation answer. More sections continue the page, and come back as

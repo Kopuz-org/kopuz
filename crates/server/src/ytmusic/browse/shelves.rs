@@ -4,7 +4,10 @@ use serde_json::{Value, json};
 
 use super::items::{item, items, two_row_item};
 use super::{continuation, renderer, runs, text, thumbnail};
-use crate::ytmusic::discover::{DiscoverItem, DiscoverShelf, PageHeader, PageLink, ShelfLayout};
+use crate::ytmusic::actions;
+use crate::ytmusic::discover::{
+    DiscoverItem, DiscoverShelf, ItemActions, PageHeader, PageLink, Privacy, ShelfLayout,
+};
 
 /// A `sectionListRenderer.contents` array.
 pub(super) fn sections(contents: &Value) -> Vec<DiscoverShelf> {
@@ -146,6 +149,8 @@ pub(super) struct Header {
     pub description: Option<String>,
     pub thumbnail: Option<String>,
     pub playback_id: Option<String>,
+    pub actions: ItemActions,
+    pub privacy: Option<Privacy>,
 }
 
 pub(super) fn header(v: &Value) -> Option<Header> {
@@ -164,6 +169,8 @@ pub(super) fn header(v: &Value) -> Option<Header> {
                     ["playlistId"]
                     .as_str()
                     .map(str::to_string),
+                actions: actions::subscription(r),
+                privacy: None,
             })
         }
         "musicResponsiveHeaderRenderer" | "musicDetailHeaderRenderer" => {
@@ -186,10 +193,29 @@ pub(super) fn header(v: &Value) -> Option<Header> {
                 description: text(&description["musicDescriptionShelfRenderer"]["description"])
                     .or_else(|| text(description)),
                 thumbnail: thumbnail(&r["thumbnail"]),
+                actions: actions::detail_header(r, playback_id.as_deref()),
                 playback_id,
+                privacy: None,
             })
         }
-        "musicEditablePlaylistDetailHeaderRenderer" => header(&r["header"]),
+        // A playlist the account owns: its own, so there is nothing to save.
+        "musicEditablePlaylistDetailHeaderRenderer" => {
+            let inner = header(&r["header"])?;
+            let id = r["playlistId"]
+                .as_str()
+                .or(inner.playback_id.as_deref())
+                .map(actions::playlist_ref);
+            Some(Header {
+                privacy: r["editHeader"]["musicPlaylistEditHeaderRenderer"]["privacy"]
+                    .as_str()
+                    .and_then(actions::privacy),
+                actions: ItemActions {
+                    rate_ref: id,
+                    ..ItemActions::default()
+                },
+                ..inner
+            })
+        }
         "musicHeaderRenderer" => Some(Header {
             kind: PageHeader::Title,
             title: text(&r["title"])?,

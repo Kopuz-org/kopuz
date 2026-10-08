@@ -1,6 +1,7 @@
 use reader::models::{Track, TrackId};
 use serde_json::Value;
 
+pub mod actions;
 pub mod botguard;
 pub mod browse;
 pub mod clients;
@@ -157,7 +158,7 @@ impl YouTubeMusicClient {
         &self,
         playlist_id: &str,
         continuation: Option<&str>,
-    ) -> Result<(Vec<Track>, Option<String>), String> {
+    ) -> Result<playlists::PlaylistPage, String> {
         playlists::playlist_page(
             playlist_id,
             self.cookies.as_deref().unwrap_or(""),
@@ -201,6 +202,40 @@ impl YouTubeMusicClient {
     pub async fn create_playlist(&self, title: &str, video_ids: &[&str]) -> Result<String, String> {
         let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::create_playlist(title, video_ids, cookies).await
+    }
+
+    /// `item_ref` is one [`actions`] handed out, or a video id.
+    pub async fn rate(&self, item_ref: &str, rating: discover::Rating) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        let target = actions::read_ref(item_ref).ok_or("nothing to rate")?;
+        mutations::rate(target, rating, cookies).await
+    }
+
+    pub async fn save(&self, item_ref: &str, saved: bool) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        let target = actions::read_ref(item_ref).ok_or("nothing to save")?;
+        mutations::save(target, saved, cookies).await
+    }
+
+    pub async fn subscribe(&self, channel_id: &str, subscribed: bool) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        mutations::subscribe(channel_id, subscribed, cookies).await
+    }
+
+    pub async fn remove_from_history(&self, token: &str) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        mutations::remove_from_history(token, cookies).await
+    }
+
+    pub async fn edit_playlist(
+        &self,
+        playlist_id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        privacy: Option<discover::Privacy>,
+    ) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        mutations::edit_playlist(playlist_id, name, description, privacy, cookies).await
     }
 
     /// Stream the user's full Liked Music playlist page by page. The

@@ -153,6 +153,45 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("don't recommend"))
     }
 
+    /// Rate a song, an album or a playlist, by a ref this source handed out
+    /// or a track's key. Only sources whose [`LibraryActions::rate`] is set
+    /// override this; the rest inherit the unsupported default.
+    async fn rate(
+        &self,
+        _item_ref: &str,
+        _rating: crate::ytmusic::discover::Rating,
+    ) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("rating"))
+    }
+
+    /// Follow an artist, or stop, by a ref this source handed out. Gated by
+    /// [`LibraryActions::follow`].
+    async fn follow(&self, _artist_ref: &str, _follow: bool) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("following"))
+    }
+
+    /// Save an album, a playlist or a song to the source's library, or take
+    /// it out, by a ref this source handed out. Gated by [`LibraryActions::save`].
+    async fn save(&self, _item_ref: &str, _saved: bool) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("saving to the library"))
+    }
+
+    /// Take one row out of the source's listening history. Gated by
+    /// [`LibraryActions::remove_from_history`].
+    async fn remove_from_history(&self, _token: &str) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("history removal"))
+    }
+
+    /// Push a playlist's name, description and privacy. Gated by
+    /// [`LibraryActions::playlist_details`].
+    async fn edit_playlist(
+        &self,
+        _playlist_id: &str,
+        _details: &PlaylistDetails,
+    ) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("playlist details"))
+    }
+
     /// Start a radio/mix seeded from a track, returning the generated queue. Only
     /// sources whose [`Capabilities::radio`] is set override this; the rest
     /// inherit the unsupported default.
@@ -375,6 +414,7 @@ pub trait MediaSource: Send + Sync {
         Ok(PlaylistPage {
             tracks: self.fetch_playlist_entries(playlist_id).await?,
             next: None,
+            header: None,
         })
     }
 

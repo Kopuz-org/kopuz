@@ -79,6 +79,20 @@ pub struct SourceCapabilities {
     pub discover: bool,
     /// It takes a "stop recommending this" signal for a track.
     pub dont_recommend: bool,
+    /// It takes a like, a dislike or neither for a song, an album or a
+    /// playlist, through [`crate::LibraryApi::rate`].
+    pub rate: bool,
+    /// Its artists can be followed, through [`crate::LibraryApi::follow`].
+    pub follow: bool,
+    /// Albums, playlists and songs can be saved to its library, through
+    /// [`crate::LibraryApi::save`].
+    pub save: bool,
+    /// Rows of its listening history can be removed, through
+    /// [`crate::LibraryApi::remove_from_history`].
+    pub remove_from_history: bool,
+    /// A playlist has a description and a privacy that
+    /// [`crate::PlaylistApi::edit_playlist`] can change.
+    pub playlist_details: bool,
     pub track_radio: bool,
     pub playlist_radio: bool,
     /// Playing a search result starts a track radio from it rather than

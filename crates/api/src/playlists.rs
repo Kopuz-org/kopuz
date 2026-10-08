@@ -32,3 +32,19 @@ pub struct PlaylistReorder {
     pub from: u32,
     pub to: u32,
 }
+
+/// Who can see a playlist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaylistPrivacy {
+    Private,
+    Unlisted,
+    Public,
+}
+
+/// Changes to one playlist. A field left `None` keeps its value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlaylistEdit {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub privacy: Option<PlaylistPrivacy>,
+}

@@ -42,6 +42,36 @@ pub struct CatalogItem {
     pub track: Option<TrackInfo>,
     /// The tile's own colour, as `#rrggbb`, where the source gives one (mood tiles).
     pub accent: Option<String>,
+    pub actions: CatalogActions,
+}
+
+/// How the account rates a song, an album or a playlist.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Rating {
+    #[default]
+    None,
+    Like,
+    Dislike,
+}
+
+/// What the account has done to an entity, and the refs that change it. A
+/// ref is opaque: a client passes it back as it came. A ref is absent where
+/// the source offers no such action for the entity, and a state is absent
+/// where the page did not say.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatalogActions {
+    /// Taken by [`crate::LibraryApi::rate`].
+    pub rate_ref: Option<String>,
+    pub rating: Option<Rating>,
+    /// Taken by [`crate::LibraryApi::save`].
+    pub save_ref: Option<String>,
+    pub saved: Option<bool>,
+    /// Taken by [`crate::LibraryApi::follow`].
+    pub follow_ref: Option<String>,
+    pub followed: Option<bool>,
+    /// Taken by [`crate::LibraryApi::remove_from_history`]; only a row of the
+    /// listening history has one.
+    pub history_token: Option<String>,
 }
 
 /// How a shelf is laid out.
@@ -157,4 +187,7 @@ pub struct CatalogDetail {
     pub artist_key: Option<String>,
     pub header: CatalogHeader,
     pub chips: Vec<CatalogChip>,
+    pub actions: CatalogActions,
+    /// Set for a playlist the account owns.
+    pub privacy: Option<crate::PlaylistPrivacy>,
 }

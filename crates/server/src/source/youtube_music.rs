@@ -6,8 +6,9 @@ use crate::{server_ops::ServerConn, ytmusic::YouTubeMusicClient};
 
 use super::{
     AlbumType, ArtistLookup, ArtistView, AuthOutcome, Capabilities, CatalogPageEntry,
-    FavoritesPage, FavoritesSync, MediaSource, PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds,
-    RemoteAlbum, SearchFilterEntry, SourceError, StreamInfo, mirror_added, mirror_created,
+    FavoritesPage, FavoritesSync, LibraryActions, MediaSource, PlaylistDetails, PlaylistMeta,
+    PlaylistOps, PlaylistPage, RadioSeeds, RemoteAlbum, SearchFilterEntry, SourceError, StreamInfo,
+    mirror_added, mirror_created,
 };
 use crate::ytmusic::browse::{
     self,
@@ -82,7 +83,62 @@ impl MediaSource for YtSource {
             artist_view: ArtistView::Remote,
             albums: AlbumType::YtMusic,
             favorites_sync: FavoritesSync::Paginated,
+            // Every one of these is the account's, so none works signed out.
+            library_actions: if self.client.is_authenticated() {
+                LibraryActions::ALL
+            } else {
+                LibraryActions::NONE
+            },
         }
+    }
+
+    async fn rate(&self, item_ref: &str, rating: discover::Rating) -> Result<(), SourceError> {
+        if item_ref.trim().is_empty() {
+            return Err(SourceError::InvalidInput("nothing to rate".into()));
+        }
+        Ok(self.client.rate(item_ref, rating).await?)
+    }
+
+    async fn follow(&self, artist_ref: &str, follow: bool) -> Result<(), SourceError> {
+        if !artist_ref.starts_with("UC") {
+            return Err(SourceError::InvalidInput("not a channel to follow".into()));
+        }
+        Ok(self.client.subscribe(artist_ref, follow).await?)
+    }
+
+    async fn save(&self, item_ref: &str, saved: bool) -> Result<(), SourceError> {
+        if item_ref.trim().is_empty() {
+            return Err(SourceError::InvalidInput("nothing to save".into()));
+        }
+        Ok(self.client.save(item_ref, saved).await?)
+    }
+
+    async fn remove_from_history(&self, token: &str) -> Result<(), SourceError> {
+        if token.trim().is_empty() {
+            return Err(SourceError::InvalidInput("no history token".into()));
+        }
+        Ok(self.client.remove_from_history(token).await?)
+    }
+
+    async fn edit_playlist(
+        &self,
+        playlist_id: &str,
+        details: &PlaylistDetails,
+    ) -> Result<(), SourceError> {
+        if playlist_id == LIKED_MUSIC_ID {
+            return Err(SourceError::InvalidInput(
+                "Liked Music cannot be edited".into(),
+            ));
+        }
+        Ok(self
+            .client
+            .edit_playlist(
+                playlist_id,
+                details.name.as_deref(),
+                details.description.as_deref(),
+                details.privacy,
+            )
+            .await?)
     }
 
     async fn dont_recommend(&self, item_id: &str) -> Result<(), SourceError> {
@@ -361,10 +417,11 @@ impl MediaSource for YtSource {
         playlist_id: &str,
         cursor: Option<String>,
     ) -> Result<(Vec<reader::Track>, Option<String>), SourceError> {
-        self.client
+        let (tracks, next, _) = self
+            .client
             .playlist_page(playlist_id, cursor.as_deref())
-            .await
-            .map_err(SourceError::from)
+            .await?;
+        Ok((tracks, next))
     }
 
     async fn resolve_album_browse_id(
@@ -611,15 +668,20 @@ impl MediaSource for YtSource {
             return Ok(PlaylistPage {
                 tracks: self.liked_music_entries().await?,
                 next: None,
+                header: None,
             });
         }
         // True per-page InnerTube walk so a long playlist streams into the cache
         // (and the UI) instead of blocking on a full fetch every visit.
-        let (tracks, next) = self
+        let (tracks, next, header) = self
             .client
             .playlist_page(playlist_id, cursor.as_deref())
             .await?;
-        Ok(PlaylistPage { tracks, next })
+        Ok(PlaylistPage {
+            tracks,
+            next,
+            header,
+        })
     }
 
     async fn fetch_favorites_page(

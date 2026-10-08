@@ -630,6 +630,41 @@ impl api::LibraryApi for GrpcApi {
         Ok(())
     }
 
+    async fn rate(&self, item_ref: String, rating: api::Rating) -> Result<(), ApiError> {
+        self.client()
+            .rate(Request::new(proto::RateRequest {
+                item_ref,
+                rating: convert::rating_to_proto(rating) as i32,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn follow(&self, artist_ref: String, follow: bool) -> Result<(), ApiError> {
+        self.client()
+            .follow(Request::new(proto::FollowRequest { artist_ref, follow }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn save(&self, item_ref: String, saved: bool) -> Result<(), ApiError> {
+        self.client()
+            .save(Request::new(proto::SaveRequest { item_ref, saved }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn remove_from_history(&self, token: String) -> Result<(), ApiError> {
+        self.client()
+            .remove_from_history(Request::new(proto::RemoveFromHistoryRequest { token }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
     async fn folder_tracks(&self, prefix: String, page: Page) -> Result<api::TrackPage, ApiError> {
         let tracks = self
             .client()
@@ -1033,7 +1068,30 @@ impl api::PlaylistApi for GrpcApi {
 
     async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError> {
         self.client()
-            .rename_playlist(Request::new(proto::RenamePlaylistRequest { id, name }))
+            .rename_playlist(Request::new(proto::RenamePlaylistRequest {
+                id,
+                name,
+                description: None,
+                privacy: None,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn edit_playlist(&self, id: String, edit: api::PlaylistEdit) -> Result<(), ApiError> {
+        if edit.name.is_none() && edit.description.is_none() && edit.privacy.is_none() {
+            return Ok(());
+        }
+        self.client()
+            .rename_playlist(Request::new(proto::RenamePlaylistRequest {
+                id,
+                name: edit.name.unwrap_or_default(),
+                description: edit.description,
+                privacy: edit
+                    .privacy
+                    .map(|privacy| convert::playlist_privacy_to_proto(privacy) as i32),
+            }))
             .await
             .map_err(wire_error)?;
         Ok(())

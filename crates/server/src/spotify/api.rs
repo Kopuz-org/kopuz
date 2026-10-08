@@ -340,6 +340,7 @@ pub async fn album_remote(
         thumbnail: first_image(&album["images"]),
         audio_playlist_id: None,
         tracks: out,
+        actions: Default::default(),
     })
 }
 
@@ -357,7 +358,7 @@ pub async fn discover_home(access: &str) -> Result<crate::ytmusic::discover::Dis
         more: None,
         items: tracks
             .into_iter()
-            .map(|t| DiscoverItem::Song(Box::new(t)))
+            .map(|t| DiscoverItem::Song(Box::new(t), Default::default()))
             .collect(),
         layout: ShelfLayout::Carousel,
         continuation: None,

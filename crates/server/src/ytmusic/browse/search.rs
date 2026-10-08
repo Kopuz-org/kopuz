@@ -154,8 +154,8 @@ pub(crate) fn parse_search(filter: Option<&Filter>, response: &Value) -> SearchP
     if filter.id == "videos" {
         for shelf in &mut shelves {
             for item in &mut shelf.items {
-                if let DiscoverItem::Song(track) = item {
-                    *item = DiscoverItem::Video(track.clone());
+                if let DiscoverItem::Song(track, actions) = item {
+                    *item = DiscoverItem::Video(track.clone(), actions.clone());
                 }
             }
         }
@@ -234,8 +234,8 @@ fn by_category(found: Vec<DiscoverShelf>) -> Vec<DiscoverShelf> {
 /// The filter whose results `item` would be among.
 fn category(item: &DiscoverItem) -> Option<&'static str> {
     Some(match item {
-        DiscoverItem::Song(_) => "songs",
-        DiscoverItem::Video(_) => "videos",
+        DiscoverItem::Song(..) => "songs",
+        DiscoverItem::Video(..) => "videos",
         DiscoverItem::Episode { .. } => "episodes",
         DiscoverItem::Album { .. } => "albums",
         // Profiles are channels too, told apart by their row's label.

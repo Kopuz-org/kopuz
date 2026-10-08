@@ -7,6 +7,7 @@
 use reader::models::{ArtistCredit, Track};
 use serde_json::{Value, json};
 
+use super::actions;
 use super::clients::{ORIGIN_YOUTUBE_MUSIC, WEB_REMIX};
 use super::innertube::{http_client, sapisid_hash};
 use super::search::synthesize_album_id;
@@ -109,6 +110,40 @@ pub struct BrowsePage {
     pub chips: Vec<PageChip>,
     pub shelves: Vec<DiscoverShelf>,
     pub continuation: Option<String>,
+    /// What the header lets the account do to the page's entity.
+    pub actions: ItemActions,
+    /// Set on a playlist the account owns.
+    pub privacy: Option<Privacy>,
+}
+
+/// How the account rates a song, an album or a playlist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rating {
+    Indifferent,
+    Like,
+    Dislike,
+}
+
+/// Who can see a playlist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Privacy {
+    Private,
+    Unlisted,
+    Public,
+}
+
+/// What the account has done to an item, and the refs the mutations in
+/// [`super::mutations`] take to change it. A ref is absent where the page
+/// offers no such action, and a state where the page did not say.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ItemActions {
+    pub rate_ref: Option<String>,
+    pub rating: Option<Rating>,
+    pub save_ref: Option<String>,
+    pub saved: Option<bool>,
+    pub follow_ref: Option<String>,
+    pub followed: Option<bool>,
+    pub history_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -143,9 +178,9 @@ impl From<DiscoverHome> for BrowsePage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DiscoverItem {
-    Song(Box<Track>),
+    Song(Box<Track>, ItemActions),
     /// A music video or an upload to YouTube rather than an album track.
-    Video(Box<Track>),
+    Video(Box<Track>, ItemActions),
     /// A podcast episode; `browse_id` opens its own page.
     Episode {
         track: Box<Track>,
@@ -158,12 +193,14 @@ pub enum DiscoverItem {
         title: String,
         subtitle: String,
         thumbnail: Option<String>,
+        actions: ItemActions,
     },
     Album {
         browse_id: String,
         title: String,
         subtitle: String,
         thumbnail: Option<String>,
+        actions: ItemActions,
     },
     Artist {
         channel_id: String,
@@ -171,6 +208,7 @@ pub enum DiscoverItem {
         /// "1.2M subscribers" and the like, where the page shows it.
         subtitle: Option<String>,
         thumbnail: Option<String>,
+        actions: ItemActions,
     },
     /// A mood or genre tile. `browse_id` is a page id, params and all.
     Mood {
@@ -241,6 +279,7 @@ pub struct YtAlbum {
     pub thumbnail: Option<String>,
     pub audio_playlist_id: Option<String>,
     pub tracks: Vec<Track>,
+    pub actions: ItemActions,
 }
 
 pub async fn fetch_album_tracks(browse_id: &str, cookies: &str) -> Result<Vec<Track>, String> {
@@ -265,6 +304,7 @@ pub struct YtArtist {
     pub banner_thumbnail: Option<String>,
     pub shuffle_playlist_id: Option<String>,
     pub sections: Vec<DiscoverShelf>,
+    pub actions: ItemActions,
 }
 
 #[tracing::instrument(name = "yt.fetch_artist", skip(cookies), fields(channel_id = %channel_id))]
@@ -329,6 +369,7 @@ pub(super) fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
         banner_thumbnail,
         shuffle_playlist_id,
         sections,
+        actions: header.map(actions::subscription).unwrap_or_default(),
     }
 }
 
@@ -460,8 +501,11 @@ fn parse_artist_song_list(section: &Value) -> Option<DiscoverShelf> {
         .map(|arr| {
             arr.iter()
                 .filter_map(|i| i.get("musicResponsiveListItemRenderer"))
-                .filter_map(parse_artist_song_row)
-                .map(|t| DiscoverItem::Song(Box::new(t)))
+                .filter_map(|row| {
+                    let track = parse_artist_song_row(row)?;
+                    let actions = actions::track(&row["menu"], &track.id.key());
+                    Some(DiscoverItem::Song(Box::new(track), actions))
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -631,6 +675,7 @@ pub(super) fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
         }
     }
 
+    let audio_playlist_id = audio_playlist_id_header.or(audio_pid_from_rows);
     YtAlbum {
         browse_id: browse_id.to_string(),
         title,
@@ -638,7 +683,10 @@ pub(super) fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
         artist: artist.map(|credit| credit.name),
         year,
         thumbnail,
-        audio_playlist_id: audio_playlist_id_header.or(audio_pid_from_rows),
+        actions: header
+            .map(|h| actions::detail_header(h, audio_playlist_id.as_deref()))
+            .unwrap_or_default(),
+        audio_playlist_id,
         tracks,
     }
 }
@@ -1056,17 +1104,21 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
     }
     let subtitle = runs_text(r, "/subtitle/runs").unwrap_or_default();
     let thumbnail = best_thumbnail(r).map(normalize_yt_thumbnail);
+    let menu = &r["menu"];
 
     if let Some(video_id) = r
         .pointer("/navigationEndpoint/watchEndpoint/videoId")
         .and_then(|v| v.as_str())
     {
-        return Some(DiscoverItem::Song(Box::new(build_song_track(
-            video_id,
-            &title,
-            &subtitle,
-            thumbnail.as_deref(),
-        ))));
+        return Some(DiscoverItem::Song(
+            Box::new(build_song_track(
+                video_id,
+                &title,
+                &subtitle,
+                thumbnail.as_deref(),
+            )),
+            actions::track(menu, video_id),
+        ));
     }
 
     if let Some(playlist_id) = r
@@ -1078,6 +1130,7 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
             title,
             subtitle,
             thumbnail,
+            actions: actions::playlist(menu, Some(playlist_id)),
         });
     }
 
@@ -1091,6 +1144,7 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
                 title,
                 subtitle,
                 thumbnail,
+                actions: actions::playlist(menu, Some(rest)),
             });
         }
         if browse_id.starts_with("MPRE") {
@@ -1099,6 +1153,10 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
                 title,
                 subtitle,
                 thumbnail,
+                actions: actions::playlist(
+                    menu,
+                    actions::overlay_playlist_id(&r["thumbnailOverlay"]),
+                ),
             });
         }
         if browse_id.starts_with("UC") {
@@ -1107,6 +1165,7 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
                 name: title,
                 subtitle: None,
                 thumbnail,
+                actions: actions::artist(browse_id),
             });
         }
         if browse_id.starts_with("FEmusic_") {

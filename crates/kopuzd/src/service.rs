@@ -634,9 +634,29 @@ impl Kopuz for KopuzGrpc {
         request: Request<proto::RenamePlaylistRequest>,
     ) -> Result<Response<proto::Unit>, Status> {
         let request = request.into_inner();
+        let privacy = match request.privacy {
+            Some(value) => Some(
+                convert::playlist_privacy_from_proto(value)
+                    .ok_or_else(|| failed(ApiError::invalid_input("unknown playlist privacy")))?,
+            ),
+            None => None,
+        };
+        if request.description.is_none() && privacy.is_none() {
+            self.0
+                .api
+                .rename_playlist(request.id, request.name)
+                .await
+                .map_err(failed)?;
+            return Ok(Response::new(proto::Unit {}));
+        }
+        let edit = api::PlaylistEdit {
+            name: (!request.name.is_empty()).then_some(request.name),
+            description: request.description,
+            privacy,
+        };
         self.0
             .api
-            .rename_playlist(request.id, request.name)
+            .edit_playlist(request.id, edit)
             .await
             .map_err(failed)?;
         Ok(Response::new(proto::Unit {}))
@@ -888,6 +908,59 @@ impl Kopuz for KopuzGrpc {
         self.0
             .api
             .dont_recommend(request.get_ref().key.clone())
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn rate(
+        &self,
+        request: Request<proto::RateRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        let rating = convert::rating_from_proto(request.rating)
+            .ok_or_else(|| failed(ApiError::invalid_input("a rating is required")))?;
+        self.0
+            .api
+            .rate(request.item_ref, rating)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn follow(
+        &self,
+        request: Request<proto::FollowRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .follow(request.artist_ref, request.follow)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn save(
+        &self,
+        request: Request<proto::SaveRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let request = request.into_inner();
+        self.0
+            .api
+            .save(request.item_ref, request.saved)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
+    async fn remove_from_history(
+        &self,
+        request: Request<proto::RemoveFromHistoryRequest>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        self.0
+            .api
+            .remove_from_history(request.into_inner().token)
             .await
             .map_err(failed)?;
         Ok(Response::new(proto::Unit {}))

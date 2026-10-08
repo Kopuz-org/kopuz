@@ -216,6 +216,10 @@ impl api::PlaylistApi for LocalApi {
         self.playlists()?.rename(&id, &name).await
     }
 
+    async fn edit_playlist(&self, id: String, edit: api::PlaylistEdit) -> Result<(), ApiError> {
+        self.playlists()?.edit(&id, edit).await
+    }
+
     async fn delete_playlist(&self, id: String) -> Result<(), ApiError> {
         self.playlists()?.delete(&id).await
     }
@@ -496,6 +500,27 @@ impl api::LibraryApi for LocalApi {
                 "this daemon runs without a favorites service",
             )),
         }
+    }
+
+    async fn rate(&self, item_ref: String, rating: api::Rating) -> Result<(), ApiError> {
+        match &self.favorites {
+            Some(service) => service.rate(&item_ref, rating).await,
+            None => Err(ApiError::unsupported(
+                "this daemon runs without a favorites service",
+            )),
+        }
+    }
+
+    async fn follow(&self, artist_ref: String, follow: bool) -> Result<(), ApiError> {
+        self.catalog()?.follow(&artist_ref, follow).await
+    }
+
+    async fn save(&self, item_ref: String, saved: bool) -> Result<(), ApiError> {
+        self.catalog()?.save(&item_ref, saved).await
+    }
+
+    async fn remove_from_history(&self, token: String) -> Result<(), ApiError> {
+        self.catalog()?.remove_from_history(&token).await
     }
 
     async fn folder_tracks(&self, prefix: String, page: Page) -> Result<api::TrackPage, ApiError> {
