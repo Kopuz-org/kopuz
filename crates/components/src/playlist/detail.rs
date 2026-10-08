@@ -31,7 +31,7 @@ pub fn PlaylistDetail(
     let tracks_res = use_tracks_by_keys(active_partition, track_refs);
 
     // Affordances follow the source's capabilities, not what kind of source it is.
-    let caps = *hooks::sources::use_capabilities().read();
+    let caps = hooks::sources::use_capabilities().read().clone();
     let can_reorder = caps.playlists == api::PlaylistCapability::Reorder;
 
     // A server playlist's contents are refreshed by the daemon, a page at a

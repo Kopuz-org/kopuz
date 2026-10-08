@@ -44,10 +44,11 @@ fn db_error(error: db::DbError) -> ApiError {
     ApiError::internal(format!("database error: {error}"))
 }
 
-/// The in-process capability struct, as the wire describes it.
-fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
+/// What a built source can do, as the wire describes it.
+fn capabilities(source: &dyn server::source::MediaSource) -> SourceCapabilities {
     use api::{AlbumPresentation, ArtistPresentation, FavoritesSyncMode, PlaylistCapability};
     use server::source::{AlbumType, ArtistView, FavoritesSync, PlaylistOps};
+    let caps = source.capabilities();
     SourceCapabilities {
         edit_tags: caps.edit_tags,
         delete_from_disk: caps.delete_from_disk,
@@ -80,6 +81,23 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
             FavoritesSync::Instant => FavoritesSyncMode::Instant,
             FavoritesSync::Paginated => FavoritesSyncMode::Paginated,
         },
+        pages: source
+            .catalog_pages()
+            .into_iter()
+            .map(|page| api::PageEntry {
+                id: page.id,
+                label: api::Text::key(page.label),
+                icon: api::Icon::Class(page.icon.to_string()),
+            })
+            .collect(),
+        search_filters: source
+            .search_filters()
+            .into_iter()
+            .map(|filter| api::SearchFilter {
+                id: filter.id.to_string(),
+                label: api::Text::key(filter.label),
+            })
+            .collect(),
     }
 }
 
@@ -185,7 +203,7 @@ impl SourceService {
         let mut info = SourceInfo {
             id: key.as_str().to_string(),
             active: current.active_source.as_str() == key.as_str(),
-            capabilities: capabilities(source.capabilities()),
+            capabilities: capabilities(source.as_ref()),
             state: self.status(key.as_str()),
             ..Default::default()
         };

@@ -160,6 +160,23 @@ pub struct Capabilities {
     pub favorites_sync: FavoritesSync,
 }
 
+/// A catalog page a source declares: the id that opens it, the translation
+/// key of its label, and its icon class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogPageEntry {
+    pub id: String,
+    pub label: &'static str,
+    pub icon: &'static str,
+}
+
+/// A search filter a source offers: the id a client passes back and the
+/// translation key of its label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchFilterEntry {
+    pub id: &'static str,
+    pub label: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthOutcome {
     Valid,

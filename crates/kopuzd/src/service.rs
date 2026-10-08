@@ -400,10 +400,28 @@ impl Kopuz for KopuzGrpc {
         let results = self
             .0
             .api
-            .search(request.into_inner().query)
+            .search(convert::search_request_from_proto(request.get_ref()))
             .await
             .map_err(failed)?;
         Ok(Response::new(convert::search_results_to_proto(&results)))
+    }
+
+    async fn get_search_suggestions(
+        &self,
+        request: Request<proto::SearchSuggestionsRequest>,
+    ) -> Result<Response<proto::SearchSuggestions>, Status> {
+        let suggestions = self
+            .0
+            .api
+            .search_suggestions(request.into_inner().query)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::SearchSuggestions {
+            suggestions: suggestions
+                .iter()
+                .map(convert::search_suggestion_to_proto)
+                .collect(),
+        }))
     }
 
     async fn get_track_web_url(

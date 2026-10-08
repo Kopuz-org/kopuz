@@ -350,10 +350,12 @@ fn DiscoverTile(
     let thumbnail = hooks::artwork::url(item.artwork.as_ref(), hooks::artwork::Size::Thumb);
     let subtitle = item.subtitle.clone().unwrap_or_default();
     match item.kind {
-        CatalogItemKind::Track => match item.track.clone() {
-            Some(track) => rsx! { SongCard { item: item.clone(), track } },
-            None => rsx! {},
-        },
+        CatalogItemKind::Track | CatalogItemKind::Video | CatalogItemKind::Episode => {
+            match item.track.clone() {
+                Some(track) => rsx! { SongCard { item: item.clone(), track } },
+                None => rsx! {},
+            }
+        }
         CatalogItemKind::Playlist | CatalogItemKind::Album => {
             let kind = item.kind;
             let id = item.id.clone();
@@ -400,7 +402,10 @@ fn DiscoverTile(
                 }
             }
         }
-        CatalogItemKind::Mood | CatalogItemKind::Unknown => rsx! {
+        CatalogItemKind::Mood
+        | CatalogItemKind::Podcast
+        | CatalogItemKind::Page
+        | CatalogItemKind::Unknown => rsx! {
             Card {
                 title: item.title.clone(),
                 subtitle: String::new(),
