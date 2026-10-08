@@ -80,7 +80,9 @@ pub fn SystemColors(config: Signal<AppConfig>, artwork: Signal<Option<Vec<Color>
         async move {
             #[cfg(target_os = "android")]
             android::set_enabled(enabled);
-            if !enabled {
+            // macOS gives no reliable read of the wallpaper on screen, so there
+            // System colors follows the album art (the fallback below).
+            if !enabled || cfg!(target_os = "macos") {
                 system_css.set(None);
                 return;
             }
