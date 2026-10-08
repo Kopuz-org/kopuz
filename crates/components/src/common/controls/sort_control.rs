@@ -68,7 +68,7 @@ pub fn SortControl<F: LibrarySortField + Eq + std::fmt::Debug + 'static>(
     rsx! {
         div { class: "relative",
             button {
-                class: "flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg bg-white/5 border border-white/5 text-white/70 hover:text-white hover:bg-white/10 transition-all",
+                class: "app-chip flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg bg-white/5 border border-white/5 text-white/70 hover:text-white hover:bg-white/10 transition-all",
                 onclick: move |evt| {
                     evt.stop_propagation();
                     let next = !*is_open.peek();
@@ -96,7 +96,7 @@ pub fn SortControl<F: LibrarySortField + Eq + std::fmt::Debug + 'static>(
                 }
 
                 div {
-                    class: "absolute right-0 top-full mt-1 z-50 w-72 bg-neutral-900 border border-white/10 rounded-xl shadow-2xl p-2 space-y-1",
+                    class: "app-menu absolute right-0 top-full mt-1 z-50 w-72 bg-neutral-900 border border-white/10 rounded-xl shadow-2xl p-2 space-y-1",
                     onclick: move |evt| evt.stop_propagation(),
 
                     if criteria.read().is_empty() {
@@ -119,12 +119,12 @@ pub fn SortControl<F: LibrarySortField + Eq + std::fmt::Debug + 'static>(
                                     key: "{idx}",
                                     class: "flex items-center gap-1.5",
 
-                                    span { class: "w-10 shrink-0 text-[10px] uppercase tracking-wider text-white/30",
+                                    span { class: "app-menu-label w-10 shrink-0 text-[10px] uppercase tracking-wider text-white/30",
                                         if idx == 0 { "{i18n::t(\"sort_by\")}" } else { "{i18n::t(\"sort_then\")}" }
                                     }
 
                                     select {
-                                        class: "flex-1 min-w-0 bg-(--surface-field) text-white text-xs rounded-md px-2 py-1.5 border border-white/10 focus:outline-none focus:border-white/30",
+                                        class: "app-native-select flex-1 min-w-0 bg-(--surface-field) text-white text-xs rounded-md px-2 py-1.5 border border-white/10 focus:outline-none focus:border-white/30",
                                         value: "{selected_pos}",
                                         onchange: move |evt| {
                                             if let Ok(pos) = evt.value().parse::<usize>()
@@ -145,7 +145,7 @@ pub fn SortControl<F: LibrarySortField + Eq + std::fmt::Debug + 'static>(
                                     }
 
                                     button {
-                                        class: "shrink-0 w-7 h-7 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-colors active:scale-95",
+                                        class: "app-icon-button shrink-0 w-7 h-7 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-colors active:scale-95",
                                         title: if direction == SortDirection::Asc { "{i18n::t(\"sort_ascending\")}" } else { "{i18n::t(\"sort_descending\")}" },
                                         onclick: move |evt| {
                                             evt.stop_propagation();
@@ -160,7 +160,7 @@ pub fn SortControl<F: LibrarySortField + Eq + std::fmt::Debug + 'static>(
                                     }
 
                                     button {
-                                        class: "shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-white/30 hover:text-red-300 hover:bg-red-500/10 transition-colors active:scale-95",
+                                        class: "app-icon-button shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-white/30 hover:text-red-300 hover:bg-red-500/10 transition-colors active:scale-95",
                                         title: "{i18n::t(\"sort_remove\")}",
                                         onclick: move |evt| {
                                             evt.stop_propagation();
@@ -178,7 +178,7 @@ pub fn SortControl<F: LibrarySortField + Eq + std::fmt::Debug + 'static>(
 
                     if criteria.read().len() < fields.len() {
                         button {
-                            class: "w-full mt-1 px-2 py-1.5 text-xs rounded-md text-white/60 hover:text-white hover:bg-white/5 flex items-center gap-2 transition-colors",
+                            class: "app-button-text w-full mt-1 px-2 py-1.5 text-xs rounded-md text-white/60 hover:text-white hover:bg-white/5 flex items-center gap-2 transition-colors",
                             onclick: move |evt| {
                                 evt.stop_propagation();
                                 let used: Vec<F> = criteria.peek().iter().map(|c| c.field).collect();

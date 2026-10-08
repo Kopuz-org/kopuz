@@ -453,7 +453,7 @@ pub fn HomeBody(
                                 key: "{key}",
                                 class: if !enabled { "opacity-40" } else { "" },
                                 if edit {
-                                    div { class: "flex items-center justify-between gap-2 mb-2 px-2 py-2 rounded-lg bg-white/5 border border-white/10",
+                                    div { class: "app-card app-card-row flex items-center justify-between gap-2 mb-2 px-2 py-2 rounded-lg bg-white/5 border border-white/10",
                                         div { class: "flex items-center gap-2 text-white/80 text-xs font-bold",
                                             i { class: "fa-solid fa-grip-vertical text-white/30" }
                                             span { "{section_label(&key)}" }
@@ -461,7 +461,7 @@ pub fn HomeBody(
                                         div { class: "flex items-center gap-1",
                                             if key == "listen_now" {
                                                 button {
-                                                    class: "px-3 h-7 rounded-md bg-white/5 hover:bg-white/15 text-white/70 hover:text-white text-xs font-semibold transition-colors",
+                                                    class: "app-button-tonal px-3 h-7 rounded-md bg-white/5 hover:bg-white/15 text-white/70 hover:text-white text-xs font-semibold transition-colors",
                                                     title: i18n::t("listen_now_layout").to_string(),
                                                     onclick: move |_| {
                                                         let mut conf = config.write();
@@ -475,7 +475,7 @@ pub fn HomeBody(
                                                 }
                                             }
                                             button {
-                                                class: "w-7 h-7 rounded-md bg-white/5 hover:bg-white/15 text-white/70 hover:text-white transition-colors",
+                                                class: "app-icon-button w-7 h-7 rounded-md bg-white/5 hover:bg-white/15 text-white/70 hover:text-white transition-colors",
                                                 title: i18n::t("move_up").to_string(),
                                                 disabled: idx == 0,
                                                 onclick: move |_| {
@@ -486,7 +486,7 @@ pub fn HomeBody(
                                                 i { class: "fa-solid fa-chevron-up text-xs" }
                                             }
                                             button {
-                                                class: "w-7 h-7 rounded-md bg-white/5 hover:bg-white/15 text-white/70 hover:text-white transition-colors",
+                                                class: "app-icon-button w-7 h-7 rounded-md bg-white/5 hover:bg-white/15 text-white/70 hover:text-white transition-colors",
                                                 title: i18n::t("move_down").to_string(),
                                                 disabled: idx + 1 >= total,
                                                 onclick: move |_| {
@@ -498,9 +498,9 @@ pub fn HomeBody(
                                             }
                                             button {
                                                 class: if enabled {
-                                                    "px-3 h-7 rounded-md bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-xs font-semibold transition-colors"
+                                                    "app-button-tonal px-3 h-7 rounded-md bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-xs font-semibold transition-colors"
                                                 } else {
-                                                    "px-3 h-7 rounded-md bg-white/5 hover:bg-white/15 text-white/60 text-xs font-semibold transition-colors"
+                                                    "app-button-outlined px-3 h-7 rounded-md bg-white/5 hover:bg-white/15 text-white/60 text-xs font-semibold transition-colors"
                                                 },
                                                 onclick: move |_| {
                                                     let mut conf = config.write();

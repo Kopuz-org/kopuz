@@ -227,7 +227,7 @@ pub fn Radio(props: RadioProps) -> Element {
                             input {
                                 r#type: "text",
                                 placeholder: "{i18n::t(\"radio_search_stations\")}",
-                                class: "w-full bg-white/10 border border-white/10 rounded-full py-2.5 pl-12 pr-4 text-sm text-white focus:outline-none focus:border-white/25 transition-colors",
+                                class: "app-search-field w-full bg-white/10 border border-white/10 rounded-full py-2.5 pl-12 pr-4 text-sm text-white focus:outline-none focus:border-white/25 transition-colors",
                                 oninput: {
                                     let debounce_gen = debounce_gen.clone();
                                     move |evt| {
@@ -251,7 +251,7 @@ pub fn Radio(props: RadioProps) -> Element {
                 // ── Custom registry stations (user-added registries) ────────────
                 if has_custom {
                     h2 {
-                        class: if is_vaxry { "text-[10px] font-bold mb-2" } else { "text-sm font-bold mb-3 uppercase tracking-wider" },
+                        class: if is_vaxry { "text-[10px] font-bold mb-2" } else { "app-section-label text-sm font-bold mb-3 uppercase tracking-wider" },
                         style: if is_vaxry { "color: rgba(255,255,255,0.35);" } else { "color: var(--color-slate-400);" },
                         "{i18n::t(\"radio_selected\")}"
                     }
@@ -478,7 +478,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                             div { class: "flex flex-wrap items-center gap-2 mt-2.5",
                                                 for stream in &station.streams {
                                                     button {
-                                                        class: "px-3 py-1 rounded-lg text-xs font-medium bg-white/10 hover:bg-white/20 transition-colors hover:text-white",
+                                                        class: "app-chip px-3 py-1 rounded-lg text-xs font-medium bg-white/10 hover:bg-white/20 transition-colors hover:text-white",
                                                         style: "color: var(--color-slate-300);",
                                                         onclick: {
                                                             let station_id = station.id.clone();
@@ -503,7 +503,7 @@ pub fn Radio(props: RadioProps) -> Element {
                 // radio-browser.info directory
                 div { class: "flex items-end justify-between mb-3",
                     h2 {
-                        class: if is_vaxry { "text-[10px] font-bold" } else { "text-sm font-bold uppercase tracking-wider" },
+                        class: if is_vaxry { "text-[10px] font-bold" } else { "app-section-label text-sm font-bold uppercase tracking-wider" },
                         style: if is_vaxry { "color: rgba(255,255,255,0.35);" } else { "color: var(--color-slate-400);" },
                         if searching {
                             "{i18n::t(\"radio_search_results\")}"

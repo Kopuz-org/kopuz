@@ -19,13 +19,14 @@ pub(crate) fn Tabs(
             div {
                 class: "flex items-center px-6 pt-4 pb-2",
                 div {
-                    class: "flex items-center gap-1 p-1 rounded-lg bg-white/10",
+                    class: "app-segmented flex items-center gap-1 p-1 rounded-lg bg-white/10",
                     button {
                         class: if *active_tab.read() == 0 {
                             "px-4 py-1.5 text-xs font-medium rounded-md bg-white/20 text-white transition-colors"
                         } else {
                             "px-4 py-1.5 text-xs font-medium rounded-md text-white/50 hover:text-white/80 transition-colors"
                         },
+                        aria_pressed: *active_tab.read() == 0,
                         onclick: move |_| active_tab.set(0),
                         "{i18n::t(\"up_next\")}"
                     }
@@ -36,13 +37,14 @@ pub(crate) fn Tabs(
                         } else {
                             "px-4 py-1.5 text-xs font-medium rounded-md text-white/50 hover:text-white/80 transition-colors"
                         },
+                        aria_pressed: *active_tab.read() == 1,
                         onclick: move |_| active_tab.set(1),
                         "{i18n::t(\"lyrics\")}"
                     }
                 }
 
                 button {
-                    class: "ml-auto w-8 h-8 flex items-center justify-center text-white/40 hover:text-white transition-colors",
+                    class: "app-icon-button ml-auto w-8 h-8 flex items-center justify-center text-white/40 hover:text-white transition-colors",
                     "aria-label": i18n::t("hide_side_panel").to_string(),
                     title: i18n::t("hide_side_panel").to_string(),
                     onclick: move |_| config.write().fullscreen_tabs_collapsed = true,

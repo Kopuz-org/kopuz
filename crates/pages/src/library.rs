@@ -378,7 +378,7 @@ pub fn LibraryPage(
                     h1 { class: "text-3xl font-semibold tracking-tight text-white", "{i18n::t(\"your_library\")}" }
                 }
                 button {
-                    class: "w-9 h-9 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
+                    class: "app-icon-button w-9 h-9 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
                     title: if caps().scan_folders { i18n::t("rescan_library").to_string() } else { i18n::t("refresh_music_library").to_string() },
                     onclick: move |_| {
                         if caps().scan_folders {

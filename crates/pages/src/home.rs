@@ -33,7 +33,7 @@ pub fn Home(
                 div { class: "flex items-center gap-2",
                     if *edit_mode.read() {
                         button {
-                            class: "px-3 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white text-xs font-semibold transition-colors",
+                            class: "app-button-outlined px-3 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white text-xs font-semibold transition-colors",
                             onclick: move |_| {
                                 config.write().home_sections = config::default_home_sections();
                             },
@@ -41,14 +41,14 @@ pub fn Home(
                             "{i18n::t(\"reset_home\")}"
                         }
                         button {
-                            class: "px-4 h-8 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold transition-colors",
+                            class: "app-button-filled px-4 h-8 rounded-full bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold transition-colors",
                             onclick: move |_| edit_mode.set(false),
                             i { class: "fa-solid fa-check mr-1 text-[10px]" }
                             "{i18n::t(\"done_editing\")}"
                         }
                     } else {
                         button {
-                            class: "px-3 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white text-xs font-semibold transition-colors flex items-center gap-2",
+                            class: "app-button-outlined px-3 h-8 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white text-xs font-semibold transition-colors flex items-center gap-2",
                             onclick: move |_| edit_mode.set(true),
                             i { class: "fa-solid fa-sliders text-[10px]" }
                             "{i18n::t(\"customize_home\")}"

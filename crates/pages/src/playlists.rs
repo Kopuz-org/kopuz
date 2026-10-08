@@ -167,7 +167,7 @@ pub fn PlaylistsPage(
                     div { class: "flex items-center gap-1",
                         if caps().folders {
                             button {
-                                class: "w-10 h-10 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
+                                class: "app-icon-button w-10 h-10 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
                                 title: i18n::t("new_folder").to_string(),
                                 onclick: move |_| {
                                     hooks::playlist_actions::create_folder(
@@ -178,7 +178,7 @@ pub fn PlaylistsPage(
                             }
                         }
                         button {
-                            class: "w-10 h-10 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
+                            class: "app-icon-button w-10 h-10 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
                             title: i18n::t("add_playlist").to_string(),
                             aria_label: i18n::t("add_playlist").to_string(),
                             onclick: move |_| {

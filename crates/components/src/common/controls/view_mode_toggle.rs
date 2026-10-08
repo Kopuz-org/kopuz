@@ -13,10 +13,11 @@ pub fn ViewModeToggle(mut mode: Signal<AlbumViewMode>) -> Element {
     let btn_inactive = "w-7 h-6 flex items-center justify-center rounded-md text-white/40 hover:text-white/80 transition-all";
 
     rsx! {
-        div { class: "flex space-x-0.5 bg-white/5 border border-white/5 p-0.5 rounded-lg",
+        div { class: "app-segmented app-segmented-icons flex space-x-0.5 bg-white/5 border border-white/5 p-0.5 rounded-lg",
             button {
                 class: if is_grid { btn_active } else { btn_inactive },
                 title: "{i18n::t(\"view_grid\")}",
+                aria_pressed: is_grid,
                 aria_label: "{i18n::t(\"view_grid\")}",
                 onclick: move |_| mode.set(AlbumViewMode::Grid),
                 i { class: "fa-solid fa-grip", style: "font-size: 11px;" }
@@ -24,6 +25,7 @@ pub fn ViewModeToggle(mut mode: Signal<AlbumViewMode>) -> Element {
             button {
                 class: if !is_grid { btn_active } else { btn_inactive },
                 title: "{i18n::t(\"view_list\")}",
+                aria_pressed: !is_grid,
                 aria_label: "{i18n::t(\"view_list\")}",
                 onclick: move |_| mode.set(AlbumViewMode::List),
                 i { class: "fa-solid fa-list", style: "font-size: 11px;" }

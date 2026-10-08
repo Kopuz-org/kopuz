@@ -342,7 +342,7 @@ pub fn SeekSlider(
                 style: "max-width: 640px;",
                 div {
                     class: "flex items-center gap-3",
-                    span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{fmt_time(display_progress)}" }
+                    span { class: "playback-time text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{fmt_time(display_progress)}" }
                     div {
                         class: format!("playback-seek flex-1 h-5 {} relative group", if can_seek { "cursor-pointer" } else { "" }),
                         style: "--seek-progress: {progress_percent}%;",
@@ -379,7 +379,7 @@ pub fn SeekSlider(
                             oninput: move |evt| on_input.call(evt),
                         }
                     }
-                    span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: right;", "{fmt_time(*current_song_duration.read())}" }
+                    span { class: "playback-time text-xs text-white/70 font-mono", style: "width: 50px; text-align: right;", "{fmt_time(*current_song_duration.read())}" }
                 }
             }
         },
@@ -387,7 +387,7 @@ pub fn SeekSlider(
             div {
                 class: "flex items-center gap-2 w-full",
                 dir: "ltr",
-                span { class: "text-[10px] text-slate-500 w-8 text-right font-mono", "{fmt_time(display_progress)}" }
+                span { class: "playback-time text-[10px] text-slate-500 w-8 text-right font-mono", "{fmt_time(display_progress)}" }
                 div {
                     class: format!("playback-slider flex-1 h-1 bg-white/10 rounded-full relative {}", if can_seek { "group cursor-pointer" } else { "" }),
                     PlaybackBufferIndicator {
@@ -411,7 +411,7 @@ pub fn SeekSlider(
                         oninput: move |evt| on_input.call(evt),
                     }
                 }
-                span { class: "text-[10px] text-slate-500 w-8 font-mono", "{fmt_time(*current_song_duration.read())}" }
+                span { class: "playback-time text-[10px] text-slate-500 w-8 font-mono", "{fmt_time(*current_song_duration.read())}" }
             }
         },
     }
@@ -440,24 +440,21 @@ pub fn VolumeSlider(
                 style: "max-width: 640px;",
                 i { class: "fa-solid fa-volume-low text-white/40" }
                 div {
-                    class: "flex-1 cursor-pointer relative group",
-                    style: "height: 20px;",
+                    class: "playback-seek flex-1 h-5 cursor-pointer relative group",
+                    style: "--seek-progress: {volume_percent}%;",
                     onwheel: move |evt| on_wheel.call(evt),
+                    div { class: "playback-seek-track absolute inset-x-0 top-2 h-1 bg-white/20 rounded-full" }
                     div {
-                        class: "absolute bg-white/20 rounded-full",
-                        style: "height: 4px; top: 8px; left: 0; right: 0;"
-                    }
-                    div {
-                        class: "absolute bg-white/90 rounded-full pointer-events-none",
-                        style: "height: 4px; top: 8px; left: 0; width: {volume_percent}%;"
+                        class: "playback-seek-fill absolute left-0 top-2 h-1 bg-white/90 rounded-full pointer-events-none",
+                        style: "width: {volume_percent}%;"
                     }
                     div {
                         class: if cfg!(target_os = "android") {
-                            "absolute bg-white rounded-full pointer-events-none"
+                            "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none"
                         } else {
-                            "absolute bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+                            "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
                         },
-                        style: "width: 12px; height: 12px; top: 4px; left: calc({volume_percent}% - 6px);"
+                        style: "left: calc({volume_percent}% - 6px);"
                     }
                     input {
                         r#type: "range",

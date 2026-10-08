@@ -24,6 +24,15 @@
     --md-sys-color-error: var(--color-red-400);
     --md-sys-color-shadow: #000000;
 
+    /* Secondary copy is written as Tailwind slate, which is blue-grey under
+       the fixed themes; read it as the neutral variant roles instead. System
+       colors sets these from its own scheme (a more specific selector). */
+    --color-slate-300: var(--md-sys-color-on-surface-variant);
+    --color-slate-400: var(--md-sys-color-on-surface-variant);
+    --color-slate-500: var(--md-sys-color-on-surface-variant);
+    --color-slate-600: var(--md-sys-color-outline);
+    --color-slate-700: var(--md-sys-color-outline-variant);
+
     --md-sys-shape-corner-extra-small: 4px;
     --md-sys-shape-corner-small: 8px;
     --md-sys-shape-corner-medium: 12px;
@@ -399,6 +408,18 @@
     right: -1px;
 }
 
+/* Body small, with tabular figures so the time doesn't jitter. */
+[data-ui-style="material3"] .playback-time {
+    width: auto;
+    min-width: 40px;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 16px;
+    letter-spacing: 0.4px;
+    font-variant-numeric: tabular-nums;
+    color: var(--md-sys-color-on-surface-variant);
+}
+
 [data-ui-style="material3"] .slider-hit {
     height: 32px;
     top: 50%;
@@ -542,6 +563,13 @@
     background: transparent;
 }
 
+/* A row isn't itself interactive, only its control, so it takes no state
+   layer. The base rule is !important; without this the hover fill matches
+   the outline of any card inside the row and the outline vanishes. */
+[data-ui-style="material3"] .settings-row:hover {
+    background: transparent !important;
+}
+
 [data-ui-style="material3"] .settings-category-content {
     scroll-margin-top: 80px;
 }
@@ -678,6 +706,9 @@
     width: 40px;
     height: 40px;
     padding: 0;
+    flex-shrink: 0;
+    background: transparent;
+    border: 0;
     border-radius: var(--md-sys-shape-corner-full);
     color: var(--md-sys-color-on-surface-variant);
 }
@@ -687,13 +718,54 @@
     background: color-mix(in srgb, var(--md-sys-color-on-surface-variant) var(--md-sys-state-hover-opacity), transparent);
 }
 
+/* A toggle icon button that is on: primary icon. */
+[data-ui-style="material3"] .app-icon-button[aria-pressed="true"] {
+    color: var(--md-sys-color-primary);
+}
+
+/* Outlined button: as the text button, plus a 1dp outline. */
+[data-ui-style="material3"] .app-button-outlined {
+    --md-button-label: var(--md-sys-color-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0 24px;
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-full);
+    color: var(--md-button-label);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    transition: background-color var(--md-sys-motion-duration-short) linear;
+}
+
+[data-ui-style="material3"] .app-button-outlined:hover {
+    background: color-mix(in srgb, var(--md-button-label) var(--md-sys-state-hover-opacity), transparent);
+    color: var(--md-button-label);
+}
+
+[data-ui-style="material3"] .app-button-outlined:active {
+    background: color-mix(in srgb, var(--md-button-label) var(--md-sys-state-pressed-opacity), transparent);
+}
+
+/* The markup sizes these icons inline. */
+[data-ui-style="material3"] :is(.app-button-filled, .app-button-tonal, .app-button-text, .app-button-outlined) > i {
+    font-size: 14px !important;
+}
+
 /* ── Segmented buttons ──────────────────────────────────────────────────── */
 /* 40dp, full shape, 1dp outline between and around segments; the selected
    segment is secondary container with a leading check. */
 
 [data-ui-style="material3"] .settings-toggle {
-    width: auto;
     min-width: 192px;
+}
+
+[data-ui-style="material3"] :is(.settings-toggle, .app-segmented) {
+    width: auto;
     height: 40px;
     padding: 0;
     gap: 0;
@@ -703,11 +775,11 @@
     background: transparent;
 }
 
-[data-ui-style="material3"] .settings-toggle > div {
+[data-ui-style="material3"] :is(.settings-toggle, .app-segmented) > div {
     display: none;
 }
 
-[data-ui-style="material3"] .settings-toggle button {
+[data-ui-style="material3"] :is(.settings-toggle, .app-segmented) button {
     height: 100%;
     padding-inline: 12px;
     white-space: nowrap;
@@ -719,15 +791,15 @@
     transition: background-color var(--md-sys-motion-duration-short) linear;
 }
 
-[data-ui-style="material3"] .settings-toggle button + button {
+[data-ui-style="material3"] :is(.settings-toggle, .app-segmented) button + button {
     border-inline-start: 1px solid var(--md-sys-color-outline);
 }
 
-[data-ui-style="material3"] .settings-toggle button:hover {
+[data-ui-style="material3"] :is(.settings-toggle, .app-segmented) button:hover {
     background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), transparent);
 }
 
-[data-ui-style="material3"] .settings-toggle button[aria-pressed="true"] {
+[data-ui-style="material3"] :is(.settings-toggle, .app-segmented) button[aria-pressed="true"] {
     background: var(--md-sys-color-secondary-container);
     color: var(--md-sys-color-on-secondary-container);
 }
@@ -739,6 +811,78 @@
     margin-inline-end: 8px;
 }
 
+[data-ui-style="material3"] .app-segmented button {
+    margin: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+/* Icon-only segments (grid / list): the icon stays, no check. */
+[data-ui-style="material3"] .app-segmented-icons button {
+    width: 48px;
+}
+
+[data-ui-style="material3"] .app-segmented-icons button[aria-pressed="true"]::before {
+    content: none;
+}
+
+/* The markup sizes these icons inline. */
+[data-ui-style="material3"] .app-segmented-icons button > i {
+    font-size: 16px !important;
+}
+
+/* ── Chips ──────────────────────────────────────────────────────────────── */
+/* Assist / filter chips: 32dp, small corners, 1dp outline variant, label
+   large. A selected filter chip fills with secondary container and drops the
+   outline. */
+
+[data-ui-style="material3"] .app-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 16px;
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-small);
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    transition: background-color var(--md-sys-motion-duration-short) linear;
+}
+
+/* Leading icon in primary; the markup sizes it inline. */
+[data-ui-style="material3"] .app-chip > i {
+    color: var(--md-sys-color-primary);
+    font-size: 14px !important;
+}
+
+[data-ui-style="material3"] .app-chip:hover {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface-variant) var(--md-sys-state-hover-opacity), transparent);
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+[data-ui-style="material3"] .app-chip[aria-pressed="true"] {
+    background: var(--md-sys-color-secondary-container);
+    border-color: transparent;
+    color: var(--md-sys-color-on-secondary-container);
+}
+
+[data-ui-style="material3"] .app-chip[aria-pressed="true"]::before {
+    content: "\f00c";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    font-size: 12px;
+}
+
+[data-ui-style="material3"] .app-chip:disabled {
+    opacity: 1;
+    border-color: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
+}
+
 /* ── Nested cards, list items and badges ───────────────────────────────── */
 /* Inside a filled card, a nested group is an outlined card: medium corners,
    1dp outline variant, no fill. List items carry no shape of their own. */
@@ -748,6 +892,27 @@
     border: 1px solid var(--md-sys-color-outline-variant);
     border-radius: var(--md-sys-shape-corner-medium);
     padding: 16px;
+}
+
+/* A card that is one row of controls (Customize Home) keeps its height. */
+[data-ui-style="material3"] .app-card.app-card-row {
+    padding: 4px 4px 4px 16px;
+}
+
+/* Section headings in a page: title small, no caps (colour is set inline). */
+[data-ui-style="material3"] .app-section-label {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    text-transform: none;
+    color: var(--md-sys-color-on-surface-variant) !important;
+}
+
+/* Linear progress: 4dp, primary on secondary container. */
+[data-ui-style="material3"] .app-progress-track {
+    height: 4px;
+    background: var(--md-sys-color-secondary-container);
 }
 
 [data-ui-style="material3"] .app-list-item {
@@ -943,6 +1108,44 @@
     border-radius: var(--md-sys-shape-corner-extra-small);
     color: var(--md-sys-color-on-surface);
     box-shadow: var(--md-sys-elevation-level2);
+}
+
+/* Free-standing menus (the sort editor). */
+[data-ui-style="material3"] .app-menu {
+    padding: 8px 12px;
+    background: var(--md-sys-color-surface-container);
+    border: 0;
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    color: var(--md-sys-color-on-surface);
+    box-shadow: var(--md-sys-elevation-level2);
+}
+
+/* Label small. */
+[data-ui-style="material3"] .app-menu-label {
+    width: auto;
+    min-width: 40px;
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    text-transform: none;
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+/* A native <select> inside a menu: a 40dp outlined field. */
+[data-ui-style="material3"] .app-native-select {
+    height: 40px;
+    padding-inline: 12px;
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    color: var(--md-sys-color-on-surface);
+    font-size: 14px;
+}
+
+[data-ui-style="material3"] .app-native-select:focus {
+    border-color: var(--md-sys-color-primary);
+    box-shadow: inset 0 0 0 1px var(--md-sys-color-primary);
 }
 
 [data-ui-style="material3"] .app-select-option {
