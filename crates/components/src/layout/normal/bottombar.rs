@@ -69,7 +69,7 @@ pub fn BottombarNormal(
             div {
                 // The tab bar underneath owns the bottom safe area; the pill
                 // only needs to clear it.
-                class: "player-bar player-bar-mobile shrink-0 mx-2 mb-2 h-[68px] bg-[#121212]/95 backdrop-blur-3xl border border-white/10 rounded-[24px] flex items-center px-3 gap-3 relative overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.8)]",
+                class: "player-bar player-bar-mobile shrink-0 mx-2 mb-2 h-[68px] bg-(--surface-chrome-raised)/95 backdrop-blur-3xl border border-white/10 rounded-[24px] flex items-center px-3 gap-3 relative overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.8)]",
                 onclick: move |_| is_fullscreen.set(true),
                 ontouchstart: move |evt| bar_swipe.start(&evt),
                 ontouchmove: move |evt| bar_swipe.update(&evt),

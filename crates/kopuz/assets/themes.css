@@ -18,6 +18,18 @@
     --color-neutral-900: #171717;
 }
 
+/* Chrome that carries `text-white` copy. Mixed from the theme's base and raised
+   colours rather than fixed hex, so a light theme (or System colors in a light
+   appearance) lightens the surface along with darkening its text. Declared on
+   #app-root, the element that carries the theme class, so they resolve against
+   the active theme; under the default theme they are the #0a0a0a, #121212 and
+   #262626 they replace. */
+#app-root {
+    --surface-chrome: color-mix(in srgb, var(--color-neutral-900, #171717) 43%, var(--color-black, #000000));
+    --surface-chrome-raised: color-mix(in srgb, var(--color-neutral-900, #171717) 78%, var(--color-black, #000000));
+    --surface-field: color-mix(in srgb, var(--color-white, #ffffff) 6%, var(--color-neutral-900, #171717));
+}
+
 /* AMOLED pure black — on OLED panels every lit pixel costs battery, so the
    base and every elevated surface collapse to true #000 and the heavy backdrop
    blurs are dropped (they keep the GPU busy for no visible gain over black).

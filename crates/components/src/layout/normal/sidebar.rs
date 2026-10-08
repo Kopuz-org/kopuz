@@ -208,7 +208,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let order_len = config.read().sidebar_order.len();
 
     let root_class = if is_android {
-        "h-full bg-[#0a0a0a]/97 text-slate-400 flex flex-col flex-shrink-0 select-none relative border-r border-white/10 overflow-hidden transition-all duration-300 ease-out".to_string()
+        "h-full bg-(--surface-chrome)/97 text-slate-400 flex flex-col flex-shrink-0 select-none relative border-r border-white/10 overflow-hidden transition-all duration-300 ease-out".to_string()
     } else {
         format!(
             "h-full bg-black/40 text-slate-400 flex flex-col flex-shrink-0 select-none relative {border_side} border-white/5 {extra_padding}"

@@ -20,6 +20,23 @@ fn tonal_roles(seed: Argb, dark: bool) -> BTreeMap<String, Argb> {
         .collect()
 }
 
+/// The `--color-*` vars every theme sets, and the Material role each takes.
+const THEME_VARS: &[(&str, &str)] = &[
+    ("black", "surface"),
+    ("white", "on_surface"),
+    ("slate-400", "on_surface_variant"),
+    ("slate-500", "on_surface_variant"),
+    ("green-500", "primary"),
+    ("indigo-400", "primary"),
+    ("indigo-500", "primary"),
+    ("indigo-600", "primary"),
+    ("indigo-900", "primary_container"),
+    ("purple-600", "tertiary"),
+    ("purple-700", "tertiary_container"),
+    ("red-400", "error"),
+    ("neutral-900", "surface_container"),
+];
+
 fn color_css(roles: &BTreeMap<String, Argb>, dark: bool) -> String {
     let mut css = format!(
         "{SELECTOR} {{ color-scheme: {};",
@@ -31,22 +48,8 @@ fn color_css(roles: &BTreeMap<String, Argb>, dark: bool) -> String {
             name.replace('_', "-")
         ));
     }
-    for (variable, role) in [
-        ("black", "surface"),
-        ("white", "on_surface"),
-        ("slate-400", "on_surface_variant"),
-        ("slate-500", "on_surface_variant"),
-        ("green-500", "primary"),
-        ("indigo-400", "primary"),
-        ("indigo-500", "primary"),
-        ("indigo-600", "primary"),
-        ("indigo-900", "primary_container"),
-        ("purple-600", "tertiary"),
-        ("purple-700", "tertiary_container"),
-        ("red-400", "error"),
-        ("neutral-900", "surface_container"),
-    ] {
-        if let Some(color) = roles.get(role) {
+    for (variable, role) in THEME_VARS {
+        if let Some(color) = roles.get(*role) {
             css.push_str(&format!("--color-{variable}: {color};"));
         }
     }
@@ -136,6 +139,100 @@ mod tests {
             }
         };
         0.2126 * linear(color.red) + 0.7152 * linear(color.green) + 0.0722 * linear(color.blue)
+    }
+
+    fn contrast(a: Argb, b: Argb) -> f64 {
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// `--surface-*: color-mix(in srgb, var(--color-A, …) P%, var(--color-B, …))`
+    /// from themes.css, as (name, A, P, B).
+    fn surface_tokens() -> Vec<(String, String, f64, String)> {
+        include_str!("../../assets/themes.css")
+            .lines()
+            .filter_map(|line| {
+                let (name, mix) = line.trim().strip_prefix("--surface-")?.split_once(':')?;
+                let (_, rest) = mix.split_once("var(--color-")?;
+                let (first, rest) = rest.split_once(',')?;
+                let (_, rest) = rest.split_once(") ")?;
+                let (percent, rest) = rest.split_once('%')?;
+                let (_, rest) = rest.split_once("var(--color-")?;
+                let (second, _) = rest.split_once(',')?;
+                Some((
+                    name.to_string(),
+                    first.to_string(),
+                    percent.parse().ok()?,
+                    second.to_string(),
+                ))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn chrome_surfaces_keep_their_text_readable_in_both_appearances() {
+        let tokens = surface_tokens();
+        assert_eq!(tokens.len(), 3, "{tokens:?}");
+        let role_of = |var: &str| {
+            THEME_VARS
+                .iter()
+                .find(|(name, _)| *name == var)
+                .map(|(_, role)| *role)
+                .unwrap_or_else(|| panic!("--color-{var} is not themed"))
+        };
+        for seed in [0xffd9842f, 0xff000000, 0xffffffff, 0xff006aff, 0xff00ff00] {
+            for dark in [false, true] {
+                let roles = tonal_roles(Argb::from_u32(seed), dark);
+                for (name, first, percent, second) in &tokens {
+                    let (a, b) = (roles[role_of(first)], roles[role_of(second)]);
+                    let mix = |x: u8, y: u8| {
+                        (f64::from(x) * percent / 100.0 + f64::from(y) * (1.0 - percent / 100.0))
+                            .round() as u8
+                    };
+                    let surface = Argb::new(
+                        255,
+                        mix(a.red, b.red),
+                        mix(a.green, b.green),
+                        mix(a.blue, b.blue),
+                    );
+                    for text in ["white", "slate-400"] {
+                        let ratio = contrast(surface, roles[role_of(text)]);
+                        assert!(
+                            ratio >= 4.5,
+                            "{seed:x} dark={dark} {name} {text}: {ratio:.2}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// A literal hex surface ignores the theme: under a light one, or System
+    /// colors in a light appearance, its `text-white` copy turns dark on dark.
+    #[test]
+    fn frontend_surfaces_take_their_colour_from_the_theme() {
+        fn walk(dir: &std::path::Path, hits: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, hits);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let source = std::fs::read_to_string(&path).unwrap();
+                    for (index, line) in source.lines().enumerate() {
+                        // Split so this test does not find itself.
+                        if line.contains(&["bg-[", "#"].concat()) {
+                            hits.push(format!("{}:{}", path.display(), index + 1));
+                        }
+                    }
+                }
+            }
+        }
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut hits = Vec::new();
+        for frontend in ["components", "pages", "kopuz"] {
+            walk(&crates.join(frontend).join("src"), &mut hits);
+        }
+        assert!(hits.is_empty(), "hardcoded surface colours: {hits:#?}");
     }
 
     #[test]

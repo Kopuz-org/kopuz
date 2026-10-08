@@ -26,7 +26,7 @@ struct CompactSkin {
 fn skin_for(style: UiStyle) -> CompactSkin {
     match style {
         UiStyle::Normal => CompactSkin {
-            container: "bg-[#0a0a0a]",
+            container: "bg-(--surface-chrome)",
             title: "text-[14px] font-bold text-white/95 truncate leading-tight",
             cover: "rounded-lg ring-1 ring-white/10 shadow-lg shadow-black/50",
             play_btn: "w-10 h-10 flex items-center justify-center rounded-full text-white hover:bg-white/10 transition-colors active:scale-95",

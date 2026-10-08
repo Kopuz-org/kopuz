@@ -124,7 +124,7 @@ pub fn SortControl<F: LibrarySortField + Eq + std::fmt::Debug + 'static>(
                                     }
 
                                     select {
-                                        class: "flex-1 min-w-0 bg-neutral-800 text-white text-xs rounded-md px-2 py-1.5 border border-white/10 focus:outline-none focus:border-white/30",
+                                        class: "flex-1 min-w-0 bg-(--surface-field) text-white text-xs rounded-md px-2 py-1.5 border border-white/10 focus:outline-none focus:border-white/30",
                                         value: "{selected_pos}",
                                         onchange: move |evt| {
                                             if let Ok(pos) = evt.value().parse::<usize>()

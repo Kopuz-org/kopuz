@@ -73,7 +73,7 @@ pub fn TabBar(current_route: Signal<Route>, on_navigate: EventHandler<Route>) ->
 
     rsx! {
         nav {
-            class: "app-tabbar shrink-0 flex items-stretch bg-[#0a0a0a]/95 backdrop-blur-3xl border-t border-white/10 pb-[env(safe-area-inset-bottom)]",
+            class: "app-tabbar shrink-0 flex items-stretch bg-(--surface-chrome)/95 backdrop-blur-3xl border-t border-white/10 pb-[env(safe-area-inset-bottom)]",
             dir: "ltr",
             for tab in TABS {
                 {
