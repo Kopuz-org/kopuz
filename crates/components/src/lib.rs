@@ -21,7 +21,7 @@ pub use layout::{
     bottombar, download_overlay, fullscreen, header, normal, rightbar, showcase, sidebar,
     stat_card, titlebar, vaxry,
 };
-pub use navigation::controller::{NavSnapshot, NavigationController};
+pub use navigation::controller::{CatalogPageRef, NavSnapshot, NavigationController};
 pub use navigation::{back_button, controller as navigation_controller, source_switcher, tabbar};
 pub use playback::compact::{CompactMode, CompactPlayer};
 pub use playback::cover_background::CoverArtBackground;

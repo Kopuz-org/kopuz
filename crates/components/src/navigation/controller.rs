@@ -9,6 +9,16 @@ pub struct NavSnapshot {
     pub playlist_id: Option<String>,
     pub discover_playlist_id: Option<String>,
     pub discover_playlist_title: Option<String>,
+    pub catalog_page: Option<CatalogPageRef>,
+}
+
+/// A page of the source's catalog, as whatever opened it named it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CatalogPageRef {
+    pub kind: api::CatalogItemKind,
+    pub id: String,
+    /// What to call the page until it answers with its own title.
+    pub title: String,
 }
 
 #[derive(Clone, Copy)]
@@ -20,6 +30,8 @@ pub struct NavigationController {
     pub selected_playlist_id: Signal<Option<String>>,
     pub discover_playlist_id: Signal<Option<String>>,
     pub discover_playlist_title: Signal<Option<String>>,
+    /// The page [`Route::Browse`] shows.
+    pub catalog_page: Signal<Option<CatalogPageRef>>,
     pub history: Signal<Vec<NavSnapshot>>,
     pub restoring: Signal<bool>,
 }
@@ -30,6 +42,13 @@ impl NavigationController {
         let mut route = self.current_route;
         selected.set(Some(artist));
         route.set(Route::Artist);
+    }
+
+    pub fn open_page(self, page: CatalogPageRef) {
+        let mut selected = self.catalog_page;
+        let mut route = self.current_route;
+        selected.set(Some(page));
+        route.set(Route::Browse);
     }
 
     pub fn navigate_to_album(self, id: String) {
@@ -59,6 +78,7 @@ impl NavigationController {
         let mut playlist = self.selected_playlist_id;
         let mut discover_playlist = self.discover_playlist_id;
         let mut discover_title = self.discover_playlist_title;
+        let mut catalog_page = self.catalog_page;
         restoring.set(true);
         history.write().clear();
         album.set(String::new());
@@ -66,7 +86,8 @@ impl NavigationController {
         playlist.set(None);
         discover_playlist.set(None);
         discover_title.set(None);
-        if *route.peek() == Route::DiscoverPlaylist {
+        catalog_page.set(None);
+        if matches!(*route.peek(), Route::DiscoverPlaylist | Route::Browse) {
             route.set(Route::Home);
         }
     }
@@ -83,12 +104,14 @@ impl NavigationController {
         let mut playlist = self.selected_playlist_id;
         let mut discover_playlist = self.discover_playlist_id;
         let mut discover_title = self.discover_playlist_title;
+        let mut catalog_page = self.catalog_page;
         restoring.set(true);
         album.set(prev.album_id);
         artist.set(prev.artist);
         playlist.set(prev.playlist_id);
         discover_playlist.set(prev.discover_playlist_id);
         discover_title.set(prev.discover_playlist_title);
+        catalog_page.set(prev.catalog_page);
         route.set(prev.route);
     }
 }

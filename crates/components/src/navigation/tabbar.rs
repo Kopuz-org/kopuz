@@ -53,7 +53,9 @@ pub fn is_tab_route(route: Route) -> bool {
 /// selected and the user unsure where they are.
 fn owning_tab(route: Route) -> Option<Route> {
     match route {
-        Route::Home | Route::Discover | Route::DiscoverPlaylist => Some(Route::Home),
+        Route::Home | Route::Discover | Route::DiscoverPlaylist | Route::Browse => {
+            Some(Route::Home)
+        }
         Route::Search => Some(Route::Search),
         Route::Library
         | Route::Album

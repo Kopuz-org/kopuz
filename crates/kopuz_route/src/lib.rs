@@ -6,6 +6,8 @@ pub enum Route {
     Home,
     Discover,
     DiscoverPlaylist,
+    /// One of the source's catalog pages, other than the one Discover opens on.
+    Browse,
     Search,
     Library,
     Album,
@@ -20,4 +22,14 @@ pub enum Route {
     Settings,
     #[cfg(not(target_os = "android"))]
     ThemeEditor,
+}
+
+impl Route {
+    /// The sidebar entry lit while this route is on screen.
+    pub fn sidebar_entry(self) -> Route {
+        match self {
+            Route::Browse => Route::Discover,
+            route => route,
+        }
+    }
 }
