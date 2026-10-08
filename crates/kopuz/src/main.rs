@@ -1620,32 +1620,32 @@ fn App() -> Element {
                             let has_image_background = config.read().cover_art_background
                                 || !config.read().custom_background_path.is_empty();
                             rsx! {
-                                div { class: if has_image_background { "shrink-0 z-[60] bg-black/30 backdrop-blur-xl border-b border-white/5 flex items-center h-11 px-3" } else { "shrink-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 flex items-center h-11 px-3 shadow-xl" },
+                                div { class: if has_image_background { "app-topbar shrink-0 z-[60] bg-black/30 backdrop-blur-xl border-b border-white/5 flex items-center h-11 px-3" } else { "app-topbar shrink-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 flex items-center h-11 px-3 shadow-xl" },
                                     if is_details {
                                         button {
-                                            class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
+                                            class: "app-icon-button w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
                                             aria_label: i18n::t("go_back"),
                                             onclick: move |_| nav_ctrl.go_back(),
                                             i { class: "fa-solid fa-arrow-left text-lg" }
                                         }
                                     } else if settings_title.is_some() {
                                         button {
-                                            class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
+                                            class: "app-icon-button w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
                                             aria_label: i18n::t("go_back"),
                                             onclick: move |_| settings_subpage.set(None),
                                             i { class: "fa-solid fa-arrow-left text-lg" }
                                         }
                                     } else {
                                         button {
-                                            class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
+                                            class: "app-icon-button w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
                                             onclick: move |_| is_sidebar_collapsed.toggle(),
                                             i { class: "fa-solid fa-bars text-lg" }
                                         }
                                     }
                                     div { class: "flex-1 flex justify-center pr-10",
                                         h2 {
-                                            class: "text-[13px] font-black tracking-[0.2em] text-white/90 uppercase",
-                                            style: "font-family: 'kopuz-custom-font', 'JetBrains Mono', monospace;",
+                                            class: "app-topbar-title text-[13px] font-black tracking-[0.2em] text-white/90 uppercase",
+                                            style: if config.read().ui_style != config::UiStyle::Material3 { "font-family: 'kopuz-custom-font', 'JetBrains Mono', monospace;" },
                                             "{page_title}"
                                         }
                                     }

@@ -355,7 +355,7 @@ pub fn FavoritesBody(
                                 }
                             }
                             button {
-                                class: "px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 transition-colors disabled:opacity-50",
+                                class: "app-button-tonal px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 transition-colors disabled:opacity-50",
                                 disabled: syncing,
                                 onclick: move |_| {
                                     hooks::jobs::start(hooks::JobKind::FavoritesSync);

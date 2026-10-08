@@ -220,6 +220,41 @@
     font-weight: 700;
 }
 
+/* ── Top app bar (Android) ──────────────────────────────────────────────── */
+/* Center-aligned small top app bar: 64dp on surface, title large; the
+   navigation icon is a standard icon button with a 48dp target. */
+
+[data-ui-style="material3"] .app-topbar {
+    height: 64px;
+    padding-inline: 4px;
+    background: var(--md-sys-color-surface);
+    border: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+[data-ui-style="material3"] .app-topbar .app-icon-button {
+    width: 48px;
+    height: 48px;
+    background: transparent;
+    border: 0;
+    color: var(--md-sys-color-on-surface);
+}
+
+/* Balances the 48dp navigation icon so the title stays centred. */
+[data-ui-style="material3"] .app-topbar > div:has(> .app-topbar-title) {
+    padding-right: 48px;
+}
+
+[data-ui-style="material3"] .app-topbar-title {
+    font-size: 22px;
+    line-height: 28px;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--md-sys-color-on-surface);
+}
+
 /* ── Player bar ─────────────────────────────────────────────────────────── */
 
 [data-ui-style="material3"] .player-bar {
@@ -371,6 +406,67 @@
 }
 
 [data-ui-style="material3"] .playback-slider:has(input:focus-visible) {
+    outline: 3px solid var(--md-sys-color-secondary);
+    outline-offset: 2px;
+}
+
+/* The full-screen seek bar is the same slider. It sits on the cover-art
+   backdrop, so the gaps beside the handle are clipped out of the track and
+   fill instead of painted over. */
+[data-ui-style="material3"] .playback-seek {
+    height: 44px;
+}
+
+[data-ui-style="material3"] :is(.playback-seek-track, .playback-seek-fill) {
+    top: 14px;
+    height: 16px;
+}
+
+[data-ui-style="material3"] .playback-seek-track {
+    background-color: var(--md-sys-color-secondary-container);
+    border-radius: 0;
+    clip-path: inset(0 0 0 min(calc(var(--seek-progress) + 8px), 100%) round 2px 8px 8px 2px);
+}
+
+[data-ui-style="material3"] .playback-seek-track + .playback-seek-track {
+    background-color: transparent;
+}
+
+[data-ui-style="material3"] .playback-seek::after {
+    content: "";
+    position: absolute;
+    right: 6px;
+    top: 20px;
+    width: 4px;
+    height: 4px;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: var(--md-sys-color-primary);
+    pointer-events: none;
+}
+
+[data-ui-style="material3"] .playback-seek-fill {
+    background: var(--md-sys-color-primary);
+    border-radius: 0;
+    clip-path: inset(0 8px 0 0 round 8px 2px 2px 8px);
+}
+
+[data-ui-style="material3"] .playback-seek-handle {
+    top: 0;
+    width: 4px;
+    height: 44px;
+    margin-left: 4px;
+    border-radius: 2px;
+    background: var(--md-sys-color-primary);
+    opacity: 1;
+    transition: width var(--md-sys-motion-duration-short) linear;
+}
+
+[data-ui-style="material3"] .playback-seek:active .playback-seek-handle {
+    width: 2px;
+    margin-left: 5px;
+}
+
+[data-ui-style="material3"] .playback-seek:has(input:focus-visible) {
     outline: 3px solid var(--md-sys-color-secondary);
     outline-offset: 2px;
 }

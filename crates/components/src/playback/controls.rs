@@ -344,15 +344,10 @@ pub fn SeekSlider(
                     class: "flex items-center gap-3",
                     span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{fmt_time(display_progress)}" }
                     div {
-                        class: format!("flex-1 {} relative group", if can_seek { "cursor-pointer" } else { "" }),
-                        style: "height: 20px;",
-                        div {
-                            class: "absolute bg-white/20 rounded-full",
-                            style: "height: 4px; top: 8px; left: 0; right: 0;"
-                        }
-                        div {
-                            class: "absolute overflow-hidden rounded-full",
-                            style: "height: 4px; top: 8px; left: 0; right: 0;",
+                        class: format!("playback-seek flex-1 h-5 {} relative group", if can_seek { "cursor-pointer" } else { "" }),
+                        style: "--seek-progress: {progress_percent}%;",
+                        div { class: "playback-seek-track absolute inset-x-0 top-2 h-1 bg-white/20 rounded-full" }
+                        div { class: "playback-seek-track absolute inset-x-0 top-2 h-1 overflow-hidden rounded-full",
                             PlaybackBufferIndicator {
                                 ranges: buffered_ranges.clone(),
                                 played_percent: progress_percent,
@@ -360,17 +355,17 @@ pub fn SeekSlider(
                             }
                         }
                         div {
-                            class: "absolute rounded-full pointer-events-none bg-white/90",
-                            style: "height: 4px; top: 8px; left: 0; width: {progress_percent}%;"
+                            class: "playback-seek-fill absolute left-0 top-2 h-1 rounded-full pointer-events-none bg-white/90",
+                            style: "width: {progress_percent}%;"
                         }
                         if !is_loading {
                             div {
                                 class: if cfg!(target_os = "android") {
-                                    "absolute bg-white rounded-full pointer-events-none"
+                                    "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none"
                                 } else {
-                                    "absolute bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+                                    "playback-seek-handle absolute top-1 w-3 h-3 bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
                                 },
-                                style: "width: 12px; height: 12px; top: 4px; left: calc({progress_percent}% - 6px);"
+                                style: "left: calc({progress_percent}% - 6px);"
                             }
                         }
                         input {
