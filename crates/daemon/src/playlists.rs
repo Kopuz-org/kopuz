@@ -190,10 +190,12 @@ impl PlaylistService {
     }
 
     pub async fn delete(&self, id: &str) -> Result<(), ApiError> {
-        self.active_source()
-            .delete_playlist(id)
+        let source = self.active_source();
+        source
+            .delete_remote_playlist(id)
             .await
             .map_err(source_error)?;
+        source.delete_playlist(id).await.map_err(source_error)?;
         self.session.invalidate(Table::Playlists);
         // A deleted playlist leaves every folder that held it.
         self.session.invalidate(Table::Folders);

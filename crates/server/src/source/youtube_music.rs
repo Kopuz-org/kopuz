@@ -141,6 +141,28 @@ impl MediaSource for YtSource {
             .await?)
     }
 
+    /// A playlist the account owns is deleted; one it saved is taken out of
+    /// the library, which is all a delete can mean for someone else's.
+    async fn delete_remote_playlist(&self, playlist_id: &str) -> Result<(), SourceError> {
+        if playlist_id == LIKED_MUSIC_ID || !self.client.is_authenticated() {
+            return Ok(());
+        }
+        let (_, _, header) = self.client.playlist_page(playlist_id, None).await?;
+        // Only an owned playlist's header carries a privacy. Without a header
+        // there is no telling, and guessing wrong leaves it on YouTube.
+        let header = header.ok_or_else(|| {
+            SourceError::Backend("YouTube Music sent no header for the playlist".into())
+        })?;
+        if header.privacy.is_some() {
+            self.client.delete_playlist(playlist_id).await?;
+        } else {
+            self.client
+                .save(&crate::ytmusic::actions::playlist_ref(playlist_id), false)
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn dont_recommend(&self, item_id: &str) -> Result<(), SourceError> {
         if item_id.trim().is_empty() {
             return Err(SourceError::InvalidInput("track has no video id".into()));

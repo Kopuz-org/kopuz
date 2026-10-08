@@ -238,6 +238,11 @@ impl YouTubeMusicClient {
         mutations::edit_playlist(playlist_id, name, description, privacy, cookies).await
     }
 
+    pub async fn delete_playlist(&self, playlist_id: &str) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        mutations::delete_playlist(playlist_id, cookies).await
+    }
+
     /// Stream the user's full Liked Music playlist page by page. The
     /// callback fires once per ~100-track batch as soon as it arrives,
     /// so the UI can populate incrementally instead of waiting for the
