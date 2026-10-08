@@ -4,7 +4,13 @@ use std::collections::BTreeMap;
 
 use config::AppConfig;
 use dioxus::prelude::*;
-use material_colors::{color::Argb, hct::Hct, scheme::Scheme, scheme::variant::SchemeTonalSpot};
+use material_colors::{
+    color::Argb,
+    dynamic_color::DynamicScheme,
+    hct::Hct,
+    scheme::Scheme,
+    scheme::variant::{SchemeContent, SchemeMonochrome, SchemeTonalSpot},
+};
 use utils::color::Color;
 
 #[cfg(any(target_os = "android", test))]
@@ -14,10 +20,31 @@ mod desktop;
 
 const SELECTOR: &str = ".theme-system[data-ui-style]";
 
-fn tonal_roles(seed: Argb, dark: bool) -> BTreeMap<String, Argb> {
-    Scheme::from(SchemeTonalSpot::new(Hct::new(seed), dark, Some(0.0)).scheme)
+/// The default theme's copper, for when there is no wallpaper or artwork.
+const DEFAULT_SEED: Argb = Argb::from_u32(0xffd9842f);
+
+type Variant = fn(Hct, bool) -> DynamicScheme;
+
+fn tonal_spot(seed: Hct, dark: bool) -> DynamicScheme {
+    SchemeTonalSpot::new(seed, dark, Some(0.0)).scheme
+}
+
+fn content(seed: Hct, dark: bool) -> DynamicScheme {
+    SchemeContent::new(seed, dark, Some(0.0)).scheme
+}
+
+fn monochrome(seed: Hct, dark: bool) -> DynamicScheme {
+    SchemeMonochrome::new(seed, dark, Some(0.0)).scheme
+}
+
+fn roles(seed: Argb, variant: Variant, dark: bool) -> BTreeMap<String, Argb> {
+    Scheme::from(variant(Hct::new(seed), dark))
         .into_iter()
         .collect()
+}
+
+fn tonal_roles(seed: Argb, dark: bool) -> BTreeMap<String, Argb> {
+    roles(seed, tonal_spot, dark)
 }
 
 /// The `--color-*` vars every theme sets, and the Material role each takes.
@@ -57,12 +84,37 @@ fn color_css(roles: &BTreeMap<String, Argb>, dark: bool) -> String {
     css
 }
 
-fn tonal_css(seed: Argb) -> String {
+fn scheme_css(seed: Argb, variant: Variant) -> String {
     format!(
         "{} @media (prefers-color-scheme: dark) {{ {} }}",
-        color_css(&tonal_roles(seed, false), false),
-        color_css(&tonal_roles(seed, true), true),
+        color_css(&roles(seed, variant, false), false),
+        color_css(&roles(seed, variant, true), true),
     )
+}
+
+fn tonal_css(seed: Argb) -> String {
+    scheme_css(seed, tonal_spot)
+}
+
+/// Below this HCT chroma a palette colour is grey, and its hue is noise.
+const MIN_SEED_CHROMA: f64 = 15.0;
+
+/// Album art is content colour, so it takes Material's content scheme, which
+/// keeps the cover's own chroma instead of TonalSpot's fixed one. The seed is
+/// the most common colour that has a hue at all; a cover with none (black and
+/// white art) gets a neutral scheme rather than a hue invented from grey.
+fn artwork_css(colors: &[Color]) -> String {
+    match artwork_seed(colors) {
+        Some(seed) => scheme_css(seed, content),
+        None => scheme_css(colors.first().map_or(DEFAULT_SEED, argb), monochrome),
+    }
+}
+
+fn artwork_seed(colors: &[Color]) -> Option<Argb> {
+    colors
+        .iter()
+        .map(argb)
+        .find(|color| Hct::new(*color).get_chroma() >= MIN_SEED_CHROMA)
 }
 
 fn argb(color: &Color) -> Argb {
@@ -115,14 +167,13 @@ pub fn SystemColors(config: Signal<AppConfig>, artwork: Signal<Option<Vec<Color>
         if !enabled() {
             return String::new();
         }
-        system_css.read().clone().unwrap_or_else(|| {
-            let seed = artwork
-                .read()
-                .as_ref()
-                .and_then(|colors| colors.first())
-                .map_or(Argb::from_u32(0xffd9842f), argb);
-            tonal_css(seed)
-        })
+        system_css
+            .read()
+            .clone()
+            .unwrap_or_else(|| match artwork.read().as_deref() {
+                Some(colors) if !colors.is_empty() => artwork_css(colors),
+                _ => tonal_css(DEFAULT_SEED),
+            })
     });
     rsx! { style { id: "system-colors", "{css}" } }
 }
@@ -238,10 +289,28 @@ mod tests {
     }
 
     #[test]
+    fn grey_artwork_gets_no_invented_hue() {
+        let grey = [
+            Color::new(4, 4, 4),
+            Color::new(240, 240, 240),
+            Color::new(90, 92, 95),
+        ];
+        assert_eq!(artwork_seed(&grey), None);
+
+        let red = Color::new(200, 30, 40);
+        let dark_with_red = [Color::new(8, 8, 8), Color::new(250, 250, 250), red.clone()];
+        assert_eq!(artwork_seed(&dark_with_red), Some(argb(&red)));
+    }
+
+    #[test]
     fn dynamic_roles_keep_text_readable_in_both_appearances() {
-        for seed in [0xffd9842f, 0xff000000, 0xffffffff, 0xff006aff, 0xff00ff00] {
+        let variants: [Variant; 3] = [tonal_spot, content, monochrome];
+        for (seed, variant) in [0xffd9842f, 0xff000000, 0xffffffff, 0xff006aff, 0xff00ff00]
+            .into_iter()
+            .flat_map(|seed| variants.map(|variant| (seed, variant)))
+        {
             for dark in [false, true] {
-                let roles = tonal_roles(Argb::from_u32(seed), dark);
+                let roles = roles(Argb::from_u32(seed), variant, dark);
                 for (background, foreground) in [
                     ("surface", "on_surface"),
                     ("surface_container", "on_surface"),
