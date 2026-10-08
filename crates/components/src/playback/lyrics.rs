@@ -338,6 +338,7 @@ fn build_display_lines(
     let mut gaps: Vec<(usize, f64, f64)> = Vec::new();
 
     if let Some(&first) = main.first()
+        && lines[first].start_time.is_finite()
         && lines[first].start_time >= LYRIC_INTERLUDE_MIN_SECONDS
     {
         gaps.push((first, 0.0, lines[first].start_time));
@@ -345,14 +346,21 @@ fn build_display_lines(
 
     for pair in main.windows(2) {
         let (current, next) = (pair[0], pair[1]);
+        let current_start = lines[current].start_time;
         let next_start = lines[next].start_time;
+        // Provider rows can overlap or arrive out of timestamp order. Only a
+        // finite, forward interval can contain an instrumental gap; keep the
+        // original row order so background-parent references remain valid.
+        if !current_start.is_finite() || !next_start.is_finite() || next_start <= current_start {
+            continue;
+        }
         // Background lines sit after their parent in the list and can outlast
         // it, so the gap starts once every line in the run has finished.
         let gap_start = lines[current..next]
             .iter()
             .map(line_end_estimate)
             .fold(f64::NEG_INFINITY, f64::max)
-            .clamp(lines[current].start_time, next_start);
+            .clamp(current_start, next_start);
         if next_start - gap_start >= LYRIC_INTERLUDE_MIN_SECONDS {
             gaps.push((next, gap_start, next_start));
         }
@@ -1266,6 +1274,45 @@ mod tests {
 
         assert_eq!(display, lines);
         assert_eq!(interludes, vec![false, false]);
+    }
+
+    #[test]
+    fn reversed_starts_preserve_lyrics_and_allow_later_interludes() {
+        let lines = vec![
+            line(0.0, Some(64.766)),
+            line(64.766, Some(65.0)),
+            background_line(64.8, Some(65.5), 1),
+            line(64.762, Some(66.0)),
+            line(90.0, Some(92.0)),
+        ];
+
+        let (display, interludes) = build_display_lines(&lines);
+
+        assert_eq!(&display[..4], &lines[..4]);
+        assert_eq!(interludes, vec![false, false, false, false, true, false]);
+        assert_eq!(display[4].start_time, 66.0);
+        assert_eq!(display[4].end_time, Some(90.0));
+        assert_eq!(display[5], lines[4]);
+    }
+
+    #[test]
+    fn non_finite_or_equal_starts_do_not_create_interludes() {
+        for (start, next) in [
+            (f64::NAN, 1.0),
+            (0.0, f64::NAN),
+            (f64::INFINITY, 1.0),
+            (0.0, f64::INFINITY),
+            (f64::NEG_INFINITY, 1.0),
+            (0.0, f64::NEG_INFINITY),
+            (1.0, 1.0),
+        ] {
+            let lines = vec![line(start, None), line(next, None)];
+
+            let (display, interludes) = build_display_lines(&lines);
+
+            assert_eq!(display.len(), 2);
+            assert_eq!(interludes, vec![false, false]);
+        }
     }
 
     #[test]
