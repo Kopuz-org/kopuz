@@ -52,7 +52,7 @@ const CUSTOM: &str = "__custom";
 
 const TEXT_INPUT: &str =
     "bg-transparent w-full px-3 py-2 text-sm text-white placeholder:text-white/50 outline-none";
-const TEXT_WRAP: &str = "flex-1 bg-white/5 p-1 rounded-xl border border-white/5";
+const TEXT_WRAP: &str = "app-text-field flex-1 bg-white/5 p-1 rounded-xl border border-white/5";
 /// Render a published field list. `values` holds every answer so far, and
 /// `on_change` is called with each one as it is edited.
 #[component]
@@ -307,7 +307,7 @@ fn Field(
 fn DirectoryButton(on_pick: EventHandler<String>) -> Element {
     rsx! {
         button {
-            class: "bg-white/10 hover:bg-white/20 px-3 py-2 rounded-xl text-sm text-white transition-colors shrink-0",
+            class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-2 rounded-xl text-sm text-white transition-colors shrink-0",
             onclick: move |_| {
                 spawn(async move {
                     if let Some(handle) = rfd::AsyncFileDialog::new().pick_folder().await {

@@ -38,7 +38,7 @@ fn BuildInfoCard() -> Element {
             }
             button {
                 r#type: "button",
-                class: "p-2 rounded text-white/35 hover:text-white hover:bg-white/10 transition-colors shrink-0",
+                class: "app-icon-button p-2 rounded text-white/35 hover:text-white hover:bg-white/10 transition-colors shrink-0",
                 title: "{build_summary}",
                 aria_label: "{build_summary}",
                 onclick: move |_| {
@@ -412,7 +412,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                                 step: "5",
                                                 value: format!("{}", config.read().cover_art_darkening),
                                                 class: "w-40",
-                                                style: "accent-color: var(--color-indigo-500);",
+                                                style: components::settings::items::range_style(f64::from(config.read().cover_art_darkening), 0.0, 95.0),
                                                 oninput: move |evt| {
                                                     if let Ok(value) = evt.value().parse::<u8>() {
                                                         config.write().cover_art_darkening = value.min(95);
@@ -439,7 +439,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                                 step: "5",
                                                 value: format!("{}", config.read().cover_art_blur),
                                                 class: "w-40",
-                                                style: "accent-color: var(--color-indigo-500);",
+                                                style: components::settings::items::range_style(f64::from(config.read().cover_art_blur), 0.0, 100.0),
                                                 oninput: move |evt| {
                                                     if let Ok(value) = evt.value().parse::<u8>() {
                                                         config.write().cover_art_blur = value.min(100);
@@ -480,7 +480,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                             step: "10",
                                             value: format!("{}", config.read().lyrics_depth_blur_strength),
                                             class: "w-40",
-                                            style: "accent-color: var(--color-indigo-500);",
+                                            style: components::settings::items::range_style(f64::from(config.read().lyrics_depth_blur_strength), 10.0, 200.0),
                                             oninput: move |evt| {
                                                 if let Ok(value) = evt.value().parse::<u8>() {
                                                     config.write().lyrics_depth_blur_strength = value.clamp(10, 200);

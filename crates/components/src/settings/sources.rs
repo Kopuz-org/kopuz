@@ -59,7 +59,7 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
                     }
                 });
             },
-            class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
+            class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
             "{add_text}"
         }
     }
@@ -95,7 +95,7 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
                     }
                 });
             },
-            class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
+            class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
             "{add_text}"
         }
     }
@@ -151,13 +151,13 @@ pub fn SourceSettings(
                     let needs_host = srv.capabilities.browser_playback && !host_access;
                     rsx! {
                         div { key: "{srv.id}",
-                            class: "flex flex-col gap-2 bg-white/5 p-2 rounded min-w-0 w-full",
+                            class: "app-card flex flex-col gap-2 bg-white/5 p-2 rounded min-w-0 w-full",
                             div { class: "flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4 w-full",
                             div { class: "min-w-0 w-full flex-1",
                                 div { class: "flex flex-wrap items-center gap-2",
                                     p { class: "min-w-0 text-sm font-medium text-white break-words", "{srv.name}" }
                                     if is_active {
-                                        span { class: "shrink-0 text-[10px] px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
+                                        span { class: "app-badge shrink-0 text-[10px] px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
                                             "{active_text}"
                                         }
                                     }
@@ -177,7 +177,7 @@ pub fn SourceSettings(
                                                 p { class: "text-xs", style: "color:#e5534b", "{i18n::t(\"disconnected\")}" }
                                                 button {
                                                     onclick: move |_| on_login.call(()),
-                                                    class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-white transition-colors",
+                                                    class: "app-button-tonal text-xs bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-white transition-colors",
                                                     "{login_text}"
                                                 }
                                             }
@@ -189,14 +189,14 @@ pub fn SourceSettings(
                                 if !is_active {
                                     button {
                                         onclick: move |_| on_switch.call(id_switch.clone()),
-                                        class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
+                                        class: "app-button-tonal text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
                                         "{switch_text}"
                                     }
                                 }
                                 if !srv.permanent {
                                     button {
                                         onclick: move |_| on_delete.call(id_delete.clone()),
-                                        class: "text-red-400 hover:text-red-300 text-sm px-2 py-1 transition-colors",
+                                        class: "app-button-text app-button-danger text-red-400 hover:text-red-300 text-sm px-2 py-1 transition-colors",
                                         "{delete_text}"
                                     }
                                 }
@@ -233,7 +233,7 @@ pub fn SourceSettings(
             }
             button {
                 onclick: move |_| on_add.call(()),
-                class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
+                class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
                 "{i18n::t(\"add_source\")}"
             }
         }

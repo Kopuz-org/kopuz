@@ -203,13 +203,14 @@ pub fn EqualizerPanel(
         div { class: "flex flex-col gap-4 min-w-0 w-full",
             div { class: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[12rem_15rem_minmax(16rem,1fr)] items-stretch gap-3",
                 div {
-                    class: "bg-white/5 p-1 rounded-xl flex relative min-h-10 items-center border border-white/5 w-full",
+                    class: "settings-toggle bg-white/5 p-1 rounded-xl flex relative min-h-10 items-center border border-white/5 w-full",
                     div {
                         class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
                         style: "{slider_style}"
                     }
                     button {
                         class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {enable_class}",
+                        aria_pressed: enabled,
                         onclick: move |_| {
                             let mut next = draft.peek().clone();
                             next.enabled = true;
@@ -221,6 +222,7 @@ pub fn EqualizerPanel(
                     }
                     button {
                         class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {disable_class}",
+                        aria_pressed: !enabled,
                         onclick: move |_| {
                             let mut next = draft.peek().clone();
                             next.enabled = false;
@@ -232,7 +234,7 @@ pub fn EqualizerPanel(
                     }
                 }
 
-                div { class: "flex min-w-0 items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2",
+                div { class: "app-card flex min-w-0 items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2",
                     span { class: "text-xs text-slate-400", "{i18n::t(\"eq_preset\")}" }
                     AppSelect {
                         class: "min-w-0 flex-1",
@@ -278,7 +280,7 @@ pub fn EqualizerPanel(
                     }
                 }
 
-                div { class: "flex min-w-0 items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 md:col-span-2 xl:col-span-1",
+                div { class: "app-card flex min-w-0 items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 md:col-span-2 xl:col-span-1",
                     div { class: "min-w-0",
                         p { class: "text-xs text-slate-400", "{i18n::t(\"eq_preamp\")}" }
                         p { class: "text-[11px] text-slate-500", "{i18n::t(\"eq_preamp_desc\")}" }
@@ -290,7 +292,7 @@ pub fn EqualizerPanel(
                         step: "0.5",
                         value: format!("{:.1}", draft.read().preamp_db),
                         class: "flex-1",
-                        style: "accent-color: var(--color-indigo-500);",
+                        style: super::range_style(f64::from(draft.read().preamp_db), -12.0, 6.0),
                         oninput: move |evt| {
                             if let Ok(value) = evt.value().parse::<f32>() {
                                 let mut next = draft.peek().clone();
@@ -315,7 +317,7 @@ pub fn EqualizerPanel(
             p { class: "text-xs text-slate-500", "{i18n::t(\"eq_graph_hint\")}" }
 
             div {
-                class: "rounded-lg border border-white/8 bg-white/5 p-4 select-none overflow-x-auto",
+                class: "app-card rounded-lg border border-white/8 bg-white/5 p-4 select-none overflow-x-auto",
                 style: "background: color-mix(in oklab, var(--color-neutral-900) 78%, transparent); border-color: color-mix(in oklab, var(--color-white) 8%, transparent);",
                 svg {
                     class: "{graph_class}",

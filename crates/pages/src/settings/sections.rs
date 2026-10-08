@@ -48,9 +48,9 @@ fn IntegrationRows(integration: api::IntegrationInfo, changed: Signal<u64>) -> E
                 control: rsx! {
                     button {
                         class: if integration.configured {
-                            "bg-green-500/20 text-green-300 px-3 py-2 rounded-xl text-sm transition-colors"
+                            "app-button-tonal bg-green-500/20 text-green-300 px-3 py-2 rounded-xl text-sm transition-colors"
                         } else {
-                            "bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-xl text-sm transition-colors"
+                            "app-button-tonal bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-xl text-sm transition-colors"
                         },
                         onclick: move |_| {
                             hooks::integrations::authenticate(connect_id.clone(), changed);
@@ -167,7 +167,7 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
                             value: "{lyrics_offset}",
                             disabled: lyrics_offset_auto,
                             class: "w-40",
-                            style: "accent-color: var(--color-indigo-500);",
+                            style: components::settings::items::range_style(f64::from(lyrics_offset), f64::from(-LYRICS_OFFSET_LIMIT_MS), f64::from(LYRICS_OFFSET_LIMIT_MS)),
                             oninput: move |evt| {
                                 if let Ok(value) = evt.value().parse::<i32>() {
                                     config.write().lyrics_offset_ms = value
@@ -209,7 +209,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                             step: "1",
                             value: format!("{}", config.read().crossfade_seconds),
                             class: "w-40",
-                            style: "accent-color: var(--color-indigo-500);",
+                            style: components::settings::items::range_style(f64::from(config.read().crossfade_seconds), 0.0, 12.0),
                             oninput: move |evt| {
                                 if let Ok(value) = evt.value().parse::<u8>() {
                                     config.write().crossfade_seconds = value.min(12);
@@ -237,7 +237,7 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                                 step: "1",
                                 value: format!("{}", (config.read().volume_scroll_step * 100.0).round() as i32),
                                 class: "w-40",
-                                style: "accent-color: var(--color-indigo-500);",
+                                style: components::settings::items::range_style(f64::from(config.read().volume_scroll_step) * 100.0, 1.0, 50.0),
                                 oninput: move |evt| {
                                     if let Ok(pct) = evt.value().parse::<i32>() {
                                         let clamped = pct.clamp(1, 50);

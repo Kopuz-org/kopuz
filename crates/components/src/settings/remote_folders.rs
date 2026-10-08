@@ -64,23 +64,23 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
             for (i , folder) in folders.iter().enumerate() {
                 div {
                     key: "{i}-{folder}",
-                    class: "flex items-center justify-between gap-3 bg-white/5 p-2 rounded w-full",
+                    class: "app-list-item flex items-center justify-between gap-3 bg-white/5 p-2 rounded w-full",
                     span { class: "text-xs text-slate-400 font-mono truncate flex-1", "{folder}" }
                     button {
                         onclick: move |_| on_remove.call(i),
-                        class: "text-red-400 hover:text-red-300 text-xs px-2 py-0.5 rounded transition-colors shrink-0",
+                        class: "app-button-text app-button-danger text-red-400 hover:text-red-300 text-xs px-2 py-0.5 rounded transition-colors shrink-0",
                         "{i18n::t(\"remove\")}"
                     }
                 }
             }
 
             if browsing() {
-                div { class: "flex flex-col gap-2 bg-white/5 p-2 rounded w-full",
+                div { class: "app-card flex flex-col gap-2 bg-white/5 p-2 rounded w-full",
                     div { class: "flex items-center gap-2",
                         button {
                             onclick: move |_| path.set(parent_dir(&path())),
                             disabled: path() == "/",
-                            class: "text-xs bg-white/10 hover:bg-white/20 disabled:opacity-40 px-2 py-1 rounded text-white transition-colors shrink-0",
+                            class: "app-button-tonal text-xs bg-white/10 hover:bg-white/20 disabled:opacity-40 px-2 py-1 rounded text-white transition-colors shrink-0",
                             "{i18n::t(\"parent_folder\")}"
                         }
                         span { class: "text-xs text-slate-400 font-mono truncate flex-1", "{path()}" }
@@ -119,12 +119,12 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
                                 on_add.call(path());
                                 browsing.set(false);
                             },
-                            class: "text-xs bg-indigo-500/70 hover:bg-indigo-500 px-2 py-1 rounded text-white transition-colors",
+                            class: "app-button-filled text-xs bg-indigo-500/70 hover:bg-indigo-500 px-2 py-1 rounded text-white transition-colors",
                             "{i18n::t(\"use_this_folder\")}"
                         }
                         button {
                             onclick: move |_| browsing.set(false),
-                            class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
+                            class: "app-button-text text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
                             "{i18n::t(\"cancel\")}"
                         }
                     }
@@ -135,7 +135,7 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
                         path.set("/".to_string());
                         browsing.set(true);
                     },
-                    class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
+                    class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
                     "{i18n::t(\"add_folder\")}"
                 }
             }

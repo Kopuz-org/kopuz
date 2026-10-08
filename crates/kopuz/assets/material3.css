@@ -534,6 +534,63 @@
     background: color-mix(in srgb, var(--md-button-label) var(--md-sys-state-pressed-opacity), var(--md-button-container));
 }
 
+/* Text button: 40dp, full shape, 12dp side padding, primary label. */
+[data-ui-style="material3"] .app-button-text {
+    --md-button-label: var(--md-sys-color-primary);
+    min-height: 40px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: transparent;
+    color: var(--md-button-label);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    transition: background-color var(--md-sys-motion-duration-short) linear;
+}
+
+[data-ui-style="material3"] .app-button-text.app-button-danger {
+    --md-button-label: var(--md-sys-color-error);
+}
+
+[data-ui-style="material3"] .app-button-text:hover {
+    background: color-mix(in srgb, var(--md-button-label) var(--md-sys-state-hover-opacity), transparent);
+}
+
+[data-ui-style="material3"] .app-button-text:active {
+    background: color-mix(in srgb, var(--md-button-label) var(--md-sys-state-pressed-opacity), transparent);
+}
+
+/* Disabled buttons: 38% label, 12% container, no state layer. */
+[data-ui-style="material3"] :is(.app-button-filled, .app-button-tonal, .app-button-text):disabled {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
+    opacity: 1;
+    cursor: default;
+}
+
+[data-ui-style="material3"] .app-button-text:disabled {
+    background: transparent;
+}
+
+/* Standard icon button: 40dp circle, on-surface-variant. */
+[data-ui-style="material3"] .app-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: var(--md-sys-shape-corner-full);
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+[data-ui-style="material3"] .app-icon-button:hover {
+    color: var(--md-sys-color-on-surface-variant);
+    background: color-mix(in srgb, var(--md-sys-color-on-surface-variant) var(--md-sys-state-hover-opacity), transparent);
+}
+
 /* ── Segmented buttons ──────────────────────────────────────────────────── */
 /* 40dp, full shape, 1dp outline between and around segments; the selected
    segment is secondary container with a leading check. */
@@ -584,6 +641,175 @@
     font-family: "Font Awesome 6 Free";
     font-weight: 900;
     margin-inline-end: 8px;
+}
+
+/* ── Nested cards, list items and badges ───────────────────────────────── */
+/* Inside a filled card, a nested group is an outlined card: medium corners,
+   1dp outline variant, no fill. List items carry no shape of their own. */
+
+[data-ui-style="material3"] .app-card {
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline-variant);
+    border-radius: var(--md-sys-shape-corner-medium);
+    padding: 16px;
+}
+
+[data-ui-style="material3"] .app-list-item {
+    background: transparent;
+    border-radius: var(--md-sys-shape-corner-small);
+    padding: 8px 12px;
+}
+
+[data-ui-style="material3"] .app-list-item:hover {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), transparent);
+}
+
+/* A status label reads as a large badge: 16dp, full shape, label small. */
+[data-ui-style="material3"] .app-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 16px;
+    padding: 0 6px;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+/* ── Settings sliders ──────────────────────────────────────────────────── */
+/* Same spec as the playback slider, on a native range input: the active
+   track is painted to --fill (set inline from the value), the handle is a
+   4x44dp bar with a 6dp gap in the colour underneath. */
+
+[data-ui-style="material3"] .settings-section {
+    --md-slider-gap: var(--md-sys-color-surface-container-highest);
+}
+
+[data-ui-style="material3"] input[type="range"][style*="--fill"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 44px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+}
+
+[data-ui-style="material3"] input[type="range"][style*="--fill"]::-webkit-slider-runnable-track {
+    height: 16px;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: linear-gradient(to right,
+        var(--md-sys-color-primary) 0 var(--fill),
+        var(--md-sys-color-secondary-container) var(--fill) 100%);
+}
+
+[data-ui-style="material3"][dir="rtl"] input[type="range"][style*="--fill"]::-webkit-slider-runnable-track {
+    background: linear-gradient(to left,
+        var(--md-sys-color-primary) 0 var(--fill),
+        var(--md-sys-color-secondary-container) var(--fill) 100%);
+}
+
+[data-ui-style="material3"] input[type="range"][style*="--fill"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 4px;
+    height: 44px;
+    margin-top: -14px;
+    border: 0;
+    border-radius: 2px;
+    background: var(--md-sys-color-primary);
+    box-shadow: 0 0 0 6px var(--md-slider-gap, var(--md-sys-color-surface-container-highest));
+}
+
+[data-ui-style="material3"] input[type="range"][style*="--fill"]:active::-webkit-slider-thumb {
+    width: 2px;
+}
+
+[data-ui-style="material3"] input[type="range"][style*="--fill"]:disabled {
+    opacity: 0.38;
+    cursor: default;
+}
+
+/* ── Dialogs ───────────────────────────────────────────────────────────── */
+/* Surface container high, extra-large corners, 24dp padding, headline small,
+   text-button actions, 32% scrim. */
+
+[data-ui-style="material3"] .overlay {
+    background-color: rgb(0 0 0 / 0.32);
+}
+
+[data-ui-style="material3"] .popup {
+    background: var(--md-sys-color-surface-container-high);
+    border: 0;
+    border-radius: var(--md-sys-shape-corner-extra-large);
+    padding: 24px;
+    min-width: 280px;
+    max-width: 560px;
+    box-shadow: var(--md-sys-elevation-level3);
+    color: var(--md-sys-color-on-surface);
+}
+
+[data-ui-style="material3"] .popup h2 {
+    font-size: 24px;
+    line-height: 32px;
+    font-weight: 400;
+    color: var(--md-sys-color-on-surface);
+}
+
+[data-ui-style="material3"] .popup input:not([type="checkbox"], [type="radio"], [type="range"]) {
+    min-height: 56px;
+    padding: 0 16px;
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    color: var(--md-sys-color-on-surface);
+    font-size: 16px;
+    line-height: 24px;
+    letter-spacing: 0.5px;
+}
+
+[data-ui-style="material3"] .popup input:not([type="checkbox"], [type="radio"], [type="range"]):focus {
+    outline: 0;
+    border-color: var(--md-sys-color-primary);
+    box-shadow: inset 0 0 0 1px var(--md-sys-color-primary);
+    background: transparent;
+}
+
+[data-ui-style="material3"] .popup .error {
+    color: var(--md-sys-color-error);
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+}
+
+[data-ui-style="material3"] .popup .actions {
+    gap: 8px;
+    margin-top: 24px;
+}
+
+[data-ui-style="material3"] .popup .actions button {
+    min-height: 40px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: transparent;
+    color: var(--md-sys-color-primary);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+}
+
+[data-ui-style="material3"] .popup .actions button:hover {
+    background: color-mix(in srgb, var(--md-sys-color-primary) var(--md-sys-state-hover-opacity), transparent);
+}
+
+[data-ui-style="material3"] .popup .actions button:disabled {
+    background: transparent;
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
+    filter: none;
 }
 
 /* ── Menus and text fields ──────────────────────────────────────────────── */
@@ -642,6 +868,41 @@
 [data-ui-style="material3"] .app-select-option-selected {
     background: var(--md-sys-color-secondary-container);
     color: var(--md-sys-color-on-secondary-container);
+}
+
+/* Free-text settings fields are outlined text fields too. */
+[data-ui-style="material3"] .app-text-field {
+    display: flex;
+    align-items: center;
+    min-height: 56px;
+    padding: 0 4px;
+    background: transparent;
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-extra-small);
+}
+
+[data-ui-style="material3"] .app-text-field:hover {
+    border-color: var(--md-sys-color-on-surface);
+}
+
+[data-ui-style="material3"] .app-text-field:focus-within {
+    border-color: var(--md-sys-color-primary);
+    box-shadow: inset 0 0 0 1px var(--md-sys-color-primary);
+}
+
+[data-ui-style="material3"] .app-text-field input {
+    color: var(--md-sys-color-on-surface);
+    font-size: 16px;
+    line-height: 24px;
+    letter-spacing: 0.5px;
+}
+
+[data-ui-style="material3"] .app-text-field input:focus-visible {
+    outline: 0;
+}
+
+[data-ui-style="material3"] .app-text-field input::placeholder {
+    color: var(--md-sys-color-on-surface-variant);
 }
 
 /* ── Search bar ─────────────────────────────────────────────────────────── */
@@ -725,7 +986,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    [data-ui-style="material3"] :is(.playback-play, .app-sidebar-link, .app-tabbar button > i, .settings-toggle button, .playback-slider-fill > div, .app-button-filled, .app-button-tonal) {
+    [data-ui-style="material3"] :is(.playback-play, .app-sidebar-link, .app-tabbar button > i, .settings-toggle button, .playback-slider-fill > div, .app-button-filled, .app-button-tonal, .app-button-text) {
         transition: none;
     }
 }
