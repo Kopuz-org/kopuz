@@ -105,26 +105,27 @@ fn local_path(value: &str) -> Option<PathBuf> {
     }
 }
 
+/// Wayland wallpaper daemons that answer a query with the image on screen:
+/// the program, its arguments, and what precedes the path on its output line.
+#[cfg(target_os = "linux")]
+type Probe<'a> = (&'a str, &'a [&'a str], &'a str);
+
+#[cfg(target_os = "linux")]
+const WAYLAND_PROBES: &[Probe<'static>] = &[
+    ("hyprctl", &["hyprpaper", "listactive"], " = "),
+    ("swww", &["query"], "image: "),
+    ("awww", &["query"], "image: "),
+];
+
+/// A query answers in milliseconds; one stuck on a wedged daemon socket would
+/// otherwise hold the colour loop, and the blocking thread under it, forever.
+#[cfg(target_os = "linux")]
+const PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(1);
+
 #[cfg(target_os = "linux")]
 fn wayland_wallpaper() -> Option<PathBuf> {
-    for (program, args, separator) in [
-        ("hyprctl", &["hyprpaper", "listactive"][..], " = "),
-        ("swww", &["query"][..], "image: "),
-        ("awww", &["query"][..], "image: "),
-    ] {
-        let Ok(output) = std::process::Command::new(program).args(args).output() else {
-            continue;
-        };
-        if !output.status.success() {
-            continue;
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        if let Some(path) = text.lines().find_map(|line| {
-            let (_, path) = line.split_once(separator)?;
-            local_path(path).filter(|path| path.is_file())
-        }) {
-            return Some(path);
-        }
+    if let Some(path) = probe_wallpaper(WAYLAND_PROBES, PROBE_DEADLINE) {
+        return Some(path);
     }
     let state_dir = std::env::var_os("XDG_STATE_HOME")
         .filter(|value| !value.is_empty())
@@ -136,6 +137,59 @@ fn wayland_wallpaper() -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
+fn probe_wallpaper(probes: &[Probe<'_>], deadline: std::time::Duration) -> Option<PathBuf> {
+    probes.iter().find_map(|(program, args, separator)| {
+        let text = probe_output(program, args, deadline)?;
+        text.lines().find_map(|line| {
+            let (_, path) = line.split_once(separator)?;
+            local_path(path).filter(|path| path.is_file())
+        })
+    })
+}
+
+/// stdout of a successful run, or `None` if it fails or outlives `deadline`,
+/// in which case the child is killed and reaped rather than left running.
+#[cfg(target_os = "linux")]
+fn probe_output(program: &str, args: &[&str], deadline: std::time::Duration) -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    // Drained on its own thread so a chatty child cannot fill the pipe and
+    // block before it exits.
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        stdout.read_to_end(&mut out).ok().map(|_| out)
+    });
+    let started = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            _ => {
+                tracing::debug!(program, "wallpaper probe timed out");
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    let out = reader.join().ok()??;
+    status
+        .success()
+        .then(|| String::from_utf8_lossy(&out).into_owned())
+}
+
+#[cfg(target_os = "linux")]
 fn wallpaper_from_state(path: &Path) -> Option<PathBuf> {
     local_path(&std::fs::read_to_string(path).ok()?).filter(|path| path.is_file())
 }
@@ -143,6 +197,35 @@ fn wallpaper_from_state(path: &Path) -> Option<PathBuf> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_hung_probe_is_killed_and_the_next_source_still_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let image = dir.path().join("wall paper.png");
+        std::fs::write(&image, b"").unwrap();
+        let hang = format!("echo $$ > '{}'; exec sleep 60", pid_file.display());
+        let answer = format!(
+            "echo 'DP-1: currently displaying: image: {}'",
+            image.display()
+        );
+        let probes = [
+            ("sh", &["-c", hang.as_str()][..], "image: "),
+            ("sh", &["-c", answer.as_str()][..], "image: "),
+        ];
+
+        let started = std::time::Instant::now();
+        let found = probe_wallpaper(&probes, std::time::Duration::from_millis(300));
+        assert_eq!(found, Some(image));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+
+        let pid = std::fs::read_to_string(&pid_file).unwrap();
+        assert!(
+            !Path::new("/proc").join(pid.trim()).exists(),
+            "the hung probe was left running or unreaped"
+        );
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
