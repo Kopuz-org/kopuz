@@ -21,6 +21,7 @@
     --md-sys-color-on-surface-variant: color-mix(in srgb, var(--color-white) 75%, var(--md-sys-color-surface));
     --md-sys-color-outline: color-mix(in srgb, var(--color-white) 45%, var(--md-sys-color-surface));
     --md-sys-color-outline-variant: color-mix(in srgb, var(--color-white) 18%, var(--md-sys-color-surface));
+    --md-sys-color-error: var(--color-red-400);
     --md-sys-color-shadow: #000000;
 
     --md-sys-shape-corner-extra-small: 4px;
@@ -488,6 +489,51 @@
     letter-spacing: 0.1px;
 }
 
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+/* Filled and filled tonal: 40dp, full shape, label large, 24dp side padding,
+   state layers in the label colour. A destructive action keeps the tonal
+   container with an error label. */
+
+[data-ui-style="material3"] :is(.app-button-filled, .app-button-tonal) {
+    min-height: 40px;
+    padding: 0 24px;
+    border: 0;
+    border-radius: var(--md-sys-shape-corner-full);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    box-shadow: none;
+    transition: background-color var(--md-sys-motion-duration-short) linear;
+}
+
+[data-ui-style="material3"] .app-button-filled {
+    --md-button-container: var(--md-sys-color-primary);
+    --md-button-label: var(--md-sys-color-on-primary);
+}
+
+[data-ui-style="material3"] .app-button-tonal {
+    --md-button-container: var(--md-sys-color-secondary-container);
+    --md-button-label: var(--md-sys-color-on-secondary-container);
+}
+
+[data-ui-style="material3"] .app-button-danger {
+    --md-button-label: var(--md-sys-color-error);
+}
+
+[data-ui-style="material3"] :is(.app-button-filled, .app-button-tonal) {
+    background: var(--md-button-container);
+    color: var(--md-button-label);
+}
+
+[data-ui-style="material3"] :is(.app-button-filled, .app-button-tonal):hover {
+    background: color-mix(in srgb, var(--md-button-label) var(--md-sys-state-hover-opacity), var(--md-button-container));
+}
+
+[data-ui-style="material3"] :is(.app-button-filled, .app-button-tonal):active {
+    background: color-mix(in srgb, var(--md-button-label) var(--md-sys-state-pressed-opacity), var(--md-button-container));
+}
+
 /* ── Segmented buttons ──────────────────────────────────────────────────── */
 /* 40dp, full shape, 1dp outline between and around segments; the selected
    segment is secondary container with a leading check. */
@@ -679,7 +725,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    [data-ui-style="material3"] :is(.playback-play, .app-sidebar-link, .app-tabbar button > i, .settings-toggle button, .playback-slider-fill > div) {
+    [data-ui-style="material3"] :is(.playback-play, .app-sidebar-link, .app-tabbar button > i, .settings-toggle button, .playback-slider-fill > div, .app-button-filled, .app-button-tonal) {
         transition: none;
     }
 }

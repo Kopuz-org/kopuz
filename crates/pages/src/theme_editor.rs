@@ -153,7 +153,7 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
             // ── Left: saved themes list ──────────────────────────────
             div { class: "w-52 shrink-0 flex flex-col gap-2",
                 button {
-                    class: "w-full px-3 py-2 bg-white/10 hover:bg-white/15 rounded text-sm text-white transition-colors text-left",
+                    class: "app-button-tonal w-full px-3 py-2 bg-white/10 hover:bg-white/15 rounded text-sm text-white transition-colors text-left",
                     onclick: move |_| selected_id.set(None),
                     "+ {i18n::t(\"new_theme\")}"
                 }
@@ -326,7 +326,7 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
 
                 div { class: "flex gap-3",
                     button {
-                        class: "px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded text-sm text-white transition-colors",
+                        class: "app-button-filled px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded text-sm text-white transition-colors",
                         onclick: move |_| {
                             let name = editing_name.read().trim().to_string();
                             if name.is_empty() { return; }
@@ -354,7 +354,7 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
                     }
                     if selected_id.peek().is_some() {
                         button {
-                            class: "px-4 py-2 bg-red-500/20 hover:bg-red-500/30 rounded text-sm text-red-400 transition-colors",
+                            class: "app-button-tonal app-button-danger px-4 py-2 bg-red-500/20 hover:bg-red-500/30 rounded text-sm text-red-400 transition-colors",
                             onclick: move |_| {
                                 if let Some(id) = selected_id.write().take() {
                                     let mut cfg = config.write();
