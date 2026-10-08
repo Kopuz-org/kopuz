@@ -1,9 +1,7 @@
-use std::path::PathBuf;
-
 use crate::{
     AppConfig, ArtistViewOrder, BackBehavior, Browser, ChannelMode, EqualizerSettings,
     FetchStrategy, HomeSection, ListenNowStyle, MusicServer, MusicService, PlayerBarPosition,
-    RegistryEntry, SettingsLayout, SortOrder, TitlebarMode, UiStyle,
+    RegistryEntry, ReplayGainSettings, SettingsLayout, SortOrder, TitlebarMode, UiStyle,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +26,7 @@ pub struct PlaybackConfig {
     pub back_behavior: BackBehavior,
     pub channel_mode: ChannelMode,
     pub equalizer: EqualizerSettings,
+    pub replay_gain: ReplayGainSettings,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,7 +47,6 @@ pub struct UiConfig {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LibraryConfig {
-    pub music_directory: Vec<PathBuf>,
     pub sort_order: SortOrder,
     pub artist_view_order: ArtistViewOrder,
     pub auto_fetch_covers: bool,
@@ -99,6 +97,7 @@ impl AppConfig {
             back_behavior: self.back_behavior,
             channel_mode: self.channel_mode,
             equalizer: self.equalizer.clone(),
+            replay_gain: self.replay_gain,
         }
     }
 
@@ -121,7 +120,6 @@ impl AppConfig {
 
     pub fn library(&self) -> LibraryConfig {
         LibraryConfig {
-            music_directory: self.music_directory.clone(),
             sort_order: self.sort_order.clone(),
             artist_view_order: self.artist_view_order.clone(),
             auto_fetch_covers: self.auto_fetch_covers,

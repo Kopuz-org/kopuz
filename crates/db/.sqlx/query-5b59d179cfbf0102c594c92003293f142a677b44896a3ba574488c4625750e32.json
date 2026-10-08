@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO lyric_lines (cache_key, position, start_time, end_time, text, parent_line, background, opposite_turn) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "5b59d179cfbf0102c594c92003293f142a677b44896a3ba574488c4625750e32"
+}

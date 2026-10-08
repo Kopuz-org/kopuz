@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT c.track_pk, c.name, ar.key AS artist_key, ar.source, ar.source_artist_id\n             FROM track_credits c JOIN artists ar ON ar.id = c.artist_pk\n            WHERE c.track_pk IN (SELECT value FROM json_each(?1))\n            ORDER BY c.track_pk, c.position",
+  "describe": {
+    "columns": [
+      {
+        "name": "track_pk",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "artist_key",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "source",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_artist_id",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "1afd79b53268beb7dc1f69777723ae5947efeec6a3e8d3aa8431571f642b80fd"
+}

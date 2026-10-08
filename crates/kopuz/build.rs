@@ -173,7 +173,7 @@ fn patch_rust_webview(path: &Path) {
 }
 
 /// Inline the vendored woff2 fonts into the bundled font CSS as base64 `data:`
-/// URIs, writing the result to `OUT_DIR`. `main.rs` pulls these in via
+/// URIs, writing the result to `OUT_DIR`. `static_assets.rs` pulls these in via
 /// `include_str!(concat!(env!("OUT_DIR"), "/..."))`, so the fonts are compiled
 /// straight into the binary — styling works under a bare `cargo run` on any OS
 /// (no CDN, no asset collection, no path resolution). The committed CSS keeps
@@ -204,7 +204,7 @@ fn embed_fonts(crate_dir: &Path) {
 
 /// Emit the favicon as a `data:` URI string to `OUT_DIR/favicon.uri`, so it's
 /// compiled into the binary and renders under a bare `cargo run` (an `asset!()`
-/// favicon needs `dx` to collect it). `main.rs` reads it via `include_str!`.
+/// favicon needs `dx` to collect it). `static_assets.rs` reads it via `include_str!`.
 fn embed_favicon(crate_dir: &Path) {
     use base64::Engine;
     let src = crate_dir.join("assets").join("favicon.ico");
@@ -710,17 +710,33 @@ fn patch_manifest(path: &Path) {
         );
     }
 
-    // singleTask: the foreground service + wake lock keep our process alive in the
-    // background, so relaunching from the launcher would otherwise spin up a *second*
-    // MainActivity in the live process and call WryActivity_create twice — which tao
-    // can't survive and aborts with SIGABRT. singleTask reuses the existing instance
-    // (onNewIntent instead of a fresh onCreate) so native init only ever runs once.
-    if !content.contains("android:launchMode=") {
-        content = content.replacen(
-            "<activity ",
-            "<activity android:launchMode=\"singleTask\" ",
-            1,
-        );
+    // Tao/Wry cannot initialize twice in a live process. Reuse the launcher
+    // activity and let its WebView handle configuration changes in place.
+    // singleTask alone does not prevent recreation on theme/density changes.
+    if let Some(name) = content.find("android:name=\"dev.dioxus.main.MainActivity\"")
+        && let Some(start) = content[..name].rfind("<activity ")
+        && let Some(end) = content[name..].find('>')
+    {
+        let end = name + end;
+        let mut activity = content[start..end].to_string();
+        for (key, value) in [
+            ("launchMode", "singleTask"),
+            (
+                "configChanges",
+                include_str!("../../android-src/activity-config-changes.txt").trim(),
+            ),
+        ] {
+            let marker = format!("android:{key}=\"");
+            if let Some(value_start) = activity.find(&marker) {
+                let value_start = value_start + marker.len();
+                if let Some(value_end) = activity[value_start..].find('"') {
+                    activity.replace_range(value_start..value_start + value_end, value);
+                }
+            } else {
+                activity.push_str(&format!(" {marker}{value}\""));
+            }
+        }
+        content.replace_range(start..end, &activity);
     }
 
     if !content.contains("MusicService") {

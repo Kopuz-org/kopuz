@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE artists SET name = ?3, name_key = ?4, named_by_source = 1 WHERE source = ?1 AND source_artist_id = ?2 AND (name IS NOT ?3 OR named_by_source = 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "8941f111f215e00d040300aec17a4b98f49c7269aca53838f344c0955d7f7563"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO server_folders (server_id, position, path) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM servers WHERE id = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "1b7d302c172c5b46002cd145868d1cd81c1f4140f57be2febf96f9b95e47639a"
+}

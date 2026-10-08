@@ -147,12 +147,6 @@ impl Equalizer {
         self.rebuild(false);
     }
 
-    pub fn update_output_format(&mut self, sample_rate: u32, channels: usize) {
-        self.sample_rate = sample_rate.max(1);
-        self.channels = channels.max(1);
-        self.rebuild(true);
-    }
-
     pub fn process_in_place(&mut self, samples: &mut [f32]) {
         if !self.settings.enabled {
             return;

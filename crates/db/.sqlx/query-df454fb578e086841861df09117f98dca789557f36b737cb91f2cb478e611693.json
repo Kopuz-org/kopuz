@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO offline_tracks (item_id, path) VALUES (?1, ?2) ON CONFLICT(item_id) DO UPDATE SET path = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "df454fb578e086841861df09117f98dca789557f36b737cb91f2cb478e611693"
+}

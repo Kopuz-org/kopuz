@@ -166,60 +166,42 @@ async fn imports_synthetic_fixture() {
     );
     assert_eq!(row.get::<Option<String>, _>("service"), None);
 
-    // Creds landed on the server row (not in the config blob).
-    let row = sqlx::query("SELECT access_token, auth_state FROM servers WHERE id = 'srv-1'")
+    // Creds landed beside the server row (not in the config blob).
+    let token: String =
+        sqlx::query_scalar("SELECT access_token FROM server_credentials WHERE server_id = 'srv-1'")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+    assert_eq!(token, "SECRET_COOKIE");
+
+    // The legacy config lands as state rows and a settings file that carries no creds.
+    let active: String = sqlx::query_scalar("SELECT active_source FROM app_state WHERE id = 1")
         .fetch_one(&mut conn)
         .await
         .unwrap();
-    assert_eq!(
-        row.get::<Option<String>, _>("access_token").as_deref(),
-        Some("SECRET_COOKIE")
-    );
-    assert_eq!(row.get::<String, _>("auth_state"), "active");
-
-    // Config blob: creds/servers/listen_counts stripped, active_server_id stamped.
-    let blob: String = sqlx::query_scalar("SELECT json FROM app_config WHERE id = 1")
-        .fetch_one(&mut conn)
-        .await
-        .unwrap();
-    let v: serde_json::Value = serde_json::from_str(&blob).unwrap();
-    assert_eq!(
-        v.get("active_source")
-            .and_then(|s| s.get("Server"))
-            .and_then(|x| x.as_str()),
-        Some("srv-1")
-    );
+    assert_eq!(active, "srv-1");
+    let settings = std::fs::read_to_string(config::store::settings_path_for(&dir)).unwrap();
     assert!(
-        v.get("server").is_none(),
-        "creds must not remain in the blob"
-    );
-    assert!(v.get("servers").is_none());
-    assert!(v.get("listen_counts").is_none());
-    assert!(
-        !blob.contains("SECRET_COOKIE"),
-        "no token leaked into the blob"
+        !settings.contains("SECRET_COOKIE"),
+        "no token leaked into the settings file"
     );
 
-    // YT sync stamps land in the metadata cache (where the runtime reads them —
-    // blob-only stamps caused a full YT re-stream on first favorites open).
+    // The YT sync time becomes the YT server's favorites stamp, or its first open would re-stream the liked library.
     let stamp: Option<String> = sqlx::query_scalar(
-        "SELECT payload FROM metadata_cache WHERE cache_key = 'yt_sync' AND kind = 'timestamps'",
+        "SELECT value FROM kv WHERE name = 'synced:favorites' AND kind = 'srv-1'",
     )
     .fetch_optional(&mut conn)
     .await
     .unwrap();
-    let stamp: serde_json::Value = serde_json::from_str(&stamp.expect("yt_sync stamp")).unwrap();
-    assert_eq!(
-        stamp.get("last_yt_sync_at").and_then(|v| v.as_u64()),
-        Some(1_700_000_000)
-    );
+    assert_eq!(stamp.as_deref(), Some("1700000000"));
 
-    // listen_counts keyed by uid (cover dropped from the legacy key).
-    let c: i64 =
-        sqlx::query_scalar("SELECT count FROM listen_counts WHERE track_key = 'ytmusic:VID1'")
-            .fetch_one(&mut conn)
-            .await
-            .unwrap();
+    // listen_counts keyed by source and track (cover dropped from the legacy key).
+    let c: i64 = sqlx::query_scalar(
+        "SELECT count FROM listen_counts WHERE source = 'srv-1' AND track_key = 'VID1'",
+    )
+    .fetch_one(&mut conn)
+    .await
+    .unwrap();
     assert_eq!(c, 5);
 
     // Liked-songs playlist membership preserved.
@@ -272,14 +254,12 @@ async fn smoke_real() {
     tracing::info!("real import report: {report:?}");
     assert!(report.ran);
 
-    let mut conn = open(&db_path).await;
-    let leaked: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM app_config WHERE json LIKE '%access_token%' OR json LIKE '%APISID%'",
-    )
-    .fetch_one(&mut conn)
-    .await
-    .unwrap();
-    assert_eq!(leaked, 0, "no creds in the config blob");
+    let settings =
+        std::fs::read_to_string(config::store::settings_path_for(&dir)).unwrap_or_default();
+    assert!(
+        !settings.contains("access_token") && !settings.contains("APISID"),
+        "no creds in the settings file"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

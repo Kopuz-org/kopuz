@@ -277,25 +277,6 @@ pub async fn album_tracks_full(access: &str, album_id: &str) -> Result<Vec<Track
     album_remote(access, album_id).await.map(|a| a.tracks)
 }
 
-/// Resolve the full queue represented by an SDK playback context. Spotify can
-/// expose many context kinds; playlist and album are the ones whose complete,
-/// ordered tracks can be reconstructed through the Web API.
-pub async fn context_tracks(access: &str, context_uri: &str) -> Result<Option<Vec<Track>>, String> {
-    if let Some(id) = context_uri
-        .strip_prefix("spotify:playlist:")
-        .filter(|id| !id.is_empty())
-    {
-        return playlist_entries(access, id).await.map(Some);
-    }
-    if let Some(id) = context_uri
-        .strip_prefix("spotify:album:")
-        .filter(|id| !id.is_empty())
-    {
-        return album_tracks_full(access, id).await.map(Some);
-    }
-    Ok(None)
-}
-
 /// One album with header metadata and every track, for the remote album page
 /// and discover tiles. The tracks endpoint returns simplified items without an
 /// album object, so the album's own name/artwork is stamped into each before
@@ -346,6 +327,12 @@ pub async fn album_remote(
             .as_array()
             .and_then(|a| a.first())
             .and_then(|a| a["name"].as_str())
+            .map(str::to_string),
+        artist_id: album["artists"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|a| a["id"].as_str())
+            .filter(|id| !id.is_empty())
             .map(str::to_string),
         year: album["release_date"]
             .as_str()
@@ -696,14 +683,21 @@ fn first_image(images: &Value) -> Option<String> {
 pub fn parse_track(item: &Value) -> Option<Track> {
     let id = item["id"].as_str().filter(|s| !s.is_empty())?;
 
-    let artists: Vec<String> = item["artists"]
+    let credits: Vec<reader::ArtistCredit> = item["artists"]
         .as_array()
         .map(|arr| {
             arr.iter()
-                .filter_map(|a| a["name"].as_str().map(str::to_string))
+                .filter_map(|a| {
+                    let name = a["name"].as_str()?;
+                    Some(match a["id"].as_str().filter(|id| !id.is_empty()) {
+                        Some(id) => reader::ArtistCredit::linked(name, id),
+                        None => reader::ArtistCredit::unlinked(name),
+                    })
+                })
                 .collect()
         })
         .unwrap_or_default();
+    let artists: Vec<String> = credits.iter().map(|c| c.name.clone()).collect();
     let artist = artists.first().cloned().unwrap_or_default();
 
     let album_obj = &item["album"];
@@ -731,17 +725,22 @@ pub fn parse_track(item: &Value) -> Option<Track> {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists,
+        replay_gain: config::ReplayGainInfo::default(),
+        credits,
     })
 }
 
 fn parse_album(item: &Value) -> Option<reader::Album> {
     let id = item["id"].as_str().filter(|s| !s.is_empty())?;
-    let artist = item["artists"]
-        .as_array()
-        .and_then(|arr| arr.first())
+    let lead = item["artists"].as_array().and_then(|arr| arr.first());
+    let artist = lead
         .and_then(|a| a["name"].as_str())
         .unwrap_or_default()
         .to_string();
+    let artist_id = lead
+        .and_then(|a| a["id"].as_str())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
     let year = item["release_date"]
         .as_str()
         .and_then(|d| d.get(0..4))
@@ -755,6 +754,8 @@ fn parse_album(item: &Value) -> Option<reader::Album> {
         year,
         cover_path: None,
         manual_cover: false,
+        artist_key: artist_id.clone(),
+        artist_id,
     })
 }
 

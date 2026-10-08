@@ -1,5 +1,5 @@
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -33,39 +33,12 @@ pub struct SubmitListens<'a> {
     payload: Vec<Listen<'a>>,
 }
 
-#[derive(Deserialize)]
-struct ValidateResponse {
-    valid: bool,
-    user_name: Option<String>,
-}
-
 pub fn auth_header(token: &str) -> String {
     let token = token.trim();
     if token.contains(' ') {
         token.to_string()
     } else {
         format!("Token {token}")
-    }
-}
-
-pub async fn validate_token(token: &str) -> Result<Option<String>, reqwest::Error> {
-    let client = Client::new();
-    let url = "https://api.listenbrainz.org/1/validate-token";
-
-    let resp = client
-        .get(url)
-        .header("Authorization", auth_header(token))
-        .send()
-        .await?;
-
-    resp.error_for_status_ref()?;
-
-    let body: ValidateResponse = resp.json().await?;
-
-    if body.valid {
-        Ok(body.user_name)
-    } else {
-        Ok(None)
     }
 }
 

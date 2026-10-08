@@ -1,10 +1,10 @@
+use api::TrackInfo as Track;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
-use hooks::use_db_queries::{use_active_source, use_albums, use_tracks_window};
+use hooks::use_db_queries::{use_active_source, use_albums, use_listen_counts, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
 use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
-use reader::Track;
 use std::collections::HashMap;
 use utils::CoverUrl;
 
@@ -16,7 +16,7 @@ fn format_duration(seconds: u64) -> String {
 
 /// Source-agnostic "listening logs" (most-played). The data path
 /// (`use_tracks_window` with a `PlayCount` sort) is already source-scoped; the
-/// only per-source bits are the cover (local file vs remote URL), the track
+/// only per-source bits are the cover (file vs remote URL), the track
 /// origin icon, and the subtitle.
 #[component]
 pub fn Activity(config: Signal<AppConfig>) -> Element {
@@ -24,10 +24,15 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
 
     let source = use_active_source();
     let albums_res = use_albums(source);
-    let filter = use_memo(move || TrackFilter {
-        source: source(),
-        sort: TrackSort::PlayCount,
-        search: String::new(),
+    let counts_res = use_listen_counts(source);
+    let filter = use_memo(move || {
+        // The source is the daemon's; naming it here only keeps the memo
+        // re-running across a switch.
+        let _ = source();
+        TrackFilter {
+            sort: TrackSort::PlayCount,
+            ..Default::default()
+        }
     });
 
     // album_id → genre (covers resolve via the source seam off the track itself).
@@ -54,6 +59,8 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
     const ITEM_HEIGHT: f64 = 60.0;
 
     let mut total_rows = use_signal(|| 0_usize);
+    // One open menu at a time: rows are a loop, so per-row hooks are not an option.
+    let mut active_menu_track = use_signal(|| None::<String>);
     let page = use_memo(move || {
         let info = components::virtual_scroll::use_virtual_scroll(
             *scroll_stat.read(),
@@ -83,8 +90,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
     );
 
     let visible_tracks: Vec<(usize, Track, u64, String, Option<CoverUrl>)> = {
-        let conf = config.read();
-        let active_source = source();
+        let counts = counts_res.read().clone().unwrap_or_default();
         let albums = album_map.read();
         let window_rows = window.rows.read().clone().unwrap_or_default();
         let row_offset = window_rows.offset as usize;
@@ -93,10 +99,9 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             .into_iter()
             .enumerate()
             .map(|(i, track)| {
-                let count_key = active_source.listen_count_key(&track.id.uid());
-                let plays = conf.listen_counts.get(&count_key).copied().unwrap_or(0);
+                let plays = counts.get(&track.uid).copied().unwrap_or(0);
                 let genre = albums.get(&track.album_id).cloned().unwrap_or_default();
-                let cover_url = ::server::cover::track(&conf, &track, 64);
+                let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
                 (row_offset + i, track, plays, genre, cover_url)
             })
             .collect()
@@ -105,30 +110,33 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
     let subtitle = i18n::t("most_played_tracks");
 
     rsx! {
-        div { class: if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
-            div { class: "max-w-[1600px] mx-auto w-full shrink-0",
-                div { class: "mb-8 flex items-end justify-between",
-                    div {
-                        if is_vaxry {
-                            p {
-                                class: "text-[10px] font-bold mb-0.5",
-                                style: "color: rgba(255,255,255,0.35);",
-                                "{i18n::t(\"library\")}"
-                            }
-                        }
-                        h1 { class: if is_vaxry { "text-2xl font-semibold tracking-tight text-white mb-1" } else { "text-3xl font-semibold tracking-tight text-white mb-2" },
-                            "{i18n::t(\"listening_logs\")}"
-                        }
-                        p { class: "text-slate-400 text-sm", "{subtitle}" }
-                    }
-                    if !is_vaxry {
+        div { class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+            // The app header names the page and a phone has no room for the columns.
+            if !cfg!(target_os = "android") {
+                div { class: "max-w-[1600px] mx-auto w-full shrink-0",
+                    div { class: "mb-8 flex items-end justify-between",
                         div {
-                            div { class: "w-12 h-12 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-slate-400",
-                                i { class: "fa-solid fa-chart-simple" }
+                            if is_vaxry {
+                                p {
+                                    class: "text-[10px] font-bold mb-0.5",
+                                    style: "color: rgba(255,255,255,0.35);",
+                                    "{i18n::t(\"library\")}"
+                                }
+                            }
+                            h1 { class: if is_vaxry { "text-2xl font-semibold tracking-tight text-white mb-1" } else { "text-3xl font-semibold tracking-tight text-white mb-2" },
+                                "{i18n::t(\"listening_logs\")}"
+                            }
+                            p { class: "text-slate-400 text-sm", "{subtitle}" }
+                        }
+                        if !is_vaxry {
+                            div {
+                                div { class: "w-12 h-12 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-slate-400",
+                                    i { class: "fa-solid fa-chart-simple" }
+                                }
                             }
                         }
                     }
-                }
+            }
 
                 div { class: "flex items-center px-4 py-3 mb-2 text-xs font-semibold text-slate-400 border-b border-white/10",
                     div { class: "w-12 shrink-0 text-center", "#" }
@@ -167,21 +175,30 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                     } else {
                         for (idx, track, plays, genre, cover_url) in visible_tracks {
                             {
-                                let track_id = track.id.uid();
+                                let track_id = track.uid.clone();
+                                let menu_track = track.clone();
+                                let open_key = track_id.clone();
+                                let ctx_key = track_id.clone();
+                                let is_menu_open = active_menu_track.read().as_deref() == Some(track_id.as_str());
                                 rsx! {
                                     div { key: "{track_id}", style: "height: {ITEM_HEIGHT}px;",
                                         div {
                                             class: "flex items-center h-full px-4 hover:bg-white/5 rounded-xl cursor-pointer transition-colors group",
+                                            oncontextmenu: move |evt| {
+                                                evt.prevent_default();
+                                                components::dots_menu::open_at_pointer(&evt);
+                                                active_menu_track.set(Some(ctx_key.clone()));
+                                            },
                                             onclick: move |_| {
                                                 let f = filter.peek().clone();
-                                                let read_db = consume_context::<hooks::ReadDb>();
+                                                let api = hooks::consume_api();
                                                 spawn(async move {
-                                                    let all = read_db
-                                                        .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
+                                                    let all = api
+                                                        .tracks(f, hooks::use_db_queries::all())
                                                         .await
+                                                        .map(|page| page.items)
                                                         .unwrap_or_default();
-                                                    ctrl.queue.set(all);
-                                                    ctrl.play_track(idx);
+                                                    ctrl.play_queue_at(all, idx);
                                                 });
                                             },
                                             div { class: "w-12 shrink-0 flex items-center justify-center tabular-nums text-white/50 font-medium group-hover:text-white transition-colors relative",
@@ -222,15 +239,27 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                                 }
                                             }
 
-                                            div { class: "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors",
-                                                "{format_duration(track.duration)}"
+                                            div { class: if cfg!(target_os = "android") { "hidden" } else { "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors" },
+                                                "{format_duration(track.duration_secs().unwrap_or_default())}"
                                             }
 
-                                            div { class: "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors flex items-center justify-end gap-2",
+                                            div { class: if cfg!(target_os = "android") { "w-14 shrink-0 text-right text-slate-400 text-sm tabular-nums flex items-center justify-end gap-2" } else { "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors flex items-center justify-end gap-2" },
                                                 if plays > 0 {
                                                     i { class: "fa-solid fa-fire text-orange-500/80 text-[10px]" }
                                                 }
                                                 span { class: if plays > 0 { "text-white font-medium" } else { "" }, "{plays}" }
+                                            }
+
+                                            div {
+                                                class: "w-10 shrink-0 flex items-center justify-end",
+                                                onclick: move |evt| evt.stop_propagation(),
+                                                components::track_actions::TrackActionsMenu {
+                                                    track: menu_track.clone(),
+                                                    is_open: Some(is_menu_open),
+                                                    on_open: Some(EventHandler::new(move |_| active_menu_track.set(Some(open_key.clone())))),
+                                                    on_close: Some(EventHandler::new(move |_| active_menu_track.set(None))),
+                                                    button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
+                                                }
                                             }
                                         }
                                     }

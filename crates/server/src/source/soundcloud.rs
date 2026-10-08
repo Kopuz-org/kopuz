@@ -42,9 +42,13 @@ impl MediaSource for SoundcloudSource {
             delete_from_disk: false,
             scan_folders: false,
             folders: false,
+            browse_folders: false,
+            external_devices: false,
+            browser_playback: false,
             sync: true,
             downloads: false,
             discover: false,
+            dont_recommend: false,
             radio: RadioSeeds::NONE,
             // No write side wired (api-v2 playlist mutation is DataDome-gated).
             playlists: PlaylistOps::None,

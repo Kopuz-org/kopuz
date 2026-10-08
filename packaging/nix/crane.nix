@@ -11,7 +11,7 @@
   tailwindcss_4,
   dioxus-cli,
   # Runtime deps
-  yt-dlp,
+  ffmpeg,
   # Linux Deps
   wrapGAppsHook3,
   webkitgtk_4_1,
@@ -28,7 +28,7 @@
 }:
 let
   pname = "kopuz";
-  version = "0.16.1";
+  version = "0.19.0";
 
   # `deno_core` pulls in the `v8` crate, whose build script fetches a prebuilt
   # librusty_v8 archive — impossible in the network-less Nix sandbox. Fetch it as
@@ -98,6 +98,8 @@ let
         fileset = fs.intersection (fs.fromSource (lib.sources.cleanSource s)) (
           fs.unions [
             (s + /.cargo)
+            # build.rs embeds Android configuration even for desktop builds.
+            (s + /android-src)
             (s + /crates)
             (s + /data)
 
@@ -175,7 +177,7 @@ craneLib.mkCargoDerivation (
     preFixup = lib.optionalString stdenv.isLinux ''
       gappsWrapperArgs+=(
         --chdir $out/bin
-        --prefix PATH : ${lib.makeBinPath [ yt-dlp ]}
+        --prefix PATH : ${lib.makeBinPath [ ffmpeg ]}
         --prefix LD_LIBRARY_PATH : ${libayatana-appindicator}/lib
       )
     '';

@@ -48,9 +48,13 @@ const CAPABILITIES: Capabilities = Capabilities {
     delete_from_disk: false,
     scan_folders: false,
     folders: false,
+    browse_folders: true,
+    external_devices: false,
+    browser_playback: false,
     sync: true,
     downloads: true,
     discover: false,
+    dont_recommend: false,
     radio: RadioSeeds::NONE,
     playlists: PlaylistOps::None, // none over raw WebDAV, the Music app's are Subsonic
     artist_view: ArtistView::Library,
@@ -183,6 +187,8 @@ impl MediaSource for NextcloudSource {
                 year: 0,
                 cover_path: cached.as_deref().map(PathBuf::from),
                 manual_cover: false,
+                artist_id: None,
+                artist_key: None,
             });
         }
 
@@ -218,7 +224,9 @@ impl MediaSource for NextcloudSource {
                     musicbrainz_recording_id: None,
                     musicbrainz_track_id: None,
                     playlist_item_id: None,
+                    credits: Vec::new(),
                     artists: vec![track.artist],
+                    replay_gain: config::ReplayGainInfo::default(),
                 }
             })
             .collect();

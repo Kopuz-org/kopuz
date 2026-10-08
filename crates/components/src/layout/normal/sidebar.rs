@@ -65,8 +65,8 @@ const TOP_MENU: &[SidebarItem] = &[
         icon: "fa-solid fa-chart-simple",
     },
     SidebarItem {
-        key: "ytdlp",
-        route: Route::Ytdlp,
+        key: "downloader",
+        route: Route::Downloader,
         icon: "fa-solid fa-download",
     },
 ];
@@ -184,10 +184,10 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let is_rtl = i18n::is_rtl();
     let border_side = if is_rtl { "border-l" } else { "border-r" };
 
-    // Discover is a capability of the active source (YT), not a config flag —
+    // Discover is a capability of the active source, not a config flag —
     // hide the tab when the active source has no discover surface.
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let has_discover = use_memo(move || active_source.read().capabilities().discover);
+    let caps = hooks::sources::use_capabilities();
+    let has_discover = use_memo(move || caps().discover);
     let ordered_items: Vec<SidebarItem> = {
         let order = config.read().sidebar_order.clone();
         let mut items: Vec<SidebarItem> = order
@@ -200,6 +200,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
             }
         }
         items.retain(|item| item.route != Route::Discover || has_discover());
+        items.retain(|item| !is_android || !crate::tabbar::is_tab_route(item.route));
         items
     };
 
@@ -284,7 +285,6 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
 
                 if !*is_collapsed.read() && config.read().show_source_toggle {
                     crate::source_switcher::SourceSwitcher {
-                        config,
                         on_manage: move |_| props.on_navigate.call(Route::Settings),
                     }
                 }
@@ -320,8 +320,10 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                             },
                         }
                     }
-                    div { class: "h-px bg-white/5 my-4 mx-3" }
-                    for item in BOTTOM_MENU {
+                    if !is_android {
+                        div { class: "h-px bg-white/5 my-4 mx-3" }
+                    }
+                    for item in BOTTOM_MENU.iter().filter(|item| !is_android || !crate::tabbar::is_tab_route(item.route)) {
                         SidebarLink {
                             item: item.clone(),
                             collapsed: is_collapsed,

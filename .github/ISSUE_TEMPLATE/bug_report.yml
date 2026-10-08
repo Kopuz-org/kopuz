@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Fill this out with enough detail to reproduce the issue. Reports with logs, screenshots, and exact steps are much easier to fix.
+        Fill this out with enough detail to reproduce the issue. Reports with logs, screenshots, and exact steps are much easier to fix. Keep it to what a maintainer needs; see the [AI policy](https://github.com/Kopuz-org/kopuz/blob/master/CONTRIBUTING.md#ai-policy).
 
   - type: textarea
     id: summary
@@ -79,10 +79,17 @@ body:
     id: media
     attributes:
       label: Screenshots or recordings
-      description: Drag and drop images or videos here if they help explain the issue.
+      description: Required for visual or audio bugs. Drag and drop images or videos here.
 
   - type: textarea
     id: extra
     attributes:
       label: Additional context
       description: Include related settings, file formats, network details, or anything else relevant.
+
+  - type: checkboxes
+    id: ai_usage
+    attributes:
+      label: AI usage
+      options:
+        - label: I used an LLM to write this issue.

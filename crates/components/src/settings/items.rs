@@ -1,9 +1,8 @@
-use config::{AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, SampleRateMode};
+use config::{
+    AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, ReplayGainMode, SampleRateMode,
+};
 use dioxus::prelude::*;
-use scrobble::lastfm;
-use scrobble::librefm;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tracing::Instrument;
 
 static APP_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -25,14 +24,16 @@ pub fn SettingItem(
     /// for controls too wide for a row (the equalizer graph).
     #[props(default)]
     stacked: bool,
+    #[props(default)] nested: bool,
 ) -> Element {
-    let locked = try_consume_context::<config::store::FileLayers>().is_some_and(|layers| {
+    let locked = try_consume_context::<hooks::config_view::LockedKeys>().is_some_and(|layers| {
         (!config_key.is_empty() && layers.is_locked(&config_key))
             || extra_config_keys.iter().any(|key| layers.is_locked(key))
     });
+    let nested_class = if nested { "settings-row-nested" } else { "" };
     rsx! {
         div {
-            class: if stacked { "settings-row px-5 py-4" } else { "settings-row flex items-center justify-between gap-5 px-5 py-2.5" },
+            class: if stacked { "settings-row {nested_class} px-5 py-4" } else { "settings-row {nested_class} flex items-center justify-between gap-5 px-5 py-2.5" },
             div {
                 class: if stacked { "flex items-center gap-2 mb-3" } else { "min-w-0 flex items-center gap-2" },
                 p { class: "min-w-0 text-sm text-white/90 font-medium", "{title}" }
@@ -67,6 +68,14 @@ pub fn SettingItem(
 pub fn SettingsSection(title: String, children: Element) -> Element {
     let mut expanded = use_signal(|| true);
 
+    if cfg!(target_os = "android") {
+        return rsx! {
+            section { class: "settings-section rounded-xl overflow-visible",
+                div { class: "settings-section-body divide-y divide-white/[0.07]", {children} }
+            }
+        };
+    }
+
     rsx! {
         section { class: "settings-section rounded-xl overflow-visible",
             button {
@@ -83,6 +92,13 @@ pub fn SettingsSection(title: String, children: Element) -> Element {
                 div { class: "settings-section-body divide-y divide-white/[0.07]", {children} }
             }
         }
+    }
+}
+
+#[component]
+pub fn SettingsGroup(label: String) -> Element {
+    rsx! {
+        div { class: "settings-subsection-label", "{label}" }
     }
 }
 
@@ -118,6 +134,14 @@ pub fn AppSelect(
         .map(|(_, label)| label.as_str())
         .unwrap_or(value.as_str());
     let open_class = if open() { "z-[70]" } else { "z-0" };
+    let (backdrop_class, menu_class) = if cfg!(target_os = "android") {
+        (
+            "app-select-sheet-backdrop",
+            "app-select-menu app-select-sheet kopuz-sheet-in",
+        )
+    } else {
+        ("fixed inset-0 z-0 cursor-default", "app-select-menu")
+    };
     let active_option_id = format!("app-select-option-{instance_id}-{}", active_index());
     let keyboard_options = options.clone();
     let keyboard_trigger_id = trigger_id.clone();
@@ -239,7 +263,7 @@ pub fn AppSelect(
             if open() {
                 button {
                     r#type: "button",
-                    class: "fixed inset-0 z-0 cursor-default",
+                    class: "{backdrop_class}",
                     aria_label: "Close menu",
                     onclick: move |_| {
                         open.set(false);
@@ -254,7 +278,7 @@ pub fn AppSelect(
                     id: "{menu_id}",
                     role: "listbox",
                     aria_labelledby: "{trigger_id}",
-                    class: "app-select-menu",
+                    class: "{menu_class}",
                     onwheel: move |event| event.stop_propagation(),
                     for (index, (option_value, label)) in options.iter().enumerate() {
                         {
@@ -369,88 +393,7 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
 
 #[path = "sources.rs"]
 mod sources;
-pub use sources::{LocalSourceSettings, MultiDirectoryPicker, ServerSettings};
-#[component]
-pub fn DiscordPresenceSettings(enabled: bool, on_change: EventHandler<bool>) -> Element {
-    let slider_style = if enabled {
-        "inset-inline-start: 4px; width: calc(50% - 4px);"
-    } else {
-        "inset-inline-start: calc(50% + 2px); width: calc(50% - 4px);"
-    };
-
-    let enable_class = if enabled {
-        "text-white"
-    } else {
-        "text-slate-500 hover:text-slate-300"
-    };
-
-    let disable_class = if !enabled {
-        "text-white"
-    } else {
-        "text-slate-500 hover:text-slate-300"
-    };
-
-    rsx! {
-        div {
-            class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 w-48",
-            div {
-                class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
-                style: "{slider_style}"
-            }
-            button {
-                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {enable_class}",
-                onclick: move |_| on_change.call(true),
-                "{i18n::t(\"enabled\")}"
-            }
-            button {
-                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {disable_class}",
-                onclick: move |_| on_change.call(false),
-                "{i18n::t(\"disabled\")}"
-            }
-        }
-    }
-}
-
-#[component]
-pub fn DiscordPresencePausedSettings(enabled: bool, on_change: EventHandler<bool>) -> Element {
-    let slider_style = if enabled {
-        "inset-inline-start: 4px; width: calc(50% - 4px);"
-    } else {
-        "inset-inline-start: calc(50% + 2px); width: calc(50% - 4px);"
-    };
-
-    let enable_class = if enabled {
-        "text-white"
-    } else {
-        "text-slate-500 hover:text-slate-300"
-    };
-
-    let disable_class = if !enabled {
-        "text-white"
-    } else {
-        "text-slate-500 hover:text-slate-300"
-    };
-
-    rsx! {
-        div {
-            class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 w-48",
-            div {
-                class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
-                style: "{slider_style}"
-            }
-            button {
-                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {enable_class}",
-                onclick: move |_| on_change.call(true),
-                "{i18n::t(\"enabled\")}"
-            }
-            button {
-                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {disable_class}",
-                onclick: move |_| on_change.call(false),
-                "{i18n::t(\"disabled\")}"
-            }
-        }
-    }
-}
+pub use sources::{MultiDirectoryPicker, SourceSettings};
 
 #[component]
 pub fn ToggleSetting(enabled: bool, on_change: EventHandler<bool>) -> Element {
@@ -474,7 +417,7 @@ pub fn ToggleSetting(enabled: bool, on_change: EventHandler<bool>) -> Element {
 
     rsx! {
         div {
-            class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 w-48",
+            class: "settings-toggle bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 w-48",
             div {
                 class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
                 style: "{slider_style}"
@@ -493,190 +436,10 @@ pub fn ToggleSetting(enabled: bool, on_change: EventHandler<bool>) -> Element {
     }
 }
 
-#[component]
-pub fn MusicBrainzSettings(current: String, on_save: EventHandler<String>) -> Element {
-    let mut input = use_signal(move || current.clone());
-
-    rsx! {
-        div {
-            class: "flex items-center gap-2 w-full max-w-xl",
-            div {
-                class: "flex-1 bg-white/5 p-1 rounded-xl border border-white/5",
-                input {
-                    class: "bg-transparent w-full px-3 py-2 text-sm text-white placeholder:text-white/50 outline-none",
-                    placeholder: "{i18n::t(\"listenbrainz_token_placeholder\")}",
-                    value: "{input()}",
-                    oninput: move |evt| {
-                        input.set(evt.value());
-                        on_save.call(evt.value());
-                    },
-                    r#type: "password",
-                }
-            }
-        }
-    }
-}
-
-#[component]
-pub fn LastFmSettings(
-    api_key: String,
-    api_secret: String,
-    session_key: String,
-    on_api_key_save: EventHandler<String>,
-    on_api_secret_save: EventHandler<String>,
-    on_session_key_save: EventHandler<String>,
-) -> Element {
-    let mut api_key_input = use_signal(move || api_key.clone());
-    let mut api_secret_input = use_signal(move || api_secret.clone());
-
-    rsx! {
-        div {
-            class: "flex flex-col gap-3 w-full max-w-xl",
-            div {
-                class: "bg-white/5 p-1 rounded-xl border border-white/5",
-                input {
-                    class: "bg-transparent w-full px-3 py-2 text-sm text-white placeholder:text-white/50 outline-none",
-                    placeholder: "{i18n::t(\"lastfm_api_key_placeholder\")}",
-                    value: "{api_key_input()}",
-                    oninput: move |evt| {
-                        let value = evt.value();
-                        api_key_input.set(value.clone());
-                        on_api_key_save.call(value);
-                        on_session_key_save.call(String::new());
-                    },
-                    r#type: "password",
-                }
-            }
-
-            div {
-                class: "bg-white/5 p-1 rounded-xl border border-white/5",
-
-                input {
-                    class: "bg-transparent w-full px-3 py-2 text-sm text-white placeholder:text-white/50 outline-none",
-                    placeholder: "{i18n::t(\"lastfm_api_secret_placeholder\")}",
-                    value: "{api_secret_input()}",
-                    oninput: move |evt| {
-                        api_secret_input.set(evt.value());
-                        on_api_secret_save.call(evt.value());
-                    },
-                    r#type: "password",
-                }
-            }
-            button {
-                class: "bg-white/10 hover:bg-white/20 px-5 py-2 rounded text-sm text-white transition-colors self-start mx-auto w-fit",
-                onclick: move |_| {
-                    let api_key = api_key_input();
-                    let api_secret = api_secret_input();
-                    let on_session_key_save = on_session_key_save;
-
-                    spawn(async move {
-                        match lastfm::get_auth_token(&api_key).await {
-                            Ok(token) => {
-                                let url = lastfm::auth_url(&api_key, &token);
-
-                                if let Err(e) = webbrowser::open(&url) {
-                                    tracing::warn!("Failed to open browser: {}", e);
-                                    return;
-                                }
-                                let mut connected = false;
-                                for _ in 0..30 {
-                                    match lastfm::get_session_key(&api_key, &api_secret, &token).await {
-                                        Ok(session_key) => {
-                                            on_session_key_save.call(session_key);
-                                            tracing::info!("Last.fm connected successfully");
-                                            connected = true;
-                                            break;
-                                        }
-                                        Err(_) => {
-                                            utils::sleep(std::time::Duration::from_secs(2)).await;
-                                        }
-                                    }
-                                }
-                            if !connected {
-                                tracing::warn!("Timed out waiting for Last.fm authorization");
-                            }
-
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to get auth token: {}", e);
-                            }
-                        }
-                    }.instrument(tracing::info_span!("lastfm.auth")));
-                },
-
-                if session_key.is_empty() || api_key_input.is_empty() || api_secret_input.is_empty() {
-                    "{i18n::t(\"connect_to_lastfm\")}"
-                } else {
-                    "{i18n::t(\"lastfm_connected\")}"
-                }
-            }
-        }
-    }
-}
-
-#[component]
-pub fn LibreFmSettings(session_key: String, on_session_key_save: EventHandler<String>) -> Element {
-    rsx! {
-        div {
-            class: "flex flex-col gap-3 w-full max-w-xl",
-            button {
-                class: "bg-white/10 hover:bg-white/20 px-5 py-2 rounded text-sm text-white transition-colors self-start mx-auto w-fit",
-                onclick: move |_| {
-                    let on_session_key_save = on_session_key_save;
-
-                    spawn(async move {
-                        match librefm::get_auth_token(librefm::API_KEY).await {
-                            Ok(token) => {
-                                let url = librefm::auth_url(librefm::API_KEY, &token);
-
-                                if let Err(e) = webbrowser::open(&url) {
-                                    tracing::warn!("Failed to open browser: {}", e);
-                                    return;
-                                }
-                                let mut connected = false;
-                                for _ in 0..30 {
-                                    match librefm::get_session_key(
-                                        librefm::API_KEY,
-                                        librefm::API_SECRET,
-                                        &token,
-                                    )
-                                    .await
-                                    {
-                                        Ok(session_key) => {
-                                            on_session_key_save.call(session_key);
-                                            tracing::info!("Libre.fm connected successfully");
-                                            connected = true;
-                                            break;
-                                        }
-                                        Err(_) => {
-                                            utils::sleep(std::time::Duration::from_secs(2)).await;
-                                        }
-                                    }
-                                }
-                                if !connected {
-                                    tracing::warn!("Timed out waiting for Libre.fm authorization");
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to get auth token: {}", e);
-                            }
-                        }
-                    });
-                },
-
-                if session_key.is_empty() {
-                    "{i18n::t(\"connect_to_librefm\")}"
-                } else {
-                    "{i18n::t(\"librefm_connected\")}"
-                }
-            }
-        }
-    }
-}
-
 #[path = "equalizer.rs"]
 mod equalizer;
 pub use equalizer::EqualizerPanel;
+
 #[component]
 pub fn BackBehaviorSelector(
     current: BackBehavior,
@@ -704,7 +467,7 @@ pub fn BackBehaviorSelector(
 
     rsx! {
         div {
-            class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 w-48",
+            class: "settings-toggle bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 w-48",
             div {
                 class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
                 style: "{slider_style}"
@@ -773,6 +536,52 @@ pub fn SampleRateModeSelector(
             options,
             on_change: move |value: String| on_change.call(SampleRateMode::from_value_str(&value)),
             class: "settings-select",
+        }
+    }
+}
+
+#[component]
+pub fn ReplayGainModeSelector(
+    current: ReplayGainMode,
+    on_change: EventHandler<ReplayGainMode>,
+) -> Element {
+    let options = ReplayGainMode::ALL
+        .iter()
+        .map(|mode| (mode.value_str().to_string(), i18n::t(mode.i18n_key())))
+        .collect();
+    rsx! {
+        AppSelect {
+            value: current.value_str().to_string(),
+            options,
+            on_change: move |value: String| on_change.call(ReplayGainMode::from_value_str(&value)),
+            class: "settings-select",
+        }
+    }
+}
+
+/// A dB slider with a signed monospace readout, for the two ReplayGain trims.
+#[component]
+pub fn GainSlider(value: f32, min: f32, max: f32, on_change: EventHandler<f32>) -> Element {
+    rsx! {
+        div { class: "settings-slider flex items-center gap-3 min-w-[220px]",
+            input {
+                r#type: "range",
+                min: "{min}",
+                max: "{max}",
+                step: "0.5",
+                value: format!("{value:.1}"),
+                class: "w-40",
+                style: "accent-color: var(--color-indigo-500);",
+                oninput: move |evt| {
+                    if let Ok(parsed) = evt.value().parse::<f32>() {
+                        on_change.call(parsed.clamp(min, max));
+                    }
+                }
+            }
+            span {
+                class: "text-xs font-mono text-white/80 w-16 text-right",
+                {format!("{value:+.1} dB")}
+            }
         }
     }
 }

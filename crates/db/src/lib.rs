@@ -12,6 +12,7 @@
 use std::sync::Arc;
 
 mod backend;
+pub mod legacy;
 
 pub use backend::{QueuedScrobbleRow, ScrobbleService};
 
@@ -32,6 +33,14 @@ pub struct ImportReport {
 // DB layer is its main consumer (`WHERE source = ?`).
 pub use config::Source;
 
+/// The `kv` kind a remembered "this artist has no photo" is filed under, named by [`artist_miss_name`].
+pub const ARTIST_PHOTO_MISS_KIND: &str = "artist_photo_miss";
+
+/// The `kv` name of one artist's remembered miss: its identity, source first so a source's can be purged.
+pub fn artist_miss_name(source: &Source, artist_key: &str) -> String {
+    format!("{}\u{1f}{artist_key}", source.as_str())
+}
+
 /// A window into a list query (for virtual-scrolled big lists).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Page {
@@ -39,8 +48,7 @@ pub struct Page {
     pub limit: u32,
 }
 
-/// The queue/progress snapshot, reconstructed from the `queue_state` row. The
-/// in-memory `PersistedQueueState` (in the app crate) maps directly from this.
+/// The stored queue: its rows, their shuffled order, and where playback stood.
 #[derive(Clone, Debug, Default)]
 pub struct QueueSnapshot {
     pub version: u8,
@@ -49,6 +57,13 @@ pub struct QueueSnapshot {
     pub progress_secs: u64,
     pub shuffle_order: Vec<usize>,
     pub shuffle_enabled: bool,
+}
+
+/// What the lyrics cache holds for a key: the words, or a miss and when it was recorded.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CachedLyrics {
+    Found(utils::lyrics::Lyrics),
+    Missing { at: i64 },
 }
 
 /// Sort order for a track listing — maps to an indexed `ORDER BY`.
@@ -80,6 +95,10 @@ pub struct TrackFilter {
     pub source: Source,
     pub sort: TrackSort,
     pub search: String,
+    /// Restrict to favorites (`Some(true)`) or non-favorites (`Some(false)`).
+    /// Matched against the local favorites mirror, which every source keeps
+    /// under its own `source.as_str()` key.
+    pub favorite: Option<bool>,
 }
 
 impl TrackFilter {
@@ -130,14 +149,25 @@ impl From<sqlx::migrate::MigrateError> for DbError {
     }
 }
 
-/// Per-artist images, source-agnostic: `(overrides, photos)`. `overrides` are
-/// user-set custom photos (always a local path, highest priority); `photos` are
-/// the synced photo per artist as a uniform [`reader::ArtistImageRef`] (a server
-/// URL or a local path — server wins when both exist), resolved by the cover
-/// seam so callers never branch on origin. Both keyed by normalized artist name.
+/// One artist row of a source and the tracks credited to it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtistRow {
+    /// What the artist is opened by: the id its source issued, else one minted when the row was filed.
+    pub key: String,
+    /// The id the source issued for this artist; an artist it issued none for is known by its row alone.
+    pub source_id: Option<String>,
+    pub name: String,
+    pub tracks: u32,
+}
+
+/// Per-artist images: `(overrides, photos)`. `overrides` are user-set custom
+/// photos (always a local path, highest priority); `photos` are the synced photo
+/// per artist as a uniform [`reader::ArtistImageRef`] (a server URL or a local
+/// path — server wins when both exist). Both keyed by the artist's identity,
+/// `(source, artist key)`.
 pub type ArtistImages = (
-    std::collections::HashMap<String, std::path::PathBuf>,
-    std::collections::HashMap<String, reader::ArtistImageRef>,
+    std::collections::HashMap<(String, String), std::path::PathBuf>,
+    std::collections::HashMap<(String, String), reader::ArtistImageRef>,
 );
 
 /// The read side of the persistence API — every query, no mutation. Carried as
@@ -167,14 +197,41 @@ pub trait ReadStore: Send + Sync {
         album_id: &str,
     ) -> Result<Vec<reader::Track>, DbError>;
 
-    /// One artist's tracks, album/disc/track-ordered. `limit` bounds the query
-    /// SQL-side for callers that only probe a few rows.
+    /// One artist's tracks, album/disc/track-ordered.
     async fn artist_tracks(
         &self,
         source: &Source,
         artist: &str,
         limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// The albums billed to one artist.
+    async fn artist_albums(
+        &self,
+        source: &Source,
+        artist: &str,
+    ) -> Result<Vec<reader::Album>, DbError>;
+
+    /// One artist of `source`, or `None` when it has no such row.
+    async fn artist(&self, source: &Source, artist: &str) -> Result<Option<ArtistRow>, DbError>;
+
+    /// The keys of `source`'s linked artists still wearing a credit's text, whose name the source has not given yet.
+    async fn artist_keys_unnamed_by_source(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashSet<String>, DbError>;
+
+    /// The key of each of `source`'s linked artists, by the id the source issued.
+    async fn linked_artist_keys(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+
+    /// The key of each of `source`'s unlinked artists, by folded name.
+    async fn unlinked_artist_keys(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
 
     /// Tracks whose album has this genre, artist/album-ordered.
     async fn genre_tracks(
@@ -218,8 +275,21 @@ pub trait ReadStore: Send + Sync {
         keys: &[String],
     ) -> Result<Vec<reader::Track>, DbError>;
 
-    /// Distinct artists for a source with their track counts, A→Z.
-    async fn artists(&self, source: &Source) -> Result<Vec<(String, u32)>, DbError>;
+    /// Every artist a track of the source credits, A→Z.
+    async fn artists(&self, source: &Source) -> Result<Vec<ArtistRow>, DbError>;
+
+    /// One album cover per credited artist: what an artist with no photo renders.
+    async fn artist_album_covers(
+        &self,
+        source: &Source,
+    ) -> Result<std::collections::HashMap<String, String>, DbError>;
+
+    /// One artist's entry of [`ReadStore::artist_album_covers`].
+    async fn artist_album_cover(
+        &self,
+        source: &Source,
+        artist: &str,
+    ) -> Result<Option<String>, DbError>;
 
     /// Distinct non-empty album genres for a source, A→Z.
     async fn genres(&self, source: &Source) -> Result<Vec<String>, DbError>;
@@ -237,8 +307,18 @@ pub trait ReadStore: Send + Sync {
     /// All albums for a source, ordered by artist then title.
     async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
 
-    /// Reconstruct the queue/progress snapshot from the `queue_state` row.
-    async fn load_queue(&self) -> Result<QueueSnapshot, DbError>;
+    /// At most `limit` albums for a source, most recently added first, on the
+    /// same order as [`TrackSort::DateAdded`]. It is its own query because
+    /// [`ReadStore::albums`] sorts alphabetically, an order no amount of
+    /// reshuffling in the caller can turn into recency.
+    async fn albums_recently_added(
+        &self,
+        source: &Source,
+        limit: u32,
+    ) -> Result<Vec<reader::Album>, DbError>;
+
+    /// The queue `source` was left with, its library rows refreshed from what a sync since wrote.
+    async fn load_queue(&self, source: &Source) -> Result<QueueSnapshot, DbError>;
 
     /// The `PlaylistStore` (the active source's playlists + folders) — the read
     /// side of the playlists UI (`use_playlists`). Writes go through the
@@ -246,12 +326,30 @@ pub trait ReadStore: Send + Sync {
     /// caller's in-memory active source.
     async fn load_playlists(&self, source: &Source) -> Result<reader::PlaylistStore, DbError>;
 
+    /// One playlist's entries in play order, each with the id its source gave it.
+    async fn playlist_entries(
+        &self,
+        source: &Source,
+        pl_id: &str,
+    ) -> Result<Vec<reader::PlaylistEntry>, DbError>;
+
     /// Hydrate one server row (creds included) into the in-memory shape — used
     /// by server switching so stored creds are reused instead of re-prompting.
     async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
 
-    /// Generic metadata-cache read (`metadata_cache` table): the `payload` for
-    /// `(cache_key, kind)`, if cached.
+    /// Store one server's credentials on their own. `save_config` writes
+    /// only the active server's, so signing into another one needs this.
+    async fn set_server_credentials(
+        &self,
+        id: &str,
+        access_token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Result<(), DbError>;
+
+    /// What the lyrics cache holds for `cache_key`.
+    async fn cached_lyrics(&self, cache_key: &str) -> Result<Option<CachedLyrics>, DbError>;
+
+    /// The value stored under `(cache_key, kind)` in the `kv` table, if any.
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
 
     /// Metadata-cache keys of `kind` written within the last `max_age_secs` —
@@ -281,6 +379,9 @@ pub trait Storage: ReadStore {
     /// Persist the whole `AppConfig`: the single-row JSON blob, plus a mirror
     /// of the settings into the standalone config file when it is writable.
     async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
+
+    /// Drop every row a source left behind: its library, playlists, favorites, plays and photos.
+    async fn purge_source(&self, source: &Source) -> Result<(), DbError>;
 
     /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
     /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op
@@ -312,11 +413,15 @@ pub trait Storage: ReadStore {
         keep_album_ids: &[String],
     ) -> Result<(), DbError>;
 
-    /// Set (`Some`) or remove (`None`) one artist image. `kind` is
+    /// Name the artist `source` issued `id` for as the source's own record does; answers whether the name changed.
+    async fn name_artist(&self, source: &Source, id: &str, name: &str) -> Result<bool, DbError>;
+
+    /// Set (`Some`) or remove (`None`) one artist's image. `kind` is
     /// `"server" | "local" | "custom"`.
     async fn set_artist_image(
         &self,
-        artist_norm: &str,
+        source: &Source,
+        artist_key: &str,
         kind: &str,
         image_ref: Option<&str>,
     ) -> Result<(), DbError>;
@@ -359,7 +464,7 @@ pub trait Storage: ReadStore {
         &self,
         source: &Source,
         pl_id: &str,
-        refs: &[String],
+        entries: &[reader::PlaylistEntry],
     ) -> Result<(), DbError>;
 
     /// Append refs to one playlist (creating it if absent), skipping any already
@@ -380,6 +485,14 @@ pub trait Storage: ReadStore {
         refs: &[String],
     ) -> Result<(), DbError>;
 
+    /// Remove only the entry at `index` in play order; a track listed twice keeps its other copy.
+    async fn remove_playlist_entry(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        index: usize,
+    ) -> Result<(), DbError>;
+
     /// Streaming upsert of one page of a playlist's entries (creating the playlist
     /// row if absent): each ref is written at `start_position + i` and stamped with
     /// the current walk's `epoch`. On position conflict the ref and epoch are
@@ -389,7 +502,7 @@ pub trait Storage: ReadStore {
         &self,
         source: &Source,
         pl_id: &str,
-        refs: &[String],
+        entries: &[reader::PlaylistEntry],
         start_position: i64,
         epoch: i64,
     ) -> Result<(), DbError>;
@@ -421,18 +534,36 @@ pub trait Storage: ReadStore {
     ) -> Result<(), DbError>;
 
     /// Increment one track's play count in its source partition.
-    async fn bump_listen_count(&self, source: &Source, track_uid: &str) -> Result<(), DbError>;
+    async fn bump_listen_count(&self, source: &Source, track_key: &str) -> Result<(), DbError>;
 
     /// Record a play for this source's recently-played history (caps + trims).
     async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;
 
-    /// Register/unregister one offline download in the config blob (single
-    /// `json_set`/`json_remove` — the downloads hot path must not rewrite the
-    /// whole config per finished song).
+    /// Register (`Some`) or forget (`None`) one track's downloaded copy.
     async fn set_offline_track(&self, id: &str, path: Option<&str>) -> Result<(), DbError>;
 
-    /// Persist the queue/progress snapshot to the single `queue_state` row.
-    async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
+    /// Replace `source`'s stored queue, rows and all.
+    async fn save_queue(&self, source: &Source, snap: &QueueSnapshot) -> Result<(), DbError>;
+
+    /// Store where `source`'s queue stands, for a save whose rows did not change.
+    async fn save_queue_position(
+        &self,
+        source: &Source,
+        snap: &QueueSnapshot,
+    ) -> Result<(), DbError>;
+
+    /// Forget `source`'s stored queue.
+    async fn clear_queue(&self, source: &Source) -> Result<(), DbError>;
+
+    /// Pin (`Some` manifest) a station after the others, or unpin it (`None`).
+    async fn set_pinned_station(&self, id: &str, manifest: Option<&str>) -> Result<(), DbError>;
+
+    /// Store a lyrics lookup's conclusion; `None` records a miss stamped now.
+    async fn cache_lyrics(
+        &self,
+        cache_key: &str,
+        lyrics: Option<&utils::lyrics::Lyrics>,
+    ) -> Result<(), DbError>;
 
     /// Enqueue a failed scrobble (issue #335). A repeat of the same
     /// `(listen, service)` folds into the existing row; the backlog is capped to
@@ -521,6 +652,24 @@ pub trait Storage: ReadStore {
     /// Batch upsert albums for a source (one transaction).
     async fn upsert_albums(&self, source: &Source, albums: &[reader::Album])
     -> Result<(), DbError>;
+
+    /// Re-file one track as a scan read it back, with its album; the album it left goes when empty.
+    async fn refile_track(
+        &self,
+        source: &Source,
+        track: &reader::Track,
+        album: &reader::Album,
+        left_album: &str,
+    ) -> Result<(), DbError>;
+
+    /// Record when each `(track_key, unix_secs)` track was added, for the
+    /// listings that sort by date added. Rows already stamped keep their value,
+    /// so this is safe to call on every scan.
+    async fn stamp_added_at(
+        &self,
+        source: &Source,
+        stamps: &[(String, i64)],
+    ) -> Result<(), DbError>;
 }
 
 /// Cheap-`Clone` handle to the active storage backend, shared via Dioxus context.
@@ -574,52 +723,6 @@ pub fn default_db_path() -> std::path::PathBuf {
     config_dir().join(name)
 }
 
-/// Blocking pre-boot read of the config — for the few values needed before
-/// the app (and its async runtime/log subscriber) exists: the tracing toggle and
-/// the titlebar mode. Opens the DB read-only without running migrations and
-/// overlays the settings file / drop-ins / env; `None` when neither the blob
-/// nor any file layer exists yet (first launch). Server/creds fields are NOT
-/// hydrated — blob fields only.
-pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
-    let db_dir = match db_path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent,
-        _ => std::path::Path::new("."),
-    };
-    let layers = config::store::FileLayers::read(&config::store::settings_path_for(db_dir));
-
-    let blob: Option<serde_json::Value> = if db_path.exists() {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .ok()?;
-        rt.block_on(async {
-            let opts = sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(db_path)
-                .create_if_missing(false)
-                .read_only(true);
-            use sqlx::ConnectOptions;
-            let mut conn = opts.connect().await.ok()?;
-            let json: Option<String> =
-                sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-                    .fetch_optional(&mut conn)
-                    .await
-                    .ok()
-                    .flatten();
-            json.and_then(|j| serde_json::from_str(&j).ok())
-        })
-    } else {
-        None
-    };
-
-    // A settings file alone (fresh install on a Nix-configured machine) is
-    // enough to peek at — the blob only appears after the first save.
-    if blob.is_none() && !layers.has_overrides() {
-        return None;
-    }
-    let value = blob.unwrap_or_else(|| serde_json::json!({}));
-    layers.merge_and_parse(value).ok()
-}
-
 /// The RELEASE database path (`kopuz.db`), independent of build profile — the
 /// debug panel's "load release DB" source.
 pub fn release_db_path() -> std::path::PathBuf {
@@ -663,4 +766,22 @@ fn android_files_dir() -> Option<std::path::PathBuf> {
         .ok()?;
     let path: String = env.get_string(&JString::from(path)).ok()?.into();
     Some(std::path::PathBuf::from(path))
+}
+
+/// The process-wide database handle, for the read-through caches that live in
+/// crates below the daemon (Discord cover art). Registered once at boot; a
+/// cache with no handle degrades to fetch-only, which is what tests and early
+/// boot get.
+pub mod cache {
+    use std::sync::OnceLock;
+
+    static DB: OnceLock<super::Db> = OnceLock::new();
+
+    pub fn init(handle: super::Db) {
+        let _ = DB.set(handle);
+    }
+
+    pub fn get() -> Option<&'static super::Db> {
+        DB.get()
+    }
 }

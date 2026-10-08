@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO albums (source, source_album_id, title, artist, cover_path, artist_pk, derived) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1) ON CONFLICT(source, source_album_id) DO UPDATE SET artist_pk = COALESCE(?6, albums.artist_pk) WHERE albums.derived = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "5d6b0fedf6cfc97708f69a03ec00454bd254d039f1a33c20e69527ed2623f5d9"
+}

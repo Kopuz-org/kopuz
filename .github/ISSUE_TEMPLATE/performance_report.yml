@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Performance reports are most useful when they identify the page, action, library size, and platform involved.
+        Performance reports are most useful when they identify the page, action, library size, and platform involved. Keep it to what a maintainer needs; see the [AI policy](https://github.com/Kopuz-org/kopuz/blob/master/CONTRIBUTING.md#ai-policy).
 
   - type: textarea
     id: issue
@@ -39,7 +39,7 @@ body:
         - Local artist / album page
         - Server library
         - Now playing / fullscreen
-        - Downloads / yt-dlp
+        - Downloads / YouTube
         - App startup
         - Other
     validations:
@@ -78,3 +78,10 @@ body:
     attributes:
       label: Additional context
       description: Mention image sizes, remote server details, or anything else relevant.
+
+  - type: checkboxes
+    id: ai_usage
+    attributes:
+      label: AI usage
+      options:
+        - label: I used an LLM to write this issue.

@@ -1,0 +1,1 @@
+orientation|screenLayout|screenSize|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|locale|layoutDirection|fontScale|fontWeightAdjustment|density|colorMode|touchscreen

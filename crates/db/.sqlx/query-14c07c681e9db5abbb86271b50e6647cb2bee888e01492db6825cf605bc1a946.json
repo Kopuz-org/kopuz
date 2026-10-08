@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM lyrics WHERE cache_key = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "14c07c681e9db5abbb86271b50e6647cb2bee888e01492db6825cf605bc1a946"
+}

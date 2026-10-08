@@ -38,6 +38,65 @@ pub fn Header(
         COLUMNS_NORMAL
     };
 
+    // Phones get sort chips instead of a column header. The Android track row
+    // is artwork plus two lines, so a "# / Title / Artist / Album / clock"
+    // strip labels columns that are not on screen — and the sort it carries is
+    // the only sort affordance the album and playlist pages have.
+    if cfg!(target_os = "android") {
+        if sort_state.is_none() && !is_selection_mode {
+            return rsx! {};
+        }
+        let chip = move |field: SortField, label: String| {
+            let active = sort_state
+                .map(|state| matches!(*state.read(), Some((current, _)) if current == field))
+                .unwrap_or(false);
+            let chip_class = if active {
+                "shrink-0 h-8 px-3 rounded-full bg-white/15 text-white text-[11px] font-semibold flex items-center gap-1.5 active:scale-95 transition-transform"
+            } else {
+                "shrink-0 h-8 px-3 rounded-full bg-white/5 text-white/55 text-[11px] font-medium flex items-center gap-1.5 active:scale-95 transition-transform"
+            };
+            rsx! {
+                button {
+                    class: "{chip_class}",
+                    onclick: move |_| {
+                        if let Some(sort_state) = sort_state {
+                            showcase::toggle_sort_state(sort_state, field);
+                        }
+                    },
+                    "{label}"
+                    i { class: "{icon_class(&sort_state, field)} text-[9px]" }
+                }
+            }
+        };
+
+        return rsx! {
+            div { class: "flex items-center gap-2 px-1 pb-2 mb-1 overflow-x-auto",
+                if is_selection_mode {
+                    if let Some(handler) = on_select_all {
+                        button {
+                            class: if all_selected {
+                                "shrink-0 w-8 h-8 rounded-full bg-indigo-500 text-white flex items-center justify-center active:scale-95 transition-transform"
+                            } else {
+                                "shrink-0 w-8 h-8 rounded-full bg-white/5 text-white/55 flex items-center justify-center active:scale-95 transition-transform"
+                            },
+                            aria_label: if all_selected { "Deselect all tracks" } else { "Select all tracks" },
+                            onclick: move |_| handler.call(!all_selected),
+                            i { class: "fa-solid fa-check text-[11px]" }
+                        }
+                    }
+                }
+                if sort_state.is_some() {
+                    {chip(SortField::Title, i18n::t("title"))}
+                    {chip(SortField::Artist, i18n::t("artist"))}
+                    if !is_album {
+                        {chip(SortField::Album, i18n::t("album"))}
+                    }
+                    {chip(SortField::Duration, i18n::t("duration"))}
+                }
+            }
+        };
+    }
+
     if is_vaxry {
         return rsx! {
             div {

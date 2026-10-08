@@ -1,14 +1,11 @@
-//! The one place a source switch happens, shared by the sidebar source switcher
-//! and the Settings "Switch" button so they behave identically. A switch keeps
-//! `config.active_source` and `config.server` (the active server's connection
-//! snapshot, which the source resolver reads for the URL + creds) consistent —
-//! both set in a single `config.write()` so the active `MediaSource` rebuilds
-//! exactly once, with the new server, and never on a stale connection.
+//! Switching what the app plays from, and whether that source is reachable.
+//!
+//! The daemon owns the sources: a switch loads that server's stored
+//! credentials into the active snapshot, which a client could not do through
+//! `set_config` -- credential fields are exactly what that refuses to take.
 
-use config::{AppConfig, MusicServer, MusicService, Source};
-use db::ReadDb;
+use config::AppConfig;
 use dioxus::prelude::*;
-use server::source::{ActiveSource, AuthOutcome};
 
 /// Live connection status of the active source, for the switcher's indicator.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -21,97 +18,51 @@ pub enum ConnStatus {
     Offline,
 }
 
-/// Connection status of the active source: local libraries are always Online
-/// (no auth); a server runs `validate()` on each switch.
+/// Connection status of the active source, as the daemon's probes last found it.
 pub fn use_connection_status() -> Memo<ConnStatus> {
-    let active_source = use_context::<Signal<ActiveSource>>();
-    let config = use_context::<Signal<AppConfig>>();
-    let mut status = use_signal(|| ConnStatus::Connecting);
-    use_effect(move || {
-        // Subscribe to the active source (rebuilds on switch); `peek` the config
-        // so a volume/theme change doesn't trigger a re-validation.
-        let src = active_source.read().clone();
-        if config.peek().active_source.is_local() {
-            status.set(ConnStatus::Online);
-            return;
+    let sources = crate::sources::use_sources();
+    use_memo(move || {
+        let sources = sources.read();
+        let active = sources.iter().flatten().find(|source| source.active);
+        match active.and_then(|source| source.state) {
+            None | Some(api::SourceState::Checking) => ConnStatus::Connecting,
+            Some(api::SourceState::Online) => ConnStatus::Online,
+            Some(api::SourceState::AuthExpired | api::SourceState::Offline) => ConnStatus::Offline,
         }
-        status.set(ConnStatus::Connecting);
-        spawn(async move {
-            let outcome = utils::offload(async move { src.validate().await }).await;
-            status.set(match outcome {
-                AuthOutcome::Valid => ConnStatus::Online,
-                AuthOutcome::Expired | AuthOutcome::Unreachable => ConnStatus::Offline,
-            });
-        });
-    });
-    use_memo(move || *status.read())
+    })
 }
 
-/// Apply a source switch. For a server it loads the stored creds from the DB (so
-/// the connection is the new server's, not a leftover one) and writes
-/// `active_source` and `server` together; for Local it clears the server snapshot.
-/// Returns whether the source is usable without a sign-in (stored creds, or
-/// anonymous YT), so the caller can launch a sign-in flow otherwise.
-pub async fn apply_source_switch(
-    mut config: Signal<AppConfig>,
-    db: ReadDb,
-    source: Source,
-) -> bool {
-    match source {
-        Source::Local | Source::LocalLibrary(_) => {
-            let source_key = source.as_str().to_string();
-            config.write().set_active_local_source(source);
-            tracing::info!(target: "kopuz::source", source = %source_key, "source switched");
-            true
-        }
-        Source::Server(id) => {
-            let Some(saved) = config.peek().find_saved_server(&id).cloned() else {
-                return false;
-            };
-            let is_anon = saved.service == MusicService::YtMusic && saved.yt_anonymous;
-            // Creds live with the server in the DB — reuse the stored token instead
-            // of re-prompting sign-in on every switch.
-            let stored = db.load_server(&saved.id).await.ok().flatten();
-            let stored_token = stored.as_ref().and_then(|s| s.access_token.clone());
-            let stored_user = stored.as_ref().and_then(|s| s.user_id.clone());
-            let has_creds = stored_token.as_deref().is_some_and(|t| !t.is_empty());
-            let active = MusicServer {
-                name: saved.name,
-                url: saved.url,
-                service: saved.service,
-                // Anonymous YT keeps an empty (non-None) token so the backend
-                // treats it as anon rather than "needs sign-in".
-                access_token: if is_anon {
-                    Some(String::new())
-                } else {
-                    stored_token
-                },
-                user_id: stored_user,
-                id: Some(saved.id.clone()),
-                yt_browser: saved.yt_browser,
-                yt_anonymous: is_anon,
-                apple_music_storefront: saved.apple_music_storefront,
-                apple_music_language: saved.apple_music_language,
-            };
-            {
-                let mut cfg = config.write();
-                cfg.set_active_server_snapshot(active);
+/// Apply a source switch. Answers whether the source is usable without a
+/// sign-in (stored credentials, or a source usable anonymously), so the caller can
+/// launch a sign-in flow otherwise.
+pub async fn apply_source_switch(config: Signal<AppConfig>, id: String) -> bool {
+    let api = crate::api::consume_api();
+    let baseline = try_consume_context::<crate::config_sync::ConfigBaseline>();
+    match api.switch_source(id).await {
+        Ok(info) => {
+            crate::sources::show_active(&info);
+            let usable = info.authenticated;
+            // Read back now rather than on the event, so a caller sees the switched config on return.
+            if let (Some(baseline), Ok(view)) = (baseline, api.config().await) {
+                baseline.adopt(config, &view);
             }
-            tracing::info!(target: "kopuz::source", server = %id, "source switched");
-            has_creds || is_anon
+            usable
+        }
+        Err(error) => {
+            tracing::warn!(%error, "source switch failed");
+            crate::toast::toast_error(&error.to_string());
+            false
         }
     }
 }
 
-/// A fire-and-forget source switcher for the sidebar: switches (loading creds)
-/// without launching a sign-in flow — the Settings page owns that.
-pub fn use_switch_source() -> impl Fn(Source) + Clone {
+/// A fire-and-forget source switcher for the sidebar: switches (loading
+/// credentials) without launching a sign-in flow -- the settings page owns that.
+pub fn use_switch_source() -> impl Fn(String) + Clone {
     let config = use_context::<Signal<AppConfig>>();
-    let db = use_context::<ReadDb>();
-    move |source: Source| {
-        let db = db.clone();
+    move |id: String| {
         spawn(async move {
-            apply_source_switch(config, db, source).await;
+            apply_source_switch(config, id).await;
         });
     }
 }

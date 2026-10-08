@@ -15,13 +15,12 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let config = use_context::<Signal<AppConfig>>();
     let _nav_ctrl = use_context::<NavigationController>();
 
-    let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
+    let total_seconds: u64 = props.tracks.iter().filter_map(|t| t.duration_secs()).sum();
     let duration_min = total_seconds / 60;
 
     let offline_tracks = config.read().offline_tracks.clone();
-    // Per-track cover resolver (source dispatch + local-album lookup live in the
+    // Per-track cover resolver (source dispatch + album lookup live in the
     // source layer; no partition decision here).
-    let cover_for = hooks::use_db_queries::use_cover_resolver(64);
     let _fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let sort_state = use_signal(|| None);
     let indexed_tracks: Vec<_> = props
@@ -47,7 +46,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
         > 1;
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.clone())
+        ctrl.get_track_at(idx).map(|track| track.uid.clone())
     };
 
     let current_song_title = ctrl.current_song_title.read().clone();
@@ -57,7 +56,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
     let tracks_for_play_all = sorted_tracks.clone();
     let selected_queue_tracks: Vec<_> = sorted_tracks
         .iter()
-        .filter(|track| props.selected_tracks.contains(&track.id))
+        .filter(|track| props.selected_tracks.contains(&track.key))
         .cloned()
         .collect();
     let selected_queue_tracks_arc = std::sync::Arc::new(selected_queue_tracks.clone());
@@ -94,11 +93,20 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
         }
     }
 
+    // A phone has no room for the title beside the cover, so it stacks under it.
+    let phone = cfg!(target_os = "android");
+    let cover_size = if phone { "w-32 h-32" } else { "w-44 h-44" };
+    let cover_cursor = if props.on_cover_click.is_some() {
+        "cursor-pointer"
+    } else {
+        ""
+    };
+
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
-            div { class: "flex items-end gap-6 mb-8 px-6 pt-6 shrink-0",
+            div { class: if phone { "flex flex-col items-center text-center gap-3 mb-3 px-4 pt-2 shrink-0" } else { "flex items-end gap-6 mb-8 px-6 pt-6 shrink-0" },
                 div {
-                    class: if props.on_cover_click.is_some() { "w-44 h-44 rounded-xl overflow-hidden shrink-0 shadow-2xl bg-white/5 cursor-pointer" } else { "w-44 h-44 rounded-xl overflow-hidden shrink-0 shadow-2xl bg-white/5" },
+                    class: "{cover_size} rounded-xl overflow-hidden shrink-0 shadow-2xl bg-white/5 {cover_cursor}",
                     style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
                     onclick: move |_| {
                         if let Some(ref h) = props.on_cover_click {
@@ -120,7 +128,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                     }
                 }
 
-                div { class: "flex flex-col gap-1 pb-1 min-w-0",
+                div { class: if phone { "flex flex-col items-center gap-1 w-full min-w-0" } else { "flex flex-col gap-1 pb-1 min-w-0" },
                     if !props.description.is_empty() {
                         if let Some(on_description_click) = props.on_description_click {
                             button {
@@ -137,7 +145,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                             }
                         }
                     }
-                    h1 { class: "text-4xl font-semibold tracking-tight text-white truncate mb-1", "{props.name}" }
+                    h1 { class: if phone { "text-2xl font-semibold tracking-tight text-white line-clamp-2 mb-1" } else { "text-4xl font-semibold tracking-tight text-white truncate mb-1" }, "{props.name}" }
                     p {
                         class: "text-sm mb-3",
                         style: "color: var(--color-white); opacity: 0.45;",
@@ -155,7 +163,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                         }
                     }
 
-                    div { class: "flex items-center gap-2 flex-wrap",
+                    div { class: if phone { "flex items-center justify-center gap-2 flex-wrap" } else { "flex items-center gap-2 flex-wrap" },
                         if !props.tracks.is_empty() {
                             button {
                                 class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
@@ -173,7 +181,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                             }
                             button {
                                 class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
-                                style: if *ctrl.shuffle.read() { "background: var(--color-indigo-500);" } else { "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);" },
+                                style: if *ctrl.shuffle.read() { "background: var(--color-indigo-500); border: 1px solid transparent;" } else { "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);" },
                                 onclick: move |_| {
                                     ctrl.toggle_shuffle();
                                     ctrl.play_queue_shuffled(tracks_for_shuffle.clone());
@@ -261,18 +269,18 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                         {
                             {
                                 let idx = *idx;
-                                let matches_current_path = currently_playing_path.as_ref() == Some(&track.id);
+                                let matches_current_path = currently_playing_path.as_ref() == Some(&track.uid);
                                 let matches_current_metadata = currently_playing_path.is_none()
                                     && !current_song_title.is_empty()
                                     && track.title == current_song_title
                                     && track.artist == current_song_artist
                                     && track.album == current_song_album
-                                    && track.duration == current_song_duration;
+                                    && track.duration_secs() == Some(current_song_duration);
                                 let is_currently_playing: bool = matches_current_path
                                     || matches_current_metadata;
                                 let is_selected = props.is_selection_mode
-                                    && props.selected_tracks.contains(&track.id);
-                                let path_str = track.id.uid();
+                                    && props.selected_tracks.contains(&track.key);
+                                let path_str = track.uid.clone();
                                 let item_id_str: String = path_str
                                     .split(':')
                                     .nth(1)
@@ -287,7 +295,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 let is_downloading = false;
                                 let play_queue = std::sync::Arc::clone(&sorted_tracks_arc);
                                 let cover_url: Option<utils::CoverUrl> =
-                                    cover_for(track).or_else(|| Some(utils::default_cover_url()));
+                                    hooks::artwork::for_track(track, hooks::artwork::Size::Thumb).or_else(|| Some(utils::default_cover_url()));
                                 let mut is_new_disc = false;
                                 if track.disc_number != last_disc && sort_state.peek().is_none()
                                     && props.is_album
@@ -298,7 +306,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 }
                                 let columns = if props.is_album { COLUMNS_VAXRY_ALBUM } else { COLUMNS_VAXRY };
                                 rsx! {
-                                    div { key: "{track.id.uid()}", class: "contents",
+                                    div { key: "{track.uid.clone()}", class: "contents",
                                     div { class: "flex items-center group",
                                         if has_multiple_discs && props.is_album && is_new_disc && sort_state.peek().is_none() {
                                             div { class: "flex-1 min-w-0",
@@ -315,9 +323,8 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                         div { class: "flex-1 min-w-0",
                                             TrackRow {
                                                 track: track.clone(),
-                                                on_start_radio: crate::track_row::radio_handler(track.clone()),
                                                 cover_url,
-                                                is_menu_open: props.active_track.as_ref() == Some(&track.id),
+                                                is_menu_open: props.active_track.as_ref() == Some(&track.uid),
                                                 is_album: props.is_album,
                                                 is_selection_mode: props.is_selection_mode,
                                                 is_selected,
@@ -350,11 +357,6 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                                         handler.call(idx);
                                                     }
                                                 },
-                                                on_queue: move |_| {
-                                                    if let Some(handler) = &props.on_queue {
-                                                        handler.call(idx);
-                                                    }
-                                                },
                                                 on_close_menu: move |_| {
                                                     if let Some(handler) = &props.on_close_menu {
                                                         handler.call(());
@@ -377,8 +379,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                                     }
                                                 },
                                                 on_play: move |_| {
-                                                    ctrl.queue.set((*play_queue).clone());
-                                                    ctrl.play_track(display_idx);
+                                                    ctrl.play_queue_at((*play_queue).clone(), display_idx);
                                                 },
                                             }
                                         }

@@ -44,6 +44,8 @@ fn server_track(id: &str, title: &str) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: vec!["Art".into()],
+        replay_gain: config::ReplayGainInfo::default(),
+        credits: Vec::new(),
     }
 }
 
@@ -80,7 +82,7 @@ async fn seed_active_server(db: &db::Db, id: &str) {
 #[tokio::test]
 async fn recently_played_round_trip() {
     let db = db::init(&unique_db()).await.unwrap();
-    let local = Source::Local;
+    let local = Source::default();
 
     for k in ["a", "b", "c"] {
         db.push_recent(&local, k).await.unwrap();
@@ -110,11 +112,11 @@ async fn playlists_round_trip() {
     let db = db::init(&db_path).await.unwrap();
     seed_active_server(&db, "srv-1").await;
 
-    db.upsert_playlist_meta(&Source::Local, "pl-1", "Mine", None, None)
+    db.upsert_playlist_meta(&Source::default(), "pl-1", "Mine", None, None)
         .await
         .unwrap();
     db.set_playlist_tracks(
-        &Source::Local,
+        &Source::default(),
         "pl-1",
         &["/music/a.flac".into(), "/music/b.flac".into()],
     )
@@ -132,7 +134,7 @@ async fn playlists_round_trip() {
     db.create_folder("f1", "Folder").await.unwrap();
     db.set_playlist_folder("pl-1", Some("f1")).await.unwrap();
 
-    let store = db.load_playlists(&Source::Local).await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
     assert_eq!(store.playlists.len(), 1);
     assert_eq!(store.playlists[0].id, "pl-1");
     assert_eq!(store.playlists[0].name, "Mine");
@@ -158,7 +160,7 @@ async fn playlists_round_trip() {
 
 /// Helper: a local playlist's track refs from the loaded store.
 async fn local_playlist_tracks(db: &db::Db, id: &str) -> Vec<String> {
-    db.load_playlists(&Source::Local)
+    db.load_playlists(&Source::default())
         .await
         .unwrap()
         .playlists
@@ -172,21 +174,21 @@ async fn local_playlist_tracks(db: &db::Db, id: &str) -> Vec<String> {
 async fn playlist_add_appends_and_dedups() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
-    db.upsert_playlist_meta(&Source::Local, "pl", "Mine", None, None)
+    db.upsert_playlist_meta(&Source::default(), "pl", "Mine", None, None)
         .await
         .unwrap();
-    db.set_playlist_tracks(&Source::Local, "pl", &["a".into(), "b".into()])
+    db.set_playlist_tracks(&Source::default(), "pl", &["a".into(), "b".into()])
         .await
         .unwrap();
 
     // New tracks append at the end, in order.
-    db.add_playlist_tracks(&Source::Local, "pl", &["c".into(), "d".into()])
+    db.add_playlist_tracks(&Source::default(), "pl", &["c".into(), "d".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "b", "c", "d"]);
 
     // Already-present refs are skipped; only the genuinely new one is appended.
-    db.add_playlist_tracks(&Source::Local, "pl", &["b".into(), "e".into()])
+    db.add_playlist_tracks(&Source::default(), "pl", &["b".into(), "e".into()])
         .await
         .unwrap();
     assert_eq!(
@@ -195,7 +197,7 @@ async fn playlist_add_appends_and_dedups() {
     );
 
     // A batch with an internal duplicate adds that ref only once.
-    db.add_playlist_tracks(&Source::Local, "pl", &["f".into(), "f".into()])
+    db.add_playlist_tracks(&Source::default(), "pl", &["f".into(), "f".into()])
         .await
         .unwrap();
     assert_eq!(
@@ -211,7 +213,7 @@ async fn playlist_add_creates_playlist_if_absent() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
 
-    db.add_playlist_tracks(&Source::Local, "fresh", &["x".into()])
+    db.add_playlist_tracks(&Source::default(), "fresh", &["x".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "fresh").await, ["x"]);
@@ -223,30 +225,30 @@ async fn playlist_add_creates_playlist_if_absent() {
 async fn playlist_remove_keeps_remaining_order() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
-    db.upsert_playlist_meta(&Source::Local, "pl", "Mine", None, None)
+    db.upsert_playlist_meta(&Source::default(), "pl", "Mine", None, None)
         .await
         .unwrap();
     db.set_playlist_tracks(
-        &Source::Local,
+        &Source::default(),
         "pl",
         &["a".into(), "b".into(), "c".into(), "d".into()],
     )
     .await
     .unwrap();
 
-    db.remove_playlist_tracks(&Source::Local, "pl", &["b".into(), "d".into()])
+    db.remove_playlist_tracks(&Source::default(), "pl", &["b".into(), "d".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c"]);
 
     // Removing a non-member is a no-op.
-    db.remove_playlist_tracks(&Source::Local, "pl", &["z".into()])
+    db.remove_playlist_tracks(&Source::default(), "pl", &["z".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c"]);
 
     // A later add still appends after the survivors (no position collision).
-    db.add_playlist_tracks(&Source::Local, "pl", &["e".into()])
+    db.add_playlist_tracks(&Source::default(), "pl", &["e".into()])
         .await
         .unwrap();
     assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c", "e"]);
@@ -256,7 +258,7 @@ async fn playlist_remove_keeps_remaining_order() {
 
 /// Helper: a folder's playlist_ids from the loaded store, or panic if absent.
 async fn folder_members(db: &db::Db, id: &str) -> Vec<String> {
-    db.load_playlists(&Source::Local)
+    db.load_playlists(&Source::default())
         .await
         .unwrap()
         .folders
@@ -272,23 +274,23 @@ async fn folder_create_rename_delete() {
     let db = db::init(&db_path).await.unwrap();
 
     db.create_folder("f1", "Rock").await.unwrap();
-    let store = db.load_playlists(&Source::Local).await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
     assert_eq!(store.folders.len(), 1);
     assert_eq!(store.folders[0].name, "Rock");
 
     // create on the same id is an upsert of the name (idempotent on id).
     db.create_folder("f1", "Metal").await.unwrap();
-    let store = db.load_playlists(&Source::Local).await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
     assert_eq!(store.folders.len(), 1, "no duplicate folder row");
     assert_eq!(store.folders[0].name, "Metal");
 
     db.rename_folder("f1", "Jazz").await.unwrap();
-    let store = db.load_playlists(&Source::Local).await.unwrap();
+    let store = db.load_playlists(&Source::default()).await.unwrap();
     assert_eq!(store.folders[0].name, "Jazz");
 
     db.delete_folder("f1").await.unwrap();
     assert!(
-        db.load_playlists(&Source::Local)
+        db.load_playlists(&Source::default())
             .await
             .unwrap()
             .folders
@@ -551,12 +553,94 @@ async fn queue_round_trips() {
         shuffle_order: vec![0],
         shuffle_enabled: true,
     };
-    db.save_queue(&snap).await.unwrap();
-    let q = db.load_queue().await.unwrap();
+    db.save_queue(&Source::default(), &snap).await.unwrap();
+    let q = db.load_queue(&Source::default()).await.unwrap();
     assert_eq!(q.queue.len(), 1);
     assert_eq!(q.queue[0].title, "Yt One");
     assert_eq!(q.progress_secs, 42);
     assert!(q.shuffle_enabled);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn each_source_keeps_its_own_queue_and_a_purge_takes_only_its_own() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let local = Source::default();
+    let server = Source::Server("srv-1".into());
+    let snap = |key: &str, title: &str, progress_secs| QueueSnapshot {
+        version: 1,
+        queue: vec![server_track(key, title)],
+        progress_secs,
+        shuffle_order: vec![0],
+        ..Default::default()
+    };
+    db.save_queue(&local, &snap("L1", "Local one", 10))
+        .await
+        .unwrap();
+    db.save_queue(&server, &snap("S1", "Server one", 20))
+        .await
+        .unwrap();
+    db.save_queue_position(&server, &snap("S1", "Server one", 25))
+        .await
+        .unwrap();
+
+    let on_local = db.load_queue(&local).await.unwrap();
+    let on_server = db.load_queue(&server).await.unwrap();
+    assert_eq!(
+        (on_local.queue[0].title.as_str(), on_local.progress_secs),
+        ("Local one", 10)
+    );
+    assert_eq!(
+        (on_server.queue[0].title.as_str(), on_server.progress_secs),
+        ("Server one", 25)
+    );
+    assert!(
+        db.load_queue(&Source::Server("never".into()))
+            .await
+            .unwrap()
+            .queue
+            .is_empty()
+    );
+
+    db.purge_source(&server).await.unwrap();
+    assert!(db.load_queue(&server).await.unwrap().queue.is_empty());
+    assert_eq!(db.load_queue(&local).await.unwrap().queue.len(), 1);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn a_library_prune_keeps_rows_a_playlist_or_favorite_holds() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let active = Source::Server("srv-1".into());
+    db.upsert_tracks(
+        &active,
+        &[
+            server_track("LIB", "In the library"),
+            server_track("PL", "Only in a playlist"),
+            server_track("FAV", "Only a favorite"),
+            server_track("GONE", "Nothing holds it"),
+        ],
+    )
+    .await
+    .unwrap();
+    db.upsert_playlist_meta(&active, "PL1", "Mix", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&active, "PL1", &["PL".into()])
+        .await
+        .unwrap();
+    db.set_favorite("srv-1", "FAV", true).await.unwrap();
+
+    db.prune_source(&active, &["LIB".into()], &[])
+        .await
+        .unwrap();
+
+    let count = db.tracks_count(&TrackFilter::new(active)).await.unwrap();
+    assert_eq!(count, 3);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
@@ -638,6 +722,78 @@ async fn active_server_writes_never_touch_other_servers_rows() {
     );
     assert_eq!(store.playlists[0].id, "OPL");
     assert_eq!(store.playlists[0].tracks, vec!["OV1"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// Two accounts can hold the same video; restoring one's queue must refresh it from that account's library, not the other's.
+#[tokio::test]
+async fn a_restored_queue_refreshes_from_its_own_source_only() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let mine = Source::Server("srv-mine".into());
+    let theirs = Source::Server("srv-theirs".into());
+    db.upsert_tracks(&theirs, &[server_track("VID", "Their row")])
+        .await
+        .unwrap();
+    db.upsert_tracks(&mine, &[server_track("VID", "My row")])
+        .await
+        .unwrap();
+    let mut queued = server_track("VID", "Queued");
+    queued.playlist_item_id = Some("entry-7".into());
+    db.save_queue(
+        &mine,
+        &QueueSnapshot {
+            version: 1,
+            queue: vec![queued],
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let restored = db.load_queue(&mine).await.unwrap();
+    assert_eq!(restored.queue[0].title, "My row");
+    assert_eq!(
+        restored.queue[0].playlist_item_id.as_deref(),
+        Some("entry-7"),
+        "the queued entry keeps its own playlist entry"
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// One listing crediting a track differently must not cost its artist the key its photo hangs on; the full prune at a sync's end clears real orphans.
+#[tokio::test]
+async fn a_briefly_uncredited_artist_keeps_its_key_until_a_full_prune() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::Server("srv-1".into());
+    let credited = |name: &str| {
+        let mut track = server_track("T1", "Song");
+        track.artist = name.into();
+        track.artists = vec![name.into()];
+        track
+    };
+    db.upsert_tracks(&source, &[credited("Ada")]).await.unwrap();
+    let first = db.unlinked_artist_keys(&source).await.unwrap();
+
+    db.upsert_tracks(&source, &[credited("Someone Else")])
+        .await
+        .unwrap();
+    db.upsert_tracks(&source, &[credited("Ada")]).await.unwrap();
+    let back = db.unlinked_artist_keys(&source).await.unwrap();
+    assert!(
+        first.iter().all(|(name, key)| back.get(name) == Some(key)),
+        "Ada keeps her key: {first:?} vs {back:?}"
+    );
+
+    db.prune_source(&source, &["T1".into()], &[]).await.unwrap();
+    assert_eq!(
+        db.unlinked_artist_keys(&source).await.unwrap(),
+        first,
+        "the full prune leaves only the credited artist"
+    );
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

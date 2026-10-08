@@ -20,7 +20,7 @@ tracing = { workspace = true }
 directories = { workspace = true }
 nextcloud-rs = { workspace = true }
 percent-encoding = { workspace = true }
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["blocking", "json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 config = { workspace = true }
@@ -41,6 +41,7 @@ db = { workspace = true }
 utils = { workspace = true }
 async-trait = { workspace = true }
 quick-xml = { workspace = true }
+lofty = { workspace = true }
 urlencoding = "2.1"
 regex = "1"
 m3u8-rs = "6"
@@ -57,19 +58,20 @@ cc = "1"
 [target.'cfg(not(any(target_os = "windows", target_os = "android")))'.dependencies]
 rookie = "0.5"
 
-# Headless JS for YouTube (desktop only; no V8 on Android): deno_core runs the
-# sig/n decipher solver and rustypipe-botguard mints PoTokens, sharing one V8.
-# Versions (incl. the deno_core lock) live in the workspace manifest.
+# Desktop-only, so both are in one table. Headless JS for YouTube (no V8 on
+# Android): deno_core runs the sig/n decipher solver and rustypipe-botguard
+# mints PoTokens, sharing one V8; versions (incl. the deno_core lock) live in
+# the workspace manifest. sqlx reads a Gecko sign-in profile's cookies.sqlite,
+# which is unencrypted (NOT rusqlite — that would double-link libsqlite3).
 [target.'cfg(not(target_os = "android"))'.dependencies]
 deno_core = { workspace = true }
 rustypipe-botguard = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
 
-# Windows native cookie decryption (v10 DPAPI + planted v20 app-bound). Reuses
-# the project's sqlx/sqlite (NOT rusqlite — that would double-link libsqlite3).
+# Windows native cookie decryption (v10 DPAPI + planted v20 app-bound).
 [target.'cfg(windows)'.dependencies]
 base64 = { workspace = true }
 aes-gcm = { workspace = true }
-sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
 windows-core = "0.62"
 windows = { workspace = true, features = [
     "Win32_Foundation",
@@ -85,3 +87,4 @@ path = "examples/duration_probe.rs"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = { workspace = true }

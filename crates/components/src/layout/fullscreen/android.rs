@@ -1,14 +1,12 @@
 use super::metadata::TrackMetadata;
 use crate::lyrics_view::LyricsView;
-use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, VolumeSlider};
+use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons};
 use crate::queue_list_view::QueueListView;
 use config::AppConfig;
 use dioxus::prelude::*;
-use player::player::Player;
 
 #[component]
 pub(crate) fn FullscreenAndroid(
-    player: Signal<Player>,
     is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
     config: Signal<AppConfig>,
@@ -18,12 +16,9 @@ pub(crate) fn FullscreenAndroid(
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
     current_song_bitrate: Signal<u16>,
-    current_song_cover_url: Signal<String>,
     current_queue_index: Signal<usize>,
-    items: Vec<reader::Track>,
+    items: Vec<api::TrackInfo>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
-    volume: Signal<f32>,
-    persisted_volume: Signal<f32>,
     background_style: Memo<String>,
     cover_background: Memo<Option<String>>,
 ) -> Element {
@@ -31,6 +26,28 @@ pub(crate) fn FullscreenAndroid(
     let tab = *active_tab.read();
 
     let mut swipe = crate::gestures::use_swipe();
+    let mut skip_swipe = crate::gestures::use_swipe();
+    let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+
+    // The sheet unmounts as soon as `is_fullscreen` clears, so a close has to
+    // hold it on screen for the length of its own animation first.
+    let mut closing = use_signal(|| false);
+    let mut close_from = use_signal(|| 0.0_f64);
+    let mut begin_close = move |from: f64| {
+        if *closing.peek() {
+            return;
+        }
+        if config.peek().reduce_animations {
+            is_fullscreen.set(false);
+            return;
+        }
+        close_from.set(from);
+        closing.set(true);
+        spawn(async move {
+            utils::sleep(std::time::Duration::from_millis(200)).await;
+            is_fullscreen.set(false);
+        });
+    };
 
     let mut pull_armed = use_signal(|| true);
     let scroller_id = match tab {
@@ -62,7 +79,14 @@ pub(crate) fn FullscreenAndroid(
     } else {
         0.0
     };
-    let sheet_style = if pull > 0.0 {
+    let is_closing = *closing.read();
+    let sheet_style = if is_closing {
+        format!(
+            "{} --kopuz-sheet-from: {}px;",
+            background_style.read(),
+            close_from.read()
+        )
+    } else if pull > 0.0 {
         format!(
             "{} transform: translateY({pull}px);",
             background_style.read()
@@ -73,13 +97,19 @@ pub(crate) fn FullscreenAndroid(
             background_style.read()
         )
     };
+    let sheet_anim = if is_closing {
+        "kopuz-sheet-out"
+    } else {
+        "kopuz-sheet-in"
+    };
     const DISMISS_AT: f64 = 140.0;
     let on_pull_end = move |evt: TouchEvent| {
         let armed = *pull_armed.peek();
-        let dismissed = armed && swipe.pull_down() >= DISMISS_AT;
+        let travelled = swipe.pull_down();
+        let dismissed = armed && travelled >= DISMISS_AT;
         let swiped_down = swipe.finish(&evt) == Some(crate::gestures::SwipeDirection::Down);
         if armed && (swiped_down || dismissed) {
-            is_fullscreen.set(false);
+            begin_close(travelled);
         }
     };
     let close_text = i18n::t("close").to_string();
@@ -103,7 +133,7 @@ pub(crate) fn FullscreenAndroid(
         div {
             // Above the mobile top bar (z-60) — at z-50 that bar painted over
             // this sheet's own header, hiding the close button and the tabs.
-            class: "fixed inset-0 z-[70] flex flex-col text-white select-none",
+            class: "fixed inset-0 z-[70] flex flex-col text-white select-none {sheet_anim}",
             style: "{sheet_style}",
 
             if let Some(cover) = cover_background() {
@@ -119,7 +149,7 @@ pub(crate) fn FullscreenAndroid(
                 button {
                     class: "w-10 h-10 flex items-center justify-center text-white/60 active:scale-95 transition-all shrink-0",
                     "aria-label": "{close_text}",
-                    onclick: move |_| is_fullscreen.set(false),
+                    onclick: move |_| begin_close(0.0),
                     i { class: "fa-solid fa-chevron-down text-xl", "aria-hidden": "true" }
                 }
                 div { class: "flex flex-1 items-center",
@@ -139,17 +169,29 @@ pub(crate) fn FullscreenAndroid(
                 if tab == 0 {
                     div {
                         class: "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]",
-                        TrackMetadata {
-                            is_fullscreen,
-                            current_song_cover_url,
-                            current_song_title,
-                            current_song_artist,
-                            current_song_album,
-                            current_song_bitrate,
+                        div {
+                            class: "w-full flex-1 min-h-0 flex flex-col",
+                            ontouchstart: move |evt| skip_swipe.start(&evt),
+                            ontouchmove: move |evt| skip_swipe.update(&evt),
+                            ontouchend: move |evt| {
+                                let mut ctrl = ctrl;
+                                match skip_swipe.finish(&evt) {
+                                    Some(crate::gestures::SwipeDirection::Left) => ctrl.play_next(),
+                                    Some(crate::gestures::SwipeDirection::Right) => ctrl.play_prev(),
+                                    _ => {}
+                                }
+                            },
+                            ontouchcancel: move |_| skip_swipe.reset(),
+                            TrackMetadata {
+                                is_fullscreen,
+                                current_song_title,
+                                current_song_artist,
+                                current_song_album,
+                                current_song_bitrate,
+                            }
                         }
                         SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Fullscreen }
                         TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
-                        VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
                     }
                 } else if tab == 1 {
                     QueueListView {

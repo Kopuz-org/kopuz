@@ -1,32 +1,63 @@
 use serde::{Deserialize, Serialize};
 
+/// Id of the folder source every install starts with; it is also its stored `source` column value.
+pub const DEFAULT_LOCAL_ID: &str = "local";
+
 /// Where a track/playlist/favorite comes from, and what the app is currently
-/// sourcing from: the built-in local library, a named local library, or a
-/// specific media server.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+/// sourcing from: a folder library or a specific media server.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(from = "SourceRepr", into = "SourceRepr")]
 pub enum Source {
-    #[default]
-    Local,
-    /// A separately configured local library. Its id includes the `local:`
-    /// namespace so it can safely share the DB `source` column with server ids.
+    /// A configured folder library; its id shares the DB `source` column with server ids.
     LocalLibrary(String),
     Server(String),
 }
 
+/// The stored shape, which still spells the default folder library `Local`.
+#[derive(Serialize, Deserialize)]
+enum SourceRepr {
+    Local,
+    LocalLibrary(String),
+    Server(String),
+}
+
+impl From<SourceRepr> for Source {
+    fn from(repr: SourceRepr) -> Self {
+        match repr {
+            SourceRepr::Local => Source::default(),
+            SourceRepr::LocalLibrary(id) => Source::LocalLibrary(id),
+            SourceRepr::Server(id) => Source::Server(id),
+        }
+    }
+}
+
+impl From<Source> for SourceRepr {
+    fn from(source: Source) -> Self {
+        match source {
+            Source::LocalLibrary(id) if id == DEFAULT_LOCAL_ID => SourceRepr::Local,
+            Source::LocalLibrary(id) => SourceRepr::LocalLibrary(id),
+            Source::Server(id) => SourceRepr::Server(id),
+        }
+    }
+}
+
+impl Default for Source {
+    fn default() -> Self {
+        Source::LocalLibrary(DEFAULT_LOCAL_ID.to_owned())
+    }
+}
+
 impl Source {
-    /// The `source` column value: `"local"`, a `local:<uuid>` id, or a server id.
+    /// The `source` column value: a folder library id or a server id.
     pub fn as_str(&self) -> &str {
         match self {
-            Source::Local => "local",
             Source::LocalLibrary(id) | Source::Server(id) => id.as_str(),
         }
     }
 
     /// Build from a stored `source` column value.
     pub fn from_column(s: &str) -> Self {
-        if s == "local" {
-            Source::Local
-        } else if s.starts_with("local:") {
+        if s == DEFAULT_LOCAL_ID || s.starts_with("local:") {
             Source::LocalLibrary(s.to_owned())
         } else {
             Source::Server(s.to_owned())
@@ -37,28 +68,28 @@ impl Source {
     pub fn server_id(&self) -> Option<&str> {
         match self {
             Source::Server(id) => Some(id),
-            Source::Local | Source::LocalLibrary(_) => None,
+            Source::LocalLibrary(_) => None,
         }
     }
 
     pub fn is_local(&self) -> bool {
-        matches!(self, Source::Local | Source::LocalLibrary(_))
+        matches!(self, Source::LocalLibrary(_))
     }
 
     pub fn local_library_id(&self) -> Option<&str> {
         match self {
             Source::LocalLibrary(id) => Some(id),
-            Source::Local | Source::Server(_) => None,
+            Source::Server(_) => None,
         }
     }
 
-    /// Key used by the play-count cache. Legacy Local and server sources keep
-    /// their existing uid keys; named local libraries add their source id so
+    /// Key used by the play-count cache. The default library and server sources
+    /// keep their existing uid keys; other folder libraries add their source id so
     /// the same filesystem path can have independent counts in each library.
     pub fn listen_count_key(&self, track_uid: &str) -> String {
         match self {
-            Source::LocalLibrary(id) => format!("{id}|{track_uid}"),
-            Source::Local | Source::Server(_) => track_uid.to_owned(),
+            Source::LocalLibrary(id) if id != DEFAULT_LOCAL_ID => format!("{id}|{track_uid}"),
+            Source::LocalLibrary(_) | Source::Server(_) => track_uid.to_owned(),
         }
     }
 }
@@ -79,7 +110,18 @@ impl SavedLocalSource {
             directories,
         }
     }
+
+    /// The folder library every install has, under the id its rows are stored with.
+    pub fn default_library(directories: Vec<std::path::PathBuf>) -> Self {
+        Self {
+            id: DEFAULT_LOCAL_ID.to_owned(),
+            name: DEFAULT_LOCAL_NAME.to_owned(),
+            directories,
+        }
+    }
 }
+
+pub const DEFAULT_LOCAL_NAME: &str = "Local Library";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum MusicService {
@@ -96,6 +138,36 @@ pub enum MusicService {
 }
 
 impl MusicService {
+    pub const ALL: &'static [MusicService] = &[
+        MusicService::Jellyfin,
+        MusicService::Subsonic,
+        MusicService::Custom,
+        MusicService::YtMusic,
+        MusicService::SoundCloud,
+        MusicService::AppleMusic,
+        MusicService::Spotify,
+        MusicService::Nextcloud,
+    ];
+
+    /// The stable slug a client names a service by. Unlike the enum, this
+    /// crosses the wire, so it never changes for an existing service.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Jellyfin => "jellyfin",
+            Self::Subsonic => "subsonic",
+            Self::Custom => "custom",
+            Self::YtMusic => "ytmusic",
+            Self::AppleMusic => "applemusic",
+            Self::SoundCloud => "soundcloud",
+            Self::Spotify => "spotify",
+            Self::Nextcloud => "nextcloud",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|service| service.id() == id)
+    }
+
     pub fn display_name(&self) -> &'static str {
         match self {
             Self::Jellyfin => "Jellyfin",
@@ -129,7 +201,8 @@ pub struct MusicServer {
     pub user_id: Option<String>,
     #[serde(default)]
     pub id: Option<String>,
-    /// For browser sign-in services: which Chromium-family browser was used.
+    /// For browser sign-in services: which browser was used. `None` means the
+    /// system default, resolved when the sign-in runs.
     #[serde(default)]
     pub yt_browser: Option<Browser>,
     /// For `MusicService::YtMusic` only: anonymous mode.
@@ -195,6 +268,15 @@ impl Default for MusicServer {
     }
 }
 
+/// Which engine a browser is built on. Everything a sign-in does differently
+/// per browser (the launch flags, where the profile keeps its cookies, how
+/// those cookies are encrypted) follows from this and not from the brand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BrowserEngine {
+    Chromium,
+    Gecko,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Browser {
@@ -204,10 +286,30 @@ pub enum Browser {
     Edge,
     Vivaldi,
     Helium,
+    Firefox,
+    LibreWolf,
+    Zen,
+    Floorp,
 }
 
 impl Browser {
     pub const ALL: &'static [Browser] = &[
+        Browser::Firefox,
+        Browser::Chrome,
+        Browser::Chromium,
+        Browser::Brave,
+        Browser::Edge,
+        Browser::Vivaldi,
+        Browser::Helium,
+        Browser::LibreWolf,
+        Browser::Zen,
+        Browser::Floorp,
+    ];
+
+    /// The Chromium family, in the order an automatic choice should try it.
+    /// Spotify playback is limited to these: its Web Playback SDK has a
+    /// long-standing Firefox bug, so a Gecko browser is never offered there.
+    pub const CHROMIUM_FAMILY: &'static [Browser] = &[
         Browser::Chrome,
         Browser::Chromium,
         Browser::Brave,
@@ -226,6 +328,10 @@ impl Browser {
             Browser::Edge => "edge",
             Browser::Vivaldi => "vivaldi",
             Browser::Helium => "helium",
+            Browser::Firefox => "firefox",
+            Browser::LibreWolf => "librewolf",
+            Browser::Zen => "zen",
+            Browser::Floorp => "floorp",
         }
     }
 
@@ -237,6 +343,24 @@ impl Browser {
             Browser::Edge => "Edge",
             Browser::Vivaldi => "Vivaldi",
             Browser::Helium => "Helium",
+            Browser::Firefox => "Firefox",
+            Browser::LibreWolf => "LibreWolf",
+            Browser::Zen => "Zen",
+            Browser::Floorp => "Floorp",
+        }
+    }
+
+    pub fn engine(self) -> BrowserEngine {
+        match self {
+            Browser::Chrome
+            | Browser::Chromium
+            | Browser::Brave
+            | Browser::Edge
+            | Browser::Vivaldi
+            | Browser::Helium => BrowserEngine::Chromium,
+            Browser::Firefox | Browser::LibreWolf | Browser::Zen | Browser::Floorp => {
+                BrowserEngine::Gecko
+            }
         }
     }
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO lyric_chunks (cache_key, line, position, start_time, text) VALUES (?1, ?2, ?3, ?4, ?5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "5cd176c361ce318ab6bb6c8a3ce3d41ce56362e651deb06a4e410f4aed67a2cf"
+}

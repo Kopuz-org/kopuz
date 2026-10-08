@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO ytdlp_history (position, url, title, format, status, error) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "1c6b0011f6ab7bab020ecb8937035407bef1a3e98e73b10ffbaf6d55088e1598"
+}

@@ -78,8 +78,8 @@ const SECTIONS: &[(&str, &[NavItem])] = &[
 #[cfg(not(target_os = "android"))]
 const TOOL_ITEMS: &[NavItem] = &[
     NavItem {
-        key: "ytdlp",
-        route: Route::Ytdlp,
+        key: "downloader",
+        route: Route::Downloader,
         icon: "fa-solid fa-download",
     },
     NavItem {
@@ -139,9 +139,9 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
     };
     let onmouseup = move |_| is_resizing.set(false);
 
-    // Discover is a capability of the active source (YT), not a config flag.
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let has_discover = use_memo(move || active_source.read().capabilities().discover);
+    // Discover is a capability of the active source, not a config flag.
+    let caps = hooks::sources::use_capabilities();
+    let has_discover = use_memo(move || caps().discover);
     let collapsed = if is_android {
         false
     } else {
@@ -155,12 +155,10 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
         "h-full flex flex-col shrink-0 select-none relative border-r border-white/5"
     };
     let root_style = if is_android {
-        if *mobile_collapsed.read() {
-            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 0px; background: rgba(10,10,10,0.97); --vaxry-sidebar-fg: #fff;"
-                .to_string()
-        } else {
-            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 280px; background: rgba(10,10,10,0.97); --vaxry-sidebar-fg: #fff;".to_string()
-        }
+        let drawer_width = if *mobile_collapsed.read() { 0 } else { 280 };
+        format!(
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: {drawer_width}px; background-color: var(--color-neutral-900); --vaxry-sidebar-fg: var(--color-white);"
+        )
     } else if config.read().theme == "album-art"
         || config.read().cover_art_background
         || !config.read().custom_background_path.is_empty()
@@ -233,7 +231,6 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
 
             if config.read().show_source_toggle {
                 crate::source_switcher::SourceSwitcher {
-                    config,
                     collapsed,
                     on_manage: move |_| props.on_navigate.call(Route::Settings),
                 }
@@ -243,16 +240,24 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                 for (section_key, items) in SECTIONS {
                     div { class: "mb-2",
                         if !collapsed {
-                            div { class: "px-4 pt-3 pb-1",
+                            div { class: if is_android { "px-5 pt-4 pb-1" } else { "px-4 pt-3 pb-1" },
                                 span {
-                                    class: "text-[10px] font-bold",
+                                    class: if is_android { "text-[10px] font-bold uppercase tracking-wider" } else { "text-[10px] font-bold" },
                                     style: "color: color-mix(in oklab, var(--vaxry-sidebar-fg) 25%, transparent);",
-                                    "{i18n::t(section_key)}"
+                                    // The tab bar takes Home and Search, which leaves
+                                    // Discover as the only item of a "Discover" section.
+                                    if is_android && *section_key == "discover" {
+                                        "{i18n::t(\"browse\")}"
+                                    } else {
+                                        "{i18n::t(section_key)}"
+                                    }
                                 }
                             }
                         }
                         for item in *items {
-                            if item.route != Route::Discover || has_discover() {
+                            if (item.route != Route::Discover || has_discover())
+                                && (!is_android || !crate::tabbar::is_tab_route(item.route))
+                            {
                                 VaxryNavItem {
                                     key: "{item.key}",
                                     item: item.clone(),
@@ -268,8 +273,10 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                     }
                 }
 
-                div { class: "mx-3 my-2 h-px", style: "background: color-mix(in oklab, var(--vaxry-sidebar-fg) 6%, transparent);" }
-                for item in TOOL_ITEMS {
+                if !is_android {
+                    div { class: "mx-3 my-2 h-px", style: "background: color-mix(in oklab, var(--vaxry-sidebar-fg) 6%, transparent);" }
+                }
+                for item in TOOL_ITEMS.iter().filter(|item| !is_android || !crate::tabbar::is_tab_route(item.route)) {
                     VaxryNavItem {
                         key: "{item.key}",
                         item: item.clone(),
@@ -283,9 +290,13 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                 }
             }
 
-            div {
-                class: "absolute top-0 right-0 w-2 h-full cursor-col-resize z-50",
-                onmousedown: move |_| is_resizing.set(true),
+            if is_android {
+                DrawerNowPlaying {}
+            } else {
+                div {
+                    class: "absolute top-0 right-0 w-2 h-full cursor-col-resize z-50",
+                    onmousedown: move |_| is_resizing.set(true),
+                }
             }
         }
     }
@@ -298,13 +309,15 @@ fn VaxryNavItem(
     collapsed: bool,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let phone = cfg!(target_os = "android");
     rsx! {
         a {
-            class: "flex items-center gap-3 cursor-pointer transition-colors relative mx-1 rounded-lg",
-            style: if active {
-                "padding: 6px 10px; background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);"
-            } else {
-                "padding: 6px 10px;"
+            class: if phone { "flex items-center gap-4 cursor-pointer transition-colors relative mx-2 rounded-lg" } else { "flex items-center gap-3 cursor-pointer transition-colors relative mx-1 rounded-lg" },
+            style: match (active, phone) {
+                (true, true) => "min-height: 48px; padding: 0 16px; background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent); box-shadow: inset 3px 0 var(--color-indigo-500);",
+                (true, false) => "padding: 6px 10px; background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);",
+                (false, true) => "min-height: 48px; padding: 0 16px;",
+                (false, false) => "padding: 6px 10px;",
             },
             title: if collapsed { i18n::t(item.key) } else { String::new() },
             onclick: move |evt| onclick.call(evt),
@@ -321,7 +334,7 @@ fn VaxryNavItem(
 
             if !collapsed {
                 span {
-                    class: "text-sm font-medium truncate",
+                    class: if phone { "text-[15px] font-medium truncate" } else { "text-sm font-medium truncate" },
                     style: if active {
                         "color: var(--color-indigo-500); font-weight: 600;"
                     } else {
@@ -329,6 +342,42 @@ fn VaxryNavItem(
                     },
                     "{i18n::t(item.key)}"
                 }
+            }
+        }
+    }
+}
+
+/// The drawer covers the mini player, so it carries what is playing itself.
+#[component]
+fn DrawerNowPlaying() -> Element {
+    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let title = ctrl.current_song_title.read().clone();
+    if title.is_empty() {
+        return rsx! {};
+    }
+    let artist = ctrl.current_song_artist.read().clone();
+    let cover = ctrl
+        .current_cover_url(hooks::artwork::Size::Thumb)
+        .unwrap_or_default();
+    rsx! {
+        div { class: "shrink-0 flex items-center gap-3 px-5 py-4 border-t border-white/5",
+            div { class: "w-10 h-10 rounded shrink-0 overflow-hidden bg-white/5 flex items-center justify-center",
+                if cover.is_empty() {
+                    i { class: "fa-solid fa-music text-white/20" }
+                } else {
+                    img { src: "{cover}", class: "w-full h-full object-cover" }
+                }
+            }
+            div { class: "flex-1 min-w-0 flex flex-col",
+                span { class: "text-sm truncate", style: "color: var(--vaxry-sidebar-fg);", "{title}" }
+                span { class: "text-xs truncate text-slate-400", "{artist}" }
+            }
+            button {
+                class: "w-10 h-10 flex items-center justify-center active:scale-90 transition-transform",
+                style: "color: var(--vaxry-sidebar-fg);",
+                aria_label: if *ctrl.is_playing.read() { i18n::t("pause") } else { i18n::t("play") },
+                onclick: move |_| ctrl.toggle(),
+                i { class: if *ctrl.is_playing.read() { "fa-solid fa-pause" } else { "fa-solid fa-play" } }
             }
         }
     }

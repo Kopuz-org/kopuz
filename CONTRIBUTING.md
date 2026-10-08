@@ -14,7 +14,10 @@
     - [Commit Messages](#commit-messages)
   - [Maintainer Communication](#maintainer-communication)
   - [AI Policy](#ai-policy)
-    - [What This Means](#what-this-means)
+    - [The Bar](#the-bar)
+    - [Agents](#agents)
+    - [Disclosure](#disclosure)
+    - [Enforcement](#enforcement)
   - [License](#license)
 
 <!--toc:end-->
@@ -43,7 +46,7 @@ Good bug reports include:
 - the Kopuz version or commit;
 - the operating system and package format;
 - the backend involved, such as local files, Jellyfin, Subsonic, YouTube Music,
-  SoundCloud, ListenBrainz, or yt-dlp;
+  SoundCloud, ListenBrainz, or YouTube downloads;
 - relevant logs from **Settings -> Logs -> Export logs** when the bug involves
   playback, scanning, crashes, or network behavior.
 
@@ -92,8 +95,8 @@ $ nix shell nixpkgs#nushell --command nu scripts/check_i18n_usage.nu
 
 ## Testing Expectations
 
-Run the smallest useful verifier before opening a pull request, then say what
-you ran in the PR description. Examples:
+Run the smallest useful verifier before opening a pull request, then fill in the
+Testing matrix in the pull request template. Examples:
 
 - database query or migration changes: `cargo test -p kopuz-db`;
 - playback or DSP changes: `cargo test -p kopuz-player`;
@@ -125,18 +128,23 @@ Kopuz uses Rust 2024 and workspace lints from `Cargo.toml`.
 
 ## Pull Requests and Submitting Changes
 
-Keep commits and pull requests focused on one behavior change. A useful PR
-description includes:
+Each pull request changes one behavior, however many crates it spans. A
+refactor the change needs goes in its own pull request lower in a [stack], and
+unrelated cleanups go in their own pull requests. If a pull request bundles
+several changes, a maintainer will ask you to split it into a stack.
 
-- what changed;
-- how it was tested;
-- screenshots or short clips for visible UI changes;
-- logs or reproduction steps for playback, scanning, source, or crash fixes;
-- any platform you could not test.
+[stack]: https://github.github.com/gh-stack/
+
+Fill in the pull request template as given. Its sections are fixed: do not add,
+remove or rename headings, and do not add subheadings. Open the pull request as
+a draft, and mark it ready for review once one column of the Testing matrix is
+all ✅. For playback, scanning, source, or crash fixes, put the logs or
+reproduction steps under Why.
 
 Maintainers may ask for narrower diffs, clearer tests, or a different boundary.
-Please handle review comments in follow-up commits instead of force-pushing away
-review context unless a maintainer asks you to clean up the branch.
+Address review in follow-up commits if you like, but never undo earlier work
+with a revert commit: rewrite the branch and force-push with lease, then squash
+before final review as described below.
 
 ### History Hygiene
 
@@ -213,54 +221,66 @@ current status and the checks you believe are still relevant.
 
 ## AI Policy
 
-> [!IMPORTANT]
-> Pull requests created or submitted by autonomous or supervised AI agents are
-> explicitly prohibited, and will be immediately closed without a review. Kopuz,
-> as a codebase, **does not welcome AI-generated contributions**.
+Kopuz accepts issues and pull requests written with LLMs or agents, as long as
+they meet the same bar as every other contribution. The bar exists because
+AI-written contributions tend to arrive large, unverified and wordy, and the
+review cost lands on maintainers.
 
-This policy exists for the following reasons:
+### The Bar
 
-1. **Quality Assurance**: AI-generated code often lacks the contextual
-   understanding required for systems-level software that interfaces with
-   critical system components.
+Every issue and pull request:
 
-2. **Security**: Kopuz is used by various users on a daily basis. It runs in the
-   foreground or the background during the time the user is consuming media, and
-   has a relatively large attack surface unless fully sandboxed. Changes to such
-   software require human judgment, security awareness, and accountability.
+- comes from a human who asked for it and stands behind it;
+- reads like a person wrote it: lead with the problem and the change in a few
+  sentences, describe behavior instead of walking through the diff file by
+  file, and leave out anything a reviewer does not need;
+- includes a screenshot or recording for anything you can see or hear, such as
+  UI and playback audio bugs.
 
-3. **Maintenance Burden**: AI-generated contributions often require
-   disproportionate maintainer effort to review, correct, and integrate
-   properly.
+Pull requests also:
 
-### What This Means
+- change one behavior (see
+  [Pull Requests and Submitting Changes](#pull-requests-and-submitting-changes));
+- fill in the Testing matrix with one row per changed behavior, and are ready
+  for review once one platform column is all ✅;
+- include a Before / After table for anything visible or audible, captured in
+  the default dark theme with the same view and steps in both, or say "No
+  visible or audible change";
+- have been reviewed by a human who can explain every change.
 
-- **Prohibited**: Submitting PRs where an AI agent (autonomous or supervised)
-  generated the code, commit messages, or PR description, regardless of whether
-  a human clicked the "submit" button.
+### Agents
 
-- **Prohibited**: Using AI agents to automatically fix issues, respond to review
-  comments, or generate follow-up commits.
+- An agent opens an issue or pull request only when a human explicitly asks
+  for it, and opens pull requests as drafts.
+- An agent makes follow-up commits only when a human asks for them.
+- An agent marks a Testing cell ✅ only for a check it ran, with the screenshot
+  or recording attached.
+- Agents never reply to review comments; the human does.
 
-- **Allowed**: Using AI tools as aids while writing code, provided a human
-  author thoroughly reviews, tests, and takes full responsibility for the
-  submission. AI-assisted PRs require **FULL DISCLOSURE** and appropriate proof
-  that the user thoroughly understands the code generated.
+### Disclosure
 
-- **Allowed**: Using AI assistance for menial labor, e.g., _moving files_ that
-  can be individually attested by the operator. Things like refactoring modules,
-  removing or rewriting functions & structs, large-scale refactors that require
-  attention MAY NOT be by AI agents.
+Tick the AI usage box in the template when you used an LLM to write code or
+text. Ticking it does not change how the contribution is reviewed.
+
+Do not add AI tools as `Co-authored-by:` trailers, and do not leave "Generated
+with …" footers in commits, issues or pull requests; the checkbox is the only
+disclosure. CI rejects pull request commits that carry them. The
+`coderabbitai[bot]` trailer GitHub adds when you accept a review suggestion is
+fine.
+
+### Enforcement
+
+Contributions that clearly miss the bar are closed without review, with a link
+to this section. Near misses get a request for the missing parts. CodeRabbit
+checks pull requests against this policy and warns about what is missing.
 
 By submitting a pull request, you attest that:
 
-1. You are a human contributor
-2. You have personally authored or thoroughly reviewed and tested all changes
-   during and after AI influence
-3. You take full moral, legal, and ethical responsibility for the contribution
-4. No autonomous or supervised AI agent was used to create or submit the PR
-5. Any AI assistance is thoroughly disclosed
-6. You understand the consequences of violating above guidelines.
+1. A human asked for this contribution and takes full moral, legal, and ethical
+   responsibility for it
+2. A human reviewed every change and can explain it
+3. Any LLM use is marked in the AI usage checkbox
+4. You understand the consequences of violating above guidelines.
 
 Violations of this policy may result in a permanent ban from contributing to the
 project.

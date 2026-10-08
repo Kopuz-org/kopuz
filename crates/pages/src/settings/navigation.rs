@@ -9,7 +9,28 @@ pub(super) enum SettingsCategory {
     Downloads,
     Metadata,
     Player,
+    Equalizer,
     Tools,
+}
+
+impl SettingsCategory {
+    pub(super) fn title(self) -> String {
+        i18n::t(self.title_key())
+    }
+
+    pub(super) fn title_key(self) -> &'static str {
+        match self {
+            Self::General => "general",
+            Self::Customization => "appearance",
+            Self::Library => "library",
+            Self::Connectivity => "connectivity",
+            Self::Downloads => "offline_downloads",
+            Self::Metadata => "metadata",
+            Self::Player => "player_settings",
+            Self::Equalizer => "equalizer",
+            Self::Tools => "logs",
+        }
+    }
 }
 
 #[component]
@@ -60,6 +81,8 @@ pub(super) fn SettingsNavigation(
         nav {
             class: "settings-fan",
             aria_label: i18n::t("settings"),
+            // The category strip owns its scroll gesture, including at its edge.
+            ontouchstart: move |evt| evt.stop_propagation(),
             div { class: "settings-fan-disc",
                 SettingsFanItem {
                     category: SettingsCategory::General,

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO artists (source, source_artist_id, name, name_key, key) VALUES (?1, ?2, ?3, ?4, ?2) ON CONFLICT(source, source_artist_id) DO UPDATE SET name = CASE WHEN artists.named_by_source = 1 THEN artists.name ELSE ?3 END, name_key = CASE WHEN artists.named_by_source = 1 THEN artists.name_key ELSE ?4 END RETURNING id AS \"id!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c50dca9f379a55b3ec167cc30f1ebf8e1d5a86556c7910d9259d77ff873e85f6"
+}

@@ -9,7 +9,8 @@ mod source;
 pub mod store;
 mod views;
 pub use source::{
-    Browser, JellyfinServer, MusicServer, MusicService, SavedLocalSource, SavedServer, Source,
+    Browser, BrowserEngine, DEFAULT_LOCAL_ID, DEFAULT_LOCAL_NAME, JellyfinServer, MusicServer,
+    MusicService, SavedLocalSource, SavedServer, Source,
 };
 pub use views::{IntegrationConfig, LibraryConfig, PlaybackConfig, ServerAuth, UiConfig};
 
@@ -41,82 +42,30 @@ pub fn default_radio_registries() -> Vec<RegistryEntry> {
         is_default: true,
     }]
 }
+/// How the URL downloader writes what it fetches. Options the earlier yt-dlp
+/// downloader stored are ignored when read back.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct YtdlpOptions {
+pub struct DownloaderOptions {
     #[serde(default = "default_true")]
     pub embed_metadata: bool,
     #[serde(default = "default_true")]
     pub embed_thumbnail: bool,
     #[serde(default)]
-    pub postprocess_thumbnail_square: bool,
-    #[serde(default)]
-    pub embed_chapters: bool,
-    #[serde(default)]
-    pub embed_subs: bool,
-    #[serde(default)]
-    pub embed_info_json: bool,
-    #[serde(default)]
     pub write_thumbnail: bool,
+    #[serde(default = "default_true")]
+    pub organize_by_album: bool,
     #[serde(default)]
-    pub write_description: bool,
-    #[serde(default)]
-    pub write_info_json: bool,
-    #[serde(default)]
-    pub write_subs: bool,
-    #[serde(default)]
-    pub write_auto_subs: bool,
-    #[serde(default)]
-    pub write_comments: bool,
-    #[serde(default)]
-    pub sponsorblock: bool,
-    #[serde(default)]
-    pub sponsorblock_mark: bool,
-    #[serde(default)]
-    pub split_chapters: bool,
-    #[serde(default)]
-    pub convert_thumbnail: String,
-    #[serde(default)]
-    pub no_playlist: bool,
-    #[serde(default)]
-    pub xattrs: bool,
-    #[serde(default)]
-    pub no_mtime: bool,
-    #[serde(default)]
-    pub rate_limit: String,
-    #[serde(default)]
-    pub cookies_from_browser: String,
-    #[serde(default)]
-    pub js_runtimes: String,
-    #[serde(default = "default_audio_quality")]
-    pub audio_quality: u8,
+    pub overwrite_existing: bool,
 }
 
-impl Default for YtdlpOptions {
+impl Default for DownloaderOptions {
     fn default() -> Self {
         Self {
             embed_metadata: true,
             embed_thumbnail: true,
-            postprocess_thumbnail_square: false,
-            embed_chapters: false,
-            embed_subs: false,
-            embed_info_json: false,
             write_thumbnail: false,
-            write_description: false,
-            write_info_json: false,
-            write_subs: false,
-            write_auto_subs: false,
-            write_comments: false,
-            sponsorblock: false,
-            sponsorblock_mark: false,
-            split_chapters: false,
-            convert_thumbnail: String::new(),
-            no_playlist: false,
-            xattrs: false,
-            no_mtime: false,
-            rate_limit: String::new(),
-            cookies_from_browser: String::new(),
-            js_runtimes: String::new(),
-            audio_quality: 0,
+            organize_by_album: true,
+            overwrite_existing: false,
         }
     }
 }
@@ -128,12 +77,9 @@ fn default_depth_blur_strength() -> u8 {
 fn default_true() -> bool {
     true
 }
-fn default_audio_quality() -> u8 {
-    0
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct YtdlpHistoryEntry {
+pub struct DownloaderHistoryEntry {
     pub url: String,
     pub title: String,
     pub format: String,
@@ -142,7 +88,7 @@ pub struct YtdlpHistoryEntry {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CustomTheme {
     pub name: String,
     pub vars: HashMap<String, String>,
@@ -464,6 +410,173 @@ impl Default for EqualizerSettings {
     }
 }
 
+/// Which of a track's ReplayGain values to apply.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum ReplayGainMode {
+    #[default]
+    Off,
+    Track,
+    Album,
+    /// Album gain while the queue is walking through one album, track gain
+    /// otherwise, so a shuffled mix levels song to song but an album keeps
+    /// the loud/quiet relief its mastering intended.
+    Auto,
+}
+
+impl ReplayGainMode {
+    pub const ALL: &'static [Self] = &[Self::Off, Self::Track, Self::Album, Self::Auto];
+
+    pub const fn value_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Track => "track",
+            Self::Album => "album",
+            Self::Auto => "auto",
+        }
+    }
+
+    pub fn from_value_str(value: &str) -> Self {
+        match value {
+            "track" => Self::Track,
+            "album" => Self::Album,
+            "auto" => Self::Auto,
+            _ => Self::Off,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Off => "replay_gain_mode_off",
+            Self::Track => "replay_gain_mode_track",
+            Self::Album => "replay_gain_mode_album",
+            Self::Auto => "replay_gain_mode_auto",
+        }
+    }
+}
+
+/// ReplayGain values carried by a track, in the units the tags use: gains in
+/// dB relative to the reference loudness, peaks as a linear sample amplitude
+/// where 1.0 is full scale.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct ReplayGainInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_gain_db: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_peak: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_gain_db: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album_peak: Option<f32>,
+}
+
+impl ReplayGainInfo {
+    pub fn is_empty(&self) -> bool {
+        self.track_gain_db.is_none() && self.album_gain_db.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct ReplayGainSettings {
+    #[serde(default)]
+    pub mode: ReplayGainMode,
+    /// Hold the gain down far enough that the track's stored peak stays under
+    /// full scale. Only does something for tracks that tagged a peak.
+    #[serde(default = "default_prevent_clipping")]
+    pub prevent_clipping: bool,
+    /// Applied on top of every resolved gain, tagged or not.
+    #[serde(default)]
+    pub preamp_db: f32,
+    /// Used in place of a gain for tracks that carry none.
+    #[serde(default)]
+    pub fallback_gain_db: f32,
+}
+
+fn default_prevent_clipping() -> bool {
+    true
+}
+
+impl Default for ReplayGainSettings {
+    fn default() -> Self {
+        Self {
+            mode: ReplayGainMode::Off,
+            prevent_clipping: true,
+            preamp_db: 0.0,
+            fallback_gain_db: 0.0,
+        }
+    }
+}
+
+/// Gains outside this range are a broken tag, not a mastering choice; ±15 dB
+/// already covers everything ReplayGain scanners emit in practice.
+const GAIN_LIMIT_DB: f32 = 15.0;
+
+impl ReplayGainSettings {
+    /// Linear factor to scale a track's samples by. `album_context` says the
+    /// queue is currently walking an album, which is what [`ReplayGainMode::Auto`]
+    /// switches on.
+    pub fn linear_gain(&self, info: ReplayGainInfo, album_context: bool) -> f32 {
+        self.linear_gain_with_fallback(info, ReplayGainInfo::default(), album_context)
+    }
+
+    /// Prefer stream tags to service metadata for each gain, keeping the peak
+    /// from the same analysis even when falling back between track and album.
+    pub fn linear_gain_with_fallback(
+        &self,
+        stream: ReplayGainInfo,
+        service: ReplayGainInfo,
+        album_context: bool,
+    ) -> f32 {
+        let prefer_album = match self.mode {
+            ReplayGainMode::Off => return 1.0,
+            ReplayGainMode::Track => false,
+            ReplayGainMode::Album => true,
+            ReplayGainMode::Auto => album_context,
+        };
+
+        // An album peak bounds every track on the album, so it can stand in for a
+        // missing track peak; a track peak is too low to bound the album gain.
+        let album = |info: ReplayGainInfo| info.album_gain_db.map(|db| (Some(db), info.album_peak));
+        let track = |info: ReplayGainInfo| {
+            info.track_gain_db
+                .map(|db| (Some(db), info.track_peak.or(info.album_peak)))
+        };
+        let album = album(stream).or_else(|| album(service));
+        let track = track(stream).or_else(|| track(service));
+        let (gain_db, peak) = if prefer_album {
+            album.or(track)
+        } else {
+            track.or(album)
+        }
+        .unwrap_or((
+            None,
+            stream
+                .album_peak
+                .or(stream.track_peak)
+                .or(service.album_peak)
+                .or(service.track_peak),
+        ));
+
+        let db = gain_db
+            .filter(|db| db.is_finite())
+            .unwrap_or(self.fallback_gain_db)
+            .clamp(-GAIN_LIMIT_DB, GAIN_LIMIT_DB)
+            + self.preamp_db.clamp(-GAIN_LIMIT_DB, GAIN_LIMIT_DB);
+
+        let mut linear = 10.0_f32.powf(db / 20.0);
+        if self.prevent_clipping
+            && let Some(peak) = peak.filter(|peak| peak.is_finite() && *peak > 0.0)
+        {
+            linear = linear.min(1.0 / peak);
+        }
+
+        if linear.is_finite() {
+            linear.clamp(0.0, 8.0)
+        } else {
+            1.0
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum OfflineQuality {
     Kbps128,
@@ -515,35 +628,6 @@ impl OfflineQuality {
             "256" => Self::Kbps256,
             "320" => Self::Kbps320,
             _ => Self::Original,
-        }
-    }
-
-    pub fn jellyfin_bitrate_bps(self) -> Option<u32> {
-        match self {
-            Self::Kbps128 => Some(128_000),
-            Self::Kbps160 => Some(160_000),
-            Self::Kbps192 => Some(192_000),
-            Self::Kbps256 => Some(256_000),
-            Self::Kbps320 => Some(320_000),
-            Self::Original => None,
-        }
-    }
-
-    pub fn subsonic_max_bitrate_kbps(self) -> u32 {
-        match self {
-            Self::Kbps128 => 128,
-            Self::Kbps160 => 160,
-            Self::Kbps192 => 192,
-            Self::Kbps256 => 256,
-            Self::Kbps320 => 320,
-            Self::Original => 0,
-        }
-    }
-
-    pub fn file_extension(self) -> &'static str {
-        match self {
-            Self::Original => "bin",
-            _ => "mp3",
         }
     }
 }
@@ -617,17 +701,16 @@ fn default_hero_height() -> u32 {
     300
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub server: Option<MusicServer>,
     #[serde(default)]
     pub servers: Vec<SavedServer>,
-    /// Named, isolated filesystem libraries. The legacy `music_directory`
-    /// remains the built-in Local source for backwards compatibility.
+    /// Isolated filesystem libraries; the one under `DEFAULT_LOCAL_ID` is the install's own.
     #[serde(default)]
     pub local_sources: Vec<SavedLocalSource>,
-    /// The active source: built-in Local, a named local library, or Server(id).
+    /// The active source: a folder library or Server(id).
     /// `server` is hydrated only for the active remote source.
     #[serde(default)]
     pub active_source: Source,
@@ -648,8 +731,6 @@ pub struct AppConfig {
     /// playback on this app's in-app device.
     #[serde(default = "default_true")]
     pub spotify_prefer_active_device: bool,
-    #[serde(default, deserialize_with = "deserialize_music_directories")]
-    pub music_directory: Vec<PathBuf>,
     #[serde(default = "default_theme")]
     pub theme: String,
     /// Palette file matugen or pywal writes, polled for changes while the live
@@ -762,15 +843,19 @@ pub struct AppConfig {
     #[serde(default)]
     pub equalizer: EqualizerSettings,
     #[serde(default)]
+    pub replay_gain: ReplayGainSettings,
+    #[serde(default)]
     pub device_change_behavior: DeviceChangeBehavior,
     #[serde(default)]
     pub sample_rate_mode: SampleRateMode,
-    #[serde(default)]
-    pub ytdlp_output_dir: String,
-    #[serde(default)]
-    pub ytdlp_options: YtdlpOptions,
-    #[serde(default)]
-    pub ytdlp_history: Vec<YtdlpHistoryEntry>,
+    /// Stored under the names the yt-dlp downloader gave these, so existing
+    /// settings and history carry over.
+    #[serde(default, rename = "ytdlp_output_dir")]
+    pub downloader_output_dir: String,
+    #[serde(default, rename = "ytdlp_options")]
+    pub downloader_options: DownloaderOptions,
+    #[serde(default, rename = "ytdlp_history")]
+    pub downloader_history: Vec<DownloaderHistoryEntry>,
     #[serde(default)]
     pub titlebar_mode: TitlebarMode,
     #[serde(default)]
@@ -889,7 +974,7 @@ pub fn default_sidebar_order() -> Vec<String> {
         "favorites".to_string(),
         "radio".to_string(),
         "activity".to_string(),
-        "ytdlp".to_string(),
+        "downloader".to_string(),
     ]
 }
 
@@ -907,22 +992,6 @@ fn default_crossfade_seconds() -> u8 {
 
 fn default_language() -> String {
     "en".to_string()
-}
-
-fn deserialize_music_directories<'de, D>(deserializer: D) -> Result<Vec<PathBuf>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum OneOrMany {
-        One(PathBuf),
-        Many(Vec<PathBuf>),
-    }
-    match OneOrMany::deserialize(deserializer)? {
-        OneOrMany::One(p) => Ok(vec![p]),
-        OneOrMany::Many(v) => Ok(v),
-    }
 }
 
 /// Slider bound for `lyrics_offset_ms`; also enforced here since config files
@@ -954,13 +1023,12 @@ impl Default for AppConfig {
         Self {
             server: None,
             servers: Vec::new(),
-            local_sources: Vec::new(),
-            active_source: Source::Local,
+            local_sources: vec![SavedLocalSource::default_library(vec![music_directory])],
+            active_source: Source::default(),
             source_explicitly_set: false,
             server_folders: HashMap::new(),
             spotify_browser: None,
             spotify_prefer_active_device: true,
-            music_directory: vec![music_directory],
             theme: default_theme(),
             live_theme_path: String::new(),
             device_id: default_device_id(),
@@ -1006,11 +1074,12 @@ impl Default for AppConfig {
             back_behavior: BackBehavior::RewindThenPrev,
             channel_mode: ChannelMode::Stereo,
             equalizer: EqualizerSettings::default(),
+            replay_gain: ReplayGainSettings::default(),
             device_change_behavior: DeviceChangeBehavior::Pause,
             sample_rate_mode: SampleRateMode::System,
-            ytdlp_output_dir: String::new(),
-            ytdlp_options: YtdlpOptions::default(),
-            ytdlp_history: Vec::new(),
+            downloader_output_dir: String::new(),
+            downloader_options: DownloaderOptions::default(),
+            downloader_history: Vec::new(),
             titlebar_mode: TitlebarMode::Custom,
             offline_quality: OfflineQuality::default(),
             offline_tracks: HashMap::new(),
@@ -1054,51 +1123,12 @@ impl AppConfig {
         }
     }
 
-    pub fn migrate_servers(&mut self) {
-        if let Some(server) = self.server.as_mut()
-            && server.id.is_none()
-        {
-            server.id = Some(uuid::Uuid::new_v4().to_string());
-        }
-        if let Some(server) = self.server.clone() {
-            let already = self.servers.iter().any(|s| s.matches(&server));
-            if !already {
-                let id = server
-                    .id
-                    .clone()
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                self.servers.push(SavedServer {
-                    id,
-                    name: server.name.clone(),
-                    url: server.url.clone(),
-                    service: server.service,
-                    yt_browser: server.yt_browser,
-                    yt_anonymous: server.yt_anonymous,
-                    apple_music_storefront: server.apple_music_storefront.clone(),
-                    apple_music_language: server.apple_music_language.clone(),
-                });
-            }
-        }
-    }
-
-    pub fn add_saved_server(&mut self, entry: SavedServer) {
-        if !self.servers.iter().any(|s| s.id == entry.id) {
-            self.servers.push(entry);
-        }
-    }
-
     pub fn remove_saved_server(&mut self, id: &str) {
         self.servers.retain(|s| s.id != id);
         if let Some(active) = &self.server
             && active.id.as_deref() == Some(id)
         {
             self.server = None;
-        }
-    }
-
-    pub fn add_local_source(&mut self, source: SavedLocalSource) {
-        if !self.local_sources.iter().any(|saved| saved.id == source.id) {
-            self.local_sources.push(source);
         }
     }
 
@@ -1109,11 +1139,26 @@ impl AppConfig {
         }
     }
 
+    /// Whether `source` is one this config still has, as opposed to one just deleted.
+    pub fn has_source(&self, source: &Source) -> bool {
+        match source {
+            Source::LocalLibrary(id) => self.local_sources.iter().any(|saved| &saved.id == id),
+            Source::Server(id) => self.servers.iter().any(|saved| &saved.id == id),
+        }
+    }
+
     pub fn find_saved_server(&self, id: &str) -> Option<&SavedServer> {
         self.servers.iter().find(|s| s.id == id)
     }
 
     pub fn migrate_sidebar_order(&mut self) {
+        // The downloads entry was keyed by the tool that fetches; a stored
+        // order still names it that way.
+        for key in self.sidebar_order.iter_mut() {
+            if key == "downloader" {
+                *key = "downloader".to_string();
+            }
+        }
         let all_keys = default_sidebar_order();
         for key in &all_keys {
             if !self.sidebar_order.iter().any(|k| k == key) {
@@ -1147,25 +1192,6 @@ impl AppConfig {
             .unwrap_or_default()
     }
 
-    /// Library roots of the active source, empty for a local one.
-    pub fn active_server_folders(&self) -> Vec<String> {
-        self.active_source
-            .server_id()
-            .map(|id| self.folders_for(id))
-            .unwrap_or_default()
-    }
-
-    /// Replace the active server's library roots. Does nothing when the active
-    /// source is local, since roots are keyed by server id.
-    pub fn edit_active_server_folders(&mut self, edit: impl FnOnce(&mut Vec<String>)) {
-        let Some(id) = self.active_source.server_id().map(String::from) else {
-            return;
-        };
-        let mut folders = self.folders_for(&id);
-        edit(&mut folders);
-        self.set_folders_for(&id, folders);
-    }
-
     /// Replace a server's library roots, dropping the entry when the list empties
     /// so the backend goes back to auto-detecting.
     pub fn set_folders_for(&mut self, server_id: &str, folders: Vec<String>) {
@@ -1177,7 +1203,7 @@ impl AppConfig {
     }
 
     pub fn clear_active_server(&mut self) {
-        self.active_source = Source::Local;
+        self.active_source = Source::default();
         self.server = None;
         self.source_explicitly_set = true;
     }
@@ -1190,7 +1216,7 @@ impl AppConfig {
     }
 
     pub fn set_active_server_snapshot(&mut self, server: MusicServer) {
-        let source = server.id.clone().map_or(Source::Local, Source::Server);
+        let source = server.id.clone().map_or(Source::default(), Source::Server);
         self.active_source = source;
         self.server = Some(server);
         self.source_explicitly_set = true;
@@ -1200,30 +1226,168 @@ impl AppConfig {
         self.active_source.server_id()?;
         self.server.as_ref().map(|server| server.service)
     }
-
-    pub fn uses_jellyfin_server(&self) -> bool {
-        self.active_service() == Some(MusicService::Jellyfin)
-    }
-
-    /// The server to activate when toggling into server mode: the current server
-    /// if already on one, else the first saved server. `None` ⇒ no servers, so
-    /// the toggle is a no-op.
-    pub fn server_toggle_target(&self) -> Option<Source> {
-        self.active_source
-            .server_id()
-            .map(String::from)
-            .or_else(|| self.servers.first().map(|s| s.id.clone()))
-            .map(Source::Server)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        AppConfig, BackBehavior, Browser, EqualizerSettings, MusicServer, ServerAuth,
-        SettingsLayout,
+        AppConfig, BackBehavior, Browser, EqualizerSettings, MusicServer, ReplayGainInfo,
+        ReplayGainMode, ReplayGainSettings, ServerAuth, SettingsLayout,
     };
-    use std::path::PathBuf;
+
+    fn tagged() -> ReplayGainInfo {
+        ReplayGainInfo {
+            track_gain_db: Some(-6.0),
+            track_peak: Some(0.5),
+            album_gain_db: Some(-3.0),
+            album_peak: Some(0.9),
+        }
+    }
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 1e-4,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn off_leaves_the_signal_alone() {
+        let settings = ReplayGainSettings::default();
+        assert_eq!(settings.mode, ReplayGainMode::Off);
+        assert_close(settings.linear_gain(tagged(), true), 1.0);
+    }
+
+    #[test]
+    fn track_and_album_modes_pick_their_own_gain() {
+        let track = ReplayGainSettings {
+            mode: ReplayGainMode::Track,
+            prevent_clipping: false,
+            ..Default::default()
+        };
+        let album = ReplayGainSettings {
+            mode: ReplayGainMode::Album,
+            ..track
+        };
+        assert_close(
+            track.linear_gain(tagged(), false),
+            10.0_f32.powf(-6.0 / 20.0),
+        );
+        assert_close(
+            album.linear_gain(tagged(), false),
+            10.0_f32.powf(-3.0 / 20.0),
+        );
+    }
+
+    #[test]
+    fn auto_follows_the_album_context() {
+        let settings = ReplayGainSettings {
+            mode: ReplayGainMode::Auto,
+            prevent_clipping: false,
+            ..Default::default()
+        };
+        assert_close(
+            settings.linear_gain(tagged(), true),
+            10.0_f32.powf(-3.0 / 20.0),
+        );
+        assert_close(
+            settings.linear_gain(tagged(), false),
+            10.0_f32.powf(-6.0 / 20.0),
+        );
+    }
+
+    #[test]
+    fn preamp_and_fallback_apply_to_untagged_tracks() {
+        let settings = ReplayGainSettings {
+            mode: ReplayGainMode::Track,
+            prevent_clipping: false,
+            preamp_db: 2.0,
+            fallback_gain_db: -4.0,
+        };
+        assert_close(
+            settings.linear_gain(ReplayGainInfo::default(), false),
+            10.0_f32.powf(-2.0 / 20.0),
+        );
+    }
+
+    #[test]
+    fn a_track_peak_never_bounds_the_album_gain() {
+        let info = ReplayGainInfo {
+            track_gain_db: Some(-6.0),
+            track_peak: Some(0.5),
+            album_gain_db: Some(6.0),
+            album_peak: None,
+        };
+        let settings = ReplayGainSettings {
+            mode: ReplayGainMode::Album,
+            prevent_clipping: true,
+            ..Default::default()
+        };
+        assert_close(settings.linear_gain(info, false), 10.0_f32.powf(6.0 / 20.0));
+    }
+
+    #[test]
+    fn backing_values_keep_each_gain_with_its_own_peak() {
+        let stream = ReplayGainInfo {
+            track_gain_db: Some(6.0),
+            ..Default::default()
+        };
+        let mut settings = ReplayGainSettings {
+            mode: ReplayGainMode::Track,
+            ..Default::default()
+        };
+        assert_close(
+            settings.linear_gain_with_fallback(stream, tagged(), false),
+            10.0_f32.powf(6.0 / 20.0),
+        );
+        settings.mode = ReplayGainMode::Album;
+        assert_close(
+            settings.linear_gain_with_fallback(stream, tagged(), true),
+            10.0_f32.powf(-3.0 / 20.0),
+        );
+    }
+
+    #[test]
+    fn an_album_peak_from_the_same_analysis_bounds_track_gain() {
+        let stream = ReplayGainInfo {
+            track_gain_db: Some(6.0),
+            album_peak: Some(0.8),
+            ..Default::default()
+        };
+        let settings = ReplayGainSettings {
+            mode: ReplayGainMode::Track,
+            ..Default::default()
+        };
+        assert_close(settings.linear_gain(stream, false), 1.25);
+        assert_close(
+            settings.linear_gain_with_fallback(ReplayGainInfo::default(), stream, false),
+            1.25,
+        );
+    }
+
+    #[test]
+    fn clip_prevention_caps_the_gain_at_the_stored_peak() {
+        let info = ReplayGainInfo {
+            track_gain_db: Some(6.0),
+            track_peak: Some(0.8),
+            ..Default::default()
+        };
+        let settings = ReplayGainSettings {
+            mode: ReplayGainMode::Track,
+            prevent_clipping: true,
+            ..Default::default()
+        };
+        assert_close(settings.linear_gain(info, false), 1.25);
+
+        let unclamped = ReplayGainSettings {
+            prevent_clipping: false,
+            ..settings
+        };
+        assert_close(
+            unclamped.linear_gain(info, false),
+            10.0_f32.powf(6.0 / 20.0),
+        );
+    }
 
     #[test]
     fn legacy_five_band_custom_eq_migrates_to_nearest_slots() {
@@ -1255,31 +1419,6 @@ mod tests {
         let eq: EqualizerSettings = serde_json::from_str(&json).unwrap();
 
         assert_eq!(eq.bands, bands);
-    }
-
-    #[test]
-    fn config_deserializes_legacy_single_music_directory() {
-        let json = r#"{
-            "music_directory": "/music"
-        }"#;
-
-        let config: AppConfig = serde_json::from_str(json).unwrap();
-
-        assert_eq!(config.music_directory, vec![PathBuf::from("/music")]);
-    }
-
-    #[test]
-    fn config_deserializes_multiple_music_directories() {
-        let json = r#"{
-            "music_directory": ["/music", "/archive"]
-        }"#;
-
-        let config: AppConfig = serde_json::from_str(json).unwrap();
-
-        assert_eq!(
-            config.music_directory,
-            vec![PathBuf::from("/music"), PathBuf::from("/archive")]
-        );
     }
 
     #[test]

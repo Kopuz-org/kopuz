@@ -149,6 +149,9 @@ pub fn VirtualScrollView(
         div {
             id: "{id}",
             class: "{class}",
+            // Spacer and row replacement already preserve absolute positions.
+            // Browser anchoring can otherwise turn those edits into more scrolls.
+            style: "overflow-anchor: none;",
             onmounted: move |event| {
                 spawn(async move {
                     if let Ok(window) = event.get_client_rect().await {

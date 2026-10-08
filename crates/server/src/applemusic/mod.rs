@@ -68,21 +68,31 @@ pub fn track_from_song_data(song: &types::TrackData) -> Track {
         song.attributes.artist_name.clone()
     };
 
-    let artists = if song.relationships.artists.data.is_empty() {
-        vec![song.attributes.artist_name.clone()]
+    // Some endpoints answer with no relationships at all, hence the fallback.
+    let credits: Vec<reader::ArtistCredit> = if song.relationships.artists.data.is_empty() {
+        vec![reader::ArtistCredit::unlinked(
+            song.attributes.artist_name.clone(),
+        )]
     } else {
         song.relationships
             .artists
             .data
             .iter()
             .map(|a| {
-                a.attributes
+                let name = a
+                    .attributes
                     .as_ref()
                     .map(|att| att.name.clone())
-                    .unwrap_or_else(|| "Unknown Artist".to_string())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| "Unknown Artist".to_string());
+                match a.id.is_empty() {
+                    true => reader::ArtistCredit::unlinked(name),
+                    false => reader::ArtistCredit::linked(name, &a.id),
+                }
             })
             .collect()
     };
+    let artists: Vec<String> = credits.iter().map(|c| c.name.clone()).collect();
 
     let album_id = song
         .relationships
@@ -109,6 +119,8 @@ pub fn track_from_song_data(song: &types::TrackData) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists,
+        replay_gain: config::ReplayGainInfo::default(),
+        credits,
     }
 }
 
@@ -189,7 +201,12 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        // A library song relates to its catalog entry and album, never an artist.
+        credits: vec![reader::ArtistCredit::unlinked(
+            song.attributes.artistName.clone(),
+        )],
         artists: vec![song.attributes.artistName.clone()],
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 
@@ -220,6 +237,8 @@ pub fn album_from_library(album: &types::LibraryAlbumResource) -> reader::Album 
                 ))
             }),
         manual_cover: false,
+        artist_id: None,
+        artist_key: None,
     }
 }
 

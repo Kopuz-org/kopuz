@@ -38,6 +38,8 @@ fn local(path: &str, title: &str) -> Track {
         musicbrainz_track_id: None,
         playlist_item_id: None,
         artists: vec!["Artist".into(), "Feat".into()],
+        replay_gain: config::ReplayGainInfo::default(),
+        credits: Vec::new(),
     }
 }
 
@@ -49,18 +51,18 @@ async fn upsert_then_prune() {
     let a = local("/music/a.flac", "A");
     let b = local("/music/b.flac", "B");
     let c = local("/other/c.flac", "C");
-    db.upsert_tracks(&Source::Local, &[a.clone(), b.clone(), c.clone()])
+    db.upsert_tracks(&Source::default(), &[a.clone(), b.clone(), c.clone()])
         .await
         .unwrap();
 
-    let filter = TrackFilter::new(Source::Local);
+    let filter = TrackFilter::new(Source::default());
     assert_eq!(db.tracks_count(&filter).await.unwrap(), 3);
 
     // Upsert is idempotent on identity: re-inserting "A" with a new title updates
     // the existing row rather than adding one.
     let mut a2 = a.clone();
     a2.title = "A (remastered)".into();
-    db.upsert_tracks(&Source::Local, &[a2]).await.unwrap();
+    db.upsert_tracks(&Source::default(), &[a2]).await.unwrap();
     assert_eq!(db.tracks_count(&filter).await.unwrap(), 3);
 
     // Round-trip preserves the typed fields.
@@ -84,7 +86,9 @@ async fn upsert_then_prune() {
     // Prune the local source keeping "a.flac" + "c.flac" → "b.flac" goes (the
     // scan-reconcile step: anything not in the last scan's keep-set).
     let keep = vec!["/music/a.flac".to_string(), "/other/c.flac".to_string()];
-    db.prune_source(&Source::Local, &keep, &[]).await.unwrap();
+    db.prune_source(&Source::default(), &keep, &[])
+        .await
+        .unwrap();
     assert_eq!(db.tracks_count(&filter).await.unwrap(), 2);
     let remaining: Vec<String> = db
         .tracks_page(
@@ -118,26 +122,72 @@ async fn automatic_cover_update_preserves_concurrent_manual_cover() {
         year: 0,
         cover_path: None,
         manual_cover: false,
+        artist_id: None,
+        artist_key: None,
     };
-    db.upsert_albums(&Source::Local, &[album]).await.unwrap();
+    db.upsert_albums(&Source::default(), &[album])
+        .await
+        .unwrap();
 
     assert!(
-        db.update_album_cover_if_not_manual(&Source::Local, "album", "/auto.jpg")
+        db.update_album_cover_if_not_manual(&Source::default(), "album", "/auto.jpg")
             .await
             .unwrap()
     );
-    db.update_album_cover(&Source::Local, "album", Some("/manual.jpg"), true)
+    db.update_album_cover(&Source::default(), "album", Some("/manual.jpg"), true)
         .await
         .unwrap();
     assert!(
-        !db.update_album_cover_if_not_manual(&Source::Local, "album", "/late-auto.jpg")
+        !db.update_album_cover_if_not_manual(&Source::default(), "album", "/late-auto.jpg")
             .await
             .unwrap()
     );
 
-    let stored = db.album(&Source::Local, "album").await.unwrap().unwrap();
+    let stored = db
+        .album(&Source::default(), "album")
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(stored.cover_path, Some(PathBuf::from("/manual.jpg")));
     assert!(stored.manual_cover);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn a_rebilled_album_takes_the_new_artist_whole() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::Server("srv".into());
+    let album = |artist: &str, artist_id: Option<&str>| Album {
+        id: "MPRE1".into(),
+        title: "Album".into(),
+        artist: artist.into(),
+        genre: String::new(),
+        year: 0,
+        cover_path: None,
+        manual_cover: false,
+        artist_id: artist_id.map(Into::into),
+        artist_key: artist_id.map(Into::into),
+    };
+
+    db.upsert_albums(&source, &[album("Ada", Some("UC-a"))])
+        .await
+        .unwrap();
+    db.upsert_albums(&source, &[album("Boris", None)])
+        .await
+        .unwrap();
+
+    let stored = db.album(&source, "MPRE1").await.unwrap().unwrap();
+    assert_eq!(stored.artist, "Boris");
+    assert_eq!(
+        stored.artist_id, None,
+        "Ada's id would open the wrong artist"
+    );
+
+    db.upsert_albums(&source, &[album("", None)]).await.unwrap();
+    let stored = db.album(&source, "MPRE1").await.unwrap().unwrap();
+    assert_eq!(stored.artist_key, None, "billed to nobody");
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
@@ -191,7 +241,7 @@ async fn a_blank_album_id_does_not_erase_a_known_one() {
 
     let linked = local("/music/a.flac", "A");
     assert_eq!(linked.album_id, "alb");
-    db.upsert_tracks(&Source::Local, std::slice::from_ref(&linked))
+    db.upsert_tracks(&Source::default(), std::slice::from_ref(&linked))
         .await
         .unwrap();
 
@@ -199,11 +249,11 @@ async fn a_blank_album_id_does_not_erase_a_known_one() {
     let mut album_less = linked.clone();
     album_less.album_id = String::new();
     album_less.title = "A (from a playlist)".into();
-    db.upsert_tracks(&Source::Local, &[album_less])
+    db.upsert_tracks(&Source::default(), &[album_less])
         .await
         .unwrap();
 
-    let tracks = db.album_tracks(&Source::Local, "alb").await.unwrap();
+    let tracks = db.album_tracks(&Source::default(), "alb").await.unwrap();
     assert_eq!(
         tracks.len(),
         1,
@@ -217,17 +267,110 @@ async fn a_blank_album_id_does_not_erase_a_known_one() {
     // A non-empty id is still authoritative — this must not become write-once.
     let mut moved = linked.clone();
     moved.album_id = "alb2".into();
-    db.upsert_tracks(&Source::Local, &[moved]).await.unwrap();
+    db.upsert_tracks(&Source::default(), &[moved])
+        .await
+        .unwrap();
     assert!(
-        db.album_tracks(&Source::Local, "alb")
+        db.album_tracks(&Source::default(), "alb")
             .await
             .unwrap()
             .is_empty()
     );
     assert_eq!(
-        db.album_tracks(&Source::Local, "alb2").await.unwrap().len(),
+        db.album_tracks(&Source::default(), "alb2")
+            .await
+            .unwrap()
+            .len(),
         1
     );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn replay_gain_round_trips_and_clears() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+
+    let mut track = local("/music/rg.flac", "RG");
+    track.replay_gain = config::ReplayGainInfo {
+        track_gain_db: Some(-7.5),
+        track_peak: Some(0.98),
+        album_gain_db: Some(-5.25),
+        album_peak: None,
+    };
+    db.upsert_tracks(&Source::default(), std::slice::from_ref(&track))
+        .await
+        .unwrap();
+
+    let filter = TrackFilter::new(Source::default());
+    let stored = db
+        .tracks_page(
+            &filter,
+            Page {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(stored[0].replay_gain, track.replay_gain);
+
+    // A re-sync from a server that stopped reporting gain must clear the row,
+    // not leave the old values to level a re-encoded file.
+    track.replay_gain = config::ReplayGainInfo::default();
+    db.upsert_tracks(&Source::default(), std::slice::from_ref(&track))
+        .await
+        .unwrap();
+    let stored = db
+        .tracks_page(
+            &filter,
+            Page {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(stored[0].replay_gain.is_empty());
+    assert_eq!(stored[0].replay_gain.track_peak, None);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn a_derived_album_follows_its_track_once_the_credit_is_linked() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let source = Source::Server("srv".into());
+    let track = |credit: reader::ArtistCredit| Track {
+        id: TrackId::Server {
+            service: config::MusicService::YtMusic,
+            item_id: "v1".into(),
+        },
+        artist: "Ada".into(),
+        artists: vec!["Ada".into()],
+        credits: vec![credit],
+        ..local("/unused", "Song")
+    };
+
+    db.upsert_tracks(&source, &[track(reader::ArtistCredit::unlinked("Ada"))])
+        .await
+        .unwrap();
+    db.upsert_tracks(
+        &source,
+        &[track(reader::ArtistCredit::linked("Ada", "UC-ada"))],
+    )
+    .await
+    .unwrap();
+
+    let album = db.album(&source, "alb").await.unwrap().unwrap();
+    let artist = db
+        .artist(&source, album.artist_key.as_deref().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(artist.source_id.as_deref(), Some("UC-ada"));
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

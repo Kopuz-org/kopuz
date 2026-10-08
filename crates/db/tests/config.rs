@@ -24,6 +24,124 @@ fn unique_db() -> PathBuf {
 }
 
 #[tokio::test]
+async fn webview_upgrade_removes_registered_sessions_and_keeps_cookie_sessions() {
+    let path = unique_db();
+    let pool = sqlx::SqlitePool::connect_with(
+        SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true),
+    )
+    .await
+    .unwrap();
+    let mut previous =
+        sqlx::migrate::Migrator::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations"))
+            .await
+            .unwrap();
+    previous
+        .migrations
+        .to_mut()
+        .retain(|migration| migration.version <= 20260919000000);
+    previous.run(&pool).await.unwrap();
+    let sessions = [
+        ("yt-oauth", "YtMusic", "kopuz:youtube:oauth:v1", false),
+        ("sc-oauth", "SoundCloud", "kopuz:soundcloud:oauth:v1", false),
+        (
+            "am-kit",
+            "AppleMusic",
+            "kopuz:musickit:v1:{\"music_user_token\":\"old\"}",
+            false,
+        ),
+        ("yt-webview", "YtMusic", "SAPISID=keep; SID=session", true),
+        ("sc-webview", "SoundCloud", "keep-sc-token", true),
+        ("am-webview", "AppleMusic", "keep-am-token", true),
+        ("spotify", "Spotify", "access\nrefresh", true),
+    ];
+    for (id, service, token, _) in sessions {
+        sqlx::query("INSERT INTO servers (id, name, url, service, access_token, user_id, auth_state) VALUES (?1, ?1, '', ?2, ?3, 'user', 'active')")
+            .bind(id).bind(service).bind(token).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO browser_auth (server_id, credentials) VALUES (?1, ?2)")
+            .bind(id)
+            .bind(r#"{"client_secret":"discard-me"}"#)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    pool.close().await;
+    let db = db::init(&path).await.unwrap();
+    for (id, _, token, keep) in sessions {
+        let source = db.load_server(id).await.unwrap().unwrap();
+        assert_eq!(source.access_token.as_deref(), keep.then_some(token));
+        assert_eq!(source.user_id.as_deref(), keep.then_some("user"));
+    }
+    let mut connection = SqliteConnectOptions::new()
+        .filename(&path)
+        .connect()
+        .await
+        .unwrap();
+    let tables: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE name = 'browser_auth'")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+    assert_eq!(tables, 0);
+    let signed_out: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM servers s LEFT JOIN server_credentials c ON c.server_id = s.id WHERE c.server_id IS NULL")
+            .fetch_one(&mut connection)
+            .await
+            .unwrap();
+    assert_eq!(signed_out, 3);
+}
+
+#[tokio::test]
+async fn webview_upgrade_after_server_split_keeps_current_credentials() {
+    for browser_table_applied in [false, true] {
+        let path = unique_db();
+        // A current master database has the split schema without the branch's
+        // migrations. Also cover a launch that already created browser_auth
+        // before failing at the old cleanup migration.
+        let db = db::init(&path).await.unwrap();
+        drop(db);
+        let pool = sqlx::SqlitePool::connect_with(SqliteConnectOptions::new().filename(&path))
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "DELETE FROM _sqlx_migrations WHERE version IN (20260919000000, 20260919010000, 20261003000000); \
+             INSERT INTO servers (id, name, url, service) VALUES ('keep', 'Keep', '', 'YtMusic'), ('old', 'Old', '', 'YtMusic'); \
+             INSERT INTO server_credentials (server_id, access_token, user_id) VALUES ('keep', 'SAPISID=keep; SID=session', 'user'), ('old', 'kopuz:youtube:oauth:v1', 'old-user');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        if browser_table_applied {
+            let mut browser = sqlx::migrate::Migrator::new(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("migrations"),
+            )
+            .await
+            .unwrap();
+            browser
+                .migrations
+                .to_mut()
+                .retain(|m| m.version == 20260919000000);
+            browser.set_ignore_missing(true);
+            browser.run(&pool).await.unwrap();
+        }
+        pool.close().await;
+        for _ in 0..2 {
+            let db = db::init(&path).await.unwrap();
+            let kept = db.load_server("keep").await.unwrap().unwrap();
+            assert_eq!(
+                kept.access_token.as_deref(),
+                Some("SAPISID=keep; SID=session")
+            );
+            assert_eq!(kept.user_id.as_deref(), Some("user"));
+            let old = db.load_server("old").await.unwrap().unwrap();
+            assert!(old.access_token.is_none());
+            assert!(old.user_id.is_none());
+        }
+    }
+}
+
+#[tokio::test]
 async fn config_round_trips_with_creds_in_servers_table() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
@@ -73,12 +191,12 @@ async fn config_round_trips_with_creds_in_servers_table() {
     // Play counts are written ONLY through bump_listen_count (a per-play
     // 1-row upsert), never by save_config — but load_config hydrates them.
     for _ in 0..7 {
-        db.bump_listen_count(&Source::Server("srv-b".into()), "ytmusic:VID1")
+        db.bump_listen_count(&Source::Server("srv-b".into()), "VID1")
             .await
             .unwrap();
     }
     for _ in 0..3 {
-        db.bump_listen_count(&Source::Local, "/music/a.flac")
+        db.bump_listen_count(&Source::default(), "/music/a.flac")
             .await
             .unwrap();
     }
@@ -94,26 +212,23 @@ async fn config_round_trips_with_creds_in_servers_table() {
     assert_eq!(loaded.listen_counts.get("ytmusic:VID1"), Some(&7));
     assert_eq!(loaded.listen_counts.get("/music/a.flac"), Some(&3));
 
-    // The blob must not carry creds, the servers list, or the counts.
+    // The settings file carries settings only: no creds, servers, counts or state.
+    let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
+    let written = std::fs::read_to_string(&settings_path).expect("settings file written");
+    assert!(
+        !written.contains("TOPSECRET_COOKIE"),
+        "token leaked into the file"
+    );
+    let written: toml::Table = written.parse().unwrap();
+    for key in ["server", "servers", "listen_counts", "active_source"] {
+        assert!(!written.contains_key(key), "{key} leaked into the file");
+    }
     let mut conn = open(&db_path).await;
-    let blob: String = sqlx::query_scalar("SELECT json FROM app_config WHERE id = 1")
+    let active: String = sqlx::query_scalar("SELECT active_source FROM app_state WHERE id = 1")
         .fetch_one(&mut conn)
         .await
         .unwrap();
-    assert!(
-        !blob.contains("TOPSECRET_COOKIE"),
-        "token leaked into the blob"
-    );
-    let v: serde_json::Value = serde_json::from_str(&blob).unwrap();
-    assert!(v.get("server").is_none());
-    assert!(v.get("servers").is_none());
-    assert!(v.get("listen_counts").is_none());
-    assert_eq!(
-        v.get("active_source")
-            .and_then(|s| s.get("Server"))
-            .and_then(|x| x.as_str()),
-        Some("srv-b")
-    );
+    assert_eq!(active, "srv-b");
 
     // Removing a server from the list drops its row (the active one is kept).
     let mut cfg2 = loaded;
@@ -151,7 +266,13 @@ async fn named_local_source_round_trips_as_active() {
     let loaded = db.load_config().await.unwrap().expect("config present");
 
     assert_eq!(loaded.active_source, Source::LocalLibrary(local.id.clone()));
-    assert_eq!(loaded.local_sources, vec![local]);
+    assert_eq!(
+        loaded.local_sources.len(),
+        2,
+        "the default folder source is kept alongside"
+    );
+    assert_eq!(loaded.local_sources[0].id, config::DEFAULT_LOCAL_ID);
+    assert_eq!(loaded.local_sources[1], local);
     assert!(loaded.server.is_none());
     assert_eq!(
         loaded
@@ -162,7 +283,7 @@ async fn named_local_source_round_trips_as_active() {
 }
 
 #[tokio::test]
-async fn settings_file_mirrors_saves_and_overrides_the_blob_on_load() {
+async fn a_save_writes_the_settings_file_and_a_hand_edit_wins_on_load() {
     let db_path = unique_db();
     let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
     let db = db::init(&db_path).await.unwrap();
@@ -173,12 +294,11 @@ async fn settings_file_mirrors_saves_and_overrides_the_blob_on_load() {
     };
     db.save_config(&cfg).await.unwrap();
 
-    // The save mirrored the settings into the standalone file.
     let text = std::fs::read_to_string(&settings_path).expect("settings file written");
     let mut written: toml::Table = text.parse().unwrap();
     assert_eq!(written["theme"].as_str(), Some("midnight"));
 
-    // A hand-edit (or hjem-managed value) in the file wins over the blob.
+    // The file is where settings live, so a hand edit is what loads.
     written.insert("theme".into(), "nord".into());
     std::fs::write(&settings_path, written.to_string()).unwrap();
     let loaded = db.load_config().await.unwrap().expect("config present");
@@ -201,28 +321,37 @@ async fn managed_settings_file_is_never_written_but_still_applies() {
 
     let db = db::init(&db_path).await.unwrap();
 
-    // No blob yet: the file layers alone configure the app.
+    // Nothing saved yet: the file alone configures the app, and a state key in it is ignored.
     let loaded = db
         .load_config()
         .await
         .unwrap()
         .expect("file layers present");
     assert_eq!(loaded.theme, "nord");
-    assert_eq!(loaded.volume, 0.25);
+    assert_eq!(loaded.volume, AppConfig::default().volume);
 
-    // Saving persists to the blob and leaves the immutable file untouched;
-    // its keys keep overriding what the UI changed.
+    // The immutable file is left alone; what it leaves unset goes beside it, and state to the DB.
     let mut cfg = loaded;
     cfg.theme = "dracula".into();
     cfg.crossfade_seconds = 4;
+    cfg.volume = 0.25;
     db.save_config(&cfg).await.unwrap();
     assert_eq!(
         std::fs::read_to_string(&settings_path).unwrap(),
         "theme = \"nord\"\nvolume = 0.25\n"
     );
+    let local: toml::Table = std::fs::read_to_string(config::store::local_path_for(&settings_path))
+        .expect("local settings written")
+        .parse()
+        .unwrap();
+    assert!(!local.contains_key("theme") && !local.contains_key("volume"));
     let reloaded = db.load_config().await.unwrap().expect("config present");
-    assert_eq!(reloaded.theme, "nord", "managed key wins over the blob");
-    assert_eq!(reloaded.crossfade_seconds, 4, "unmanaged key persists");
+    assert_eq!(reloaded.theme, "nord", "the managed key wins");
+    assert_eq!(
+        reloaded.crossfade_seconds, 4,
+        "an unmanaged setting persists"
+    );
+    assert_eq!(reloaded.volume, 0.25, "state persists in the DB");
 
     let mut perms = std::fs::metadata(&settings_path).unwrap().permissions();
     perms.set_readonly(false);
@@ -280,11 +409,9 @@ async fn layered_overrides_are_not_persisted_as_base_config() {
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
-/// The hand-written path end to end: a partial `settings.toml` plus a drop-in
-/// over an existing blob, with one unusable value in each. Everything the app
-/// can use applies, in precedence order, and the bad keys cost only themselves.
+/// A partial hand-written `settings.toml` plus a drop-in, one unusable value in each: the rest applies in precedence order.
 #[tokio::test]
-async fn hand_written_layers_apply_over_the_blob_and_survive_bad_keys() {
+async fn hand_written_layers_apply_in_order_and_survive_bad_keys() {
     let db_path = unique_db();
     let settings_path = config::store::settings_path_for(db_path.parent().unwrap());
     let db = db::init(&db_path).await.unwrap();
@@ -313,26 +440,26 @@ async fn hand_written_layers_apply_over_the_blob_and_survive_bad_keys() {
 
     let loaded = db.load_config().await.unwrap().expect("config present");
     assert_eq!(loaded.theme, "dracula", "the drop-in out-ranks the file");
-    assert_eq!(loaded.language, "tr", "the file out-ranks the blob");
-    assert_eq!(loaded.volume, 0.8, "untouched keys come from the blob");
+    assert_eq!(loaded.language, "tr");
+    assert_eq!(loaded.volume, 0.8, "state comes from the DB");
     assert_eq!(
-        loaded.crossfade_seconds, 3,
-        "a bad value falls back to the stored one, not to the default"
+        loaded.crossfade_seconds,
+        AppConfig::default().crossfade_seconds,
+        "a bad value falls back to the default"
     );
     assert_eq!(loaded.ui_style, config::UiStyle::default());
 
-    // Saving on top of that doesn't corrupt the hand-written file: the pinned
-    // drop-in key keeps the file's own value and the rest mirrors normally.
+    // Saving on top of that doesn't corrupt the hand-written file: the pinned drop-in key keeps the file's own value.
     let mut cfg = loaded;
-    cfg.volume = 0.25;
+    cfg.language = "de".into();
     db.save_config(&cfg).await.unwrap();
     let written: toml::Table = std::fs::read_to_string(&settings_path)
         .unwrap()
         .parse()
         .unwrap();
     assert_eq!(written["theme"].as_str(), Some("nord"));
-    assert_eq!(written["language"].as_str(), Some("tr"));
-    assert_eq!(written["volume"].as_float(), Some(0.25));
+    assert_eq!(written["language"].as_str(), Some("de"));
+    assert!(!written.contains_key("volume"));
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

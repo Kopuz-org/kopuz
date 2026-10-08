@@ -1,0 +1,68 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT al.source_album_id, al.title, al.artist, al.genre, al.year, al.cover_path, al.manual_cover,\n                  ar.key AS \"artist_key?\", ar.source_artist_id AS \"artist_source_id?\"\n             FROM albums al LEFT JOIN artists ar ON ar.id = al.artist_pk\n            WHERE al.source = ?1 AND al.artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2)\n            ORDER BY al.year DESC, al.title COLLATE NOCASE",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_album_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "title",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "artist",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "genre",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "year",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "cover_path",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "manual_cover",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "artist_key?",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "artist_source_id?",
+        "ordinal": 8,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "42f33f24c3dbdfa61fdd16a68b7d1ae2eb0e0f1534021279e69f591dcc9b1c96"
+}

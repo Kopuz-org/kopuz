@@ -32,6 +32,28 @@ impl SubsonicSource {
 /// Convert a Subsonic song into a `Track`, resolving its own cover and album
 /// instead of a preloaded one. Shared by playlist entries and radio results,
 /// where each song can belong to a different album.
+/// The artists a song credits. An OpenSubsonic server lists them one by one, so
+/// a collaboration files under each artist; a plain Subsonic server only names
+/// the joined `billed` string, which stays one credit.
+fn credits_of(song: &crate::subsonic::SubsonicSong, billed: &str) -> Vec<reader::ArtistCredit> {
+    let listed: Vec<reader::ArtistCredit> = song
+        .artists
+        .iter()
+        .filter(|artist| !artist.name.trim().is_empty())
+        .map(|artist| match artist.id.is_empty() {
+            true => reader::ArtistCredit::unlinked(&artist.name),
+            false => reader::ArtistCredit::linked(&artist.name, &artist.id),
+        })
+        .collect();
+    if !listed.is_empty() {
+        return listed;
+    }
+    match song.artist_id.as_deref().filter(|id| !id.is_empty()) {
+        Some(id) => vec![reader::ArtistCredit::linked(billed, id)],
+        None => vec![reader::ArtistCredit::unlinked(billed)],
+    }
+}
+
 fn song_to_track(
     client: &SubsonicClient,
     service: MusicService,
@@ -48,6 +70,8 @@ fn song_to_track(
         Some(cover_tag.as_deref().unwrap_or(reader::CoverRef::NO_COVER)),
     );
     let artist = item.artist.clone().unwrap_or_default();
+    let replay_gain = item.replay_gain_info();
+    let credits = credits_of(&item, &artist);
     reader::models::Track {
         id: reader::models::TrackId::Server {
             service,
@@ -67,7 +91,9 @@ fn song_to_track(
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
-        artists: vec![artist],
+        artists: credits.iter().map(|credit| credit.name.clone()).collect(),
+        credits,
+        replay_gain,
     }
 }
 
@@ -132,7 +158,10 @@ impl MediaSource for SubsonicSource {
                 if let Some(cover_art_id) = &artist.cover_art
                     && let Ok(url) = self.client.cover_art_url(cover_art_id, Some(512))
                 {
-                    artist_images.push((artist.name, url));
+                    artist_images.push((
+                        reader::ArtistCredit::linked(artist.name, artist.id.clone()),
+                        url,
+                    ));
                 }
             }
         }
@@ -170,6 +199,8 @@ impl MediaSource for SubsonicSource {
                     year: album.year.unwrap_or(0),
                     cover_path: Some(PathBuf::from(album_id_prefixed.clone())),
                     manual_cover: false,
+                    artist_id: album.artist_id.clone(),
+                    artist_key: album.artist_id.clone(),
                 });
 
                 let songs = self.client.get_album_songs(&album.id).await.map_err(|e| {
@@ -188,6 +219,11 @@ impl MediaSource for SubsonicSource {
                         .as_ref()
                         .and_then(|c| self.client.cover_art_url(c, Some(512)).ok())
                         .map(|url| reader::CoverRef::encode_url(&url));
+                    let replay_gain = song.replay_gain_info();
+                    let credits = credits_of(
+                        &song,
+                        song.artist.as_deref().unwrap_or(album_artist.as_str()),
+                    );
                     tracks.push(reader::Track {
                         id: reader::models::TrackId::Server {
                             service: self.service,
@@ -210,7 +246,9 @@ impl MediaSource for SubsonicSource {
                         musicbrainz_recording_id: None,
                         musicbrainz_track_id: None,
                         playlist_item_id: None,
-                        artists: vec![song.artist.unwrap_or_else(|| album_artist.clone())],
+                        artists: credits.iter().map(|credit| credit.name.clone()).collect(),
+                        credits,
+                        replay_gain,
                     });
                 }
             }
@@ -233,9 +271,13 @@ impl MediaSource for SubsonicSource {
             delete_from_disk: false,
             scan_folders: false,
             folders: false,
+            browse_folders: false,
+            external_devices: false,
+            browser_playback: false,
             sync: true,
             downloads: true,
             discover: false,
+            dont_recommend: false,
             radio: RadioSeeds::TRACK,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,
@@ -273,16 +315,13 @@ impl MediaSource for SubsonicSource {
     async fn remove_from_playlist(
         &self,
         playlist_id: &str,
-        track: &reader::Track,
+        _track: &reader::Track,
         position: usize,
     ) -> Result<(), SourceError> {
         self.client
             .remove_from_playlist(playlist_id, position)
             .await?;
-        self.db
-            .remove_playlist_tracks(&self.source, playlist_id, &[track.id.key().into_owned()])
-            .await
-            .map_err(SourceError::from)
+        self.remove_playlist_entry(playlist_id, position).await
     }
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
@@ -329,16 +368,16 @@ impl MediaSource for SubsonicSource {
     async fn reorder_playlist(
         &self,
         playlist_id: &str,
-        ordered_refs: &[String],
+        ordered: &[reader::PlaylistEntry],
         _moved: &reader::Track,
         _new_index: usize,
     ) -> Result<(), SourceError> {
-        let ids: Vec<&str> = ordered_refs.iter().map(String::as_str).collect();
+        let ids: Vec<&str> = ordered.iter().map(|entry| entry.key.as_str()).collect();
         self.client
             .reorder_playlist(playlist_id, &ids, ids.len())
             .await?;
         self.db
-            .set_playlist_tracks(&self.source, playlist_id, ordered_refs)
+            .set_playlist_tracks(&self.source, playlist_id, ordered)
             .await
             .map_err(SourceError::from)
     }
@@ -404,14 +443,16 @@ impl MediaSource for SubsonicSource {
             .collect())
     }
 
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError> {
+    async fn fetch_artist_images(
+        &self,
+    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
         let artists = self.client.get_artists().await?;
         let mut out = Vec::new();
         for artist in artists {
             if let Some(cover_art_id) = &artist.cover_art
                 && let Ok(url) = self.client.cover_art_url(cover_art_id, Some(512))
             {
-                out.push((artist.name.clone(), url));
+                out.push((reader::ArtistCredit::linked(&artist.name, &artist.id), url));
             }
         }
         Ok(out)
@@ -462,6 +503,41 @@ mod tests {
                 .query_pairs()
                 .any(|(key, value)| { key == "size" && value == "384" })
         );
+    }
+
+    #[test]
+    fn open_subsonic_artists_credit_each_collaborator() {
+        let song: crate::subsonic::SubsonicSong = serde_json::from_value(serde_json::json!({
+            "id": "song-1",
+            "title": "Collab",
+            "artist": "Ada feat. Boris",
+            "artistId": "joined",
+            "artists": [{ "id": "ar-1", "name": "Ada" }, { "id": "ar-2", "name": "Boris" }]
+        }))
+        .expect("valid OpenSubsonic song");
+
+        let credits = credits_of(&song, "Ada feat. Boris");
+        let named: Vec<_> = credits
+            .iter()
+            .map(|credit| (credit.name.as_str(), credit.id.as_deref()))
+            .collect();
+        assert_eq!(named, [("Ada", Some("ar-1")), ("Boris", Some("ar-2"))]);
+    }
+
+    #[test]
+    fn plain_subsonic_song_keeps_its_one_credit() {
+        let song: crate::subsonic::SubsonicSong = serde_json::from_value(serde_json::json!({
+            "id": "song-1",
+            "title": "Collab",
+            "artist": "Ada feat. Boris",
+            "artistId": "ar-9"
+        }))
+        .expect("valid Subsonic song");
+
+        let credits = credits_of(&song, "Ada feat. Boris");
+        assert_eq!(credits.len(), 1);
+        assert_eq!(credits[0].name, "Ada feat. Boris");
+        assert_eq!(credits[0].id.as_deref(), Some("ar-9"));
     }
 
     #[test]

@@ -60,3 +60,26 @@ jobs:
           else
             echo "Checked $checked commit subject(s)."
           fi
+
+      # Push events would rescan history that predates the rule, so this only gates new PR commits.
+      - name: Check for AI attribution
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          tools='claude|anthropic|copilot|cursor|codex|openai|chatgpt|gemini|devin|aider|windsurf|codeium'
+          ai_re="^co-authored-by:.*($tools)|generated (with|by) .*($tools)"
+          failed=0
+          while read -r sha; do
+            if hits=$(git log -1 --format=%B "$sha" | grep -iE "$ai_re"); then
+              while IFS= read -r line; do
+                echo "::error title=AI attribution::${sha:0:9}: $line"
+              done <<<"$hits"
+              failed=1
+            fi
+          done < <(git rev-list "$BASE_SHA..$HEAD_SHA")
+
+          exit "$failed"

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO artists (source, name, name_key, key) VALUES (?1, ?2, ?3, lower(hex(randomblob(16)))) ON CONFLICT(source, name_key) WHERE source_artist_id IS NULL DO UPDATE SET name = artists.name RETURNING id AS \"id!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "546acf533a686770dcc0aa2c3c641e967ba5b4512da7e312ba823fd6bc4e35fe"
+}

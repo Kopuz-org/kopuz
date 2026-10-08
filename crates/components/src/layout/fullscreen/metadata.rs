@@ -7,17 +7,32 @@ use hooks::use_player_controller::PlayerController;
 #[component]
 pub(crate) fn TrackMetadata(
     mut is_fullscreen: Signal<bool>,
-    current_song_cover_url: Signal<String>,
     current_song_title: Signal<String>,
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
     current_song_bitrate: Signal<u16>,
 ) -> Element {
     let ctrl = use_context::<PlayerController>();
+    let mut track_menu_open = use_signal(|| false);
+    // A menu left open across a track change would act on the new track.
+    let menu_track_key = use_memo(move || {
+        ctrl.current_track_snapshot
+            .read()
+            .as_ref()
+            .map(|track| track.key.clone())
+    });
+    use_effect(move || {
+        menu_track_key.read();
+        track_menu_open.set(false);
+    });
     let nav_ctrl = use_context::<NavigationController>();
     let favorite_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_favorite = hooks::use_db_queries::use_track_is_favorite(favorite_track)();
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+    let artist = current_track_snapshot
+        .as_ref()
+        .and_then(|track| track.primary_credit())
+        .and_then(|credit| credit.key.clone());
     let actions_track = current_track_snapshot.clone();
     let favorite_label = if is_favorite {
         i18n::t("remove_from_favorites").to_string()
@@ -29,7 +44,9 @@ pub(crate) fn TrackMetadata(
         div {
             class: "flex-1 min-h-0 w-full flex items-center justify-center mb-6",
             {
-                let cover = current_song_cover_url.read().clone();
+                let cover = ctrl
+                    .current_cover_url(hooks::artwork::Size::Full)
+                    .unwrap_or_default();
                 if cover.is_empty() {
                     rsx! {
                         div {
@@ -39,7 +56,6 @@ pub(crate) fn TrackMetadata(
                         }
                     }
                 } else {
-                    let cover = crate::cover_background::high_quality_artwork_url(cover);
                     rsx! {
                         img {
                             src: "{cover}",
@@ -54,6 +70,13 @@ pub(crate) fn TrackMetadata(
         div {
             class: "flex items-center gap-4 w-full mb-1",
             style: "max-width: 640px;",
+            oncontextmenu: move |evt| {
+                evt.prevent_default();
+                if ctrl.current_track_snapshot.peek().is_some() {
+                    crate::dots_menu::open_at_pointer(&evt);
+                    track_menu_open.set(true);
+                }
+            },
             div {
                 class: "flex flex-col items-start min-w-0 flex-1",
                 h1 { class: "text-[28px] font-semibold tracking-tight text-white mb-1 line-clamp-2 w-full", "{current_song_title}" }
@@ -62,12 +85,11 @@ pub(crate) fn TrackMetadata(
                     button {
                         class: "text-xl text-white/70 font-medium line-clamp-2 max-w-full hover:text-white hover:underline text-left transition-colors",
                         onclick: move |_| {
-                            let artist = current_song_artist.read().clone();
-                            if artist.is_empty() {
+                            let Some(artist) = artist.clone() else {
                                 return;
-                            }
+                            };
                             is_fullscreen.set(false);
-                            nav_ctrl.navigate_to_artist(artist);
+                            nav_ctrl.open_artist(artist);
                         },
                         "{current_song_artist}"
                     }
@@ -99,14 +121,17 @@ pub(crate) fn TrackMetadata(
                     },
                     title: "{favorite_label}",
                     "aria-label": "{favorite_label}",
-                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone()),
+                    onclick: move |_| { toggle_favorite(hooks::favorites::current(&ctrl)) },
                     i {
                         class: if is_favorite { "fa-solid fa-heart" } else { "fa-regular fa-heart" },
                         "aria-hidden": "true",
                     }
                 }
+                crate::dont_recommend::DontRecommendButton {
+                    class: "w-11 h-11 rounded-full flex-shrink-0 flex items-center justify-center bg-white/10 text-white/50 hover:bg-white/15 hover:text-white/80 transition-colors active:scale-95",
+                }
                 if let Some(track) = actions_track {
-                    TrackActions { track }
+                    TrackActions { track, menu_open: track_menu_open }
                 }
             }
         }

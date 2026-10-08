@@ -3,9 +3,9 @@ use dioxus::prelude::*;
 
 pub(crate) fn use_fullscreen_background(
     palette: Signal<Option<Vec<utils::color::Color>>>,
-    current_song_cover_url: Signal<String>,
 ) -> (Memo<String>, Memo<Option<String>>) {
     let config = use_context::<Signal<AppConfig>>();
+    let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
 
     let background_style = use_memo(move || {
         let conf = config.read();
@@ -26,8 +26,7 @@ pub(crate) fn use_fullscreen_background(
             return utils::format_artwork_url(Some(&path)).map(|url| url.as_ref().to_string());
         }
         if conf.cover_art_background {
-            let url = current_song_cover_url.read().clone();
-            return (!url.is_empty()).then_some(url);
+            return ctrl.current_cover_url(hooks::artwork::Size::Full);
         }
         None
     });

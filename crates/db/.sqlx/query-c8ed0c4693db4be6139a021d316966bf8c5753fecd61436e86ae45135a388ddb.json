@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO app_state (id, device_id, active_source, source_explicitly_set, volume, discord_presence_paused, fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) ON CONFLICT(id) DO UPDATE SET device_id = ?1, active_source = ?2, source_explicitly_set = ?3, volume = ?4, discord_presence_paused = ?5, fullscreen_tabs_collapsed = ?6, sort_order = ?7, album_view_mode = ?8, artist_album_view_mode = ?9, artists_view_mode = ?10, artist_view_order = ?11, listen_now_style = ?12, hero_height = ?13",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "c8ed0c4693db4be6139a021d316966bf8c5753fecd61436e86ae45135a388ddb"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE tracks SET added_at = ?3 WHERE source = ?1 AND track_key = ?2 AND added_at = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "70b448aa97a62261b67d1d5d659fbec3a482d2946e1a94c0015566ebde48c508"
+}

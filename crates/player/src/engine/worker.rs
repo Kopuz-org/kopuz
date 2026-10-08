@@ -23,6 +23,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::Time;
 
 use super::{ActorMsg, SourceFactory};
+use crate::replaygain;
 
 pub(crate) enum WorkerCmd {
     /// Begin decoding into the given ring. Sent once, after `Ready`.
@@ -58,6 +59,9 @@ pub(crate) enum WorkerMsg {
         token: u64,
         source_sample_rate: Option<u32>,
         seekable: bool,
+        /// Read off the probed container, so a service that transcodes and
+        /// drops the tags reports no gain rather than a stale one.
+        replay_gain: config::ReplayGainInfo,
     },
     /// Natural end of the source. The worker stays parked and seekable. The
     /// epoch identifies which ring generation ended, so an `Eof` that races a
@@ -181,15 +185,17 @@ fn run(
     };
     let source_sample_rate = audio_params.sample_rate;
 
-    let mut decoder: Box<dyn AudioDecoder> = match symphonia::default::get_codecs()
+    let (mut decoder, output_gain) = match symphonia::default::get_codecs()
         .make_audio_decoder(&audio_params, &AudioDecoderOptions::default())
     {
-        Ok(d) => d,
+        Ok(d) => (d, 1.0),
         Err(_) => match symphonia_adapter_libopus::OpusDecoder::try_registry_new(
             &audio_params,
             &AudioDecoderOptions::default(),
         ) {
-            Ok(d) => d,
+            // The libopus adapter consumes pre-skip but does not apply the
+            // OpusHead gain. Keep this codec gain independent of ReplayGain.
+            Ok(d) => (d, opus_output_gain(audio_params.extra_data.as_deref())),
             Err(e) => return fail(format!("symphonia codec error: {e}")),
         },
     };
@@ -198,6 +204,7 @@ fn run(
         token,
         source_sample_rate,
         seekable,
+        replay_gain: replaygain::from_format(format.as_mut()),
     });
 
     // Wait for the actor's decision. A superseded load simply drops our
@@ -341,6 +348,11 @@ fn run(
             output.sample_rate,
             &mut scratch,
         );
+        if output_gain != 1.0 {
+            for sample in samples.iter_mut() {
+                *sample *= output_gain;
+            }
+        }
 
         let change = write_all(
             cmd_rx,
@@ -603,6 +615,15 @@ pub(crate) fn parse_opushead_channels(extra: &[u8]) -> Option<u8> {
     }
 }
 
+fn opus_output_gain(extra: Option<&[u8]>) -> f32 {
+    let Some(header) = extra.filter(|extra| extra.len() >= 19 && extra.starts_with(b"OpusHead"))
+    else {
+        return 1.0;
+    };
+    let q78 = i16::from_le_bytes([header[16], header[17]]);
+    10.0_f32.powf(f32::from(q78) / (256.0 * 20.0))
+}
+
 pub(crate) fn audio_params_for_track(track: &Track) -> Option<AudioCodecParameters> {
     let mut audio_params = track
         .codec_params
@@ -630,7 +651,7 @@ fn audio_buf_to_f32_interleaved<'a>(
     target_channels: usize,
     target_sample_rate: u32,
     scratch: &'a mut Scratch,
-) -> &'a [f32] {
+) -> &'a mut [f32] {
     // Resample against the packet's own declared rate rather than a rate guessed
     // at probe time: some containers report channels but not sample rate up
     // front (leaving the probe value unknown), and a chained stream can change
@@ -667,11 +688,11 @@ fn audio_buf_to_f32_interleaved<'a>(
             target_sample_rate,
             &mut scratch.resampled,
         );
-        &scratch.resampled
+        &mut scratch.resampled
     } else if channels_converted {
-        &scratch.converted
+        &mut scratch.converted
     } else {
-        &scratch.interleaved
+        &mut scratch.interleaved
     }
 }
 

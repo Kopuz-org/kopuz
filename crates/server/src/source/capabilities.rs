@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use config::Source;
 
 use super::{
-    AuthOutcome, Capabilities, FavoritesPage, LibrarySnapshot, MediaSource, PlaylistMeta,
-    PlaylistPage, RemoteAlbum, SourceError, StreamInfo,
+    ArtistLookup, AuthOutcome, Capabilities, FavoritesPage, LibrarySnapshot, MediaSource,
+    PlaylistMeta, PlaylistPage, RemoteAlbum, SourceError, StreamInfo,
 };
 
 pub trait SourceIdentity {
@@ -73,7 +73,7 @@ pub trait PlaylistSource: SourceIdentity + Send + Sync {
     async fn reorder_playlist(
         &self,
         playlist_id: &str,
-        ordered_refs: &[String],
+        ordered: &[reader::PlaylistEntry],
         moved: &reader::Track,
         new_index: usize,
     ) -> Result<(), SourceError>;
@@ -125,12 +125,11 @@ where
     async fn reorder_playlist(
         &self,
         playlist_id: &str,
-        ordered_refs: &[String],
+        ordered: &[reader::PlaylistEntry],
         moved: &reader::Track,
         new_index: usize,
     ) -> Result<(), SourceError> {
-        <T as MediaSource>::reorder_playlist(self, playlist_id, ordered_refs, moved, new_index)
-            .await
+        <T as MediaSource>::reorder_playlist(self, playlist_id, ordered, moved, new_index).await
     }
 
     async fn fetch_playlist_entries(
@@ -220,8 +219,12 @@ where
 pub trait LibrarySource: SourceIdentity + Send + Sync {
     async fn fetch_library(&self) -> Result<LibrarySnapshot, SourceError>;
     async fn album_tracks(&self, album_id: &str) -> Result<Vec<reader::Track>, SourceError>;
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError>;
-    async fn fetch_artist_image(&self, name: &str) -> Result<Option<String>, SourceError>;
+    async fn fetch_artist_images(&self)
+    -> Result<Vec<(reader::ArtistCredit, String)>, SourceError>;
+    async fn fetch_artist_image(
+        &self,
+        artist: &reader::ArtistCredit,
+    ) -> Result<ArtistLookup, SourceError>;
 }
 
 #[async_trait]
@@ -237,12 +240,17 @@ where
         <T as MediaSource>::album_tracks(self, album_id).await
     }
 
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError> {
+    async fn fetch_artist_images(
+        &self,
+    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
         <T as MediaSource>::fetch_artist_images(self).await
     }
 
-    async fn fetch_artist_image(&self, name: &str) -> Result<Option<String>, SourceError> {
-        <T as MediaSource>::fetch_artist_image(self, name).await
+    async fn fetch_artist_image(
+        &self,
+        artist: &reader::ArtistCredit,
+    ) -> Result<ArtistLookup, SourceError> {
+        <T as MediaSource>::fetch_artist_image(self, artist).await
     }
 }
 

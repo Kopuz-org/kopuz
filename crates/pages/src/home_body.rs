@@ -1,13 +1,13 @@
+use api::{AlbumInfo as Album, TrackInfo as Track};
 use components::dots_menu::{DotsMenu, MenuAction};
 use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{
-    use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_favorites,
-    use_playlists, use_top_genre, use_tracks_by_keys,
+    use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_artists,
+    use_favorites, use_playlists, use_recently_added_albums, use_top_genre, use_tracks_by_keys,
 };
 use rand::rng;
 use rand::seq::SliceRandom;
-use reader::{Album, Track};
 use std::collections::HashMap;
 
 type AlbumCard = (String, String, String, Option<String>);
@@ -37,22 +37,23 @@ fn section_label(key: &str) -> String {
     i18n::t(i18n_key).to_string()
 }
 
-fn album_cover_url(conf: &AppConfig, album: &Album) -> Option<String> {
-    ::server::cover::from_path(conf, album.cover_path.as_deref(), 384).map(|c| c.to_string())
+fn album_cover_url(album: &Album) -> Option<String> {
+    hooks::artwork::for_album(album, hooks::artwork::Size::Thumb).map(|cover| cover.to_string())
 }
 
-/// A track's cover, source-agnostic via the cover seam — the track self-describes
-/// its cover (a local row's path is projected from its album by the DB read layer).
-fn track_cover_url(conf: &AppConfig, track: &Track) -> Option<String> {
-    ::server::cover::track(conf, track, 384).map(|c| c.to_string())
+/// A track's cover: the row carries its own reference, so a mixed-source list
+/// resolves without asking which service it came from.
+fn track_cover_url(track: &Track) -> Option<String> {
+    hooks::artwork::for_track(track, hooks::artwork::Size::Thumb).map(|cover| cover.to_string())
 }
 
-/// The hero stretches one cover across the full content width (up to 800px
-/// tall), so it asks for far more pixels than the 384px grid cards.
-const HERO_COVER_WIDTH: u32 = 1400;
+/// How many newest albums the Recently Added query pulls. The row shows 12, but
+/// untitled albums and same-title duplicates are dropped afterwards, so the
+/// window has to be wide enough to still fill it.
+const RECENTLY_ADDED_WINDOW: u32 = 64;
 
-/// The source-agnostic Home body (sections + hero). Rendered for local and any
-/// server; the active source decides the data, covers (via the source seam), the
+/// The source-agnostic Home body (sections + hero). Rendered for any
+/// source; the active source decides the data, covers (via the source seam), the
 /// recently-played list, and offline/sync gating.
 #[component]
 pub fn HomeBody(
@@ -60,13 +61,12 @@ pub fn HomeBody(
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
     on_select_playlist: EventHandler<String>,
-    on_search_artist: EventHandler<String>,
+    on_open_artist: EventHandler<String>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
     let mut config = use_context::<Signal<AppConfig>>();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let caps = use_memo(move || active_source.read().capabilities());
+    let caps = hooks::sources::use_capabilities();
     let mut has_fetched = use_signal(|| false);
     // Which card has its overflow menu open, keyed by track uid / playlist id.
     // Owned here because the section renderers are plain functions, so they
@@ -74,11 +74,23 @@ pub fn HomeBody(
     let active_card_menu = use_signal(|| None::<String>);
 
     let albums_res = use_albums(source);
+    let recently_added_res = use_recently_added_albums(source, RECENTLY_ADDED_WINDOW);
+    let artists_res = use_artists(source);
+    // Photos by artist key, so the Top Artists row shows the picture the daemon holds for each.
+    let artist_covers = use_memo(move || {
+        artists_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|artist| {
+                let cover =
+                    hooks::artwork::url(artist.artwork.as_ref(), hooks::artwork::Size::Thumb)?;
+                Some((artist.key.clone(), cover))
+            })
+            .collect::<HashMap<String, utils::CoverUrl>>()
+    });
     let playlists_res = use_playlists();
-    // The artist-image caches the Top Artists row resolves through (read-only:
-    // home triggers no photo fetch; the Artists page's pipeline fills these).
-    let artist_images_res = hooks::use_db_queries::use_artist_images();
-    let fetched_artist_images = use_context::<Signal<::server::cover::FetchedArtistImages>>();
     let offline_keys = use_memo(move || -> Vec<String> {
         if !(caps().downloads && *is_offline.read()) {
             return Vec::new();
@@ -97,12 +109,10 @@ pub fn HomeBody(
     let top_genre_res = use_top_genre(source);
     let artist_samples_res = use_artist_sample_tracks(source, 30);
 
-    // Servers fill an empty cache by syncing; local is populated by the scan.
+    // Catalog sources fill an empty cache by syncing; folder sources are populated by the scan.
     let mut fetch_remote = move || {
         has_fetched.set(true);
-        spawn(async move {
-            let _ = crate::server::subsonic_sync::sync_server_library(false).await;
-        });
+        hooks::jobs::start(hooks::JobKind::LibrarySync);
     };
 
     use_effect(move || {
@@ -118,9 +128,7 @@ pub fn HomeBody(
         }
     });
 
-    let jellyfin_albums_all = use_memo(move || -> Vec<AlbumCard> {
-        let conf = config.read();
-
+    let source_albums_all = use_memo(move || -> Vec<AlbumCard> {
         let mut albums = albums_res.read().clone().unwrap_or_default();
         albums.sort_by(|a, b| {
             a.title
@@ -160,7 +168,7 @@ pub fn HomeBody(
         unique_albums
             .into_iter()
             .map(|album| {
-                let cover = album_cover_url(&conf, &album);
+                let cover = album_cover_url(&album);
                 (
                     album.id.clone(),
                     album.title.clone(),
@@ -171,8 +179,8 @@ pub fn HomeBody(
             .collect::<Vec<_>>()
     });
 
-    let jellyfin_shuffled = use_memo(move || {
-        let albums = jellyfin_albums_all();
+    let shuffled_albums = use_memo(move || {
+        let albums = source_albums_all();
         if albums.is_empty() {
             return Vec::new();
         }
@@ -183,7 +191,6 @@ pub fn HomeBody(
     });
 
     let new_releases = use_memo(move || -> Vec<AlbumCard> {
-        let conf = config.read();
         let mut albums = albums_res.read().clone().unwrap_or_default();
         albums.sort_by_key(|b| std::cmp::Reverse(b.year));
         let mut unique = Vec::new();
@@ -202,7 +209,7 @@ pub fn HomeBody(
         unique
             .into_iter()
             .map(|album| {
-                let cover = album_cover_url(&conf, &album);
+                let cover = album_cover_url(&album);
                 (
                     album.id.clone(),
                     album.title.clone(),
@@ -214,11 +221,11 @@ pub fn HomeBody(
     });
 
     let recently_added = use_memo(move || -> Vec<AlbumCard> {
-        let conf = config.read();
-        let all_albums = albums_res.read().clone().unwrap_or_default();
+        // Already newest-first from the daemon, so this only de-duplicates.
+        let all_albums = recently_added_res.read().clone().unwrap_or_default();
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for album in all_albums.iter().rev() {
+        for album in all_albums.iter() {
             if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
                 continue;
             }
@@ -232,7 +239,7 @@ pub fn HomeBody(
         unique
             .into_iter()
             .map(|album| {
-                let cover = album_cover_url(&conf, &album);
+                let cover = album_cover_url(&album);
                 (
                     album.id.clone(),
                     album.title.clone(),
@@ -244,7 +251,6 @@ pub fn HomeBody(
     });
 
     let continue_listening = use_memo(move || {
-        let conf = config.read();
         let recent_tracks = recent_tracks_res.read().clone().unwrap_or_default();
         let all_albums = albums_res.read().clone().unwrap_or_default();
         let album_by_id: HashMap<&str, &Album> =
@@ -268,7 +274,7 @@ pub fn HomeBody(
             {
                 continue;
             }
-            let cover = track_cover_url(&conf, track);
+            let cover = track_cover_url(track);
             out.push((track.clone(), album, cover));
             if out.len() >= 10 {
                 break;
@@ -278,7 +284,6 @@ pub fn HomeBody(
     });
 
     let hero_entry = use_memo(move || {
-        let conf = config.read();
         let recent_tracks = recent_tracks_res.read().clone().unwrap_or_default();
         let all_albums = albums_res.read().clone().unwrap_or_default();
         let album_by_id: HashMap<&str, &Album> =
@@ -289,14 +294,13 @@ pub fn HomeBody(
                 continue;
             }
             let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
-            let cover = track_cover_url(&conf, track);
+            let cover = track_cover_url(track);
             return Some((track.clone(), album, cover));
         }
         None
     });
 
     let made_for_you = use_memo(move || -> (String, Vec<AlbumCard>) {
-        let conf = config.read();
         let all_albums = albums_res.read().clone().unwrap_or_default();
         let Some(top_genre) = top_genre_res.read().clone().flatten() else {
             return (String::new(), Vec::new());
@@ -314,7 +318,7 @@ pub fn HomeBody(
         let cards = albums
             .into_iter()
             .map(|album| {
-                let cover = album_cover_url(&conf, &album);
+                let cover = album_cover_url(&album);
                 (
                     album.id.clone(),
                     album.title.clone(),
@@ -326,11 +330,7 @@ pub fn HomeBody(
         (top_genre, cards)
     });
 
-    let jellyfin_artists = use_memo(move || {
-        let conf = config.read();
-        let albums = albums_res.read().clone().unwrap_or_default();
-        let images = artist_images_res.read().clone().unwrap_or_default();
-        let fetched = fetched_artist_images.read();
+    let source_artists = use_memo(move || {
         let tracks = if caps().downloads && *is_offline.read() {
             let mut downloaded = offline_tracks_res.read().clone().unwrap_or_default();
             downloaded.sort_by_key(|a| a.artist.to_lowercase());
@@ -341,28 +341,25 @@ pub fn HomeBody(
         let mut unique_artists = std::collections::HashSet::new();
         let mut artist_list = Vec::new();
         for track in &tracks {
-            if is_unknown_artist(&track.artist) {
+            // The row's own credit, so the tile is the artist the source named
+            // rather than the billed string it happens to show.
+            let Some(credit) = track.primary_credit() else {
+                continue;
+            };
+            if is_unknown_artist(&credit.name) {
                 continue;
             }
-            if unique_artists.insert(track.artist.clone()) {
-                // The same image chain the Artists grid uses: photo where one
-                // exists, the track's album cover as the Library last resort
-                // (a Remote catalog resolves photo-or-placeholder instead).
-                let norm = utils::artist::normalize_artist_key(&track.artist);
-                let album_cover = albums
-                    .iter()
-                    .find(|a| a.id == track.album_id)
-                    .and_then(|a| a.cover_path.as_deref());
-                let art = ::server::cover::ArtistArt::from_caches(
-                    &images,
-                    &fetched,
-                    &norm,
-                    &track.artist,
-                    album_cover,
-                    caps().artist_view,
-                );
-                let cover_url = ::server::cover::artist(&conf, art, 384).map(|c| c.to_string());
-                artist_list.push((track.artist.clone(), cover_url));
+            let Some(key) = &credit.key else {
+                continue;
+            };
+            if unique_artists.insert(key.clone()) {
+                // The daemon walks override, then photo, then an album cover
+                // for a library source; no picture renders the placeholder.
+                let cover_url = artist_covers
+                    .read()
+                    .get(key)
+                    .map(|cover: &utils::CoverUrl| cover.as_ref().to_string());
+                artist_list.push((credit.name.clone(), cover_url, key.clone()));
             }
             if artist_list.len() >= 10 {
                 break;
@@ -371,19 +368,8 @@ pub fn HomeBody(
         artist_list
     });
 
-    let playlist_cover_keys = use_memo(move || -> Vec<String> {
-        let store = playlists_res.read().clone().unwrap_or_default();
-        store
-            .playlists
-            .iter()
-            .filter_map(|p| p.tracks.first().cloned())
-            .collect()
-    });
-    let playlist_cover_tracks_res = use_tracks_by_keys(source, playlist_cover_keys);
-
     let recent_playlists = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
-        let cover_tracks = playlist_cover_tracks_res.read().clone().unwrap_or_default();
         let conf = config.read();
         let offline = caps().downloads && *is_offline.read();
         store
@@ -393,8 +379,8 @@ pub fn HomeBody(
                 if !offline {
                     return true;
                 }
-                !p.tracks.is_empty()
-                    && p.tracks.iter().all(|tid| {
+                !p.track_keys.is_empty()
+                    && p.track_keys.iter().all(|tid| {
                         if let Some(path_str) = conf.offline_tracks.get(tid) {
                             std::path::Path::new(path_str).exists()
                         } else {
@@ -406,39 +392,17 @@ pub fn HomeBody(
             .take(10)
             .cloned()
             .map(|p| {
-                let cover_url = {
-                    if let Some(url) =
-                        ::server::cover::from_path(&conf, p.cover_path.as_deref(), 384)
-                    {
-                        Some(url.to_string())
-                    } else if let Some(tag) = &p.image_tag
-                        && let Some(s) = &conf.server
-                    {
-                        ::server::cover::resolve(
-                            &conf,
-                            reader::CoverRef::remote_item(s.service, &p.id, Some(tag.as_str())),
-                            384,
-                        )
-                        .map(|t| t.to_string())
-                    } else {
-                        p.tracks.first().and_then(|tid| {
-                            cover_tracks
-                                .iter()
-                                .find(|t| {
-                                    let id = t.id.key();
-                                    !id.is_empty() && id.as_ref() == tid.as_str()
-                                })
-                                .and_then(|t| track_cover_url(&conf, t))
-                        })
-                    }
-                };
-                (p.id, p.name, p.tracks.len(), cover_url)
+                // The daemon walked the playlist's own cover, its server's and
+                // the first track's, so the row's reference is the whole answer.
+                let cover_url =
+                    hooks::artwork::url(p.artwork.as_ref(), hooks::artwork::Size::Thumb)
+                        .map(|cover| cover.to_string());
+                (p.id, p.name, p.track_keys.len(), cover_url)
             })
             .collect::<Vec<_>>()
     });
 
     let hero_cover = use_memo(move || {
-        let conf = config.read();
         let entry = hero_entry.read();
         let (track, album_opt, _) = entry.as_ref()?;
         // The album's own art first, but fall back to the track's — the albums
@@ -446,11 +410,9 @@ pub fn HomeBody(
         // path, which otherwise left the hero on the 384px card thumbnail.
         let cover = album_opt
             .as_ref()
-            .and_then(|album| {
-                ::server::cover::from_path(&conf, album.cover_path.as_deref(), HERO_COVER_WIDTH)
-            })
-            .or_else(|| ::server::cover::track(&conf, track, HERO_COVER_WIDTH))?;
-        Some(components::high_quality_artwork_url(cover.to_string()))
+            .and_then(|album| hooks::artwork::for_album(album, hooks::artwork::Size::Full))
+            .or_else(|| hooks::artwork::for_track(track, hooks::artwork::Size::Full))?;
+        Some(cover.to_string())
     });
 
     let conf_snapshot = config.read();
@@ -558,11 +520,11 @@ pub fn HomeBody(
                                     edit,
                                     is_vaxry,
                                     listen_now_style,
-                                    jellyfin_shuffled(),
+                                    shuffled_albums(),
                                     hero_cover(),
                                     continue_listening(),
                                     hero_entry(),
-                                    jellyfin_artists(),
+                                    source_artists(),
                                     new_releases(),
                                     made_for_you(),
                                     recently_added(),
@@ -570,7 +532,7 @@ pub fn HomeBody(
                                     on_select_album,
                                     on_play_album,
                                     on_select_playlist,
-                                    on_search_artist,
+                                    on_open_artist,
                                     active_card_menu,
                                     scroll_container,
                                 )}

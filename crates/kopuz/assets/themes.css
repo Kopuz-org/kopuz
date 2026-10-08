@@ -1005,6 +1005,166 @@ select:disabled {
     }
 }
 
+@media (max-width: 640px) {
+    .settings-toggle {
+        width: auto;
+        min-width: 9.5rem;
+        flex: none;
+    }
+
+    .settings-toggle > button {
+        padding-inline: 0.625rem;
+    }
+
+    .settings-row:has(.settings-slider) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        row-gap: 0.5rem;
+    }
+
+    .settings-row .settings-slider {
+        display: contents;
+    }
+
+    .settings-row .settings-slider > input[type="range"] {
+        grid-row: 2;
+        grid-column: 1 / -1;
+        width: 100%;
+        height: 1.75rem;
+    }
+
+    .settings-row .settings-slider > span {
+        grid-row: 1;
+        grid-column: 2;
+        width: auto;
+    }
+
+    .settings-row > [inert]:has(.settings-slider) {
+        grid-column: 1 / -1;
+    }
+
+    .settings-row .app-select.settings-select {
+        width: auto;
+        max-width: 60%;
+    }
+
+    .settings-row .settings-select .app-select-trigger {
+        min-height: 2.75rem;
+        padding: 0;
+        gap: 0.5rem;
+        border: 0;
+        background: transparent;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: none;
+        color: color-mix(in srgb, var(--color-white, #ffffff) 55%, transparent);
+        font-size: 0.8125rem;
+    }
+
+    .settings-row .settings-select .app-select-chevron {
+        rotate: none;
+        transform: rotate(-90deg);
+    }
+
+    [dir="rtl"] .settings-row .settings-select .app-select-chevron {
+        transform: rotate(90deg);
+    }
+
+    .settings-row-nested {
+        position: relative;
+        padding-inline-start: 2.25rem;
+    }
+
+    .settings-row-nested::before {
+        content: "";
+        position: absolute;
+        inset-block: 0;
+        inset-inline-start: 1.25rem;
+        width: 1px;
+        background: color-mix(in srgb, var(--color-indigo-500, #d9842f) 40%, transparent);
+    }
+}
+
+.settings-index {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+}
+
+.settings-index-row {
+    display: flex;
+    width: 100%;
+    min-height: 3.5rem;
+    align-items: center;
+    gap: 0.875rem;
+    padding: 0.625rem 1rem;
+    border-top: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 7%, transparent);
+    color: var(--color-white, #ffffff);
+    text-align: start;
+    transition: background-color 120ms ease;
+}
+
+.settings-index-row:active {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 5%, transparent);
+}
+
+.settings-index-icon {
+    width: 1rem;
+    flex: none;
+    color: color-mix(in srgb, var(--color-white, #ffffff) 45%, transparent);
+    font-size: 0.8125rem;
+    text-align: center;
+}
+
+.settings-index-text {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.settings-index-title {
+    color: color-mix(in srgb, var(--color-white, #ffffff) 92%, transparent);
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.settings-index-summary {
+    overflow: hidden;
+    color: color-mix(in srgb, var(--color-white, #ffffff) 45%, transparent);
+    font-size: 0.6875rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settings-index-online {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-inline-end: 0.375rem;
+    border-radius: 50%;
+    background: var(--color-green-500, #22c55e);
+    vertical-align: 1px;
+}
+
+.settings-index-chevron {
+    flex: none;
+    color: color-mix(in srgb, var(--color-white, #ffffff) 30%, transparent);
+    font-size: 0.625rem;
+}
+
+[dir="rtl"] .settings-index-chevron {
+    transform: scaleX(-1);
+}
+
+/* A contained or transformed ancestor would pin the fixed option sheet to it. */
+[data-platform="android"] .settings-category-content {
+    contain: none;
+    animation: none;
+}
+
 /* The fan disc is built around a hub on its left edge; RTL puts the column on
    the other side of the workspace, so mirror the geometry to keep the hub
    against the window edge and the wedges fanning into the content. */
@@ -1142,6 +1302,51 @@ select:disabled {
 .app-select-option:focus-visible,
 .app-select-option-active {
     background: color-mix(in srgb, var(--color-indigo-500, #d9842f) 18%, transparent);
+}
+
+.app-select-sheet-backdrop {
+    position: fixed;
+    z-index: 0;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    cursor: default;
+}
+
+.app-select-menu.app-select-sheet {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    max-width: none;
+    max-height: min(28rem, 70vh);
+    padding: 1.25rem 0.5rem calc(1rem + env(safe-area-inset-bottom));
+    border-bottom: 0;
+    border-radius: 1rem 1rem 0 0;
+    background: color-mix(in srgb, var(--color-black, #000000) 72%, var(--color-neutral-900, #171717));
+}
+
+.app-select-menu.app-select-sheet::before {
+    content: "";
+    position: absolute;
+    top: 0.5rem;
+    left: 50%;
+    width: 2rem;
+    height: 3px;
+    margin-left: -1rem;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--color-white, #ffffff) 25%, transparent);
+}
+
+.app-select-sheet .app-select-option {
+    min-height: 2.75rem;
+    padding: 0.5rem 0.75rem;
+}
+
+/* Keep a drag on the sheet's backdrop from scrolling the page behind. */
+#main-scroll-area:has(.app-select-sheet) .overflow-y-auto {
+    overflow: hidden;
 }
 
 .app-select-option-selected {

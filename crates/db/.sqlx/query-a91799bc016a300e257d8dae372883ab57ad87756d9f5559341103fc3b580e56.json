@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT cover_path AS \"cover_path!\" FROM artist_cover_albums\n            WHERE source = ?1 AND artist_pk = (SELECT id FROM artists WHERE source = ?1 AND key = ?2)",
+  "describe": {
+    "columns": [
+      {
+        "name": "cover_path!",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a91799bc016a300e257d8dae372883ab57ad87756d9f5559341103fc3b580e56"
+}

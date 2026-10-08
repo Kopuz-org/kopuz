@@ -12,7 +12,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::{MetadataOptions, RawValue, StandardTag, Tag as SymphoniaTag};
 use symphonia::core::units::Timestamp;
 
-pub(crate) struct ScannedTrack {
+pub struct ScannedTrack {
     pub track: Track,
     pub album: Album,
 }
@@ -166,6 +166,7 @@ pub fn extract_metadata(
         title,
         artist,
         artists,
+        credits: Vec::new(),
         album: album_title.unwrap_or_else(|| "Unknown Album".to_string()),
         khz: sample_rate,
         bitrate: bitrate_kbps,
@@ -177,10 +178,11 @@ pub fn extract_metadata(
         musicbrainz_recording_id,
         musicbrainz_track_id,
         playlist_item_id: None,
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 
-pub(crate) fn read_metadata(track_path: &Path) -> Option<ScannedTrack> {
+pub fn read_metadata(track_path: &Path) -> Option<ScannedTrack> {
     let options = ParseOptions::new().read_cover_art(false);
     let tagged_file = match Probe::open(track_path).ok()?.options(options).read() {
         Ok(tagged_file) => tagged_file,
@@ -211,6 +213,8 @@ pub(crate) fn read_metadata(track_path: &Path) -> Option<ScannedTrack> {
         year,
         cover_path: None,
         manual_cover: false,
+        artist_id: None,
+        artist_key: None,
     };
 
     Some(ScannedTrack { track, album })
@@ -473,6 +477,7 @@ fn read_with_symphonia(track_path: &Path) -> Option<ScannedTrack> {
         title,
         artist: artist.clone(),
         artists: vec![artist.clone()],
+        credits: Vec::new(),
         album: album_title.unwrap_or_else(|| "Unknown Album".to_string()),
         khz: sample_rate,
         bitrate: bitrate_kbps,
@@ -510,6 +515,7 @@ fn read_with_symphonia(track_path: &Path) -> Option<ScannedTrack> {
         )
         .and_then(symphonia_tag_to_string),
         playlist_item_id: None,
+        replay_gain: config::ReplayGainInfo::default(),
     };
 
     let genre = find_symphonia_tag(&tags, |t| matches!(t, StandardTag::Genre(_)), &["GENRE"])
@@ -531,6 +537,8 @@ fn read_with_symphonia(track_path: &Path) -> Option<ScannedTrack> {
         year,
         cover_path: None,
         manual_cover: false,
+        artist_id: None,
+        artist_key: None,
     };
 
     Some(ScannedTrack { track, album })

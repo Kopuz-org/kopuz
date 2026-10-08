@@ -9,10 +9,12 @@
 //! else.
 //!
 //! Layering, lowest to highest precedence:
-//! 1. whatever base the caller already has (the DB state blob),
+//! 1. the settings the app saved beside a managed file (`<stem>.local.toml`),
 //! 2. the settings file,
 //! 3. drop-ins (`<stem>.d/*.toml`, lexicographic order),
 //! 4. `KOPUZ_CONFIG_<FIELD>` environment variables.
+//!
+//! Every layer holds settings only: state, credentials and library data are the DB's ([`is_setting`]).
 //!
 //! Keys pinned by a layer the settings UI cannot usefully edit — a managed
 //! (Nix-store / read-only) file, any drop-in, any env var — are reported in
@@ -34,21 +36,105 @@ pub const ENV_PATH_OVERRIDE: &str = "KOPUZ_CONFIG_PATH";
 
 const NIX_STORE_PREFIX: &str = "/nix/store";
 
-/// Runtime state, not settings: churns constantly or is per-install identity.
-/// Never written to the settings file — it stays in the DB blob, so it keeps
-/// persisting even when the settings file is immutable. (`server`/`servers`/
-/// `listen_counts` additionally live in their own DB tables and are stripped
-/// from every persisted form.)
-const STATE_KEYS: &[&str] = &[
+/// What the app changes by being used rather than through its settings: the DB keeps it, and no settings layer holds it.
+pub const STATE_KEYS: &[&str] = &[
+    "device_id",
+    "active_source",
+    "source_explicitly_set",
+    "volume",
+    "discord_presence_paused",
+    "fullscreen_tabs_collapsed",
+    "sort_order",
+    "album_sort",
+    "library_sort",
+    "artist_album_sort",
+    "artist_sort",
+    "album_view_mode",
+    "artist_album_view_mode",
+    "artists_view_mode",
+    "artist_view_order",
+    "sidebar_order",
+    "home_sections",
+    "listen_now_style",
+    "hero_height",
+];
+
+/// Credentials, which a settings file kept in dotfiles or the Nix store must never hold.
+pub const SECRET_KEYS: &[&str] = &[
+    "musicbrainz_token",
+    "lastfm_api_key",
+    "lastfm_api_secret",
+    "lastfm_session_key",
+    "librefm_api_key",
+    "librefm_api_secret",
+    "librefm_session_key",
+];
+
+/// Library data the DB keeps in its own tables.
+pub const DATA_KEYS: &[&str] = &[
     "server",
     "servers",
+    "server_folders",
     "listen_counts",
-    "device_id",
     "offline_tracks",
+    "pinned_stations",
     "ytdlp_history",
-    "source_explicitly_set",
-    "fullscreen_tabs_collapsed",
 ];
+
+/// Whether a top-level `AppConfig` field is a setting, which only the settings layers hold.
+pub fn is_setting(key: &str) -> bool {
+    ![STATE_KEYS, SECRET_KEYS, DATA_KEYS]
+        .iter()
+        .any(|keys| keys.contains(&key))
+}
+
+fn settings_only(
+    mut map: serde_json::Map<String, JsonValue>,
+) -> serde_json::Map<String, JsonValue> {
+    map.retain(|key, _| is_setting(key));
+    map
+}
+
+/// Folds the retired `music_directory` key into the default folder source and makes sure that source exists.
+pub(crate) fn fold_legacy_directories(value: &mut JsonValue, force: bool) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    let legacy = obj.remove("music_directory").and_then(|raw| match raw {
+        JsonValue::String(path) => Some(vec![JsonValue::String(path)]),
+        JsonValue::Array(paths) if paths.iter().all(JsonValue::is_string) => Some(paths),
+        _ => {
+            tracing::warn!("ignoring a music_directory that is neither a path nor a list of paths");
+            None
+        }
+    });
+    let sources = obj
+        .entry("local_sources")
+        .or_insert_with(|| JsonValue::Array(Vec::new()));
+    let Some(sources) = sources.as_array_mut() else {
+        return;
+    };
+    let default = sources
+        .iter()
+        .position(|source| source["id"] == crate::DEFAULT_LOCAL_ID);
+    match (default, legacy) {
+        (Some(index), Some(dirs)) => {
+            let existing = &mut sources[index]["directories"];
+            if force || existing.as_array().is_none_or(Vec::is_empty) {
+                *existing = JsonValue::Array(dirs);
+            }
+        }
+        (None, dirs) => sources.insert(
+            0,
+            serde_json::json!({
+                "id": crate::DEFAULT_LOCAL_ID,
+                "name": crate::DEFAULT_LOCAL_NAME,
+                "directories": dirs.unwrap_or_default(),
+            }),
+        ),
+        (Some(_), None) => {}
+    }
+}
 
 /// The settings file for an app whose database lives in `db_dir`:
 /// `KOPUZ_CONFIG_PATH` override, else `<db_dir>/settings.toml` (release) or
@@ -74,6 +160,15 @@ pub fn dropin_dir_for(settings_path: &Path) -> PathBuf {
         .and_then(|s| s.to_str())
         .unwrap_or("settings");
     settings_path.with_file_name(format!("{stem}.d"))
+}
+
+/// The writable file beside a managed one, holding the settings it leaves unset: `settings.toml` → `settings.local.toml`.
+pub fn local_path_for(settings_path: &Path) -> PathBuf {
+    let stem = settings_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("settings");
+    settings_path.with_file_name(format!("{stem}.local.toml"))
 }
 
 /// The read-side snapshot of every file/env layer, plus what the UI needs to
@@ -107,9 +202,15 @@ impl FileLayers {
         let mut overrides = JsonValue::Object(Default::default());
         let mut locked_keys = BTreeSet::new();
 
+        // Under the main file, so a managed file's keys still win over what the app saved beside it.
+        if let Some(map) = read_toml_table(&local_path_for(settings_path)) {
+            merge_into(&mut overrides, JsonValue::Object(settings_only(map)));
+        }
+
         let managed = is_managed(settings_path, store_prefix);
         let file_exists;
         if let Some(map) = read_toml_table(settings_path) {
+            let map = settings_only(map);
             file_exists = true;
             if managed {
                 locked_keys.extend(map.keys().cloned());
@@ -124,16 +225,23 @@ impl FileLayers {
         let dropin_dir = dropin_dir_for(settings_path);
         for path in sorted_toml_files(&dropin_dir) {
             if let Some(map) = read_toml_table(&path) {
+                let map = settings_only(map);
                 locked_keys.extend(map.keys().cloned());
                 merge_into(&mut overrides, JsonValue::Object(map));
             }
         }
 
-        let env_layer = env_overrides(env);
-        if let Some(obj) = env_layer.as_object() {
-            locked_keys.extend(obj.keys().cloned());
+        let env_layer = match env_overrides(env) {
+            JsonValue::Object(map) => settings_only(map),
+            _ => serde_json::Map::new(),
+        };
+        locked_keys.extend(env_layer.keys().cloned());
+        merge_into(&mut overrides, JsonValue::Object(env_layer));
+
+        // The retired key's value now lives in the default folder source.
+        if locked_keys.contains("music_directory") {
+            locked_keys.insert("local_sources".to_owned());
         }
-        merge_into(&mut overrides, env_layer);
 
         Self {
             path: settings_path.to_path_buf(),
@@ -173,8 +281,11 @@ impl FileLayers {
     /// can't deserialize on its own is still an error: that is the app's own
     /// state, not something a text file caused.
     pub fn merge_and_parse(&self, base: JsonValue) -> Result<crate::AppConfig, serde_json::Error> {
+        let mut base = base;
+        fold_legacy_directories(&mut base, false);
         let mut merged = base.clone();
         self.apply(&mut merged);
+        fold_legacy_directories(&mut merged, true);
         let error = match serde_json::from_value::<crate::AppConfig>(merged) {
             Ok(cfg) => return Ok(cfg),
             Err(error) => error,
@@ -192,6 +303,7 @@ impl FileLayers {
                 &mut candidate,
                 JsonValue::Object(serde_json::Map::from_iter([(key.clone(), value.clone())])),
             );
+            fold_legacy_directories(&mut candidate, true);
             if serde_json::from_value::<crate::AppConfig>(candidate.clone()).is_ok() {
                 kept = candidate;
             } else {
@@ -209,23 +321,16 @@ impl FileLayers {
     }
 }
 
-/// Write the settings file from a full config JSON object (state keys are
-/// stripped first), atomically via a sibling temp file. Returns `false`
-/// without touching anything when the file is managed — an immutable config
-/// is never written (issue #530).
-///
-/// `locked_keys` are the fields a higher layer pins ([`FileLayers::locked_keys`]):
-/// their in-memory value came from that layer, not from the user, so the file
-/// keeps whatever it already held for them.
+/// Write the settings, only when one changed, to the file or beside a managed one ([`local_path_for`]); answers whether anything was written.
 pub fn save_settings_file(
     settings_path: &Path,
     cfg_json: &JsonValue,
     locked_keys: &BTreeSet<String>,
 ) -> std::io::Result<bool> {
-    if is_managed(settings_path, NIX_STORE_PREFIX) {
-        tracing::debug!(path = %settings_path.display(), "settings file is managed; skipping write");
-        return Ok(false);
-    }
+    let written_path = match is_managed(settings_path, NIX_STORE_PREFIX) {
+        true => local_path_for(settings_path),
+        false => settings_path.to_path_buf(),
+    };
 
     let mut cfg = cfg_json.clone();
     let Some(obj) = cfg.as_object_mut() else {
@@ -233,14 +338,12 @@ pub fn save_settings_file(
             "config did not serialize to an object",
         ));
     };
-    for key in STATE_KEYS {
-        obj.remove(*key);
-    }
+    obj.retain(|key, _| is_setting(key));
     // A pinned key's value in `cfg_json` is the layer's, merged in on load.
     // Writing it back would bake the override into the base file, so it would
     // keep applying once the drop-in/env layer is gone.
     if !locked_keys.is_empty() {
-        let existing = read_toml_table(settings_path).unwrap_or_default();
+        let existing = read_toml_table(&written_path).unwrap_or_default();
         for key in locked_keys {
             match existing.get(key) {
                 Some(value) => obj.insert(key.clone(), value.clone()),
@@ -256,12 +359,18 @@ pub fn save_settings_file(
             ));
         }
     };
+    let on_disk = std::fs::read_to_string(&written_path)
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok());
+    if on_disk.as_ref() == Some(&table) {
+        return Ok(false);
+    }
     let text = toml::to_string_pretty(&table).map_err(std::io::Error::other)?;
 
     // Follow a writable symlink to its target instead of replacing the link
     // with a regular file. (An hjem-managed link points into the store and
     // never gets here — this is for someone linking the file themselves.)
-    let target = std::fs::canonicalize(settings_path).unwrap_or_else(|_| settings_path.to_owned());
+    let target = std::fs::canonicalize(&written_path).unwrap_or(written_path);
     if let Some(parent) = target.parent()
         && !parent.as_os_str().is_empty()
     {
@@ -442,6 +551,125 @@ mod tests {
         std::iter::empty()
     }
 
+    fn default_dirs(cfg: &AppConfig) -> Vec<PathBuf> {
+        cfg.local_sources
+            .iter()
+            .find(|source| source.id == crate::DEFAULT_LOCAL_ID)
+            .map(|source| source.directories.clone())
+            .unwrap_or_default()
+    }
+
+    fn no_layers() -> FileLayers {
+        let dir = tempfile::tempdir().unwrap();
+        FileLayers::read_inner(&dir.path().join("none.toml"), NIX_STORE_PREFIX, empty_env())
+    }
+
+    #[test]
+    fn a_stored_music_directory_becomes_the_default_folder_source() {
+        for (stored, want) in [
+            (serde_json::json!("/music"), vec!["/music"]),
+            (
+                serde_json::json!(["/music", "/archive"]),
+                vec!["/music", "/archive"],
+            ),
+            (serde_json::json!([]), vec![]),
+        ] {
+            let cfg = no_layers()
+                .merge_and_parse(serde_json::json!({ "music_directory": stored }))
+                .unwrap();
+            assert_eq!(
+                default_dirs(&cfg),
+                want.iter().map(PathBuf::from).collect::<Vec<_>>()
+            );
+            assert_eq!(cfg.local_sources[0].id, crate::DEFAULT_LOCAL_ID);
+        }
+    }
+
+    #[test]
+    fn the_default_folder_source_exists_even_when_nothing_was_stored() {
+        let cfg = no_layers().merge_and_parse(serde_json::json!({})).unwrap();
+        assert_eq!(cfg.local_sources.len(), 1);
+        assert!(default_dirs(&cfg).is_empty());
+        assert_eq!(cfg.active_source.as_str(), "local");
+    }
+
+    #[test]
+    fn a_migrated_source_is_not_overwritten_by_a_leftover_key() {
+        let cfg = no_layers()
+            .merge_and_parse(serde_json::json!({
+                "music_directory": ["/old"],
+                "local_sources": [
+                    {"id": "local:x", "name": "X", "directories": ["/x"]},
+                    {"id": "local", "name": "Local Library", "directories": ["/new"]},
+                ],
+            }))
+            .unwrap();
+        assert_eq!(default_dirs(&cfg), vec![PathBuf::from("/new")]);
+        assert_eq!(cfg.local_sources.len(), 2);
+    }
+
+    #[test]
+    fn a_managed_file_with_music_directory_wins_and_locks_the_folder_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "music_directory = [\"/nix/music\"]\n").unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&path, perms).unwrap();
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        assert!(layers.managed);
+        assert!(layers.is_locked("local_sources"));
+
+        let blob = serde_json::json!({
+            "local_sources": [{"id": "local", "name": "Local Library", "directories": ["/db"]}],
+        });
+        let cfg = layers.merge_and_parse(blob).unwrap();
+        assert_eq!(default_dirs(&cfg), vec![PathBuf::from("/nix/music")]);
+    }
+
+    #[test]
+    fn a_managed_empty_music_directory_clears_the_default_folder_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        std::fs::write(&path, "music_directory = []\n").unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&path, perms).unwrap();
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let blob = serde_json::json!({
+            "local_sources": [{"id": "local", "name": "Local Library", "directories": ["/db"]}],
+        });
+        let cfg = layers.merge_and_parse(blob).unwrap();
+        assert!(default_dirs(&cfg).is_empty());
+    }
+
+    #[test]
+    fn a_malformed_music_directory_is_dropped_not_fatal() {
+        let cfg = no_layers()
+            .merge_and_parse(serde_json::json!({ "music_directory": 7 }))
+            .unwrap();
+        assert!(default_dirs(&cfg).is_empty());
+    }
+
+    #[test]
+    fn every_stored_active_source_spelling_still_loads() {
+        for (stored, column) in [
+            (serde_json::json!("Local"), "local"),
+            (
+                serde_json::json!({"LocalLibrary": "local:abc"}),
+                "local:abc",
+            ),
+            (serde_json::json!({"Server": "srv"}), "srv"),
+        ] {
+            let source: crate::Source = serde_json::from_value(stored.clone()).unwrap();
+            assert_eq!(source.as_str(), column);
+            assert_eq!(serde_json::to_value(&source).unwrap(), stored);
+            assert_eq!(crate::Source::from_column(column), source);
+        }
+    }
+
     #[test]
     fn default_config_round_trips_through_the_settings_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -457,13 +685,13 @@ mod tests {
 
         let defaults = AppConfig::default();
         assert_eq!(restored.theme, defaults.theme);
-        assert_eq!(restored.music_directory, defaults.music_directory);
+        assert_eq!(restored.local_sources, defaults.local_sources);
         assert_eq!(restored.volume, defaults.volume);
         assert_eq!(restored.home_sections, defaults.home_sections);
         assert_eq!(restored.equalizer, defaults.equalizer);
         assert_eq!(restored.radio_registries, defaults.radio_registries);
         assert_eq!(restored.sidebar_order, defaults.sidebar_order);
-        assert_eq!(restored.ytdlp_options, defaults.ytdlp_options);
+        assert_eq!(restored.downloader_options, defaults.downloader_options);
     }
 
     /// Every collection/enum/nested shape at once: the default config is
@@ -500,7 +728,6 @@ mod tests {
             active_source: crate::Source::LocalLibrary("local:two".into()),
             spotify_browser: Some("brave".into()),
             spotify_prefer_active_device: false,
-            music_directory: vec!["/music".into()],
             theme: "custom-one".into(),
             discord_presence: Some(false),
             discord_presence_paused: None,
@@ -536,7 +763,7 @@ mod tests {
             },
             device_change_behavior: DeviceChangeBehavior::Resume,
             sample_rate_mode: SampleRateMode::Source,
-            ytdlp_output_dir: "/downloads".into(),
+            downloader_output_dir: "/downloads".into(),
             titlebar_mode: TitlebarMode::System,
             offline_quality: OfflineQuality::Original,
             player_bar_position: PlayerBarPosition::Top,
@@ -579,23 +806,16 @@ mod tests {
         let restored: AppConfig = serde_json::from_value(base).unwrap();
 
         assert_eq!(restored.local_sources, cfg.local_sources);
-        assert_eq!(restored.active_source, cfg.active_source);
         assert_eq!(restored.spotify_browser, cfg.spotify_browser);
         assert_eq!(
             restored.spotify_prefer_active_device,
             cfg.spotify_prefer_active_device
         );
-        assert_eq!(restored.music_directory, cfg.music_directory);
         assert_eq!(restored.theme, cfg.theme);
         assert_eq!(restored.discord_presence, cfg.discord_presence);
-        assert_eq!(restored.sort_order, cfg.sort_order);
-        assert_eq!(restored.album_sort, cfg.album_sort);
-        assert_eq!(restored.album_view_mode, cfg.album_view_mode);
         assert_eq!(restored.language, cfg.language);
         assert_eq!(restored.cover_art_darkening, cfg.cover_art_darkening);
         assert_eq!(restored.custom_font_path, cfg.custom_font_path);
-        assert_eq!(restored.sidebar_order, cfg.sidebar_order);
-        assert_eq!(restored.volume, cfg.volume);
         assert_eq!(restored.crossfade_seconds, cfg.crossfade_seconds);
         assert_eq!(
             serde_json::to_value(&restored.custom_themes).unwrap(),
@@ -606,24 +826,22 @@ mod tests {
         assert_eq!(restored.equalizer, cfg.equalizer);
         assert_eq!(restored.device_change_behavior, cfg.device_change_behavior);
         assert_eq!(restored.sample_rate_mode, cfg.sample_rate_mode);
-        assert_eq!(restored.ytdlp_output_dir, cfg.ytdlp_output_dir);
+        assert_eq!(restored.downloader_output_dir, cfg.downloader_output_dir);
         assert_eq!(restored.titlebar_mode, cfg.titlebar_mode);
         assert_eq!(restored.offline_quality, cfg.offline_quality);
         assert_eq!(restored.player_bar_position, cfg.player_bar_position);
         assert_eq!(restored.ui_style, cfg.ui_style);
         assert_eq!(restored.settings_layout, cfg.settings_layout);
-        assert_eq!(restored.hero_height, cfg.hero_height);
-        assert_eq!(restored.home_sections, cfg.home_sections);
-        assert_eq!(restored.listen_now_style, cfg.listen_now_style);
         assert_eq!(restored.auto_fetch_covers, cfg.auto_fetch_covers);
         assert_eq!(restored.cover_fetch_strategy, cfg.cover_fetch_strategy);
         assert_eq!(restored.radio_registries, cfg.radio_registries);
-        assert_eq!(restored.pinned_stations, cfg.pinned_stations);
         assert_eq!(restored.prefer_local_lyrics, cfg.prefer_local_lyrics);
 
-        // `discord_presence_paused: None` has no TOML representation, so the
-        // key is absent and its serde default (`Some(true)`) comes back.
-        assert_eq!(restored.discord_presence_paused, Some(true));
+        assert_eq!(
+            restored.volume,
+            AppConfig::default().volume,
+            "state stays in the DB"
+        );
     }
 
     #[test]
@@ -631,7 +849,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         let cfg = AppConfig {
-            volume: 0.35,
             volume_scroll_step: 0.05,
             ..Default::default()
         };
@@ -653,28 +870,39 @@ mod tests {
         let mut base = serde_json::json!({});
         layers.apply(&mut base);
         let restored: AppConfig = serde_json::from_value(base).unwrap();
-        assert_eq!(restored.volume, cfg.volume);
         assert_eq!(restored.volume_scroll_step, cfg.volume_scroll_step);
     }
 
     #[test]
-    fn state_keys_never_reach_the_settings_file() {
+    fn nothing_but_settings_reaches_or_leaves_a_settings_layer() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         let mut cfg = AppConfig::default();
         cfg.offline_tracks
             .insert("track".into(), "/tmp/x.mp3".into());
+        cfg.lastfm_session_key = "secret".into();
+        cfg.volume = 0.2;
         let cfg_json = serde_json::to_value(&cfg).unwrap();
 
         save_settings_file(&path, &cfg_json, &BTreeSet::new()).unwrap();
 
         let written: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
-        for key in STATE_KEYS {
-            assert!(
-                !written.contains_key(*key),
-                "state key {key} leaked into the file"
-            );
+        for key in [STATE_KEYS, SECRET_KEYS, DATA_KEYS].concat() {
+            assert!(!written.contains_key(key), "{key} leaked into the file");
         }
+
+        // A file an older build wrote still holds them; no layer may hand them back.
+        std::fs::write(
+            &path,
+            "volume = 0.9\nlastfm_session_key = \"old\"\ntheme = \"nord\"\n",
+        )
+        .unwrap();
+        let env = [("KOPUZ_CONFIG_VOLUME".to_string(), "0.1".to_string())].into_iter();
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, env);
+        let mut base = serde_json::json!({});
+        layers.apply(&mut base);
+        assert_eq!(base, serde_json::json!({ "theme": "nord" }));
+        assert!(!layers.is_locked("volume"));
     }
 
     #[test]
@@ -755,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn read_only_file_is_managed_and_locks_its_keys_and_save_skips_it() {
+    fn a_managed_file_is_never_written_and_the_rest_goes_beside_it() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");
         std::fs::write(&path, "theme = \"nord\"\n").unwrap();
@@ -767,12 +995,60 @@ mod tests {
         assert!(layers.managed);
         assert!(layers.is_locked("theme"));
 
-        let cfg_json = serde_json::to_value(AppConfig::default()).unwrap();
-        assert!(!save_settings_file(&path, &cfg_json, &BTreeSet::new()).unwrap());
+        let cfg = AppConfig {
+            theme: "nord".into(),
+            language: "tr".into(),
+            ..Default::default()
+        };
+        let cfg_json = serde_json::to_value(&cfg).unwrap();
+        assert!(save_settings_file(&path, &cfg_json, &layers.locked_keys).unwrap());
+
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             "theme = \"nord\"\n"
         );
+        let local: toml::Table = std::fs::read_to_string(local_path_for(&path))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            !local.contains_key("theme"),
+            "the managed key stays the managed file's"
+        );
+        assert_eq!(local.get("language").and_then(|v| v.as_str()), Some("tr"));
+
+        std::fs::write(
+            local_path_for(&path),
+            "theme = \"gruvbox\"\nlanguage = \"tr\"\n",
+        )
+        .unwrap();
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let restored = layers.merge_and_parse(serde_json::json!({})).unwrap();
+        assert_eq!(
+            (restored.theme.as_str(), restored.language.as_str()),
+            ("nord", "tr")
+        );
+    }
+
+    #[test]
+    fn a_save_that_changes_no_setting_leaves_the_file_as_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let mut cfg = AppConfig::default();
+        let cfg_json = serde_json::to_value(&cfg).unwrap();
+        save_settings_file(&path, &cfg_json, &BTreeSet::new()).unwrap();
+        let hand_written = format!("# mine\n{}", std::fs::read_to_string(&path).unwrap());
+        std::fs::write(&path, &hand_written).unwrap();
+
+        cfg.volume = 0.5;
+        let saved = save_settings_file(
+            &path,
+            &serde_json::to_value(&cfg).unwrap(),
+            &BTreeSet::new(),
+        );
+
+        assert!(!saved.unwrap(), "only state changed");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), hand_written);
     }
 
     #[cfg(unix)]

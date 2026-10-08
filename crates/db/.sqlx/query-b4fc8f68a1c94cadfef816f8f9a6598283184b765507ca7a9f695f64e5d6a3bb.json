@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ar.key, cv.cover_path AS \"cover_path!\"\n             FROM artist_cover_albums cv JOIN artists ar ON ar.id = cv.artist_pk\n            WHERE cv.source = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "key",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "cover_path!",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "b4fc8f68a1c94cadfef816f8f9a6598283184b765507ca7a9f695f64e5d6a3bb"
+}

@@ -113,6 +113,8 @@ pub struct Item {
     pub album: Option<String>,
     pub album_id: Option<String>,
     pub artists: Option<Vec<String>>,
+    /// Absent unless the request's `Fields` asked for `ArtistItems`.
+    pub artist_items: Option<Vec<NamedItem>>,
     pub album_artist: Option<String>,
     pub image_tags: Option<std::collections::HashMap<String, String>>,
     pub index_number: Option<u32>,
@@ -122,6 +124,27 @@ pub struct Item {
     pub container: Option<String>,
     pub bitrate: Option<u32>,
     pub sample_rate: Option<u32>,
+    pub normalization_gain: Option<f32>,
+    pub album_normalization_gain: Option<f32>,
+}
+
+impl Item {
+    /// Jellyfin derives these from LUFS and publishes no peak, so clip
+    /// prevention has nothing to work with on a Jellyfin-supplied gain.
+    pub fn replay_gain_info(&self) -> config::ReplayGainInfo {
+        config::ReplayGainInfo {
+            track_gain_db: self.normalization_gain.filter(|db| db.is_finite()),
+            album_gain_db: self.album_normalization_gain.filter(|db| db.is_finite()),
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "PascalCase")]
+pub struct NamedItem {
+    pub name: String,
+    pub id: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -130,6 +153,7 @@ pub struct AlbumItem {
     pub name: String,
     pub id: String,
     pub album_artist: Option<String>,
+    pub album_artists: Option<Vec<NamedItem>>,
     pub artists: Option<Vec<String>>,
     pub production_year: Option<u32>,
     pub genres: Option<Vec<String>>,
@@ -227,7 +251,7 @@ impl JellyfinClient {
         Ok(self
             .http_client
             .request(method, self.build_url(path))
-            .header("X-Emby-Authorization", auth_header))
+            .header("Authorization", auth_header))
     }
 
     async fn ensure_success(
@@ -301,7 +325,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .json(&body)
             .send()
             .await
@@ -355,7 +379,7 @@ impl JellyfinClient {
             ("IncludeItemTypes", "Audio"),
             (
                 "Fields",
-                "DateCreated,DateLastMediaAdded,MediaSources,ImageTags,Genres,ParentIndexNumber,IndexNumber,AlbumId,AlbumArtist,ProductionYear,Container",
+                "DateCreated,DateLastMediaAdded,MediaSources,ImageTags,Genres,ParentIndexNumber,IndexNumber,AlbumId,AlbumArtist,ProductionYear,Container,ArtistItems",
             ),
             ("StartIndex", start.as_str()),
             ("Limit", limit_val.as_str()),
@@ -416,7 +440,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .json(&body)
             .send()
             .await
@@ -451,7 +475,7 @@ impl JellyfinClient {
             .http_client
             .post(&url)
             .query(&[("Ids", item_id), ("UserId", user_id)])
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -467,7 +491,7 @@ impl JellyfinClient {
         let user_id = self.user_id()?;
         let path = format!("/Playlists/{}/Items", playlist_id);
 
-        let fields = "DateCreated,DateLastMediaAdded,MediaSources,ImageTags,Genres,ParentIndexNumber,IndexNumber,AlbumId,AlbumArtist,ProductionYear,Container,PlaylistItemId".to_string();
+        let fields = "DateCreated,DateLastMediaAdded,MediaSources,ImageTags,Genres,ParentIndexNumber,IndexNumber,AlbumId,AlbumArtist,ProductionYear,Container,PlaylistItemId,ArtistItems".to_string();
         let query = [("UserId", user_id), ("Fields", fields.as_str())];
         let items_resp: ItemsResponse = self.request_with_query(&path, &query).await?;
         Ok(items_resp.items)
@@ -495,7 +519,7 @@ impl JellyfinClient {
             .http_client
             .delete(&url)
             .query(&[("EntryIds", entry_id)])
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -535,7 +559,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .header("Content-Length", "0")
             .send()
             .await
@@ -622,7 +646,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .json(&body)
             .send()
             .await
@@ -666,7 +690,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .json(&body)
             .send()
             .await
@@ -707,7 +731,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .json(&body)
             .send()
             .await
@@ -758,7 +782,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -790,7 +814,7 @@ impl JellyfinClient {
         let resp = self
             .http_client
             .delete(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .header("Authorization", auth_header)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -829,5 +853,38 @@ impl JellyfinClient {
 
         let items_resp: ItemsResponse = self.request_with_query(&path, &query).await?;
         Ok(items_resp.items)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Item;
+
+    #[test]
+    fn reads_the_normalization_gains() {
+        let item: Item = serde_json::from_str(
+            r#"{
+                "Name": "T",
+                "Id": "1",
+                "Type": "Audio",
+                "NormalizationGain": -7.5,
+                "AlbumNormalizationGain": -5.25
+            }"#,
+        )
+        .unwrap();
+
+        let info = item.replay_gain_info();
+        assert_eq!(info.track_gain_db, Some(-7.5));
+        assert_eq!(info.album_gain_db, Some(-5.25));
+        // Jellyfin publishes no peaks, so clip prevention stays inert here.
+        assert_eq!(info.track_peak, None);
+        assert_eq!(info.album_peak, None);
+    }
+
+    #[test]
+    fn an_item_from_an_older_server_reports_nothing() {
+        let item: Item =
+            serde_json::from_str(r#"{"Name": "T", "Id": "1", "Type": "Audio"}"#).unwrap();
+        assert!(item.replay_gain_info().is_empty());
     }
 }

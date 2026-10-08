@@ -50,15 +50,24 @@ impl MediaSource for SpotifySource {
             .then(|| format!("https://open.spotify.com/track/{}", track.id.key()))
     }
 
+    fn album_web_url(&self, browse_id: &str) -> Option<String> {
+        (!browse_id.trim().is_empty())
+            .then(|| format!("https://open.spotify.com/album/{browse_id}"))
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             edit_tags: false,
             delete_from_disk: false,
             scan_folders: false,
             folders: false,
+            browse_folders: false,
+            external_devices: true,
+            browser_playback: true,
             sync: true,
             downloads: false,
             discover: true,
+            dont_recommend: false,
             radio: RadioSeeds::NONE,
             playlists: PlaylistOps::None,
             artist_view: ArtistView::Library,

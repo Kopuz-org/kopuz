@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use config::{ChannelMode, EqualizerSettings};
+use config::{ChannelMode, EqualizerSettings, ReplayGainInfo, ReplayGainSettings};
 
 use crate::engine::{
     ActorMsg, AudioSink, Command, CpalSink, EngineHandle, EngineStatus, Event, LoadReply,
@@ -57,6 +57,10 @@ pub struct LoadArgs {
     pub meta: NowPlayingMeta,
     pub transition: Transition,
     pub start_at: Option<Duration>,
+    /// The queue is walking an album; see [`LoadRequest::album_context`].
+    pub album_context: bool,
+    /// See [`LoadRequest::service_replay_gain`].
+    pub service_replay_gain: ReplayGainInfo,
     /// Resolves once the source is playing or failed; dropped on cancellation.
     pub reply: Option<LoadReply>,
 }
@@ -67,6 +71,13 @@ pub struct Player {
 }
 
 impl Player {
+    fn from_engine(engine: EngineHandle) -> Self {
+        Self {
+            engine,
+            now_playing: None,
+        }
+    }
+
     pub fn try_new() -> Result<Self, PlayerInitError> {
         // Android initialises the JNI media session + classloader cache here; the desktop
         // platforms set up their system integration from the app entry point instead.
@@ -86,10 +97,14 @@ impl Player {
             .map(|sink| Box::new(sink) as Box<dyn AudioSink>)
         })?;
 
-        Ok(Self {
-            engine,
-            now_playing: None,
-        })
+        Ok(Self::from_engine(engine))
+    }
+
+    /// Start a player around an injected sink. Daemon and engine tests use
+    /// this to run the real actor/decoder state machine without requiring an
+    /// output device.
+    pub fn try_with_sink(sink: Box<dyn AudioSink>) -> Result<Self, PlayerInitError> {
+        EngineHandle::spawn(move |_| Ok(sink)).map(Self::from_engine)
     }
 
     pub fn new() -> Self {
@@ -117,6 +132,8 @@ impl Player {
             meta,
             transition,
             start_at,
+            album_context,
+            service_replay_gain,
             reply,
         } = args;
         self.engine.send(Command::Load(LoadRequest {
@@ -125,6 +142,8 @@ impl Player {
             duration: meta.duration,
             transition,
             start_at,
+            album_context,
+            service_replay_gain,
             reply,
         }));
         self.now_playing = Some(meta);
@@ -180,10 +199,6 @@ impl Player {
         self.push_now_playing(time, !self.is_paused());
     }
 
-    pub fn is_playback_complete(&self) -> bool {
-        matches!(self.status().phase, Phase::Idle | Phase::Ended)
-    }
-
     pub fn is_paused(&self) -> bool {
         self.status().paused
     }
@@ -217,6 +232,19 @@ impl Player {
 
     pub fn set_equalizer(&self, settings: EqualizerSettings) {
         self.engine.send(Command::SetEqualizer(settings));
+    }
+
+    /// Takes effect on the playing track too, not just the next one.
+    pub fn set_replay_gain(&self, settings: ReplayGainSettings) {
+        self.engine.send(Command::SetReplayGain(settings));
+    }
+
+    /// Refresh the queue context without reloading a playing or probing track.
+    pub fn set_album_context(&self, token: u64, album_context: bool) {
+        self.engine.send(Command::SetAlbumContext {
+            token,
+            album_context,
+        });
     }
 
     /// Whether playback keeps going or holds paused after migrating to a new

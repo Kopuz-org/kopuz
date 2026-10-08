@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Describe the problem first, then the feature you want. Requests tied to a real workflow are easier to evaluate.
+        Describe the problem first, then the feature you want. Requests tied to a real workflow are easier to evaluate. Keep it to what a maintainer needs; see the [AI policy](https://github.com/Kopuz-org/kopuz/blob/master/CONTRIBUTING.md#ai-policy).
 
   - type: textarea
     id: problem
@@ -42,7 +42,7 @@ body:
         - Local library
         - Server integration
         - UI / UX
-        - Downloads / yt-dlp
+        - Downloads / YouTube
         - Mobile / touch
         - Packaging / install
         - Other
@@ -54,3 +54,10 @@ body:
     attributes:
       label: Additional context
       description: Add any constraints, edge cases, or implementation notes you think matter.
+
+  - type: checkboxes
+    id: ai_usage
+    attributes:
+      label: AI usage
+      options:
+        - label: I used an LLM to write this issue.

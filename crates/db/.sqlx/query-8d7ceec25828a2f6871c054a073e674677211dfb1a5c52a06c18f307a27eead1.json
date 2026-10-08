@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT source_artist_id AS \"source_artist_id!: String\", key FROM artists\n            WHERE source = ?1 AND source_artist_id IS NOT NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_artist_id!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "key",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "8d7ceec25828a2f6871c054a073e674677211dfb1a5c52a06c18f307a27eead1"
+}

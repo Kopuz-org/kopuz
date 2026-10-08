@@ -31,9 +31,11 @@ pub fn AlbumPlayButton(
         format!("fa-solid fa-play ml-0.5 {icon_extra}")
     };
     rsx! {
-        div {
+        button {
+            r#type: "button",
             class: "{class}",
             style: "{style}",
+            aria_label: if is_playing { i18n::t("pause") } else { i18n::t("play") },
             onclick: move |evt| {
                 evt.stop_propagation();
                 if is_current {

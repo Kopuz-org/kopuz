@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM sidebar_items",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "4e8f90207799c0002fa499f9ae120acc9d6c6a2d9ebcbc753bc92ac955ba2cf4"
+}

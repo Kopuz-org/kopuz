@@ -58,7 +58,7 @@ pub async fn launch_signin_and_extract(
 
     // One lookup for both cases — it resolves a host-spawn command line itself
     // when running under Flatpak.
-    let bin = ip::find_browser_bin(browser, profile.display().to_string())
+    let bin = ip::find_browser_bin(browser, Some(profile.as_path()))
         .await
         .ok_or_else(|| {
             if ip::in_flatpak() {
@@ -76,21 +76,8 @@ pub async fn launch_signin_and_extract(
             }
         })?;
 
-    let mut cmd = ip::browser_command(&bin);
-    cmd.arg("--no-first-run")
-        .arg("--no-default-browser-check")
-        .arg("--password-store=basic")
-        .arg(format!("--user-data-dir={}", profile.display()));
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0100_0000);
-    }
-    let mut child = cmd
-        .arg(format!("--app={SIGNIN_URL}"))
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true)
+    ip::prepare_profile(browser, &profile);
+    let mut child = ip::signin_command(browser, &bin, &profile, SIGNIN_URL)
         .spawn()
         .map_err(|e| format!("spawn {bin}: {e}"))?;
 

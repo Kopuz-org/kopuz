@@ -12,12 +12,15 @@ pub struct Album {
     pub cover_path: Option<PathBuf>,
     #[serde(default)]
     pub manual_cover: bool,
+    #[serde(default)]
+    pub artist_id: Option<String>,
+    /// The key the library files the billed artist under, for an album read back from the library.
+    #[serde(skip)]
+    pub artist_key: Option<String>,
 }
 
 /// A source-agnostic artist photo reference: a local file path or a remote URL.
-/// Resolved to a `CoverUrl` by the cover seam (`server::cover::artist`), so the
-/// UI never branches on where the image lives. A custom user override is handled
-/// separately (it's a priority concern, not a source one).
+/// A custom user override is handled separately (it's a priority concern, not a source one).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ArtistImageRef {
     /// A local filesystem path (from the local scan).
@@ -32,7 +35,7 @@ pub enum ArtistImageRef {
 /// Storage remains string-based for backwards compatibility. All interpretation
 /// of those strings happens here so callers never need to split service prefixes
 /// or decode embedded URLs themselves.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CoverRef {
     Local(PathBuf),
     JellyfinItem {
@@ -161,10 +164,54 @@ pub struct Track {
     pub musicbrainz_recording_id: Option<String>,
     #[serde(default)]
     pub musicbrainz_track_id: Option<String>,
+    /// Only set on a row fetched as a playlist entry; it is stored with the entry, never the track.
     #[serde(default)]
     pub playlist_item_id: Option<String>,
     #[serde(default)]
     pub artists: Vec<String>,
+    /// Every credit in billing order; a queue stored before credits existed has only `artists`.
+    #[serde(default)]
+    pub credits: Vec<ArtistCredit>,
+    /// ReplayGain values the source reported. Media servers publish them so a
+    /// transcoded stream still levels; local files leave this empty, since the
+    /// player reads their tags off the file it is decoding.
+    #[serde(default)]
+    pub replay_gain: config::ReplayGainInfo,
+}
+
+/// One credited artist, and the source whose listing it came from, since an id means nothing to another.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ArtistCredit {
+    pub name: String,
+    #[serde(default)]
+    pub id: Option<String>,
+    /// The source that listed this credit, stamped as the row leaves it; `None` for one whose origin is unknown.
+    #[serde(default)]
+    pub source: Option<config::Source>,
+    /// The key the library files this artist under, for a credit read back from it; a linked artist's is its `id`.
+    #[serde(default)]
+    pub key: Option<String>,
+}
+
+impl ArtistCredit {
+    pub fn unlinked(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            id: None,
+            source: None,
+            key: None,
+        }
+    }
+
+    pub fn linked(name: impl Into<String>, id: impl Into<String>) -> Self {
+        let id = id.into();
+        Self {
+            name: name.into(),
+            id: Some(id.clone()),
+            source: None,
+            key: Some(id),
+        }
+    }
 }
 
 impl CoverRef {
@@ -314,7 +361,14 @@ impl CoverRef {
         if let Some(url) = stored.strip_prefix("directurl:") {
             return (!url.is_empty()).then(|| url.to_string());
         }
-        if stored.starts_with("http://") || stored.starts_with("https://") {
+        // `artwork://` is the app's own scheme for a cover the daemon
+        // resolves. It is as self-contained as an http URL, and saying so
+        // here is what keeps a daemon-sourced row from being misread as a
+        // service-specific image tag.
+        if stored.starts_with("http://")
+            || stored.starts_with("https://")
+            || stored.starts_with("artwork://")
+        {
             return Some(stored.to_string());
         }
 
@@ -457,6 +511,29 @@ mod tests {
     use config::MusicService;
     use std::path::PathBuf;
 
+    /// The stored queue is read with `unwrap_or_default` over the whole `Vec`,
+    /// so one `Track` that will not parse silently empties it.
+    #[test]
+    fn a_track_stored_before_credits_still_deserializes() {
+        let json = r#"{
+            "id": { "Local": "/music/a.flac" },
+            "album_id": "al-1",
+            "title": "A",
+            "artist": "Ada",
+            "album": "One",
+            "duration": 60,
+            "khz": 44,
+            "track_number": null,
+            "disc_number": null,
+            "artists": ["Ada"]
+        }"#;
+
+        let track: Track = serde_json::from_str(json).expect("an older track still reads");
+
+        assert_eq!(track.artists, vec!["Ada".to_string()]);
+        assert!(track.credits.is_empty());
+    }
+
     #[test]
     fn library_deserializes_legacy_root_path() {
         let json = r#"{
@@ -526,6 +603,8 @@ mod tests {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: Vec::new(),
+            replay_gain: config::ReplayGainInfo::default(),
+            credits: Vec::new(),
         }
     }
 
@@ -713,6 +792,41 @@ pub struct Playlist {
     pub cover_path: Option<PathBuf>,
 }
 
+/// One playlist entry: its track, and the entry's own id where the source numbers entries.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PlaylistEntry {
+    pub key: String,
+    pub item_id: Option<String>,
+}
+
+impl PlaylistEntry {
+    pub fn of(key: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            item_id: None,
+        }
+    }
+
+    pub fn from_track(track: &Track) -> Self {
+        Self {
+            key: track.id.key().into_owned(),
+            item_id: track.playlist_item_id.clone(),
+        }
+    }
+}
+
+impl From<&str> for PlaylistEntry {
+    fn from(key: &str) -> Self {
+        Self::of(key)
+    }
+}
+
+impl From<String> for PlaylistEntry {
+    fn from(key: String) -> Self {
+        Self::of(key)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlaylistFolder {
     pub id: String,
@@ -737,32 +851,4 @@ pub struct FavoritesStore {
     pub jellyfin_favorites: Vec<String>,
 }
 
-impl FavoritesStore {
-    pub fn is_local_favorite(&self, path: &Path) -> bool {
-        self.local_favorites.iter().any(|p| p == path)
-    }
-
-    pub fn is_jellyfin_favorite(&self, id: &str) -> bool {
-        self.jellyfin_favorites.iter().any(|i| i == id)
-    }
-
-    pub fn toggle_local(&mut self, path: PathBuf) -> bool {
-        if let Some(pos) = self.local_favorites.iter().position(|p| p == &path) {
-            self.local_favorites.remove(pos);
-            false
-        } else {
-            self.local_favorites.push(path);
-            true
-        }
-    }
-
-    pub fn set_jellyfin(&mut self, id: String, is_fav: bool) {
-        if is_fav {
-            if !self.jellyfin_favorites.contains(&id) {
-                self.jellyfin_favorites.push(id);
-            }
-        } else {
-            self.jellyfin_favorites.retain(|i| i != &id);
-        }
-    }
-}
+impl FavoritesStore {}

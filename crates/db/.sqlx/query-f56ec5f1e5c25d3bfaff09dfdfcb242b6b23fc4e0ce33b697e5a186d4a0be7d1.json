@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM track_musicbrainz WHERE track_pk = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "f56ec5f1e5c25d3bfaff09dfdfcb242b6b23fc4e0ce33b697e5a186d4a0be7d1"
+}

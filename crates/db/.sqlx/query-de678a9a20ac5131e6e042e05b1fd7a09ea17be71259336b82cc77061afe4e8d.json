@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT a.genre FROM tracks t\n             JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id\n             JOIN listen_counts lc ON lc.source = t.source AND lc.track_key = t.track_key\n            WHERE t.source = ?1 AND TRIM(a.genre) != ''\n            GROUP BY a.genre ORDER BY SUM(lc.count) DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "genre",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "de678a9a20ac5131e6e042e05b1fd7a09ea17be71259336b82cc77061afe4e8d"
+}

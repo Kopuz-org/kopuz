@@ -16,7 +16,7 @@ pub struct RegistryStationRef {
     pub manifest_url: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct StationRegistry {
     stations: HashMap<String, StationManifest>,
     /// Runtime inserts; kept out of the curated listing.
@@ -270,11 +270,6 @@ impl StationRegistry {
 
     pub fn get(&self, id: &str) -> Option<&StationManifest> {
         self.stations.get(id)
-    }
-
-    pub fn create_provider(&self, station_id: &str) -> Option<crate::provider::DynamicProvider> {
-        let manifest = self.get(station_id)?;
-        Some(crate::provider::DynamicProvider::new(manifest.clone()))
     }
 }
 

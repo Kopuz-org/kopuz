@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM integration_credentials",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "0ea4db2e936f4b4dcb0409d7659ce005e58be0c09583a54cf1a0cdd8912eb156"
+}

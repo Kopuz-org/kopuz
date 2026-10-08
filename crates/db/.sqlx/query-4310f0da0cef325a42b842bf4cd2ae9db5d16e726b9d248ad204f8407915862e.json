@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT queue_position, name, source_artist_id, source, artist_key FROM queue_credits WHERE queue_source = ?1 ORDER BY queue_position, position",
+  "describe": {
+    "columns": [
+      {
+        "name": "queue_position",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "source_artist_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "source",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "artist_key",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "4310f0da0cef325a42b842bf4cd2ae9db5d16e726b9d248ad204f8407915862e"
+}

@@ -36,6 +36,7 @@ use objc2_media_player::{
 unsafe extern "C" {
     fn CFRunLoopGetMain() -> *mut std::ffi::c_void;
     fn CFRunLoopWakeUp(rl: *mut std::ffi::c_void);
+    fn CFRunLoopRun();
     fn CFRunLoopAddTimer(
         rl: *mut std::ffi::c_void,
         timer: *mut std::ffi::c_void,
@@ -67,6 +68,17 @@ unsafe extern "C" {
         reason: *const std::ffi::c_void,
         assertion_id: *mut IOPMAssertionID,
     ) -> i32;
+}
+
+/// Park the calling thread in the main CFRunLoop forever. A headless daemon
+/// must call this from its main thread (with async work on other threads) or
+/// the Now Playing heartbeat timer and MPRemoteCommandCenter callbacks
+/// installed by [`init`] never fire.
+pub fn park_main_loop() {
+    // SAFETY: CFRunLoopRun runs the current thread's run loop; it takes no
+    // arguments and only returns when the loop is stopped or has no sources.
+    // The heartbeat timer installed by `init` keeps at least one source alive.
+    unsafe { CFRunLoopRun() }
 }
 
 pub fn wake_run_loop() {

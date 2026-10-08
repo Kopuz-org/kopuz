@@ -92,7 +92,7 @@ mod tests {
 
     async fn mem_pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::backend::migrations::run_migrations(&pool)
+        crate::backend::migrations::run_migrations(&pool, None)
             .await
             .unwrap();
         pool

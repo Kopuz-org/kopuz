@@ -1,6 +1,8 @@
 //! Reusable Dioxus UI components for the Kopuz music player.
 
+pub mod album;
 pub mod common;
+pub mod forms;
 pub mod layout;
 pub mod navigation;
 pub mod playback;
@@ -10,6 +12,7 @@ pub mod search;
 pub mod settings;
 pub mod track;
 
+pub use album::actions as album_actions;
 pub use common::controls::{
     dots_menu, reorder_buttons, selection_bar, sort_control, view_mode_toggle,
 };
@@ -19,12 +22,12 @@ pub use layout::{
     stat_card, titlebar, vaxry,
 };
 pub use navigation::controller::{NavSnapshot, NavigationController};
-pub use navigation::{back_button, controller as navigation_controller, source_switcher};
+pub use navigation::{back_button, controller as navigation_controller, source_switcher, tabbar};
 pub use playback::compact::{CompactMode, CompactPlayer};
-pub use playback::cover_background::{CoverArtBackground, high_quality_artwork_url};
+pub use playback::cover_background::CoverArtBackground;
 pub use playback::{
     album_play_button, compact as compact_player, controls as player_controls, cover_background,
-    lyrics as lyrics_view, radio_actions, spotify_devices,
+    dont_recommend, external_devices, lyrics as lyrics_view, radio_actions,
 };
 pub use playlist::{
     detail as playlist_detail, folder_picker, modal as playlist_modal, popups as playlist_popups,
@@ -38,4 +41,6 @@ pub use search::{
 pub use settings::{
     items as settings_items, popups as settings_popups, remote_folders as settings_remote_folders,
 };
-pub use track::{list_view as track_list_view, metadata_modal, row as track_row};
+pub use track::{
+    actions as track_actions, list_view as track_list_view, metadata_modal, row as track_row,
+};

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM home_sections",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "7a366352fea923f853e3180a9ff06114af47434a7ac45f6f3d9545e30edd5730"
+}

@@ -7,10 +7,10 @@ use crate::header::Header;
 use crate::reorder_buttons::ReorderButtons;
 use crate::showcase::{self, ShowcaseProps};
 use crate::track_row::TrackRow;
+use api::TrackInfo as Track;
 use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
-use reader::Track;
 
 #[derive(PartialEq)]
 struct ShowcaseDerived {
@@ -27,12 +27,11 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
     let _nav_ctrl = use_context::<NavigationController>();
-    let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
+    let total_seconds: u64 = props.tracks.iter().filter_map(|t| t.duration_secs()).sum();
     let duration_min = total_seconds / 60;
 
-    // Per-track cover resolver (source dispatch + local-album lookup live in the
+    // Per-track cover resolver (source dispatch + album lookup live in the
     // source layer; no partition decision here).
-    let cover_for = hooks::use_db_queries::use_cover_resolver(80);
 
     let offline_tracks = config.read().offline_tracks.clone();
     let sort_state = use_signal(|| None);
@@ -76,7 +75,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
 
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.clone())
+        ctrl.get_track_at(idx).map(|track| track.uid.clone())
     };
     let current_song_title = ctrl.current_song_title.read().clone();
     let current_song_artist = ctrl.current_song_artist.read().clone();
@@ -86,14 +85,14 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let selected_queue_tracks: Vec<_> = derived
         .queue
         .iter()
-        .filter(|track| props.selected_tracks.contains(&track.id))
+        .filter(|track| props.selected_tracks.contains(&track.key))
         .cloned()
         .collect();
     let selected_queue_tracks_arc = Arc::new(selected_queue_tracks);
 
     let all_downloaded = !props.tracks.is_empty()
         && props.tracks.iter().all(|t| {
-            let p = t.id.uid();
+            let p = t.uid.clone();
             let id = p.split(':').nth(1).unwrap_or(&p);
             if let Some(path_str) = offline_tracks.get(id) {
                 std::path::Path::new(path_str).exists()
@@ -139,7 +138,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
          div {
              class: "select-none flex-1 min-h-0 flex flex-col w-full",
              div {
-                 class: if cfg!(target_os = "android") { "flex flex-col items-center text-center gap-4 mb-6 shrink-0" } else { "flex flex-col md:flex-row items-end gap-8 mb-12 shrink-0" },
+                 class: if cfg!(target_os = "android") { "flex flex-col items-center text-center gap-4 mb-6 shrink-0" } else { "flex flex-col md:flex-row md:flex-wrap items-end gap-8 mb-12 shrink-0" },
                  div { class: if cfg!(target_os = "android") { "w-44 h-44 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" } else { "w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" },
                      if let Some(url) = &props.cover_url {
                          img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
@@ -160,7 +159,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          }
                      }
                  }
-                 div { class: "flex-1 min-w-0",
+                 div { class: "flex-1 min-w-0 md:min-w-64",
                      if !props.description.is_empty() {
                          if let Some(on_description_click) = props.on_description_click {
                              button {
@@ -193,8 +192,11 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                 div { class: "flex items-center gap-4",
                      if !props.tracks.is_empty() {
                         button {
-                            class: "w-14 h-14 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
-                            style: if *ctrl.shuffle.read() { "color: var(--color-indigo-500);" } else { "" },
+                            class: if *ctrl.shuffle.read() {
+                                "w-14 h-14 rounded-full flex items-center justify-center text-indigo-500 hover:bg-white/10 transition-colors active:scale-95"
+                            } else {
+                                "w-14 h-14 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95"
+                            },
                             title: if *ctrl.shuffle.read() {
                                 i18n::t("shuffle_on").to_string()
                             } else {
@@ -282,22 +284,22 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
                          {
                              let idx = *idx;
-                             let cover_url = cover_for(track);
+                             let cover_url = hooks::artwork::for_track(track, hooks::artwork::Size::Thumb);
 
-                             let is_selected = props.selected_tracks.contains(&track.id);
-                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.id);
+                             let is_selected = props.selected_tracks.contains(&track.key);
+                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.uid);
                              let matches_current_metadata = currently_playing_path.is_none()
                                  && !current_song_title.is_empty()
                                  && track.title == current_song_title
                                  && track.artist == current_song_artist
                                  && track.album == current_song_album
-                                 && track.duration == current_song_duration;
+                                 && track.duration_secs() == Some(current_song_duration);
                              let is_currently_playing: bool = matches_current_path || matches_current_metadata;
                              let track_count = props.tracks.len();
                              let can_move_up = props.is_reorderable && idx > 0;
                              let can_move_down = props.is_reorderable && idx + 1 < track_count;
 
-                             let path_str = track.id.uid();
+                             let path_str = track.uid.clone();
                              let item_id_str: String = path_str.split(':').nth(1).unwrap_or(&path_str).to_string();
                              let is_downloaded = if let Some(path_str) = offline_tracks.get(&item_id_str) {
                                  std::path::Path::new(path_str).exists()
@@ -316,7 +318,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
 
                              rsx! {
                                  div {
-                                     key: "{track.id.uid()}",
+                                     key: "{track.uid}",
                                      class: "contents",
                                  div {
                                      class: "flex items-center group",
@@ -338,9 +340,8 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                      div { class: "flex-1 min-w-0",
                                          TrackRow {
                                              track: track.clone(),
-                                             on_start_radio: crate::track_row::radio_handler(track.clone()),
                                              cover_url: cover_url,
-                                             is_menu_open: props.active_track.as_ref() == Some(&track.id),
+                                             is_menu_open: props.active_track.as_ref() == Some(&track.uid),
                                              is_album: props.is_album,
                                              is_selection_mode: props.is_selection_mode,
                                              is_selected: is_selected,
@@ -373,11 +374,6 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                      handler.call(idx);
                                                  }
                                              },
-                                             on_queue: move |_| {
-                                                 if let Some(handler) = &props.on_queue {
-                                                     handler.call(idx);
-                                                 }
-                                             },
                                              on_close_menu: move |_| {
                                                 if let Some(handler) = &props.on_close_menu {
                                                     handler.call(());
@@ -400,8 +396,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                  }
                                              },
                                              on_play: move |_| {
-                                                 ctrl.queue.set((*play_queue).clone());
-                                                 ctrl.play_track(display_idx);
+                                                 ctrl.play_queue_at((*play_queue).clone(), display_idx);
                                              }
                                          }
                                      }

@@ -74,23 +74,26 @@ async fn seed(db_path: &std::path::Path) {
     {
         batch.push_str(&format!(
             "INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, \
-             disc_number, track_number, artists_json) VALUES \
-             ({}, 'local', '{key}', '{album_id}', '{title}', '{artist}', '{album}', {disc}, {track}, '[]');\n",
+             disc_number, track_number) VALUES \
+             ({}, 'local', '{key}', '{album_id}', '{title}', '{artist}', '{album}', {disc}, {track});\n",
             i + 1
         ));
     }
     batch.push_str(
-        "INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, artists_json) \
-         VALUES (100, 'srv-1', 'vid1', 'YtMusic', 'al-yt', 'Server Song', 'Cyn', 'Yt Album', '[]');\n\
-         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, artists_json) \
-         VALUES (101, 'local:test', '/music/jazz/b_1.flac', 'al-separate', 'Separate Song', 'Dee', 'Separate Album', '[]');\n\
+        "INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album) \
+         VALUES (100, 'srv-1', 'vid1', 'YtMusic', 'al-yt', 'Server Song', 'Cyn', 'Yt Album');\n\
+         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album) \
+         VALUES (101, 'local:test', '/music/jazz/b_1.flac', 'al-separate', 'Separate Song', 'Dee', 'Separate Album');\n\
          INSERT INTO albums (source, source_album_id, title, artist, genre) VALUES \
            ('local', 'al-rock', 'Rock One', 'Axel', 'Rock'), \
            ('local', 'al-jazz', 'Jazz One', 'Bea', 'Jazz'), \
            ('local:test', 'al-separate', 'Separate Album', 'Dee', 'Other'), \
            ('srv-1', 'al-yt', 'Yt Album', 'Cyn', 'Pop');\n\
-         INSERT INTO listen_counts (track_key, count) VALUES \
-           ('/music/rock/a1.flac', 3), ('/music/jazz/b_1.flac', 10), ('ytmusic:vid1', 7);\n",
+         INSERT INTO listen_counts (source, track_key, count) VALUES \
+           ('local', '/music/rock/a1.flac', 3), ('local', '/music/jazz/b_1.flac', 10), ('srv-1', 'vid1', 7);\n\
+         INSERT INTO artists (source, name, name_key, key) SELECT source, artist, lower(artist), lower(hex(randomblob(16))) FROM (SELECT DISTINCT source, artist FROM tracks);\n\
+         INSERT INTO track_credits (track_pk, position, artist_pk, name) \
+           SELECT t.rowid_pk, 0, a.id, t.artist FROM tracks t JOIN artists a ON a.source = t.source AND a.name = t.artist;\n",
     );
     conn.execute(batch.as_str()).await.unwrap();
 }
@@ -100,7 +103,7 @@ async fn typed_queries_smoke() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
     seed(&db_path).await;
-    let local = Source::Local;
+    let local = Source::default();
     let srv = Source::Server("srv-1".into());
 
     let rock = db.album_tracks(&local, "al-rock").await.unwrap();
@@ -110,11 +113,19 @@ async fn typed_queries_smoke() {
         "album_tracks orders by disc/track"
     );
 
-    let bea = db.artist_tracks(&local, "Bea", None).await.unwrap();
+    let bea_key = db
+        .artists(&local)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|artist| artist.name == "Bea")
+        .expect("Bea is listed")
+        .key;
+    let bea = db.artist_tracks(&local, &bea_key, None).await.unwrap();
     assert_eq!(bea.len(), 2);
     assert!(bea.iter().all(|t| t.artist == "Bea"));
 
-    let bounded = db.artist_tracks(&local, "Bea", Some(1)).await.unwrap();
+    let bounded = db.artist_tracks(&local, &bea_key, Some(1)).await.unwrap();
     assert_eq!(bounded.len(), 1, "limit bounds the query SQL-side");
 
     let jazz = db.genre_tracks(&local, "Jazz").await.unwrap();
@@ -123,7 +134,7 @@ async fn typed_queries_smoke() {
 
     // Prefix with an underscore in a filename must not act as a wildcard.
     let folder = db
-        .folder_tracks(&Source::Local, "/music/jazz/")
+        .folder_tracks(&Source::default(), "/music/jazz/")
         .await
         .unwrap();
     assert_eq!(folder.len(), 2);
@@ -139,7 +150,7 @@ async fn typed_queries_smoke() {
         "named local sources must reconstruct filesystem track ids",
     );
     let none = db
-        .folder_tracks(&Source::Local, "/music/ja_z/")
+        .folder_tracks(&Source::default(), "/music/ja_z/")
         .await
         .unwrap();
     assert!(none.is_empty(), "LIKE metachars are escaped");
@@ -171,6 +182,7 @@ async fn typed_queries_smoke() {
                 source: local.clone(),
                 sort: TrackSort::PlayCount,
                 search: String::new(),
+                favorite: None,
             },
             Page {
                 offset: 0,
@@ -207,17 +219,17 @@ async fn track_cover_projects_from_album_for_local_keeps_own_for_server() {
         "INSERT INTO albums (source, source_album_id, title, artist, genre, cover_path) VALUES \
            ('local', 'al-x', 'X', 'A', 'Rock', '/covers/al-x.jpg'), \
            ('srv-1', 'al-srv', 'SrvAlbum', 'B', 'Pop', '/album/should-not-win.jpg'); \
-         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, artists_json) \
-           VALUES (1, 'local', '/music/x.flac', 'al-x', 'Song', 'A', 'X', '[]'); \
-         INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, cover_path, artists_json) \
-           VALUES (2, 'srv-1', 'vid9', 'YtMusic', 'al-srv', 'SrvSong', 'B', 'SrvAlbum', 'own-ref', '[]'); \
-         INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, artists_json) \
-           VALUES (3, 'srv-1', 'vid10', 'YtMusic', 'al-srv', 'SrvSongNoCover', 'B', 'SrvAlbum', '[]');",
+         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album) \
+           VALUES (1, 'local', '/music/x.flac', 'al-x', 'Song', 'A', 'X'); \
+         INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, cover_path) \
+           VALUES (2, 'srv-1', 'vid9', 'YtMusic', 'al-srv', 'SrvSong', 'B', 'SrvAlbum', 'own-ref'); \
+         INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album) \
+           VALUES (3, 'srv-1', 'vid10', 'YtMusic', 'al-srv', 'SrvSongNoCover', 'B', 'SrvAlbum');",
     )
     .await
     .unwrap();
 
-    let local = db.album_tracks(&Source::Local, "al-x").await.unwrap();
+    let local = db.album_tracks(&Source::default(), "al-x").await.unwrap();
     assert_eq!(local.len(), 1);
     assert_eq!(
         local[0].cover.as_deref(),
@@ -248,4 +260,59 @@ async fn track_cover_projects_from_album_for_local_keeps_own_for_server() {
     );
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// The favorite filter runs in SQL so paging and totals stay correct on a
+/// large library. favorites.server_id carries the same string as
+/// tracks.source, and favorites.ref carries the track_key.
+#[tokio::test]
+async fn track_filter_selects_favorites_in_sql() {
+    let path = unique_db();
+    let db = db::init(&path).await.unwrap();
+    seed(&path).await;
+    let local = Source::default();
+
+    db.set_favorite(local.as_str(), "/music/jazz/b_1.flac", true)
+        .await
+        .unwrap();
+    db.set_favorite(local.as_str(), "/music/rock/a1.flac", true)
+        .await
+        .unwrap();
+
+    let filter = |favorite| TrackFilter {
+        source: local.clone(),
+        sort: TrackSort::Title,
+        search: String::new(),
+        favorite,
+    };
+    let page = Page {
+        offset: 0,
+        limit: 100,
+    };
+
+    let favorites = db.tracks_page(&filter(Some(true)), page).await.unwrap();
+    let mut keys: Vec<String> = favorites
+        .iter()
+        .map(|track| track.id.key().to_string())
+        .collect();
+    keys.sort();
+    assert_eq!(keys, vec!["/music/jazz/b_1.flac", "/music/rock/a1.flac"]);
+
+    // The count must agree with the page, or the scroll spacer lies.
+    assert_eq!(db.tracks_count(&filter(Some(true))).await.unwrap(), 2);
+
+    let others = db.tracks_page(&filter(Some(false)), page).await.unwrap();
+    assert!(
+        others
+            .iter()
+            .all(|track| !keys.contains(&track.id.key().to_string())),
+        "Some(false) is the complement, not everything"
+    );
+
+    let unfiltered = db.tracks_count(&filter(None)).await.unwrap();
+    assert_eq!(
+        unfiltered,
+        2 + others.len() as u32,
+        "the two halves partition the library"
+    );
 }

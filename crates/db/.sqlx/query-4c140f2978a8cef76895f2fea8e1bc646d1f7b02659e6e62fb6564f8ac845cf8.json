@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM server_folders",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "4c140f2978a8cef76895f2fea8e1bc646d1f7b02659e6e62fb6564f8ac845cf8"
+}

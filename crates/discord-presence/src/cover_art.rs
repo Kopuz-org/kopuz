@@ -203,7 +203,7 @@ pub async fn resolve_cover_art_url_cached(
     album: &str,
 ) -> Option<String> {
     let key = cover_cache_key(mbid, artist, album);
-    if let Some(handle) = utils::db_cache::get()
+    if let Some(handle) = db::cache::get()
         && let Ok(Some(payload)) = handle.meta_get(&key, COVER_META_KIND).await
     {
         if let Some(url) = payload.strip_prefix("url:") {
@@ -217,7 +217,7 @@ pub async fn resolve_cover_art_url_cached(
     }
 
     let resolved = resolve_cover_art_url(mbid, artist, album).await;
-    if let Some(handle) = utils::db_cache::get() {
+    if let Some(handle) = db::cache::get() {
         let payload = match &resolved {
             Some(url) => format!("url:{url}"),
             None => format!("none:{}", now_unix()),
@@ -307,7 +307,9 @@ mod tests {
             musicbrainz_recording_id: None,
             musicbrainz_track_id: None,
             playlist_item_id: None,
+            credits: Vec::new(),
             artists: Vec::new(),
+            replay_gain: config::ReplayGainInfo::default(),
         }
     }
 

@@ -91,10 +91,7 @@ pub trait MediaSource: Send + Sync {
         item_refs: &[String],
     ) -> Result<String, SourceError>;
 
-    /// Remove one track from a playlist. The per-service identity differs (YT:
-    /// video id, Jellyfin: entry id, Subsonic: position), so the whole track +
-    /// its current position are passed and each impl takes what it needs; the
-    /// DB cache is kept in sync.
+    /// Remove the entry at `position`; the track carries that entry's own `playlist_item_id`.
     async fn remove_from_playlist(
         &self,
         playlist_id: &str,
@@ -116,7 +113,7 @@ pub trait MediaSource: Send + Sync {
     async fn download_track(
         &self,
         _item_id: &str,
-        _progress: Option<utils::stream_buffer::BufferProgressCallback>,
+        _progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
     ) -> Result<Vec<u8>, SourceError> {
         Err(SourceError::unsupported("track download"))
     }
@@ -134,18 +131,26 @@ pub trait MediaSource: Send + Sync {
 
     // --- capability-gated ops (default = unsupported) -----------------------
 
-    /// Persist a playlist reorder: `ordered_refs` is the full new membership;
+    /// Persist a playlist reorder: `ordered` is the full new membership, entry ids kept;
     /// `moved`/`new_index` identify the one entry that changed position. Only
     /// sources whose [`Capabilities::playlists`] is [`PlaylistOps::Reorder`]
     /// override this; the rest inherit the unsupported default.
     async fn reorder_playlist(
         &self,
         _playlist_id: &str,
-        _ordered_refs: &[String],
+        _ordered: &[reader::PlaylistEntry],
         _moved: &reader::Track,
         _new_index: usize,
     ) -> Result<(), SourceError> {
         Err(SourceError::unsupported("playlist reorder"))
+    }
+
+    /// Tell the source to stop recommending `item_id` — YT Music's dislike,
+    /// which is a signal to its recommender rather than a library edit. Only
+    /// sources whose [`Capabilities::dont_recommend`] is set override this; the
+    /// rest inherit the unsupported default.
+    async fn dont_recommend(&self, _item_id: &str) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("don't recommend"))
     }
 
     /// Start a radio/mix seeded from a track, returning the generated queue. Only
@@ -171,6 +176,13 @@ pub trait MediaSource: Send + Sync {
     /// pages (e.g. a YouTube Music watch link or Spotify track link). `None` otherwise — callers fall
     /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.
     fn web_url(&self, _track: &reader::Track) -> Option<String> {
+        None
+    }
+
+    /// The same for an album, given the id this source browses it by. `None`
+    /// when the source has no album pages, in which case a caller shares the
+    /// first track's page instead.
+    fn album_web_url(&self, _browse_id: &str) -> Option<String> {
         None
     }
 
@@ -258,12 +270,6 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("playlist paging"))
     }
 
-    /// Resolve an artist name to a remote channel id (discover artist links).
-    /// Default unsupported; only catalog remotes (YT) override.
-    async fn resolve_artist_channel_id(&self, _query: &str) -> Result<Option<String>, SourceError> {
-        Err(SourceError::unsupported("artist channel"))
-    }
-
     /// Resolve a saved album's title + artist to a remote album browse id, so
     /// the album page can fetch the album's full track list (the local library
     /// stores YT albums by hash, with no browse id). Default unsupported; only
@@ -327,14 +333,19 @@ pub trait MediaSource: Send + Sync {
 
     /// Fetch artist → image-URL pairs from the remote (for the "artist photo"
     /// view). Default empty (local reads them from the DB; YT has none).
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError> {
+    async fn fetch_artist_images(
+        &self,
+    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
         Ok(Vec::new())
     }
 
-    /// Resolve a single artist's photo URL by name. Default None; the catalog
-    /// remote (YT) implements it so the Artists grid can show real YT photos.
-    async fn fetch_artist_image(&self, _name: &str) -> Result<Option<String>, SourceError> {
-        Ok(None)
+    /// Look one artist up for its photo, and for its name when the lookup went by the id the source issued.
+    /// Default finds nothing; the catalog remote (YT) implements it so the Artists grid can show real YT photos.
+    async fn fetch_artist_image(
+        &self,
+        _artist: &reader::ArtistCredit,
+    ) -> Result<ArtistLookup, SourceError> {
+        Ok(ArtistLookup::default())
     }
 
     /// One page of favorites — for [`FavoritesSync::Paginated`] sources (YT). The
@@ -471,10 +482,22 @@ pub trait MediaSource: Send + Sync {
     async fn set_playlist_tracks(
         &self,
         playlist_id: &str,
-        refs: &[String],
+        entries: &[reader::PlaylistEntry],
     ) -> Result<(), SourceError> {
         self.db()
-            .set_playlist_tracks(self.source(), playlist_id, refs)
+            .set_playlist_tracks(self.source(), playlist_id, entries)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Remove the entry at `index` in play order. DB-cache op.
+    async fn remove_playlist_entry(
+        &self,
+        playlist_id: &str,
+        index: usize,
+    ) -> Result<(), SourceError> {
+        self.db()
+            .remove_playlist_entry(self.source(), playlist_id, index)
             .await
             .map_err(SourceError::from)
     }
@@ -561,15 +584,23 @@ pub trait MediaSource: Send + Sync {
             .map_err(SourceError::from)
     }
 
-    /// Record (or clear) the cached image for an artist. DB-cache op.
+    /// Name the artist this source issued `id` for as its own record does; answers whether the row changed. DB op.
+    async fn name_artist(&self, id: &str, name: &str) -> Result<bool, SourceError> {
+        self.db()
+            .name_artist(self.source(), id, name)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Record (or clear) the cached image for one of this source's artists, by its key. DB-cache op.
     async fn set_artist_image(
         &self,
-        artist_norm: &str,
+        artist_key: &str,
         kind: &str,
         image_ref: Option<&str>,
     ) -> Result<(), SourceError> {
         self.db()
-            .set_artist_image(artist_norm, kind, image_ref)
+            .set_artist_image(self.source(), artist_key, kind, image_ref)
             .await
             .map_err(SourceError::from)
     }
@@ -645,10 +676,10 @@ pub trait MediaSource: Send + Sync {
             .map_err(SourceError::from)
     }
 
-    /// Increment a track's play count, keyed by its uid. DB-cache op.
-    async fn bump_listen_count(&self, track_uid: &str) -> Result<(), SourceError> {
+    /// Increment a track's play count in this source. DB-cache op.
+    async fn bump_listen_count(&self, track_key: &str) -> Result<(), SourceError> {
         self.db()
-            .bump_listen_count(self.source(), track_uid)
+            .bump_listen_count(self.source(), track_key)
             .await
             .map_err(SourceError::from)
     }
@@ -694,12 +725,12 @@ pub trait MediaSource: Send + Sync {
     async fn upsert_playlist_tracks_page(
         &self,
         playlist_id: &str,
-        refs: &[String],
+        entries: &[reader::PlaylistEntry],
         start_position: i64,
         epoch: i64,
     ) -> Result<(), SourceError> {
         self.db()
-            .upsert_playlist_tracks_page(self.source(), playlist_id, refs, start_position, epoch)
+            .upsert_playlist_tracks_page(self.source(), playlist_id, entries, start_position, epoch)
             .await
             .map_err(SourceError::from)
     }
@@ -756,7 +787,8 @@ pub(super) async fn mirror_created(
 ) -> Result<(), SourceError> {
     db.upsert_playlist_meta(source, id, name, None, None)
         .await?;
-    db.set_playlist_tracks(source, id, refs)
+    let entries: Vec<reader::PlaylistEntry> = refs.iter().map(|key| key.as_str().into()).collect();
+    db.set_playlist_tracks(source, id, &entries)
         .await
         .map_err(SourceError::from)
 }
@@ -828,7 +860,7 @@ pub fn local(db: Db, source: Source) -> Box<dyn MediaSource> {
 /// the result (the cached [`ActiveSource`]) rather than calling per render.
 pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSource> {
     match source {
-        Source::Local | Source::LocalLibrary(_) => local(db, source.clone()),
+        Source::LocalLibrary(_) => local(db, source.clone()),
         Source::Server(id) => match ServerConn::resolve(config) {
             Some(conn) => remote_source(db, Source::Server(id.clone()), &conn),
             None => Box::new(OfflineServerSource {

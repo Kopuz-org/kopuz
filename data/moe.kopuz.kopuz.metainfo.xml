@@ -48,6 +48,34 @@
   </screenshots>
 
   <releases>
+    <release version="0.19.0" date="2026-10-03">
+      <description>
+        <p>
+          Android gains bottom navigation, sort controls, and smoother player sheets. System Back gestures navigate within the app, settings swipes no longer open the sidebar, and startup, rotation, sign-in, and artwork loading are more reliable. YouTube Music gains native downloads and starts a radio when playing a search result, and Windows media controls stay available when the daemon starts first.
+        </p>
+      </description>
+    </release>
+    <release version="0.18.0" date="2026-10-03">
+      <description>
+        <p>
+          Artists are identified by their source IDs, replaying a track resets its progress correctly, and Jellyfin uses modern authentication. Browser sign-in supports the system default browser, including Firefox, remote cover images are resized, and translations gain new interface labels.
+        </p>
+      </description>
+    </release>
+    <release version="0.17.0" date="2026-09-17">
+      <description>
+        <p>
+          The library, player and sources now live in a headless core that the app hosts in-process and that also runs on its own as a daemon, reachable over an authenticated gRPC API, so a remote or scripted client talks to the same session the desktop window does. YouTube Music drops the proof-of-origin minter and streams through the visionOS client instead, which no longer needs one.
+        </p>
+      </description>
+    </release>
+    <release version="0.16.2" date="2026-09-12">
+      <description>
+        <p>
+          Recently Added on the home page finally lists what was recently added: albums are ranked by when their music arrived, recorded per file as the library is scanned, and the library's own date-added sort reads the same stamp. Shuffle and repeat let go of their highlight when switched off instead of staying lit for the session. Apple Music takes a custom storefront, cookies import from Brave builds that ship their binary under another name, covers and context menus behave on unsynced albums, and windows with an app-drawn titlebar can be resized from their edges on Linux. Kopuz is now licensed under the EUPL-1.2.
+        </p>
+      </description>
+    </release>
     <release version="0.16.1" date="2026-08-26">
       <description>
         <p>

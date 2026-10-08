@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO sidebar_items (position, item) VALUES (?1, ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b58c7d99ef8f27aeb94042aaa5baa8e75e40d681c2b57527060c748bc4980e68"
+}

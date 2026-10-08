@@ -59,6 +59,12 @@ Library, playlists, favorites, and settings are stored in a local **SQLite**
 database (`kopuz.db`); the UI reads it live so changes show up immediately. Each
 media source carries its own credentials and its own favorites.
 
+The player itself is a daemon: it owns the library, the audio engine, the media
+sources and their credentials, and everything that touches the system. The
+window is a client of it, and so is anything else you write — the contract is
+one gRPC schema on a local socket, documented in [docs/api.md](docs/api.md).
+`kopuzd` runs the same core with no window.
+
 ## Features
 
 [jellyfin-plugin-listenbrainz]: https://github.com/lyarenei/jellyfin-plugin-listenbrainz
@@ -137,12 +143,14 @@ media source carries its own credentials and its own favorites.
   switching.
 - **Channel Mode**: Switch between `Stereo`, `Mono`, `Left only`, `Right only`,
   and `Swap L/R` output modes.
-- **yt-dlp Integration**: Download audio directly from YouTube and other
-  supported sites via yt-dlp. Choose your output format (Best Audio, MP3, FLAC,
-  Opus, WAV, or MP4 video). FLAC is not recommended since yt-dlp remuxes lossy
-  audio rather than decoding from a lossless source. Supports SponsorBlock,
-  chapter splitting, cookies, rate limiting, and more. Requires `yt-dlp`
-  installed on your system.
+- **YouTube Downloads**: Paste a YouTube or YouTube Music link to a song, a
+  playlist or an album and Kopuz downloads it through its own YouTube client,
+  using your YouTube Music session for Premium quality when you are signed in.
+  Files are tagged with title, artist, album and cover art, filed into album
+  folders, and picked up by the next library scan. Best Audio keeps the stream
+  exactly as YouTube serves it and needs nothing installed; converting to MP3,
+  FLAC or WAV needs `ffmpeg`, which is also used to give Opus streams an Ogg
+  container that can carry tags.
 - **Metadata Settings**: A dedicated Metadata section in Settings lets you
   control how artist images are sourced. Choose between **Album Cover** (uses
   the first album artwork as the artist photo, default) or **Artist Photo**
@@ -628,8 +636,9 @@ The setup dialog offers two methods:
 - **Sign in with a browser** - kopuz opens the Google sign-in page in an
   **isolated browser profile** (a fresh, separate session; your normal browsing
   is never touched), waits for you to log in, and extracts the session cookies.
-  Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
-  Edge, Vivaldi, or Helium). This unlocks your **library, Liked Music,
+  By default it uses your **system default browser**; pick a specific one
+  (Firefox, Chrome, Chromium, Brave, Edge, Vivaldi, Helium, LibreWolf, Zen, or
+  Floorp) if you would rather. This unlocks your **library, Liked Music,
   playlists, and followed artists**.
 
 - **Continue without signing in (anonymous)** - no sign-in, no cookies. You can
@@ -640,10 +649,9 @@ The setup dialog offers two methods:
 
 ### Premium tracks
 
-Music Premium-locked tracks fall back to a local
-[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) resolve when the primary path
-returns `UNPLAYABLE`, so having `yt-dlp` installed helps for those. Anonymous
-mode can't play Premium-only content at all.
+A signed-in Music Premium account gets its higher-quality streams through
+Kopuz's own YouTube client, for playback and downloads alike. Anonymous mode
+can't play Premium-only content at all.
 
 ## SoundCloud Setup
 
@@ -653,8 +661,9 @@ servers → Add → SoundCloud**.
 There's no URL or password to type. Kopuz opens `soundcloud.com/signin` in an
 **isolated browser profile** (a fresh, separate session; your normal browsing is
 never touched), waits for you to log in, and pulls the session's `oauth_token`.
-Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
-Edge, Vivaldi, or Helium).
+By default it uses your **system default browser**; pick a specific one
+(Firefox, Chrome, Chromium, Brave, Edge, Vivaldi, Helium, LibreWolf, Zen, or
+Floorp) if you would rather.
 
 Once signed in you get search, track playback (progressive MP3 plus Go+ AAC/HLS
 streams), your **Liked tracks** as favorites, read-only access to your

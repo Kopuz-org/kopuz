@@ -5,9 +5,9 @@ use db::Db;
 use crate::{server_ops::ServerConn, ytmusic::YouTubeMusicClient};
 
 use super::{
-    AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync, MediaSource,
-    PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds, RemoteAlbum, SourceError, StreamInfo,
-    mirror_added, mirror_created,
+    AlbumType, ArtistLookup, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync,
+    MediaSource, PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds, RemoteAlbum, SourceError,
+    StreamInfo, mirror_added, mirror_created,
 };
 
 /// YT Music's "Liked Music" auto-playlist. It is not browsed like the user's
@@ -62,15 +62,32 @@ impl MediaSource for YtSource {
             delete_from_disk: false,
             scan_folders: false,
             folders: false,
+            browse_folders: false,
+            external_devices: false,
+            browser_playback: false,
             sync: true,
             downloads: true,
             discover: true,
-            radio: RadioSeeds::ALL,
+            dont_recommend: true,
+            radio: RadioSeeds {
+                search: true,
+                ..RadioSeeds::ALL
+            },
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Remote,
             albums: AlbumType::YtMusic,
             favorites_sync: FavoritesSync::Paginated,
         }
+    }
+
+    async fn dont_recommend(&self, item_id: &str) -> Result<(), SourceError> {
+        if item_id.trim().is_empty() {
+            return Err(SourceError::InvalidInput("track has no video id".into()));
+        }
+        self.client
+            .dislike_video(item_id)
+            .await
+            .map_err(SourceError::from)
     }
 
     async fn start_radio(&self, seed_ref: &str) -> Result<Vec<reader::Track>, SourceError> {
@@ -102,6 +119,11 @@ impl MediaSource for YtSource {
     fn web_url(&self, track: &reader::Track) -> Option<String> {
         let vid = track.id.key();
         (!vid.trim().is_empty()).then(|| format!("https://music.youtube.com/watch?v={vid}"))
+    }
+
+    fn album_web_url(&self, browse_id: &str) -> Option<String> {
+        (!browse_id.trim().is_empty())
+            .then(|| format!("https://music.youtube.com/browse/{browse_id}"))
     }
 
     async fn search(
@@ -190,31 +212,6 @@ impl MediaSource for YtSource {
             .map_err(SourceError::from)
     }
 
-    async fn resolve_artist_channel_id(&self, query: &str) -> Result<Option<String>, SourceError> {
-        // A song's watch-queue byline links its artists' channels exactly —
-        // including user channels the Artists search can't find at all — so
-        // a library artist reconciles from their own song first. The search
-        // only decides names the library doesn't hold.
-        let tracks = self
-            .db
-            .artist_tracks(&self.source, query, Some(3))
-            .await
-            .unwrap_or_default();
-        for track in tracks.iter() {
-            if let Ok(Some(cid)) = self
-                .client
-                .artist_channel_for_video(&track.id.key(), query)
-                .await
-            {
-                return Ok(Some(cid));
-            }
-        }
-        self.client
-            .resolve_artist_channel_id(query)
-            .await
-            .map_err(SourceError::from)
-    }
-
     async fn resolve_album_browse_id(
         &self,
         album: &str,
@@ -236,20 +233,41 @@ impl MediaSource for YtSource {
             .map_err(SourceError::from)
     }
 
-    async fn fetch_artist_image(&self, name: &str) -> Result<Option<String>, SourceError> {
+    async fn fetch_artist_image(
+        &self,
+        artist: &reader::ArtistCredit,
+    ) -> Result<ArtistLookup, SourceError> {
+        if let Some(channel) = artist.id.as_deref() {
+            let header = self
+                .client
+                .artist_header(channel)
+                .await
+                .map_err(SourceError::from)?;
+            return Ok(ArtistLookup {
+                image: header.avatar,
+                name: header.name,
+            });
+        }
+        let name = artist.name.as_str();
         if let Some(url) = self
             .client
             .resolve_artist_image(name)
             .await
             .map_err(SourceError::from)?
         {
-            return Ok(Some(url));
+            return Ok(ArtistLookup {
+                image: Some(url),
+                name: None,
+            });
         }
         // No artists-search entry (user channels for uploaded content) —
         // reconcile the channel from a library song and use its avatar.
+        let Some(key) = artist.key.as_deref() else {
+            return Ok(ArtistLookup::default());
+        };
         let tracks = self
             .db
-            .artist_tracks(&self.source, name, Some(3))
+            .artist_tracks(&self.source, key, Some(3))
             .await
             .unwrap_or_default();
         for track in tracks.iter() {
@@ -257,12 +275,16 @@ impl MediaSource for YtSource {
                 .client
                 .artist_channel_for_video(&track.id.key(), name)
                 .await
-                && let Ok(avatar @ Some(_)) = self.client.artist_avatar(&cid).await
+                && let Ok(header) = self.client.artist_header(&cid).await
+                && header.avatar.is_some()
             {
-                return Ok(avatar);
+                return Ok(ArtistLookup {
+                    image: header.avatar,
+                    name: None,
+                });
             }
         }
-        Ok(None)
+        Ok(ArtistLookup::default())
     }
 
     async fn add_to_playlist(
@@ -315,7 +337,7 @@ impl MediaSource for YtSource {
         &self,
         playlist_id: &str,
         track: &reader::Track,
-        _position: usize,
+        position: usize,
     ) -> Result<(), SourceError> {
         let vid = track.id.key();
         if vid.is_empty() {
@@ -337,10 +359,7 @@ impl MediaSource for YtSource {
                 .map_err(SourceError::from);
         }
         self.client.remove_from_playlist(playlist_id, &vid).await?;
-        self.db
-            .remove_playlist_tracks(&self.source, playlist_id, &[vid.into_owned()])
-            .await
-            .map_err(SourceError::from)
+        self.remove_playlist_entry(playlist_id, position).await
     }
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {

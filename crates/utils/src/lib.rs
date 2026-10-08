@@ -1,20 +1,17 @@
-//! Shared utility crate for Kopuz: color helpers, artwork URLs, lyrics fetching,
-//! and terminal logging.
+//! Shared utility crate for Kopuz: color helpers, artwork URLs, the lyric data
+//! model, and terminal logging.
+//!
+//! The frontend crates link this, so nothing here may reach a media source.
 
 pub mod artist;
+pub mod artwork_image;
 pub mod build_info;
 pub mod color;
-pub mod db_cache;
-pub mod hls_source;
-pub mod icy;
 pub mod live_theme;
 pub mod logs;
 pub mod lyrics;
-pub mod musicbrainz;
 pub mod playlist;
-pub mod range_source;
 pub mod redact;
-pub mod stream_buffer;
 pub mod themes;
 use std::path::Path;
 use std::sync::Arc;
@@ -23,10 +20,6 @@ pub type CoverUrl = Arc<str>;
 
 pub fn cover_url_from_string(url: String) -> CoverUrl {
     Arc::from(url)
-}
-
-pub fn map_cover_url(url: Option<String>) -> Option<CoverUrl> {
-    url.map(cover_url_from_string)
 }
 
 /// Cross-platform async sleep backed by tokio.
@@ -155,6 +148,63 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
     }
 }
 
+static ARTWORK_ENDPOINT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Install the app's loopback artwork endpoint before rendering the Android UI.
+pub fn set_artwork_endpoint(endpoint: String) -> Result<(), String> {
+    ARTWORK_ENDPOINT
+        .set(endpoint)
+        .map_err(|_| "artwork endpoint is already initialized".to_string())
+}
+
+pub fn is_entity_artwork_url(url: &str) -> bool {
+    ARTWORK_ENDPOINT.get().is_some_and(|endpoint| {
+        url.strip_prefix(endpoint)
+            .is_some_and(|rest| rest.starts_with('?'))
+    })
+}
+
+/// The cover URL for a library entity the daemon resolves. The app serves
+/// these through loopback HTTP on Android and a custom protocol on desktop;
+/// credentials used to fetch a provider's images never reach the frontend.
+/// `version` changes with the picture, allowing an immutable response cache.
+pub fn format_entity_artwork_url(kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
+    let origin = if cfg!(target_os = "android") {
+        let Some(endpoint) = ARTWORK_ENDPOINT.get() else {
+            tracing::error!("artwork requested before the loopback server was started");
+            return default_cover_url();
+        };
+        endpoint.as_str()
+    } else if cfg!(target_os = "windows") {
+        "http://artwork.dioxus.localhost/api"
+    } else {
+        "artwork://api"
+    };
+    entity_artwork_url(origin, kind, id, version, hq)
+}
+
+fn entity_artwork_url(origin: &str, kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
+    const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'#')
+        .add(b'%')
+        .add(b'&')
+        .add(b'+')
+        .add(b'=')
+        .add(b'?')
+        .add(b'<')
+        .add(b'>')
+        .add(b'`')
+        .add(b'\\')
+        .add(b':');
+
+    let id = percent_encoding::utf8_percent_encode(id, QUERY_VAL);
+    let quality = if hq { "&hq=1" } else { "" };
+    let url = format!("{origin}?{kind}={id}{quality}&v={version}");
+    cover_url_from_string(url)
+}
+
 pub const DEFAULT_COVER_SVG: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%231e1b2e'/%3E%3Ccircle cx='200' cy='180' r='70' fill='none' stroke='%233d3466' stroke-width='6'/%3E%3Cpath d='M155 280 Q200 240 245 280' fill='none' stroke='%233d3466' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E";
 
 pub fn default_cover_url() -> CoverUrl {
@@ -163,6 +213,41 @@ pub fn default_cover_url() -> CoverUrl {
 
 #[cfg(test)]
 mod artwork_url_tests {
+    #[test]
+    fn entity_images_encode_ids_and_quality_for_each_transport() {
+        for endpoint in [
+            "http://127.0.0.1:49152/session/api",
+            "http://artwork.dioxus.localhost/api",
+            "artwork://api",
+        ] {
+            for kind in ["track", "album", "artist", "playlist", "catalog", "station"] {
+                let url = super::entity_artwork_url(endpoint, kind, "source:a&b +c", 42, true);
+                assert_eq!(
+                    url.as_ref(),
+                    format!("{endpoint}?{kind}=source%3Aa%26b%20%2Bc&hq=1&v=42")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn only_the_registered_endpoint_is_ours() {
+        let endpoint = "http://127.0.0.1:49152/session/api";
+        super::set_artwork_endpoint(endpoint.into()).unwrap();
+        assert!(super::is_entity_artwork_url(&format!(
+            "{endpoint}?track=a&v=1"
+        )));
+        assert!(!super::is_entity_artwork_url(
+            "http://127.0.0.1:49152/other/api?track=a"
+        ));
+        assert!(!super::is_entity_artwork_url(&format!(
+            "{endpoint}-other?track=a"
+        )));
+        assert!(!super::is_entity_artwork_url(
+            "https://example.com/api?track=a"
+        ));
+    }
+
     #[test]
     fn local_artwork_url_versions_the_webview_cache() {
         let url = super::format_artwork_url(Some(std::path::Path::new("/music/cover.jpg")))

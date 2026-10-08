@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT key FROM artists WHERE source = ?1 AND source_artist_id IS NOT NULL AND named_by_source = 0",
+  "describe": {
+    "columns": [
+      {
+        "name": "key",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9f60157394915b8809f22faf818c3819b81bd7c76716eb11384d2a8e457f3a5e"
+}

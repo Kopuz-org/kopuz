@@ -10,8 +10,8 @@ use crate::queue_drag::{
     RIGHTBAR_DROPZONE_ID, RIGHTBAR_QUEUE_DROP_TARGET_CLASS, cancel_rightbar_drag,
     clear_rightbar_drop_target, has_dragged_queue_track, install_rightbar_drag_handlers,
     rightbar_auto_scroll, rightbar_queue_row_class, rightbar_reorder_move_target,
-    shift_indices_at_or_after, start_rightbar_reorder, stop_rightbar_auto_scroll,
-    take_dragged_queue_tracks, update_rightbar_drop_target, update_rightbar_end_drop_target,
+    start_rightbar_reorder, stop_rightbar_auto_scroll, take_dragged_queue_tracks,
+    update_rightbar_drop_target, update_rightbar_end_drop_target,
 };
 use crate::reorder_buttons::ReorderButtons;
 
@@ -20,7 +20,7 @@ pub use crate::shared::LayoutMode;
 #[component]
 pub fn QueueRow(
     queue_idx: usize,
-    track: reader::Track,
+    track: api::TrackInfo,
     cover_url: Option<utils::CoverUrl>,
     layout: LayoutMode,
     can_move_up: bool,
@@ -44,6 +44,8 @@ pub fn QueueRow(
         }
         LayoutMode::Rightbar => rightbar_queue_row_class(is_reorder_source),
     };
+    let mut ctrl = use_context::<PlayerController>();
+    let mut menu_open = use_signal(|| false);
     let row_class = if is_active {
         format!("{base_class} {layout}__active-queue-item")
     } else {
@@ -61,13 +63,22 @@ pub fn QueueRow(
             class: "{row_class}",
             style: match layout {
                 LayoutMode::Fullscreen => "",
-                LayoutMode::Rightbar => {
-                    "content-visibility: auto; contain-intrinsic-size: 0 52px;"
-                }
+                // content-visibility applies paint containment, which makes the
+                // row a containing block for the menu's fixed-position panel and
+                // clips it to a 52px box, so the menu opens invisibly. Drop the
+                // containment for as long as the menu is up, as the album and
+                // artist cards do.
+                LayoutMode::Rightbar if menu_open() => "content-visibility: visible; contain: none;",
+                LayoutMode::Rightbar => "content-visibility: auto; contain-intrinsic-size: 0 52px;",
             },
             onmousedown: move |evt| on_row_mouse_down.call(evt),
             onmousemove: move |evt| on_row_mouse_move.call(evt),
             ondoubleclick: move |_| on_play.call(()),
+            oncontextmenu: move |evt| {
+                evt.prevent_default();
+                crate::dots_menu::open_at_pointer(&evt);
+                menu_open.set(true);
+            },
 
             div { class: "w-4 flex justify-center items-end shrink-0",
 
@@ -136,6 +147,26 @@ pub fn QueueRow(
                     on_move_down,
                 }
             }
+
+            div {
+                class: "shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity",
+                crate::track_actions::TrackActionsMenu {
+                    track: track.clone(),
+                    is_open: Some(menu_open()),
+                    on_open: Some(EventHandler::new(move |_| menu_open.set(true))),
+                    on_close: Some(EventHandler::new(move |_| menu_open.set(false))),
+                    // Queueing a track that is already in the queue would just
+                    // duplicate it; reordering is what this surface offers.
+                    show_queue_actions: false,
+                    on_remove_from_queue: (!is_active).then(|| EventHandler::new(move |_| {
+                        ctrl.remove_queue_item(queue_idx);
+                    })),
+                    button_class: match layout {
+                        LayoutMode::Fullscreen => "w-8 h-8".to_string(),
+                        LayoutMode::Rightbar => "w-7 h-7".to_string(),
+                    },
+                }
+            }
         }
     }
 }
@@ -151,7 +182,7 @@ pub fn QueueSummary(
     let is_radio = if let Some(track) = ctrl.get_track_at(*current_queue_index.read()) {
         // As of today, radio tracks have a duration of u64::MAX, if this
         // invariant ever changes, this logic must be updated as well
-        track.duration == u64::MAX
+        track.is_radio()
     } else {
         false
     };
@@ -208,7 +239,7 @@ const FULLSCREEN_ITEM_HEIGHT: f64 = 76.0;
 
 #[component]
 pub fn QueueListView(
-    items: Vec<reader::Track>,
+    items: Vec<api::TrackInfo>,
     config: Signal<AppConfig>,
     current_queue_index: Signal<usize>,
     layout: LayoutMode,
@@ -357,11 +388,10 @@ pub fn QueueListView(
         LayoutMode::Rightbar => 80,
     };
 
-    let get_track_cover = |track: &reader::Track| -> Option<utils::CoverUrl> {
-        // `peek()`, not a reactive read — cover lookup shouldn't subscribe to
-        // config updates. Source-agnostic via the cover seam; the track
-        // self-describes its cover (local path projected from its album by the DB).
-        server::cover::track(&config.peek(), track, cover_max_width)
+    let get_track_cover = |track: &api::TrackInfo| -> Option<utils::CoverUrl> {
+        // The row carries its own reference; the width only says whether
+        // this surface wants the large one.
+        hooks::artwork::for_track(track, hooks::artwork::size_for(cover_max_width))
     };
 
     let mut play_song_at_index = move |index: usize| {
@@ -372,53 +402,14 @@ pub fn QueueListView(
         ctrl.move_queue_item(from, to);
     };
 
-    let mut insert_queue_tracks = move |insert_at: usize, tracks: Vec<reader::Track>| {
-        if tracks.is_empty() {
-            return;
-        }
-        let count = tracks.len();
-        let visual_insert = insert_at;
-        /* FCK SHUFFLE */
-        if *ctrl.shuffle.peek() {
-            let shuffle_order = ctrl.shuffle_order.peek().clone();
-            let physical_insert = shuffle_order
-                .get(visual_insert)
-                .copied()
-                .unwrap_or_else(|| ctrl.queue.peek().len());
-            ctrl.queue.with_mut(|queue| {
-                let insert_pos = physical_insert.min(queue.len());
-                for (offset, track) in tracks.into_iter().enumerate() {
-                    queue.insert(insert_pos + offset, track);
-                }
-            });
-            ctrl.shuffle_order.with_mut(|order| {
-                shift_indices_at_or_after(order, physical_insert, count);
-                let insert_pos = visual_insert.min(order.len());
-                for i in 0..count {
-                    order.insert(insert_pos + i, physical_insert + i);
-                }
-            });
-            let current_idx = *ctrl.current_queue_index.peek();
-            if visual_insert <= current_idx {
-                ctrl.current_queue_index.set(current_idx + count);
-            }
-            ctrl.history.with_mut(|history| {
-                shift_indices_at_or_after(history, physical_insert, count);
-            });
-        } else {
-            let insert_at = insert_at.min(ctrl.queue.peek().len());
-            ctrl.queue.with_mut(|queue| {
-                for (offset, track) in tracks.into_iter().enumerate() {
-                    queue.insert(insert_at + offset, track);
-                }
-            });
-        }
+    let mut insert_queue_tracks = move |insert_at: usize, tracks: Vec<api::TrackInfo>| {
+        ctrl.insert_queue_tracks(insert_at, tracks);
     };
 
     let queue_count = items.len();
     let queue_duration: u64 = items
         .iter()
-        .filter_map(|t| (t.duration != u64::MAX).then_some(t.duration))
+        .filter_map(|t| t.duration_secs())
         .fold(0, |acc, d| acc.saturating_add(d));
 
     let scroll_info = use_virtual_scroll(

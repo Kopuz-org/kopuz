@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT name FROM kv WHERE kind = ?1 AND updated_at >= (unixepoch() - ?2)",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "47f69a18e37ad2dd065d52e0af91d6c465946997e8aafca6cb0df3f1bbbb4c48"
+}

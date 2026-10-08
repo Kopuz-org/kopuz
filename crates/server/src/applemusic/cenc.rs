@@ -547,28 +547,6 @@ pub fn decrypt_sample(
     )
 }
 
-/// Decrypt a whole track at once — the simple path, kept for callers that want
-/// the finished bytes rather than a stream.
-pub fn decrypt_fmp4(data: &[u8], cdm: &Cdm, key_id: &[u8]) -> Result<Vec<u8>, String> {
-    let layout = index_fmp4(data)?;
-    let mut buf = data.to_vec();
-    patch_init(&mut buf, &layout);
-
-    let started = std::time::Instant::now();
-    for sample in &layout.samples {
-        decrypt_sample(&mut buf, sample, cdm, key_id)?;
-    }
-    let total = started.elapsed();
-    tracing::info!(
-        "am.decrypt: done — {} samples, {} bytes in {:.2}s ({:.0}µs/sample)",
-        layout.samples.len(),
-        buf.len(),
-        total.as_secs_f64(),
-        total.as_secs_f64() * 1e6 / layout.samples.len().max(1) as f64
-    );
-    Ok(buf)
-}
-
 // Parse trun
 
 fn parse_trun(

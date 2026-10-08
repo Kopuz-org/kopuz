@@ -36,9 +36,13 @@ impl MediaSource for AppleMusicSource {
             delete_from_disk: false,
             scan_folders: false,
             folders: false,
+            browse_folders: false,
+            external_devices: false,
+            browser_playback: false,
             sync: true,
             downloads: true,
             discover: false,
+            dont_recommend: false,
             radio: RadioSeeds::ALL,
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Library,
@@ -137,7 +141,7 @@ impl MediaSource for AppleMusicSource {
     async fn download_track(
         &self,
         item_id: &str,
-        progress: Option<utils::stream_buffer::BufferProgressCallback>,
+        progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
     ) -> Result<Vec<u8>, SourceError> {
         let token = self
             .client
@@ -235,6 +239,8 @@ impl MediaSource for AppleMusicSource {
                             crate::applemusic::artwork_url(&a.attributes.artwork.url, 600)
                         ))),
                         manual_cover: false,
+                        artist_id: a.relationships.artists.data.first().map(|r| r.id.clone()),
+                        artist_key: a.relationships.artists.data.first().map(|r| r.id.clone()),
                     })
                     .collect()
             })
@@ -354,7 +360,7 @@ impl MediaSource for AppleMusicSource {
         &self,
         playlist_id: &str,
         track: &reader::Track,
-        _position: usize,
+        position: usize,
     ) -> Result<(), SourceError> {
         // The playlist row's own id, not the catalog id — see
         // `track_from_playlist_entry`.
@@ -366,13 +372,12 @@ impl MediaSource for AppleMusicSource {
             .remove_from_playlist(playlist_id, entry_id)
             .await
             .map_err(SourceError::Backend)?;
-        self.db
-            .remove_playlist_tracks(&self.source, playlist_id, &[track.id.key().into_owned()])
-            .await
-            .map_err(SourceError::from)
+        self.remove_playlist_entry(playlist_id, position).await
     }
 
-    async fn fetch_artist_images(&self) -> Result<Vec<(String, String)>, SourceError> {
+    async fn fetch_artist_images(
+        &self,
+    ) -> Result<Vec<(reader::ArtistCredit, String)>, SourceError> {
         tracing::info!("am.fetch_artist_images: starting");
         let artists = self
             .client
@@ -385,7 +390,8 @@ impl MediaSource for AppleMusicSource {
                 && !artwork.url.is_empty()
             {
                 let url = crate::applemusic::artwork_url(&artwork.url, 300);
-                out.push((a.attributes.name.clone(), url));
+                // A library artist id is not the catalog id a track credits, so only the name matches.
+                out.push((reader::ArtistCredit::unlinked(&a.attributes.name), url));
             }
         }
         tracing::info!("am.fetch_artist_images: {} artists with images", out.len());

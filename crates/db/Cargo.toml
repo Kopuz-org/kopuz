@@ -18,6 +18,7 @@ workspace = true
 [dependencies]
 config = { workspace = true }
 reader = { workspace = true }
+utils = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
@@ -43,3 +44,4 @@ ndk-context = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 toml = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
+tempfile = { workspace = true }

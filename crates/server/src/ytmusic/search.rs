@@ -1,4 +1,4 @@
-use reader::models::Track;
+use reader::models::{ArtistCredit, Track};
 use serde_json::{Value, json};
 
 use super::SOURCE_PREFIX;
@@ -48,7 +48,7 @@ impl MusicVideoType {
 struct ParsedRow {
     video_id: String,
     title: String,
-    artists: Vec<String>,
+    artists: Vec<ArtistCredit>,
     album: Option<String>,
     album_browse_id: Option<String>,
     duration: u64,
@@ -94,27 +94,6 @@ pub async fn music_search_tracks(query: &str, cookies: Option<&str>) -> Result<V
         }
     }
     Ok(out)
-}
-
-/// Resolve a free-text artist name to a YT Music channel id (`UC…`).
-/// Powers the artist page when navigation only had a name (track row
-/// click, sidebar tag, etc.) and the YT backend is active. Returns
-/// None if the search returned no artist row at all.
-#[tracing::instrument(name = "yt.resolve_artist", skip(cookies), fields(query = %query))]
-pub async fn resolve_artist_channel_id(
-    query: &str,
-    cookies: Option<&str>,
-) -> Result<Option<String>, String> {
-    if query.trim().is_empty() {
-        return Ok(None);
-    }
-    let http = super::innertube::http_client();
-    let resp = do_search_raw(http, query, Some(ARTISTS_FILTER), cookies).await?;
-    Ok(pick_artist_row(&resp, query).and_then(|row| {
-        row.pointer("/navigationEndpoint/browseEndpoint/browseId")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-    }))
 }
 
 /// Resolve an album title + artist to its YT Music album browse id
@@ -274,21 +253,22 @@ pub(super) fn fold_artist_name(s: &str) -> String {
         .to_lowercase()
 }
 
-/// Split an unlinked artist credit into individual names: "feat."/"ft."
-/// (space-prefixed, any case) and commas separate; a bare "&" does NOT —
-/// "MYTH & ROID" is one artist. Leading "&"s left by a ", & C" tail are
-/// stripped. A plain single name passes through unchanged.
-fn split_unlinked_artists(text: &str) -> Vec<String> {
-    let mut joined = text.to_string();
-    for sep in [" feat.", " Feat.", " FEAT.", " ft.", " Ft.", " FT."] {
-        joined = joined.replace(sep, ",");
-    }
-    joined
-        .split([',', '、'])
-        .map(|part| part.trim().trim_start_matches('&').trim())
-        .filter(|part| !part.is_empty())
-        .map(|part| part.to_string())
-        .collect()
+/// A column's text up to its first " • ", every run joined as displayed.
+fn leading_text(row: &Value, col: usize) -> String {
+    row.get("flexColumns")
+        .and_then(|c| c.as_array())
+        .and_then(|cs| cs.get(col))
+        .and_then(|c| c.pointer("/musicResponsiveListItemFlexColumnRenderer/text/runs"))
+        .and_then(|runs| runs.as_array())
+        .map(|runs| {
+            runs.iter()
+                .filter_map(|run| run.get("text").and_then(|t| t.as_str()))
+                .take_while(|text| *text != " • ")
+                .collect::<String>()
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 async fn do_search_raw(
@@ -318,9 +298,12 @@ async fn do_search_raw(
         .post(format!(
             "{ORIGIN_YT_MUSIC}/youtubei/v1/search?prettyPrint=false"
         ))
+        .header("User-Agent", client.user_agent)
         .header("Content-Type", "application/json")
+        .header("X-Goog-Api-Format-Version", "1")
         .header("X-YouTube-Client-Name", client.client_id)
         .header("X-YouTube-Client-Version", client.client_version)
+        .header("X-Origin", ORIGIN_YT_MUSIC)
         .header("Origin", ORIGIN_YT_MUSIC)
         .header("Referer", format!("{ORIGIN_YT_MUSIC}/"))
         .json(&body);
@@ -426,11 +409,18 @@ fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
         .unwrap_or((None, None));
     let artist = subtitle
         .iter()
-        .find(|(_, b)| b.as_deref().is_some_and(|b| b.starts_with("UC")))
-        .map(|(t, _)| t.clone())
+        .find_map(|(t, b)| match b.as_deref() {
+            Some(id) if id.starts_with("UC") => Some(ArtistCredit::linked(t, id)),
+            _ => None,
+        })
         // No channel link: skip the leading kind label, take the next token.
-        .or_else(|| subtitle.get(1).map(|(t, _)| t.clone()))
-        .unwrap_or_default();
+        .or_else(|| subtitle.get(1).map(|(t, _)| ArtistCredit::unlinked(t)))
+        .filter(|credit| !credit.name.is_empty());
+    let duration = subtitle
+        .iter()
+        .find(|(t, _)| looks_like_duration(t))
+        .and_then(|(t, _)| parse_mm_ss(t))
+        .unwrap_or(0);
 
     let thumbnail_url = card
         .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
@@ -446,14 +436,10 @@ fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
     Some(ParsedRow {
         video_id,
         title,
-        artists: if artist.is_empty() {
-            Vec::new()
-        } else {
-            vec![artist]
-        },
+        artists: artist.into_iter().collect(),
         album,
         album_browse_id,
-        duration: 0,
+        duration,
         thumbnail_url,
     })
 }
@@ -492,12 +478,20 @@ fn parse_playlist_track(
     mvt: MusicVideoType,
     thumbnail_url: Option<String>,
 ) -> ParsedRow {
-    let primary_artist = pick_run(row, 1, 0);
-    let artists = if primary_artist.is_empty() {
-        Vec::new()
-    } else {
-        vec![primary_artist]
-    };
+    // The row the library sync stores, so it decides whether an artist has an id.
+    let mut artists: Vec<ArtistCredit> = pick_runs_with_browse(row, 1)
+        .into_iter()
+        .filter_map(|(text, browse)| match browse.as_deref() {
+            Some(id) if id.starts_with("UC") => Some(ArtistCredit::linked(text, id)),
+            _ => None,
+        })
+        .collect();
+    if artists.is_empty() {
+        let name = leading_text(row, 1);
+        if !name.is_empty() {
+            artists.push(ArtistCredit::unlinked(name));
+        }
+    }
     let album = if mvt.has_album() {
         let s = pick_run(row, 2, 0);
         if s.is_empty() { None } else { Some(s) }
@@ -555,26 +549,19 @@ fn parse_search_row(
         .find(|(_, b)| b.as_deref().is_some_and(|b| b.starts_with("MPRE")))
         .map(|(t, b)| (Some(t.clone()), b.clone()))
         .unwrap_or((None, None));
-    let mut artists: Vec<String> = runs
+    let mut artists: Vec<ArtistCredit> = runs
         .iter()
-        .filter(|(_, b)| b.as_deref().is_some_and(|b| b.starts_with("UC")))
-        .map(|(t, _)| t.clone())
+        .filter_map(|(t, b)| match b.as_deref() {
+            Some(id) if id.starts_with("UC") => Some(ArtistCredit::linked(t, id)),
+            _ => None,
+        })
         .collect();
     if artists.is_empty() {
-        // Unlinked artist text (no channel run). Fall back to the first run
-        // that isn't the duration, album, or — for albumless rows — the
-        // view-count tail. The leading run is the artist in every observed
-        // shape. Unlike channel-linked runs, this text can be a joined credit
-        // ("INABAKUMORI feat. Kaai Yuki") — split it, or the whole credit
-        // becomes a phantom artist of its own in the Artists grid.
-        artists = runs
-            .iter()
-            .map(|(t, _)| t.clone())
-            .filter(|t| !looks_like_duration(t))
-            .filter(|t| Some(t) != album.as_ref())
-            .take(1)
-            .flat_map(|t| split_unlinked_artists(&t))
-            .collect();
+        // No run links a channel: the artist is the leading segment exactly as written, never split.
+        let name = leading_text(row, 1);
+        if !name.is_empty() && !looks_like_duration(&name) && album.as_deref() != Some(&name) {
+            artists.push(ArtistCredit::unlinked(name));
+        }
     }
 
     ParsedRow {
@@ -623,7 +610,11 @@ fn runs_with_browse(runs: Option<&Value>) -> Vec<(String, Option<String>)> {
 }
 
 fn parsed_to_track(p: ParsedRow) -> Track {
-    let primary_artist = p.artists.first().cloned().unwrap_or_default();
+    let primary_artist = p
+        .artists
+        .first()
+        .map(|credit| credit.name.clone())
+        .unwrap_or_default();
     let album = p.album.clone().unwrap_or_default();
     let album_id = match p.album_browse_id {
         Some(id) => format!("{SOURCE_PREFIX}:album:{id}"),
@@ -647,7 +638,9 @@ fn parsed_to_track(p: ParsedRow) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
-        artists: p.artists,
+        artists: p.artists.iter().map(|c| c.name.clone()).collect(),
+        credits: p.artists,
+        replay_gain: config::ReplayGainInfo::default(),
     }
 }
 
@@ -869,31 +862,170 @@ fn parse_mm_ss(s: &str) -> Option<u64> {
 }
 
 #[cfg(test)]
-mod artist_split_tests {
-    use super::split_unlinked_artists;
+mod credit_tests {
+    use super::{
+        ParsedRow, parse_card_shelf, parse_playlist_track, parse_search_row, parsed_to_track,
+    };
+    use serde_json::{Value, json};
+
+    fn column(runs: &[(&str, Option<&str>)]) -> Value {
+        let runs: Vec<Value> = runs
+            .iter()
+            .map(|(text, browse)| match browse {
+                Some(id) => json!({
+                    "text": text,
+                    "navigationEndpoint": { "browseEndpoint": { "browseId": id } }
+                }),
+                None => json!({ "text": text }),
+            })
+            .collect();
+        json!({ "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": runs } } })
+    }
+
+    fn search_row(runs: &[(&str, Option<&str>)]) -> ParsedRow {
+        let row = json!({ "flexColumns": [column(&[("Song", None)]), column(runs)] });
+        parse_search_row(&row, "vid".into(), "Song".into(), None)
+    }
 
     #[test]
-    fn splits_feat_and_commas_keeps_ampersand_names() {
-        assert_eq!(
-            split_unlinked_artists("INABAKUMORI feat. Kaai Yuki"),
-            vec!["INABAKUMORI", "Kaai Yuki"]
+    fn a_linked_run_keeps_the_channel_it_points_at() {
+        let parsed = search_row(&[("Ada", Some("UCada")), ("•", None), ("3:21", None)]);
+
+        assert_eq!(parsed.artists.len(), 1);
+        assert_eq!(parsed.artists[0].name, "Ada");
+        assert_eq!(parsed.artists[0].id.as_deref(), Some("UCada"));
+        assert_eq!(parsed.duration, 201);
+    }
+
+    #[test]
+    fn each_linked_artist_becomes_its_own_credit() {
+        let parsed = search_row(&[
+            ("Ada", Some("UCada")),
+            ("Boris", Some("UCboris")),
+            ("3:00", None),
+        ]);
+
+        let names: Vec<&str> = parsed.artists.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Ada", "Boris"]);
+        assert_eq!(parsed.artists[1].id.as_deref(), Some("UCboris"));
+    }
+
+    /// Unlinked text is one credit exactly as written: cutting it guesses at names.
+    #[test]
+    fn an_unlinked_credit_is_kept_whole() {
+        for name in [
+            "INABAKUMORI feat. Kaai Yuki",
+            "01/P",
+            "____natural / TETO KASANE",
+        ] {
+            let parsed = search_row(&[(name, None), (" • ", None), ("2:30", None)]);
+
+            assert_eq!(parsed.artists.len(), 1, "{name}");
+            assert_eq!(parsed.artists[0].name, name);
+            assert!(parsed.artists[0].id.is_none());
+        }
+    }
+
+    /// The runs between names are part of the name; reading only the first dropped them.
+    #[test]
+    fn an_unlinked_playlist_credit_keeps_every_run() {
+        let row = json!({
+            "flexColumns": [
+                column(&[("Song", None)]),
+                column(&[("NIBREZZY", None), (" & ", None), ("Kohei Tanaka", None)]),
+            ],
+            "fixedColumns": [{
+                "musicResponsiveListItemFixedColumnRenderer": {
+                    "text": { "runs": [{ "text": "3:21" }] }
+                }
+            }],
+        });
+
+        let parsed = parse_playlist_track(
+            &row,
+            "vid".into(),
+            "Song".into(),
+            super::MusicVideoType::AlbumTrack,
+            None,
         );
-        // No space after "feat." — as YT actually delivers it.
-        assert_eq!(
-            split_unlinked_artists("かいりきベア feat.缶缶"),
-            vec!["かいりきベア", "缶缶"]
+
+        assert_eq!(parsed.artists.len(), 1);
+        assert_eq!(parsed.artists[0].name, "NIBREZZY & Kohei Tanaka");
+    }
+
+    #[test]
+    fn an_album_run_is_not_taken_for_a_credit() {
+        let parsed = search_row(&[
+            ("Ada", Some("UCada")),
+            ("One", Some("MPREalbum")),
+            ("3:00", None),
+        ]);
+
+        assert_eq!(parsed.artists.len(), 1);
+        assert_eq!(parsed.album.as_deref(), Some("One"));
+    }
+
+    #[test]
+    fn a_playlist_row_keeps_the_channel_the_sync_stores() {
+        let row = json!({
+            "flexColumns": [column(&[("Song", None)]), column(&[("Ada", Some("UCada"))])],
+            "fixedColumns": [{
+                "musicResponsiveListItemFixedColumnRenderer": {
+                    "text": { "runs": [{ "text": "3:21" }] }
+                }
+            }],
+        });
+
+        let parsed = parse_playlist_track(
+            &row,
+            "vid".into(),
+            "Song".into(),
+            super::MusicVideoType::AlbumTrack,
+            None,
         );
-        assert_eq!(
-            split_unlinked_artists("塞壬唱片-MSR, 真名辺あや, & TMKJ"),
-            vec!["塞壬唱片-MSR", "真名辺あや", "TMKJ"]
-        );
-        // "&" alone never splits, and "ft." needs its leading space — names
-        // like "Swift." must not be cut mid-word.
-        assert_eq!(split_unlinked_artists("MYTH & ROID"), vec!["MYTH & ROID"]);
-        assert_eq!(
-            split_unlinked_artists("Taylor Swift."),
-            vec!["Taylor Swift."]
-        );
-        assert_eq!(split_unlinked_artists("Reol"), vec!["Reol"]);
+
+        assert_eq!(parsed.artists[0].id.as_deref(), Some("UCada"));
+        assert_eq!(parsed.duration, 201);
+    }
+
+    #[test]
+    fn a_track_carries_both_the_names_and_the_credits() {
+        let track = parsed_to_track(search_row(&[
+            ("Ada", Some("UCada")),
+            ("Boris", Some("UCboris")),
+        ]));
+
+        assert_eq!(track.artist, "Ada");
+        assert_eq!(track.artists, ["Ada", "Boris"]);
+        assert_eq!(track.credits[1].id.as_deref(), Some("UCboris"));
+    }
+
+    /// The top-result card carries its length in the subtitle like a list row
+    /// does, so the first result is not the one song with no duration.
+    #[test]
+    fn the_top_result_card_has_a_duration() {
+        let card = json!({
+            "onTap": { "watchEndpoint": {
+                "videoId": "vid",
+                "watchEndpointMusicSupportedConfigs": { "watchEndpointMusicConfig": {
+                    "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                } }
+            } },
+            "title": { "runs": [{ "text": "Song" }] },
+            "subtitle": { "runs": [
+                { "text": "Song" },
+                { "text": " • " },
+                { "text": "Ada", "navigationEndpoint": { "browseEndpoint": { "browseId": "UCada" } } },
+                { "text": " • " },
+                { "text": "Album", "navigationEndpoint": { "browseEndpoint": { "browseId": "MPREb_album" } } },
+                { "text": " • " },
+                { "text": "3:21" }
+            ] }
+        });
+
+        let parsed = parse_card_shelf(&card).expect("a music card");
+        assert_eq!(parsed.duration, 201);
+        assert_eq!(parsed.album.as_deref(), Some("Album"));
+        assert_eq!(parsed.artists[0].name, "Ada");
     }
 }

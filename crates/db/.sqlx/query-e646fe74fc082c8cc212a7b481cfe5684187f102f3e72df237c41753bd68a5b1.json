@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO integration_credentials (key, value) VALUES (?1, ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e646fe74fc082c8cc212a7b481cfe5684187f102f3e72df237c41753bd68a5b1"
+}
