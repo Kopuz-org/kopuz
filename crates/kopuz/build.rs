@@ -184,7 +184,12 @@ fn embed_fonts(crate_dir: &Path) {
     let fonts = assets.join("fonts");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
 
-    for css_name in ["fontawesome.css", "jetbrains-mono.css", "main.css"] {
+    for css_name in [
+        "fontawesome.css",
+        "jetbrains-mono.css",
+        "roboto.css",
+        "main.css",
+    ] {
         let src = assets.join(css_name);
         println!("cargo:rerun-if-changed={}", src.display());
         let css = match fs::read_to_string(&src) {

@@ -8,6 +8,7 @@ const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
 const REDUCED_ANIMATIONS_CSS: &str = include_str!("../assets/reduced-animations.css");
 const FONT_AWESOME_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/fontawesome.css"));
 const JETBRAINS_MONO_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/jetbrains-mono.css"));
+const ROBOTO_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/roboto.css"));
 
 /// Put static assets in the initial document. `document::Style` sends the CSS
 /// and embedded fonts over the WebView's JavaScript bridge after the first DOM
@@ -25,6 +26,7 @@ pub fn head() -> String {
         ("material3", MATERIAL3_CSS),
         ("reduced-animations", REDUCED_ANIMATIONS_CSS),
         ("jetbrains-mono", JETBRAINS_MONO_CSS),
+        ("roboto", ROBOTO_CSS),
         ("fontawesome", FONT_AWESOME_CSS),
     ] {
         head.push_str("<style id=\"kopuz-");
