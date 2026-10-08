@@ -1,8 +1,15 @@
+/* Material 3 UI style. Values follow the Material 3 baseline specs
+   (m3.material.io): colour roles, the type scale, shape, elevation and state
+   layers as tokens below, then one block per component. Under the System colors
+   theme the roles come from material3/mod.rs; under any other theme they are
+   approximated from the theme's own vars so the style still reads. */
+
 [data-ui-style="material3"] {
     --md-sys-color-primary: color-mix(in srgb, var(--color-indigo-500) 65%, var(--color-white));
     --md-sys-color-on-primary: var(--color-black);
     --md-sys-color-primary-container: color-mix(in srgb, var(--color-indigo-500) 25%, var(--color-black));
     --md-sys-color-on-primary-container: var(--color-white);
+    --md-sys-color-secondary: color-mix(in srgb, var(--color-indigo-500) 40%, var(--color-white));
     --md-sys-color-secondary-container: color-mix(in srgb, var(--color-indigo-500) 16%, var(--color-neutral-900));
     --md-sys-color-on-secondary-container: var(--color-white);
     --md-sys-color-surface: color-mix(in srgb, var(--color-neutral-900) 96%, var(--color-indigo-500));
@@ -14,21 +21,46 @@
     --md-sys-color-on-surface-variant: color-mix(in srgb, var(--color-white) 75%, var(--md-sys-color-surface));
     --md-sys-color-outline: color-mix(in srgb, var(--color-white) 45%, var(--md-sys-color-surface));
     --md-sys-color-outline-variant: color-mix(in srgb, var(--color-white) 18%, var(--md-sys-color-surface));
+    --md-sys-color-shadow: #000000;
+
+    --md-sys-shape-corner-extra-small: 4px;
     --md-sys-shape-corner-small: 8px;
     --md-sys-shape-corner-medium: 12px;
     --md-sys-shape-corner-large: 16px;
     --md-sys-shape-corner-extra-large: 28px;
-    --md-sys-shape-corner-full: 999px;
+    --md-sys-shape-corner-full: 9999px;
+
+    --md-sys-state-hover-opacity: 8%;
+    --md-sys-state-focus-opacity: 10%;
+    --md-sys-state-pressed-opacity: 10%;
+
+    --md-sys-elevation-level1: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 1px rgb(0 0 0 / 0.15);
+    --md-sys-elevation-level2: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 2px 6px 2px rgb(0 0 0 / 0.15);
+    --md-sys-elevation-level3: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 4px 8px 3px rgb(0 0 0 / 0.15);
+
+    --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+    --md-sys-motion-duration-short: 150ms;
+    --md-sys-motion-duration-medium: 300ms;
+
+    /* Body medium. */
     font-family: "Roboto", "Noto Sans", system-ui, sans-serif, "nasin-nanpa";
     font-size: 14px;
     line-height: 20px;
+    letter-spacing: 0.25px;
     color: var(--md-sys-color-on-surface);
 }
 
-[data-ui-style="material3"] :is(button, a, input, select, textarea):focus-visible {
-    outline: 3px solid var(--md-sys-color-primary);
-    outline-offset: 3px;
+/* Focus indicator: 3dp, secondary, 2dp outside the component. */
+[data-ui-style="material3"] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline: 3px solid var(--md-sys-color-secondary);
+    outline-offset: 2px;
 }
+
+[data-ui-style="material3"] * {
+    scrollbar-color: var(--md-sys-color-outline-variant) transparent;
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
 
 [data-ui-style="material3"] .app-content {
     gap: 8px;
@@ -39,45 +71,66 @@
     padding: 8px 0 0 12px;
 }
 
-[data-ui-style="material3"] #main-scroll-area {
+[data-ui-style="material3"] :is(#main-scroll-area, #rightbar-root) {
     background: var(--md-sys-color-surface-container-low);
+    border: 0;
     border-radius: var(--md-sys-shape-corner-extra-large);
     min-width: 0;
 }
 
-[data-ui-style="material3"] :is(h1, .showcase-title) {
+/* Headline large; the showcase title is display small at full width. */
+[data-ui-style="material3"] h1 {
     font-size: 32px;
     line-height: 40px;
     font-weight: 400;
     letter-spacing: 0;
 }
 
+[data-ui-style="material3"] .showcase-title {
+    font-size: clamp(32px, 3vw, 36px);
+    line-height: 1.22;
+    font-weight: 400;
+    letter-spacing: 0;
+    margin-bottom: 16px;
+}
+
+/* ── Navigation drawer (standard) ───────────────────────────────────────── */
+/* Sits on the surface with no container of its own. Items are 56dp, flush,
+   fully rounded; the active indicator is secondary container. */
+
 [data-ui-style="material3"] .app-sidebar {
-    background: var(--md-sys-color-surface-container-low);
+    background: transparent;
     color: var(--md-sys-color-on-surface-variant);
     border: 0;
-    border-radius: var(--md-sys-shape-corner-extra-large);
+    border-radius: 0;
     margin-inline-start: 12px;
 }
 
-[data-ui-style="material3"] * {
-    scrollbar-color: var(--md-sys-color-outline-variant) transparent;
+[data-ui-style="material3"] .app-sidebar-nav {
+    padding: 0 12px;
 }
 
-[data-ui-style="material3"] .app-sidebar-nav {
-    padding: 8px 12px;
+[data-ui-style="material3"] .app-sidebar-nav > * {
+    margin-block: 0;
 }
 
 [data-ui-style="material3"] .app-sidebar-link {
-    min-height: 48px;
+    min-height: 56px;
+    padding-block: 0;
+    padding-inline: 16px 24px;
     border-radius: var(--md-sys-shape-corner-full);
     color: var(--md-sys-color-on-surface-variant);
-    font-weight: 500;
-    transition: background-color 150ms ease, color 150ms ease;
+    background: transparent;
+    transition: background-color var(--md-sys-motion-duration-short) linear;
 }
 
 [data-ui-style="material3"] .app-sidebar-link:hover {
-    background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent);
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), transparent);
+    color: var(--md-sys-color-on-surface);
+}
+
+[data-ui-style="material3"] .app-sidebar-link:active {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-pressed-opacity), transparent);
 }
 
 [data-ui-style="material3"] .app-sidebar-link[aria-current="page"] {
@@ -85,10 +138,8 @@
     color: var(--md-sys-color-on-secondary-container);
 }
 
-[data-ui-style="material3"] .app-sidebar-label {
-    margin-inline: 12px 0;
-    letter-spacing: 0.1px;
-    opacity: 1;
+[data-ui-style="material3"] .app-sidebar-link[aria-current="page"]:hover {
+    background: color-mix(in srgb, var(--md-sys-color-on-secondary-container) var(--md-sys-state-hover-opacity), var(--md-sys-color-secondary-container));
 }
 
 [data-ui-style="material3"] .app-sidebar-icon {
@@ -96,11 +147,82 @@
     height: 24px;
 }
 
+/* Label large. */
+[data-ui-style="material3"] .app-sidebar-label {
+    margin-inline: 12px 0;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    opacity: 1;
+}
+
 [data-ui-style="material3"] .app-sidebar-indicator {
     display: none;
 }
 
+/* ── Navigation bar ─────────────────────────────────────────────────────── */
+/* 80dp, surface container; 64x32 pill indicator; label medium, prominent
+   when active. */
+
+[data-ui-style="material3"] .app-tabbar {
+    background: var(--md-sys-color-surface-container);
+    border: 0;
+    backdrop-filter: none;
+}
+
+[data-ui-style="material3"] .app-tabbar button {
+    height: 80px;
+    padding: 12px 0 16px;
+    gap: 4px;
+    justify-content: flex-start;
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+[data-ui-style="material3"] .app-tabbar button > i {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 32px;
+    font-size: 20px;
+    border-radius: var(--md-sys-shape-corner-full);
+    transition: background-color var(--md-sys-motion-duration-short) linear;
+}
+
+[data-ui-style="material3"] .app-tabbar button:hover > i {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), transparent);
+}
+
+[data-ui-style="material3"] .app-tabbar button:active > i {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-pressed-opacity), transparent);
+}
+
+[data-ui-style="material3"] .app-tabbar button[aria-current="page"] {
+    color: var(--md-sys-color-on-surface);
+}
+
+[data-ui-style="material3"] .app-tabbar button[aria-current="page"] > i {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+}
+
+[data-ui-style="material3"] .app-tabbar button > span {
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+[data-ui-style="material3"] .app-tabbar button[aria-current="page"] > span {
+    font-weight: 700;
+}
+
+/* ── Player bar ─────────────────────────────────────────────────────────── */
+
 [data-ui-style="material3"] .player-bar {
+    --md-slider-gap: var(--md-sys-color-surface-container);
     background: var(--md-sys-color-surface-container);
     border: 0;
     border-radius: var(--md-sys-shape-corner-extra-large);
@@ -125,10 +247,27 @@
     width: auto;
 }
 
+/* Standard icon buttons: 40dp, full shape, on-surface-variant, state layer. */
+[data-ui-style="material3"] :is(.playback-controls, .player-tools, .player-track) button:not(.playback-play) {
+    color: var(--md-sys-color-on-surface-variant);
+    border-radius: var(--md-sys-shape-corner-full);
+}
+
+[data-ui-style="material3"] :is(.playback-controls, .player-tools, .player-track) button:not(.playback-play):hover {
+    color: var(--md-sys-color-on-surface);
+    background: color-mix(in srgb, var(--md-sys-color-on-surface-variant) var(--md-sys-state-hover-opacity), transparent);
+}
+
+[data-ui-style="material3"] :is(.playback-controls, .player-tools, .player-track) button:not(.playback-play):active {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface-variant) var(--md-sys-state-pressed-opacity), transparent);
+}
+
 [data-ui-style="material3"] .playback-controls {
     gap: 8px;
 }
 
+/* Filled icon button, medium size with the square shape; the corners round
+   off on hover and tighten on press. */
 [data-ui-style="material3"] .playback-play {
     width: 56px;
     height: 48px;
@@ -136,15 +275,18 @@
     border-radius: var(--md-sys-shape-corner-large);
     background: var(--md-sys-color-primary);
     color: var(--md-sys-color-on-primary);
-    transition: border-radius 200ms ease, filter 150ms ease;
+    transition:
+        border-radius var(--md-sys-motion-duration-medium) var(--md-sys-motion-easing-standard),
+        background-color var(--md-sys-motion-duration-short) linear;
 }
 
 [data-ui-style="material3"] .playback-play:hover {
-    filter: brightness(1.1);
+    background: color-mix(in srgb, var(--md-sys-color-on-primary) var(--md-sys-state-hover-opacity), var(--md-sys-color-primary));
     border-radius: var(--md-sys-shape-corner-extra-large);
 }
 
 [data-ui-style="material3"] .playback-play:active {
+    background: color-mix(in srgb, var(--md-sys-color-on-primary) var(--md-sys-state-pressed-opacity), var(--md-sys-color-primary));
     border-radius: var(--md-sys-shape-corner-medium);
 }
 
@@ -154,9 +296,32 @@
     border-radius: var(--md-sys-shape-corner-extra-large);
 }
 
+/* ── Slider ─────────────────────────────────────────────────────────────── */
+/* 16dp track: active primary, inactive secondary container, full shape with
+   2dp inner corners. 4x44dp bar handle with a 6dp gap either side, and a 4dp
+   stop indicator at the end. The gap is painted in --md-slider-gap, the colour
+   of whatever the slider sits on. */
+
 [data-ui-style="material3"] .playback-slider {
-    height: 6px;
-    background: var(--md-sys-color-surface-container-highest);
+    height: 16px;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: var(--md-sys-color-secondary-container);
+}
+
+[data-ui-style="material3"] .playback-slider::after {
+    content: "";
+    position: absolute;
+    inset-inline-end: 6px;
+    top: 6px;
+    width: 4px;
+    height: 4px;
+    border-radius: var(--md-sys-shape-corner-full);
+    background: var(--md-sys-color-primary);
+    pointer-events: none;
+}
+
+[data-ui-style="material3"] .playback-slider-fill {
+    border-radius: 8px 2px 2px 8px;
 }
 
 [data-ui-style="material3"] :is(.playback-slider-fill, .material3-progress) {
@@ -164,13 +329,38 @@
 }
 
 [data-ui-style="material3"] .playback-slider-fill > div {
+    z-index: 1;
     background: var(--md-sys-color-primary);
     opacity: 1;
     width: 4px;
-    height: 18px;
+    height: 44px;
     border-radius: 2px;
-    top: -6px;
+    top: -14px;
     right: -2px;
+    transition: width var(--md-sys-motion-duration-short) linear;
+}
+
+[data-ui-style="material3"] .playback-slider-fill > div::before,
+[data-ui-style="material3"] .playback-slider-fill > div::after {
+    content: "";
+    position: absolute;
+    top: 14px;
+    width: 6px;
+    height: 16px;
+    background: var(--md-slider-gap, transparent);
+}
+
+[data-ui-style="material3"] .playback-slider-fill > div::before {
+    right: 100%;
+}
+
+[data-ui-style="material3"] .playback-slider-fill > div::after {
+    left: 100%;
+}
+
+[data-ui-style="material3"] .playback-slider:active .playback-slider-fill > div {
+    width: 2px;
+    right: -1px;
 }
 
 [data-ui-style="material3"] .slider-hit {
@@ -180,9 +370,11 @@
 }
 
 [data-ui-style="material3"] .playback-slider:has(input:focus-visible) {
-    outline: 2px solid var(--md-sys-color-primary);
-    outline-offset: 6px;
+    outline: 3px solid var(--md-sys-color-secondary);
+    outline-offset: 2px;
 }
+
+/* ── Showcase header ────────────────────────────────────────────────────── */
 
 [data-ui-style="material3"] .showcase-hero {
     background: var(--md-sys-color-surface-container);
@@ -199,31 +391,25 @@
     border-radius: var(--md-sys-shape-corner-large);
 }
 
-[data-ui-style="material3"] .showcase-title {
-    font-size: clamp(28px, 3vw, 45px);
-    line-height: 1.15;
-    margin-bottom: 16px;
-}
+/* ── Lists ──────────────────────────────────────────────────────────────── */
 
 [data-ui-style="material3"] .track-row {
     border-radius: var(--md-sys-shape-corner-medium);
 }
 
 [data-ui-style="material3"] .track-row:hover {
-    background: var(--md-sys-color-surface-container-high);
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), transparent);
 }
 
-[data-ui-style="material3"] :is(.settings-section, .app-select-menu, .dots-menu-panel) {
-    background: var(--md-sys-color-surface-container);
+/* ── Cards ──────────────────────────────────────────────────────────────── */
+/* Filled card: surface container highest, medium corners. */
+
+[data-ui-style="material3"] .settings-section {
+    background: var(--md-sys-color-surface-container-highest);
     border: 0;
-    border-radius: var(--md-sys-shape-corner-large);
+    border-radius: var(--md-sys-shape-corner-medium);
     color: var(--md-sys-color-on-surface);
     box-shadow: none;
-}
-
-[data-ui-style="material3"] :is(.app-select-menu, .dots-menu-panel) {
-    background: var(--md-sys-color-surface-container-high);
-    box-shadow: 0 4px 8px #0003;
 }
 
 [data-ui-style="material3"] :is(.settings-section-header, .settings-subsection-label) {
@@ -231,6 +417,7 @@
     color: var(--md-sys-color-primary);
 }
 
+/* Title medium. */
 [data-ui-style="material3"] .settings-section-header h2 {
     font-size: 16px;
     line-height: 24px;
@@ -240,8 +427,10 @@
     color: var(--md-sys-color-on-surface);
 }
 
+/* Title small. */
 [data-ui-style="material3"] .settings-subsection-label {
     font-size: 14px;
+    line-height: 20px;
     font-weight: 500;
     text-transform: none;
     letter-spacing: 0.1px;
@@ -252,94 +441,194 @@
     border-color: var(--md-sys-color-outline-variant);
 }
 
-[data-ui-style="material3"] .settings-category-content {
-    scroll-margin-top: 80px;
-}
-
-[data-ui-style="material3"] .settings-fan {
-    background: var(--md-sys-color-surface-container-low);
-    border-color: var(--md-sys-color-outline-variant);
-    padding-block: 8px;
-    margin-bottom: 24px;
-}
-
-[data-ui-style="material3"] .settings-layout-topbar .settings-fan-item {
-    height: 48px;
-    padding-inline: 16px;
-    color: var(--md-sys-color-on-surface-variant);
-}
-
-[data-ui-style="material3"] .settings-fan-item.is-selected {
-    color: var(--md-sys-color-primary);
-    border-bottom-color: var(--md-sys-color-primary);
-    background: var(--md-sys-color-secondary-container);
-    border-radius: var(--md-sys-shape-corner-medium) var(--md-sys-shape-corner-medium) 0 0;
-}
-
-[data-ui-style="material3"] .settings-fan-mobile-label {
-    font-size: 14px;
-    font-weight: 500;
-    letter-spacing: 0.1px;
-}
-
 [data-ui-style="material3"] .settings-section-body > .settings-row:nth-child(even) {
     background: transparent;
 }
 
-[data-ui-style="material3"] :is(.app-select-trigger, .app-search-field) {
-    background: var(--md-sys-color-surface-container-highest);
+[data-ui-style="material3"] .settings-category-content {
+    scroll-margin-top: 80px;
+}
+
+/* ── Tabs (secondary) ───────────────────────────────────────────────────── */
+/* Icon and label inline, so secondary tabs: 48dp, title small, a 2dp primary
+   indicator across the tab, on-surface when active, a divider underneath. */
+
+[data-ui-style="material3"] .settings-fan {
+    background: var(--md-sys-color-surface-container-low);
+    border-color: var(--md-sys-color-outline-variant);
+    padding-block: 0;
+    gap: 0;
+    margin-bottom: 24px;
+}
+
+[data-ui-style="material3"] .settings-layout-topbar .settings-fan-item,
+[data-ui-style="material3"] .settings-layout-topbar .settings-fan-item.is-selected {
+    height: 48px;
+    padding-inline: 16px;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+[data-ui-style="material3"] .settings-layout-topbar .settings-fan-item:hover {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), transparent);
     color: var(--md-sys-color-on-surface);
-    border: 1px solid var(--md-sys-color-outline);
-    border-radius: var(--md-sys-shape-corner-small);
-    min-height: 48px;
-    box-shadow: none;
+}
+
+[data-ui-style="material3"] .settings-layout-topbar .settings-fan-item.is-selected {
+    border-bottom-color: var(--md-sys-color-primary);
+    color: var(--md-sys-color-on-surface);
+}
+
+[data-ui-style="material3"] .settings-fan-mobile-label {
     font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
 }
 
-[data-ui-style="material3"] .app-search-field {
-    border: 0;
-    border-radius: var(--md-sys-shape-corner-full);
-    min-height: 56px;
-    font-size: 16px;
-}
-
-[data-ui-style="material3"] .app-select-option {
-    min-height: 48px;
-    border-radius: var(--md-sys-shape-corner-small);
-    color: var(--md-sys-color-on-surface);
-}
-
-[data-ui-style="material3"] :is(.app-select-option-selected, .app-select-option:hover, .app-select-option:focus-visible) {
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-}
+/* ── Segmented buttons ──────────────────────────────────────────────────── */
+/* 40dp, full shape, 1dp outline between and around segments; the selected
+   segment is secondary container with a leading check. */
 
 [data-ui-style="material3"] .settings-toggle {
+    width: auto;
+    min-width: 192px;
+    height: 40px;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
     border: 1px solid var(--md-sys-color-outline);
     border-radius: var(--md-sys-shape-corner-full);
     background: transparent;
 }
 
 [data-ui-style="material3"] .settings-toggle > div {
-    border-radius: var(--md-sys-shape-corner-full);
-    background: var(--md-sys-color-secondary-container);
+    display: none;
 }
 
 [data-ui-style="material3"] .settings-toggle button {
-    color: var(--md-sys-color-on-surface-variant);
+    height: 100%;
+    padding-inline: 12px;
+    white-space: nowrap;
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    color: var(--md-sys-color-on-surface);
+    transition: background-color var(--md-sys-motion-duration-short) linear;
+}
+
+[data-ui-style="material3"] .settings-toggle button + button {
+    border-inline-start: 1px solid var(--md-sys-color-outline);
+}
+
+[data-ui-style="material3"] .settings-toggle button:hover {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), transparent);
 }
 
 [data-ui-style="material3"] .settings-toggle button[aria-pressed="true"] {
+    background: var(--md-sys-color-secondary-container);
     color: var(--md-sys-color-on-secondary-container);
 }
 
-[data-ui-style="material3"] #rightbar-root {
-    background: var(--md-sys-color-surface-container-low);
-    border: 0;
-    border-radius: var(--md-sys-shape-corner-extra-large);
+[data-ui-style="material3"] .settings-toggle button[aria-pressed="true"]::before {
+    content: "\f00c";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    margin-inline-end: 8px;
 }
 
+/* ── Menus and text fields ──────────────────────────────────────────────── */
+/* Exposed dropdowns are outlined text fields: 56dp, extra-small corners, 1dp
+   outline that turns 2dp primary on focus. Menus: surface container,
+   extra-small corners, elevation 2, 48dp items in label large. */
+
+[data-ui-style="material3"] .app-select-trigger {
+    min-height: 56px;
+    padding-inline: 16px 12px;
+    background: transparent;
+    color: var(--md-sys-color-on-surface);
+    border: 1px solid var(--md-sys-color-outline);
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    box-shadow: none;
+    font-size: 16px;
+    line-height: 24px;
+    letter-spacing: 0.5px;
+}
+
+[data-ui-style="material3"] .app-select-trigger:hover {
+    border-color: var(--md-sys-color-on-surface);
+}
+
+[data-ui-style="material3"] .app-select-trigger:focus-visible {
+    outline: 0;
+    border-color: var(--md-sys-color-primary);
+    box-shadow: inset 0 0 0 1px var(--md-sys-color-primary);
+}
+
+[data-ui-style="material3"] :is(.app-select-menu, .dots-menu-panel) {
+    padding-block: 8px;
+    background: var(--md-sys-color-surface-container);
+    border: 0;
+    border-radius: var(--md-sys-shape-corner-extra-small);
+    color: var(--md-sys-color-on-surface);
+    box-shadow: var(--md-sys-elevation-level2);
+}
+
+[data-ui-style="material3"] .app-select-option {
+    min-height: 48px;
+    padding-inline: 12px;
+    border-radius: 0;
+    color: var(--md-sys-color-on-surface);
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+}
+
+[data-ui-style="material3"] :is(.app-select-option:hover, .app-select-option:focus-visible) {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), transparent);
+    color: var(--md-sys-color-on-surface);
+}
+
+[data-ui-style="material3"] .app-select-option-selected {
+    background: var(--md-sys-color-secondary-container);
+    color: var(--md-sys-color-on-secondary-container);
+}
+
+/* ── Search bar ─────────────────────────────────────────────────────────── */
+/* 56dp, full shape, surface container high, body large. */
+
+[data-ui-style="material3"] .app-search-field {
+    min-height: 56px;
+    background: var(--md-sys-color-surface-container-high);
+    color: var(--md-sys-color-on-surface);
+    border: 0;
+    border-radius: var(--md-sys-shape-corner-full);
+    box-shadow: none;
+    font-size: 16px;
+    line-height: 24px;
+    letter-spacing: 0.5px;
+}
+
+[data-ui-style="material3"] .app-search-field:hover {
+    background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), var(--md-sys-color-surface-container-high));
+}
+
+[data-ui-style="material3"] .app-search-field::placeholder {
+    color: var(--md-sys-color-on-surface-variant);
+}
+
+[data-ui-style="material3"] :has(> .app-search-field) > i {
+    color: var(--md-sys-color-on-surface);
+}
+
+/* ── Compact player ─────────────────────────────────────────────────────── */
+
 [data-ui-style="material3"] .material3-compact {
+    --md-slider-gap: var(--md-sys-color-surface-container);
     background: var(--md-sys-color-surface-container);
     border-radius: var(--md-sys-shape-corner-large);
 }
@@ -348,37 +637,7 @@
     display: none;
 }
 
-[data-ui-style="material3"] .app-tabbar {
-    background: var(--md-sys-color-surface-container);
-    border: 0;
-    backdrop-filter: none;
-}
-
-[data-ui-style="material3"] .app-tabbar button {
-    height: 80px;
-    gap: 4px;
-    color: var(--md-sys-color-on-surface-variant);
-}
-
-[data-ui-style="material3"] .app-tabbar button > i {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 64px;
-    height: 32px;
-    border-radius: var(--md-sys-shape-corner-full);
-}
-
-[data-ui-style="material3"] .app-tabbar button[aria-current="page"] > i {
-    background: var(--md-sys-color-secondary-container);
-    color: var(--md-sys-color-on-secondary-container);
-}
-
-[data-ui-style="material3"] .app-tabbar button > span {
-    font-size: 12px;
-    line-height: 16px;
-    letter-spacing: 0.5px;
-}
+/* ── Android ────────────────────────────────────────────────────────────── */
 
 [data-ui-style="material3"][data-platform="android"] .app-content {
     padding: 0;
@@ -389,10 +648,13 @@
     border-radius: 0;
 }
 
+/* The modal drawer: surface container low, large corners on its open edge,
+   elevation 1. */
 [data-ui-style="material3"][data-platform="android"] .app-sidebar {
     border-radius: 0 var(--md-sys-shape-corner-large) var(--md-sys-shape-corner-large) 0;
     margin-inline-start: 0;
     background: var(--md-sys-color-surface-container-low);
+    box-shadow: var(--md-sys-elevation-level1);
 }
 
 [data-ui-style="material3"][data-platform="android"][dir="rtl"] .app-sidebar {
@@ -417,7 +679,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    [data-ui-style="material3"] :is(.playback-play, .app-sidebar-link) {
+    [data-ui-style="material3"] :is(.playback-play, .app-sidebar-link, .app-tabbar button > i, .settings-toggle button, .playback-slider-fill > div) {
         transition: none;
     }
 }
