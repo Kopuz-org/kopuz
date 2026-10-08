@@ -2,4 +2,5 @@
 
 pub mod browse;
 pub mod discover;
+pub mod search;
 mod shelves;

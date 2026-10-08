@@ -191,11 +191,17 @@ pub(crate) fn ShelfRow(
     #[props(default)]
     on_more: Option<EventHandler<()>>,
     #[props(default)] more_loading: bool,
+    /// What "show all" does instead of opening the shelf's page, such as
+    /// switching a search to the shelf's filter.
+    #[props(default)]
+    show_all: Option<EventHandler<()>>,
 ) -> Element {
-    let on_show_all = shelf.more_ref.is_some().then(|| {
-        let shelf = shelf.clone();
-        EventHandler::new(move |_| {
-            shelves::open_more(&shelf, on_select_album, on_select_playlist, on_open_artist)
+    let on_show_all = show_all.or_else(|| {
+        shelf.more_ref.is_some().then(|| {
+            let shelf = shelf.clone();
+            EventHandler::new(move |_| {
+                shelves::open_more(&shelf, on_select_album, on_select_playlist, on_open_artist)
+            })
         })
     });
     let layout = if shelf.list {

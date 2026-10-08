@@ -25,7 +25,20 @@ pub fn Search(
     queue: Signal<Vec<api::TrackInfo>>,
     current_queue_index: Signal<usize>,
     on_select_album: EventHandler<String>,
+    on_select_playlist: EventHandler<(api::CatalogItemKind, String, String)>,
 ) -> Element {
+    // A source that declares search filters gets its own results view.
+    let filters = hooks::sources::use_capabilities()().search_filters;
+    if !filters.is_empty() {
+        return rsx! {
+            crate::server::search::CatalogSearch {
+                search_query,
+                filters,
+                on_select_album,
+                on_select_playlist,
+            }
+        };
+    }
     let data = use_search_data(search_query);
     let mut selected_genre = use_signal(|| None::<String>);
 

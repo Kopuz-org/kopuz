@@ -1759,6 +1759,12 @@ fn App() -> Element {
                                     selected_album_id.set(id);
                                     current_route.set(Route::Album);
                                 },
+                                on_select_playlist: move |(kind, id, title): (api::CatalogItemKind, String, String)| {
+                                    discover_selected_playlist_kind.set(kind);
+                                    discover_selected_playlist_id.set(Some(id));
+                                    discover_selected_playlist_title.set(Some(title));
+                                    current_route.set(Route::DiscoverPlaylist);
+                                },
                             }
                         },
                         Route::Library => rsx! {
