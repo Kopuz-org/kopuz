@@ -235,6 +235,15 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("catalog pages"))
     }
 
+    /// What the source relates to one of its tracks: similar songs, artists
+    /// and albums, as a page. Default unsupported.
+    async fn related(
+        &self,
+        _item_id: &str,
+    ) -> Result<crate::ytmusic::discover::BrowsePage, SourceError> {
+        Err(SourceError::unsupported("related"))
+    }
+
     /// The tracks of a remote album / browse id. Standard library remotes use
     /// this to open or act on an album before a full cache sync; catalog remotes
     /// use it for discover surfaces. Default unsupported.

@@ -118,7 +118,7 @@ pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<Vec<Track>
     Ok(walk_queue(&resp))
 }
 
-fn walk_queue(resp: &Value) -> Vec<Track> {
+pub(super) fn walk_queue(resp: &Value) -> Vec<Track> {
     // Iterate the watchNext tabs by tabRenderer presence rather than
     // assuming the queue lives at tabs[0]. YT A/B-tests the tab order
     // (Up next vs Lyrics vs Related) and the positional dive

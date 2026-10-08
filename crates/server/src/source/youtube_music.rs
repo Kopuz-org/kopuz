@@ -9,6 +9,7 @@ use super::{
     FavoritesPage, FavoritesSync, MediaSource, PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds,
     RemoteAlbum, SourceError, StreamInfo, mirror_added, mirror_created,
 };
+use crate::ytmusic::browse;
 use crate::ytmusic::discover::{self, BrowsePage};
 
 /// YT Music's "Liked Music" auto-playlist. It is not browsed like the user's
@@ -153,11 +154,80 @@ impl MediaSource for YtSource {
     }
 
     fn catalog_pages(&self) -> Vec<CatalogPageEntry> {
-        vec![CatalogPageEntry {
-            id: discover::HOME.to_string(),
-            label: "home",
-            icon: "fa-solid fa-house",
-        }]
+        let page = |id: &str, label, icon| CatalogPageEntry {
+            id: id.to_string(),
+            label,
+            icon,
+        };
+        let mut pages = vec![
+            page(discover::HOME, "home", "fa-solid fa-house"),
+            page(
+                browse::EXPLORE,
+                "catalog_page_explore",
+                "fa-solid fa-compass",
+            ),
+            page(
+                browse::NEW_RELEASES,
+                "new_releases",
+                "fa-solid fa-compact-disc",
+            ),
+            page(
+                browse::CHARTS,
+                "catalog_page_charts",
+                "fa-solid fa-chart-simple",
+            ),
+            page(
+                browse::MOODS,
+                "catalog_page_moods",
+                "fa-solid fa-masks-theater",
+            ),
+            page(
+                browse::PODCASTS,
+                "catalog_page_podcasts",
+                "fa-solid fa-podcast",
+            ),
+        ];
+        // The library and history are the account's; anonymously they are empty.
+        if self.client.is_authenticated() {
+            pages.extend([
+                page(
+                    browse::LIBRARY_SONGS,
+                    "catalog_page_library_songs",
+                    "fa-solid fa-music",
+                ),
+                page(
+                    browse::LIBRARY_ALBUMS,
+                    "catalog_page_library_albums",
+                    "fa-solid fa-record-vinyl",
+                ),
+                page(
+                    browse::LIBRARY_ARTISTS,
+                    "catalog_page_library_artists",
+                    "fa-solid fa-microphone",
+                ),
+                page(
+                    browse::LIBRARY_SUBSCRIPTIONS,
+                    "catalog_page_subscriptions",
+                    "fa-solid fa-user-check",
+                ),
+                page(
+                    browse::LIBRARY_PODCASTS,
+                    "catalog_page_library_podcasts",
+                    "fa-solid fa-podcast",
+                ),
+                page(
+                    browse::LIBRARY_UPLOADS,
+                    "catalog_page_uploads",
+                    "fa-solid fa-upload",
+                ),
+                page(
+                    browse::HISTORY,
+                    "catalog_page_history",
+                    "fa-solid fa-clock-rotate-left",
+                ),
+            ]);
+        }
+        pages
     }
 
     async fn browse_page(
@@ -165,14 +235,22 @@ impl MediaSource for YtSource {
         id: &str,
         continuation: Option<&str>,
     ) -> Result<BrowsePage, SourceError> {
-        if id != discover::HOME {
-            return Err(SourceError::InvalidInput(format!("no such page: {id}")));
+        if id.trim().is_empty() {
+            return Err(SourceError::InvalidInput(
+                "a page is opened by its id".into(),
+            ));
         }
-        let home = match continuation {
-            Some(token) => self.client.discover_continuation(token).await,
-            None => self.client.discover_home().await,
-        }?;
-        Ok(BrowsePage::from(home))
+        Ok(match continuation {
+            Some(token) => self.client.browse_continuation(token).await?,
+            None => self.client.browse_page(id).await?,
+        })
+    }
+
+    async fn related(&self, item_id: &str) -> Result<BrowsePage, SourceError> {
+        if item_id.trim().is_empty() {
+            return Err(SourceError::InvalidInput("track has no video id".into()));
+        }
+        Ok(self.client.related(item_id).await?)
     }
 
     async fn fetch_album_tracks(&self, browse_id: &str) -> Result<Vec<reader::Track>, SourceError> {

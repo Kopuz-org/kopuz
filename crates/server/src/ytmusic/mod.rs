@@ -2,6 +2,7 @@ use reader::models::{Track, TrackId};
 use serde_json::Value;
 
 pub mod botguard;
+pub mod browse;
 pub mod clients;
 pub mod cookies;
 pub mod decipher;
@@ -15,6 +16,9 @@ pub mod player;
 pub mod playlists;
 pub mod search;
 pub mod verify_session_keepalive;
+
+#[cfg(test)]
+mod fixture_tests;
 
 pub use player::YtStreamInfo;
 
@@ -325,6 +329,20 @@ impl YouTubeMusicClient {
         token: &str,
     ) -> Result<discover::DiscoverHome, String> {
         discover::fetch_continuation(token, self.cookies.as_deref().unwrap_or("")).await
+    }
+
+    /// Any browse page by its page id. The library tabs and history need a
+    /// session; anonymously they come back without shelves.
+    pub async fn browse_page(&self, id: &str) -> Result<discover::BrowsePage, String> {
+        browse::fetch_page(id, self.cookies.as_deref()).await
+    }
+
+    pub async fn browse_continuation(&self, token: &str) -> Result<discover::BrowsePage, String> {
+        browse::fetch_continuation(token, self.cookies.as_deref()).await
+    }
+
+    pub async fn related(&self, video_id: &str) -> Result<discover::BrowsePage, String> {
+        browse::fetch_related(video_id, self.cookies.as_deref()).await
     }
 
     pub async fn fetch_album_tracks(&self, browse_id: &str) -> Result<Vec<Track>, String> {

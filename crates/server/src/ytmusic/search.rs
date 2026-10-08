@@ -45,14 +45,14 @@ impl MusicVideoType {
 }
 
 #[derive(Debug, Clone)]
-struct ParsedRow {
-    video_id: String,
-    title: String,
-    artists: Vec<ArtistCredit>,
-    album: Option<String>,
-    album_browse_id: Option<String>,
-    duration: u64,
-    thumbnail_url: Option<String>,
+pub(super) struct ParsedRow {
+    pub video_id: String,
+    pub title: String,
+    pub artists: Vec<ArtistCredit>,
+    pub album: Option<String>,
+    pub album_browse_id: Option<String>,
+    pub duration: u64,
+    pub thumbnail_url: Option<String>,
 }
 
 #[tracing::instrument(name = "yt.search", skip(cookies), fields(query = %query))]
@@ -609,7 +609,7 @@ fn runs_with_browse(runs: Option<&Value>) -> Vec<(String, Option<String>)> {
         .unwrap_or_default()
 }
 
-fn parsed_to_track(p: ParsedRow) -> Track {
+pub(super) fn parsed_to_track(p: ParsedRow) -> Track {
     let primary_artist = p
         .artists
         .first()
