@@ -800,6 +800,30 @@ impl api::SourceApi for LocalApi {
         self.sources()?.validate_source(&id).await
     }
 
+    async fn accounts(&self, id: String) -> Result<Vec<api::SourceAccount>, ApiError> {
+        self.sources()?.accounts(&id).await
+    }
+
+    async fn switch_account(
+        &self,
+        id: String,
+        account: Option<String>,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let (info, resync) = self.sources()?.switch_account(&id, account).await?;
+        if resync {
+            for kind in [
+                api::JobKind::LibrarySync,
+                api::JobKind::PlaylistSync,
+                api::JobKind::FavoritesSync,
+            ] {
+                if let Err(error) = api::JobApi::start_job(self, kind).await {
+                    tracing::debug!(%error, ?kind, "sync after an account switch not started");
+                }
+            }
+        }
+        Ok(info)
+    }
+
     async fn can_open_browser(&self) -> Result<bool, ApiError> {
         Ok(self.sources()?.can_open_browser().await)
     }

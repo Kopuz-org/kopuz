@@ -208,6 +208,9 @@ pub fn SourceSettings(
                                     crate::settings_remote_folders::RemoteFolderPicker { settings: picker }
                                 }
                             }
+                            if srv.capabilities.accounts && srv.authenticated {
+                                AccountPicker { source_id: srv.id.clone() }
+                            }
                             if needs_host {
                                 crate::settings_popups::HostAccessWarning {
                                     message: i18n::t("browser_playback_needs_host").to_string(),
@@ -236,6 +239,79 @@ pub fn SourceSettings(
                 class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
                 "{i18n::t(\"add_source\")}"
             }
+        }
+    }
+}
+
+/// The accounts a source's sign-in can act as. Drawn only when there is more
+/// than one to pick from; a single account has nothing to choose.
+#[component]
+fn AccountPicker(source_id: String) -> Element {
+    let api = hooks::use_api();
+    let mut chosen = use_signal(|| None::<Option<String>>);
+    let listed_id = source_id.clone();
+    let accounts = use_resource(move || {
+        let api = api.clone();
+        let id = listed_id.clone();
+        async move { api.accounts(id).await.map_err(|error| error.to_string()) }
+    });
+
+    let accounts = match &*accounts.read() {
+        Some(Ok(accounts)) if accounts.len() > 1 => accounts.clone(),
+        Some(Err(error)) => {
+            let message = i18n::t_with("source_accounts_failed", &[("error", error.clone())]);
+            return rsx! {
+                p { class: "text-xs text-red-400 border-t border-white/10 pt-2", "{message}" }
+            };
+        }
+        _ => return rsx! {},
+    };
+    let active = chosen().unwrap_or_else(|| {
+        accounts
+            .iter()
+            .find(|account| account.active)
+            .and_then(|account| account.id.clone())
+    });
+    let options: Vec<(String, String)> = accounts
+        .iter()
+        .map(|account| {
+            let label = match &account.handle {
+                Some(handle) => format!("{} ({handle})", account.name),
+                None => account.name.clone(),
+            };
+            (account.id.clone().unwrap_or_default(), label)
+        })
+        .collect();
+    let current = active.clone();
+
+    rsx! {
+        div { class: "border-t border-white/10 pt-2",
+            crate::settings_items::SettingItem {
+                title: i18n::t("source_account"),
+                control: rsx! {
+                    crate::settings_items::AppSelect {
+                        value: active.clone().unwrap_or_default(),
+                        options,
+                        on_change: move |picked: String| {
+                            let account = (!picked.is_empty()).then_some(picked);
+                            if account == current {
+                                return;
+                            }
+                            chosen.set(Some(account.clone()));
+                            let api = hooks::consume_api();
+                            let id = source_id.clone();
+                            spawn(async move {
+                                if let Err(error) = api.switch_account(id, account).await {
+                                    tracing::warn!(%error, "switching the source account failed");
+                                    chosen.set(None);
+                                    hooks::toast::toast_error(&error.to_string());
+                                }
+                            });
+                        },
+                    }
+                },
+            }
+            p { class: "text-xs text-white/50 px-5 pb-2 -mt-1", "{i18n::t(\"source_account_help\")}" }
         }
     }
 }

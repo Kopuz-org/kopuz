@@ -30,6 +30,48 @@ pub fn sapisid_hash(cookies: &str, origin: &str) -> Option<String> {
     ))
 }
 
+tokio::task_local! {
+    /// The brand account (`pageId`) a signed-in call acts as. Scoped around a
+    /// whole client call by [`as_account`], so a call that is never scoped
+    /// acts as the Google account itself.
+    static PAGE_ID: Option<String>;
+}
+
+/// Run `call` with every signed-in request in it acting as `page_id`.
+pub(crate) async fn as_account<F: std::future::Future>(
+    page_id: Option<String>,
+    call: F,
+) -> F::Output {
+    PAGE_ID.scope(page_id, call).await
+}
+
+pub(super) fn page_id() -> Option<String> {
+    PAGE_ID.try_with(Clone::clone).ok().flatten()
+}
+
+/// Attach a signed-in session to `req`: the cookies, their SAPISIDHASH and,
+/// when a brand account is in scope, `X-Goog-PageId` plus the matching
+/// `context.user.onBehalfOfUser` in `body`. YouTube only honours the brand
+/// account when both carry it.
+pub(super) fn signed(
+    mut req: reqwest::RequestBuilder,
+    body: &mut Value,
+    cookies: &str,
+    auth: String,
+) -> reqwest::RequestBuilder {
+    req = req.header("Cookie", cookies).header("Authorization", auth);
+    if let Some(page_id) = page_id() {
+        req = req.header("X-Goog-PageId", page_id.as_str());
+        if let Some(context) = body.get_mut("context").and_then(Value::as_object_mut) {
+            let user = context.entry("user").or_insert_with(|| json!({}));
+            if let Some(user) = user.as_object_mut() {
+                user.insert("onBehalfOfUser".into(), Value::String(page_id));
+            }
+        }
+    }
+    req
+}
+
 fn cookie_value(header: &str, name: &str) -> Option<String> {
     let prefix = format!("{name}=");
     for part in header.split(';') {
@@ -177,7 +219,7 @@ pub async fn player(
     {
         let auth =
             sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-        req = req.header("Cookie", c).header("Authorization", auth);
+        req = signed(req, &mut body, c, auth);
     }
 
     let resp = match req.json(&body).send().await {
@@ -250,7 +292,7 @@ pub async fn post(
     {
         let auth =
             sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-        req = req.header("Cookie", c).header("Authorization", auth);
+        req = signed(req, &mut body, c, auth);
     }
     let resp = req
         .json(&body)
@@ -280,7 +322,7 @@ pub async fn browse(browse_id: &str, cookies: &str) -> Result<Value, String> {
 pub async fn browse_maybe_auth(browse_id: &str, cookies: Option<&str>) -> Result<Value, String> {
     let client = super::clients::WEB_REMIX;
     let context = build_context(client);
-    let body = json!({
+    let mut body = json!({
         "context": { "client": context, "user": { "lockedSafetyMode": false } },
         "browseId": browse_id,
     });
@@ -298,7 +340,7 @@ pub async fn browse_maybe_auth(browse_id: &str, cookies: Option<&str>) -> Result
     if let Some(c) = cookies {
         let auth =
             sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-        req = req.header("Cookie", c).header("Authorization", auth);
+        req = signed(req, &mut body, c, auth);
     }
     let resp = req
         .json(&body)
@@ -336,7 +378,7 @@ pub async fn browse_continuation_maybe_auth(
 ) -> Result<Value, String> {
     let client = super::clients::WEB_REMIX;
     let context = build_context(client);
-    let body = json!({
+    let mut body = json!({
         "context": { "client": context, "user": { "lockedSafetyMode": false } },
     });
     let mut req = http_client()
@@ -353,7 +395,7 @@ pub async fn browse_continuation_maybe_auth(
     if let Some(c) = cookies {
         let auth =
             sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-        req = req.header("Cookie", c).header("Authorization", auth);
+        req = signed(req, &mut body, c, auth);
     }
     let resp = req
         .json(&body)
@@ -373,7 +415,7 @@ pub async fn browse_continuation_maybe_auth(
 pub async fn visitor_id(cookies: Option<&str>) -> Result<String, String> {
     let client = super::clients::WEB_REMIX;
     let context = build_context(client);
-    let body = json!({ "context": { "client": context } });
+    let mut body = json!({ "context": { "client": context } });
     let mut req = http_client()
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/visitor_id?prettyPrint=false"
@@ -387,7 +429,7 @@ pub async fn visitor_id(cookies: Option<&str>) -> Result<String, String> {
     if let Some(c) = cookies {
         let auth =
             sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-        req = req.header("Cookie", c).header("Authorization", auth);
+        req = signed(req, &mut body, c, auth);
     }
     let resp = req
         .json(&body)
@@ -411,6 +453,44 @@ mod tests {
     const SORRY_PAGE: &str = "<html><head><meta http-equiv=\"content-type\" \
         content=\"text/html; charset=utf-8\"/><title>Sorry...</title><style> body \
         { font-family: verdana, arial, sans-serif; }</style></head><body>...";
+
+    fn sign(body: &mut Value) -> reqwest::Request {
+        let req = reqwest::Client::new().post("https://music.youtube.com/youtubei/v1/browse");
+        signed(req, body, "SAPISID=abc", "SAPISIDHASH 1_x".into())
+            .build()
+            .expect("request")
+    }
+
+    #[tokio::test]
+    async fn a_brand_account_rides_on_the_header_and_the_context() {
+        let mut body =
+            json!({ "context": { "client": {}, "user": { "lockedSafetyMode": false } } });
+        let req = as_account(Some("4242".into()), async { sign(&mut body) }).await;
+        assert_eq!(req.headers()["X-Goog-PageId"], "4242");
+        assert_eq!(req.headers()["Cookie"], "SAPISID=abc");
+        assert_eq!(body["context"]["user"]["onBehalfOfUser"], "4242");
+        assert_eq!(body["context"]["user"]["lockedSafetyMode"], false);
+
+        // A body that had no user object gets one.
+        let mut bare = json!({ "context": { "client": {} } });
+        as_account(Some("4242".into()), async { sign(&mut bare) }).await;
+        assert_eq!(bare["context"]["user"]["onBehalfOfUser"], "4242");
+    }
+
+    #[tokio::test]
+    async fn the_google_account_itself_sends_no_page_id() {
+        for scoped in [false, true] {
+            let mut body = json!({ "context": { "client": {}, "user": {} } });
+            let req = if scoped {
+                as_account(None, async { sign(&mut body) }).await
+            } else {
+                sign(&mut body)
+            };
+            assert!(req.headers().get("X-Goog-PageId").is_none());
+            assert!(body["context"]["user"].get("onBehalfOfUser").is_none());
+            assert_eq!(req.headers()["Authorization"], "SAPISIDHASH 1_x");
+        }
+    }
 
     #[test]
     fn the_abuse_page_is_recognised_and_nothing_else_is() {

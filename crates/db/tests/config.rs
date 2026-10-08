@@ -155,6 +155,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
                 service: MusicService::Jellyfin,
                 yt_browser: None,
                 yt_anonymous: false,
+                account: None,
                 apple_music_storefront: "us".into(),
                 apple_music_language: "en".into(),
             },
@@ -165,6 +166,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
                 service: MusicService::YtMusic,
                 yt_browser: Some(config::Browser::Brave),
                 yt_anonymous: false,
+                account: Some("brand-7".into()),
                 apple_music_storefront: "us".into(),
                 apple_music_language: "en".into(),
             },
@@ -178,6 +180,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
             id: Some("srv-b".into()),
             yt_browser: Some(config::Browser::Brave),
             yt_anonymous: false,
+            account: Some("brand-7".into()),
             apple_music_storefront: "us".into(),
             apple_music_language: "en".into(),
         }),
@@ -209,6 +212,16 @@ async fn config_round_trips_with_creds_in_servers_table() {
     assert_eq!(active.id.as_deref(), Some("srv-b"));
     assert_eq!(active.access_token.as_deref(), Some("TOPSECRET_COOKIE"));
     assert_eq!(active.yt_browser, Some(config::Browser::Brave));
+    assert_eq!(active.account.as_deref(), Some("brand-7"));
+    let saved = loaded.servers.iter().find(|s| s.id == "srv-b").unwrap();
+    assert_eq!(saved.account.as_deref(), Some("brand-7"));
+    let jelly = loaded.servers.iter().find(|s| s.id == "srv-a").unwrap();
+    assert_eq!(
+        jelly.account, None,
+        "only the server that chose one has one"
+    );
+    let hydrated = db.load_server("srv-b").await.unwrap().unwrap();
+    assert_eq!(hydrated.account.as_deref(), Some("brand-7"));
     assert_eq!(loaded.listen_counts.get("ytmusic:VID1"), Some(&7));
     assert_eq!(loaded.listen_counts.get("/music/a.flac"), Some(&3));
 

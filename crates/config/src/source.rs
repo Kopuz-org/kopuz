@@ -208,6 +208,10 @@ pub struct MusicServer {
     /// For `MusicService::YtMusic` only: anonymous mode.
     #[serde(default)]
     pub yt_anonymous: bool,
+    /// For services with several accounts under one sign-in (YouTube brand
+    /// accounts): the one in use. `None` is the signed-in account itself.
+    #[serde(default)]
+    pub account: Option<String>,
     /// For `MusicService::AppleMusic`: the storefront code (e.g. "us",
     /// "gb", "jp") controlling catalog region and media availability.
     #[serde(default = "default_apple_music_storefront")]
@@ -241,6 +245,7 @@ impl MusicServer {
             id: Some(uuid::Uuid::new_v4().to_string()),
             yt_browser: None,
             yt_anonymous: false,
+            account: None,
             apple_music_storefront: "us".to_string(),
             apple_music_language: "en".to_string(),
         }
@@ -262,6 +267,7 @@ impl Default for MusicServer {
             id: None,
             yt_browser: None,
             yt_anonymous: false,
+            account: None,
             apple_music_storefront: "us".to_string(),
             apple_music_language: "en".to_string(),
         }
@@ -393,6 +399,9 @@ pub struct SavedServer {
     /// Persisted anonymous-mode flag.
     #[serde(default)]
     pub yt_anonymous: bool,
+    /// Persisted account choice, for services with several under one sign-in.
+    #[serde(default)]
+    pub account: Option<String>,
     /// Persisted Apple Music storefront (e.g. "us", "gb", "jp").
     #[serde(default = "default_apple_music_storefront")]
     pub apple_music_storefront: String,
@@ -410,6 +419,7 @@ impl SavedServer {
             service,
             yt_browser: None,
             yt_anonymous: false,
+            account: None,
             apple_music_storefront: "us".to_string(),
             apple_music_language: "en".to_string(),
         }
@@ -426,6 +436,7 @@ impl SavedServer {
             service: server.service,
             yt_browser: server.yt_browser,
             yt_anonymous: server.yt_anonymous,
+            account: server.account.clone(),
             apple_music_storefront: server.apple_music_storefront.clone(),
             apple_music_language: server.apple_music_language.clone(),
         }

@@ -70,6 +70,9 @@ pub struct SourceCapabilities {
     pub external_devices: bool,
     /// It plays through a browser on the host, not the engine.
     pub browser_playback: bool,
+    /// One sign-in holds several accounts, which a client can list and
+    /// switch between.
+    pub accounts: bool,
     pub playlists: PlaylistCapability,
     pub artists: ArtistPresentation,
     pub albums: AlbumPresentation,
@@ -138,6 +141,17 @@ pub struct SourceInfo {
     pub permanent: bool,
     /// What the daemon's last probe found; `None` until it has probed this source.
     pub state: Option<crate::SourceState>,
+}
+
+/// One account a source's sign-in can act as, such as a YouTube brand account.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceAccount {
+    /// What to switch to; `None` is the signed-in account itself.
+    pub id: Option<String>,
+    pub name: String,
+    pub handle: Option<String>,
+    /// The one the source acts as now.
+    pub active: bool,
 }
 
 /// A source to create or update, as the answers to a [`ServiceInfo`]'s form.

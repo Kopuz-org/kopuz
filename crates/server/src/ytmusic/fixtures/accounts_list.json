@@ -1,0 +1,111 @@
+{
+  "responseContext": {
+    "serviceTrackingParams": [
+      { "service": "GFEEDBACK", "params": [{ "key": "logged_in", "value": "1" }] }
+    ]
+  },
+  "actions": [
+    {
+      "getMultiPageMenuAction": {
+        "menu": {
+          "multiPageMenuRenderer": {
+            "header": {
+              "simpleMenuHeaderRenderer": {
+                "title": { "runs": [{ "text": "Accounts" }] }
+              }
+            },
+            "sections": [
+              {
+                "accountSectionListRenderer": {
+                  "header": {
+                    "googleAccountHeaderRenderer": {
+                      "name": { "simpleText": "Ada Example" },
+                      "email": { "simpleText": "ada@example.com" }
+                    }
+                  },
+                  "contents": [
+                    {
+                      "accountItemSectionRenderer": {
+                        "contents": [
+                          {
+                            "accountItem": {
+                              "accountName": { "runs": [{ "text": "Ada Example" }] },
+                              "accountPhoto": {
+                                "thumbnails": [
+                                  { "url": "https://yt3.ggpht.com/a/ada=s88", "width": 88, "height": 88 }
+                                ]
+                              },
+                              "isSelected": true,
+                              "isDisabled": false,
+                              "hasChannel": true,
+                              "serviceEndpoint": {
+                                "selectActiveIdentityEndpoint": {
+                                  "supportedTokens": [
+                                    { "accountStateToken": { "hasChannel": true, "isMerged": false, "obfuscatedGaiaId": "100000000000000000001" } },
+                                    { "offlineCacheKeyToken": { "clientCacheKey": "100000000000000000001" } },
+                                    { "accountSigninToken": { "signinUrl": "https://accounts.google.com/ServiceLogin" } },
+                                    { "datasyncIdToken": { "datasyncIdToken": "100000000000000000001||" } }
+                                  ]
+                                }
+                              },
+                              "accountByline": { "runs": [{ "text": "ada@example.com" }] },
+                              "channelHandle": { "runs": [{ "text": "@adaexample" }] }
+                            }
+                          },
+                          {
+                            "accountItem": {
+                              "accountName": { "runs": [{ "text": "Ada Records" }] },
+                              "accountPhoto": {
+                                "thumbnails": [
+                                  { "url": "https://yt3.ggpht.com/a/records=s88", "width": 88, "height": 88 }
+                                ]
+                              },
+                              "isSelected": false,
+                              "isDisabled": false,
+                              "hasChannel": true,
+                              "serviceEndpoint": {
+                                "selectActiveIdentityEndpoint": {
+                                  "supportedTokens": [
+                                    { "pageIdToken": { "pageId": "112233445566778899000" } },
+                                    { "accountStateToken": { "hasChannel": true, "isMerged": false, "obfuscatedGaiaId": "100000000000000000002" } },
+                                    { "offlineCacheKeyToken": { "clientCacheKey": "100000000000000000002" } },
+                                    { "datasyncIdToken": { "datasyncIdToken": "100000000000000000002||100000000000000000001" } }
+                                  ]
+                                }
+                              },
+                              "accountByline": { "runs": [{ "text": "@adarecords" }] }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "footer": {
+              "multiPageMenuSectionRenderer": {
+                "items": [
+                  {
+                    "compactLinkRenderer": {
+                      "icon": { "iconType": "PERSON_ADD" },
+                      "title": { "runs": [{ "text": "Add account" }] },
+                      "navigationEndpoint": { "urlEndpoint": { "url": "https://accounts.google.com/AddSession" } }
+                    }
+                  },
+                  {
+                    "compactLinkRenderer": {
+                      "icon": { "iconType": "EXIT_TO_APP" },
+                      "title": { "runs": [{ "text": "Sign out" }] },
+                      "navigationEndpoint": { "signOutEndpoint": { "hack": true } }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -51,6 +51,7 @@ const CAPABILITIES: Capabilities = Capabilities {
     browse_folders: true,
     external_devices: false,
     browser_playback: false,
+    accounts: false,
     sync: true,
     downloads: true,
     discover: false,

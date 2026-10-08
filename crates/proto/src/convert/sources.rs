@@ -18,6 +18,7 @@ pub fn capabilities_to_proto(value: &api::SourceCapabilities) -> SourceCapabilit
         browse_folders: value.browse_folders,
         external_devices: value.external_devices,
         browser_playback: value.browser_playback,
+        accounts: value.accounts,
         playlists: match value.playlists {
             PlaylistCapability::None => crate::PlaylistCapability::None,
             PlaylistCapability::AddRemove => crate::PlaylistCapability::AddRemove,
@@ -35,6 +36,24 @@ pub fn capabilities_to_proto(value: &api::SourceCapabilities) -> SourceCapabilit
             FavoritesSyncMode::Instant => crate::FavoritesSyncMode::FavoritesSyncInstant,
             FavoritesSyncMode::Paginated => crate::FavoritesSyncMode::FavoritesSyncPaginated,
         } as i32,
+    }
+}
+
+pub fn source_account_to_proto(value: &api::SourceAccount) -> SourceAccount {
+    SourceAccount {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        handle: value.handle.clone(),
+        active: value.active,
+    }
+}
+
+pub fn source_account_from_proto(value: &SourceAccount) -> api::SourceAccount {
+    api::SourceAccount {
+        id: value.id.clone(),
+        name: value.name.clone(),
+        handle: value.handle.clone(),
+        active: value.active,
     }
 }
 
@@ -57,6 +76,7 @@ pub fn capabilities_from_proto(value: Option<&SourceCapabilities>) -> api::Sourc
         browse_folders: value.browse_folders,
         external_devices: value.external_devices,
         browser_playback: value.browser_playback,
+        accounts: value.accounts,
         playlists: match crate::PlaylistCapability::try_from(value.playlists) {
             Ok(crate::PlaylistCapability::AddRemove) => api::PlaylistCapability::AddRemove,
             Ok(crate::PlaylistCapability::Reorder) => api::PlaylistCapability::Reorder,
@@ -291,6 +311,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn an_account_round_trips_with_and_without_an_id() {
+        for account in [
+            api::SourceAccount {
+                id: None,
+                name: "Ada".into(),
+                handle: Some("@ada".into()),
+                active: false,
+            },
+            api::SourceAccount {
+                id: Some("1122".into()),
+                name: "Ada Records".into(),
+                handle: None,
+                active: true,
+            },
+        ] {
+            assert_eq!(
+                account,
+                source_account_from_proto(&source_account_to_proto(&account))
+            );
+        }
+    }
+
     /// A source row is what a settings page renders, so every field of it has
     /// to survive the wire -- and none of them may be a credential.
     #[test]
@@ -312,6 +355,7 @@ mod tests {
                 downloads: true,
                 browse_folders: true,
                 external_devices: false,
+                accounts: true,
                 playlists: api::PlaylistCapability::Reorder,
                 artists: api::ArtistPresentation::Library,
                 albums: api::AlbumPresentation::Standard,

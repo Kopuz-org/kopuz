@@ -534,6 +534,111 @@ async fn dont_recommend_is_refused_by_a_source_without_it() {
     assert!(!caps.dont_recommend);
 }
 
+/// Account switching is for a sign-in that holds several accounts. A source
+/// without one says so through its capabilities, and both calls refuse with
+/// `Unsupported` on both transports rather than failing as transport errors.
+#[tokio::test]
+async fn accounts_are_refused_by_a_source_without_them() {
+    let pair = spawn_pair().await;
+    let draft = api::SourceDraft {
+        name: "Home".into(),
+        service: "jellyfin".into(),
+        values: vec![api::FieldValue::new("url", "https://jelly.example")],
+        ..Default::default()
+    };
+    let server = pair.wire.upsert_source(draft).await.expect("add server");
+    let local_id = pair
+        .wire
+        .sources()
+        .await
+        .expect("sources")
+        .into_iter()
+        .find(|source| source.active)
+        .expect("an active source")
+        .id;
+
+    for id in [local_id, server.id.clone()] {
+        let listed = [
+            pair.local.accounts(id.clone()).await.expect_err("local"),
+            pair.wire.accounts(id.clone()).await.expect_err("wire"),
+        ];
+        let switched = [
+            pair.local
+                .switch_account(id.clone(), Some("brand".into()))
+                .await
+                .expect_err("local"),
+            pair.wire
+                .switch_account(id.clone(), None)
+                .await
+                .expect_err("wire"),
+        ];
+        for error in listed.iter().chain(&switched) {
+            assert_eq!(error.code, ErrorCode::Unsupported, "{id}: {error:?}");
+        }
+    }
+
+    let sources = pair.wire.sources().await.expect("sources");
+    assert!(sources.iter().all(|source| !source.capabilities.accounts));
+    assert_eq!(sources, pair.local.sources().await.expect("local sources"));
+
+    let missing = [
+        pair.local.accounts("nope".into()).await.expect_err("local"),
+        pair.wire.accounts("nope".into()).await.expect_err("wire"),
+    ];
+    assert_eq!(missing[0].code, missing[1].code);
+}
+
+/// A signed-in source with accounts offers them, and the choice is kept with
+/// the source: switching an inactive one touches no network and no playback.
+#[tokio::test]
+async fn an_account_choice_is_kept_with_its_source() {
+    let pair = spawn_pair().await;
+    let draft = api::SourceDraft {
+        name: "Music".into(),
+        service: "ytmusic".into(),
+        values: vec![api::FieldValue::new("auth_method", "browser")],
+        ..Default::default()
+    };
+    let added = pair.wire.upsert_source(draft).await.expect("add source");
+    assert!(!added.capabilities.accounts, "no sign-in, no accounts");
+    pair.local
+        .provision_credentials(api::CredentialProvision {
+            server_id: added.id.clone(),
+            secret: "SAPISID=not-a-real-cookie".into(),
+            user_id: Some("yt-test".into()),
+            browser: None,
+        })
+        .await
+        .expect("provision");
+
+    let switched = pair
+        .wire
+        .switch_account(added.id.clone(), Some("brand-1".into()))
+        .await
+        .expect("switch over the wire");
+    assert!(switched.capabilities.accounts);
+    assert!(
+        !switched.active,
+        "switching an account does not switch sources"
+    );
+    let stored = |pair: &Pair, id: String| {
+        let database = pair.database.clone();
+        async move { database.load_server(&id).await.unwrap().unwrap().account }
+    };
+    assert_eq!(
+        stored(&pair, added.id.clone()).await.as_deref(),
+        Some("brand-1")
+    );
+
+    let back = pair
+        .local
+        .switch_account(added.id.clone(), None)
+        .await
+        .expect("switch back locally");
+    assert_eq!(back, switched, "the row a client renders does not change");
+    assert_eq!(stored(&pair, added.id.clone()).await, None);
+}
+
 /// Scan the library and wait for the job to finish.
 async fn run_scan(pair: &Pair) {
     let job = pair

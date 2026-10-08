@@ -7,7 +7,7 @@ exports_files(["Cargo.toml"])
 
 kopuz_rust_library(
     name = "server",
-    compile_data = glob(["src/ytmusic/decipher/solver/*"]),
+    compile_data = glob(["src/ytmusic/decipher/solver/*", "src/ytmusic/fixtures/*"]),
     extra_deps = [
         "//crates/config",
         "//crates/db",

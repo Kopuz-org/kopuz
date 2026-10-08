@@ -1278,6 +1278,36 @@ impl api::SourceApi for GrpcApi {
         Ok(convert::source_state_from_proto(state.get_ref().state))
     }
 
+    async fn accounts(&self, id: String) -> Result<Vec<api::SourceAccount>, ApiError> {
+        let list = self
+            .client()
+            .get_source_accounts(Request::new(proto::SourceId { id }))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .get_ref()
+            .accounts
+            .iter()
+            .map(convert::source_account_from_proto)
+            .collect())
+    }
+
+    async fn switch_account(
+        &self,
+        id: String,
+        account: Option<String>,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let info = self
+            .client()
+            .switch_source_account(Request::new(proto::SwitchSourceAccountRequest {
+                id,
+                account,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(info.get_ref()))
+    }
+
     async fn can_open_browser(&self) -> Result<bool, ApiError> {
         let access = self
             .client()

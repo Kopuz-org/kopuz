@@ -119,6 +119,8 @@ service Kopuz {
   rpc BrowseSource(BrowseSourceRequest) returns (SourceFolderList);
   rpc ValidateSource(SourceId) returns (SourceStateResponse);
   rpc CanOpenBrowser(CanOpenBrowserRequest) returns (BrowserAccess);
+  rpc GetSourceAccounts(SourceId) returns (SourceAccountList);
+  rpc SwitchSourceAccount(SwitchSourceAccountRequest) returns (SourceInfo);
   rpc GetIntegrations(GetIntegrationsRequest) returns (IntegrationList);
   rpc SetIntegrationSettings(SetIntegrationSettingsRequest) returns (IntegrationInfo);
   rpc ClearIntegration(IntegrationId) returns (Unit);
@@ -739,6 +741,9 @@ message SourceCapabilities {
   // Playing a search result starts a track radio from it rather than
   // queueing the results.
   bool search_radio = 18;
+  // One sign-in holds several accounts, which a client can list and switch
+  // between.
+  bool accounts = 26;
 }
 
 // What making a source usable takes.
@@ -867,6 +872,24 @@ message SourceStateResponse {
 }
 
 message CanOpenBrowserRequest {}
+
+// One account a source's sign-in can act as. An absent id is the signed-in
+// account itself.
+message SourceAccount {
+  optional string id = 1;
+  string name = 2;
+  optional string handle = 3;
+  bool active = 4;
+}
+
+message SourceAccountList {
+  repeated SourceAccount accounts = 1;
+}
+
+message SwitchSourceAccountRequest {
+  string id = 1;
+  optional string account = 2;
+}
 
 // False on a sandboxed daemon that cannot spawn a browser for a sign-in.
 message BrowserAccess {

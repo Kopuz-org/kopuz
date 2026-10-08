@@ -18,7 +18,7 @@ pub use cache::prime;
 use cache::{LyricsInflightGuard, lyrics_cache, remember_lyrics, try_begin_lyrics_fetch};
 use local::fetch_local_lrc;
 use lrc::{extract_line_timestamps, parse_enhanced_words, parse_lrc};
-pub use request::{AppleMusicLyricsAuth, LyricsRequest, LyricsServerAuth};
+pub use request::{AppleMusicLyricsAuth, LyricsRequest, LyricsServerAuth, YouTubeMusicLyricsAuth};
 use server::{fetch_jellyfin_lyrics, fetch_subsonic_lyrics};
 pub use utils::lyrics::{LyricChunk, LyricLine, Lyrics};
 
@@ -442,7 +442,8 @@ where
 
     if let Some(video_id) = extract_youtube_video_id(track_path) {
         let started = Instant::now();
-        let native = fetch_youtube_music_lyrics(&video_id, reach).await;
+        let native =
+            fetch_youtube_music_lyrics(&video_id, request.youtube_music_auth.as_ref(), reach).await;
         tracing::info!(
             target: "kopuz::lyrics",
             "youtube_music key_hash={} elapsed_ms={} kind={}",
@@ -723,10 +724,14 @@ fn is_remote_track(track_path: &str) -> bool {
 /// The song's own lyrics from YouTube Music, for a track it streams. A
 /// failed request counts as unreached, so a passing outage is not cached as
 /// the song having no lyrics.
-async fn fetch_youtube_music_lyrics(video_id: &str, reach: &ProviderReach) -> Option<Lyrics> {
+async fn fetch_youtube_music_lyrics(
+    video_id: &str,
+    auth: Option<&YouTubeMusicLyricsAuth>,
+    reach: &ProviderReach,
+) -> Option<Lyrics> {
     use crate::ytmusic::lyrics::YtLyrics;
 
-    match crate::ytmusic::lyrics::fetch(video_id, None).await {
+    match youtube_music_client(auth).lyrics(video_id).await {
         Ok(found) => found.map(|lyrics| match lyrics {
             YtLyrics::Timed(lines) => Lyrics::Synced(
                 lines
@@ -749,6 +754,18 @@ async fn fetch_youtube_music_lyrics(video_id: &str, reach: &ProviderReach) -> Op
             reach.unreachable();
             None
         }
+    }
+}
+
+fn youtube_music_client(
+    auth: Option<&YouTubeMusicLyricsAuth>,
+) -> crate::ytmusic::YouTubeMusicClient {
+    match auth {
+        Some(auth) => crate::ytmusic::YouTubeMusicClient::signed_in_as(
+            auth.cookies.clone(),
+            auth.account.clone(),
+        ),
+        None => crate::ytmusic::YouTubeMusicClient::new(),
     }
 }
 
@@ -1005,6 +1022,25 @@ mod tests {
         paxsenix_apple_to_lyrics,
     };
     use super::*;
+
+    #[tokio::test]
+    async fn youtube_music_lyrics_act_as_the_chosen_brand_account() {
+        let auth = |account: Option<&str>| YouTubeMusicLyricsAuth {
+            cookies: "SAPISID=abc".into(),
+            account: account.map(Into::into),
+        };
+        let brand = auth(Some("4242"));
+        assert_eq!(
+            youtube_music_client(Some(&brand))
+                .acting_as()
+                .await
+                .as_deref(),
+            Some("4242")
+        );
+        let own = auth(None);
+        assert_eq!(youtube_music_client(Some(&own)).acting_as().await, None);
+        assert_eq!(youtube_music_client(None).acting_as().await, None);
+    }
 
     #[test]
     fn a_run_is_conclusive_until_a_provider_cannot_be_reached() {

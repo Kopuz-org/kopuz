@@ -56,6 +56,7 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
         browse_folders: caps.browse_folders,
         external_devices: caps.external_devices,
         browser_playback: caps.browser_playback,
+        accounts: caps.accounts,
         sync: caps.sync,
         downloads: caps.downloads,
         discover: caps.discover,
@@ -472,12 +473,24 @@ impl SourceService {
         self.config
             .mutate_state(&["servers", "server"], move |config| {
                 match config.servers.iter_mut().find(|entry| entry.id == saved.id) {
-                    Some(existing) => *existing = saved.clone(),
+                    // The form does not carry the account choice, so an edit
+                    // keeps it unless the source now speaks another service.
+                    Some(existing) => {
+                        let account = existing
+                            .account
+                            .take()
+                            .filter(|_| existing.service == saved.service);
+                        *existing = saved.clone();
+                        existing.account = account;
+                    }
                     None => config.servers.push(saved.clone()),
                 }
                 if config.active_source.server_id() == Some(saved.id.as_str())
                     && let Some(server) = config.server.as_mut()
                 {
+                    if server.service != saved.service {
+                        server.account = None;
+                    }
                     server.name.clone_from(&saved.name);
                     server.url.clone_from(&saved.url);
                     server.service = saved.service;
@@ -873,6 +886,78 @@ impl SourceService {
                 path,
             })
             .collect())
+    }
+
+    pub async fn accounts(&self, id: &str) -> Result<Vec<api::SourceAccount>, ApiError> {
+        let (_, source) = self.resolve(id).await?;
+        if !source.capabilities().accounts {
+            return Err(ApiError::unsupported(
+                "this source has no accounts to switch between",
+            ));
+        }
+        let accounts = source
+            .accounts()
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        Ok(accounts
+            .into_iter()
+            .map(|account| api::SourceAccount {
+                id: account.id,
+                name: account.name,
+                handle: account.handle,
+                active: account.active,
+            })
+            .collect())
+    }
+
+    /// Act as another account of `id`'s sign-in. Answers whether it was the
+    /// active source and the account changed, in which case what is loaded
+    /// from the old account has to be synced again.
+    pub async fn switch_account(
+        &self,
+        id: &str,
+        account: Option<String>,
+    ) -> Result<(SourceInfo, bool), ApiError> {
+        self.config.ensure_unlocked(&["server", "servers"])?;
+        let (_, source) = self.resolve(id).await?;
+        if !source.capabilities().accounts {
+            return Err(ApiError::unsupported(
+                "this source has no accounts to switch between",
+            ));
+        }
+        let account = account.filter(|account| !account.is_empty());
+        let current = self.current().await;
+        let previous = current
+            .servers
+            .iter()
+            .find(|server| server.id == id)
+            .ok_or_else(|| ApiError::not_found("no such server"))?
+            .account
+            .clone();
+        if previous == account {
+            return Ok((self.source_info(id).await?, false));
+        }
+        let active = current.active_source.server_id() == Some(id);
+        let target = id.to_string();
+        self.config
+            .mutate_state(&["servers", "server"], move |config| {
+                if let Some(saved) = config.servers.iter_mut().find(|s| s.id == target) {
+                    saved.account.clone_from(&account);
+                }
+                if config.active_source.server_id() == Some(target.as_str())
+                    && let Some(server) = config.server.as_mut()
+                {
+                    server.account = account;
+                }
+            })
+            .await?;
+        if active {
+            self.session.reset_playback().await?;
+            self.finish_source_change();
+        } else {
+            self.session.invalidate(Table::Servers);
+        }
+        Ok((self.source_info(id).await?, active))
     }
 
     pub async fn validate_source(&self, id: &str) -> Result<SourceState, ApiError> {

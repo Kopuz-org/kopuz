@@ -147,6 +147,9 @@ pub struct Capabilities {
     pub external_devices: bool,
     /// It plays through a browser on the host, not the engine.
     pub browser_playback: bool,
+    /// One sign-in holds several accounts (YouTube brand accounts), which a
+    /// client can list and switch between.
+    pub accounts: bool,
     pub sync: bool,
     pub downloads: bool,
     pub discover: bool,
@@ -158,6 +161,16 @@ pub struct Capabilities {
     pub artist_view: ArtistView,
     pub albums: AlbumType,
     pub favorites_sync: FavoritesSync,
+}
+
+/// One account a sign-in can act as.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceAccount {
+    /// `None` for the signed-in account itself.
+    pub id: Option<String>,
+    pub name: String,
+    pub handle: Option<String>,
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

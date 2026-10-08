@@ -8,7 +8,7 @@ use reader::models::{ArtistCredit, Track};
 use serde_json::{Value, json};
 
 use super::clients::{ORIGIN_YOUTUBE_MUSIC, WEB_REMIX};
-use super::innertube::{http_client, sapisid_hash};
+use super::innertube::{http_client, sapisid_hash, signed};
 use super::search::synthesize_album_id;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -825,12 +825,13 @@ async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
     // jar with no SAPISID both fall through to an anonymous request —
     // discover still returns generic recommendations rather than
     // hard-failing with "SAPISID missing".
+    let mut body = body.clone();
     if !cookies.is_empty()
         && let Some(auth) = sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC)
     {
-        req = req.header("Cookie", cookies).header("Authorization", auth);
+        req = signed(req, &mut body, cookies, auth);
     }
-    req.json(body)
+    req.json(&body)
         .send()
         .await
         .map_err(|e| format!("discover HTTP: {e}"))?

@@ -1320,6 +1320,38 @@ impl Kopuz for KopuzGrpc {
         }))
     }
 
+    async fn get_source_accounts(
+        &self,
+        request: Request<proto::SourceId>,
+    ) -> Result<Response<proto::SourceAccountList>, Status> {
+        let accounts = self
+            .0
+            .api
+            .accounts(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::SourceAccountList {
+            accounts: accounts
+                .iter()
+                .map(convert::source_account_to_proto)
+                .collect(),
+        }))
+    }
+
+    async fn switch_source_account(
+        &self,
+        request: Request<proto::SwitchSourceAccountRequest>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let request = request.into_inner();
+        let info = self
+            .0
+            .api
+            .switch_account(request.id, request.account)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
     async fn can_open_browser(
         &self,
         _request: Request<proto::CanOpenBrowserRequest>,

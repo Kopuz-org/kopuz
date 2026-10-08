@@ -6,8 +6,8 @@ use crate::{server_ops::ServerConn, ytmusic::YouTubeMusicClient};
 
 use super::{
     AlbumType, ArtistLookup, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync,
-    MediaSource, PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds, RemoteAlbum, SourceError,
-    StreamInfo, mirror_added, mirror_created,
+    MediaSource, PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds, RemoteAlbum, SourceAccount,
+    SourceError, StreamInfo, mirror_added, mirror_created,
 };
 
 /// YT Music's "Liked Music" auto-playlist. It is not browsed like the user's
@@ -22,6 +22,7 @@ pub(super) struct YtSource {
     db: Db,
     source: Source,
     client: YouTubeMusicClient,
+    account: Option<String>,
 }
 
 impl YtSource {
@@ -29,7 +30,8 @@ impl YtSource {
         Self {
             db,
             source,
-            client: YouTubeMusicClient::with_cookies(conn.token.clone()),
+            client: YouTubeMusicClient::signed_in_as(conn.token.clone(), conn.account.clone()),
+            account: conn.account.clone(),
         }
     }
 
@@ -65,6 +67,7 @@ impl MediaSource for YtSource {
             browse_folders: false,
             external_devices: false,
             browser_playback: false,
+            accounts: self.client.is_authenticated(),
             sync: true,
             downloads: true,
             discover: true,
@@ -88,6 +91,20 @@ impl MediaSource for YtSource {
             .dislike_video(item_id)
             .await
             .map_err(SourceError::from)
+    }
+
+    async fn accounts(&self) -> Result<Vec<SourceAccount>, SourceError> {
+        let listed = self.client.accounts().await?;
+        let chosen = self.account.as_deref();
+        Ok(listed
+            .into_iter()
+            .map(|account| SourceAccount {
+                active: account.page_id.as_deref() == chosen,
+                id: account.page_id,
+                name: account.name,
+                handle: account.handle,
+            })
+            .collect())
     }
 
     async fn start_radio(&self, seed_ref: &str) -> Result<Vec<reader::Track>, SourceError> {

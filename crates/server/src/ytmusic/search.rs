@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use super::SOURCE_PREFIX;
 use super::clients::WEB_REMIX;
-use super::innertube::sapisid_hash;
+use super::innertube::{sapisid_hash, signed};
 
 const ORIGIN_YT_MUSIC: &str = "https://music.youtube.com";
 const SONGS_FILTER: &str = "EgWKAQIIAWoMEAMQBBAJEAoQDhAV";
@@ -305,15 +305,15 @@ async fn do_search_raw(
         .header("X-YouTube-Client-Version", client.client_version)
         .header("X-Origin", ORIGIN_YT_MUSIC)
         .header("Origin", ORIGIN_YT_MUSIC)
-        .header("Referer", format!("{ORIGIN_YT_MUSIC}/"))
-        .json(&body);
+        .header("Referer", format!("{ORIGIN_YT_MUSIC}/"));
     if let Some(c) = cookies {
-        req = req.header("Cookie", c);
-        if let Some(auth) = sapisid_hash(c, ORIGIN_YT_MUSIC) {
-            req = req.header("Authorization", auth);
-        }
+        req = match sapisid_hash(c, ORIGIN_YT_MUSIC) {
+            Some(auth) => signed(req, &mut body, c, auth),
+            None => req.header("Cookie", c),
+        };
     }
-    req.send()
+    req.json(&body)
+        .send()
         .await
         .map_err(|e| format!("search HTTP: {e}"))?
         .error_for_status()

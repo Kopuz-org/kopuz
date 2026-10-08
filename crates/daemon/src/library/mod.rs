@@ -400,6 +400,9 @@ impl LibraryService {
                     catalog_id: catalog_id.to_string(),
                 });
             }
+            if let Some(auth) = youtube_music_lyrics_auth(server) {
+                request = request.youtube_music_auth(auth);
+            }
         }
 
         // Three layers, cheapest first: this process's cache, the library's
@@ -608,9 +611,50 @@ impl QueueMaterializer for LibraryService {
     }
 }
 
+/// A signed-in YouTube Music source reads lyrics as its chosen brand account,
+/// like its other calls. Anonymous mode has no session to read with.
+fn youtube_music_lyrics_auth(
+    server: &config::MusicServer,
+) -> Option<server::lyrics::YouTubeMusicLyricsAuth> {
+    if server.service != config::MusicService::YtMusic || server.yt_anonymous {
+        return None;
+    }
+    let cookies = server.access_token.clone().filter(|c| !c.is_empty())?;
+    Some(server::lyrics::YouTubeMusicLyricsAuth {
+        cookies,
+        account: server.account.clone(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn youtube_music_lyrics_carry_the_chosen_brand_account() {
+        let mut server = config::MusicServer::new_with_service(
+            "YouTube Music".into(),
+            String::new(),
+            config::MusicService::YtMusic,
+        );
+        server.access_token = Some("SAPISID=abc".into());
+        server.account = Some("4242".into());
+        let auth = youtube_music_lyrics_auth(&server).expect("signed in");
+        assert_eq!(auth.cookies, "SAPISID=abc");
+        assert_eq!(auth.account.as_deref(), Some("4242"));
+
+        server.account = None;
+        let own = youtube_music_lyrics_auth(&server).expect("signed in");
+        assert_eq!(own.account, None);
+
+        server.access_token = Some(String::new());
+        assert_eq!(youtube_music_lyrics_auth(&server), None);
+
+        let mut jellyfin = server.clone();
+        jellyfin.service = config::MusicService::Jellyfin;
+        jellyfin.access_token = Some("token".into());
+        assert_eq!(youtube_music_lyrics_auth(&jellyfin), None);
+    }
 
     fn track(n: usize, artist: &str) -> Track {
         Track {
