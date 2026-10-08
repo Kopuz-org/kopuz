@@ -68,6 +68,9 @@ pub struct LoadArgs {
 pub struct Player {
     engine: EngineHandle,
     now_playing: Option<NowPlayingMeta>,
+    /// A crossfade or gapless load's metadata, held back until it commits so
+    /// the OS display (and the seek clamp) keep describing the audible track.
+    incoming: Option<(u64, NowPlayingMeta)>,
 }
 
 impl Player {
@@ -75,6 +78,7 @@ impl Player {
         Self {
             engine,
             now_playing: None,
+            incoming: None,
         }
     }
 
@@ -146,20 +150,25 @@ impl Player {
             service_replay_gain,
             reply,
         }));
-        self.now_playing = Some(meta);
         // Push the OS now-playing display now only for an immediate switch (the
-        // UI hydrates to the new track at the same time). A crossfade keeps
-        // showing the outgoing track until the fade completes, so its metadata
-        // is pushed then, via `commit_now_playing`.
+        // UI hydrates to the new track at the same time). A crossfade or gapless
+        // switch keeps showing the outgoing track until the engine switches, so
+        // its metadata is pushed then, via `commit_now_playing`.
         if matches!(transition, Transition::Immediate) {
+            self.now_playing = Some(meta);
+            self.incoming = None;
             self.push_now_playing(start_at.unwrap_or(Duration::ZERO), true);
+        } else {
+            self.incoming = Some((token, meta));
         }
     }
 
-    /// Push the stored now-playing metadata to the OS display. Used to commit a
-    /// crossfade's incoming track once its fade completes (its push was deferred
-    /// in `load`).
-    pub fn commit_now_playing(&self) {
+    /// Adopt and push the deferred metadata of the load `token` once the
+    /// engine has switched to it.
+    pub fn commit_now_playing(&mut self, token: u64) {
+        if let Some((_, meta)) = self.incoming.take_if(|(incoming, _)| *incoming == token) {
+            self.now_playing = Some(meta);
+        }
         self.update_now_playing_system();
     }
 
@@ -210,6 +219,7 @@ impl Player {
     pub fn stop(&mut self) {
         self.engine.send(Command::Stop { pause_device: true });
         self.now_playing = None;
+        self.incoming = None;
         // Tear down the Android foreground service + media notification so the OS can
         // reclaim the process; otherwise the dismissed-notification state lingers.
         #[cfg(target_os = "android")]
@@ -259,7 +269,16 @@ impl Player {
         self.engine.send(Command::SetSampleRateMode(mode));
     }
 
-    pub fn update_metadata(&mut self, meta: NowPlayingMeta) {
+    /// Refresh the metadata of the load `token`, deferred or live.
+    pub fn update_metadata(&mut self, token: u64, meta: NowPlayingMeta) {
+        if let Some((_, incoming)) = self
+            .incoming
+            .as_mut()
+            .filter(|(incoming, _)| *incoming == token)
+        {
+            *incoming = meta;
+            return;
+        }
         self.engine.send(Command::SetDuration(meta.duration));
         self.now_playing = Some(meta);
         self.update_now_playing_system();

@@ -38,6 +38,9 @@ pub type SourceFactory = Box<
 pub enum Transition {
     Immediate,
     Crossfade(Duration),
+    /// Wait behind the current session and start on the sample after its
+    /// last one.
+    Gapless,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -55,6 +58,10 @@ pub struct LoadOutcome {
     /// False when a requested crossfade fell back to an immediate switch
     /// (config mismatch, idle/drained outgoing session, or paused).
     pub crossfaded: bool,
+    /// True when a gapless load is queued behind the current session; it
+    /// becomes audible on `TrackSwitched`. False when it fell back to an
+    /// immediate switch because there was nothing left to play first.
+    pub gapless: bool,
 }
 
 /// Resolved once the source is playing (`Ok`) or failed to load (`Err`).
@@ -80,7 +87,8 @@ pub struct LoadRequest {
 
 pub enum Command {
     Load(LoadRequest),
-    /// Drop a load that is still probing without touching the live session.
+    /// Drop a load that is still probing, and a gapless session queued behind
+    /// the live one, without touching the live session.
     CancelPending,
     /// Seek the visible session. `token`, when set, is the session the caller
     /// believes is visible; the engine drops the seek if a crossfade has since
@@ -125,9 +133,10 @@ pub enum Event {
     Ended {
         token: u64,
     },
-    /// A crossfade finished and the outgoing session was torn down. `token` is
+    /// A crossfade finished, or a gapless session took over at the last sample
+    /// of the one before it, and the outgoing session was torn down. `token` is
     /// the now-sole (incoming) session; `from_token` the retired outgoing one.
-    /// This is the authoritative signal to commit a deferred crossfade UI.
+    /// This is the authoritative signal to commit a deferred transition UI.
     TrackSwitched {
         token: u64,
         from_token: u64,

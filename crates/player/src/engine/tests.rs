@@ -2006,3 +2006,76 @@ fn an_unbuffered_slow_source_cannot_even_probe() {
         "expected the probe to stall on unavailable bytes, got: {err}"
     );
 }
+
+#[test]
+fn gapless_load_starts_on_the_sample_after_the_last_one() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory_a, duration_a) = wav_factory(0.5);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    let (factory_b, duration_b) = wav_factory(1.0);
+    let outcome = load_with(&engine, 2, factory_b, duration_b, Transition::Gapless);
+    assert!(outcome.gapless && !outcome.crossfaded);
+    // Queued behind A: nothing switches until A has been heard to the end.
+    assert_eq!(engine.status().token, 1);
+    // Let both decoders fill their rings, so an empty block can only be a gap.
+    std::thread::sleep(Duration::from_millis(200));
+
+    let a_samples = (0.5 * TEST_CONFIG.sample_rate as f64) as usize * TEST_CONFIG.channels;
+    let mut samples = Vec::new();
+    while samples.len() < a_samples * 2 {
+        samples.extend(sink.pull(1000));
+    }
+    wait_until("TrackSwitched", || {
+        drain_events(&mut events, &mut seen);
+        seen.iter().any(|e| {
+            matches!(
+                e,
+                Event::TrackSwitched {
+                    token: 2,
+                    from_token: 1
+                }
+            )
+        })
+    });
+    assert!(!seen.iter().any(|e| matches!(e, Event::Ended { .. })));
+    assert_eq!(engine.status().token, 2);
+    assert!(
+        samples.iter().all(|sample| *sample != 0.0),
+        "silence at sample {:?}",
+        samples.iter().position(|sample| *sample == 0.0)
+    );
+    engine.shutdown();
+}
+
+#[test]
+fn a_cancelled_gapless_load_lets_the_current_track_end() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory_a, duration_a) = wav_factory(0.5);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    let (factory_b, duration_b) = wav_factory(1.0);
+    assert!(load_with(&engine, 2, factory_b, duration_b, Transition::Gapless).gapless);
+    engine.send(Command::CancelPending);
+
+    wait_until("A ends", || {
+        sink.pull(4096);
+        drain_events(&mut events, &mut seen);
+        seen.iter().any(|e| matches!(e, Event::Ended { token: 1 }))
+    });
+    assert!(
+        !seen
+            .iter()
+            .any(|e| matches!(e, Event::TrackSwitched { .. }))
+    );
+    assert_eq!(engine.status().token, 1);
+    assert!(sink.pull(4096).iter().all(|sample| *sample == 0.0));
+    engine.shutdown();
+}

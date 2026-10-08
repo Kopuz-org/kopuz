@@ -129,6 +129,8 @@ struct Session {
     worker: WorkerHandle,
     written: Arc<AtomicU64>,
     played: Arc<AtomicU64>,
+    /// The audio callback's view of `eof` for the current ring.
+    eof_flag: Arc<AtomicBool>,
     /// Linear ReplayGain factor the audio callback reads for this session.
     gain: Arc<AtomicU32>,
     /// The track's own tagged values, kept so a settings change can recompute
@@ -171,6 +173,7 @@ struct RingParts {
     producer: rtrb::Producer<f32>,
     written: Arc<AtomicU64>,
     played: Arc<AtomicU64>,
+    eof: Arc<AtomicBool>,
     rt_session: RtSession,
 }
 
@@ -181,14 +184,17 @@ fn make_ring(config: SinkConfig, gain: Arc<AtomicU32>) -> RingParts {
     let (producer, consumer) = rtrb::RingBuffer::new(size);
     let written = Arc::new(AtomicU64::new(0));
     let played = Arc::new(AtomicU64::new(0));
+    let eof = Arc::new(AtomicBool::new(false));
     RingParts {
         producer,
         written,
         played: played.clone(),
+        eof: eof.clone(),
         rt_session: RtSession {
             consumer,
             played,
             gain,
+            eof,
         },
     }
 }
@@ -220,6 +226,9 @@ struct Actor {
     /// seek mid-fade can cancel the fade and resume it in place. Its consumer
     /// lives in the RT callback until the fade completes or is killed.
     fading: Option<Session>,
+    /// A gapless session decoding into a ring the audio callback holds behind
+    /// `current`; it takes over on `Retired::Advanced`.
+    queued: Option<Session>,
     /// Detached workers (superseded probes, stopped sessions) awaiting exit.
     /// Never joined on the command path — a worker stuck in network I/O must
     /// not stall the actor.
@@ -267,6 +276,7 @@ impl Actor {
             current: None,
             pending: None,
             fading: None,
+            queued: None,
             graveyard: Vec::new(),
             last_phase: Phase::Idle,
             last_token: 0,
@@ -311,6 +321,7 @@ impl Actor {
     fn is_idle(&self) -> bool {
         self.current.is_none()
             && self.fading.is_none()
+            && self.queued.is_none()
             && self.pending.is_none()
             && self.graveyard.is_empty()
             && self.rt_rings_outstanding == 0
@@ -343,6 +354,7 @@ impl Actor {
             Command::Load(request) => self.handle_load(request),
             Command::CancelPending => {
                 self.discard_pending();
+                self.drop_queued();
                 self.publish();
             }
             Command::Seek { position, token } => self.handle_seek(position, token),
@@ -376,9 +388,13 @@ impl Actor {
                 self.replay_gain_settings = settings;
                 // Sessions publish their gain through a shared cell, so both
                 // sides of an in-flight crossfade re-level without a reload.
-                for session in [self.current.as_ref(), self.fading.as_ref()]
-                    .into_iter()
-                    .flatten()
+                for session in [
+                    self.current.as_ref(),
+                    self.fading.as_ref(),
+                    self.queued.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
                 {
                     session.gain.store(
                         settings
@@ -401,10 +417,14 @@ impl Actor {
                 {
                     pending.plan.album_context = album_context;
                 }
-                for session in [self.current.as_mut(), self.fading.as_mut()]
-                    .into_iter()
-                    .flatten()
-                    .filter(|session| session.token == token)
+                for session in [
+                    self.current.as_mut(),
+                    self.fading.as_mut(),
+                    self.queued.as_mut(),
+                ]
+                .into_iter()
+                .flatten()
+                .filter(|session| session.token == token)
                 {
                     session.album_context = album_context;
                     session.gain.store(
@@ -509,11 +529,14 @@ impl Actor {
                 self.start_session(pending, source_sample_rate, seekable, replay_gain);
             }
             WorkerMsg::Eof { token, epoch } => {
-                if let Some(current) = &mut self.current
-                    && current.token == token
-                    && current.ring_epoch == epoch
+                // A short queued track can finish decoding before it is heard.
+                if let Some(session) = [self.current.as_mut(), self.queued.as_mut()]
+                    .into_iter()
+                    .flatten()
+                    .find(|session| session.token == token && session.ring_epoch == epoch)
                 {
-                    current.eof = true;
+                    session.eof = true;
+                    session.eof_flag.store(true, Ordering::Release);
                 }
             }
             WorkerMsg::Failed { token, error } => {
@@ -544,6 +567,13 @@ impl Actor {
                     // The outgoing side of a crossfade failing just ends its
                     // fade-out early; the incoming session is unaffected.
                     self.retire_session(fading);
+                    self.publish();
+                } else if self.queued.as_ref().is_some_and(|q| q.token == token) {
+                    self.drop_queued();
+                    self.emit(Event::Error {
+                        token,
+                        message: error,
+                    });
                     self.publish();
                 }
             }
@@ -609,6 +639,7 @@ impl Actor {
             service_replay_gain,
         } = plan;
 
+        self.drop_queued();
         let fade = match transition {
             Transition::Crossfade(fade) if !fade.is_zero() => Some(fade),
             _ => None,
@@ -630,6 +661,15 @@ impl Actor {
                     .take_if(|c| !c.ended)
                     .map(|session| (fade, config, session))
             });
+        // Gapless queues behind a current session that still has audio left,
+        // at the live config like a fade, and never under a running fade.
+        let gapless_config = live_config.filter(|_| {
+            transition == Transition::Gapless
+                && self.rt_tx.is_some()
+                && self.fading.is_none()
+                && self.current.as_ref().is_some_and(|current| !current.ended)
+        });
+        let gapless = gapless_config.is_some();
 
         // Branch only on the fade decision; the ring/start/swap/install tail is
         // shared. `config`, `fade_frames`, and `crossfaded` capture the delta.
@@ -643,6 +683,8 @@ impl Actor {
                 Some((fade_frames.max(1), self.fade_generation)),
                 true,
             )
+        } else if let Some(config) = gapless_config {
+            (config, None, false)
         } else {
             // Immediate switch: reopen at the source's preferred rate when it
             // differs (Source mode only; System mode keeps the device at its
@@ -673,7 +715,8 @@ impl Actor {
             // play the new track silently. Exception: a crossfade that fell
             // back *because* the user is paused honors the pause instead of
             // blasting the next track through it; it starts on Resume.
-            let honor_pause = fade.is_some() && self.paused.load(Ordering::Relaxed);
+            let honor_pause = (fade.is_some() || transition == Transition::Gapless)
+                && self.paused.load(Ordering::Relaxed);
             if !honor_pause {
                 self.paused.store(false, Ordering::Relaxed);
                 if let Err(e) = self.sink.play() {
@@ -694,6 +737,7 @@ impl Actor {
             producer,
             written,
             played,
+            eof,
             rt_session,
         } = make_ring(config, gain.clone());
         let _ = worker.cmd_tx.send(WorkerCmd::Start {
@@ -704,16 +748,13 @@ impl Actor {
             start_at,
             epoch: 0,
         });
-        self.send_rt(RtCmd::Swap {
-            session: rt_session,
-            fade,
-        });
 
-        self.current = Some(Session {
+        let session = Session {
             token,
             worker,
             written,
             played,
+            eof_flag: eof,
             gain,
             replay_gain,
             service_replay_gain,
@@ -725,9 +766,25 @@ impl Actor {
             eof: false,
             ended: false,
             ring_epoch: 0,
-        });
-        self.last_token = token;
-        Ok(LoadOutcome { crossfaded })
+        };
+        if gapless {
+            self.send_rt(RtCmd::Queue {
+                session: rt_session,
+                id: token,
+            });
+            self.queued = Some(session);
+        } else {
+            self.send_rt(RtCmd::Swap {
+                session: rt_session,
+                fade,
+            });
+            self.current = Some(session);
+            self.last_token = token;
+        }
+        Ok(LoadOutcome {
+            crossfaded,
+            gapless,
+        })
     }
 
     /// Stop a worker and detach its join handle into the graveyard. Never
@@ -741,6 +798,14 @@ impl Actor {
     /// Stop and detach a session's worker into the graveyard.
     fn retire_session(&mut self, session: Session) {
         self.retire_worker(session.worker);
+    }
+
+    /// Drop the gapless session queued behind the current one, if any.
+    fn drop_queued(&mut self) {
+        if let Some(queued) = self.queued.take() {
+            self.send_rt(RtCmd::Unqueue(queued.token));
+            self.retire_session(queued);
+        }
     }
 
     /// Stop the outgoing crossfade session, if any.
@@ -776,6 +841,7 @@ impl Actor {
             }
             Some(_) => {}
         }
+        self.drop_queued();
 
         // Cancel the fade and seek the outgoing (visible) worker in place — it
         // is still alive as the fading session, so no re-resolve. The incoming
@@ -822,6 +888,7 @@ impl Actor {
         });
         current.written = ring.written;
         current.played = ring.played;
+        current.eof_flag = ring.eof;
         current.base_micros = target.as_micros() as u64;
         current.eof = false;
         // Seeking an ended session revives its parked worker.
@@ -847,6 +914,7 @@ impl Actor {
 
     fn handle_stop(&mut self, pause_device: bool) {
         self.discard_pending();
+        self.drop_queued();
         if let Some(current) = self.current.take() {
             self.retire_session(current);
         }
@@ -882,6 +950,9 @@ impl Actor {
             self.desired_output_rate(self.current.as_ref().and_then(|c| c.source_sample_rate));
 
         self.stop_fading();
+        // The rebuilt callback starts without the queued ring; the outgoing
+        // session then ends normally and the controller loads the next track.
+        self.drop_queued();
 
         let was_playing = self.current.is_some() && !self.paused.load(Ordering::Relaxed);
 
@@ -958,9 +1029,11 @@ impl Actor {
     }
 
     /// Resources the RT callback shipped back: drop rings here (never on the
-    /// audio thread) and finish crossfades. Each Retired balances a Swap.
+    /// audio thread), finish crossfades and promote a gapless session. Each
+    /// Retired balances a Swap or a Queue.
     fn reap_rt_retired(&mut self) {
         let mut fade_completed = false;
+        let mut advanced = None;
         let mut retired = 0usize;
         if let Some(retire_rx) = &self.retire_rx {
             while let Ok(msg) = retire_rx.try_recv() {
@@ -972,6 +1045,9 @@ impl Actor {
                     if generation == self.fade_generation)
                 {
                     fade_completed = true;
+                }
+                if let Retired::Advanced(_, id) = msg {
+                    advanced = Some(id);
                 }
             }
         }
@@ -988,11 +1064,28 @@ impl Actor {
             }
             self.publish();
         }
+
+        // An id the actor no longer holds was dropped after the callback took
+        // it over; the `Unqueue` already sent retires it there.
+        if let Some(next) = self.queued.take_if(|queued| advanced == Some(queued.token)) {
+            let token = next.token;
+            if let Some(outgoing) = self.current.replace(next) {
+                let from_token = outgoing.token;
+                self.retire_session(outgoing);
+                self.emit(Event::TrackSwitched { token, from_token });
+            }
+            self.last_token = token;
+            self.publish();
+        }
     }
 
     /// Drain-complete: the worker hit EOF and the audio callback has played
     /// everything it wrote. Exactly-once by the `ended` latch.
     fn latch_drain_complete(&mut self) {
+        // The audio callback hands a drained session to the queued one.
+        if self.queued.is_some() {
+            return;
+        }
         let ended_token = match &mut self.current {
             Some(current)
                 if current.eof
@@ -1123,7 +1216,7 @@ impl Actor {
         // Each Swap hands the RT a new ring consumer it will later ship back as
         // a Retired message; track the balance so the loop knows when the RT is
         // empty and it can park.
-        if matches!(cmd, RtCmd::Swap { .. }) {
+        if matches!(cmd, RtCmd::Swap { .. } | RtCmd::Queue { .. }) {
             self.rt_rings_outstanding += 1;
         }
         if let Some(rt_tx) = &self.rt_tx {
@@ -1186,6 +1279,9 @@ impl Actor {
         }
         if let Some(fading) = self.fading.take() {
             self.retire_session(fading);
+        }
+        if let Some(queued) = self.queued.take() {
+            self.retire_session(queued);
         }
         // Closing the sink drops the stream and with it the RT state and any
         // consumers it still owns, unblocking workers stuck on full rings.

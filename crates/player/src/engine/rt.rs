@@ -26,6 +26,9 @@ pub(crate) struct RtSession {
     /// preamp tweak is heard on the current track without a reload. Per session
     /// because a crossfade has two tracks in flight, each with its own gain.
     pub gain: Arc<AtomicU32>,
+    /// Set by the actor once the worker reports EOF for this ring, so an empty
+    /// ring with this set is the end of the track rather than an underrun.
+    pub eof: Arc<AtomicBool>,
 }
 
 pub(crate) enum RtCmd {
@@ -39,6 +42,16 @@ pub(crate) enum RtCmd {
         session: RtSession,
         fade: Option<(u64, u64)>,
     },
+    /// Hold a session to take over, on the same block, once the active one
+    /// has played its last sample. `id` is echoed on `Advanced`.
+    Queue {
+        session: RtSession,
+        id: u64,
+    },
+    /// Drop the queued session `id`. If it already took over, drop the active
+    /// session instead: the actor never adopted it, and the outgoing session's
+    /// drain then ends the track the usual way.
+    Unqueue(u64),
     DropAll,
     SetEqualizer(EqualizerSettings),
     SetChannelMode(ChannelMode),
@@ -51,6 +64,8 @@ pub(crate) enum Retired {
     /// The crossfade of this generation ran to completion; the actor reacts by
     /// tearing down the fading worker and emitting `TrackSwitched`.
     FadeComplete(#[allow(dead_code)] rtrb::Consumer<f32>, u64),
+    /// The queued session `id` took over from this drained one.
+    Advanced(#[allow(dead_code)] rtrb::Consumer<f32>, u64),
 }
 
 struct Fade {
@@ -69,6 +84,10 @@ pub(crate) struct RtState {
     active: Option<RtSession>,
     fading: Option<RtSession>,
     fade: Option<Fade>,
+    next: Option<(RtSession, u64)>,
+    /// The queue id of the active session when it came from `next`, so a late
+    /// `Unqueue` can still find it.
+    promoted: Option<u64>,
     eq: Equalizer,
     channel_mode: ChannelMode,
     volume: Arc<AtomicU32>,
@@ -103,6 +122,8 @@ impl RtState {
             active: None,
             fading: None,
             fade: None,
+            next: None,
+            promoted: None,
             eq,
             channel_mode,
             volume,
@@ -124,15 +145,18 @@ impl RtState {
         let read = if self.fade.is_some() && self.fading.is_some() {
             self.process_fade(data)
         } else {
-            self.active
+            let mut read = self
+                .active
                 .as_mut()
-                .map(|session| {
-                    let read = read_into(&mut session.consumer, data);
-                    session.played.fetch_add(read as u64, Ordering::Relaxed);
-                    apply_gain(&mut data[..read], session_gain(session));
-                    read
-                })
-                .unwrap_or(0)
+                .map(|session| read_session(session, data))
+                .unwrap_or(0);
+            if read < data.len()
+                && self.advance_to_next()
+                && let Some(session) = self.active.as_mut()
+            {
+                read += read_session(session, &mut data[read..]);
+            }
+            read
         };
 
         if read > 0 {
@@ -147,10 +171,40 @@ impl RtState {
         data[read..].fill(0.0);
     }
 
+    /// Promote the queued session once the active one is drained at EOF. The
+    /// flag is read before the ring, so samples written before the worker's
+    /// EOF are never mistaken for the end.
+    fn advance_to_next(&mut self) -> bool {
+        let drained = self.active.as_ref().is_some_and(|session| {
+            session.eof.load(Ordering::Acquire) && session.consumer.is_empty()
+        });
+        if !drained {
+            return false;
+        }
+        let Some((next, id)) = self.next.take() else {
+            return false;
+        };
+        if let Some(outgoing) = self.active.replace(next) {
+            let _ = self
+                .retire_tx
+                .send(Retired::Advanced(outgoing.consumer, id));
+        }
+        self.promoted = Some(id);
+        true
+    }
+
+    fn drop_next(&mut self) {
+        if let Some((next, _)) = self.next.take() {
+            let _ = self.retire_tx.send(Retired::Ring(next.consumer));
+        }
+    }
+
     fn drain_commands(&mut self) {
         while let Ok(cmd) = self.cmd_rx.try_recv() {
             match cmd {
                 RtCmd::Swap { session, fade } => {
+                    self.drop_next();
+                    self.promoted = None;
                     if let Some(old_fading) = self.fading.take() {
                         let _ = self.retire_tx.send(Retired::Ring(old_fading.consumer));
                     }
@@ -172,7 +226,27 @@ impl RtState {
                     }
                     self.active = Some(session);
                 }
+                RtCmd::Queue { session, id } => {
+                    self.drop_next();
+                    self.next = Some((session, id));
+                }
+                RtCmd::Unqueue(id) => {
+                    if self
+                        .next
+                        .as_ref()
+                        .is_some_and(|(_, next_id)| *next_id == id)
+                    {
+                        self.drop_next();
+                    } else if self.promoted == Some(id) {
+                        self.promoted = None;
+                        if let Some(active) = self.active.take() {
+                            let _ = self.retire_tx.send(Retired::Ring(active.consumer));
+                        }
+                    }
+                }
                 RtCmd::DropAll => {
+                    self.drop_next();
+                    self.promoted = None;
                     if let Some(fading) = self.fading.take() {
                         let _ = self.retire_tx.send(Retired::Ring(fading.consumer));
                     }
@@ -287,6 +361,13 @@ impl RtState {
 
         written
     }
+}
+
+fn read_session(session: &mut RtSession, out: &mut [f32]) -> usize {
+    let read = read_into(&mut session.consumer, out);
+    session.played.fetch_add(read as u64, Ordering::Relaxed);
+    apply_gain(&mut out[..read], session_gain(session));
+    read
 }
 
 fn session_gain(session: &RtSession) -> f32 {

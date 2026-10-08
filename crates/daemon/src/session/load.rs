@@ -25,10 +25,17 @@ impl Session {
         }
         let track_key = track.id.uid();
         let (restore_seek, clear_pending_resume) = self.pending_resume_seek(&track);
-        let use_crossfade = allow_crossfade
-            && self.should_crossfade()
-            && restore_seek.is_none_or(|position| position.is_zero());
-        let crossfade_duration = Duration::from_secs(self.config.crossfade_seconds as u64);
+        let transition =
+            if !allow_crossfade || restore_seek.is_some_and(|position| !position.is_zero()) {
+                Transition::Immediate
+            } else if self.should_crossfade() {
+                Transition::Crossfade(Duration::from_secs(self.config.crossfade_seconds as u64))
+            } else if self.should_play_gapless() {
+                Transition::Gapless
+            } else {
+                Transition::Immediate
+            };
+        let deferred = transition != Transition::Immediate;
         let item_ref = PlaybackItemRef::parse(&track_key);
         let is_radio = item_ref.is_radio();
         let is_server = item_ref.is_server();
@@ -146,7 +153,7 @@ impl Session {
         self.error = None;
         self.cancel_load_task();
         self.cancel_radio_task();
-        if !use_crossfade {
+        if !deferred {
             self.pending_transition = None;
         }
         let from_token = self.intent.token();
@@ -154,7 +161,7 @@ impl Session {
         self.set_intent(PlaybackIntent::Loading {
             token,
             idx,
-            crossfade: use_crossfade,
+            deferred,
             from_token,
         });
         self.buffered.clear();
@@ -182,12 +189,14 @@ impl Session {
             self.radio_task = Some(handle);
         }
 
-        if use_crossfade {
+        if deferred {
             self.pending_transition = Some(PendingTransition {
                 to_position: idx,
+                to_key: track_key.clone(),
                 to_token: token,
                 from_token,
                 stage: TransitionStage::Loading,
+                gapless: transition == Transition::Gapless,
             });
         }
 
@@ -207,7 +216,7 @@ impl Session {
             track.cover.clone()
         };
 
-        if !use_crossfade {
+        if !deferred {
             if is_server || is_radio {
                 // Remote resolution deliberately silences the old session;
                 // local files switch seamlessly inside the engine.
@@ -234,11 +243,7 @@ impl Session {
             remote_ref,
             active_source: self.active_source.clone(),
             artwork,
-            transition: if use_crossfade {
-                Transition::Crossfade(crossfade_duration)
-            } else {
-                Transition::Immediate
-            },
+            transition,
             start_at: restore_seek.filter(|position| !position.is_zero()),
             clear_pending_resume,
             cmd_tx: self.cmd_tx.clone(),
@@ -361,7 +366,9 @@ impl Session {
                     self.pending_resume = None;
                 }
                 self.maybe_record_recent();
-                if let Some(scrobbler) = self.scrobbler.clone() {
+                // A queued gapless track is not heard yet; it scrobbles from
+                // the switch instead.
+                if !outcome.gapless {
                     let committed_track = self
                         .pending_transition
                         .as_ref()
@@ -370,7 +377,7 @@ impl Session {
                         .and_then(|position| self.model.track_at(position).cloned())
                         .or_else(|| self.model.current_track().cloned());
                     if let Some(track) = committed_track {
-                        scrobbler.track_committed(track, finished.token);
+                        self.scrobble_committed(track, finished.token);
                     }
                 }
                 let matching_transition = self
@@ -378,11 +385,15 @@ impl Session {
                     .as_ref()
                     .is_some_and(|pending| pending.to_token == finished.token);
                 if matching_transition {
-                    if outcome.crossfaded {
+                    if outcome.crossfaded || outcome.gapless {
                         if let Some(pending) = self.pending_transition.as_mut() {
                             // Keep the visible queue/track outgoing until the
                             // authoritative TrackSwitched event.
-                            pending.stage = TransitionStage::Fading;
+                            pending.stage = if outcome.crossfaded {
+                                TransitionStage::Fading
+                            } else {
+                                TransitionStage::Queued
+                            };
                         }
                     } else {
                         self.commit_transition_model(finished.token);
@@ -399,6 +410,9 @@ impl Session {
                         None,
                         self.phase == ApiPhase::Playing,
                     );
+                }
+                if self.arm_gapless_now() {
+                    self.publish(state_tx, false);
                 }
             }
             Some(Err(error)) => {

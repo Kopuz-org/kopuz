@@ -110,6 +110,8 @@ fn test_track(key: &String) -> Track {
         u64::MAX
     } else if key.contains("short") {
         1
+    } else if key.contains("long") {
+        60
     } else {
         6
     };
@@ -763,7 +765,7 @@ async fn resume_re_adopts_the_live_engine_token_after_mid_load_pause() {
     let gate = Arc::new((Mutex::new(true), Condvar::new()));
     let provider_gate = gate.clone();
     let provider: FactoryOverride = Arc::new(move |track| {
-        Some(if track.title == "slow" {
+        Some(if track.title == "long-slow" {
             gated_factory(6, provider_gate.clone())
         } else {
             wav_factory(6)
@@ -772,7 +774,7 @@ async fn resume_re_adopts_the_live_engine_token_after_mid_load_pause() {
     let harness = harness_with_provider(|_| {}, provider);
     harness
         .api
-        .set_queue(replace(&["fast", "slow"]))
+        .set_queue(replace(&["long-fast", "long-slow"]))
         .await
         .expect("set queue");
     wait_committed(&harness.api).await;
@@ -2296,4 +2298,187 @@ async fn stored_volume(database: &db::Db) -> f32 {
         .expect("load")
         .expect("stored config")
         .volume
+}
+
+/// Pull audio like `drive_until`, keeping every sample, until `predicate`
+/// holds and then for `tail` more pulls.
+async fn record_until(
+    harness: &Harness,
+    description: &str,
+    tail: usize,
+    predicate: impl Fn(&PlayerState) -> bool,
+) -> (PlayerState, Vec<f32>) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut samples = Vec::new();
+    loop {
+        samples.extend(harness.sink.pull(2048));
+        let state = harness.api.player_state().await.expect("player state");
+        if predicate(&state) {
+            for _ in 0..tail {
+                samples.extend(harness.sink.pull(2048));
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            return (state, samples);
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out driving audio until {description}: {state:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// The longest run of silent samples between the first and last audible one.
+fn longest_inner_silence(samples: &[f32]) -> usize {
+    let audible = |sample: &f32| *sample != 0.0;
+    let (Some(first), Some(last)) = (
+        samples.iter().position(audible),
+        samples.iter().rposition(audible),
+    ) else {
+        return samples.len();
+    };
+    samples[first..=last]
+        .split(audible)
+        .map(<[f32]>::len)
+        .max()
+        .unwrap_or(0)
+}
+
+#[tokio::test]
+async fn gapless_switches_on_the_last_sample_of_the_outgoing_track() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["short-a", "short-b"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+
+    let mut audible_before_switch = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut samples = Vec::new();
+    loop {
+        let block = harness.sink.pull(2048);
+        samples.extend_from_slice(&block);
+        let state = harness.api.player_state().await.expect("player state");
+        if state.queue.index == Some(1) {
+            assert!(matches!(state.intent, Intent::Committed { token: 2 }));
+            assert!(state.fading.is_none());
+            break;
+        }
+        assert_eq!(
+            state.track.as_ref().map(|track| track.title.as_str()),
+            Some("short-a")
+        );
+        audible_before_switch = samples.iter().filter(|sample| **sample != 0.0).count();
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no switch: {state:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // The queue only moves once all of the first track has been heard.
+    let one_second = TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels;
+    assert!(
+        audible_before_switch >= one_second - 2 * 2048,
+        "switched after {audible_before_switch} samples"
+    );
+    let (_, tail) = record_until(&harness, "second track audible", 10, |_| true).await;
+    samples.extend(tail);
+    assert_eq!(longest_inner_silence(&samples), 0);
+}
+
+#[tokio::test]
+async fn a_queue_edit_after_gapless_arming_rearms_the_next_track() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["short-a", "short-b"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    wait_state(&harness.api, "gapless armed", |state| {
+        state.queue.index == Some(0) && matches!(state.intent, Intent::Committed { token: 2 })
+    })
+    .await;
+
+    harness
+        .api
+        .set_queue(enqueue(QueueMode::PlayNext, &["short-c"]))
+        .await
+        .expect("play next after arming");
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        vec!["short-a", "short-c", "short-b"]
+    );
+    wait_state(&harness.api, "re-armed", |state| {
+        state.queue.index == Some(0) && matches!(state.intent, Intent::Committed { token: 3 })
+    })
+    .await;
+
+    let (state, samples) = record_until(&harness, "edited next track playing", 10, |state| {
+        state.queue.index == Some(1)
+    })
+    .await;
+    assert_eq!(
+        state.track.as_ref().map(|track| track.title.as_str()),
+        Some("short-c")
+    );
+    assert_eq!(longest_inner_silence(&samples), 0);
+}
+
+#[tokio::test]
+async fn repeat_one_loops_the_track_gapless() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["short-a", "short-b"]))
+        .await
+        .expect("set queue");
+    harness
+        .api
+        .player_command(PlayerCommand::SetMode {
+            shuffle: None,
+            loop_mode: Some(LoopMode::Track),
+        })
+        .await
+        .expect("repeat one");
+    wait_committed(&harness.api).await;
+
+    let (state, samples) = record_until(&harness, "track replayed", 10, |state| {
+        matches!(state.intent, Intent::Committed { token } if token >= 3)
+            && state.queue.index == Some(0)
+    })
+    .await;
+    assert_eq!(
+        state.track.as_ref().map(|track| track.title.as_str()),
+        Some("short-a")
+    );
+    assert_eq!(longest_inner_silence(&samples), 0);
+}
+
+#[tokio::test]
+async fn crossfade_above_zero_still_fades_instead_of_queueing() {
+    let harness = harness(|config| config.crossfade_seconds = 1);
+    harness
+        .api
+        .set_queue(replace(&["track-0", "track-1"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+
+    // Nothing is armed until the crossfade window, unlike the gapless preload.
+    let early = harness.api.player_state().await.expect("state");
+    assert!(matches!(early.intent, Intent::Committed { token: 1 }));
+
+    let state = drive_until(&harness, "crossfade running", |state| {
+        state.fading.is_some()
+    })
+    .await;
+    assert_eq!(state.queue.index, Some(0));
+    assert!(matches!(state.intent, Intent::Committed { token: 2 }));
+    drive_until(&harness, "crossfade committed", |state| {
+        state.queue.index == Some(1) && state.fading.is_none()
+    })
+    .await;
 }

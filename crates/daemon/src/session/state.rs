@@ -116,6 +116,12 @@ impl Session {
             && self.player.can_resume()
     }
 
+    pub(super) fn should_play_gapless(&self) -> bool {
+        self.config.crossfade_seconds == 0
+            && self.phase == ApiPhase::Playing
+            && self.player.can_resume()
+    }
+
     pub(super) fn now_ms(&self) -> u64 {
         self.epoch.elapsed().as_millis() as u64
     }
