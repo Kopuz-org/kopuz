@@ -6,10 +6,9 @@ use config::AppConfig;
 use dioxus::prelude::*;
 use material_colors::{
     color::Argb,
-    dynamic_color::DynamicScheme,
+    dynamic_color::{DynamicScheme, Variant},
     hct::Hct,
     scheme::Scheme,
-    scheme::variant::{SchemeContent, SchemeMonochrome, SchemeTonalSpot},
 };
 use utils::color::Color;
 
@@ -23,28 +22,14 @@ const SELECTOR: &str = ".theme-system[data-ui-style]";
 /// The default theme's copper, for when there is no wallpaper or artwork.
 const DEFAULT_SEED: Argb = Argb::from_u32(0xffd9842f);
 
-type Variant = fn(Hct, bool) -> DynamicScheme;
-
-fn tonal_spot(seed: Hct, dark: bool) -> DynamicScheme {
-    SchemeTonalSpot::new(seed, dark, Some(0.0)).scheme
-}
-
-fn content(seed: Hct, dark: bool) -> DynamicScheme {
-    SchemeContent::new(seed, dark, Some(0.0)).scheme
-}
-
-fn monochrome(seed: Hct, dark: bool) -> DynamicScheme {
-    SchemeMonochrome::new(seed, dark, Some(0.0)).scheme
-}
-
-fn roles(seed: Argb, variant: Variant, dark: bool) -> BTreeMap<String, Argb> {
-    Scheme::from(variant(Hct::new(seed), dark))
+fn roles(seed: Argb, variant: &Variant, dark: bool) -> BTreeMap<String, Argb> {
+    Scheme::from(DynamicScheme::by_variant(seed, variant, dark, Some(0.0)))
         .into_iter()
         .collect()
 }
 
 fn tonal_roles(seed: Argb, dark: bool) -> BTreeMap<String, Argb> {
-    roles(seed, tonal_spot, dark)
+    roles(seed, &Variant::TonalSpot, dark)
 }
 
 /// The `--color-*` vars every theme sets, and the Material role each takes.
@@ -84,7 +69,7 @@ fn color_css(roles: &BTreeMap<String, Argb>, dark: bool) -> String {
     css
 }
 
-fn scheme_css(seed: Argb, variant: Variant) -> String {
+fn scheme_css(seed: Argb, variant: &Variant) -> String {
     format!(
         "{} @media (prefers-color-scheme: dark) {{ {} }}",
         color_css(&roles(seed, variant, false), false),
@@ -93,20 +78,20 @@ fn scheme_css(seed: Argb, variant: Variant) -> String {
 }
 
 fn tonal_css(seed: Argb) -> String {
-    scheme_css(seed, tonal_spot)
+    scheme_css(seed, &Variant::TonalSpot)
 }
 
 /// Below this HCT chroma a palette colour is grey, and its hue is noise.
 const MIN_SEED_CHROMA: f64 = 15.0;
 
-/// Album art is content colour, so it takes Material's content scheme, which
-/// keeps the cover's own chroma instead of TonalSpot's fixed one. The seed is
-/// the most common colour that has a hue at all; a cover with none (black and
-/// white art) gets a neutral scheme rather than a hue invented from grey.
+/// Preserve the cover's chroma; grey artwork gets a neutral scheme.
 fn artwork_css(colors: &[Color]) -> String {
     match artwork_seed(colors) {
-        Some(seed) => scheme_css(seed, content),
-        None => scheme_css(colors.first().map_or(DEFAULT_SEED, argb), monochrome),
+        Some(seed) => scheme_css(seed, &Variant::Content),
+        None => scheme_css(
+            colors.first().map_or(DEFAULT_SEED, argb),
+            &Variant::Monochrome,
+        ),
     }
 }
 
@@ -118,9 +103,7 @@ fn artwork_seed(colors: &[Color]) -> Option<Argb> {
 }
 
 fn argb(color: &Color) -> Argb {
-    Argb::from_u32(
-        0xff000000 | u32::from(color.r) << 16 | u32::from(color.g) << 8 | u32::from(color.b),
-    )
+    Argb::new(255, color.r, color.g, color.b)
 }
 
 #[component]
@@ -146,8 +129,9 @@ pub fn SystemColors(config: Signal<AppConfig>, artwork: Signal<Option<Vec<Color>
                 #[cfg(not(target_os = "android"))]
                 let next = {
                     let live_path = config.peek().live_theme_path.clone();
+                    let path = desktop::wallpaper_path().await;
                     let (cache, seed) = tokio::task::spawn_blocking(move || {
-                        let seed = wallpaper.seed(&live_path);
+                        let seed = wallpaper.seed(path, &live_path);
                         (wallpaper, seed)
                     })
                     .await
@@ -304,10 +288,10 @@ mod tests {
 
     #[test]
     fn dynamic_roles_keep_text_readable_in_both_appearances() {
-        let variants: [Variant; 3] = [tonal_spot, content, monochrome];
+        let variants = [Variant::TonalSpot, Variant::Content, Variant::Monochrome];
         for (seed, variant) in [0xffd9842f, 0xff000000, 0xffffffff, 0xff006aff, 0xff00ff00]
             .into_iter()
-            .flat_map(|seed| variants.map(|variant| (seed, variant)))
+            .flat_map(|seed| variants.iter().map(move |variant| (seed, variant)))
         {
             for dark in [false, true] {
                 let roles = roles(Argb::from_u32(seed), variant, dark);
@@ -317,10 +301,8 @@ mod tests {
                     ("primary", "on_primary"),
                     ("secondary_container", "on_secondary_container"),
                 ] {
-                    let a = luminance(roles[background]);
-                    let b = luminance(roles[foreground]);
                     assert!(
-                        (a.max(b) + 0.05) / (a.min(b) + 0.05) >= 4.5,
+                        contrast(roles[background], roles[foreground]) >= 4.5,
                         "{seed:x} {dark} {background}"
                     );
                 }
