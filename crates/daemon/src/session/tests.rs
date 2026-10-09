@@ -124,6 +124,11 @@ fn test_track(key: &String) -> Track {
                 service: config::MusicService::Spotify,
                 item_id: item_id.to_string(),
             }
+        } else if let Some(item_id) = key.strip_prefix("smb:") {
+            reader::models::TrackId::Server {
+                service: config::MusicService::Smb,
+                item_id: item_id.to_string(),
+            }
         } else {
             reader::models::TrackId::Local(PathBuf::from(key))
         },
@@ -149,6 +154,70 @@ fn test_track(key: &String) -> Track {
         artists: vec![],
         replay_gain: config::ReplayGainInfo::default(),
     }
+}
+
+#[test]
+fn smb_now_playing_artwork_resolves_cached_files_and_missing_covers() {
+    let config = config::AppConfig::default();
+    let mut track = test_track(&"smb:Album/song.flac".to_string());
+    track.cover = Some("/cache/album cover.jpg".into());
+    assert_eq!(
+        load::now_playing_artwork(&config, &track).as_deref(),
+        Some("/cache/album cover.jpg")
+    );
+    track.cover = Some(reader::CoverRef::NO_COVER.into());
+    assert_eq!(load::now_playing_artwork(&config, &track), None);
+    track.cover = Some("https://example.com/cover.jpg".into());
+    assert_eq!(
+        load::now_playing_artwork(&config, &track).as_deref(),
+        Some("https://example.com/cover.jpg")
+    );
+}
+
+#[tokio::test]
+async fn album_artwork_arriving_after_playback_refreshes_the_queue() {
+    let source = config::Source::Server("nas".into());
+    let harness = harness(|config| config.active_source = source.clone());
+    harness
+        .api
+        .set_queue(replace(&["smb:01.flac", "smb:02.flac"]))
+        .await
+        .unwrap();
+    wait_committed(&harness.api).await;
+    harness
+        .api
+        .player_command(PlayerCommand::Pause)
+        .await
+        .unwrap();
+    let album = reader::Album {
+        id: String::new(),
+        title: "Album".into(),
+        artist: String::new(),
+        genre: String::new(),
+        year: 0,
+        cover_path: Some(PathBuf::from("/cache/album.jpg")),
+        manual_cover: false,
+        artist_id: None,
+        artist_key: None,
+    };
+    harness.api.session.update_album_covers(
+        &config::Source::Server("other".into()),
+        std::slice::from_ref(&album),
+    );
+    let unchanged = harness.api.queue_snapshot().await.unwrap();
+    assert!(unchanged.items.iter().all(|track| track.artwork.is_none()));
+    harness.api.session.update_album_covers(&source, &[album]);
+    let state = wait_state(&harness.api, "background cover", |state| {
+        state
+            .track
+            .as_ref()
+            .is_some_and(|track| track.artwork.is_some())
+    })
+    .await;
+    assert_eq!(state.phase, ApiPhase::Paused);
+    assert_eq!(state.queue.index, Some(0));
+    let queue = harness.api.queue_snapshot().await.unwrap();
+    assert!(queue.items.iter().all(|track| track.artwork.is_some()));
 }
 
 fn wav_bytes(seconds: u64) -> Vec<u8> {

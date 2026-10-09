@@ -68,6 +68,7 @@ pub struct LoadArgs {
 pub struct Player {
     engine: EngineHandle,
     now_playing: Option<NowPlayingMeta>,
+    metadata_token: Option<u64>,
 }
 
 impl Player {
@@ -75,6 +76,7 @@ impl Player {
         Self {
             engine,
             now_playing: None,
+            metadata_token: None,
         }
     }
 
@@ -147,6 +149,7 @@ impl Player {
             reply,
         }));
         self.now_playing = Some(meta);
+        self.metadata_token = Some(token);
         // Push the OS now-playing display now only for an immediate switch (the
         // UI hydrates to the new track at the same time). A crossfade keeps
         // showing the outgoing track until the fade completes, so its metadata
@@ -210,6 +213,7 @@ impl Player {
     pub fn stop(&mut self) {
         self.engine.send(Command::Stop { pause_device: true });
         self.now_playing = None;
+        self.metadata_token = None;
         // Tear down the Android foreground service + media notification so the OS can
         // reclaim the process; otherwise the dismissed-notification state lingers.
         #[cfg(target_os = "android")]
@@ -263,6 +267,18 @@ impl Player {
         self.engine.send(Command::SetDuration(meta.duration));
         self.now_playing = Some(meta);
         self.update_now_playing_system();
+    }
+
+    /// Update stored artwork; `commit_now_playing` publishes it when the track is visible.
+    pub fn set_artwork(&mut self, token: u64, artwork: Option<String>) -> bool {
+        if self.metadata_token != Some(token) {
+            return false;
+        }
+        if let Some(meta) = &mut self.now_playing {
+            meta.artwork = artwork;
+            return true;
+        }
+        false
     }
 
     pub fn get_position(&self) -> Duration {
@@ -336,5 +352,42 @@ impl Player {
 impl Default for Player {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn delayed_artwork_only_updates_the_metadata_owned_by_its_load() {
+        let mut player = Player::try_with_sink(Box::new(crate::engine::NullSink::new())).unwrap();
+        let load = |token| LoadArgs {
+            token,
+            factory: Box::new(|| Err("no audio needed".into())),
+            meta: NowPlayingMeta {
+                title: format!("Track {token}"),
+                artist: String::new(),
+                album: String::new(),
+                duration: Duration::from_secs(60),
+                artwork: None,
+            },
+            transition: Transition::Crossfade(Duration::from_secs(2)),
+            start_at: None,
+            album_context: false,
+            service_replay_gain: ReplayGainInfo::default(),
+            reply: None,
+        };
+        player.load(load(1));
+        assert!(!player.set_artwork(2, Some("/cache/incoming.jpg".into())));
+        assert!(player.now_playing.as_ref().unwrap().artwork.is_none());
+        player.load(load(2));
+        assert!(player.set_artwork(2, Some("/cache/incoming.jpg".into())));
+        assert!(!player.set_artwork(1, Some("/cache/outgoing.jpg".into())));
+        let current = player.now_playing.as_ref().unwrap();
+        assert_eq!(current.title, "Track 2");
+        assert_eq!(current.artwork.as_deref(), Some("/cache/incoming.jpg"));
+        player.stop();
+        assert!(!player.set_artwork(2, Some("/cache/incoming.jpg".into())));
     }
 }

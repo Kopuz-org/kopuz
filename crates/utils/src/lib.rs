@@ -118,6 +118,7 @@ fn artwork_url_for(abs_str: &str) -> Option<CoverUrl> {
     const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
         .add(b' ')
         .add(b'"')
+        .add(b'\'')
         .add(b'#')
         .add(b'%')
         .add(b'&')
@@ -187,6 +188,7 @@ fn entity_artwork_url(origin: &str, kind: &str, id: &str, version: u64, hq: bool
     const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
         .add(b' ')
         .add(b'"')
+        .add(b'\'')
         .add(b'#')
         .add(b'%')
         .add(b'&')
@@ -226,6 +228,32 @@ mod artwork_url_tests {
                     url.as_ref(),
                     format!("{endpoint}?{kind}=source%3Aa%26b%20%2Bc&hq=1&v=42")
                 );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_os = "android"))]
+    fn artwork_paths_with_apostrophes_are_safe_in_css_urls() {
+        for file in ["07 - Butcher's Hook.flac", "15 - 'til We Die.flac"] {
+            let path = format!("/music/Slipknot/[2008] - All Hope Is Gone/{file}");
+            let mut urls = vec![super::artwork_url_for(&path).unwrap()];
+            for endpoint in [
+                "http://127.0.0.1:49152/session/api",
+                "http://artwork.dioxus.localhost/api",
+                "artwork://api",
+            ] {
+                urls.push(super::entity_artwork_url(
+                    endpoint, "track", &path, 42, false,
+                ));
+            }
+            for url in urls {
+                assert!(!url.contains('\''), "unescaped apostrophe in {url}");
+                let encoded = url.split_once('=').unwrap().1.split('&').next().unwrap();
+                let decoded = percent_encoding::percent_decode_str(encoded)
+                    .decode_utf8()
+                    .unwrap();
+                assert_eq!(decoded, path);
             }
         }
     }

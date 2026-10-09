@@ -126,6 +126,10 @@ enum SessionCmd {
     LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
     LoadFinished(LoadFinished),
     BufferProgress(BufferProgressEvent),
+    AlbumCovers {
+        source: config::Source,
+        covers: std::collections::HashMap<String, String>,
+    },
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     ArtworkFetched {
         token: u64,
@@ -330,6 +334,22 @@ impl SessionHandle {
     /// goes through here, so there is one place to look for who dirties what.
     pub fn invalidate(&self, table: api::Table) {
         self.emit_event(ApiEvent::LibraryInvalidated { table });
+    }
+
+    pub fn update_album_covers(&self, source: &config::Source, albums: &[reader::Album]) {
+        let covers = albums
+            .iter()
+            .filter_map(|album| {
+                album
+                    .cover_path
+                    .as_ref()
+                    .map(|path| (album.id.clone(), path.to_string_lossy().into_owned()))
+            })
+            .collect();
+        let _ = self.cmd_tx.send(SessionCmd::AlbumCovers {
+            source: source.clone(),
+            covers,
+        });
     }
 
     /// Announce whether a source is reachable, so every client shows the same
@@ -661,6 +681,9 @@ impl Session {
             SessionCmd::LoadPrepared(result) => self.handle_prepared_load(*result, state_tx),
             SessionCmd::LoadFinished(result) => self.handle_load_finished(result, state_tx),
             SessionCmd::BufferProgress(event) => self.handle_buffer_progress(event, state_tx),
+            SessionCmd::AlbumCovers { source, covers } => {
+                self.apply_album_covers(source, covers, state_tx)
+            }
             SessionCmd::ArtworkFetched { token, meta } => {
                 if self.intent.token() == token {
                     self.player.update_metadata(*meta);

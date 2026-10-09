@@ -39,6 +39,7 @@ mod local;
 mod nextcloud;
 mod offline;
 mod search;
+mod smb;
 mod soundcloud;
 mod spotify;
 mod subsonic;
@@ -50,6 +51,7 @@ use jellyfin::JellyfinSource;
 use local::LocalSource;
 use nextcloud::NextcloudSource;
 use offline::OfflineServerSource;
+use smb::SmbSource;
 use soundcloud::SoundcloudSource;
 use spotify::SpotifySource;
 use subsonic::SubsonicSource;
@@ -104,6 +106,15 @@ pub trait MediaSource: Send + Sync {
     /// Resolve a playable stream for one item id (local = a file path, server =
     /// the remote's URL / deciphered stream).
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError>;
+
+    /// A seekable protocol-native stream, or `None` to use the resolved URL.
+    async fn open_stream(
+        &self,
+        _item_id: &str,
+        _progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
+    ) -> Result<Option<Box<dyn symphonia::core::io::MediaSource>>, SourceError> {
+        Ok(None)
+    }
 
     /// The bytes of one track, for sources that can't express it as a URL.
     ///
@@ -308,6 +319,24 @@ pub trait MediaSource: Send + Sync {
     /// (Jellyfin/Subsonic) override; the caller persists + prunes the result.
     async fn fetch_library(&self) -> Result<LibrarySnapshot, SourceError> {
         Ok(LibrarySnapshot::default())
+    }
+
+    /// Fetch a library while reporting the file currently being scanned.
+    async fn fetch_library_with_progress(
+        &self,
+        _on_progress: std::sync::Arc<dyn Fn(String) + Send + Sync>,
+    ) -> Result<LibrarySnapshot, SourceError> {
+        self.fetch_library().await
+    }
+
+    /// Resolve missing album covers after the library has been persisted.
+    async fn fetch_missing_covers(
+        &self,
+        _albums: &[reader::Album],
+        _tracks: &[reader::Track],
+        _on_progress: std::sync::Arc<dyn Fn(String) + Send + Sync>,
+    ) -> Result<Vec<reader::Album>, SourceError> {
+        Ok(Vec::new())
     }
 
     /// Fetch a playlist's tracks from the remote. Local playlists resolve their
@@ -841,6 +870,7 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
         MusicService::Nextcloud => Box::new(NextcloudSource::new(db, source, conn)),
         MusicService::Clippsly => Box::new(ClippslySource::new(db, source, conn)),
+        MusicService::Smb => Box::new(SmbSource::new(db, source, conn)),
     }
 }
 

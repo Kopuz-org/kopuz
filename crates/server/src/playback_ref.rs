@@ -21,12 +21,17 @@ impl<'a> PlaybackItemRef<'a> {
         let mut parts = value.split(':');
         let scheme = parts.next().unwrap_or_default();
         match scheme {
+            "smb" => Self::Server {
+                service: scheme,
+                item_id: value.strip_prefix("smb:").unwrap_or_default(),
+                extra: None,
+            },
             "radio" => Self::Radio {
                 station_id: parts.next().unwrap_or_default(),
                 stream_id: parts.next().unwrap_or_default(),
             },
             "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "applemusic"
-            | "spotify" => Self::Server {
+            | "spotify" | "nextcloud" | "clippsly" => Self::Server {
                 service: scheme,
                 item_id: parts.next().unwrap_or_default(),
                 extra: parts.next(),
@@ -133,6 +138,33 @@ mod tests {
                 service: "ytmusic",
                 item_id: "video_id",
                 extra: Some("extra"),
+            }
+        );
+    }
+
+    #[test]
+    fn every_service_routes_track_keys_to_a_server() {
+        for service in config::MusicService::ALL {
+            let key = format!("{}:track_id", service.id());
+            assert_eq!(
+                PlaybackItemRef::parse(&key),
+                PlaybackItemRef::Server {
+                    service: service.id(),
+                    item_id: "track_id",
+                    extra: None,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn smb_item_refs_preserve_the_complete_path() {
+        assert_eq!(
+            PlaybackItemRef::parse("smb:Artist/Vol 1: Deluxe/01.flac"),
+            PlaybackItemRef::Server {
+                service: "smb",
+                item_id: "Artist/Vol 1: Deluxe/01.flac",
+                extra: None,
             }
         );
     }

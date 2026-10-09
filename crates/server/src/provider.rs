@@ -73,6 +73,15 @@ impl ProviderClient {
                     user_id: username.to_string(),
                 })
             }
+            MusicService::Smb => {
+                crate::smb::login(&self.server_url, username, password)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok(AuthSession {
+                    access_token: password.to_string(),
+                    user_id: username.to_string(),
+                })
+            }
             MusicService::YtMusic => Err(
                 "YouTube Music uses OAuth device flow; call login_ytmusic_device() instead"
                     .to_string(),

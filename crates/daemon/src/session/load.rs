@@ -85,9 +85,7 @@ impl Session {
                 .and_then(|station| station.streams.iter().find(|stream| stream.id == stream_id))
                 .map(|stream| (stream.url.clone(), cover))
         } else if is_server && self.config.server.is_some() && self.active_source.is_some() {
-            let cover = server::cover::track(&self.config, &track, 800)
-                .map(|cover| cover.as_ref().to_string())
-                .unwrap_or_default();
+            let cover = now_playing_artwork(&self.config, &track).unwrap_or_default();
             Some((ResolvedStreamRef::pending_marker(&item_id), cover))
         } else {
             None
@@ -192,9 +190,7 @@ impl Session {
         }
 
         let cover_url = if offline_path.is_some() {
-            server::cover::track(&self.config, &track, 800)
-                .map(|cover| cover.as_ref().to_string())
-                .unwrap_or_default()
+            now_playing_artwork(&self.config, &track).unwrap_or_default()
         } else {
             remote_ref
                 .as_ref()
@@ -202,7 +198,7 @@ impl Session {
                 .unwrap_or_default()
         };
         let artwork = if is_server || is_radio {
-            Some(cover_url)
+            Some(cover_url).filter(|cover| !cover.is_empty())
         } else {
             track.cover.clone()
         };
@@ -257,7 +253,7 @@ impl Session {
         result: Result<PreparedLoad, LoadFailure>,
         state_tx: &watch::Sender<PlayerState>,
     ) {
-        let prepared = match result {
+        let mut prepared = match result {
             Ok(prepared) => prepared,
             Err(failure) => {
                 if self.fail_load(failure.token, failure.message) {
@@ -268,6 +264,14 @@ impl Session {
         };
         if self.intent.token() != prepared.token {
             return;
+        }
+        if let Some(artwork) = self
+            .model
+            .track_at(prepared.idx)
+            .filter(|track| track.id == prepared.track.id)
+            .and_then(|track| now_playing_artwork(&self.config, track))
+        {
+            prepared.artwork = Some(artwork);
         }
         self.load_task = None;
         self.stamp_probed_stream_info(
@@ -444,6 +448,58 @@ impl Session {
         });
         true
     }
+
+    pub(super) fn apply_album_covers(
+        &mut self,
+        source: config::Source,
+        covers: std::collections::HashMap<String, String>,
+        state_tx: &watch::Sender<PlayerState>,
+    ) {
+        if source != self.config.active_source {
+            return;
+        }
+        let loaded_position = self
+            .pending_transition
+            .as_ref()
+            .map_or(self.model.current_position(), |transition| {
+                transition.to_position
+            });
+        let mut changed = false;
+        let mut loaded_changed = false;
+        for position in 0..self.model.len() {
+            let Some(track) = self.model.track_at_mut(position) else {
+                continue;
+            };
+            if let Some(cover) = covers.get(&track.album_id)
+                && track.cover.as_ref() != Some(cover)
+            {
+                track.cover = Some(cover.clone());
+                changed = true;
+                loaded_changed |= position == loaded_position;
+            }
+        }
+        if loaded_changed && self.external.is_none() {
+            let artwork = self
+                .model
+                .track_at(loaded_position)
+                .and_then(|track| now_playing_artwork(&self.config, track));
+            if self.player.set_artwork(self.intent.token(), artwork)
+                && self.pending_transition.is_none()
+            {
+                self.player.commit_now_playing();
+            }
+        }
+        if changed {
+            self.publish(state_tx, true);
+        }
+    }
+}
+
+pub(super) fn now_playing_artwork(config: &config::AppConfig, track: &Track) -> Option<String> {
+    match server::cover::locate(config, reader::CoverRef::for_track(track), 800)? {
+        server::cover::Located::File(path) => Some(path.to_string_lossy().into_owned()),
+        server::cover::Located::Url(url) => Some(url),
+    }
 }
 
 /// Download a cover to a temp file named by its URL hash, so repeated plays
@@ -569,6 +625,31 @@ impl ClassifiedLoad {
 
         let mut duration_secs = None;
         let mut bitrate = None;
+        let native_stream = match &source {
+            ClassifiedSource::Remote {
+                stream_ref,
+                source: Some(source),
+            } => {
+                if let ResolvedStreamRef::Pending(item_id) = ResolvedStreamRef::parse(stream_ref) {
+                    source
+                        .open_stream(item_id, buffer_progress.clone())
+                        .await
+                        .map_err(|error| LoadFailure {
+                            token: self.token,
+                            message: error.to_string(),
+                        })?
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        let source = match native_stream {
+            Some(stream) => ClassifiedSource::Factory(Box::new(move || {
+                Ok(player::decoder::from_stream(stream))
+            })),
+            None => source,
+        };
         let factory: SourceFactory = match source {
             ClassifiedSource::Factory(factory) => factory,
             ClassifiedSource::Local(path) => Box::new(move || {
@@ -589,6 +670,12 @@ impl ClassifiedLoad {
                         let source = source
                             .as_ref()
                             .ok_or_else(|| "no active source for cache fallback".to_string())?;
+                        if let Some(stream) = rt_handle
+                            .block_on(source.open_stream(&item_id, buffer_progress.clone()))
+                            .map_err(|error| error.to_string())?
+                        {
+                            return Ok(player::decoder::from_stream(stream));
+                        }
                         let info = rt_handle
                             .block_on(source.resolve_stream(&item_id))
                             .map_err(|error| error.to_string())?;
