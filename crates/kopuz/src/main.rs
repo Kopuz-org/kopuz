@@ -1006,10 +1006,6 @@ fn App() -> Element {
     provide_context(pages::server::discover::DiscoverNowPlaying(
         discover_now_playing,
     ));
-    let discover_prefetch_cache = use_signal(std::collections::HashMap::new);
-    provide_context(pages::server::discover::DiscoverPrefetchCache(
-        discover_prefetch_cache,
-    ));
     provide_context(scroll_positions);
     provide_context(components::source_switcher::SettingsAnchor(settings_anchor));
     let mut settings_subpage = use_signal(|| None::<&'static str>);

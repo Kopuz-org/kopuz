@@ -38,6 +38,10 @@ pub struct TrackListViewProps {
     pub actions: Option<Element>,
     #[props(default)]
     pub on_start_radio: Option<EventHandler<()>>,
+    /// Plays the whole list some other way than queueing the rows shown, as
+    /// a catalog list that pages in plays by its id.
+    #[props(default)]
+    pub on_play_all: Option<EventHandler<()>>,
 }
 
 #[component]
@@ -129,6 +133,10 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                     }
                 },
                 on_play_all: move |_| {
+                    if let Some(play_all) = props.on_play_all {
+                        play_all.call(());
+                        return;
+                    }
                     let is_shuffle = *ctrl.shuffle.peek();
                     if is_shuffle {
                         ctrl.play_queue_shuffled(tracks_play_all.clone());

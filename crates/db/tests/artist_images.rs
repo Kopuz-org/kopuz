@@ -40,6 +40,8 @@ fn track(path: &str, artist: &str, credits: Vec<ArtistCredit>) -> Track {
         artists: vec![artist.into()],
         replay_gain: config::ReplayGainInfo::default(),
         credits,
+        explicit: false,
+        plays: None,
     }
 }
 

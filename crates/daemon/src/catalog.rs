@@ -14,10 +14,14 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use api::{
-    ApiError, ArtworkRef, ArtworkTarget, CatalogDetail, CatalogDetailRequest, CatalogItem,
-    CatalogItemKind, CatalogPage, CatalogShelf,
+    ApiError, ArtworkRef, ArtworkTarget, CatalogChip, CatalogDetail, CatalogDetailRequest,
+    CatalogHeader, CatalogItem, CatalogItemKind, CatalogPage, CatalogShelf, ShelfLayout,
 };
-use server::ytmusic::discover::{DiscoverHome, DiscoverItem};
+use server::ytmusic::discover::{
+    BrowsePage, DiscoverHome, DiscoverItem, DiscoverShelf, LinkKind, PageHeader,
+};
+
+use server::source::MediaSource;
 
 use crate::library::LibraryService;
 use crate::session::SessionHandle;
@@ -91,53 +95,79 @@ impl CatalogService {
         ))
     }
 
-    /// Convert a browse page `listed` served, registering its songs and tile images so later requests resolve them.
+    /// Convert a browse page `source` served, registering its songs and tile images so later requests resolve them.
     fn page(
         &self,
-        mut home: DiscoverHome,
-        listed: &config::Source,
+        home: DiscoverHome,
+        source: &dyn MediaSource,
         config: &config::AppConfig,
     ) -> CatalogPage {
-        let songs = home
-            .shelves
-            .iter_mut()
-            .flat_map(|shelf| shelf.items.iter_mut())
-            .filter_map(|item| match item {
-                DiscoverItem::Song(track) => Some(&mut **track),
-                _ => None,
-            });
-        crate::wire::listed_by(listed, songs);
-        let songs: Vec<reader::Track> = home
-            .shelves
-            .iter()
-            .flat_map(|shelf| shelf.items.iter())
-            .filter_map(|item| match item {
-                DiscoverItem::Song(track) => Some((**track).clone()),
-                _ => None,
-            })
-            .collect();
-        self.library.register_transient(&songs);
         CatalogPage {
-            shelves: home
-                .shelves
-                .into_iter()
-                .map(|shelf| CatalogShelf {
-                    title: shelf.title,
-                    strapline: shelf.strapline,
-                    more_ref: shelf.more_browse_id,
-                    list: shelf.is_song_list,
-                    items: shelf
-                        .items
-                        .into_iter()
-                        .map(|item| self.item(item, config))
-                        .collect(),
-                })
-                .collect(),
+            shelves: self.shelves(home.shelves, source, config),
             continuation: home.continuation,
         }
     }
 
-    fn item(&self, item: DiscoverItem, config: &config::AppConfig) -> CatalogItem {
+    fn shelves(
+        &self,
+        mut shelves: Vec<DiscoverShelf>,
+        source: &dyn MediaSource,
+        config: &config::AppConfig,
+    ) -> Vec<CatalogShelf> {
+        let songs = shelves
+            .iter_mut()
+            .flat_map(|shelf| shelf.items.iter_mut())
+            .filter_map(|item| match item {
+                DiscoverItem::Song(track)
+                | DiscoverItem::Video(track)
+                | DiscoverItem::Episode { track, .. } => Some(&mut **track),
+                _ => None,
+            });
+        crate::wire::listed_by(source.source(), songs);
+        let songs: Vec<reader::Track> = shelves
+            .iter()
+            .flat_map(|shelf| shelf.items.iter())
+            .filter_map(|item| match item {
+                DiscoverItem::Song(track)
+                | DiscoverItem::Video(track)
+                | DiscoverItem::Episode { track, .. } => Some((**track).clone()),
+                _ => None,
+            })
+            .collect();
+        self.library.register_transient(&songs);
+        shelves
+            .into_iter()
+            .map(|shelf| {
+                let layout = layout(shelf.layout);
+                let (more_ref, more_kind) = match shelf.more {
+                    Some(link) => (Some(link.id), link_kind(link.kind)),
+                    None => (None, CatalogItemKind::Unknown),
+                };
+                CatalogShelf {
+                    title: shelf.title,
+                    strapline: shelf.strapline,
+                    more_ref,
+                    more_kind,
+                    list: layout == ShelfLayout::List,
+                    layout,
+                    continuation: shelf.continuation,
+                    search_filter: shelf.search_filter.map(str::to_string),
+                    items: shelf
+                        .items
+                        .into_iter()
+                        .map(|item| self.item(item, source, config))
+                        .collect(),
+                }
+            })
+            .collect()
+    }
+
+    fn item(
+        &self,
+        item: DiscoverItem,
+        source: &dyn MediaSource,
+        config: &config::AppConfig,
+    ) -> CatalogItem {
         match item {
             // A song's artwork is the track's own, so the tile and the queue
             // row cannot disagree about which picture belongs to it.
@@ -147,7 +177,10 @@ impl CatalogService {
                 title: track.title.clone(),
                 subtitle: Some(track.artist.clone()),
                 artwork: crate::artwork::track_ref(&track),
+                explicit: track.explicit,
+                web_url: source.web_url(&track),
                 track: Some(crate::wire::track_info(&track, config)),
+                accent: None,
             },
             DiscoverItem::Playlist {
                 playlist_id,
@@ -157,47 +190,96 @@ impl CatalogService {
             } => CatalogItem {
                 artwork: self.remember_thumbnail(&playlist_id, thumbnail.as_deref()),
                 kind: CatalogItemKind::Playlist,
+                web_url: source.playlist_web_url(&playlist_id),
                 id: playlist_id,
                 title,
                 subtitle: Some(subtitle),
-                track: None,
+                ..CatalogItem::default()
             },
             DiscoverItem::Album {
                 browse_id,
                 title,
                 subtitle,
                 thumbnail,
+                explicit,
             } => CatalogItem {
                 artwork: self.remember_thumbnail(&browse_id, thumbnail.as_deref()),
                 kind: CatalogItemKind::Album,
+                web_url: source.album_web_url(&browse_id),
                 id: browse_id,
                 title,
                 subtitle: Some(subtitle),
-                track: None,
+                explicit,
+                ..CatalogItem::default()
             },
             DiscoverItem::Artist {
                 channel_id,
                 name,
+                subtitle,
                 thumbnail,
             } => CatalogItem {
                 artwork: self.remember_thumbnail(&channel_id, thumbnail.as_deref()),
                 kind: CatalogItemKind::Artist,
+                web_url: source.artist_web_url(&channel_id),
                 id: channel_id,
                 title: name,
-                subtitle: None,
-                track: None,
+                subtitle,
+                ..CatalogItem::default()
             },
             DiscoverItem::Mood {
                 browse_id,
                 title,
                 thumbnail,
+                accent,
             } => CatalogItem {
                 artwork: self.remember_thumbnail(&browse_id, thumbnail.as_deref()),
                 kind: CatalogItemKind::Mood,
                 id: browse_id,
                 title,
-                subtitle: None,
-                track: None,
+                accent: accent.map(|argb| format!("#{:06x}", argb & 0x00ff_ffff)),
+                ..CatalogItem::default()
+            },
+            DiscoverItem::Video(track) => CatalogItem {
+                kind: CatalogItemKind::Video,
+                ..self.item(DiscoverItem::Song(track), source, config)
+            },
+            DiscoverItem::Episode {
+                track,
+                browse_id,
+                published,
+            } => {
+                let item = self.item(DiscoverItem::Song(track), source, config);
+                let subtitle: Vec<&str> = [published.as_deref(), item.subtitle.as_deref()]
+                    .into_iter()
+                    .flatten()
+                    .filter(|part| !part.is_empty())
+                    .collect();
+                CatalogItem {
+                    kind: CatalogItemKind::Episode,
+                    id: browse_id,
+                    subtitle: (!subtitle.is_empty()).then(|| subtitle.join(" • ")),
+                    ..item
+                }
+            }
+            DiscoverItem::Podcast {
+                browse_id,
+                title,
+                subtitle,
+                thumbnail,
+            } => CatalogItem {
+                artwork: self.remember_thumbnail(&browse_id, thumbnail.as_deref()),
+                kind: CatalogItemKind::Podcast,
+                web_url: source.album_web_url(&browse_id),
+                id: browse_id,
+                title,
+                subtitle: Some(subtitle),
+                ..CatalogItem::default()
+            },
+            DiscoverItem::Page { page_id, title } => CatalogItem {
+                kind: CatalogItemKind::Page,
+                id: page_id,
+                title,
+                ..CatalogItem::default()
             },
         }
     }
@@ -210,7 +292,7 @@ impl CatalogService {
             None => source.discover_home().await,
         }
         .map_err(source_error)?;
-        Ok(self.page(home, source.source(), &config))
+        Ok(self.page(home, &*source, &config))
     }
 
     pub async fn detail(&self, request: CatalogDetailRequest) -> Result<CatalogDetail, ApiError> {
@@ -223,44 +305,25 @@ impl CatalogService {
         let source = self.source();
         match request.kind {
             CatalogItemKind::Album => {
-                // An album reached by its own browse id resolves directly; one
-                // reached by a library ref needs the lookup first; and a saved
-                // album from a source that stores no browse id is found by what
-                // it is called, which is why the id alone is enough here.
-                let mut album = match source
-                    .fetch_album_by_ref(&request.id)
-                    .await
-                    .map_err(source_error)?
-                {
-                    Some(album) => album,
-                    None => match self.saved_album(&request.id).await {
-                        Some((title, artist)) => match source
-                            .fetch_album_by_meta(&title, &artist)
-                            .await
-                            .map_err(source_error)?
-                        {
-                            Some(album) => album,
-                            None => return Err(ApiError::not_found("no such catalog album")),
-                        },
-                        None => source
-                            .fetch_album(&request.id)
-                            .await
-                            .map_err(source_error)?,
-                    },
-                };
-                crate::wire::listed_by(source.source(), &mut album.tracks);
-                self.library.register_transient(&album.tracks);
+                let album = self.remote_album(&*source, &request.id).await?;
                 let artwork = self.remember_thumbnail(&album.browse_id, album.thumbnail.as_deref());
                 let artist_key = album.artist_id.as_deref().map(str::to_string);
                 Ok(CatalogDetail {
                     kind: CatalogItemKind::Album,
+                    // A source with albums but no album pages shares the first track's.
+                    web_url: source
+                        .album_web_url(&album.browse_id)
+                        .or_else(|| album.tracks.first().and_then(|track| source.web_url(track))),
                     id: album.browse_id,
                     title: album.title,
                     artist_key,
                     subtitle: album.artist,
+                    description: album.description,
+                    album_type: album.album_type,
                     artwork,
                     playback_id: album.audio_playlist_id,
                     year: album.year,
+                    header: CatalogHeader::Detail,
                     tracks: album
                         .tracks
                         .iter()
@@ -270,22 +333,33 @@ impl CatalogService {
                 })
             }
             CatalogItemKind::Playlist => {
-                let mut page = source
-                    .fetch_playlist_entries_page(&request.id, request.continuation)
-                    .await
-                    .map_err(source_error)?;
-                crate::wire::listed_by(source.source(), &mut page.tracks);
-                self.library.register_transient(&page.tracks);
+                let page = self
+                    .playlist_page(&*source, &request.id, request.continuation)
+                    .await?;
+                let header = page.header.unwrap_or_default();
                 let artwork = self
-                    .thumbnail(&request.id)
-                    .map(|url| {
-                        crate::artwork::url_ref(ArtworkTarget::Catalog(request.id.clone()), &url)
+                    .remember_thumbnail(&request.id, header.thumbnail.as_deref())
+                    .or_else(|| {
+                        self.thumbnail(&request.id).map(|url| {
+                            crate::artwork::url_ref(
+                                ArtworkTarget::Catalog(request.id.clone()),
+                                &url,
+                            )
+                        })
                     })
                     .or_else(|| page.tracks.first().and_then(crate::artwork::track_ref));
+                let title = match header.title.trim() {
+                    "" => request.id.clone(),
+                    _ => header.title,
+                };
                 Ok(CatalogDetail {
                     kind: CatalogItemKind::Playlist,
-                    id: request.id.clone(),
-                    title: request.id,
+                    web_url: source.playlist_web_url(&request.id),
+                    id: request.id,
+                    title,
+                    owner: header.owner,
+                    description: header.description,
+                    plays: header.plays,
                     artwork,
                     tracks: page
                         .tracks
@@ -293,6 +367,7 @@ impl CatalogService {
                         .map(|track| crate::wire::track_info(track, &config))
                         .collect(),
                     continuation: page.next,
+                    header: CatalogHeader::Detail,
                     ..Default::default()
                 })
             }
@@ -323,28 +398,255 @@ impl CatalogService {
                         shelves: artist.sections,
                         continuation: None,
                     },
-                    source.source(),
+                    &*source,
                     &config,
                 );
                 let artwork =
                     self.remember_thumbnail(&artist.channel_id, artist.banner_thumbnail.as_deref());
                 Ok(CatalogDetail {
                     kind: CatalogItemKind::Artist,
+                    web_url: source.artist_web_url(&artist.channel_id),
                     id: artist.channel_id,
                     title: artist.name,
                     subtitle: artist.subscribers,
+                    monthly_listeners: artist.monthly_listeners,
                     description: artist.description,
                     artwork,
                     playback_id: artist.shuffle_playlist_id,
                     shelves: page.shelves,
                     continuation: page.continuation,
+                    header: CatalogHeader::Artist,
                     ..Default::default()
                 })
             }
-            CatalogItemKind::Track | CatalogItemKind::Mood | CatalogItemKind::Unknown => Err(
-                ApiError::unsupported("this catalog kind has no detail page"),
-            ),
+            // Each of these is a page of the source's own, opened by the id it handed out.
+            CatalogItemKind::Page
+            | CatalogItemKind::Mood
+            | CatalogItemKind::Podcast
+            | CatalogItemKind::Episode => {
+                let page = source
+                    .browse_page(&request.id, request.continuation.as_deref())
+                    .await
+                    .map_err(source_error)?;
+                Ok(self.browse_detail(request, page, &*source, &config))
+            }
+            // A song's own page is what the source relates to it.
+            CatalogItemKind::Track | CatalogItemKind::Video => {
+                let page = source.related(&request.id).await.map_err(source_error)?;
+                Ok(self.browse_detail(request, page, &*source, &config))
+            }
+            CatalogItemKind::Unknown => Err(ApiError::unsupported(
+                "this catalog kind has no detail page",
+            )),
         }
+    }
+
+    /// An album reached by its own browse id resolves directly; one reached by
+    /// a library ref needs the lookup first; and a saved album from a source
+    /// that stores no browse id is found by what it is called, which is why
+    /// the id alone is enough here. Its tracks come back registered.
+    async fn remote_album(
+        &self,
+        source: &dyn MediaSource,
+        id: &str,
+    ) -> Result<server::source::RemoteAlbum, ApiError> {
+        let mut album = match source.fetch_album_by_ref(id).await.map_err(source_error)? {
+            Some(album) => album,
+            None => match self.saved_album(id).await {
+                Some((title, artist)) => source
+                    .fetch_album_by_meta(&title, &artist)
+                    .await
+                    .map_err(source_error)?
+                    .ok_or_else(|| ApiError::not_found("no such catalog album"))?,
+                None => source.fetch_album(id).await.map_err(source_error)?,
+            },
+        };
+        crate::wire::listed_by(source.source(), &mut album.tracks);
+        self.library.register_transient(&album.tracks);
+        Ok(album)
+    }
+
+    /// One page of a playlist the source lists, its tracks registered.
+    async fn playlist_page(
+        &self,
+        source: &dyn MediaSource,
+        id: &str,
+        continuation: Option<String>,
+    ) -> Result<server::source::PlaylistPage, ApiError> {
+        let mut page = source
+            .fetch_playlist_entries_page(id, continuation)
+            .await
+            .map_err(source_error)?;
+        crate::wire::listed_by(source.source(), &mut page.tracks);
+        self.library.register_transient(&page.tracks);
+        Ok(page)
+    }
+
+    /// Every track of an album the library does not hold, so it plays by id.
+    pub async fn album_tracks(&self, id: &str) -> Result<Vec<reader::Track>, ApiError> {
+        let tracks = self.remote_album(&*self.source(), id).await?.tracks;
+        match tracks.is_empty() {
+            true => Err(ApiError::not_found("that album has no tracks to play")),
+            false => Ok(tracks),
+        }
+    }
+
+    /// Every track of a playlist the library does not hold, page by page.
+    /// Pages repeat rows at their seams, and a page with nothing new ends
+    /// the walk even when it hands out another token.
+    pub async fn playlist_tracks(&self, id: &str) -> Result<Vec<reader::Track>, ApiError> {
+        let source = self.source();
+        let mut seen = std::collections::HashSet::new();
+        let mut tracks = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = self.playlist_page(&*source, id, cursor).await?;
+            let before = tracks.len();
+            tracks.extend(
+                page.tracks
+                    .into_iter()
+                    .filter(|track| seen.insert(track.id.key().into_owned())),
+            );
+            match page.next {
+                Some(next) if tracks.len() > before => cursor = Some(next),
+                _ => break,
+            }
+        }
+        match tracks.is_empty() {
+            true => Err(ApiError::not_found("that playlist has no tracks to play")),
+            false => Ok(tracks),
+        }
+    }
+
+    /// A track by key that no listing this session served, looked up at the source.
+    pub async fn track(&self, key: &str) -> Result<Option<reader::Track>, ApiError> {
+        let source = self.source();
+        let Some(mut track) = source.fetch_track(key).await.map_err(source_error)? else {
+            return Ok(None);
+        };
+        crate::wire::listed_by(source.source(), [&mut track]);
+        self.library
+            .register_transient(std::slice::from_ref(&track));
+        Ok(Some(track))
+    }
+
+    fn browse_detail(
+        &self,
+        request: CatalogDetailRequest,
+        page: BrowsePage,
+        source: &dyn MediaSource,
+        config: &config::AppConfig,
+    ) -> CatalogDetail {
+        let id = request.id;
+        let artwork = self.remember_thumbnail(&id, page.thumbnail.as_deref());
+        CatalogDetail {
+            kind: request.kind,
+            title: page.title,
+            subtitle: page.subtitle,
+            description: page.description,
+            artwork,
+            playback_id: page.playback_id,
+            header: match page.header {
+                PageHeader::None => CatalogHeader::None,
+                PageHeader::Title => CatalogHeader::Title,
+                PageHeader::Detail => CatalogHeader::Detail,
+                PageHeader::Artist => CatalogHeader::Artist,
+            },
+            chips: page
+                .chips
+                .into_iter()
+                .map(|chip| CatalogChip {
+                    id: chip.page_id,
+                    label: chip.title,
+                    selected: chip.selected,
+                })
+                .collect(),
+            web_url: match request.kind {
+                CatalogItemKind::Podcast => source.album_web_url(&id),
+                _ => None,
+            },
+            owner: page.owner,
+            plays: page.plays,
+            shelves: self.shelves(page.shelves, source, config),
+            continuation: page.continuation,
+            id,
+            ..Default::default()
+        }
+    }
+
+    /// A filtered search, or more of one. The plain search is the library's.
+    pub async fn search(
+        &self,
+        request: api::SearchRequest,
+    ) -> Result<api::SearchResults, ApiError> {
+        let config = self.config();
+        let source = self.source();
+        // A continuation names what it continues, so it needs no filter beside it.
+        let filter = request.filter.as_deref().unwrap_or_default();
+        let page = source
+            .search_shelves(&request.query, filter, request.continuation.as_deref())
+            .await
+            .map_err(source_error)?;
+        Ok(api::SearchResults {
+            shelves: self.shelves(page.shelves, &*source, &config),
+            continuation: page.continuation,
+            correction: page.correction,
+            ..Default::default()
+        })
+    }
+
+    pub async fn search_suggestions(
+        &self,
+        query: &str,
+    ) -> Result<Vec<api::SearchSuggestion>, ApiError> {
+        use server::ytmusic::browse::search::Suggestion;
+        let config = self.config();
+        let source = self.source();
+        let suggestions = source
+            .search_suggestions(query)
+            .await
+            .map_err(source_error)?;
+        // Hits go through the same conversion as a shelf, so their songs are
+        // registered and their pictures remembered like any browse row's.
+        let mut hits = Vec::new();
+        let mut order = Vec::new();
+        for suggestion in suggestions {
+            match suggestion {
+                Suggestion::Query { text, from_history } => order.push(Some((text, from_history))),
+                Suggestion::Item(item) => {
+                    hits.push(item);
+                    order.push(None);
+                }
+            }
+        }
+        let shelf = DiscoverShelf {
+            title: String::new(),
+            strapline: None,
+            more: None,
+            items: hits,
+            layout: server::ytmusic::discover::ShelfLayout::List,
+            continuation: None,
+            search_filter: None,
+        };
+        let mut hits = self
+            .shelves(vec![shelf], &*source, &config)
+            .into_iter()
+            .flat_map(|shelf| shelf.items);
+        Ok(order
+            .into_iter()
+            .filter_map(|entry| match entry {
+                Some((text, from_history)) => Some(api::SearchSuggestion {
+                    text,
+                    from_history,
+                    item: None,
+                }),
+                None => hits.next().map(|item| api::SearchSuggestion {
+                    text: item.title.clone(),
+                    from_history: false,
+                    item: Some(item),
+                }),
+            })
+            .collect())
     }
 
     /// An artist the source issued no id for has no catalog page, so it is the tracks the library files under it.
@@ -418,6 +720,61 @@ impl CatalogService {
     }
 }
 
+/// What a queue asks of the source: the lists and tracks behind ids the
+/// library does not hold. The library reaches the catalog through this, so a
+/// queue can be built from a catalog id without a network in tests.
+#[async_trait::async_trait]
+pub trait CatalogQueue: Send + Sync {
+    async fn album_tracks(&self, id: &str) -> Result<Vec<reader::Track>, ApiError>;
+    async fn playlist_tracks(&self, id: &str) -> Result<Vec<reader::Track>, ApiError>;
+    async fn track(&self, key: &str) -> Result<Option<reader::Track>, ApiError>;
+    async fn track_radio(&self, key: &str) -> Result<Vec<reader::Track>, ApiError>;
+    async fn playlist_radio(&self, id: &str) -> Result<Vec<reader::Track>, ApiError>;
+}
+
+#[async_trait::async_trait]
+impl CatalogQueue for CatalogService {
+    async fn album_tracks(&self, id: &str) -> Result<Vec<reader::Track>, ApiError> {
+        CatalogService::album_tracks(self, id).await
+    }
+
+    async fn playlist_tracks(&self, id: &str) -> Result<Vec<reader::Track>, ApiError> {
+        CatalogService::playlist_tracks(self, id).await
+    }
+
+    async fn track(&self, key: &str) -> Result<Option<reader::Track>, ApiError> {
+        CatalogService::track(self, key).await
+    }
+
+    async fn track_radio(&self, key: &str) -> Result<Vec<reader::Track>, ApiError> {
+        CatalogService::track_radio(self, key).await
+    }
+
+    async fn playlist_radio(&self, id: &str) -> Result<Vec<reader::Track>, ApiError> {
+        CatalogService::playlist_radio(self, id).await
+    }
+}
+
+fn layout(layout: server::ytmusic::discover::ShelfLayout) -> ShelfLayout {
+    use server::ytmusic::discover::ShelfLayout as Source;
+    match layout {
+        Source::Carousel => ShelfLayout::Carousel,
+        Source::Grid => ShelfLayout::Grid,
+        Source::List => ShelfLayout::List,
+        Source::TrackGrid => ShelfLayout::TrackGrid,
+        Source::Hero => ShelfLayout::Hero,
+    }
+}
+
+fn link_kind(kind: LinkKind) -> CatalogItemKind {
+    match kind {
+        LinkKind::Album => CatalogItemKind::Album,
+        LinkKind::Artist => CatalogItemKind::Artist,
+        LinkKind::Playlist => CatalogItemKind::Playlist,
+        LinkKind::Page => CatalogItemKind::Page,
+    }
+}
+
 /// Lift the seed out of a mix, if the source put it there. Removing rather
 /// than copying is what keeps it from appearing twice once it is pinned.
 fn take_seed(tracks: &mut Vec<reader::Track>, key: &str) -> Option<reader::Track> {
@@ -449,6 +806,8 @@ mod tests {
             credits: Vec::new(),
             artists: Vec::new(),
             replay_gain: config::ReplayGainInfo::default(),
+            explicit: false,
+            plays: None,
         }
     }
 

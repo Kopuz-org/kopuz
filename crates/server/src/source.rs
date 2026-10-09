@@ -186,6 +186,29 @@ pub trait MediaSource: Send + Sync {
         None
     }
 
+    /// The same for an artist, given the id this source browses it by.
+    fn artist_web_url(&self, _artist_id: &str) -> Option<String> {
+        None
+    }
+
+    /// The same for a playlist, given the id this source lists it by.
+    fn playlist_web_url(&self, _playlist_id: &str) -> Option<String> {
+        None
+    }
+
+    /// One track by the id it plays under, for a key nothing has listed this
+    /// session. `None` when the source has no such track; the default has no
+    /// way to look one up.
+    async fn fetch_track(&self, _item_id: &str) -> Result<Option<reader::Track>, SourceError> {
+        Ok(None)
+    }
+
+    /// The signed-in account's picture. `None` anonymously, and for a source
+    /// whose accounts have none.
+    async fn account_avatar(&self) -> Result<Option<String>, SourceError> {
+        Ok(None)
+    }
+
     /// Search this source for `query`, returning matching tracks and albums. The
     /// default searches the source's library corpus (the behavior local, Jellyfin
     /// and Subsonic all share); catalog-backed remotes (YT) override to query the
@@ -203,6 +226,33 @@ pub trait MediaSource: Send + Sync {
         Ok(search::filter(&q, tracks, albums))
     }
 
+    /// The filters [`search_shelves`](Self::search_shelves) takes. Default none.
+    fn search_filters(&self) -> Vec<SearchFilterEntry> {
+        Vec::new()
+    }
+
+    /// Search results as the source lays them out, under one of its
+    /// [`search_filters`](Self::search_filters): shelves for its "all"
+    /// filter, one long shelf under any other, and `continuation` for more of
+    /// that. Default unsupported; a source without filters has nothing to
+    /// add to [`search`](Self::search).
+    async fn search_shelves(
+        &self,
+        _query: &str,
+        _filter: &str,
+        _continuation: Option<&str>,
+    ) -> Result<crate::ytmusic::browse::search::SearchPage, SourceError> {
+        Err(SourceError::unsupported("search filters"))
+    }
+
+    /// Completions for what has been typed so far. Default none.
+    async fn search_suggestions(
+        &self,
+        _query: &str,
+    ) -> Result<Vec<crate::ytmusic::browse::search::Suggestion>, SourceError> {
+        Ok(Vec::new())
+    }
+
     /// The discover/home feed. Default unsupported — gated by
     /// [`Capabilities::discover`]; only catalog remotes (YT) override.
     async fn discover_home(&self) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
@@ -216,6 +266,32 @@ pub trait MediaSource: Send + Sync {
         _token: &str,
     ) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
         Err(SourceError::unsupported("discover"))
+    }
+
+    /// The catalog pages this source offers a frontend's navigation, in order.
+    /// Default none; only catalog remotes (YT) declare any.
+    fn catalog_pages(&self) -> Vec<CatalogPageEntry> {
+        Vec::new()
+    }
+
+    /// One catalog page by an id [`catalog_pages`](Self::catalog_pages), a
+    /// chip or a link on another page handed out; `continuation` pages it.
+    /// Default unsupported.
+    async fn browse_page(
+        &self,
+        _id: &str,
+        _continuation: Option<&str>,
+    ) -> Result<crate::ytmusic::discover::BrowsePage, SourceError> {
+        Err(SourceError::unsupported("catalog pages"))
+    }
+
+    /// What the source relates to one of its tracks: similar songs, artists
+    /// and albums, as a page. Default unsupported.
+    async fn related(
+        &self,
+        _item_id: &str,
+    ) -> Result<crate::ytmusic::discover::BrowsePage, SourceError> {
+        Err(SourceError::unsupported("related"))
     }
 
     /// The tracks of a remote album / browse id. Standard library remotes use
@@ -322,6 +398,7 @@ pub trait MediaSource: Send + Sync {
         Ok(PlaylistPage {
             tracks: self.fetch_playlist_entries(playlist_id).await?,
             next: None,
+            header: None,
         })
     }
 

@@ -35,6 +35,35 @@ pub fn capabilities_to_proto(value: &api::SourceCapabilities) -> SourceCapabilit
             FavoritesSyncMode::Instant => crate::FavoritesSyncMode::FavoritesSyncInstant,
             FavoritesSyncMode::Paginated => crate::FavoritesSyncMode::FavoritesSyncPaginated,
         } as i32,
+        pages: value.pages.iter().map(page_entry_to_proto).collect(),
+        search_filters: value
+            .search_filters
+            .iter()
+            .map(|filter| SearchFilter {
+                id: filter.id.clone(),
+                label: Some(text_to_proto(&filter.label)),
+            })
+            .collect(),
+    }
+}
+
+pub fn page_entry_to_proto(value: &api::PageEntry) -> PageEntry {
+    PageEntry {
+        id: value.id.clone(),
+        label: Some(text_to_proto(&value.label)),
+        icon: Some(icon_to_proto(&value.icon)),
+    }
+}
+
+pub fn page_entry_from_proto(value: &PageEntry) -> api::PageEntry {
+    api::PageEntry {
+        id: value.id.clone(),
+        label: value
+            .label
+            .as_ref()
+            .map(text_from_proto)
+            .unwrap_or_default(),
+        icon: value.icon.as_ref().map(icon_from_proto).unwrap_or_default(),
     }
 }
 
@@ -76,6 +105,19 @@ pub fn capabilities_from_proto(value: Option<&SourceCapabilities>) -> api::Sourc
             }
             _ => api::FavoritesSyncMode::Instant,
         },
+        pages: value.pages.iter().map(page_entry_from_proto).collect(),
+        search_filters: value
+            .search_filters
+            .iter()
+            .map(|filter| api::SearchFilter {
+                id: filter.id.clone(),
+                label: filter
+                    .label
+                    .as_ref()
+                    .map(text_from_proto)
+                    .unwrap_or_default(),
+            })
+            .collect(),
     }
 }
 
@@ -167,6 +209,7 @@ pub fn source_info_to_proto(value: &api::SourceInfo) -> SourceInfo {
         state: value
             .state
             .map(|state| super::enums::source_state_to_proto(state) as i32),
+        avatar: value.avatar.as_ref().map(artwork_ref_to_proto),
     }
 }
 
@@ -190,6 +233,7 @@ pub fn source_info_from_proto(value: &SourceInfo) -> api::SourceInfo {
         needs_network: value.needs_network,
         permanent: value.permanent,
         state: value.state.map(super::enums::source_state_from_proto),
+        avatar: value.avatar.as_ref().and_then(artwork_ref_from_proto),
     }
 }
 
@@ -316,6 +360,15 @@ mod tests {
                 artists: api::ArtistPresentation::Library,
                 albums: api::AlbumPresentation::Standard,
                 favorites_sync: api::FavoritesSyncMode::Paginated,
+                pages: vec![api::PageEntry {
+                    id: "FEmusic_home".into(),
+                    label: api::Text::key("home"),
+                    icon: api::Icon::Class("fa-solid fa-house".into()),
+                }],
+                search_filters: vec![api::SearchFilter {
+                    id: "songs".into(),
+                    label: api::Text::key("search_filter_songs"),
+                }],
                 ..Default::default()
             },
             detail: Some("https://jelly.example".into()),
@@ -324,6 +377,10 @@ mod tests {
             needs_network: true,
             permanent: true,
             state: Some(api::SourceState::AuthExpired),
+            avatar: Some(api::ArtworkRef::new(
+                api::ArtworkTarget::Account("yt".into()),
+                9,
+            )),
         };
         assert_eq!(info, source_info_from_proto(&source_info_to_proto(&info)));
         let unprobed = api::SourceInfo {

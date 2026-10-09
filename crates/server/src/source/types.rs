@@ -118,6 +118,8 @@ pub struct FavoritesPage {
 pub struct PlaylistPage {
     pub tracks: Vec<reader::Track>,
     pub next: Option<String>,
+    /// What heads the playlist, on the first page of a source that pages them with one.
+    pub header: Option<crate::ytmusic::playlists::PlaylistHeader>,
 }
 
 /// What looking one artist up found: a photo, and the name the source's own record gives when the lookup went by id.
@@ -158,6 +160,25 @@ pub struct Capabilities {
     pub artist_view: ArtistView,
     pub albums: AlbumType,
     pub favorites_sync: FavoritesSync,
+    /// A signed-in account has a picture, which [`MediaSource::account_avatar`](super::MediaSource::account_avatar) fetches.
+    pub account_avatar: bool,
+}
+
+/// A catalog page a source declares: the id that opens it, the translation
+/// key of its label, and its icon class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogPageEntry {
+    pub id: String,
+    pub label: &'static str,
+    pub icon: &'static str,
+}
+
+/// A search filter a source offers: the id a client passes back and the
+/// translation key of its label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchFilterEntry {
+    pub id: &'static str,
+    pub label: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,6 +210,8 @@ pub struct RemoteAlbum {
     pub artist: Option<String>,
     pub artist_id: Option<String>,
     pub year: Option<String>,
+    pub album_type: Option<String>,
+    pub description: Option<String>,
     pub thumbnail: Option<String>,
     pub audio_playlist_id: Option<String>,
     pub tracks: Vec<reader::Track>,
@@ -202,6 +225,8 @@ impl From<crate::ytmusic::discover::YtAlbum> for RemoteAlbum {
             artist: a.artist,
             artist_id: a.artist_id,
             year: a.year,
+            album_type: a.album_type,
+            description: a.description,
             thumbnail: a.thumbnail,
             audio_playlist_id: a.audio_playlist_id,
             tracks: a.tracks,

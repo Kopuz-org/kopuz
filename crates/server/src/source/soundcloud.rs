@@ -55,6 +55,7 @@ impl MediaSource for SoundcloudSource {
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Paginated,
+            account_avatar: false,
         }
     }
 

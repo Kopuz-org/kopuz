@@ -72,7 +72,7 @@ pub fn AlbumActionsMenu(props: AlbumActionsMenuProps) -> Element {
     let mut local_open = use_signal(|| false);
     let mut show_playlist_modal = use_signal(|| false);
 
-    let capabilities = *caps.read();
+    let capabilities = caps.read().clone();
     let is_open = props.is_open.unwrap_or_else(|| *local_open.read());
 
     let on_open = props.on_open;

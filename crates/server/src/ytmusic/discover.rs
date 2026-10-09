@@ -21,18 +21,142 @@ pub struct DiscoverHome {
 pub struct DiscoverShelf {
     pub title: String,
     pub strapline: Option<String>,
-    pub more_browse_id: Option<String>,
+    /// The shelf's own page, behind its "More" or its title.
+    pub more: Option<PageLink>,
     pub items: Vec<DiscoverItem>,
-    /// Render as a vertical song list (with row numbers / duration)
-    /// instead of a horizontal tile carousel. Only set true for the
-    /// artist-page "Top songs" shelf — discover-home shelves stay
-    /// horizontal.
-    pub is_song_list: bool,
+    pub layout: ShelfLayout,
+    /// More items for this shelf, as opposed to more shelves for the page.
+    pub continuation: Option<String>,
+    /// On a search's All results, the filter that shows every result of
+    /// this shelf's kind.
+    pub search_filter: Option<&'static str>,
+}
+
+/// How a shelf lays out its items.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ShelfLayout {
+    #[default]
+    Carousel,
+    Grid,
+    /// A vertical song list with row numbers and durations, as the artist
+    /// page's "Top songs".
+    List,
+    TrackGrid,
+    Hero,
+}
+
+/// Where a link leads: which kind of page, and the id that opens it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageLink {
+    pub kind: LinkKind,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkKind {
+    Album,
+    Artist,
+    Playlist,
+    Page,
+}
+
+impl PageLink {
+    /// Where a `navigationEndpoint` leads. Albums and playlists open by
+    /// their id whatever else the link carries; anything else with `params`
+    /// is a view of a page, such as an artist's "Singles", and opens as one.
+    pub fn endpoint(endpoint: &Value) -> Option<Self> {
+        let browse = endpoint.get("browseEndpoint")?;
+        let id = browse.get("browseId")?.as_str()?;
+        let params = browse
+            .get("params")
+            .and_then(Value::as_str)
+            .map(super::browse::decode_percent);
+        Some(match params {
+            Some(params) if !id.starts_with("MPRE") && !id.starts_with("VL") => Self {
+                kind: LinkKind::Page,
+                id: super::browse::page_id(id, Some(&params)),
+            },
+            _ => Self::browse(id),
+        })
+    }
+
+    /// What a bare browse id opens. A playlist keeps its `VL` prefix, which
+    /// the playlist walk accepts as it is.
+    pub fn browse(browse_id: &str) -> Self {
+        let kind = match browse_id {
+            id if id.starts_with("VL") => LinkKind::Playlist,
+            id if id.starts_with("MPRE") => LinkKind::Album,
+            id if id.starts_with("UC") => LinkKind::Artist,
+            _ => LinkKind::Page,
+        };
+        Self {
+            kind,
+            id: browse_id.to_string(),
+        }
+    }
+}
+
+/// A browse page as a whole: what heads it, the chips that filter it, and its shelves.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BrowsePage {
+    pub header: PageHeader,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub description: Option<String>,
+    pub thumbnail: Option<String>,
+    /// The playlist that plays the whole page.
+    pub playback_id: Option<String>,
+    /// Who made it, for a playlist or a show.
+    pub owner: Option<String>,
+    /// "6.9M views", where the header counts them.
+    pub plays: Option<String>,
+    pub chips: Vec<PageChip>,
+    pub shelves: Vec<DiscoverShelf>,
+    pub continuation: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PageHeader {
+    #[default]
+    None,
+    Title,
+    Detail,
+    Artist,
+}
+
+/// One chip over a page; `page_id` opens the page it filters to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageChip {
+    pub title: String,
+    pub page_id: String,
+    pub selected: bool,
+}
+
+/// The browse id of the home feed, which is also its page id.
+pub const HOME: &str = "FEmusic_home";
+
+impl From<DiscoverHome> for BrowsePage {
+    fn from(home: DiscoverHome) -> Self {
+        Self {
+            shelves: home.shelves,
+            continuation: home.continuation,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DiscoverItem {
     Song(Box<Track>),
+    /// A music video or an upload to YouTube rather than an album track.
+    Video(Box<Track>),
+    /// A podcast episode; `browse_id` opens its own page.
+    Episode {
+        track: Box<Track>,
+        browse_id: String,
+        /// When it came out, as the page wrote it ("Feb 25, 2024", "10h ago").
+        published: Option<String>,
+    },
     Playlist {
         playlist_id: String,
         title: String,
@@ -44,22 +168,39 @@ pub enum DiscoverItem {
         title: String,
         subtitle: String,
         thumbnail: Option<String>,
+        explicit: bool,
     },
     Artist {
         channel_id: String,
         name: String,
+        /// "1.2M subscribers" and the like, where the page shows it.
+        subtitle: Option<String>,
         thumbnail: Option<String>,
     },
+    /// A mood or genre tile. `browse_id` is a page id, params and all.
     Mood {
         browse_id: String,
         title: String,
         thumbnail: Option<String>,
+        /// The tile's stripe colour, `0xAARRGGBB`.
+        accent: Option<u32>,
+    },
+    Podcast {
+        browse_id: String,
+        title: String,
+        subtitle: String,
+        thumbnail: Option<String>,
+    },
+    /// A button to another page, as Explore's New releases and Charts.
+    Page {
+        page_id: String,
+        title: String,
     },
 }
 
 #[tracing::instrument(name = "yt.discover_home", skip(cookies))]
 pub async fn fetch_home(cookies: &str) -> Result<DiscoverHome, String> {
-    let body = build_browse_body(Some("FEmusic_home"));
+    let body = build_browse_body(Some(HOME));
     let resp = post(
         &format!("{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"),
         &body,
@@ -102,6 +243,9 @@ pub struct YtAlbum {
     pub artist: Option<String>,
     pub artist_id: Option<String>,
     pub year: Option<String>,
+    /// "Album", "Single", "EP", as the header labels it.
+    pub album_type: Option<String>,
+    pub description: Option<String>,
     pub thumbnail: Option<String>,
     pub audio_playlist_id: Option<String>,
     pub tracks: Vec<Track>,
@@ -125,6 +269,8 @@ pub struct YtArtist {
     pub channel_id: String,
     pub name: String,
     pub subscribers: Option<String>,
+    /// "80.8M monthly audience", where the header shows it.
+    pub monthly_listeners: Option<String>,
     pub description: Option<String>,
     pub banner_thumbnail: Option<String>,
     pub shuffle_playlist_id: Option<String>,
@@ -150,7 +296,7 @@ pub async fn fetch_artist(channel_id: &str, cookies: &str) -> Result<YtArtist, S
     Ok(artist)
 }
 
-fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
+pub(super) fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
     let header = find_artist_header(resp);
 
     let name = header
@@ -163,6 +309,7 @@ fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
         )
         .or_else(|| runs_text(h, "/subscriberCountText/runs"))
     });
+    let monthly_listeners = header.and_then(|h| runs_text(h, "/monthlyListenerCount/runs"));
     let description = header.and_then(|h| runs_text(h, "/description/runs"));
     let banner_thumbnail = header.and_then(best_artist_banner);
     let shuffle_playlist_id = header
@@ -189,6 +336,7 @@ fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
         channel_id: channel_id.to_string(),
         name,
         subscribers,
+        monthly_listeners,
         description,
         banner_thumbnail,
         shuffle_playlist_id,
@@ -278,14 +426,7 @@ fn parse_artist_carousel(section: &Value) -> Option<DiscoverShelf> {
         return None;
     }
     let strapline = header.and_then(|h| runs_text(h, "/strapline/runs"));
-    let more_browse_id = header
-        .and_then(|h| {
-            h.pointer(
-                "/moreContentButton/buttonRenderer/navigationEndpoint/browseEndpoint/browseId",
-            )
-        })
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+    let more = header.and_then(more_button);
     let items: Vec<DiscoverItem> = shelf
         .get("contents")
         .and_then(|v| v.as_array())
@@ -297,10 +438,18 @@ fn parse_artist_carousel(section: &Value) -> Option<DiscoverShelf> {
     Some(DiscoverShelf {
         title,
         strapline,
-        more_browse_id,
+        more,
         items,
-        is_song_list: false,
+        layout: ShelfLayout::Carousel,
+        continuation: None,
+        search_filter: None,
     })
+}
+
+/// A carousel header's "More" button. An artist's "Albums" or "Singles"
+/// button carries `params` that pick the shelf, so it opens as a page.
+fn more_button(header: &Value) -> Option<PageLink> {
+    PageLink::endpoint(header.pointer("/moreContentButton/buttonRenderer/navigationEndpoint")?)
 }
 
 /// "Top songs" comes back as a list shelf (musicShelfRenderer), not a
@@ -313,10 +462,10 @@ fn parse_artist_song_list(section: &Value) -> Option<DiscoverShelf> {
     if title.is_empty() {
         return None;
     }
-    let more_browse_id = shelf
+    let more = shelf
         .pointer("/bottomEndpoint/browseEndpoint/browseId")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(PageLink::browse);
     let items: Vec<DiscoverItem> = shelf
         .get("contents")
         .and_then(|v| v.as_array())
@@ -334,9 +483,11 @@ fn parse_artist_song_list(section: &Value) -> Option<DiscoverShelf> {
     Some(DiscoverShelf {
         title,
         strapline: None,
-        more_browse_id,
+        more,
         items,
-        is_song_list: true,
+        layout: ShelfLayout::List,
+        continuation: None,
+        search_filter: None,
     })
 }
 
@@ -353,6 +504,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
     let mut credits: Vec<ArtistCredit> = Vec::new();
     let mut album = String::new();
     let mut flex_duration: Option<u64> = None;
+    let mut plays = None;
     for c in &cols {
         match c {
             RowColumn::Title {
@@ -380,6 +532,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
             RowColumn::Duration { secs } if flex_duration.is_none() => {
                 flex_duration = Some(*secs);
             }
+            RowColumn::PlayCount { text } if plays.is_none() => plays = Some(text.clone()),
             _ => {}
         }
     }
@@ -428,6 +581,8 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
         artists,
         replay_gain: config::ReplayGainInfo::default(),
         credits,
+        explicit: super::has_explicit_badge(row),
+        plays,
     })
 }
 
@@ -443,7 +598,7 @@ pub async fn fetch_album(browse_id: &str, cookies: &str) -> Result<YtAlbum, Stri
     Ok(parse_album(browse_id, &resp))
 }
 
-fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
+pub(super) fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
     let sections = album_section_contents(resp);
     let header = find_album_header(resp, &sections);
 
@@ -453,6 +608,14 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
 
     let artist = pick_album_artist(header);
     let year = pick_album_year(header);
+    let album_type = pick_album_type(header);
+    let description = header.and_then(|h| {
+        runs_text(
+            h,
+            "/description/musicDescriptionShelfRenderer/description/runs",
+        )
+        .or_else(|| runs_text(h, "/description/runs"))
+    });
     let thumbnail = best_album_thumbnail(header).map(normalize_yt_thumbnail);
     let audio_playlist_id_header = header.and_then(find_audio_playlist_id);
 
@@ -498,6 +661,8 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
         artist_id: artist.as_ref().and_then(|credit| credit.id.clone()),
         artist: artist.map(|credit| credit.name),
         year,
+        album_type,
+        description,
         thumbnail,
         audio_playlist_id: audio_playlist_id_header.or(audio_pid_from_rows),
         tracks,
@@ -641,6 +806,15 @@ fn pick_album_year(header: Option<&Value>) -> Option<String> {
     None
 }
 
+/// The first part of the header's subtitle, "Album • 2013", when it names a kind of release.
+fn pick_album_type(header: Option<&Value>) -> Option<String> {
+    let first = header?
+        .pointer("/subtitle/runs/0/text")
+        .and_then(Value::as_str)?
+        .trim();
+    matches!(first, "Album" | "Single" | "EP" | "Audiobook").then(|| first.to_string())
+}
+
 fn find_audio_playlist_id(header: &Value) -> Option<String> {
     let buttons = header.get("buttons").and_then(|v| v.as_array())?;
     for button in buttons {
@@ -687,6 +861,7 @@ fn parse_album_row(
     let mut row_artist: Option<String> = None;
     let mut row_credits: Vec<ArtistCredit> = Vec::new();
     let mut flex_duration: Option<u64> = None;
+    let mut plays = None;
     for c in &cols {
         match c {
             RowColumn::Title {
@@ -713,6 +888,7 @@ fn parse_album_row(
             RowColumn::Duration { secs } if flex_duration.is_none() => {
                 flex_duration = Some(*secs);
             }
+            RowColumn::PlayCount { text } if plays.is_none() => plays = Some(text.clone()),
             _ => {}
         }
     }
@@ -764,6 +940,8 @@ fn parse_album_row(
         artists,
         replay_gain: config::ReplayGainInfo::default(),
         credits,
+        explicit: super::has_explicit_badge(row),
+        plays,
     })
 }
 
@@ -841,7 +1019,7 @@ async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
         .map_err(|e| format!("discover JSON: {e}"))
 }
 
-fn parse_initial(resp: &Value) -> DiscoverHome {
+pub(super) fn parse_initial(resp: &Value) -> DiscoverHome {
     let sections = tab_section_contents(resp, "/contents/singleColumnBrowseResultsRenderer/tabs");
     let continuation = resp
         .pointer("/contents/singleColumnBrowseResultsRenderer/tabs")
@@ -860,7 +1038,7 @@ fn parse_initial(resp: &Value) -> DiscoverHome {
     }
 }
 
-fn parse_continuation(resp: &Value) -> DiscoverHome {
+pub(super) fn parse_continuation(resp: &Value) -> DiscoverHome {
     let contents = resp
         .pointer("/continuationContents/sectionListContinuation/contents")
         .and_then(|v| v.as_array());
@@ -886,14 +1064,7 @@ fn parse_shelf(section: &Value) -> Option<DiscoverShelf> {
         return None;
     }
     let strapline = header.and_then(|h| runs_text(h, "/strapline/runs"));
-    let more_browse_id = header
-        .and_then(|h| {
-            h.pointer(
-                "/moreContentButton/buttonRenderer/navigationEndpoint/browseEndpoint/browseId",
-            )
-        })
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+    let more = header.and_then(more_button);
 
     let items: Vec<DiscoverItem> = shelf
         .get("contents")
@@ -908,9 +1079,11 @@ fn parse_shelf(section: &Value) -> Option<DiscoverShelf> {
     Some(DiscoverShelf {
         title,
         strapline,
-        more_browse_id,
+        more,
         items,
-        is_song_list: false,
+        layout: ShelfLayout::Carousel,
+        continuation: None,
+        search_filter: None,
     })
 }
 
@@ -927,12 +1100,14 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
         .pointer("/navigationEndpoint/watchEndpoint/videoId")
         .and_then(|v| v.as_str())
     {
-        return Some(DiscoverItem::Song(Box::new(build_song_track(
-            video_id,
-            &title,
-            &subtitle,
-            thumbnail.as_deref(),
-        ))));
+        let mut track = build_song_track(video_id, &title, &subtitle, thumbnail.as_deref());
+        track.explicit = super::has_explicit_badge(r);
+        track.plays = subtitle
+            .split('•')
+            .map(str::trim)
+            .find(|part| super::is_count(part))
+            .map(str::to_string);
+        return Some(DiscoverItem::Song(Box::new(track)));
     }
 
     if let Some(playlist_id) = r
@@ -965,20 +1140,27 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
                 title,
                 subtitle,
                 thumbnail,
+                explicit: super::has_explicit_badge(r),
             });
         }
         if browse_id.starts_with("UC") {
             return Some(DiscoverItem::Artist {
                 channel_id: browse_id.to_string(),
                 name: title,
+                subtitle: None,
                 thumbnail,
             });
         }
         if browse_id.starts_with("FEmusic_") {
+            let params = r
+                .pointer("/navigationEndpoint/browseEndpoint/params")
+                .and_then(|v| v.as_str())
+                .map(super::browse::decode_percent);
             return Some(DiscoverItem::Mood {
-                browse_id: browse_id.to_string(),
+                browse_id: super::browse::page_id(browse_id, params.as_deref()),
                 title,
                 thumbnail,
+                accent: None,
             });
         }
     }
@@ -1017,6 +1199,8 @@ fn build_song_track(video_id: &str, title: &str, subtitle: &str, thumbnail: Opti
         credits: Vec::new(),
         artists,
         replay_gain: config::ReplayGainInfo::default(),
+        explicit: false,
+        plays: None,
     }
 }
 
@@ -1104,7 +1288,9 @@ pub(crate) enum RowColumn {
     Duration {
         secs: u64,
     },
-    PlayCount,
+    PlayCount {
+        text: String,
+    },
     Other,
     Empty,
 }
@@ -1220,7 +1406,9 @@ fn classify_flex_columns(row: &Value) -> Vec<RowColumn> {
         if let Some(secs) = parse_mm_ss(text.trim()) {
             out.push(RowColumn::Duration { secs });
         } else if is_play_count_text(&text) {
-            out.push(RowColumn::PlayCount);
+            out.push(RowColumn::PlayCount {
+                text: text.trim().to_string(),
+            });
         } else {
             out.push(RowColumn::Other);
         }
@@ -1259,7 +1447,7 @@ fn row_index_text(row: &Value) -> Option<String> {
     runs_text(row, "/index/runs").map(|s| s.trim().to_string())
 }
 
-fn normalize_yt_thumbnail(url: String) -> String {
+pub(super) fn normalize_yt_thumbnail(url: String) -> String {
     // Photo-CDN URLs end with =wNNN-hNNN-... and accept rewriting to a
     // bigger size. Mix-art URLs (music.youtube.com/image/mixart?r=…)
     // and any other token-style URL can't take that suffix; appending
@@ -1273,6 +1461,23 @@ fn normalize_yt_thumbnail(url: String) -> String {
         return format!("{}=w544-h544-l90-rj", &url[..idx]);
     }
     url
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::{LinkKind, PageLink};
+
+    /// A "More" opens what its browse id is; a playlist keeps the `VL` the
+    /// playlist viewer is handed today.
+    #[test]
+    fn a_browse_id_says_what_it_opens() {
+        let kind = |id: &str| PageLink::browse(id).kind;
+        assert_eq!(kind("VLOLAK5uy_x"), LinkKind::Playlist);
+        assert_eq!(PageLink::browse("VLOLAK5uy_x").id, "VLOLAK5uy_x");
+        assert_eq!(kind("MPREb_x"), LinkKind::Album);
+        assert_eq!(kind("UCabc"), LinkKind::Artist);
+        assert_eq!(kind("FEmusic_moods_and_genres"), LinkKind::Page);
+    }
 }
 
 #[cfg(test)]

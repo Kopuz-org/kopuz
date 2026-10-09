@@ -1315,6 +1315,8 @@ fn legacy_to_track(l: &LegacyTrack) -> Option<Track> {
         artists: l.artists.clone(),
         replay_gain: config::ReplayGainInfo::default(),
         credits: Vec::new(),
+        explicit: false,
+        plays: None,
     })
 }
 
@@ -1818,6 +1820,8 @@ mod row_fill_tests {
             artists: vec!["Ada".into()],
             credits: vec![reader::ArtistCredit::linked("Ada", "UC-ada")],
             replay_gain: config::ReplayGainInfo::default(),
+            explicit: false,
+            plays: None,
         }
     }
 

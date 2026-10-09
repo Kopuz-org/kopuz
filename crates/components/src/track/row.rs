@@ -17,6 +17,21 @@ pub(crate) fn copy_to_clipboard(text: &str) {
     );
     let _ = dioxus::document::eval(&js);
 }
+/// The "E" a source puts beside an explicit track or release.
+#[component]
+pub fn ExplicitBadge() -> Element {
+    let label = i18n::t("explicit").to_string();
+    rsx! {
+        span {
+            class: "shrink-0 inline-flex items-center justify-center w-3.5 h-3.5 text-[9px] font-bold rounded-[3px] leading-none",
+            style: "background: var(--color-white); color: var(--color-black); opacity: 0.55;",
+            title: "{label}",
+            aria_label: "{label}",
+            "E"
+        }
+    }
+}
+
 /// The artist the row's artist cell opens; a row crediting nobody opens nothing.
 fn billed_artist(track: &Track) -> Option<String> {
     track.primary_credit().and_then(|credit| credit.key.clone())
@@ -97,7 +112,10 @@ pub fn TrackRow(
     };
 
     let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
-    let duration_str = fmt_dur(track.duration_secs().unwrap_or_default());
+    let duration_str = match track.duration_secs() {
+        Some(secs) if secs > 0 => fmt_dur(secs),
+        _ => String::new(),
+    };
 
     // The container a file is in, which the daemon works out: a row
     // that came from a service names no file, so it has none.
@@ -163,13 +181,18 @@ pub fn TrackRow(
                 }
 
                 div { class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
-                    span {
-                        class: if is_currently_playing {
-                            "text-[13px] font-semibold truncate leading-tight text-indigo-400"
-                        } else {
-                            "text-[13px] font-medium truncate leading-tight text-white/95"
-                        },
-                        "{track.title}"
+                    div { class: "flex items-center gap-1.5 min-w-0",
+                        span {
+                            class: if is_currently_playing {
+                                "text-[13px] font-semibold truncate leading-tight text-indigo-400"
+                            } else {
+                                "text-[13px] font-medium truncate leading-tight text-white/95"
+                            },
+                            "{track.title}"
+                        }
+                        if track.explicit {
+                            ExplicitBadge {}
+                        }
                     }
                     span { class: "text-[11px] text-white/45 truncate leading-tight",
                         span { dir: "auto", "{track.artist}" }
@@ -364,6 +387,9 @@ pub fn TrackRow(
                             },
                             ondoubleclick: move |evt| evt.stop_propagation(),
                             "{track.title}"
+                        }
+                        if track.explicit {
+                            ExplicitBadge {}
                         }
                         if is_downloaded {
                             i {
@@ -631,6 +657,9 @@ pub fn TrackRow(
                     ondoubleclick: move |evt| evt.stop_propagation(),
                     "{track.title}"
                 }
+                if track.explicit {
+                    span { class: "ml-1.5 inline-flex shrink-0", ExplicitBadge {} }
+                }
                 if let Some(ref ft) = file_type {
                     span {
                         class: "shrink-0 ml-2 text-[9px] font-semibold uppercase px-1 py-0.5 rounded leading-none tracking-wide",
@@ -719,6 +748,12 @@ pub fn TrackRow(
 /// share one implementation. Kept here so the existing row call sites keep
 /// reading `track_row::radio_handler(...)`.
 pub use crate::radio_actions::track_radio_handler as radio_handler;
+
+/// Copy a link the caller already holds, with the notice a row's share gives.
+pub fn copy_link(url: &str) {
+    copy_to_clipboard(url);
+    toast(&i18n::t("share_copied"));
+}
 
 /// Copy a shareable link for a track. Which page a row has -- the source's
 /// own, or the one its metadata names elsewhere -- is the daemon's knowledge.

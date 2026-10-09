@@ -73,6 +73,7 @@ impl MediaSource for SpotifySource {
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Paginated,
+            account_avatar: false,
         }
     }
 

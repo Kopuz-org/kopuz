@@ -762,6 +762,8 @@ mod tests {
             artists: credits.iter().map(|name| name.to_string()).collect(),
             replay_gain: config::ReplayGainInfo::default(),
             credits: Vec::new(),
+            explicit: false,
+            plays: None,
         }
     }
 

@@ -40,6 +40,8 @@ fn local(path: &str, title: &str) -> Track {
         artists: vec!["Artist".into(), "Feat".into()],
         replay_gain: config::ReplayGainInfo::default(),
         credits: Vec::new(),
+        explicit: false,
+        plays: None,
     }
 }
 

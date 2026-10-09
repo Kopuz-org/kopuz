@@ -192,6 +192,8 @@ impl MediaSource for JellyfinSource {
                             .artists
                             .unwrap_or_else(|| item.album_artist.into_iter().collect()),
                         replay_gain,
+                        explicit: false,
+                        plays: None,
                     });
                 }
                 start += count;
@@ -274,6 +276,7 @@ impl MediaSource for JellyfinSource {
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Instant,
+            account_avatar: false,
         }
     }
 
@@ -439,6 +442,8 @@ impl MediaSource for JellyfinSource {
                     credits: credits_of(item.artist_items.as_deref()),
                     artists: item.artists.unwrap_or_default(),
                     replay_gain,
+                    explicit: false,
+                    plays: None,
                 }
             })
             .collect())

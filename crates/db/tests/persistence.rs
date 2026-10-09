@@ -46,6 +46,8 @@ fn server_track(id: &str, title: &str) -> Track {
         artists: vec!["Art".into()],
         replay_gain: config::ReplayGainInfo::default(),
         credits: Vec::new(),
+        explicit: false,
+        plays: None,
     }
 }
 

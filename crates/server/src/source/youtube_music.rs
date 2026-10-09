@@ -5,10 +5,15 @@ use db::Db;
 use crate::{server_ops::ServerConn, ytmusic::YouTubeMusicClient};
 
 use super::{
-    AlbumType, ArtistLookup, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync,
-    MediaSource, PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds, RemoteAlbum, SourceError,
-    StreamInfo, mirror_added, mirror_created,
+    AlbumType, ArtistLookup, ArtistView, AuthOutcome, Capabilities, CatalogPageEntry,
+    FavoritesPage, FavoritesSync, MediaSource, PlaylistMeta, PlaylistOps, PlaylistPage, RadioSeeds,
+    RemoteAlbum, SearchFilterEntry, SourceError, StreamInfo, mirror_added, mirror_created,
 };
+use crate::ytmusic::browse::{
+    self,
+    search::{self, SearchPage, Suggestion},
+};
+use crate::ytmusic::discover::{self, BrowsePage};
 
 /// YT Music's "Liked Music" auto-playlist. It is not browsed like the user's
 /// other playlists: its contents are the liked songs, which kopuz already keeps
@@ -77,6 +82,7 @@ impl MediaSource for YtSource {
             artist_view: ArtistView::Remote,
             albums: AlbumType::YtMusic,
             favorites_sync: FavoritesSync::Paginated,
+            account_avatar: true,
         }
     }
 
@@ -126,6 +132,33 @@ impl MediaSource for YtSource {
             .then(|| format!("https://music.youtube.com/browse/{browse_id}"))
     }
 
+    fn artist_web_url(&self, channel_id: &str) -> Option<String> {
+        (!channel_id.trim().is_empty())
+            .then(|| format!("https://music.youtube.com/channel/{channel_id}"))
+    }
+
+    fn playlist_web_url(&self, playlist_id: &str) -> Option<String> {
+        let id = playlist_id.strip_prefix("VL").unwrap_or(playlist_id);
+        (!id.trim().is_empty()).then(|| format!("https://music.youtube.com/playlist?list={id}"))
+    }
+
+    async fn fetch_track(&self, item_id: &str) -> Result<Option<reader::Track>, SourceError> {
+        if item_id.trim().is_empty() {
+            return Ok(None);
+        }
+        self.client
+            .fetch_track(item_id)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    async fn account_avatar(&self) -> Result<Option<String>, SourceError> {
+        self.client
+            .account_avatar()
+            .await
+            .map_err(SourceError::from)
+    }
+
     async fn search(
         &self,
         query: &str,
@@ -149,6 +182,156 @@ impl MediaSource for YtSource {
             .discover_continuation(token)
             .await
             .map_err(SourceError::from)
+    }
+
+    fn catalog_pages(&self) -> Vec<CatalogPageEntry> {
+        let page = |id: &str, label, icon| CatalogPageEntry {
+            id: id.to_string(),
+            label,
+            icon,
+        };
+        let mut pages = vec![
+            page(discover::HOME, "home", "fa-solid fa-house"),
+            page(
+                browse::EXPLORE,
+                "catalog_page_explore",
+                "fa-solid fa-compass",
+            ),
+            page(
+                browse::NEW_RELEASES,
+                "new_releases",
+                "fa-solid fa-compact-disc",
+            ),
+            page(
+                browse::CHARTS,
+                "catalog_page_charts",
+                "fa-solid fa-chart-simple",
+            ),
+            page(
+                browse::MOODS,
+                "catalog_page_moods",
+                "fa-solid fa-masks-theater",
+            ),
+            page(
+                browse::PODCASTS,
+                "catalog_page_podcasts",
+                "fa-solid fa-podcast",
+            ),
+        ];
+        // The library and history are the account's; anonymously they are empty.
+        if self.client.is_authenticated() {
+            pages.extend([
+                page(
+                    browse::LIBRARY_SONGS,
+                    "catalog_page_library_songs",
+                    "fa-solid fa-music",
+                ),
+                page(
+                    browse::LIBRARY_ALBUMS,
+                    "catalog_page_library_albums",
+                    "fa-solid fa-record-vinyl",
+                ),
+                page(
+                    browse::LIBRARY_ARTISTS,
+                    "catalog_page_library_artists",
+                    "fa-solid fa-microphone",
+                ),
+                page(
+                    browse::LIBRARY_SUBSCRIPTIONS,
+                    "catalog_page_subscriptions",
+                    "fa-solid fa-user-check",
+                ),
+                page(
+                    browse::LIBRARY_PODCASTS,
+                    "catalog_page_library_podcasts",
+                    "fa-solid fa-podcast",
+                ),
+                page(
+                    browse::LIBRARY_UPLOADS,
+                    "catalog_page_uploads",
+                    "fa-solid fa-upload",
+                ),
+                page(
+                    browse::HISTORY,
+                    "catalog_page_history",
+                    "fa-solid fa-clock-rotate-left",
+                ),
+            ]);
+        }
+        pages
+    }
+
+    async fn browse_page(
+        &self,
+        id: &str,
+        continuation: Option<&str>,
+    ) -> Result<BrowsePage, SourceError> {
+        if id.trim().is_empty() {
+            return Err(SourceError::InvalidInput(
+                "a page is opened by its id".into(),
+            ));
+        }
+        Ok(match continuation {
+            Some(token) => self.client.browse_continuation(token).await?,
+            None => self.client.browse_page(id).await?,
+        })
+    }
+
+    fn search_filters(&self) -> Vec<SearchFilterEntry> {
+        let all = SearchFilterEntry {
+            id: search::ALL,
+            label: search::ALL_LABEL,
+        };
+        let library = self.client.is_authenticated().then_some(&search::LIBRARY);
+        std::iter::once(all)
+            .chain(
+                search::FILTERS
+                    .iter()
+                    .chain(library)
+                    .map(|filter| SearchFilterEntry {
+                        id: filter.id,
+                        label: filter.label,
+                    }),
+            )
+            .collect()
+    }
+
+    async fn search_shelves(
+        &self,
+        query: &str,
+        filter: &str,
+        continuation: Option<&str>,
+    ) -> Result<SearchPage, SourceError> {
+        if let Some(token) = continuation {
+            return Ok(search::continued(
+                self.client.browse_continuation(token).await?,
+            ));
+        }
+        if query.trim().is_empty() {
+            return Ok(SearchPage::default());
+        }
+        let filter = match filter {
+            search::ALL => None,
+            id => Some(
+                search::filter(id)
+                    .ok_or_else(|| SourceError::InvalidInput(format!("no such filter: {id}")))?,
+            ),
+        };
+        Ok(self.client.search_page(query, filter).await?)
+    }
+
+    async fn search_suggestions(&self, query: &str) -> Result<Vec<Suggestion>, SourceError> {
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(self.client.search_suggestions(query).await?)
+    }
+
+    async fn related(&self, item_id: &str) -> Result<BrowsePage, SourceError> {
+        if item_id.trim().is_empty() {
+            return Err(SourceError::InvalidInput("track has no video id".into()));
+        }
+        Ok(self.client.related(item_id).await?)
     }
 
     async fn fetch_album_tracks(&self, browse_id: &str) -> Result<Vec<reader::Track>, SourceError> {
@@ -206,10 +389,11 @@ impl MediaSource for YtSource {
         playlist_id: &str,
         cursor: Option<String>,
     ) -> Result<(Vec<reader::Track>, Option<String>), SourceError> {
-        self.client
+        let (tracks, next, _) = self
+            .client
             .playlist_page(playlist_id, cursor.as_deref())
-            .await
-            .map_err(SourceError::from)
+            .await?;
+        Ok((tracks, next))
     }
 
     async fn resolve_album_browse_id(
@@ -456,15 +640,20 @@ impl MediaSource for YtSource {
             return Ok(PlaylistPage {
                 tracks: self.liked_music_entries().await?,
                 next: None,
+                header: None,
             });
         }
         // True per-page InnerTube walk so a long playlist streams into the cache
         // (and the UI) instead of blocking on a full fetch every visit.
-        let (tracks, next) = self
+        let (tracks, next, header) = self
             .client
             .playlist_page(playlist_id, cursor.as_deref())
             .await?;
-        Ok(PlaylistPage { tracks, next })
+        Ok(PlaylistPage {
+            tracks,
+            next,
+            header,
+        })
     }
 
     async fn fetch_favorites_page(

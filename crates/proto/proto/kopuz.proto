@@ -48,6 +48,7 @@ service Kopuz {
   rpc GetGenreTracks(GenreTracksRequest) returns (TrackPage);
   rpc GetRecentTracks(Page) returns (TrackPage);
   rpc Search(SearchRequest) returns (SearchResults);
+  rpc GetSearchSuggestions(SearchSuggestionsRequest) returns (SearchSuggestions);
   rpc GetTrackWebUrl(TrackWebUrlRequest) returns (WebUrl);
   rpc GetAlbumWebUrl(AlbumWebUrlRequest) returns (WebUrl);
   rpc GetCatalog(CatalogRequest) returns (CatalogPage);
@@ -571,6 +572,24 @@ message GenreTracksRequest {
 
 message SearchRequest {
   string query = 1;
+  // One of the source's search filters; absent is its plain search.
+  optional string filter = 2;
+  optional string continuation = 3;
+}
+
+message SearchSuggestionsRequest {
+  string query = 1;
+}
+
+// A query to run, or with item, a direct hit to open.
+message SearchSuggestion {
+  string text = 1;
+  bool from_history = 2;
+  optional CatalogItem item = 3;
+}
+
+message SearchSuggestions {
+  repeated SearchSuggestion suggestions = 1;
 }
 
 message TrackWebUrlRequest {
@@ -594,6 +613,10 @@ message RefreshArtistArtworkRequest {
 message SearchResults {
   repeated TrackInfo tracks = 1;
   repeated AlbumInfo albums = 2;
+  // A filtered search's results.
+  repeated CatalogShelf shelves = 3;
+  optional string continuation = 4;
+  optional string correction = 5;
 }
 
 // ---------------- settings schema ----------------
@@ -739,6 +762,22 @@ message SourceCapabilities {
   // Playing a search result starts a track radio from it rather than
   // queueing the results.
   bool search_radio = 18;
+  // The catalog pages it offers, in the order to list them.
+  repeated PageEntry pages = 19;
+  // The filters its search takes, in the order to offer them.
+  repeated SearchFilter search_filters = 25;
+}
+
+message SearchFilter {
+  string id = 1;
+  Text label = 2;
+}
+
+// A catalog page a frontend can link to; opened as CATALOG_ITEM_PAGE with id.
+message PageEntry {
+  string id = 1;
+  Text label = 2;
+  Icon icon = 3;
 }
 
 // What making a source usable takes.
@@ -800,6 +839,8 @@ message SourceInfo {
   bool permanent = 19;
   // What the daemon's last probe found; absent until it has probed this source.
   optional SourceState state = 20;
+  // The picture of the account it is signed in as, where its service has one.
+  optional ArtworkRef avatar = 21;
 }
 
 message GetSourcesRequest {}
@@ -960,6 +1001,25 @@ enum CatalogItemKind {
   CATALOG_ITEM_PLAYLIST = 3;
   CATALOG_ITEM_ARTIST = 4;
   CATALOG_ITEM_MOOD = 5;
+  CATALOG_ITEM_PODCAST = 6;
+  CATALOG_ITEM_EPISODE = 7;
+  CATALOG_ITEM_VIDEO = 8;
+  CATALOG_ITEM_PAGE = 9;
+}
+
+enum ShelfLayout {
+  SHELF_LAYOUT_CAROUSEL = 0;
+  SHELF_LAYOUT_GRID = 1;
+  SHELF_LAYOUT_LIST = 2;
+  SHELF_LAYOUT_TRACK_GRID = 3;
+  SHELF_LAYOUT_HERO = 4;
+}
+
+enum CatalogHeader {
+  CATALOG_HEADER_NONE = 0;
+  CATALOG_HEADER_TITLE = 1;
+  CATALOG_HEADER_DETAIL = 2;
+  CATALOG_HEADER_ARTIST = 3;
 }
 
 message CatalogItem {
@@ -968,8 +1028,14 @@ message CatalogItem {
   string title = 3;
   optional string subtitle = 4;
   optional ArtworkRef artwork = 5;
-  // Set for tracks, so a shelf of songs is playable without a second call.
+  // Set for tracks, videos and episodes, so a shelf of them is playable
+  // without a second call.
   optional TrackInfo track = 6;
+  // The tile's own colour, as #rrggbb.
+  optional string accent = 7;
+  bool explicit = 9;
+  // The source's public page for it, to share.
+  optional string web_url = 10;
 }
 
 message CatalogShelf {
@@ -978,6 +1044,20 @@ message CatalogShelf {
   repeated CatalogItem items = 3;
   optional string more_ref = 4;
   bool list = 5;
+  ShelfLayout layout = 6;
+  // The kind that opens more_ref.
+  CatalogItemKind more_kind = 7;
+  // More items for this shelf.
+  optional string continuation = 8;
+  // On a search's "all" results, the filter showing every result of its kind.
+  optional string search_filter = 9;
+}
+
+// A filter over a page; id opens the filtered page as CATALOG_ITEM_PAGE.
+message CatalogChip {
+  string id = 1;
+  string label = 2;
+  bool selected = 3;
 }
 
 message CatalogRequest {
@@ -1010,6 +1090,16 @@ message CatalogDetail {
   optional string continuation = 11;
   // For an album, the artist its header opens; absent when it bills nobody.
   optional string artist_key = 12;
+  CatalogHeader header = 13;
+  repeated CatalogChip chips = 14;
+  // For an album: "Album", "Single", "EP", as the source labels it.
+  optional string album_type = 17;
+  // For an artist; subtitle carries its subscribers.
+  optional string monthly_listeners = 18;
+  // For a playlist or a show, who made it.
+  optional string owner = 19;
+  optional string plays = 20;
+  optional string web_url = 21;
 }
 
 // ---------------- radio ----------------
@@ -1158,6 +1248,9 @@ message TrackInfo {
   optional ArtworkRef artwork = 21;
   // Every credited artist in billing order, each with the key that opens it where there is one.
   repeated ArtistCredit credits = 23;
+  bool explicit = 24;
+  // How often it was played or watched, as the source wrote it ("1.2B plays").
+  optional string plays = 25;
 }
 
 // An artist key is minted by the daemon; a frontend compares and passes it back, never reads it.
@@ -1660,6 +1753,8 @@ message ArtworkTarget {
     string catalog = 5;
     string station = 6;
     string artist_key = 7;
+    // A source id: the picture of the account it is signed in as.
+    string account = 8;
   }
 }
 
@@ -1680,6 +1775,7 @@ message ArtworkRequest {
     string catalog = 6;
     string station = 7;
     string artist_key = 8;
+    string account = 9;
   }
   bool hq = 4;
 }
