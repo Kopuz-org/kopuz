@@ -269,7 +269,7 @@ fn CloudStorage(source_id: String, uploads: bool) -> Element {
                 None => rsx! { p { class: "text-xs text-white/60", "{i18n::t(\"cloud_storage_loading\")}" } },
             }
             if uploads {
-                label { class: "app-button-tonal self-start px-3 py-1 rounded text-sm text-white bg-white/10",
+                label { class: "app-button-tonal inline-flex items-center justify-center self-start px-3 py-1 rounded text-sm text-white bg-white/10 hover:bg-white/20 transition-colors cursor-pointer",
                     "{i18n::t(\"upload_music\")}"
                     input {
                         key: "{picker_version}",
