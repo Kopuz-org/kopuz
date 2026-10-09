@@ -5,7 +5,7 @@ const FORBIDDEN = '(?i)Source::Local|LocalLibrary|local_source|local_library|mus
 
 def main [] {
   let root = ($env.FILE_PWD | path dirname)
-  let crates = [api client hooks pages components kopuz kopuz_route]
+  let crates = [api client ctl hooks pages components kopuz kopuz_route]
   let hits = (
     $crates
     | each {|c| glob ($root | path join "crates" $c "**" "*.rs") }

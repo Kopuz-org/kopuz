@@ -124,6 +124,12 @@ jobs:
           }
           dx --version
 
+      - name: Test the command-line client
+        run: cargo test -p kopuz-ctl
+
+      - name: Build the daemon and client
+        run: cargo build --release -p kopuz-kopuzd -p kopuz-ctl
+
       - name: Bundle Windows installer (.msi)
         shell: pwsh
         run: dx bundle --release --platform desktop --package kopuz

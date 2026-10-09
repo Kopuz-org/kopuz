@@ -63,7 +63,9 @@ The player itself is a daemon: it owns the library, the audio engine, the media
 sources and their credentials, and everything that touches the system. The
 window is a client of it, and so is anything else you write — the contract is
 one gRPC schema on a local socket, documented in [docs/api.md](docs/api.md).
-`kopuzd` runs the same core with no window.
+`kopuzd` runs the same core with no window. Use [`kopuzctl`](docs/cli.md) to
+control playback, configure sources, and start library jobs from a terminal or
+script.
 
 ## Features
 

@@ -62,3 +62,12 @@ jobs:
 
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test the command-line client
+        run: cargo test -p kopuz-ctl
+
+      - name: Test CLI commands against the daemon
+        run: cargo test -p kopuz-kopuzd --test contract cli_
+
+      - name: Run release Clippy
+        run: cargo clippy --workspace --all-targets --release -- -D warnings

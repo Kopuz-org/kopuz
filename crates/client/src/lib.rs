@@ -35,6 +35,23 @@ use tower::service_fn;
 
 type Client = KopuzClient<InterceptedService<Channel, Auth>>;
 
+/// The default socket or named pipe served by the desktop app and `kopuzd`.
+#[cfg(windows)]
+pub fn default_socket_path() -> Option<PathBuf> {
+    proto::pipe::default_name().ok().map(PathBuf::from)
+}
+
+/// The default socket served by the desktop app and `kopuzd`.
+#[cfg(not(windows))]
+pub fn default_socket_path() -> Option<PathBuf> {
+    let base = directories::BaseDirs::new()?;
+    let dir = base
+        .runtime_dir()
+        .map(|runtime| runtime.join("kopuz"))
+        .unwrap_or_else(|| base.cache_dir().join("kopuz"));
+    Some(dir.join("kopuzd.sock"))
+}
+
 /// Where a daemon is reached.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Address {
