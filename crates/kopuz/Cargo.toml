@@ -71,6 +71,7 @@ reqwest = { workspace = true, features = ["json"] }
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
+tokio = { workspace = true, features = ["process"] }
 ashpd = { version = "0.13", default-features = false, features = ["tokio", "settings"] }
 webkit2gtk = { workspace = true, features = ["v2_16"] }
 libloading = { workspace = true }
