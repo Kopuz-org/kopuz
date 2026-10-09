@@ -198,6 +198,10 @@ new_releases = Mga Bagong Release
 # Navigation Buttons
 up_next = SUSUNOD
 lyrics = LYRICS
+track_version = Bersyon
+track_version_song = Kanta
+track_version_video = Video
+music_video = Music video
 
 # Player/Media
 loading_lyrics = Nilo-load ang lyrics...
@@ -307,6 +311,24 @@ discover_more_loading = Nilo-load pa…
 discover_failed = Hindi ma-load ang Discover: { $error }
 discover_unsupported = Available lamang ang Discover kapag YouTube Music ang aktibong server.
 discover_show_all = Ipakita lahat
+catalog_page_explore = Galugarin
+catalog_page_charts = Mga Chart
+catalog_page_moods = Mga Mood at Genre
+catalog_page_podcasts = Mga Podcast
+catalog_page_library_songs = Iyong mga kanta
+catalog_page_library_albums = Iyong mga album
+catalog_page_library_artists = Iyong mga artist
+catalog_page_subscriptions = Mga Subscription
+catalog_page_library_podcasts = Iyong mga podcast
+catalog_page_uploads = Mga Upload
+catalog_page_history = History
+search_filter_all = Lahat
+search_filter_songs = Mga Kanta
+search_filter_videos = Mga Video
+search_filter_community_playlists = Mga Playlist ng Komunidad
+search_filter_featured_playlists = Mga Itinatampok na Playlist
+search_filter_episodes = Mga Episode
+search_filter_profiles = Mga Profile
 source_anon_playlists = Mag-sign in sa YouTube Music para makita ang iyong mga library playlist.
 source_anon_favorites = Mag-sign in sa YouTube Music para makita ang iyong mga liked na kanta.
 source_anon_discover = Mag-sign in sa YouTube Music para mag-browse sa Tuklasin.

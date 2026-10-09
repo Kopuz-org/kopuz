@@ -177,6 +177,103 @@ pub struct Track {
     /// player reads their tags off the file it is decoding.
     #[serde(default)]
     pub replay_gain: config::ReplayGainInfo,
+    /// The other cut of this recording at the same source, when the source said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub counterpart: Option<Box<Counterpart>>,
+}
+
+/// The music video of an album track, or the album track of a music video.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct Counterpart {
+    /// Its item id at the same service.
+    pub item_id: String,
+    /// The counterpart is the video, which makes the row carrying it the song.
+    pub video: bool,
+    pub duration_ms: Option<u64>,
+    /// Stretches both cuts share. A music video often adds an intro or an
+    /// interlude the album track does not have, so offsets do not line up.
+    #[serde(default)]
+    pub segments: Vec<SharedSegment>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SharedSegment {
+    /// Where the stretch starts in the row that carries the counterpart.
+    pub start_ms: u64,
+    pub counterpart_start_ms: u64,
+    pub duration_ms: u64,
+}
+
+impl Counterpart {
+    /// `position_ms` in the row carrying this, mapped onto the counterpart:
+    /// through the shared stretch it falls in or the nearest one, else in
+    /// proportion to the two lengths, else at the same offset.
+    pub fn map_position(&self, position_ms: u64, own_duration_ms: Option<u64>) -> u64 {
+        let distance = |s: &&SharedSegment| {
+            if position_ms < s.start_ms {
+                s.start_ms - position_ms
+            } else {
+                position_ms.saturating_sub(s.start_ms + s.duration_ms)
+            }
+        };
+        let mapped = match self.segments.iter().min_by_key(distance) {
+            Some(s) => (position_ms + s.counterpart_start_ms).saturating_sub(s.start_ms),
+            None => match (own_duration_ms, self.duration_ms) {
+                (Some(own), Some(other)) if own > 0 => {
+                    (position_ms as u128 * other as u128 / own as u128) as u64
+                }
+                _ => position_ms,
+            },
+        };
+        match self.duration_ms {
+            Some(other) => mapped.min(other),
+            None => mapped,
+        }
+    }
+
+    /// The same pair seen from the counterpart's side.
+    fn mirrored(&self, item_id: String, duration_ms: Option<u64>) -> Counterpart {
+        Counterpart {
+            item_id,
+            video: !self.video,
+            duration_ms,
+            segments: self
+                .segments
+                .iter()
+                .map(|s| SharedSegment {
+                    start_ms: s.counterpart_start_ms,
+                    counterpart_start_ms: s.start_ms,
+                    duration_ms: s.duration_ms,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl Track {
+    /// The counterpart as a row of its own, carrying this one as its
+    /// counterpart, so switching back maps the position the other way.
+    pub fn counterpart_track(&self) -> Option<Track> {
+        let counterpart = self.counterpart.as_deref()?;
+        let TrackId::Server { service, item_id } = &self.id else {
+            return None;
+        };
+        let own_ms = (self.duration > 0).then(|| self.duration.saturating_mul(1000));
+        let mut other = self.clone();
+        other.id = TrackId::Server {
+            service: *service,
+            item_id: counterpart.item_id.clone(),
+        };
+        other.duration = counterpart
+            .duration_ms
+            .map_or(self.duration, |ms| ms.div_ceil(1000));
+        other.khz = 0;
+        other.bitrate = 0;
+        other.playlist_item_id = None;
+        other.replay_gain = config::ReplayGainInfo::default();
+        other.counterpart = Some(Box::new(counterpart.mirrored(item_id.clone(), own_ms)));
+        Some(other)
+    }
 }
 
 /// One credited artist, and the source whose listing it came from, since an id means nothing to another.
@@ -604,6 +701,7 @@ mod tests {
             playlist_item_id: None,
             artists: Vec::new(),
             replay_gain: config::ReplayGainInfo::default(),
+            counterpart: None,
             credits: Vec::new(),
         }
     }
@@ -852,3 +950,118 @@ pub struct FavoritesStore {
 }
 
 impl FavoritesStore {}
+
+#[cfg(test)]
+mod counterpart_tests {
+    use super::*;
+
+    fn song(counterpart: Counterpart) -> Track {
+        Track {
+            id: TrackId::Server {
+                service: MusicService::YtMusic,
+                item_id: "song".into(),
+            },
+            cover: Some("cover".into()),
+            album_id: "album".into(),
+            title: "Take On Me".into(),
+            artist: "a-ha".into(),
+            album: "Hunting High and Low".into(),
+            duration: 226,
+            khz: 48,
+            bitrate: 128,
+            track_number: Some(1),
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: Some("entry".into()),
+            artists: vec!["a-ha".into()],
+            credits: Vec::new(),
+            replay_gain: config::ReplayGainInfo::default(),
+            counterpart: Some(Box::new(counterpart)),
+        }
+    }
+
+    /// The music video opens on an intro the album track does not have, and
+    /// cuts an interlude: a place in the song lands at the same note.
+    fn video() -> Counterpart {
+        Counterpart {
+            item_id: "video".into(),
+            video: true,
+            duration_ms: Some(244_000),
+            segments: vec![
+                SharedSegment {
+                    start_ms: 0,
+                    counterpart_start_ms: 18_000,
+                    duration_ms: 120_000,
+                },
+                SharedSegment {
+                    start_ms: 130_000,
+                    counterpart_start_ms: 150_000,
+                    duration_ms: 90_000,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn a_position_maps_through_the_stretch_it_falls_in() {
+        let video = video();
+        assert_eq!(video.map_position(60_000, Some(226_000)), 78_000);
+        assert_eq!(video.map_position(140_000, Some(226_000)), 160_000);
+        // Between stretches, the nearest one decides.
+        assert_eq!(video.map_position(122_000, Some(226_000)), 140_000);
+        assert_eq!(video.map_position(129_000, Some(226_000)), 149_000);
+        // Never past the counterpart's own end.
+        assert_eq!(video.map_position(225_000, Some(226_000)), 244_000);
+    }
+
+    #[test]
+    fn without_stretches_a_position_maps_in_proportion_or_stays() {
+        let mut video = video();
+        video.segments.clear();
+        assert_eq!(video.map_position(113_000, Some(226_000)), 122_000);
+        assert_eq!(video.map_position(113_000, None), 113_000);
+        video.duration_ms = None;
+        assert_eq!(video.map_position(113_000, Some(226_000)), 113_000);
+    }
+
+    #[test]
+    fn the_counterpart_row_maps_back_to_where_it_came_from() {
+        let track = song(video());
+        let other = track.counterpart_track().expect("the video as a row");
+        assert_eq!(other.id.key(), "video");
+        assert_eq!(other.duration, 244);
+        assert_eq!(
+            (other.title.as_str(), other.album_id.as_str()),
+            ("Take On Me", "album")
+        );
+        assert_eq!(other.playlist_item_id, None);
+        assert_eq!((other.khz, other.bitrate), (0, 0));
+
+        let back = other
+            .counterpart
+            .as_deref()
+            .expect("the song as its counterpart");
+        assert_eq!(back.item_id, "song");
+        assert!(!back.video);
+        assert_eq!(back.duration_ms, Some(226_000));
+        let there = track
+            .counterpart
+            .as_deref()
+            .unwrap()
+            .map_position(60_000, Some(226_000));
+        assert_eq!(back.map_position(there, Some(244_000)), 60_000);
+
+        let round_trip = other.counterpart_track().unwrap();
+        assert_eq!(round_trip.id, track.id);
+        assert_eq!(round_trip.counterpart, track.counterpart);
+    }
+
+    #[test]
+    fn a_local_file_has_no_counterpart_row() {
+        let mut track = song(video());
+        track.id = TrackId::Local(PathBuf::from("/music/take-on-me.flac"));
+        assert!(track.counterpart_track().is_none());
+    }
+}

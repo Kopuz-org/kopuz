@@ -145,6 +145,10 @@ new_releases = Lansări Noi
 # Navigation Buttons
 up_next = URMEAZĂ
 lyrics = VERSURI
+track_version = Versiune
+track_version_song = Melodie
+track_version_video = Videoclip
+music_video = Videoclip muzical
 
 # Player/Media
 loading_lyrics = Se încarcă versurile...
@@ -494,6 +498,24 @@ discover_more_loading = Se încarcă mai mult…
 discover_failed = Nu s-a putut încărca Descoperă: { $error }
 discover_unsupported = Descoperă este disponibil doar când YouTube Music este serverul activ.
 discover_show_all = Afișează toate
+catalog_page_explore = Explorează
+catalog_page_charts = Topuri
+catalog_page_moods = Stări și genuri
+catalog_page_podcasts = Podcasturi
+catalog_page_library_songs = Melodiile tale
+catalog_page_library_albums = Albumele tale
+catalog_page_library_artists = Artiștii tăi
+catalog_page_subscriptions = Abonamente
+catalog_page_library_podcasts = Podcasturile tale
+catalog_page_uploads = Încărcări
+catalog_page_history = Istoric
+search_filter_all = Toate
+search_filter_songs = Melodii
+search_filter_videos = Videoclipuri
+search_filter_community_playlists = Playlisturi ale comunității
+search_filter_featured_playlists = Playlisturi recomandate
+search_filter_episodes = Episoade
+search_filter_profiles = Profiluri
 source_anon_playlists = Conectează-te la YouTube Music pentru a vedea playlisturile din bibliotecă.
 source_anon_favorites = Conectează-te la YouTube Music pentru a vedea melodiile apreciate.
 source_anon_discover = Conectează-te la YouTube Music pentru a explora Descoperă.

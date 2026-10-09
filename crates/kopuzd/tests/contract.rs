@@ -40,6 +40,9 @@ impl QueueMaterializer for StubLibrary {
 }
 
 fn track(key: &str) -> Track {
+    if key.starts_with("ytm-song:") {
+        return music_video_pair(key);
+    }
     Track {
         id: reader::models::TrackId::Local(std::path::PathBuf::from(key)),
         cover: None,
@@ -58,8 +61,30 @@ fn track(key: &str) -> Track {
         playlist_item_id: None,
         artists: vec![],
         replay_gain: config::ReplayGainInfo::default(),
+        counterpart: None,
         credits: vec![],
     }
+}
+
+/// A song paired with its music video, which opens on a second of intro.
+fn music_video_pair(key: &str) -> Track {
+    let mut song = track("/stand-in.wav");
+    song.id = reader::models::TrackId::Server {
+        service: config::MusicService::YtMusic,
+        item_id: key.to_string(),
+    };
+    song.title = key.to_string();
+    song.counterpart = Some(Box::new(reader::Counterpart {
+        item_id: format!("{key}-video"),
+        video: true,
+        duration_ms: Some(7_000),
+        segments: vec![reader::SharedSegment {
+            start_ms: 0,
+            counterpart_start_ms: 1_000,
+            duration_ms: 6_000,
+        }],
+    }));
+    song
 }
 
 fn wav_bytes(seconds: u64) -> Vec<u8> {
@@ -1276,6 +1301,81 @@ async fn catalog_and_radio_report_absence_identically() {
     );
 }
 
+/// A source's pages are its navigation, so the list a client renders has to
+/// be the one the daemon declared, and opening a page a source does not have
+/// has to fail the same way on both transports.
+#[tokio::test]
+async fn catalog_pages_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    let active = |sources: Vec<api::SourceInfo>| {
+        sources
+            .into_iter()
+            .find(|source| source.active)
+            .expect("an active source")
+            .capabilities
+    };
+    let local = active(pair.local.sources().await.expect("local sources"));
+    let wire = active(pair.wire.sources().await.expect("wire sources"));
+    assert_eq!(local, wire);
+    assert!(local.pages.is_empty(), "a local library declares no pages");
+
+    let request = api::CatalogDetailRequest::page("FEmusic_home");
+    let local = pair.local.catalog_detail(request.clone()).await;
+    let wire = pair.wire.catalog_detail(request).await;
+    assert_eq!(
+        local.as_ref().err().map(|e| e.code),
+        Some(ErrorCode::Unsupported)
+    );
+    assert_eq!(local.err().map(|e| e.code), wire.err().map(|e| e.code));
+}
+
+/// A search with no filter is the plain search on both transports; a filter
+/// the source never offered, and a suggestion it cannot give, fail the same
+/// way on both rather than one of them answering empty.
+#[tokio::test]
+async fn search_filters_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    let plain = api::SearchRequest::new("seed");
+    let local = pair
+        .local
+        .search(plain.clone())
+        .await
+        .expect("local search");
+    let wire = pair.wire.search(plain).await.expect("wire search");
+    assert_eq!(local, wire);
+    assert!(
+        !local.tracks.is_empty(),
+        "the plain search still finds rows"
+    );
+    assert!(local.shelves.is_empty() && local.continuation.is_none());
+
+    let caps = pair
+        .wire
+        .sources()
+        .await
+        .expect("sources")
+        .into_iter()
+        .find(|source| source.active)
+        .expect("an active source")
+        .capabilities;
+    assert!(caps.search_filters.is_empty());
+
+    let filtered = api::SearchRequest::filtered("seed", "songs");
+    assert_eq!(
+        pair.local
+            .search(filtered.clone())
+            .await
+            .err()
+            .map(|e| e.code),
+        pair.wire.search(filtered).await.err().map(|e| e.code),
+    );
+    let local = pair.local.search_suggestions("se".into()).await;
+    let wire = pair.wire.search_suggestions("se".into()).await;
+    assert_eq!(local.map_err(|e| e.code), wire.map_err(|e| e.code));
+}
+
 /// Deleting from disk is the one API call that destroys something outside
 /// the database, so its guard has to hold identically on both transports.
 #[tokio::test]
@@ -1969,4 +2069,101 @@ async fn both_transports_shake_hands_on_this_revision() {
             mismatched => panic!("{mismatched:?}"),
         }
     }
+}
+
+#[tokio::test]
+async fn version_switches_and_their_errors_map_identically() {
+    let pair = spawn_pair().await;
+    pair.wire
+        .set_queue(replace(&["ytm-song:a", "/b.wav"]))
+        .await
+        .expect("set queue");
+    wait_state(&pair.local, "committed", |state| {
+        matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    let local = pair.local.player_state().await.expect("local state");
+    let wire = pair.wire.player_state().await.expect("wire state");
+    let song = local.track.clone().expect("the song plays");
+    assert_eq!(song.version(), Some(api::TrackVersion::Song));
+    assert_eq!(wire.track, local.track, "the pairing crosses the wire");
+
+    pair.wire
+        .player_command(PlayerCommand::SetVersion {
+            version: api::TrackVersion::Video,
+        })
+        .await
+        .expect("switch over the wire");
+    let state = wait_state(&pair.local, "the video committed", |state| {
+        state
+            .track
+            .as_ref()
+            .is_some_and(|t| t.key == "ytm-song:a-video")
+            && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    let video = state.track.expect("the video plays");
+    assert_eq!(video.version(), Some(api::TrackVersion::Video));
+    assert_eq!(
+        video.counterpart.as_ref().map(|other| other.key.as_str()),
+        Some("ytm-song:a")
+    );
+    assert_eq!(state.queue.length, 2);
+    let queue = pair
+        .wire
+        .queue_snapshot()
+        .await
+        .expect("queue over the wire");
+    assert_eq!(queue.items[0].key, "ytm-song:a-video");
+    assert_eq!(queue.items[1].key, "/b.wav");
+
+    // This pair serves no pictures, and says so the same way on both sides.
+    let request = api::VideoRequest {
+        key: "ytm-song:a-video".into(),
+        start: 0,
+        length: Some(1024),
+    };
+    let local_err = pair
+        .local
+        .video(request.clone())
+        .await
+        .expect_err("no video locally");
+    let wire_err = pair
+        .wire
+        .video(request)
+        .await
+        .expect_err("no video over the wire");
+    assert_eq!(local_err.code, ErrorCode::Unsupported);
+    assert_eq!(
+        (wire_err.code, wire_err.message),
+        (local_err.code, local_err.message)
+    );
+
+    pair.wire
+        .player_command(PlayerCommand::Next)
+        .await
+        .expect("next");
+    wait_state(&pair.local, "the plain track", |state| {
+        state.track.as_ref().is_some_and(|t| t.key == "/b.wav")
+            && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    let switch = PlayerCommand::SetVersion {
+        version: api::TrackVersion::Video,
+    };
+    let local_err = pair
+        .local
+        .player_command(switch)
+        .await
+        .expect_err("no pair locally");
+    let wire_err = pair
+        .wire
+        .player_command(switch)
+        .await
+        .expect_err("no pair over the wire");
+    assert_eq!(local_err.code, ErrorCode::InvalidInput);
+    assert_eq!(
+        (wire_err.code, wire_err.message),
+        (local_err.code, local_err.message)
+    );
 }

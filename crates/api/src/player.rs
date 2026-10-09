@@ -143,4 +143,29 @@ pub enum PlayerCommand {
         shuffle: Option<bool>,
         loop_mode: Option<LoopMode>,
     },
+    /// Swap the playing track for its other cut, at the same place in the
+    /// song. Only the swapped queue item changes; a track with no
+    /// [`crate::TrackCounterpart`] of that version answers `invalid_input`.
+    SetVersion {
+        version: crate::TrackVersion,
+    },
+}
+
+/// A byte range of a music video's picture, for [`crate::PlayerApi::video`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VideoRequest {
+    /// A queued track whose version is [`crate::TrackVersion::Video`].
+    pub key: String,
+    pub start: u64,
+    /// At most this many bytes; the daemon may send fewer.
+    pub length: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VideoChunk {
+    pub content_type: String,
+    pub start: u64,
+    /// The whole stream's length, when the source says.
+    pub total: Option<u64>,
+    pub bytes: Vec<u8>,
 }

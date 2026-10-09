@@ -34,6 +34,17 @@ pub(crate) fn TrackMetadata(
         .and_then(|track| track.primary_credit())
         .and_then(|credit| credit.key.clone());
     let actions_track = current_track_snapshot.clone();
+    // The picture is desktop-only: Android's webview reaches the daemon over
+    // loopback HTTP, which serves covers and not video ranges.
+    let version = if cfg!(target_os = "android") {
+        None
+    } else {
+        super::video::current_version(&ctrl)
+    };
+    let video_key = current_track_snapshot
+        .as_ref()
+        .filter(|_| version == Some(api::TrackVersion::Video))
+        .map(|track| track.key.clone());
     let favorite_label = if is_favorite {
         i18n::t("remove_from_favorites").to_string()
     } else {
@@ -41,13 +52,23 @@ pub(crate) fn TrackMetadata(
     };
 
     rsx! {
+        if let Some(version) = version {
+            div {
+                class: "flex justify-center w-full mb-4",
+                super::video::VersionSwitch { version }
+            }
+        }
         div {
             class: "flex-1 min-h-0 w-full flex items-center justify-center mb-6",
             {
                 let cover = ctrl
                     .current_cover_url(hooks::artwork::Size::Full)
                     .unwrap_or_default();
-                if cover.is_empty() {
+                if let Some(track_key) = video_key {
+                    rsx! {
+                        super::video::MusicVideo { track_key, poster: cover }
+                    }
+                } else if cover.is_empty() {
                     rsx! {
                         div {
                             class: "rounded-xl overflow-hidden h-full flex items-center justify-center bg-black/30",

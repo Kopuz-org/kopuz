@@ -145,6 +145,10 @@ new_releases = kalama sin
 # Navigation Buttons
 up_next = POKA
 lyrics = SITELEN
+track_version = nasin
+track_version_song = kalama musi
+track_version_video = sitelen tawa
+music_video = sitelen tawa musi
 
 # Player/Media
 loading_lyrics = mi kama jo e sitelen...
@@ -494,6 +498,24 @@ discover_more_loading = mi alasa e ijo sin…
 discover_failed = pakala — mi ken ala alasa: { $error }
 discover_unsupported = sona sin li lon taso lon tenpo pi YouTube Music.
 discover_show_all = lukin e ale
+catalog_page_explore = lukin e kalama
+catalog_page_charts = kalama pona mute
+catalog_page_moods = pilin en nasin kalama
+catalog_page_podcasts = toki kalama
+catalog_page_library_songs = kalama sina
+catalog_page_library_albums = kulupu kalama sina
+catalog_page_library_artists = jan kalama sina
+catalog_page_subscriptions = jan lukin
+catalog_page_library_podcasts = toki kalama sina
+catalog_page_uploads = kalama tan sina
+catalog_page_history = tenpo pini
+search_filter_all = ale
+search_filter_songs = kalama musi
+search_filter_videos = sitelen tawa
+search_filter_community_playlists = kulupu kalama jan
+search_filter_featured_playlists = kulupu kalama pona
+search_filter_episodes = toki kalama wan
+search_filter_profiles = jan
 source_anon_playlists = o kama lon YouTube Music la sina ken lukin e kulupu kalama sina.
 source_anon_favorites = o kama lon YouTube Music la sina ken lukin e kalama pi olin sina.
 source_anon_discover = o kama lon YouTube Music la sina ken lukin sin.

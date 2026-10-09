@@ -183,6 +183,18 @@ pub fn format_entity_artwork_url(kind: &str, id: &str, version: u64, hq: bool) -
     entity_artwork_url(origin, kind, id, version, hq)
 }
 
+/// The picture of a queued music video, which the desktop app's artwork
+/// transport answers a byte range at a time from the daemon.
+pub fn format_video_url(key: &str) -> String {
+    let origin = if cfg!(target_os = "windows") {
+        "http://artwork.dioxus.localhost/video"
+    } else {
+        "artwork://video"
+    };
+    let key = percent_encoding::utf8_percent_encode(key, percent_encoding::NON_ALPHANUMERIC);
+    format!("{origin}?track={key}")
+}
+
 fn entity_artwork_url(origin: &str, kind: &str, id: &str, version: u64, hq: bool) -> CoverUrl {
     const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
         .add(b' ')

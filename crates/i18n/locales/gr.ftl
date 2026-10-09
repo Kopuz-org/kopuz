@@ -145,6 +145,10 @@ new_releases = Νέες Κυκλοφορίες
 # Navigation Buttons
 up_next = Επόμενο
 lyrics = Στίχοι
+track_version = Έκδοση
+track_version_song = Τραγούδι
+track_version_video = Βίντεο
+music_video = Μουσικό βίντεο
 
 # Player/Media
 loading_lyrics = Φόρτωση στίχων...
@@ -494,6 +498,24 @@ discover_more_loading = Φόρτωση περισσότερων…
 discover_failed = Αδυναμία φόρτωσης Ανακάλυψης: { $error }
 discover_unsupported = Η Ανακάλυψη είναι διαθέσιμη μόνο όταν το YouTube Music είναι ο ενεργός διακομιστής.
 discover_show_all = Εμφάνιση όλων
+catalog_page_explore = Εξερεύνηση
+catalog_page_charts = Τσαρτ
+catalog_page_moods = Διαθέσεις και είδη
+catalog_page_podcasts = Podcast
+catalog_page_library_songs = Τα τραγούδια σου
+catalog_page_library_albums = Τα άλμπουμ σου
+catalog_page_library_artists = Οι καλλιτέχνες σου
+catalog_page_subscriptions = Συνδρομές
+catalog_page_library_podcasts = Τα podcast σου
+catalog_page_uploads = Μεταφορτώσεις
+catalog_page_history = Ιστορικό
+search_filter_all = Όλα
+search_filter_songs = Τραγούδια
+search_filter_videos = Βίντεο
+search_filter_community_playlists = Λίστες κοινότητας
+search_filter_featured_playlists = Προτεινόμενες λίστες
+search_filter_episodes = Επεισόδια
+search_filter_profiles = Προφίλ
 source_anon_playlists = Συνδέσου στο YouTube Music για να δεις τις λίστες αναπαραγωγής σου.
 source_anon_favorites = Συνδέσου στο YouTube Music για να δεις τα τραγούδια που σου άρεσαν.
 source_anon_discover = Συνδέσου στο YouTube Music για να δεις την Ανακάλυψη.

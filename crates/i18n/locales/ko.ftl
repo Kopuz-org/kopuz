@@ -145,6 +145,10 @@ new_releases = 새 앨범
 # Navigation Buttons
 up_next = 다음 곡
 lyrics = 가사
+track_version = 버전
+track_version_song = 노래
+track_version_video = 동영상
+music_video = 뮤직비디오
 
 # Player/Media
 loading_lyrics = 가사 불러오는 중...
@@ -494,6 +498,24 @@ discover_more_loading = 더 불러오는 중…
 discover_failed = 탐색을 불러올 수 없음: { $error }
 discover_unsupported = 탐색은 YouTube Music이 활성 서버일 때만 사용할 수 있습니다.
 discover_show_all = 모두 보기
+catalog_page_explore = 둘러보기
+catalog_page_charts = 차트
+catalog_page_moods = 분위기 및 장르
+catalog_page_podcasts = 팟캐스트
+catalog_page_library_songs = 내 노래
+catalog_page_library_albums = 내 앨범
+catalog_page_library_artists = 내 아티스트
+catalog_page_subscriptions = 구독
+catalog_page_library_podcasts = 내 팟캐스트
+catalog_page_uploads = 업로드
+catalog_page_history = 기록
+search_filter_all = 전체
+search_filter_songs = 노래
+search_filter_videos = 동영상
+search_filter_community_playlists = 커뮤니티 재생목록
+search_filter_featured_playlists = 추천 재생목록
+search_filter_episodes = 에피소드
+search_filter_profiles = 프로필
 source_anon_playlists = 라이브러리 재생목록을 보려면 YouTube Music에 로그인하세요.
 source_anon_favorites = 좋아요 표시한 곡을 보려면 YouTube Music에 로그인하세요.
 source_anon_discover = 발견을 둘러보려면 YouTube Music에 로그인하세요.

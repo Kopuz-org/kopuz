@@ -761,6 +761,7 @@ mod tests {
             playlist_item_id: None,
             artists: credits.iter().map(|name| name.to_string()).collect(),
             replay_gain: config::ReplayGainInfo::default(),
+            counterpart: None,
             credits: Vec::new(),
         }
     }

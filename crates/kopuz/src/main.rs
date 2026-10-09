@@ -233,7 +233,12 @@ fn main() -> std::process::ExitCode {
             .with_asynchronous_custom_protocol(
                 "artwork",
                 |_id, request, responder: dioxus::desktop::RequestAsyncResponder| {
-                    artwork_protocol::serve(request.uri().clone(), responder);
+                    let range = request
+                        .headers()
+                        .get(http::header::RANGE)
+                        .and_then(|range| range.to_str().ok())
+                        .map(str::to_string);
+                    artwork_protocol::serve(request.uri().clone(), range, responder);
                 },
             );
 

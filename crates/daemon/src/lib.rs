@@ -33,6 +33,7 @@ pub mod session;
 pub mod sources;
 pub mod spotify;
 pub mod url_download;
+pub mod video;
 mod wire;
 
 pub use artwork::ArtworkService;
@@ -56,3 +57,4 @@ pub use session::{LocalApi, PlaybackServices, QueueMaterializer, SessionHandle};
 pub use sources::SourceService;
 pub use spotify::SpotifySink;
 pub use url_download::UrlDownloadService;
+pub use video::VideoService;

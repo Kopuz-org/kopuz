@@ -68,6 +68,7 @@ impl MediaSource for SpotifySource {
             downloads: false,
             discover: true,
             dont_recommend: false,
+            music_videos: false,
             radio: RadioSeeds::NONE,
             playlists: PlaylistOps::None,
             artist_view: ArtistView::Library,

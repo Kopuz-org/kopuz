@@ -145,6 +145,10 @@ new_releases = Új megjelenések
 # Navigation Buttons
 up_next = KÖVETKEZŐ
 lyrics = DALSZÖVEG
+track_version = Változat
+track_version_song = Dal
+track_version_video = Videó
+music_video = Videoklip
 
 # Player/Media
 loading_lyrics = Dalszöveg betöltése...
@@ -494,6 +498,24 @@ discover_more_loading = További betöltése…
 discover_failed = Nem sikerült betölteni a Felfedezést: { $error }
 discover_unsupported = A Felfedezés csak akkor érhető el, ha a YouTube Music az aktív szerver.
 discover_show_all = Összes megjelenítése
+catalog_page_explore = Felfedezés
+catalog_page_charts = Toplisták
+catalog_page_moods = Hangulatok és műfajok
+catalog_page_podcasts = Podcastok
+catalog_page_library_songs = Dalaid
+catalog_page_library_albums = Albumaid
+catalog_page_library_artists = Előadóid
+catalog_page_subscriptions = Feliratkozások
+catalog_page_library_podcasts = Podcastjaid
+catalog_page_uploads = Feltöltések
+catalog_page_history = Előzmények
+search_filter_all = Összes
+search_filter_songs = Dalok
+search_filter_videos = Videók
+search_filter_community_playlists = Közösségi lejátszási listák
+search_filter_featured_playlists = Kiemelt lejátszási listák
+search_filter_episodes = Epizódok
+search_filter_profiles = Profilok
 source_anon_playlists = Jelentkezz be a YouTube Musicba a könyvtárad lejátszási listáinak megtekintéséhez.
 source_anon_favorites = Jelentkezz be a YouTube Musicba a kedvelt dalaid megtekintéséhez.
 source_anon_discover = Jelentkezz be a YouTube Musicba a Felfedezés böngészéséhez.

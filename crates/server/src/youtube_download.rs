@@ -211,6 +211,7 @@ impl YoutubeDownloader {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             replay_gain: config::ReplayGainInfo::default(),
+            counterpart: None,
             credits: Vec::new(),
         })
     }

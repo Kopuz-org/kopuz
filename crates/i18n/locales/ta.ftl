@@ -198,6 +198,10 @@ new_releases = புதிய வெளியீடுகள்
 # Navigation Buttons
 up_next = அடுத்தது
 lyrics = வரிகள்
+track_version = பதிப்பு
+track_version_song = பாடல்
+track_version_video = வீடியோ
+music_video = இசை வீடியோ
 
 # Player/Media
 loading_lyrics = வரிகள் ஏற்றப்படுகிறது...
@@ -307,6 +311,24 @@ discover_more_loading = மேலும் ஏற்றுகிறது…
 discover_failed = கண்டறிதலை ஏற்ற முடியவில்லை: { $error }
 discover_unsupported = YouTube Music செயலில் உள்ள சேவையகமாக இருக்கும்போது மட்டுமே கண்டறிதல் கிடைக்கும்.
 discover_show_all = அனைத்தையும் காட்டு
+catalog_page_explore = ஆராய்
+catalog_page_charts = தரவரிசைகள்
+catalog_page_moods = மனநிலைகள் & வகைகள்
+catalog_page_podcasts = பாட்காஸ்ட்கள்
+catalog_page_library_songs = உங்கள் பாடல்கள்
+catalog_page_library_albums = உங்கள் ஆல்பங்கள்
+catalog_page_library_artists = உங்கள் கலைஞர்கள்
+catalog_page_subscriptions = சந்தாக்கள்
+catalog_page_library_podcasts = உங்கள் பாட்காஸ்ட்கள்
+catalog_page_uploads = பதிவேற்றங்கள்
+catalog_page_history = வரலாறு
+search_filter_all = அனைத்தும்
+search_filter_songs = பாடல்கள்
+search_filter_videos = வீடியோக்கள்
+search_filter_community_playlists = சமூகப் பிளேலிஸ்ட்கள்
+search_filter_featured_playlists = சிறப்புப் பிளேலிஸ்ட்கள்
+search_filter_episodes = எபிசோடுகள்
+search_filter_profiles = சுயவிவரங்கள்
 source_anon_playlists = உங்கள் நூலக பிளேலிஸ்ட்களைக் காண YouTube Music இல் உள்நுழையவும்.
 source_anon_favorites = உங்கள் விரும்பிய பாடல்களைக் காண YouTube Music இல் உள்நுழையவும்.
 source_anon_discover = கண்டறி பகுதியை உலாவ YouTube Music இல் உள்நுழையவும்.

@@ -145,6 +145,10 @@ new_releases = מהדורות חדשות
 # Navigation Buttons
 up_next = הבא בתור
 lyrics = מילים
+track_version = גרסה
+track_version_song = שיר
+track_version_video = סרטון
+music_video = קליפ
 
 # Player/Media
 loading_lyrics = טוען מילים...
@@ -494,6 +498,24 @@ discover_more_loading = טוען עוד…
 discover_failed = לא ניתן לטעון את גילוי: { $error }
 discover_unsupported = גילוי זמין רק כאשר YouTube Music הוא השרת הפעיל.
 discover_show_all = הצג הכל
+catalog_page_explore = גילוי
+catalog_page_charts = מצעדים
+catalog_page_moods = מצבי רוח וז'אנרים
+catalog_page_podcasts = פודקאסטים
+catalog_page_library_songs = השירים שלך
+catalog_page_library_albums = האלבומים שלך
+catalog_page_library_artists = האמנים שלך
+catalog_page_subscriptions = מינויים
+catalog_page_library_podcasts = הפודקאסטים שלך
+catalog_page_uploads = העלאות
+catalog_page_history = היסטוריה
+search_filter_all = הכול
+search_filter_songs = שירים
+search_filter_videos = סרטונים
+search_filter_community_playlists = פלייליסטים של הקהילה
+search_filter_featured_playlists = פלייליסטים מומלצים
+search_filter_episodes = פרקים
+search_filter_profiles = פרופילים
 source_anon_playlists = היכנס ל-YouTube Music כדי לראות את רשימות ההשמעה בספרייה שלך.
 source_anon_favorites = היכנס ל-YouTube Music כדי לראות את השירים שאהבת.
 source_anon_discover = היכנס ל-YouTube Music כדי לעיין בגלה.

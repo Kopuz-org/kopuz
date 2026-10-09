@@ -198,6 +198,10 @@ new_releases = Phát hành mới
 # Navigation Buttons
 up_next = TIẾP THEO
 lyrics = LỜI BÀI HÁT
+track_version = Phiên bản
+track_version_song = Bài hát
+track_version_video = Video
+music_video = Video âm nhạc
 
 # Player/Media
 loading_lyrics = Đang tải lời bài hát...
@@ -307,6 +311,24 @@ discover_more_loading = Đang tải thêm...
 discover_failed = Không thể tải Khám phá: { $error }
 discover_unsupported = Khám phá chỉ khả dụng khi YouTube Music là máy chủ đang hoạt động.
 discover_show_all = Hiển thị tất cả
+catalog_page_explore = Khám phá
+catalog_page_charts = Bảng xếp hạng
+catalog_page_moods = Tâm trạng & thể loại
+catalog_page_podcasts = Podcast
+catalog_page_library_songs = Bài hát của bạn
+catalog_page_library_albums = Album của bạn
+catalog_page_library_artists = Nghệ sĩ của bạn
+catalog_page_subscriptions = Kênh đăng ký
+catalog_page_library_podcasts = Podcast của bạn
+catalog_page_uploads = Nội dung tải lên
+catalog_page_history = Lịch sử
+search_filter_all = Tất cả
+search_filter_songs = Bài hát
+search_filter_videos = Video
+search_filter_community_playlists = Danh sách phát cộng đồng
+search_filter_featured_playlists = Danh sách phát nổi bật
+search_filter_episodes = Tập
+search_filter_profiles = Hồ sơ
 source_anon_playlists = Đăng nhập YouTube Music để xem danh sách phát trong thư viện của bạn.
 source_anon_favorites = Đăng nhập YouTube Music để xem các bài hát đã thích.
 source_anon_discover = Đăng nhập YouTube Music để xem mục Khám phá.

@@ -5,6 +5,7 @@ mod desktop;
 mod lyrics;
 mod metadata;
 mod tabs;
+mod video;
 
 use android::FullscreenAndroid;
 use background::use_fullscreen_background;

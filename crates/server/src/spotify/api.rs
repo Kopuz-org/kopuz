@@ -349,17 +349,19 @@ pub async fn album_remote(
 /// the `user-top-read` / `user-read-recently-played` scopes were added) are
 /// skipped, so the page degrades instead of erroring.
 pub async fn discover_home(access: &str) -> Result<crate::ytmusic::discover::DiscoverHome, String> {
-    use crate::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf};
+    use crate::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, ShelfLayout};
 
     let song_shelf = |title: &str, tracks: Vec<Track>| DiscoverShelf {
         title: title.to_string(),
         strapline: None,
-        more_browse_id: None,
+        more: None,
         items: tracks
             .into_iter()
             .map(|t| DiscoverItem::Song(Box::new(t)))
             .collect(),
-        is_song_list: false,
+        layout: ShelfLayout::Carousel,
+        continuation: None,
+        search_filter: None,
     };
 
     let mut shelves = Vec::new();
@@ -726,6 +728,7 @@ pub fn parse_track(item: &Value) -> Option<Track> {
         playlist_item_id: None,
         artists,
         replay_gain: config::ReplayGainInfo::default(),
+        counterpart: None,
         credits,
     })
 }

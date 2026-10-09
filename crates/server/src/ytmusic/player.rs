@@ -652,6 +652,123 @@ async fn try_native_decipher(
         .ok_or_else(|| "deciphered format missing fields".to_string())
 }
 
+/// A picture-only stream: what a music video's frames play from while its
+/// sound plays through the engine from the audio stream.
+#[derive(Clone, Debug)]
+pub struct YtVideoStream {
+    pub url: String,
+    pub mime: String,
+    pub user_agent: String,
+    pub content_length: Option<u64>,
+}
+
+/// Taller is wasted on a now-playing view and costs bandwidth the audio needs.
+const MAX_VIDEO_HEIGHT: u64 = 1080;
+
+/// Resolve the picture of a music video. The anonymous client hands out plain
+/// URLs for video formats, so it goes first even for a signed-in account; the
+/// deciphered signed-in path is the fallback for what it refuses.
+#[tracing::instrument(name = "yt.resolve_video", skip(cookies), fields(video_id = %video_id))]
+pub async fn resolve_video(video_id: &str, cookies: Option<&str>) -> Result<YtVideoStream, String> {
+    let visitor = visitor_data(None).await.ok();
+    let anonymous = async |extras: PlayerExtras<'_>| -> Result<YtVideoStream, String> {
+        let json = innertube::player(VISIONOS, video_id, None, extras)
+            .await
+            .map_err(labelled)?;
+        let status = PlayabilityStatus::from_response(&json);
+        if !status.is_attemptable() {
+            return Err(format!(
+                "{} playability {}: {}",
+                VISIONOS.client_name,
+                status.as_str(),
+                playability_reason(&json)
+            ));
+        }
+        let format = pick_video_format(&json, true)
+            .ok_or_else(|| format!("{} returned no plain video format", VISIONOS.client_name))?;
+        video_stream_from(
+            format,
+            format["url"].as_str().unwrap_or_default().to_string(),
+            VISIONOS,
+        )
+        .ok_or_else(|| "video format missing fields".to_string())
+    };
+    let plain = PlayerExtras {
+        visitor_data: visitor,
+        ..Default::default()
+    };
+    let mut error = match anonymous(plain).await {
+        Ok(stream) => return Ok(stream),
+        Err(error) => error,
+    };
+    if !innertube::is_google_block(&error)
+        && let Ok(pot) = botguard::mint_content_pot(video_id).await
+    {
+        let extras = PlayerExtras {
+            content_pot: Some(&pot),
+            visitor_data: visitor,
+            signature_timestamp: None,
+        };
+        match anonymous(extras).await {
+            Ok(stream) => return Ok(stream),
+            Err(with_pot) => error = format!("{error}; with pot: {with_pot}"),
+        }
+    }
+    if cookies.is_some() {
+        let player = decipher::player_js(video_id).await?;
+        let extras = PlayerExtras {
+            signature_timestamp: Some(player.1),
+            visitor_data: visitor_data(cookies).await.ok(),
+            ..Default::default()
+        };
+        let json = innertube::player(WEB_REMIX, video_id, cookies, extras).await?;
+        if let Some(format) = pick_video_format(&json, false) {
+            let url = decipher::deciphered_url(&player.0, format).await?;
+            if let Some(stream) = video_stream_from(format, url, WEB_REMIX) {
+                return Ok(stream);
+            }
+        }
+        error = format!("{error}; signed-in: WEB_REMIX returned no video format");
+    }
+    Err(error)
+}
+
+/// The tallest H.264 MP4 picture under the cap. H.264 is the one codec every
+/// desktop webview decodes, which VP9 and AV1 are not.
+fn pick_video_format(json: &Value, plain_only: bool) -> Option<&Value> {
+    json.pointer("/streamingData/adaptiveFormats")?
+        .as_array()?
+        .iter()
+        .filter(|f| {
+            let mime = f["mimeType"].as_str().unwrap_or_default();
+            mime.starts_with("video/mp4") && mime.contains("avc1")
+        })
+        .filter(|f| f["height"].as_u64().is_some_and(|h| h <= MAX_VIDEO_HEIGHT))
+        .filter(|f| !plain_only || f["url"].is_string())
+        .max_by_key(|f| (f["height"].as_u64(), f["bitrate"].as_u64()))
+}
+
+fn video_stream_from(format: &Value, url: String, client: YouTubeClient) -> Option<YtVideoStream> {
+    let mime = format["mimeType"].as_str()?;
+    if url.is_empty() {
+        return None;
+    }
+    tracing::info!(
+        itag = format["itag"].as_u64().unwrap_or(0),
+        height = format["height"].as_u64().unwrap_or(0),
+        client = client.client_name,
+        "video stream resolved"
+    );
+    Some(YtVideoStream {
+        url,
+        mime: mime.split(';').next().unwrap_or(mime).trim().to_string(),
+        user_agent: client.user_agent.to_string(),
+        content_length: format["contentLength"]
+            .as_str()
+            .and_then(|s| s.parse().ok()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -710,6 +827,34 @@ mod tests {
         assert_eq!(info.itag, Some(251));
         assert_eq!(info.bitrate, Some(136544));
         assert_eq!(info.duration_secs, Some(212));
+    }
+
+    #[test]
+    fn the_video_is_the_tallest_h264_under_the_cap() {
+        let json = json!({ "streamingData": { "adaptiveFormats": [
+            { "itag": 137, "mimeType": "video/mp4; codecs=\"avc1.640028\"", "height": 1080,
+              "bitrate": 4000000, "url": "https://x/137", "contentLength": "80911999" },
+            { "itag": 401, "mimeType": "video/mp4; codecs=\"av01.0.12M.08\"", "height": 2160,
+              "bitrate": 9000000, "url": "https://x/401" },
+            { "itag": 248, "mimeType": "video/webm; codecs=\"vp9\"", "height": 1080,
+              "bitrate": 2000000, "url": "https://x/248" },
+            { "itag": 299, "mimeType": "video/mp4; codecs=\"avc1.64002a\"", "height": 1440,
+              "bitrate": 6000000, "url": "https://x/299" },
+            { "itag": 136, "mimeType": "video/mp4; codecs=\"avc1.4D401F\"", "height": 720,
+              "bitrate": 1500000, "signatureCipher": "s=abc" },
+            { "itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 136544,
+              "url": "https://x/251" }
+        ]}});
+        let format = pick_video_format(&json, true).expect("a plain H.264 format");
+        assert_eq!(format["itag"], 137);
+        let stream = video_stream_from(format, "https://x/137".into(), VISIONOS).unwrap();
+        assert_eq!(stream.mime, "video/mp4");
+        assert_eq!(stream.content_length, Some(80_911_999));
+
+        let mut ciphered = json.clone();
+        ciphered["streamingData"]["adaptiveFormats"][0]["url"] = Value::Null;
+        assert!(pick_video_format(&ciphered, true).is_none());
+        assert_eq!(pick_video_format(&ciphered, false).unwrap()["itag"], 137);
     }
 
     #[test]

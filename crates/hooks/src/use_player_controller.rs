@@ -415,6 +415,26 @@ impl PlayerController {
         });
     }
 
+    /// Swap the playing track for its other cut; the daemon keeps the place
+    /// in the song and reports the swapped track back.
+    pub fn set_version(&self, version: api::TrackVersion) {
+        self.command(api::PlayerCommand::SetVersion { version });
+    }
+
+    /// Where a picture of what is playing should be, in seconds, and whether
+    /// it should be moving: the engine's anchor, less the output latency so
+    /// the frame lands with the sound. Read reactively, so it changes with
+    /// every new anchor rather than every frame.
+    pub fn picture_anchor(&self) -> Option<(f64, bool)> {
+        let (ms, at, playing) = (*self.engine_anchor.read())?;
+        let latency = *self.output_latency_ms.read() as f64 / 1000.0;
+        let mut position = ms as f64 / 1000.0;
+        if playing {
+            position += at.elapsed().as_secs_f64();
+        }
+        Some(((position - latency).max(0.0), playing))
+    }
+
     pub fn output_latency_secs(&self) -> f64 {
         *self.output_latency_ms.peek() as f64 / 1000.0
     }

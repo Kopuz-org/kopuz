@@ -153,11 +153,30 @@ pub struct Capabilities {
     /// The person can tell it to stop recommending a track — a negative
     /// signal to the source's recommender, not a library edit.
     pub dont_recommend: bool,
+    /// Its tracks can have a music video cut, which plays with a picture.
+    pub music_videos: bool,
     pub radio: RadioSeeds,
     pub playlists: PlaylistOps,
     pub artist_view: ArtistView,
     pub albums: AlbumType,
     pub favorites_sync: FavoritesSync,
+}
+
+/// A catalog page a source declares: the id that opens it, the translation
+/// key of its label, and its icon class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogPageEntry {
+    pub id: String,
+    pub label: &'static str,
+    pub icon: &'static str,
+}
+
+/// A search filter a source offers: the id a client passes back and the
+/// translation key of its label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchFilterEntry {
+    pub id: &'static str,
+    pub label: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,6 +192,16 @@ pub struct StreamInfo {
     pub user_agent: Option<String>,
     pub duration_secs: Option<u64>,
     pub bitrate: Option<u32>,
+    pub content_length: Option<u64>,
+}
+
+/// A picture-only stream, fetched by range. The URL is the source's and is
+/// never handed to a frontend.
+#[derive(Debug, Clone)]
+pub struct VideoStream {
+    pub url: String,
+    pub content_type: String,
+    pub user_agent: Option<String>,
     pub content_length: Option<u64>,
 }
 

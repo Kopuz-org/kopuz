@@ -145,6 +145,23 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("playlist reorder"))
     }
 
+    /// The other cut of `track` -- its music video, or the album track of a
+    /// music video -- when the source pairs them and the track does not say.
+    /// `None` is an answer, not a failure: most tracks have no counterpart.
+    async fn counterpart(
+        &self,
+        _track: &reader::Track,
+    ) -> Result<Option<reader::Counterpart>, SourceError> {
+        Ok(None)
+    }
+
+    /// The picture of a track that is a video, as a stream the daemon
+    /// fetches ranges of for a frontend. Only sources whose
+    /// [`Capabilities::music_videos`] is set override this.
+    async fn video_stream(&self, _item_id: &str) -> Result<VideoStream, SourceError> {
+        Err(SourceError::unsupported("music videos"))
+    }
+
     /// Tell the source to stop recommending `item_id` — YT Music's dislike,
     /// which is a signal to its recommender rather than a library edit. Only
     /// sources whose [`Capabilities::dont_recommend`] is set override this; the
@@ -203,6 +220,33 @@ pub trait MediaSource: Send + Sync {
         Ok(search::filter(&q, tracks, albums))
     }
 
+    /// The filters [`search_shelves`](Self::search_shelves) takes. Default none.
+    fn search_filters(&self) -> Vec<SearchFilterEntry> {
+        Vec::new()
+    }
+
+    /// Search results as the source lays them out, under one of its
+    /// [`search_filters`](Self::search_filters): shelves for its "all"
+    /// filter, one long shelf under any other, and `continuation` for more of
+    /// that. Default unsupported; a source without filters has nothing to
+    /// add to [`search`](Self::search).
+    async fn search_shelves(
+        &self,
+        _query: &str,
+        _filter: &str,
+        _continuation: Option<&str>,
+    ) -> Result<crate::ytmusic::browse::search::SearchPage, SourceError> {
+        Err(SourceError::unsupported("search filters"))
+    }
+
+    /// Completions for what has been typed so far. Default none.
+    async fn search_suggestions(
+        &self,
+        _query: &str,
+    ) -> Result<Vec<crate::ytmusic::browse::search::Suggestion>, SourceError> {
+        Ok(Vec::new())
+    }
+
     /// The discover/home feed. Default unsupported — gated by
     /// [`Capabilities::discover`]; only catalog remotes (YT) override.
     async fn discover_home(&self) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
@@ -216,6 +260,32 @@ pub trait MediaSource: Send + Sync {
         _token: &str,
     ) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
         Err(SourceError::unsupported("discover"))
+    }
+
+    /// The catalog pages this source offers a frontend's navigation, in order.
+    /// Default none; only catalog remotes (YT) declare any.
+    fn catalog_pages(&self) -> Vec<CatalogPageEntry> {
+        Vec::new()
+    }
+
+    /// One catalog page by an id [`catalog_pages`](Self::catalog_pages), a
+    /// chip or a link on another page handed out; `continuation` pages it.
+    /// Default unsupported.
+    async fn browse_page(
+        &self,
+        _id: &str,
+        _continuation: Option<&str>,
+    ) -> Result<crate::ytmusic::discover::BrowsePage, SourceError> {
+        Err(SourceError::unsupported("catalog pages"))
+    }
+
+    /// What the source relates to one of its tracks: similar songs, artists
+    /// and albums, as a page. Default unsupported.
+    async fn related(
+        &self,
+        _item_id: &str,
+    ) -> Result<crate::ytmusic::discover::BrowsePage, SourceError> {
+        Err(SourceError::unsupported("related"))
     }
 
     /// The tracks of a remote album / browse id. Standard library remotes use

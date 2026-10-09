@@ -144,6 +144,9 @@ impl Session {
         }
 
         self.error = None;
+        if is_server {
+            self.ask_counterpart(&track);
+        }
         self.cancel_load_task();
         self.cancel_radio_task();
         if !use_crossfade {

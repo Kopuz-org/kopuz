@@ -43,6 +43,7 @@ impl MediaSource for AppleMusicSource {
             downloads: true,
             discover: false,
             dont_recommend: false,
+            music_videos: false,
             radio: RadioSeeds::ALL,
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Library,

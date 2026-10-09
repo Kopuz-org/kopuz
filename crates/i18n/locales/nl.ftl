@@ -198,6 +198,10 @@ new_releases = Nieuwe releases
 # Navigation Buttons
 up_next = HIERNA
 lyrics = SONGTEKST
+track_version = Versie
+track_version_song = Nummer
+track_version_video = Video
+music_video = Videoclip
 
 # Player/Media
 loading_lyrics = Songtekst laden...
@@ -307,6 +311,24 @@ discover_more_loading = Meer laden…
 discover_failed = Kan Ontdekken niet laden: { $error }
 discover_unsupported = Ontdekken is alleen beschikbaar wanneer YouTube Music de actieve server is.
 discover_show_all = Alles tonen
+catalog_page_explore = Verkennen
+catalog_page_charts = Hitlijsten
+catalog_page_moods = Stemmingen en genres
+catalog_page_podcasts = Podcasts
+catalog_page_library_songs = Jouw nummers
+catalog_page_library_albums = Jouw albums
+catalog_page_library_artists = Jouw artiesten
+catalog_page_subscriptions = Abonnementen
+catalog_page_library_podcasts = Jouw podcasts
+catalog_page_uploads = Uploads
+catalog_page_history = Geschiedenis
+search_filter_all = Alles
+search_filter_songs = Nummers
+search_filter_videos = Video's
+search_filter_community_playlists = Communityplaylists
+search_filter_featured_playlists = Uitgelichte playlists
+search_filter_episodes = Afleveringen
+search_filter_profiles = Profielen
 source_anon_playlists = Log in bij YouTube Music om je bibliotheekafspeellijsten te zien.
 source_anon_favorites = Log in bij YouTube Music om je leuk gevonden nummers te zien.
 source_anon_discover = Log in bij YouTube Music om Ontdekken te bekijken.

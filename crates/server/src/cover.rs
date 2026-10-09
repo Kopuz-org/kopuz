@@ -239,6 +239,7 @@ mod tests {
             credits: Vec::new(),
             artists: Vec::new(),
             replay_gain: config::ReplayGainInfo::default(),
+            counterpart: None,
         }
     }
 

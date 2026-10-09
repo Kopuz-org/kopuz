@@ -265,6 +265,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
             .with_sources(sources.clone())
             .with_downloader(downloader)
             .with_spotify(spotify)
+            .with_video(crate::VideoService::new(database.clone(), session.clone()))
             .with_integrations(crate::IntegrationService::new(config_service_for_api)),
     );
 

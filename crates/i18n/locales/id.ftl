@@ -198,6 +198,10 @@ new_releases = Rilis Baru
 # Navigation Buttons
 up_next = BERIKUTNYA
 lyrics = LIRIK
+track_version = Versi
+track_version_song = Lagu
+track_version_video = Video
+music_video = Video musik
 
 # Player/Media
 loading_lyrics = Memuat lirik...
@@ -307,6 +311,24 @@ discover_more_loading = Muat lainnya…
 discover_failed = Tidak dapat memuat Discover: { $error }
 discover_unsupported = Discover hanya tersedia ketika peladen YouTube Music aktif.
 discover_show_all = Tampilkan semua
+catalog_page_explore = Jelajahi
+catalog_page_charts = Tangga lagu
+catalog_page_moods = Suasana hati & genre
+catalog_page_podcasts = Podcast
+catalog_page_library_songs = Lagu kamu
+catalog_page_library_albums = Album kamu
+catalog_page_library_artists = Artis kamu
+catalog_page_subscriptions = Langganan
+catalog_page_library_podcasts = Podcast kamu
+catalog_page_uploads = Unggahan
+catalog_page_history = Riwayat
+search_filter_all = Semua
+search_filter_songs = Lagu
+search_filter_videos = Video
+search_filter_community_playlists = Playlist komunitas
+search_filter_featured_playlists = Playlist unggulan
+search_filter_episodes = Episode
+search_filter_profiles = Profil
 source_anon_playlists = Masuk ke YouTube Music untuk melihat daftar putar pustaka anda.
 source_anon_favorites = Masuk ke YouTube Music untuk melihat lagu yang anda sukai.
 source_anon_discover = Masuk ke YouTube Music untuk membuka Jelajahi.

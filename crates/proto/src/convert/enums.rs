@@ -49,6 +49,22 @@ pub fn track_kind_from_proto(value: i32) -> api::TrackKind {
     }
 }
 
+pub fn track_version_to_proto(value: api::TrackVersion) -> TrackVersion {
+    match value {
+        api::TrackVersion::Song => TrackVersion::Song,
+        api::TrackVersion::Video => TrackVersion::Video,
+    }
+}
+
+/// `None` for an unspecified version, which names no cut to switch to.
+pub fn track_version_from_proto(value: i32) -> Option<api::TrackVersion> {
+    match TrackVersion::try_from(value).unwrap_or(TrackVersion::Unspecified) {
+        TrackVersion::Song => Some(api::TrackVersion::Song),
+        TrackVersion::Video => Some(api::TrackVersion::Video),
+        TrackVersion::Unspecified => None,
+    }
+}
+
 pub fn queue_mode_to_proto(value: api::QueueMode) -> QueueMode {
     match value {
         api::QueueMode::Replace => QueueMode::Replace,

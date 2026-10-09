@@ -171,6 +171,16 @@ impl Kopuz for KopuzGrpc {
         .await
     }
 
+    async fn set_version(
+        &self,
+        request: Request<proto::SetVersion>,
+    ) -> Result<Response<proto::MutationResult>, Status> {
+        let version = convert::track_version_from_proto(request.get_ref().version)
+            .ok_or_else(|| Status::invalid_argument("pass the song or the video version"))?;
+        self.player_mutation(api::PlayerCommand::SetVersion { version })
+            .await
+    }
+
     async fn get_status(
         &self,
         _request: Request<proto::GetStatusRequest>,
@@ -400,10 +410,28 @@ impl Kopuz for KopuzGrpc {
         let results = self
             .0
             .api
-            .search(request.into_inner().query)
+            .search(convert::search_request_from_proto(request.get_ref()))
             .await
             .map_err(failed)?;
         Ok(Response::new(convert::search_results_to_proto(&results)))
+    }
+
+    async fn get_search_suggestions(
+        &self,
+        request: Request<proto::SearchSuggestionsRequest>,
+    ) -> Result<Response<proto::SearchSuggestions>, Status> {
+        let suggestions = self
+            .0
+            .api
+            .search_suggestions(request.into_inner().query)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::SearchSuggestions {
+            suggestions: suggestions
+                .iter()
+                .map(convert::search_suggestion_to_proto)
+                .collect(),
+        }))
     }
 
     async fn get_track_web_url(
@@ -1132,6 +1160,29 @@ impl Kopuz for KopuzGrpc {
             })
             .collect();
         Ok(Response::new(Box::pin(futures_util::stream::iter(chunks))))
+    }
+
+    async fn get_video(
+        &self,
+        request: Request<proto::VideoRequest>,
+    ) -> Result<Response<proto::VideoChunk>, Status> {
+        let request = request.into_inner();
+        let chunk = self
+            .0
+            .api
+            .video(api::VideoRequest {
+                key: request.key,
+                start: request.start,
+                length: request.length,
+            })
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::VideoChunk {
+            content_type: chunk.content_type,
+            start: chunk.start,
+            total: chunk.total,
+            data: chunk.bytes,
+        }))
     }
 
     async fn get_sources(

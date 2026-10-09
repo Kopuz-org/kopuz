@@ -222,9 +222,26 @@ pub async fn post(
     payload: Value,
     cookies: Option<&str>,
 ) -> Result<Value, String> {
+    post_as_visitor(client, endpoint, payload, cookies, None).await
+}
+
+/// [`post`] as the visitor an earlier response named. Anonymous continuation
+/// tokens only answer the visitor they were issued to; anyone else gets an
+/// empty page.
+pub async fn post_as_visitor(
+    client: YouTubeClient,
+    endpoint: &str,
+    payload: Value,
+    cookies: Option<&str>,
+    visitor: Option<&str>,
+) -> Result<Value, String> {
+    let mut context = build_context(client);
+    if let (Some(visitor), Some(fields)) = (visitor, context.as_object_mut()) {
+        fields.insert("visitorData".into(), Value::String(visitor.into()));
+    }
     let mut body = json!({
         "context": {
-            "client": build_context(client),
+            "client": context,
             "user": { "lockedSafetyMode": false }
         },
     });
@@ -244,6 +261,9 @@ pub async fn post(
         req = req
             .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
             .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
+    }
+    if let Some(visitor) = visitor {
+        req = req.header("X-Goog-Visitor-Id", visitor);
     }
     if client.login_supported
         && let Some(c) = cookies.filter(|c| !c.is_empty())

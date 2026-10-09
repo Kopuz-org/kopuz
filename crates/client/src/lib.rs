@@ -203,6 +203,13 @@ impl api::PlayerApi for GrpcApi {
                     }))
                     .await
             }
+            PlayerCommand::SetVersion { version } => {
+                self.client()
+                    .set_version(Request::new(proto::SetVersion {
+                        version: convert::track_version_to_proto(version) as i32,
+                    }))
+                    .await
+            }
         }
         .map_err(wire_error)?;
         Ok(CommandAck {
@@ -280,6 +287,25 @@ impl api::PlayerApi for GrpcApi {
             .await
             .map_err(wire_error)?;
         Ok(())
+    }
+
+    async fn video(&self, request: api::VideoRequest) -> Result<api::VideoChunk, ApiError> {
+        let chunk = self
+            .client()
+            .get_video(Request::new(proto::VideoRequest {
+                key: request.key,
+                start: request.start,
+                length: request.length,
+            }))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        Ok(api::VideoChunk {
+            content_type: chunk.content_type,
+            start: chunk.start,
+            total: chunk.total,
+            bytes: chunk.data,
+        })
     }
 }
 
@@ -434,13 +460,30 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::track_page_from_proto(tracks.get_ref()))
     }
 
-    async fn search(&self, query: String) -> Result<api::SearchResults, ApiError> {
+    async fn search(&self, request: api::SearchRequest) -> Result<api::SearchResults, ApiError> {
         let results = self
             .client()
-            .search(Request::new(proto::SearchRequest { query }))
+            .search(Request::new(convert::search_request_to_proto(&request)))
             .await
             .map_err(wire_error)?;
         Ok(convert::search_results_from_proto(results.get_ref()))
+    }
+
+    async fn search_suggestions(
+        &self,
+        query: String,
+    ) -> Result<Vec<api::SearchSuggestion>, ApiError> {
+        let suggestions = self
+            .client()
+            .get_search_suggestions(Request::new(proto::SearchSuggestionsRequest { query }))
+            .await
+            .map_err(wire_error)?;
+        Ok(suggestions
+            .get_ref()
+            .suggestions
+            .iter()
+            .map(convert::search_suggestion_from_proto)
+            .collect())
     }
 
     async fn track_web_url(&self, key: String) -> Result<Option<String>, ApiError> {

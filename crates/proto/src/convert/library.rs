@@ -63,6 +63,14 @@ pub fn track_info_to_proto(value: &api::TrackInfo) -> TrackInfo {
         musicbrainz_track_id: value.musicbrainz_track_id.clone(),
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
         credits: value.credits.iter().map(artist_credit_to_proto).collect(),
+        counterpart: value
+            .counterpart
+            .as_ref()
+            .map(|counterpart| TrackCounterpart {
+                key: counterpart.key.clone(),
+                version: track_version_to_proto(counterpart.version) as i32,
+                duration_ms: counterpart.duration_ms,
+            }),
     }
 }
 
@@ -88,6 +96,13 @@ pub fn track_info_from_proto(value: &TrackInfo) -> api::TrackInfo {
         musicbrainz_track_id: value.musicbrainz_track_id.clone(),
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
         credits: value.credits.iter().map(artist_credit_from_proto).collect(),
+        counterpart: value.counterpart.as_ref().and_then(|counterpart| {
+            Some(api::TrackCounterpart {
+                key: counterpart.key.clone(),
+                version: track_version_from_proto(counterpart.version)?,
+                duration_ms: counterpart.duration_ms,
+            })
+        }),
     }
 }
 
@@ -316,10 +331,29 @@ pub fn artist_page_from_proto(value: &ArtistPage) -> api::ArtistPage {
     }
 }
 
+pub fn search_request_to_proto(value: &api::SearchRequest) -> SearchRequest {
+    SearchRequest {
+        query: value.query.clone(),
+        filter: value.filter.clone(),
+        continuation: value.continuation.clone(),
+    }
+}
+
+pub fn search_request_from_proto(value: &SearchRequest) -> api::SearchRequest {
+    api::SearchRequest {
+        query: value.query.clone(),
+        filter: value.filter.clone(),
+        continuation: value.continuation.clone(),
+    }
+}
+
 pub fn search_results_to_proto(value: &api::SearchResults) -> SearchResults {
     SearchResults {
         tracks: value.tracks.iter().map(track_info_to_proto).collect(),
         albums: value.albums.iter().map(album_info_to_proto).collect(),
+        shelves: value.shelves.iter().map(catalog_shelf_to_proto).collect(),
+        continuation: value.continuation.clone(),
+        correction: value.correction.clone(),
     }
 }
 
@@ -327,6 +361,25 @@ pub fn search_results_from_proto(value: &SearchResults) -> api::SearchResults {
     api::SearchResults {
         tracks: value.tracks.iter().map(track_info_from_proto).collect(),
         albums: value.albums.iter().map(album_info_from_proto).collect(),
+        shelves: value.shelves.iter().map(catalog_shelf_from_proto).collect(),
+        continuation: value.continuation.clone(),
+        correction: value.correction.clone(),
+    }
+}
+
+pub fn search_suggestion_to_proto(value: &api::SearchSuggestion) -> SearchSuggestion {
+    SearchSuggestion {
+        text: value.text.clone(),
+        from_history: value.from_history,
+        item: value.item.as_ref().map(catalog_item_to_proto),
+    }
+}
+
+pub fn search_suggestion_from_proto(value: &SearchSuggestion) -> api::SearchSuggestion {
+    api::SearchSuggestion {
+        text: value.text.clone(),
+        from_history: value.from_history,
+        item: value.item.as_ref().map(catalog_item_from_proto),
     }
 }
 
@@ -380,6 +433,64 @@ pub fn artist_detail_from_proto(value: &ArtistDetail) -> Option<api::ArtistDetai
 mod tests {
     use super::*;
 
+    /// A filtered search carries its filter and continuation out, and its
+    /// shelves and correction back, on top of the plain search's rows.
+    #[test]
+    fn a_search_and_its_suggestions_round_trip() {
+        let request = api::SearchRequest {
+            query: "daft punk".into(),
+            filter: Some("songs".into()),
+            continuation: Some("search||4qmF".into()),
+        };
+        assert_eq!(
+            request,
+            search_request_from_proto(&search_request_to_proto(&request))
+        );
+        assert_eq!(
+            api::SearchRequest::new("q"),
+            search_request_from_proto(&search_request_to_proto(&api::SearchRequest::new("q")))
+        );
+
+        let results = api::SearchResults {
+            shelves: vec![api::CatalogShelf {
+                title: "Songs".into(),
+                layout: api::ShelfLayout::List,
+                search_filter: Some("songs".into()),
+                ..Default::default()
+            }],
+            continuation: Some("next".into()),
+            correction: Some("daft punk".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            results,
+            search_results_from_proto(&search_results_to_proto(&results))
+        );
+
+        for suggestion in [
+            api::SearchSuggestion {
+                text: "daft punk".into(),
+                from_history: true,
+                item: None,
+            },
+            api::SearchSuggestion {
+                text: "Daft Punk".into(),
+                from_history: false,
+                item: Some(api::CatalogItem {
+                    kind: api::CatalogItemKind::Artist,
+                    id: "UC".into(),
+                    title: "Daft Punk".into(),
+                    ..Default::default()
+                }),
+            },
+        ] {
+            assert_eq!(
+                suggestion,
+                search_suggestion_from_proto(&search_suggestion_to_proto(&suggestion))
+            );
+        }
+    }
+
     /// A track row is what every listing renders, down to the file details a
     /// row shows, so all of it has to survive the wire.
     #[test]
@@ -417,8 +528,25 @@ mod tests {
                     key: None,
                 },
             ],
+            counterpart: Some(api::TrackCounterpart {
+                key: "dQw4w9WgXcQ".into(),
+                version: api::TrackVersion::Video,
+                duration_ms: Some(213_000),
+            }),
         };
         assert_eq!(track, track_info_from_proto(&track_info_to_proto(&track)));
+    }
+
+    /// A counterpart that names no cut gives a client nothing to switch to.
+    #[test]
+    fn a_counterpart_of_no_version_is_dropped() {
+        let mut wire = track_info_to_proto(&api::TrackInfo::default());
+        wire.counterpart = Some(TrackCounterpart {
+            key: "x".into(),
+            version: TrackVersion::Unspecified as i32,
+            duration_ms: None,
+        });
+        assert_eq!(track_info_from_proto(&wire).counterpart, None);
     }
 
     #[test]

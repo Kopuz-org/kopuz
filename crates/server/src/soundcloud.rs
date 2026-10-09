@@ -409,6 +409,7 @@ fn parse_track(item: &Value) -> Option<Track> {
             vec![artist]
         },
         replay_gain: config::ReplayGainInfo::default(),
+        counterpart: None,
     })
 }
 

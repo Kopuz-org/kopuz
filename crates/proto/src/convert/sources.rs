@@ -18,6 +18,7 @@ pub fn capabilities_to_proto(value: &api::SourceCapabilities) -> SourceCapabilit
         browse_folders: value.browse_folders,
         external_devices: value.external_devices,
         browser_playback: value.browser_playback,
+        music_videos: value.music_videos,
         playlists: match value.playlists {
             PlaylistCapability::None => crate::PlaylistCapability::None,
             PlaylistCapability::AddRemove => crate::PlaylistCapability::AddRemove,
@@ -35,6 +36,35 @@ pub fn capabilities_to_proto(value: &api::SourceCapabilities) -> SourceCapabilit
             FavoritesSyncMode::Instant => crate::FavoritesSyncMode::FavoritesSyncInstant,
             FavoritesSyncMode::Paginated => crate::FavoritesSyncMode::FavoritesSyncPaginated,
         } as i32,
+        pages: value.pages.iter().map(page_entry_to_proto).collect(),
+        search_filters: value
+            .search_filters
+            .iter()
+            .map(|filter| SearchFilter {
+                id: filter.id.clone(),
+                label: Some(text_to_proto(&filter.label)),
+            })
+            .collect(),
+    }
+}
+
+pub fn page_entry_to_proto(value: &api::PageEntry) -> PageEntry {
+    PageEntry {
+        id: value.id.clone(),
+        label: Some(text_to_proto(&value.label)),
+        icon: Some(icon_to_proto(&value.icon)),
+    }
+}
+
+pub fn page_entry_from_proto(value: &PageEntry) -> api::PageEntry {
+    api::PageEntry {
+        id: value.id.clone(),
+        label: value
+            .label
+            .as_ref()
+            .map(text_from_proto)
+            .unwrap_or_default(),
+        icon: value.icon.as_ref().map(icon_from_proto).unwrap_or_default(),
     }
 }
 
@@ -57,6 +87,7 @@ pub fn capabilities_from_proto(value: Option<&SourceCapabilities>) -> api::Sourc
         browse_folders: value.browse_folders,
         external_devices: value.external_devices,
         browser_playback: value.browser_playback,
+        music_videos: value.music_videos,
         playlists: match crate::PlaylistCapability::try_from(value.playlists) {
             Ok(crate::PlaylistCapability::AddRemove) => api::PlaylistCapability::AddRemove,
             Ok(crate::PlaylistCapability::Reorder) => api::PlaylistCapability::Reorder,
@@ -76,6 +107,19 @@ pub fn capabilities_from_proto(value: Option<&SourceCapabilities>) -> api::Sourc
             }
             _ => api::FavoritesSyncMode::Instant,
         },
+        pages: value.pages.iter().map(page_entry_from_proto).collect(),
+        search_filters: value
+            .search_filters
+            .iter()
+            .map(|filter| api::SearchFilter {
+                id: filter.id.clone(),
+                label: filter
+                    .label
+                    .as_ref()
+                    .map(text_from_proto)
+                    .unwrap_or_default(),
+            })
+            .collect(),
     }
 }
 
@@ -312,10 +356,20 @@ mod tests {
                 downloads: true,
                 browse_folders: true,
                 external_devices: false,
+                music_videos: true,
                 playlists: api::PlaylistCapability::Reorder,
                 artists: api::ArtistPresentation::Library,
                 albums: api::AlbumPresentation::Standard,
                 favorites_sync: api::FavoritesSyncMode::Paginated,
+                pages: vec![api::PageEntry {
+                    id: "FEmusic_home".into(),
+                    label: api::Text::key("home"),
+                    icon: api::Icon::Class("fa-solid fa-house".into()),
+                }],
+                search_filters: vec![api::SearchFilter {
+                    id: "songs".into(),
+                    label: api::Text::key("search_filter_songs"),
+                }],
                 ..Default::default()
             },
             detail: Some("https://jelly.example".into()),

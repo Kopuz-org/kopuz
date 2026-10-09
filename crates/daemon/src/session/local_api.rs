@@ -21,6 +21,7 @@ pub struct LocalApi {
     pub(super) integrations: Option<Arc<crate::integrations::IntegrationService>>,
     pub(super) downloader: Option<Arc<crate::url_download::UrlDownloadService>>,
     pub(super) spotify: Option<Arc<crate::spotify::SpotifySink>>,
+    pub(super) video: Option<Arc<crate::video::VideoService>>,
 }
 
 impl LocalApi {
@@ -42,7 +43,13 @@ impl LocalApi {
             integrations: None,
             downloader: None,
             spotify: None,
+            video: None,
         }
+    }
+
+    pub fn with_video(mut self, video: Arc<crate::video::VideoService>) -> Self {
+        self.video = Some(video);
+        self
     }
 
     pub fn with_library(mut self, library: Arc<crate::library::LibraryService>) -> Self {
@@ -322,6 +329,14 @@ impl api::PlayerApi for LocalApi {
             .select_device(device_id)
             .await
     }
+
+    async fn video(&self, request: api::VideoRequest) -> Result<api::VideoChunk, ApiError> {
+        self.video
+            .as_deref()
+            .ok_or_else(|| ApiError::unsupported("this daemon runs without music videos"))?
+            .chunk(request)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -445,8 +460,18 @@ impl api::LibraryApi for LocalApi {
         self.library()?.recent_tracks(page).await
     }
 
-    async fn search(&self, query: String) -> Result<api::SearchResults, ApiError> {
-        self.library()?.search(&query).await
+    async fn search(&self, request: api::SearchRequest) -> Result<api::SearchResults, ApiError> {
+        match (&request.filter, &request.continuation) {
+            (None, None) => self.library()?.search(&request.query).await,
+            _ => self.catalog()?.search(request).await,
+        }
+    }
+
+    async fn search_suggestions(
+        &self,
+        query: String,
+    ) -> Result<Vec<api::SearchSuggestion>, ApiError> {
+        self.catalog()?.search_suggestions(&query).await
     }
 
     async fn track_web_url(&self, key: String) -> Result<Option<String>, ApiError> {

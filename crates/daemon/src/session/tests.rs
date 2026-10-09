@@ -119,6 +119,11 @@ fn test_track(key: &String) -> Track {
                 service: config::MusicService::Jellyfin,
                 item_id: key.clone(),
             }
+        } else if key.starts_with("ytm-") {
+            reader::models::TrackId::Server {
+                service: config::MusicService::YtMusic,
+                item_id: key.clone(),
+            }
         } else if let Some(item_id) = key.strip_prefix("spotify:") {
             reader::models::TrackId::Server {
                 service: config::MusicService::Spotify,
@@ -148,6 +153,23 @@ fn test_track(key: &String) -> Track {
         },
         artists: vec![],
         replay_gain: config::ReplayGainInfo::default(),
+        counterpart: key
+            .starts_with("ytm-song:")
+            .then(|| Box::new(music_video_of(key))),
+    }
+}
+
+/// A video whose first second is an intro the song does not have.
+fn music_video_of(key: &str) -> reader::Counterpart {
+    reader::Counterpart {
+        item_id: format!("{key}-video"),
+        video: true,
+        duration_ms: Some(7_000),
+        segments: vec![reader::SharedSegment {
+            start_ms: 0,
+            counterpart_start_ms: 1_000,
+            duration_ms: 6_000,
+        }],
     }
 }
 
@@ -1813,6 +1835,7 @@ fn external_track(title: &str) -> Track {
         credits: Vec::new(),
         artists: Vec::new(),
         replay_gain: config::ReplayGainInfo::default(),
+        counterpart: None,
     }
 }
 
@@ -2296,4 +2319,181 @@ async fn stored_volume(database: &db::Db) -> f32 {
         .expect("load")
         .expect("stored config")
         .volume
+}
+
+#[tokio::test]
+async fn switching_to_the_video_keeps_the_place_in_the_song_and_the_queue() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["ytm-song:a", "track-1"]))
+        .await
+        .expect("queue");
+    wait_committed(&harness.api).await;
+    for _ in 0..40 {
+        harness.sink.pull(2048);
+    }
+    harness
+        .api
+        .player_command(PlayerCommand::Pause)
+        .await
+        .expect("pause");
+    let paused_at = harness
+        .api
+        .player_state()
+        .await
+        .expect("state")
+        .position
+        .expect("anchor")
+        .ms;
+    assert!(paused_at > 0, "the song played before the switch");
+
+    harness
+        .api
+        .player_command(PlayerCommand::SetVersion {
+            version: api::TrackVersion::Video,
+        })
+        .await
+        .expect("switch to the video");
+    let state = harness.api.player_state().await.expect("state");
+    let track = state.track.expect("the video plays");
+    assert_eq!(track.key, "ytm-song:a-video");
+    assert_eq!(track.version(), Some(api::TrackVersion::Video));
+    assert_eq!(
+        track.counterpart.as_ref().map(|other| other.key.as_str()),
+        Some("ytm-song:a")
+    );
+    // Paused, the video waits at the same note: a second later, past its intro.
+    assert_eq!(state.position.expect("anchor").ms, paused_at + 1_000);
+    assert!(!state.position.unwrap().playing);
+    assert_eq!(state.queue.length, 2);
+    assert_eq!(queue_titles(&harness.api).await, ["ytm-song:a", "track-1"]);
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    assert_eq!(snapshot.items[0].key, "ytm-song:a-video");
+    assert_eq!(snapshot.items[1].key, "track-1");
+
+    harness
+        .api
+        .player_command(PlayerCommand::Play)
+        .await
+        .expect("play");
+    let state = wait_committed(&harness.api).await;
+    assert_eq!(
+        state.track.as_ref().map(|t| t.key.as_str()),
+        Some("ytm-song:a-video")
+    );
+    assert!(state.position.expect("anchor").ms >= paused_at + 1_000);
+
+    // Playing, the song comes back where the video stood, less the intro.
+    for _ in 0..20 {
+        harness.sink.pull(2048);
+    }
+    let before = harness
+        .api
+        .player_state()
+        .await
+        .expect("state")
+        .position
+        .expect("anchor");
+    harness
+        .api
+        .player_command(PlayerCommand::SetVersion {
+            version: api::TrackVersion::Song,
+        })
+        .await
+        .expect("switch back");
+    let state = wait_state(&harness.api, "the song playing again", |state| {
+        state.track.as_ref().is_some_and(|t| t.key == "ytm-song:a")
+            && state.phase == ApiPhase::Playing
+            && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    let resumed = state.position.expect("anchor").ms;
+    assert!(
+        resumed + 1_000 >= before.ms && resumed <= 6_000,
+        "song resumed at {resumed}ms after the video stood at {}ms",
+        before.ms
+    );
+    assert_eq!(state.queue.length, 2);
+    assert_eq!(state.queue.index, Some(0));
+
+    // Already the song: nothing to do.
+    let rev = state.rev;
+    harness
+        .api
+        .player_command(PlayerCommand::SetVersion {
+            version: api::TrackVersion::Song,
+        })
+        .await
+        .expect("a no-op");
+    assert_eq!(
+        harness.api.player_state().await.unwrap().track.unwrap().key,
+        "ytm-song:a"
+    );
+    assert!(harness.api.player_state().await.unwrap().rev >= rev);
+}
+
+#[tokio::test]
+async fn a_track_with_no_other_version_refuses_the_switch() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["track-0"]))
+        .await
+        .expect("queue");
+    wait_committed(&harness.api).await;
+    let error = harness
+        .api
+        .player_command(PlayerCommand::SetVersion {
+            version: api::TrackVersion::Video,
+        })
+        .await
+        .expect_err("no video to switch to");
+    assert_eq!(error.code, ErrorCode::InvalidInput);
+    assert_eq!(
+        harness.api.player_state().await.unwrap().track.unwrap().key,
+        "track-0"
+    );
+}
+
+#[tokio::test]
+async fn a_counterpart_the_source_finds_later_reaches_the_playing_row() {
+    let harness = harness(|_| {});
+    harness
+        .api
+        .set_queue(replace(&["ytm-bare:b", "track-1"]))
+        .await
+        .expect("queue");
+    let state = wait_committed(&harness.api).await;
+    let track = state.track.expect("playing");
+    assert_eq!(track.counterpart, None);
+
+    let _ = harness
+        .api
+        .session
+        .cmd_tx
+        .send(SessionCmd::CounterpartFound {
+            uid: track.uid.clone(),
+            counterpart: Box::new(music_video_of("ytm-bare:b")),
+        });
+    let state = wait_state(&harness.api, "the counterpart on the row", |state| {
+        state
+            .track
+            .as_ref()
+            .is_some_and(|t| t.counterpart.is_some())
+    })
+    .await;
+    assert_eq!(
+        state.track.unwrap().version(),
+        Some(api::TrackVersion::Song)
+    );
+    let snapshot = harness.api.queue_snapshot().await.expect("snapshot");
+    assert_eq!(
+        snapshot.items[0]
+            .counterpart
+            .as_ref()
+            .map(|c| c.key.as_str()),
+        Some("ytm-bare:b-video")
+    );
+    assert_eq!(snapshot.items[1].counterpart, None);
 }

@@ -145,6 +145,10 @@ new_releases = إصدارات جديدة
 # Navigation Buttons
 up_next = التالي
 lyrics = الكلمات
+track_version = الإصدار
+track_version_song = أغنية
+track_version_video = فيديو
+music_video = فيديو موسيقي
 
 # Player/Media
 loading_lyrics = جارٍ تحميل الكلمات...
@@ -500,6 +504,24 @@ discover_more_loading = جارٍ تحميل المزيد…
 discover_failed = تعذّر تحميل قسم الاكتشاف: { $error }
 discover_unsupported = الاكتشاف متاح فقط عندما تكون YouTube Music هي الخادم النشط.
 discover_show_all = عرض الكل
+catalog_page_explore = استكشاف
+catalog_page_charts = الأكثر رواجًا
+catalog_page_moods = الحالات المزاجية والأنواع
+catalog_page_podcasts = بودكاست
+catalog_page_library_songs = أغانيك
+catalog_page_library_albums = ألبوماتك
+catalog_page_library_artists = فنانوك
+catalog_page_subscriptions = الاشتراكات
+catalog_page_library_podcasts = البودكاست الخاص بك
+catalog_page_uploads = التحميلات
+catalog_page_history = السجل
+search_filter_all = الكل
+search_filter_songs = الأغاني
+search_filter_videos = الفيديوهات
+search_filter_community_playlists = قوائم تشغيل المجتمع
+search_filter_featured_playlists = قوائم تشغيل مميزة
+search_filter_episodes = الحلقات
+search_filter_profiles = الملفات الشخصية
 source_anon_playlists = سجّل الدخول إلى YouTube Music لعرض قوائم التشغيل في مكتبتك.
 source_anon_favorites = سجّل الدخول إلى YouTube Music لعرض الأغاني التي أعجبتك.
 source_anon_discover = سجّل الدخول إلى YouTube Music لتصفح قسم اكتشف.

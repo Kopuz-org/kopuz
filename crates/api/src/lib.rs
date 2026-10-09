@@ -24,7 +24,8 @@ mod sources;
 
 pub use artwork::{ArtworkData, ArtworkRef, ArtworkRequest, ArtworkTarget};
 pub use catalog::{
-    CatalogDetail, CatalogDetailRequest, CatalogItem, CatalogItemKind, CatalogPage, CatalogShelf,
+    CatalogChip, CatalogDetail, CatalogDetailRequest, CatalogHeader, CatalogItem, CatalogItemKind,
+    CatalogPage, CatalogShelf, ShelfLayout,
 };
 pub use error::{ApiError, ErrorBody, ErrorCode};
 pub use events::{ApiEvent, JobKind, JobProgress, NoticeLevel, SourceState, Table};
@@ -33,13 +34,14 @@ pub use jobs::{
 };
 pub use library::{
     AlbumInfo, AlbumPage, ArtistCredit, ArtistDetail, ArtistInfo, ArtistPage, DEFAULT_PAGE_LIMIT,
-    LyricChunkView, LyricLineView, LyricsView, Page, SearchResults, StatsView, TrackFilter,
-    TrackInfo, TrackPage, TrackSort,
+    LyricChunkView, LyricLineView, LyricsView, Page, SearchRequest, SearchResults,
+    SearchSuggestion, StatsView, TrackCounterpart, TrackFilter, TrackInfo, TrackPage, TrackSort,
+    TrackVersion,
 };
 pub use mutations::{ArtworkChange, ArtworkUpload, TrackMetadataPatch};
 pub use player::{
     BufferedRange, ExternalDevice, ExternalPlayback, FadingState, Intent, LoopMode, Phase,
-    PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind,
+    PlayerCommand, PlayerState, PositionAnchor, QueueSummary, TrackKind, VideoChunk, VideoRequest,
 };
 pub use playlists::{PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder};
 pub use queue::{
@@ -52,8 +54,9 @@ pub use schema::{
 };
 pub use sources::{
     AlbumPresentation, ArtistPresentation, ConnectKind, CredentialProvision, DraftCheck,
-    FavoritesSyncMode, IntegrationInfo, PlaylistCapability, ServiceInfo, ServiceRef, SignInKind,
-    SourceCapabilities, SourceDraft, SourceFolderEntry, SourceInfo, SourceLoginRequest,
+    FavoritesSyncMode, IntegrationInfo, PageEntry, PlaylistCapability, SearchFilter, ServiceInfo,
+    ServiceRef, SignInKind, SourceCapabilities, SourceDraft, SourceFolderEntry, SourceInfo,
+    SourceLoginRequest,
 };
 
 /// The config view: the layered config with credential keys
@@ -150,6 +153,13 @@ pub trait PlayerApi: Send + Sync {
         source_id: String,
         device_id: Option<String>,
     ) -> Result<(), ApiError>;
+
+    /// A byte range of the picture of a queued music video, for a frontend's
+    /// muted video element; the engine plays its sound. The picture shares
+    /// the playing cut's timeline, so the element follows
+    /// [`PlayerState::position`] (less `output_latency_ms`) one to one. Gated
+    /// by [`SourceCapabilities::music_videos`].
+    async fn video(&self, request: VideoRequest) -> Result<VideoChunk, ApiError>;
 }
 
 /// Reading the library, and the per-track state that belongs to it.
@@ -198,7 +208,11 @@ pub trait LibraryApi: Send + Sync {
 
     /// Search the active source. Remote sources answer over the network, so
     /// this is a daemon call and not a filter the caller composes.
-    async fn search(&self, query: String) -> Result<SearchResults, ApiError>;
+    async fn search(&self, request: SearchRequest) -> Result<SearchResults, ApiError>;
+
+    /// Completions for a half-typed query, and direct hits among them.
+    /// Empty for a source that offers none.
+    async fn search_suggestions(&self, query: String) -> Result<Vec<SearchSuggestion>, ApiError>;
 
     /// The source's public page for a row, for a share action. `None` when the
     /// source has no web pages, which is a client's cue to fall back to a

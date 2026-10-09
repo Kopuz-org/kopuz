@@ -178,6 +178,10 @@ new_releases = Lançamentos
 # Navigation Buttons
 up_next = A SEGUIR
 lyrics = LETRAS
+track_version = Versão
+track_version_song = Música
+track_version_video = Vídeo
+music_video = Videoclipe
 
 # Player/Media
 loading_lyrics = A carregar a letra...
@@ -492,6 +496,24 @@ discover_more_loading = A carregar mais…
 discover_failed = Não foi possível carregar Descobrir: { $error }
 discover_unsupported = Descobrir só está disponível quando o YouTube Music é o servidor ativo.
 discover_show_all = Mostrar tudo
+catalog_page_explore = Explorar
+catalog_page_charts = Tops
+catalog_page_moods = Estados de espírito e géneros
+catalog_page_podcasts = Podcasts
+catalog_page_library_songs = As suas músicas
+catalog_page_library_albums = Os seus álbuns
+catalog_page_library_artists = Os seus artistas
+catalog_page_subscriptions = Subscrições
+catalog_page_library_podcasts = Os seus podcasts
+catalog_page_uploads = Carregamentos
+catalog_page_history = Histórico
+search_filter_all = Tudo
+search_filter_songs = Músicas
+search_filter_videos = Vídeos
+search_filter_community_playlists = Playlists da comunidade
+search_filter_featured_playlists = Playlists em destaque
+search_filter_episodes = Episódios
+search_filter_profiles = Perfis
 source_anon_playlists = Entra no YouTube Music para veres as tuas playlists.
 source_anon_favorites = Entra no YouTube Music para veres as tuas músicas com like.
 source_anon_discover = Entra no YouTube Music para explorares o Descobrir.
