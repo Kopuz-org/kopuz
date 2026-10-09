@@ -26,6 +26,7 @@ mod playback;
 pub mod playlists;
 pub mod queue_model;
 pub mod radio;
+mod recovery;
 pub mod script_engine;
 pub mod scrobbler;
 pub mod services;

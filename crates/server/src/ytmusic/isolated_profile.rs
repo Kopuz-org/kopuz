@@ -34,14 +34,12 @@ pub async fn launch_signin_and_extract(
         server_id,
         PROFILE_PREFIX,
         SIGNIN_URL,
+        super::cookies::DOMAIN,
         signin_timeout,
-        |browser, profile| async move {
-            let header = super::cookies::extract_from(browser, &profile).await?;
-            if cookies::has_cookie(&header, "SAPISID") && cookies::has_cookie(&header, "SID") {
-                Ok(Some(header))
-            } else {
-                Ok(None)
-            }
+        |cookies| {
+            let header = super::cookies::header(cookies);
+            (cookies::has_cookie(&header, "SAPISID") && cookies::has_cookie(&header, "SID"))
+                .then_some(header)
         },
     )
     .await

@@ -116,6 +116,8 @@ service Kopuz {
   rpc LoginSource(SourceLoginRequest) returns (SourceInfo);
   rpc ClearCredentials(SourceId) returns (Unit);
   rpc AuthenticateSource(SourceId) returns (SourceInfo);
+  rpc GetBrowserSessions(GetBrowserSessionsRequest) returns (BrowserSessionList);
+  rpc ImportBrowserSession(ImportBrowserSessionRequest) returns (SourceInfo);
   rpc BrowseSource(BrowseSourceRequest) returns (SourceFolderList);
   rpc ValidateSource(SourceId) returns (SourceStateResponse);
   rpc CanOpenBrowser(CanOpenBrowserRequest) returns (BrowserAccess);
@@ -860,6 +862,27 @@ message SourceFolderEntry {
 
 message SourceFolderList {
   repeated SourceFolderEntry entries = 1;
+}
+
+message GetBrowserSessionsRequest {
+  string service = 1;
+}
+
+// A browser profile on the daemon's machine signed in to a service.
+message BrowserSession {
+  string id = 1;
+  string browser = 2;
+  string profile = 3;
+  optional string account = 4;
+}
+
+message BrowserSessionList {
+  repeated BrowserSession sessions = 1;
+}
+
+message ImportBrowserSessionRequest {
+  string id = 1;
+  string session = 2;
 }
 
 message SourceStateResponse {

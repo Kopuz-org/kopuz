@@ -14,7 +14,9 @@ use components::settings_items::{
     AppSelect, BackBehaviorSelector, LanguageSelector, RadioRegistryDropdown, SettingItem,
     SettingsGroup, SettingsSection, SourceSettings, ThemeSelector, ToggleSetting,
 };
-use components::settings_popups::{AddRegistryPopup, AddSourcePopup, LoginPopup};
+use components::settings_popups::{
+    AddRegistryPopup, AddSourcePopup, BrowserSignInPopup, LoginPopup,
+};
 use components::settings_remote_folders::RemoteFolderSettings;
 use config::AppConfig;
 use dioxus::prelude::*;
@@ -53,6 +55,15 @@ fn BuildInfoCard() -> Element {
     }
 }
 
+/// Whether a resource has an answer for its current inputs. `finished` only
+/// peeks, so it would not re-render when the answer lands.
+fn settled<T>(resource: &Resource<T>) -> bool {
+    matches!(
+        *resource.state().read(),
+        UseResourceState::Ready | UseResourceState::Stopped
+    )
+}
+
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
@@ -74,6 +85,31 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let draft_values = use_signal(Vec::<api::FieldValue>::new);
     let draft_secrets = use_signal(Vec::<api::FieldValue>::new);
     let draft_check = use_signal(|| Option::<api::DraftCheck>::None);
+    // The service the add form shows: the picked one, else the first offered.
+    let sessions_for = use_memo(move || {
+        if !show_add_source() {
+            return None;
+        }
+        let picked = source_service();
+        if !picked.is_empty() {
+            return Some(picked);
+        }
+        services
+            .read()
+            .as_ref()
+            .and_then(|offered| offered.first().map(|service| service.id.clone()))
+    });
+    let browser_sessions = hooks::sources::use_browser_sessions(sessions_for);
+    let importing = use_signal(|| Option::<String>::None);
+    // Signing an existing source in again offers the same profiles first.
+    let mut show_reauth = use_signal(|| false);
+    let reauth_error = use_signal(|| Option::<String>::None);
+    let reauth_for = use_memo(move || {
+        show_reauth()
+            .then(|| active_server().map(|server| server.service.id))
+            .flatten()
+    });
+    let reauth_sessions = hooks::sources::use_browser_sessions(reauth_for);
 
     let mut username = use_signal(String::new);
     let mut password = use_signal(String::new);
@@ -147,11 +183,28 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     // Signing in again on an active server: which flow it is belongs to the
     // service, and the daemon runs it.
     let mut sign_in_again = move || match active_server() {
-        Some(server) if server.sign_in == api::SignInKind::Browser => {
-            crate::settings_actions::authenticate(server.id, error, ctrl.playback_error);
+        Some(server) if server.reauth == api::SignInKind::Browser => {
+            let mut reauth_error = reauth_error;
+            reauth_error.set(None);
+            show_reauth.set(true);
         }
         _ => show_login.set(true),
     };
+
+    // A service with no profiles to offer goes straight to the browser.
+    use_effect(move || {
+        let looked = reauth_sessions.read().clone();
+        if show_reauth()
+            && settled(&reauth_sessions)
+            && reauth_for().is_some()
+            && looked.is_some_and(|found| found.is_empty())
+        {
+            show_reauth.set(false);
+            if let Some(server) = active_server() {
+                crate::settings_actions::authenticate(server.id, error, ctrl.playback_error);
+            }
+        }
+    });
 
     // The daemon checks the draft as it is typed, so the form knows what is
     // wrong with it and which sign-in saving it will start.
@@ -173,6 +226,26 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 draft_values,
                 draft_secrets,
             ),
+            source_name,
+            draft_values,
+            draft_secrets,
+            error,
+            show_add_source,
+            show_login,
+            ctrl.playback_error,
+        );
+    };
+
+    let handle_import_session = move |session: api::BrowserSession| {
+        crate::settings_actions::add_source_from_session(
+            crate::settings_actions::draft(
+                source_name,
+                source_service,
+                draft_values,
+                draft_secrets,
+            ),
+            session,
+            importing,
             source_name,
             draft_values,
             draft_secrets,
@@ -788,8 +861,44 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     check: draft_check(),
                     host_access: host_access(),
                     error,
+                    sessions: settled(&browser_sessions)
+                        .then(|| browser_sessions.read().clone())
+                        .flatten(),
+                    importing: importing(),
                     on_close: move |_| show_add_source.set(false),
-                    on_save: handle_add_source
+                    on_save: handle_add_source,
+                    on_import: handle_import_session,
+                }
+            }
+
+            if show_reauth() {
+                BrowserSignInPopup {
+                    service_name: active_server()
+                        .map(|server| components::forms::text(&server.service.name))
+                        .unwrap_or_default(),
+                    sessions: settled(&reauth_sessions)
+                        .then(|| reauth_sessions.read().clone())
+                        .flatten(),
+                    importing: importing(),
+                    error: reauth_error,
+                    on_close: move |_| show_reauth.set(false),
+                    on_browser: move |_| {
+                        show_reauth.set(false);
+                        if let Some(server) = active_server() {
+                            crate::settings_actions::authenticate(server.id, error, ctrl.playback_error);
+                        }
+                    },
+                    on_import: move |session: api::BrowserSession| {
+                        if let Some(server) = active_server() {
+                            crate::settings_actions::reauth_from_session(
+                                server.id,
+                                session,
+                                importing,
+                                reauth_error,
+                                show_reauth,
+                            );
+                        }
+                    },
                 }
             }
 

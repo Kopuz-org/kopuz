@@ -340,7 +340,11 @@ pub(crate) async fn read_cookies(
                 None => continue,
             }
         };
-        out.push(Cookie { name, value });
+        out.push(Cookie {
+            domain: host,
+            name,
+            value,
+        });
     }
     let _ = std::fs::remove_dir_all(&tmp);
     Ok(out)

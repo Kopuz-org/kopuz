@@ -36,8 +36,14 @@ pub fn AddSourcePopup(
     check: Option<api::DraftCheck>,
     host_access: bool,
     error: Signal<Option<String>>,
+    /// Browser profiles already signed in to the chosen service; `None`
+    /// while they are being looked for.
+    sessions: Option<Vec<api::BrowserSession>>,
+    /// The session being taken, while it is.
+    importing: Option<String>,
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
+    on_import: EventHandler<api::BrowserSession>,
 ) -> Element {
     let chosen = services
         .iter()
@@ -104,6 +110,17 @@ pub fn AddSourcePopup(
                     }
                 }
 
+                // Only a service signed in through a browser can have any, so
+                // nothing is held open for the others while they are asked.
+                if sessions.as_ref().map_or(needs_browser, |found| !found.is_empty()) {
+                    BrowserSessions {
+                        sessions,
+                        importing,
+                        disabled: blocked,
+                        on_import,
+                    }
+                }
+
                 crate::forms::schema_form::SchemaForm {
                     fields: fields.clone(),
                     values: answered,
@@ -139,6 +156,141 @@ pub fn AddSourcePopup(
         }
     }
 }
+/// Profiles in browsers on this machine that already hold a session, each
+/// one click from being used instead of signing in again. `None` is still
+/// looking: every profile is checked with the service first, which takes a
+/// few seconds.
+#[component]
+pub fn BrowserSessions(
+    sessions: Option<Vec<api::BrowserSession>>,
+    importing: Option<String>,
+    disabled: bool,
+    on_import: EventHandler<api::BrowserSession>,
+) -> Element {
+    let busy = importing.is_some();
+    let looking = sessions.is_none();
+    rsx! {
+        section {
+            class: "flex flex-col gap-2",
+            aria_labelledby: "browser-sessions-heading",
+            aria_busy: looking,
+            h3 {
+                id: "browser-sessions-heading",
+                class: "app-section-label text-xs font-semibold uppercase tracking-wider text-white/50",
+                if looking {
+                    "{i18n::t(\"browser_sessions_checking\")}"
+                } else {
+                    "{i18n::t(\"browser_sessions_heading\")}"
+                }
+            }
+            match sessions {
+                None => rsx! {
+                    div {
+                        class: "app-list-item flex items-center gap-3 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 animate-pulse",
+                        aria_hidden: "true",
+                        i { class: "fa-solid fa-user text-white/20 text-sm shrink-0" }
+                        span { class: "h-3 w-40 rounded bg-white/10" }
+                    }
+                },
+                Some(found) => rsx! {
+                    for session in found.into_iter() {
+                        button {
+                            key: "{session.id}",
+                            r#type: "button",
+                            class: "app-list-item flex items-center gap-3 w-full text-left rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer",
+                            disabled: disabled || busy,
+                            onclick: {
+                                let session = session.clone();
+                                move |_| on_import.call(session.clone())
+                            },
+                            i { class: "fa-solid fa-user text-white/40 text-sm shrink-0", aria_hidden: "true" }
+                            span { class: "flex flex-col min-w-0 flex-1",
+                                span { class: "text-sm text-white truncate", "{session_label(&session)}" }
+                                if let Some(account) = session.account.as_ref() {
+                                    span { class: "text-xs text-white/50 truncate", "{account}" }
+                                }
+                            }
+                            span { class: "text-sm font-medium text-indigo-400 shrink-0",
+                                if importing.as_deref() == Some(session.id.as_str()) {
+                                    "{i18n::t(\"browser_session_importing\")}"
+                                } else {
+                                    "{i18n::t(\"browser_session_use\")}"
+                                }
+                            }
+                        }
+                    }
+                    p { class: "text-xs text-white/50", "{i18n::t(\"browser_session_help\")}" }
+                },
+            }
+        }
+    }
+}
+
+/// How a browser profile is named to the user: its browser, then its own name.
+pub fn session_label(session: &api::BrowserSession) -> String {
+    i18n::t_with(
+        "browser_session_name",
+        &[
+            ("browser", session.browser.clone()),
+            ("profile", session.profile.clone()),
+        ],
+    )
+}
+
+/// Signing a source in again: the browser profiles that already hold a
+/// session for it, or a fresh browser sign-in.
+#[component]
+pub fn BrowserSignInPopup(
+    service_name: String,
+    sessions: Option<Vec<api::BrowserSession>>,
+    importing: Option<String>,
+    error: Signal<Option<String>>,
+    on_close: EventHandler<()>,
+    on_browser: EventHandler<()>,
+    on_import: EventHandler<api::BrowserSession>,
+) -> Element {
+    let busy = importing.is_some();
+    rsx! {
+        div {
+            class: "overlay",
+            onclick: move |_| if !busy { on_close.call(()) },
+
+            div {
+                class: "popup",
+                role: "dialog",
+                aria_modal: "true",
+                onclick: |e| e.stop_propagation(),
+
+                h2 { "{i18n::t_with(\"login_to_service\", &[(\"service\", service_name.clone())])}" }
+
+                if let Some(err) = error() {
+                    p { class: "error", "{err}" }
+                }
+
+                BrowserSessions {
+                    sessions,
+                    importing,
+                    disabled: false,
+                    on_import,
+                }
+
+                div { class: "actions",
+                    button {
+                        disabled: busy,
+                        onclick: move |_| on_close.call(()),
+                        "{i18n::t(\"cancel\")}"
+                    }
+                    button {
+                        disabled: busy,
+                        onclick: move |_| on_browser.call(()),
+                        "{i18n::t(\"sign_in_with_browser\")}"
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn LoginPopup(
     mut username: Signal<String>,

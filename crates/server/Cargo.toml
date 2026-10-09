@@ -68,6 +68,10 @@ deno_core = { workspace = true }
 rustypipe-botguard = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
 
+# Hands the DevTools pipe ends to a browser as fds 3 and 4.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 # Windows native cookie decryption (v10 DPAPI + planted v20 app-bound).
 [target.'cfg(windows)'.dependencies]
 base64 = { workspace = true }

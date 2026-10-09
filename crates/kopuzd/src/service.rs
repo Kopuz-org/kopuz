@@ -1283,6 +1283,43 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::source_info_to_proto(&info)))
     }
 
+    async fn get_browser_sessions(
+        &self,
+        request: Request<proto::GetBrowserSessionsRequest>,
+    ) -> Result<Response<proto::BrowserSessionList>, Status> {
+        let sessions = self
+            .0
+            .api
+            .browser_sessions(request.into_inner().service)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::BrowserSessionList {
+            sessions: sessions
+                .into_iter()
+                .map(|session| proto::BrowserSession {
+                    id: session.id,
+                    browser: session.browser,
+                    profile: session.profile,
+                    account: session.account,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn import_browser_session(
+        &self,
+        request: Request<proto::ImportBrowserSessionRequest>,
+    ) -> Result<Response<proto::SourceInfo>, Status> {
+        let request = request.into_inner();
+        let info = self
+            .0
+            .api
+            .import_browser_session(request.id, request.session)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(convert::source_info_to_proto(&info)))
+    }
+
     async fn browse_source(
         &self,
         request: Request<proto::BrowseSourceRequest>,

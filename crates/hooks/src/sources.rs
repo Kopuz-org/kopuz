@@ -147,6 +147,22 @@ pub fn use_services() -> Resource<Vec<api::ServiceInfo>> {
     })
 }
 
+/// Browser profiles already signed in to `service`, fetched again whenever it
+/// changes. `None` asks for nothing.
+pub fn use_browser_sessions(service: Memo<Option<String>>) -> Resource<Vec<api::BrowserSession>> {
+    let api = use_api();
+    use_resource(move || {
+        let api = api.clone();
+        let service = service();
+        async move {
+            match service {
+                Some(service) => api.browser_sessions(service).await.unwrap_or_default(),
+                None => Vec::new(),
+            }
+        }
+    })
+}
+
 /// Answer one of a source's own options. The daemon decides where the value
 /// lives -- the server row or the settings -- so this only carries it there.
 pub fn set_source_settings(id: String, values: Vec<api::FieldValue>) {

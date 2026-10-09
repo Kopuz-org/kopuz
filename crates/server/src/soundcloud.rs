@@ -664,16 +664,13 @@ pub mod signin {
             server_id,
             PROFILE_PREFIX,
             "https://soundcloud.com/signin",
+            "soundcloud.com",
             signin_timeout,
-            |browser, profile| async move {
-                Ok(cookies::read_cookies(browser, &profile, "soundcloud.com")
-                    .await
-                    .ok()
-                    .and_then(|cs| {
-                        cs.into_iter()
-                            .find(|c| c.name == "oauth_token" && !c.value.is_empty())
-                            .map(|c| c.value)
-                    }))
+            |cookies| {
+                cookies
+                    .iter()
+                    .find(|c| c.name == "oauth_token" && !c.value.is_empty())
+                    .map(|c| c.value.clone())
             },
         )
         .await

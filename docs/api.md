@@ -215,7 +215,9 @@ A job kind is single-flight: a second start returns ALREADY_EXISTS.
 Sources and integrations: `GetSources`, `SelectSource`, `UpsertServer`,
 `DeleteServer`, `UpsertLocalSource`, `DeleteLocalSource`,
 `SetSourceDirectories`, `ProvisionCredentials`, `LoginSource`,
-`ClearCredentials`, `AuthenticateSource`, `BrowseSource`, `ValidateSource`,
+`ClearCredentials`, `AuthenticateSource`, `GetBrowserSessions` /
+`ImportBrowserSession` (take a session from a signed-in browser profile on
+the daemon's machine), `BrowseSource`, `ValidateSource`,
 `CanOpenBrowser`, and `GetIntegrations` / `ProvisionIntegration` /
 `ClearIntegration` / `AuthenticateIntegration` for the scrobblers.
 

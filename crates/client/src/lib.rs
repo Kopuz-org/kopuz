@@ -1248,6 +1248,44 @@ impl api::SourceApi for GrpcApi {
         Ok(convert::source_info_from_proto(info.get_ref()))
     }
 
+    async fn browser_sessions(
+        &self,
+        service: String,
+    ) -> Result<Vec<api::BrowserSession>, ApiError> {
+        let list = self
+            .client()
+            .get_browser_sessions(Request::new(proto::GetBrowserSessionsRequest { service }))
+            .await
+            .map_err(wire_error)?;
+        Ok(list
+            .into_inner()
+            .sessions
+            .into_iter()
+            .map(|session| api::BrowserSession {
+                id: session.id,
+                browser: session.browser,
+                profile: session.profile,
+                account: session.account,
+            })
+            .collect())
+    }
+
+    async fn import_browser_session(
+        &self,
+        id: String,
+        session: String,
+    ) -> Result<api::SourceInfo, ApiError> {
+        let info = self
+            .client()
+            .import_browser_session(Request::new(proto::ImportBrowserSessionRequest {
+                id,
+                session,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(convert::source_info_from_proto(info.get_ref()))
+    }
+
     async fn browse_source(
         &self,
         id: String,

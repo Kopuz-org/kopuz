@@ -11,18 +11,20 @@
 //! system-level work regardless of who triggered it.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use api::{
-    ApiError, CredentialProvision, ErrorCode, SourceCapabilities, SourceDraft, SourceFolderEntry,
-    SourceInfo, SourceLoginRequest, SourceState, Table,
+    ApiError, BrowserSession, CredentialProvision, ErrorCode, SourceCapabilities, SourceDraft,
+    SourceFolderEntry, SourceInfo, SourceLoginRequest, SourceState, Table,
 };
-use server::source::AuthOutcome;
+use server::source::{AuthOutcome, MediaSource};
 
 use crate::config_service::ConfigService;
+use crate::recovery::{Recovery, once_more};
 use crate::session::SessionHandle;
 
 /// How long a browser sign-in may sit waiting for a person.
@@ -38,6 +40,50 @@ pub struct SourceService {
     /// Each source's last probe answer, tagged with the probe that wrote it.
     status: Mutex<HashMap<String, (u64, SourceState)>>,
     probes: AtomicU64,
+    upstream: Arc<dyn Upstream>,
+    recovery: Recovery,
+}
+
+/// What probing and recovering a session ask of the network and of the
+/// browser profiles on this machine.
+#[async_trait::async_trait]
+pub(crate) trait Upstream: Send + Sync {
+    async fn validate(&self, source: &dyn MediaSource) -> AuthOutcome;
+
+    /// Working cookies for `server`'s YouTube Music session: the stored ones
+    /// after one `verify_session` rotation, else a fresh read of the profile
+    /// it signed in with.
+    async fn recover_ytmusic(&self, server: &config::MusicServer, id: &str) -> Option<String>;
+}
+
+struct Network;
+
+#[async_trait::async_trait]
+impl Upstream for Network {
+    async fn validate(&self, source: &dyn MediaSource) -> AuthOutcome {
+        source.validate().await
+    }
+
+    async fn recover_ytmusic(&self, server: &config::MusicServer, id: &str) -> Option<String> {
+        let stored = server.access_token.clone();
+        if let Some(cookies) = try_resume_ytmusic(stored).await {
+            return Some(cookies);
+        }
+        #[cfg(target_os = "android")]
+        {
+            let _ = id;
+            None
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let browser = server::cookies::resolve_browser(server.yt_browser).await;
+            resume_from_profiles(browser, id, server.yt_profile.as_deref()).await
+        }
+    }
+}
+
+fn auth_expired<T>(result: &Result<T, ApiError>) -> bool {
+    matches!(result, Err(error) if error.code == ErrorCode::SourceAuthExpired)
 }
 
 fn db_error(error: db::DbError) -> ApiError {
@@ -85,12 +131,23 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
 
 impl SourceService {
     pub fn new(db: db::Db, session: SessionHandle, config: Arc<ConfigService>) -> Arc<Self> {
+        Self::with_upstream(db, session, config, Arc::new(Network))
+    }
+
+    pub(crate) fn with_upstream(
+        db: db::Db,
+        session: SessionHandle,
+        config: Arc<ConfigService>,
+        upstream: Arc<dyn Upstream>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             db,
             session,
             config,
             status: Mutex::new(HashMap::new()),
             probes: AtomicU64::new(0),
+            upstream,
+            recovery: Recovery::default(),
         })
     }
 
@@ -472,7 +529,16 @@ impl SourceService {
         self.config
             .mutate_state(&["servers", "server"], move |config| {
                 match config.servers.iter_mut().find(|entry| entry.id == saved.id) {
-                    Some(existing) => *existing = saved.clone(),
+                    // The form does not carry the imported profile, so an edit
+                    // keeps it unless the source now speaks another service.
+                    Some(existing) => {
+                        let profile = existing
+                            .yt_profile
+                            .take()
+                            .filter(|_| existing.service == saved.service);
+                        *existing = saved.clone();
+                        existing.yt_profile = profile;
+                    }
                     None => config.servers.push(saved.clone()),
                 }
                 if config.active_source.server_id() == Some(saved.id.as_str())
@@ -628,6 +694,17 @@ impl SourceService {
         &self,
         provision: CredentialProvision,
     ) -> Result<SourceInfo, ApiError> {
+        self.store_credentials(provision, None).await
+    }
+
+    /// [`Self::provision_credentials`], recording which browser profile a
+    /// session came from when it names a browser. A browser sign-in names
+    /// none, which forgets an earlier import's profile.
+    async fn store_credentials(
+        &self,
+        provision: CredentialProvision,
+        profile: Option<String>,
+    ) -> Result<SourceInfo, ApiError> {
         self.config.ensure_unlocked(&["server", "servers"])?;
         if provision.secret.is_empty() {
             return Err(ApiError::invalid_input("the credential is empty"));
@@ -646,6 +723,9 @@ impl SourceService {
                 config::Browser::from_id(browser)
                     .ok_or_else(|| ApiError::invalid_input("no such browser"))?,
             );
+            // Signed in through a browser, so no longer anonymous.
+            server.yt_anonymous = false;
+            server.yt_profile = profile;
         }
         let active = self
             .current()
@@ -781,9 +861,14 @@ impl SourceService {
             let browser = server::cookies::resolve_browser(server.yt_browser).await;
             let (secret, user_id) = match server.service {
                 config::MusicService::YtMusic => {
-                    let secret = ensure_ytmusic_signed_in(server.access_token.clone(), browser, id)
-                        .await
-                        .map_err(ApiError::internal)?;
+                    let secret = ensure_ytmusic_signed_in(
+                        server.access_token.clone(),
+                        browser,
+                        id,
+                        server.yt_profile.as_deref(),
+                    )
+                    .await
+                    .map_err(ApiError::internal)?;
                     let user = server::ytmusic::derive_user_id(&secret)
                         .unwrap_or_else(|| "me".to_string());
                     (secret, user)
@@ -838,6 +923,96 @@ impl SourceService {
         }
     }
 
+    /// Browser profiles on this machine already signed in to `service`.
+    pub async fn browser_sessions(&self, service: &str) -> Result<Vec<BrowserSession>, ApiError> {
+        if config::MusicService::from_id(service) != Some(config::MusicService::YtMusic) {
+            return Ok(Vec::new());
+        }
+        #[cfg(target_os = "android")]
+        {
+            Ok(Vec::new())
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let scratch = server::ytmusic::browser_sessions::scratch_dir();
+            Ok(server::ytmusic::browser_sessions::signed_in(&scratch)
+                .await
+                .into_iter()
+                .map(|profile| BrowserSession {
+                    id: profile.id(),
+                    browser: profile.browser.label().to_string(),
+                    profile: profile.name,
+                    account: profile.email,
+                })
+                .collect())
+        }
+    }
+
+    /// Sign `id` in with the session a browser profile on this machine holds.
+    ///
+    /// Like a browser sign-in, the secret never leaves this process.
+    pub async fn import_browser_session(
+        &self,
+        id: &str,
+        session: &str,
+    ) -> Result<SourceInfo, ApiError> {
+        self.config.ensure_unlocked(&["server", "servers"])?;
+        let server = self
+            .db
+            .load_server(id)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| ApiError::not_found("no such server"))?;
+        if server.service != config::MusicService::YtMusic {
+            return Err(ApiError::unsupported(
+                "this source cannot take a session from a browser profile",
+            ));
+        }
+        #[cfg(target_os = "android")]
+        {
+            let _ = session;
+            Err(ApiError::unsupported(
+                "there are no browser profiles to take a session from here",
+            ))
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let scratch = server::ytmusic::browser_sessions::scratch_dir();
+            let (browser, cookies) = server::ytmusic::browser_sessions::import(session, &scratch)
+                .await
+                .map_err(ApiError::invalid_input)?;
+            let secret = try_resume_ytmusic(Some(cookies)).await.ok_or_else(|| {
+                ApiError::invalid_input(format!(
+                    "YouTube Music did not accept the session from {}. Open music.youtube.com there to refresh it, then try again.",
+                    browser.label()
+                ))
+            })?;
+            self.store_import(id, session, browser, secret).await
+        }
+    }
+
+    /// Keep a session imported from the browser profile `profile` names, and
+    /// where it came from, so recovery can read that profile again.
+    async fn store_import(
+        &self,
+        id: &str,
+        profile: &str,
+        browser: config::Browser,
+        secret: String,
+    ) -> Result<SourceInfo, ApiError> {
+        let user = server::ytmusic::derive_user_id(&secret).unwrap_or_else(|| "me".to_string());
+        self.store_credentials(
+            CredentialProvision {
+                server_id: id.to_string(),
+                secret,
+                user_id: Some(user),
+                browser: Some(browser.id().to_string()),
+            },
+            Some(profile.to_string()),
+        )
+        .await
+    }
+
     pub async fn browse_source(
         &self,
         id: &str,
@@ -885,14 +1060,105 @@ impl SourceService {
         if announce {
             self.record_status(id, probe, SourceState::Checking);
         }
-        let (_, source) = self.resolve(id).await?;
-        let state = match source.validate().await {
+        let seen = self.recovery.epoch();
+        let outcome = once_more(
+            || async {
+                let (_, source) = self.resolve(id).await?;
+                Ok::<_, ApiError>(self.upstream.validate(source.as_ref()).await)
+            },
+            |outcome| matches!(outcome, Ok(AuthOutcome::Expired)),
+            || self.recover(id, seen),
+        )
+        .await?;
+        let state = match outcome {
             AuthOutcome::Valid => SourceState::Online,
             AuthOutcome::Expired => SourceState::AuthExpired,
             AuthOutcome::Unreachable => SourceState::Offline,
         };
         self.record_status(id, probe, state);
         Ok(state)
+    }
+
+    /// Run `attempt`, a call that reaches the active source. If it answers
+    /// that the session expired, recover the session and run it once more.
+    pub async fn recovering<T, A>(&self, attempt: impl FnMut() -> A) -> Result<T, ApiError>
+    where
+        A: Future<Output = Result<T, ApiError>>,
+    {
+        let seen = self.recovery.epoch();
+        once_more(attempt, auth_expired, || self.recover_active(seen)).await
+    }
+
+    async fn recover_active(&self, seen: u64) -> bool {
+        let Some(id) = self
+            .current()
+            .await
+            .active_source
+            .server_id()
+            .map(str::to_string)
+        else {
+            return false;
+        };
+        // Once recovery has given up, the re-probe retries it, so requests
+        // against a dead session do not each read a browser profile.
+        if self.status(&id) == Some(SourceState::AuthExpired) {
+            return false;
+        }
+        self.recover(&id, seen).await
+    }
+
+    /// Get `id`'s session back and store it, at most one attempt at a time
+    /// across the daemon. A source with nothing to recover answers false.
+    async fn recover(&self, id: &str, seen: u64) -> bool {
+        self.recovery
+            .run(seen, async {
+                let recovered = self.recover_session(id).await;
+                if !recovered {
+                    let probe = self.probes.fetch_add(1, Ordering::Relaxed) + 1;
+                    self.record_status(id, probe, SourceState::AuthExpired);
+                }
+                recovered
+            })
+            .await
+    }
+
+    async fn recover_session(&self, id: &str) -> bool {
+        let server = match self.db.load_server(id).await {
+            Ok(Some(server))
+                if server.service == config::MusicService::YtMusic
+                    && server.access_token.is_some() =>
+            {
+                server
+            }
+            Ok(_) => return false,
+            Err(error) => {
+                tracing::warn!(%error, source = %id, "loading a source to recover its session failed");
+                return false;
+            }
+        };
+        let Some(cookies) = self.upstream.recover_ytmusic(&server, id).await else {
+            tracing::warn!(source = %id, "the YouTube Music session expired and could not be recovered");
+            return false;
+        };
+        let user = server::ytmusic::derive_user_id(&cookies).or(server.user_id);
+        match self
+            .provision_credentials(CredentialProvision {
+                server_id: id.to_string(),
+                secret: cookies,
+                user_id: user,
+                browser: None,
+            })
+            .await
+        {
+            Ok(_) => {
+                tracing::info!(source = %id, "recovered the YouTube Music session");
+                true
+            }
+            Err(error) => {
+                tracing::warn!(%error, source = %id, "storing the recovered YouTube Music session failed");
+                false
+            }
+        }
     }
 
     /// Probe the active source whenever it or its server entry changes, and retry one that is not online.
@@ -1031,7 +1297,6 @@ impl SourceService {
 
 /// Accept cookies that still validate, else try one keepalive rotation before
 /// giving up on them.
-#[cfg(not(target_os = "android"))]
 async fn try_resume_ytmusic(seed: Option<String>) -> Option<String> {
     let cookies = seed?;
     if server::provider::validate_ytmusic_cookies(&cookies).await {
@@ -1054,18 +1319,13 @@ async fn ensure_ytmusic_signed_in(
     stored: Option<String>,
     browser: config::Browser,
     server_id: &str,
+    imported: Option<&str>,
 ) -> Result<String, String> {
     if let Some(cookies) = try_resume_ytmusic(stored).await {
         return Ok(cookies);
     }
-    let profile = server::ytmusic::isolated_profile::profile_dir(server_id);
-    if profile.is_dir() {
-        let from_profile = server::ytmusic::cookies::extract_from(browser, &profile)
-            .await
-            .ok();
-        if let Some(cookies) = try_resume_ytmusic(from_profile).await {
-            return Ok(cookies);
-        }
+    if let Some(cookies) = resume_from_profiles(browser, server_id, imported).await {
+        return Ok(cookies);
     }
     let cookies = server::ytmusic::isolated_profile::launch_signin_and_extract(
         browser,
@@ -1077,6 +1337,30 @@ async fn ensure_ytmusic_signed_in(
         return Err("sign-in finished but YouTube Music still rejected the session".to_string());
     }
     Ok(cookies)
+}
+
+/// A session read again from the isolated sign-in profile, else from the
+/// browser profile `imported` names. Either has to validate.
+#[cfg(not(target_os = "android"))]
+async fn resume_from_profiles(
+    browser: config::Browser,
+    server_id: &str,
+    imported: Option<&str>,
+) -> Option<String> {
+    let isolated = server::ytmusic::isolated_profile::profile_dir(server_id);
+    if isolated.is_dir() {
+        let from_profile = server::ytmusic::cookies::extract_from(browser, &isolated)
+            .await
+            .ok();
+        if let Some(cookies) = try_resume_ytmusic(from_profile).await {
+            return Some(cookies);
+        }
+    }
+    let scratch = server::ytmusic::browser_sessions::scratch_dir();
+    let (_, cookies) = server::ytmusic::browser_sessions::import(imported?, &scratch)
+        .await
+        .ok()?;
+    try_resume_ytmusic(Some(cookies)).await
 }
 
 #[cfg(test)]
@@ -1092,5 +1376,321 @@ mod tests {
             assert_eq!(error.code, ErrorCode::InvalidInput);
         }
         assert!(SourceService::validate_server_id("jellyfin-1").is_ok());
+    }
+
+    fn youtube_music(anonymous: bool) -> config::AppConfig {
+        let mut server = config::MusicServer::new_with_service(
+            "YouTube Music".into(),
+            "https://music.youtube.com".into(),
+            config::MusicService::YtMusic,
+        );
+        server.id = Some("yt".into());
+        server.access_token = Some("SAPISID=leftover".into());
+        server.yt_anonymous = anonymous;
+        config::AppConfig {
+            server: Some(server),
+            active_source: config::Source::Server("yt".into()),
+            ..Default::default()
+        }
+    }
+
+    struct NoLibrary;
+
+    #[async_trait::async_trait]
+    impl crate::QueueMaterializer for NoLibrary {
+        async fn materialize(&self, _: &api::QueueContext) -> Result<Vec<reader::Track>, ApiError> {
+            Ok(Vec::new())
+        }
+    }
+
+    /// Answers probes from a script and recovers to a fixed session.
+    #[derive(Default)]
+    struct FakeUpstream {
+        recovered: Option<String>,
+        recoveries: std::sync::atomic::AtomicUsize,
+        validations: Mutex<std::collections::VecDeque<AuthOutcome>>,
+    }
+
+    impl FakeUpstream {
+        fn recovering_to(cookies: Option<&str>) -> Self {
+            Self {
+                recovered: cookies.map(str::to_string),
+                ..Default::default()
+            }
+        }
+
+        fn recoveries(&self) -> usize {
+            self.recoveries.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Upstream for FakeUpstream {
+        async fn validate(&self, _: &dyn MediaSource) -> AuthOutcome {
+            let mut script = self.validations.lock().expect("script");
+            script.pop_front().unwrap_or(AuthOutcome::Valid)
+        }
+
+        async fn recover_ytmusic(&self, _: &config::MusicServer, _: &str) -> Option<String> {
+            tokio::task::yield_now().await;
+            self.recoveries.fetch_add(1, Ordering::SeqCst);
+            self.recovered.clone()
+        }
+    }
+
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        db: db::Db,
+        sources: Arc<SourceService>,
+    }
+
+    impl Fixture {
+        async fn token(&self) -> Option<String> {
+            self.db
+                .load_server("yt")
+                .await
+                .expect("load")
+                .expect("server")
+                .access_token
+        }
+    }
+
+    /// A signed-in YouTube Music source, active, over a real database.
+    async fn signed_in(upstream: Arc<FakeUpstream>) -> Fixture {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init(&dir.path().join("sources.db")).await.expect("db");
+        let mut seeded = youtube_music(false);
+        if let Some(server) = seeded.server.as_ref() {
+            seeded
+                .servers
+                .push(config::SavedServer::from_music_server(server));
+        }
+        let config = Arc::new(ConfigService::new(
+            db.clone(),
+            dir.path().join("settings.toml"),
+            seeded,
+        ));
+        config
+            .mutate_state(&[], |_| {})
+            .await
+            .expect("seed the database");
+        let player =
+            player::player::Player::try_with_sink(Box::new(player::engine::NullSink::new()))
+                .expect("headless player starts");
+        let session = SessionHandle::spawn_with_factory(
+            Arc::new(NoLibrary),
+            player,
+            crate::PlaybackServices::default(),
+            Arc::new(|_| None),
+        );
+        config.attach_session(session.clone());
+        let sources = SourceService::with_upstream(db.clone(), session, config, upstream);
+        Fixture {
+            _dir: dir,
+            db,
+            sources,
+        }
+    }
+
+    fn expired() -> ApiError {
+        ApiError::new(ErrorCode::SourceAuthExpired, "signed out")
+    }
+
+    /// What the active source's config holds, failing the first time, the
+    /// way a request against a session YouTube stopped taking does.
+    async fn request(
+        fixture: &Fixture,
+        attempts: &std::sync::atomic::AtomicUsize,
+    ) -> Result<Option<String>, ApiError> {
+        fixture
+            .sources
+            .recovering(|| async {
+                if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(expired());
+                }
+                Ok(fixture
+                    .sources
+                    .current()
+                    .await
+                    .server
+                    .and_then(|server| server.access_token))
+            })
+            .await
+    }
+
+    #[tokio::test]
+    async fn an_expired_request_recovers_the_session_and_runs_once_more() {
+        let upstream = Arc::new(FakeUpstream::recovering_to(Some("SAPISID=fresh")));
+        let fixture = signed_in(upstream.clone()).await;
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+
+        let answer = request(&fixture, &attempts).await.expect("retried");
+
+        assert_eq!(
+            answer.as_deref(),
+            Some("SAPISID=fresh"),
+            "the retry saw the recovered session"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(upstream.recoveries(), 1);
+        assert_eq!(fixture.token().await.as_deref(), Some("SAPISID=fresh"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_recovery_is_not_retried_and_marks_the_source_expired() {
+        let upstream = Arc::new(FakeUpstream::recovering_to(None));
+        let fixture = signed_in(upstream.clone()).await;
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+
+        let error = request(&fixture, &attempts)
+            .await
+            .expect_err("still expired");
+
+        assert_eq!(error.code, ErrorCode::SourceAuthExpired);
+        assert_eq!(
+            attempts.load(Ordering::SeqCst),
+            1,
+            "no retry without a session"
+        );
+        assert_eq!(fixture.sources.status("yt"), Some(SourceState::AuthExpired));
+        assert_eq!(fixture.token().await.as_deref(), Some("SAPISID=leftover"));
+
+        let again = std::sync::atomic::AtomicUsize::new(0);
+        request(&fixture, &again).await.expect_err("still expired");
+        assert_eq!(
+            upstream.recoveries(),
+            1,
+            "the re-probe owns the next attempt"
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_expired_requests_share_one_recovery() {
+        let upstream = Arc::new(FakeUpstream::recovering_to(Some("SAPISID=fresh")));
+        let fixture = signed_in(upstream.clone()).await;
+        let counters: Vec<_> = (0..8)
+            .map(|_| std::sync::atomic::AtomicUsize::new(0))
+            .collect();
+
+        let answers = futures_util::future::join_all(
+            counters.iter().map(|attempts| request(&fixture, attempts)),
+        )
+        .await;
+
+        for answer in answers {
+            assert_eq!(answer.expect("retried").as_deref(), Some("SAPISID=fresh"));
+        }
+        assert_eq!(upstream.recoveries(), 1);
+        for attempts in &counters {
+            assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_probe_that_finds_the_session_expired_recovers_it_and_probes_again() {
+        let upstream = Arc::new(FakeUpstream::recovering_to(Some("SAPISID=fresh")));
+        upstream
+            .validations
+            .lock()
+            .expect("script")
+            .extend([AuthOutcome::Expired, AuthOutcome::Valid]);
+        let fixture = signed_in(upstream.clone()).await;
+
+        let state = fixture.sources.validate_source("yt").await.expect("probe");
+
+        assert_eq!(state, SourceState::Online);
+        assert_eq!(fixture.sources.status("yt"), Some(SourceState::Online));
+        assert_eq!(upstream.recoveries(), 1);
+        assert!(upstream.validations.lock().expect("script").is_empty());
+        assert_eq!(fixture.token().await.as_deref(), Some("SAPISID=fresh"));
+    }
+
+    #[tokio::test]
+    async fn a_probe_whose_recovery_fails_reports_the_session_expired() {
+        let upstream = Arc::new(FakeUpstream::recovering_to(None));
+        upstream
+            .validations
+            .lock()
+            .expect("script")
+            .extend([AuthOutcome::Expired, AuthOutcome::Valid]);
+        let fixture = signed_in(upstream.clone()).await;
+
+        let state = fixture.sources.validate_source("yt").await.expect("probe");
+
+        assert_eq!(state, SourceState::AuthExpired);
+        assert_eq!(fixture.sources.status("yt"), Some(SourceState::AuthExpired));
+        assert_eq!(
+            upstream.validations.lock().expect("script").len(),
+            1,
+            "not probed again without a recovered session"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_import_records_the_profile_it_came_from() {
+        let fixture = signed_in(Arc::new(FakeUpstream::default())).await;
+        let profile = "brave:/profiles/Default";
+        let stored_profile = || async {
+            let server = fixture
+                .db
+                .load_server("yt")
+                .await
+                .expect("load")
+                .expect("server");
+            let saved = fixture
+                .sources
+                .current()
+                .await
+                .servers
+                .into_iter()
+                .find(|saved| saved.id == "yt")
+                .expect("saved");
+            assert_eq!(saved.yt_profile, server.yt_profile);
+            server.yt_profile
+        };
+
+        fixture
+            .sources
+            .store_import(
+                "yt",
+                profile,
+                config::Browser::Brave,
+                "SAPISID=imported".into(),
+            )
+            .await
+            .expect("import");
+        assert_eq!(stored_profile().await.as_deref(), Some(profile));
+
+        fixture
+            .sources
+            .provision_credentials(CredentialProvision {
+                server_id: "yt".into(),
+                secret: "SAPISID=rotated".into(),
+                user_id: None,
+                browser: None,
+            })
+            .await
+            .expect("rotate");
+        assert_eq!(
+            stored_profile().await.as_deref(),
+            Some(profile),
+            "a rotation keeps where the session came from"
+        );
+
+        fixture
+            .sources
+            .provision_credentials(CredentialProvision {
+                server_id: "yt".into(),
+                secret: "SAPISID=signed-in".into(),
+                user_id: None,
+                browser: Some(config::Browser::Brave.id().to_string()),
+            })
+            .await
+            .expect("sign in");
+        assert_eq!(
+            stored_profile().await,
+            None,
+            "a browser sign-in is not an import"
+        );
     }
 }

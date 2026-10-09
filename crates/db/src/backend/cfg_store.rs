@@ -239,6 +239,7 @@ async fn sync_servers(tx: &mut sqlx::SqliteConnection, cfg: &AppConfig) -> Resul
         let options = server_options(
             browser.as_deref(),
             s.yt_anonymous,
+            s.yt_profile.as_deref(),
             &s.apple_music_storefront,
             &s.apple_music_language,
         );
@@ -257,6 +258,7 @@ async fn sync_servers(tx: &mut sqlx::SqliteConnection, cfg: &AppConfig) -> Resul
         let options = server_options(
             browser.as_deref(),
             srv.yt_anonymous,
+            srv.yt_profile.as_deref(),
             &srv.apple_music_storefront,
             &srv.apple_music_language,
         );
@@ -494,6 +496,10 @@ impl StoredServer {
         parse_browser(self.options.get(OPT_BROWSER).map(String::as_str))
     }
 
+    fn profile(&self) -> Option<String> {
+        self.options.get(OPT_PROFILE).cloned()
+    }
+
     fn anonymous(&self) -> bool {
         self.options
             .get(OPT_ANONYMOUS)
@@ -509,6 +515,7 @@ impl StoredServer {
             service: self.service,
             yt_browser: self.browser(),
             yt_anonymous: self.anonymous(),
+            yt_profile: self.profile(),
             apple_music_storefront: self.option_or(OPT_STOREFRONT, defaults.apple_music_storefront),
             apple_music_language: self.option_or(OPT_LANGUAGE, defaults.apple_music_language),
         }
@@ -525,6 +532,7 @@ impl StoredServer {
             id: Some(self.id.clone()),
             yt_browser: self.browser(),
             yt_anonymous: self.anonymous(),
+            yt_profile: self.profile(),
             apple_music_storefront: self.option_or(OPT_STOREFRONT, defaults.apple_music_storefront),
             apple_music_language: self.option_or(OPT_LANGUAGE, defaults.apple_music_language),
         }
@@ -533,6 +541,7 @@ impl StoredServer {
 
 const OPT_BROWSER: &str = "yt_browser";
 const OPT_ANONYMOUS: &str = "yt_anonymous";
+const OPT_PROFILE: &str = "yt_profile";
 const OPT_STOREFRONT: &str = "apple_music_storefront";
 const OPT_LANGUAGE: &str = "apple_music_language";
 
@@ -581,6 +590,7 @@ async fn stored_servers(pool: &SqlitePool, id: Option<&str>) -> Result<Vec<Store
 pub(crate) fn server_options(
     browser: Option<&str>,
     anonymous: bool,
+    profile: Option<&str>,
     storefront: &str,
     language: &str,
 ) -> Vec<(&'static str, String)> {
@@ -591,6 +601,9 @@ pub(crate) fn server_options(
     }
     if anonymous {
         rows.push((OPT_ANONYMOUS, "1".to_string()));
+    }
+    if let Some(profile) = profile.filter(|profile| !profile.is_empty()) {
+        rows.push((OPT_PROFILE, profile.to_string()));
     }
     if storefront != defaults.apple_music_storefront {
         rows.push((OPT_STOREFRONT, storefront.to_string()));

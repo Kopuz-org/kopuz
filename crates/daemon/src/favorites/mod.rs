@@ -28,6 +28,20 @@ fn source_error(error: server::source::SourceError) -> ApiError {
     }
 }
 
+/// What to tell the user about a favorite the source refused. An expired
+/// session says nothing here: the caller recovers it and pushes again, and a
+/// session that stays expired shows on the source instead.
+fn push_rejected_notice(error: &server::source::SourceError) -> Option<ApiEvent> {
+    if matches!(error, server::source::SourceError::Auth) {
+        return None;
+    }
+    Some(ApiEvent::Notice {
+        level: api::NoticeLevel::Error,
+        code: "favorite_push_rejected".to_string(),
+        message: Some(error.to_string()),
+    })
+}
+
 pub struct FavoritesService {
     db: db::Db,
     session: SessionHandle,
@@ -111,11 +125,9 @@ impl FavoritesService {
             let _ = source.record_favorite(&track, !favorite).await;
             self.bump(Table::Favorites);
             self.bump(Table::Tracks);
-            self.session.emit_event(ApiEvent::Notice {
-                level: api::NoticeLevel::Error,
-                code: "favorite_push_rejected".to_string(),
-                message: Some(error.to_string()),
-            });
+            if let Some(notice) = push_rejected_notice(&error) {
+                self.session.emit_event(notice);
+            }
             return Err(source_error(error));
         }
         self.mutation_nudge.store(true, Ordering::Relaxed);
@@ -286,5 +298,22 @@ impl FavoritesService {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use server::source::SourceError;
+
+    #[test]
+    fn an_expired_session_does_not_announce_a_rejected_push() {
+        assert!(push_rejected_notice(&SourceError::Auth).is_none());
+        let Some(ApiEvent::Notice { code, .. }) =
+            push_rejected_notice(&SourceError::Backend("refused".into()))
+        else {
+            panic!("a refusal is announced");
+        };
+        assert_eq!(code, "favorite_push_rejected");
     }
 }

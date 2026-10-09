@@ -363,6 +363,20 @@ pub(crate) fn signin_command(
     cmd
 }
 
+/// Spawn a command built by [`signin_command`] or alike. On Windows it asks to
+/// leave kopuz's job; a job that forbids that (a scheduled task's, a service's)
+/// refuses the spawn outright, and the browser then starts inside it.
+pub(crate) fn spawn_browser(cmd: &mut Command) -> std::io::Result<tokio::process::Child> {
+    match cmd.spawn() {
+        #[cfg(target_os = "windows")]
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            cmd.creation_flags(0);
+            cmd.spawn()
+        }
+        spawned => spawned,
+    }
+}
+
 /// Run a command and hand back its stdout, through the host when sandboxed.
 async fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
     let mut command = if in_flatpak() {

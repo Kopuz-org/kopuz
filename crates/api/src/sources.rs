@@ -191,6 +191,20 @@ pub struct SourceLoginRequest {
     pub password: String,
 }
 
+/// A browser profile on the daemon's machine that is already signed in to a
+/// service, which a source of it can take the session from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BrowserSession {
+    /// What to hand back to take this one.
+    pub id: String,
+    /// The browser's name, such as "Firefox".
+    pub browser: String,
+    /// The profile's name as the browser shows it.
+    pub profile: String,
+    /// The account the browser itself is signed in to, where it says.
+    pub account: Option<String>,
+}
+
 /// One entry when browsing a server's folder tree.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SourceFolderEntry {
