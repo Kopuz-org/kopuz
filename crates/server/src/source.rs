@@ -33,6 +33,7 @@ use crate::server_ops::ServerConn;
 
 mod apple_music;
 pub mod capabilities;
+mod clippsly;
 mod jellyfin;
 mod local;
 mod nextcloud;
@@ -44,6 +45,7 @@ mod subsonic;
 mod types;
 mod youtube_music;
 use apple_music::AppleMusicSource;
+use clippsly::ClippslySource;
 use jellyfin::JellyfinSource;
 use local::LocalSource;
 use nextcloud::NextcloudSource;
@@ -120,6 +122,14 @@ pub trait MediaSource: Send + Sync {
 
     /// Check stored creds against the source (local is always [`Valid`](AuthOutcome::Valid)).
     async fn validate(&self) -> AuthOutcome;
+
+    async fn storage_quota(&self) -> Result<StorageQuota, SourceError> {
+        Err(SourceError::unsupported("storage quota"))
+    }
+
+    async fn upload_track(&self, _filename: String, _content: Vec<u8>) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("music uploads"))
+    }
 
     /// All favorited item ids on the remote (YT pages internally). Local has no
     /// remote set, so it returns empty.
@@ -830,6 +840,7 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         }
         MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
         MusicService::Nextcloud => Box::new(NextcloudSource::new(db, source, conn)),
+        MusicService::Clippsly => Box::new(ClippslySource::new(db, source, conn)),
     }
 }
 

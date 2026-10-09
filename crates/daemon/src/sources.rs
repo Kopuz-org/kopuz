@@ -58,6 +58,8 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
         browser_playback: caps.browser_playback,
         sync: caps.sync,
         downloads: caps.downloads,
+        uploads: caps.uploads,
+        storage_quota: caps.storage_quota,
         discover: caps.discover,
         dont_recommend: caps.dont_recommend,
         track_radio: caps.radio.track,
@@ -83,7 +85,41 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
     }
 }
 
+fn source_error(error: server::source::SourceError) -> ApiError {
+    use server::source::SourceError;
+    match &error {
+        SourceError::Unsupported(what) => ApiError::unsupported(*what),
+        SourceError::Auth => ApiError::new(ErrorCode::SourceAuthExpired, error.to_string()),
+        SourceError::Connectivity => ApiError::new(ErrorCode::SourceUnreachable, error.to_string()),
+        SourceError::InvalidInput(message) => ApiError::invalid_input(message.clone()),
+        SourceError::Backend(message) => ApiError::internal(message.clone()),
+    }
+}
+
 impl SourceService {
+    pub async fn storage_quota(&self, id: &str) -> Result<api::StorageQuota, ApiError> {
+        let (_, source) = self.resolve(id).await?;
+        let quota = source.storage_quota().await.map_err(source_error)?;
+        Ok(api::StorageQuota {
+            used_bytes: quota.used_bytes,
+            quota_bytes: quota.quota_bytes,
+            remaining_bytes: quota.remaining_bytes,
+        })
+    }
+
+    pub async fn upload_track(&self, upload: api::TrackUpload) -> Result<(), ApiError> {
+        if upload.content.is_empty() || upload.content.len() > api::MAX_MUSIC_UPLOAD_BYTES {
+            return Err(ApiError::invalid_input(
+                "audio files must be between 1 byte and 500 MiB",
+            ));
+        }
+        let (_, source) = self.resolve(&upload.source_id).await?;
+        source
+            .upload_track(upload.filename, upload.content)
+            .await
+            .map_err(source_error)
+    }
+
     pub fn new(db: db::Db, session: SessionHandle, config: Arc<ConfigService>) -> Arc<Self> {
         Arc::new(Self {
             db,
@@ -695,11 +731,20 @@ impl SourceService {
             .await
             .map_err(db_error)?
             .ok_or_else(|| ApiError::not_found("no such server"))?;
-        let auth =
+        let auth = if server.service == config::MusicService::Clippsly {
+            let client = server::clippsly::ClippslyClient::new(&server.url, &request.password)
+                .map_err(source_error)?;
+            let account = client.account().await.map_err(source_error)?;
+            server::provider::AuthSession {
+                access_token: request.password,
+                user_id: account.id.to_string(),
+            }
+        } else {
             server::provider::ProviderClient::new(server.service, server.url, current.device_id)
                 .login(request.username.trim(), &request.password)
                 .await
-                .map_err(|error| ApiError::new(ErrorCode::SourceAuthExpired, error))?;
+                .map_err(|error| ApiError::new(ErrorCode::SourceAuthExpired, error))?
+        };
         self.provision_credentials(CredentialProvision {
             server_id: request.server_id,
             secret: auth.access_token,

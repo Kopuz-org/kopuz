@@ -54,6 +54,11 @@ impl ProviderClient {
                     user_id: username.to_string(),
                 })
             }
+            MusicService::Clippsly => {
+                let client = crate::clippsly::ClippslyClient::new(&self.server_url, password).map_err(|e| e.to_string())?;
+                let account = client.account().await.map_err(|e| e.to_string())?;
+                Ok(AuthSession { access_token: password.to_string(), user_id: account.id.to_string() })
+            }
             MusicService::Nextcloud => {
                 // The password is expected to be an app password (Settings,
                 // Security), which is revocable and survives 2FA.

@@ -67,6 +67,8 @@ impl MediaSource for YtSource {
             browser_playback: false,
             sync: true,
             downloads: true,
+            uploads: false,
+            storage_quota: false,
             discover: true,
             dont_recommend: true,
             radio: RadioSeeds {

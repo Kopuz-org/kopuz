@@ -1189,6 +1189,86 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(convert::source_info_to_proto(&info)))
     }
 
+    async fn get_storage_quota(
+        &self,
+        request: Request<proto::SourceId>,
+    ) -> Result<Response<proto::StorageQuota>, Status> {
+        let quota = self
+            .0
+            .api
+            .storage_quota(request.into_inner().id)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::StorageQuota {
+            used_bytes: quota.used_bytes,
+            quota_bytes: quota.quota_bytes,
+            remaining_bytes: quota.remaining_bytes,
+        }))
+    }
+
+    async fn upload_track(
+        &self,
+        request: Request<tonic::Streaming<proto::TrackUploadChunk>>,
+    ) -> Result<Response<proto::Unit>, Status> {
+        let mut stream = request.into_inner();
+        let header = tokio::time::timeout(std::time::Duration::from_secs(30), stream.message())
+            .await
+            .map_err(|_| Status::deadline_exceeded("upload timed out"))??
+            .ok_or_else(|| Status::invalid_argument("missing upload metadata"))?;
+        if header.total_bytes == 0
+            || header.total_bytes > api::MAX_MUSIC_UPLOAD_BYTES as u64
+            || header.source_id.is_empty()
+            || header.filename.is_empty()
+            || !header.content.is_empty()
+        {
+            return Err(Status::invalid_argument("invalid upload metadata"));
+        }
+        let source = self
+            .0
+            .api
+            .sources()
+            .await
+            .map_err(failed)?
+            .into_iter()
+            .find(|source| source.id == header.source_id)
+            .ok_or_else(|| Status::not_found("no such source"))?;
+        if !source.capabilities.uploads {
+            return Err(Status::unimplemented(
+                "this source does not support music uploads",
+            ));
+        }
+        let mut content = Vec::new();
+        while let Some(chunk) =
+            tokio::time::timeout(std::time::Duration::from_secs(30), stream.message())
+                .await
+                .map_err(|_| Status::deadline_exceeded("upload timed out"))??
+        {
+            if !chunk.source_id.is_empty()
+                || !chunk.filename.is_empty()
+                || chunk.total_bytes != 0
+                || chunk.content.is_empty()
+                || chunk.content.len() > 256 * 1024
+                || content.len() as u64 + chunk.content.len() as u64 > header.total_bytes
+            {
+                return Err(Status::invalid_argument("invalid upload chunk"));
+            }
+            content.extend(chunk.content);
+        }
+        if content.len() as u64 != header.total_bytes {
+            return Err(Status::invalid_argument("incomplete upload"));
+        }
+        self.0
+            .api
+            .upload_track(api::TrackUpload {
+                source_id: header.source_id,
+                filename: header.filename,
+                content,
+            })
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::Unit {}))
+    }
+
     async fn check_source_draft(
         &self,
         request: Request<proto::SourceDraft>,

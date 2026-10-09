@@ -58,6 +58,8 @@ pub struct SourceCapabilities {
     pub browse_folders: bool,
     pub sync: bool,
     pub downloads: bool,
+    pub uploads: bool,
+    pub storage_quota: bool,
     pub discover: bool,
     /// It takes a "stop recommending this" signal for a track.
     pub dont_recommend: bool,
@@ -219,4 +221,20 @@ pub struct IntegrationInfo {
     pub configured: bool,
     pub connect: ConnectKind,
     pub fields: Vec<FieldSpec>,
+}
+
+/// Maximum audio payload accepted by either daemon transport.
+pub const MAX_MUSIC_UPLOAD_BYTES: usize = 500 * 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageQuota {
+    pub used_bytes: u64,
+    pub quota_bytes: u64,
+    pub remaining_bytes: u64,
+}
+
+pub struct TrackUpload {
+    pub source_id: String,
+    pub filename: String,
+    pub content: Vec<u8>,
 }

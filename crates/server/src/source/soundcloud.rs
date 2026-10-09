@@ -47,6 +47,8 @@ impl MediaSource for SoundcloudSource {
             browser_playback: false,
             sync: true,
             downloads: false,
+            uploads: false,
+            storage_quota: false,
             discover: false,
             dont_recommend: false,
             radio: RadioSeeds::NONE,

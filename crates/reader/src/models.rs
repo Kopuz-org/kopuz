@@ -116,6 +116,7 @@ impl TrackId {
             ("applemusic", config::MusicService::AppleMusic),
             ("spotify", config::MusicService::Spotify),
             ("nextcloud", config::MusicService::Nextcloud),
+            ("clippsly", config::MusicService::Clippsly),
         ] {
             if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
                 let item_id = rest.split(':').next().unwrap_or("").to_string();
@@ -139,6 +140,7 @@ fn service_prefix(s: config::MusicService) -> &'static str {
         config::MusicService::AppleMusic => "applemusic",
         config::MusicService::Spotify => "spotify",
         config::MusicService::Nextcloud => "nextcloud",
+        config::MusicService::Clippsly => "clippsly",
     }
 }
 
@@ -251,7 +253,7 @@ impl CoverRef {
             // Their item identity is irrelevant to cover resolution.
             // Nextcloud too: an img tag won't send the Basic auth its previews
             // need, so the sync caches art to disk and the ref carries a path.
-            "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" => {
+            "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" | "clippsly" => {
                 value.map_or(Self::None, Self::parse)
             }
             _ => Self::None,
@@ -289,7 +291,8 @@ impl CoverRef {
             | MusicService::SoundCloud
             | MusicService::AppleMusic
             | MusicService::Spotify
-            | MusicService::Nextcloud => cover.map_or(Self::None, Self::parse),
+            | MusicService::Nextcloud
+            | MusicService::Clippsly => cover.map_or(Self::None, Self::parse),
         }
     }
 
@@ -342,7 +345,8 @@ impl CoverRef {
             MusicService::SoundCloud
             | MusicService::AppleMusic
             | MusicService::Spotify
-            | MusicService::Nextcloud => track.cover.as_deref().map_or(Self::None, Self::parse),
+            | MusicService::Nextcloud
+            | MusicService::Clippsly => track.cover.as_deref().map_or(Self::None, Self::parse),
         }
     }
 

@@ -149,6 +149,8 @@ pub struct Capabilities {
     pub browser_playback: bool,
     pub sync: bool,
     pub downloads: bool,
+    pub uploads: bool,
+    pub storage_quota: bool,
     pub discover: bool,
     /// The person can tell it to stop recommending a track — a negative
     /// signal to the source's recommender, not a library edit.
@@ -207,4 +209,11 @@ impl From<crate::ytmusic::discover::YtAlbum> for RemoteAlbum {
             tracks: a.tracks,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageQuota {
+    pub used_bytes: u64,
+    pub quota_bytes: u64,
+    pub remaining_bytes: u64,
 }

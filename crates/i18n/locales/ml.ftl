@@ -860,3 +860,11 @@ settings_group_interface = ഇന്റർഫേസ്
 settings_group_output = ഔട്ട്പുട്ട്
 settings_group_loudness = ശബ്ദനില
 browse = ബ്രൗസ് ചെയ്യുക
+
+clippsly_help = Create an App Password at clippsly.app, then sign in with your Clippsly username and that App Password. Storage limits are set by your Clippsly account.
+cloud_storage_usage = Cloud storage: { $used } of { $total } used
+upload_music = Upload music
+uploading_music = Uploading { $name }…
+music_uploaded = Uploaded { $count } file(s).
+music_upload_too_large = Audio files must be no larger than 500 MiB.
+cloud_storage_loading = Loading storage usage…

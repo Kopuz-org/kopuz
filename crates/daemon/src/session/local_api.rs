@@ -731,6 +731,14 @@ impl api::EventApi for LocalApi {
 
 #[async_trait::async_trait]
 impl api::SourceApi for LocalApi {
+    async fn storage_quota(&self, id: String) -> Result<api::StorageQuota, ApiError> {
+        self.sources()?.storage_quota(&id).await
+    }
+
+    async fn upload_track(&self, upload: api::TrackUpload) -> Result<(), ApiError> {
+        self.sources()?.upload_track(upload).await
+    }
+
     async fn sources(&self) -> Result<Vec<api::SourceInfo>, ApiError> {
         self.sources()?.sources().await
     }

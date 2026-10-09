@@ -66,6 +66,8 @@ impl MediaSource for SpotifySource {
             browser_playback: true,
             sync: true,
             downloads: false,
+            uploads: false,
+            storage_quota: false,
             discover: true,
             dont_recommend: false,
             radio: RadioSeeds::NONE,

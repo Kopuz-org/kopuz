@@ -32,6 +32,8 @@ impl MediaSource for OfflineServerSource {
             browser_playback: false,
             sync: false,
             downloads: false,
+            uploads: false,
+            storage_quota: false,
             discover: false,
             dont_recommend: false,
             radio: RadioSeeds::NONE,

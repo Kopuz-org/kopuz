@@ -94,6 +94,8 @@ struct Pair {
     wire: client::GrpcApi,
     tcp: client::GrpcApi,
     tcp_address: String,
+    token: kopuzd::Token,
+    config: Arc<ConfigService>,
     jobs: Arc<JobRunner>,
     database: db::Db,
     session: SessionHandle,
@@ -192,11 +194,181 @@ async fn spawn_pair() -> Pair {
         wire: client::GrpcApi::new(&socket).expect("wire client"),
         tcp: client::GrpcApi::connect_tcp(&tcp_address, token.secret()).expect("tcp client"),
         tcp_address,
+        token,
+        config: config_service,
         jobs,
         database,
         session,
         _dir: dir,
     }
+}
+
+async fn clippsly_pair() -> (Pair, String, tokio::task::JoinHandle<()>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let pair = spawn_pair().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let source = pair
+        .local
+        .upsert_source(api::SourceDraft {
+            name: "Test locker".into(),
+            service: "clippsly".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    pair.config
+        .mutate_state(&["servers"], |config| {
+            config
+                .servers
+                .iter_mut()
+                .find(|row| row.id == source.id)
+                .unwrap()
+                .url = address;
+        })
+        .await
+        .unwrap();
+    pair.database
+        .set_server_credentials(&source.id, Some("mock-password"), Some("42"))
+        .await
+        .unwrap();
+    let server = tokio::spawn(async move {
+        loop {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut data = Vec::new();
+            let end = loop {
+                let mut buffer = [0; 16384];
+                let length = socket.read(&mut buffer).await.unwrap();
+                assert!(length > 0);
+                data.extend_from_slice(&buffer[..length]);
+                if let Some(end) = data.windows(4).position(|part| part == b"\r\n\r\n") {
+                    break end + 4;
+                }
+            };
+            let headers = String::from_utf8(data[..end].to_vec()).unwrap();
+            assert!(
+                headers
+                    .to_ascii_lowercase()
+                    .contains("authorization: bearer mock-password")
+            );
+            let length = headers
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .find(|(key, _)| key.eq_ignore_ascii_case("content-length"))
+                .map(|(_, value)| value.trim().parse::<usize>().unwrap())
+                .unwrap_or(0);
+            while data.len() < end + length {
+                let mut buffer = [0; 16384];
+                let read = socket.read(&mut buffer).await.unwrap();
+                assert!(read > 0);
+                data.extend_from_slice(&buffer[..read]);
+            }
+            let body = if headers.starts_with("GET /v1/account/storage ") {
+                r#"{"track_count":1,"used_bytes":10,"quota_bytes":10000000,"quota_remaining_bytes":9999990}"#
+            } else if headers.starts_with("POST /v1/upload ") {
+                assert!(length > 4 * 1024 * 1024);
+                r#"{"success":true}"#
+            } else {
+                panic!("unexpected mock request: {headers}")
+            };
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        }
+    });
+    (pair, source.id, server)
+}
+
+#[tokio::test]
+async fn clippsly_quota_and_large_uploads_agree_across_transports() {
+    let (pair, id, server) = clippsly_pair().await;
+    for api in [&pair.local as &dyn KopuzApi, &pair.wire, &pair.tcp] {
+        let source = api
+            .sources()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == id)
+            .unwrap();
+        assert!(source.capabilities.uploads && source.capabilities.storage_quota);
+        assert!(source.authenticated);
+        assert!(!format!("{source:?}").contains("mock-password"));
+        let quota = api.storage_quota(id.clone()).await.unwrap();
+        assert_eq!(quota.used_bytes, 10);
+        assert_eq!(quota.remaining_bytes, 9_999_990);
+        api.upload_track(api::TrackUpload {
+            source_id: id.clone(),
+            filename: "song.flac".into(),
+            content: vec![b'a'; 5 * 1024 * 1024],
+        })
+        .await
+        .unwrap();
+        let error = api
+            .upload_track(api::TrackUpload {
+                source_id: id.clone(),
+                filename: "song.flac".into(),
+                content: vec![],
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert_eq!(
+            api.storage_quota(config::DEFAULT_LOCAL_ID.into())
+                .await
+                .unwrap_err()
+                .code,
+            ErrorCode::Unsupported
+        );
+    }
+    assert!(!server.is_finished(), "the mock server failed");
+    server.abort();
+}
+
+#[tokio::test]
+async fn clippsly_wire_rejects_truncated_oversized_and_changed_upload_metadata() {
+    let (pair, id, server) = clippsly_pair().await;
+    let mut client =
+        proto::kopuz_client::KopuzClient::connect(format!("http://{}", pair.tcp_address))
+            .await
+            .unwrap();
+    let header = proto::TrackUploadChunk {
+        source_id: id.clone(),
+        filename: "song.flac".into(),
+        total_bytes: 4,
+        content: Vec::new(),
+    };
+    for chunks in [
+        vec![],
+        vec![header.clone()],
+        vec![proto::TrackUploadChunk {
+            total_bytes: api::MAX_MUSIC_UPLOAD_BYTES as u64 + 1,
+            ..header.clone()
+        }],
+        vec![
+            header.clone(),
+            proto::TrackUploadChunk {
+                content: vec![0; 5],
+                ..Default::default()
+            },
+        ],
+        vec![
+            header.clone(),
+            proto::TrackUploadChunk {
+                source_id: id.clone(),
+                content: vec![0; 4],
+                ..Default::default()
+            },
+        ],
+    ] {
+        let mut request = tonic::Request::new(tokio_stream::iter(chunks));
+        request.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {}", pair.token.secret()).parse().unwrap(),
+        );
+        let error = client.upload_track(request).await.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    }
+    server.abort();
 }
 
 async fn panicking_job() -> Result<(), ApiError> {
