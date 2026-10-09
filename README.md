@@ -110,6 +110,9 @@ script.
   search, and scrobbling, with playback through Spotify's official Web Playback
   SDK or any **Spotify Connect** device you own. Needs Premium and a one-time
   app setup. See [Spotify Setup](#spotify-setup).
+- **SMB / NAS**: Add an SMB 2/3 share or subfolder as a music library, with
+  embedded tags, cover art, and seekable playback without mounting the share.
+  See [SMB setup and validation](docs/smb.md).
 - **Lyrics Support**: Enjoy real-time synced and plain lyrics, complete with
   auto-scrolling to follow along with your music.
 - **Favorites**: Star tracks locally or sync favorites with your

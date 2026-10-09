@@ -143,7 +143,7 @@ fn album_metadata_key(album: &Album) -> (String, String) {
     )
 }
 
-fn merge_scanned_tracks(library: &mut Library, scanned_tracks: Vec<ScannedTrack>) {
+pub fn merge_scanned_tracks(library: &mut Library, scanned_tracks: Vec<ScannedTrack>) {
     let mut track_indexes: HashMap<_, _> = library
         .tracks
         .iter()

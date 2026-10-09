@@ -14,6 +14,7 @@ pub mod nextcloud;
 pub mod playback_ref;
 pub mod provider;
 pub mod server_ops;
+pub mod smb;
 pub mod soundcloud;
 pub mod source;
 pub mod spotify;

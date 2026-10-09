@@ -117,9 +117,15 @@ impl TrackId {
             ("spotify", config::MusicService::Spotify),
             ("nextcloud", config::MusicService::Nextcloud),
             ("clippsly", config::MusicService::Clippsly),
+            ("smb", config::MusicService::Smb),
         ] {
             if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
-                let item_id = rest.split(':').next().unwrap_or("").to_string();
+                let item_id = if svc == config::MusicService::Smb {
+                    rest
+                } else {
+                    rest.split(':').next().unwrap_or("")
+                }
+                .to_string();
                 return TrackId::Server {
                     service: svc,
                     item_id,
@@ -141,6 +147,7 @@ fn service_prefix(s: config::MusicService) -> &'static str {
         config::MusicService::Spotify => "spotify",
         config::MusicService::Nextcloud => "nextcloud",
         config::MusicService::Clippsly => "clippsly",
+        config::MusicService::Smb => "smb",
     }
 }
 
@@ -253,7 +260,7 @@ impl CoverRef {
             // Their item identity is irrelevant to cover resolution.
             // Nextcloud too: an img tag won't send the Basic auth its previews
             // need, so the sync caches art to disk and the ref carries a path.
-            "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" | "clippsly" => {
+            "ytmusic" | "soundcloud" | "applemusic" | "nextcloud" | "clippsly" | "smb" => {
                 value.map_or(Self::None, Self::parse)
             }
             _ => Self::None,
@@ -292,7 +299,8 @@ impl CoverRef {
             | MusicService::AppleMusic
             | MusicService::Spotify
             | MusicService::Nextcloud
-            | MusicService::Clippsly => cover.map_or(Self::None, Self::parse),
+            | MusicService::Clippsly
+            | MusicService::Smb => cover.map_or(Self::None, Self::parse),
         }
     }
 
@@ -346,7 +354,8 @@ impl CoverRef {
             | MusicService::AppleMusic
             | MusicService::Spotify
             | MusicService::Nextcloud
-            | MusicService::Clippsly => track.cover.as_deref().map_or(Self::None, Self::parse),
+            | MusicService::Clippsly
+            | MusicService::Smb => track.cover.as_deref().map_or(Self::None, Self::parse),
         }
     }
 
@@ -514,6 +523,20 @@ mod tests {
     use super::{CoverRef, Library, Track, TrackId};
     use config::MusicService;
     use std::path::PathBuf;
+
+    #[test]
+    fn smb_track_ids_preserve_colons_and_unicode() {
+        let id = TrackId::Server {
+            service: MusicService::Smb,
+            item_id: "Özel/Vol 1: Deluxe/01.flac".into(),
+        };
+        assert_eq!(TrackId::from_legacy_path(&id.uid()), id);
+        assert_eq!(id.key(), "Özel/Vol 1: Deluxe/01.flac");
+        assert_eq!(
+            serde_json::from_str::<TrackId>(&serde_json::to_string(&id).unwrap()).unwrap(),
+            id
+        );
+    }
 
     /// The stored queue is read with `unwrap_or_default` over the whole `Vec`,
     /// so one `Track` that will not parse silently empties it.

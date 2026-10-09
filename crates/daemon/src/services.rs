@@ -178,6 +178,7 @@ fn icon(service: MusicService) -> Icon {
         }
         MusicService::Nextcloud => Icon::Svg(NEXTCLOUD_MARK.into()),
         MusicService::Clippsly => Icon::Class("fa-solid fa-cloud".into()),
+        MusicService::Smb => Icon::Class("fa-solid fa-server".into()),
     }
 }
 
@@ -191,6 +192,7 @@ fn accent(service: MusicService) -> &'static str {
         MusicService::Subsonic | MusicService::Custom => "#f0a84b",
         MusicService::Nextcloud => "#0082c9",
         MusicService::Clippsly => "#8064e9",
+        MusicService::Smb => "#6366f1",
     }
 }
 
@@ -382,6 +384,13 @@ pub fn add_fields(service: MusicService) -> Vec<FieldSpec> {
                 ..note_field()
             },
         ],
+        MusicService::Smb => vec![
+            url_field("smb_url_placeholder"),
+            FieldSpec {
+                help: Some(Text::key("smb_help")),
+                ..note_field()
+            },
+        ],
         MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom => {
             vec![url_field("server_url_placeholder")]
         }
@@ -554,6 +563,11 @@ pub fn check(service: MusicService, draft: &SourceDraft) -> (SignInKind, Vec<Pro
             }
         }
         MusicService::YtMusic | MusicService::SoundCloud | MusicService::Clippsly => {}
+        MusicService::Smb => {
+            if server::smb::Location::parse(value(URL)).is_err() {
+                problems.push(Problem::on(URL, Text::key("invalid_smb_url")));
+            }
+        }
         _ => {
             if !value(URL).starts_with("http") {
                 problems.push(Problem::on(URL, Text::key("invalid_server_url")));
