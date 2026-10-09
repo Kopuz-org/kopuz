@@ -316,10 +316,29 @@ pub fn artist_page_from_proto(value: &ArtistPage) -> api::ArtistPage {
     }
 }
 
+pub fn search_request_to_proto(value: &api::SearchRequest) -> SearchRequest {
+    SearchRequest {
+        query: value.query.clone(),
+        filter: value.filter.clone(),
+        continuation: value.continuation.clone(),
+    }
+}
+
+pub fn search_request_from_proto(value: &SearchRequest) -> api::SearchRequest {
+    api::SearchRequest {
+        query: value.query.clone(),
+        filter: value.filter.clone(),
+        continuation: value.continuation.clone(),
+    }
+}
+
 pub fn search_results_to_proto(value: &api::SearchResults) -> SearchResults {
     SearchResults {
         tracks: value.tracks.iter().map(track_info_to_proto).collect(),
         albums: value.albums.iter().map(album_info_to_proto).collect(),
+        shelves: value.shelves.iter().map(catalog_shelf_to_proto).collect(),
+        continuation: value.continuation.clone(),
+        correction: value.correction.clone(),
     }
 }
 
@@ -327,6 +346,25 @@ pub fn search_results_from_proto(value: &SearchResults) -> api::SearchResults {
     api::SearchResults {
         tracks: value.tracks.iter().map(track_info_from_proto).collect(),
         albums: value.albums.iter().map(album_info_from_proto).collect(),
+        shelves: value.shelves.iter().map(catalog_shelf_from_proto).collect(),
+        continuation: value.continuation.clone(),
+        correction: value.correction.clone(),
+    }
+}
+
+pub fn search_suggestion_to_proto(value: &api::SearchSuggestion) -> SearchSuggestion {
+    SearchSuggestion {
+        text: value.text.clone(),
+        from_history: value.from_history,
+        item: value.item.as_ref().map(catalog_item_to_proto),
+    }
+}
+
+pub fn search_suggestion_from_proto(value: &SearchSuggestion) -> api::SearchSuggestion {
+    api::SearchSuggestion {
+        text: value.text.clone(),
+        from_history: value.from_history,
+        item: value.item.as_ref().map(catalog_item_from_proto),
     }
 }
 
@@ -379,6 +417,64 @@ pub fn artist_detail_from_proto(value: &ArtistDetail) -> Option<api::ArtistDetai
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A filtered search carries its filter and continuation out, and its
+    /// shelves and correction back, on top of the plain search's rows.
+    #[test]
+    fn a_search_and_its_suggestions_round_trip() {
+        let request = api::SearchRequest {
+            query: "daft punk".into(),
+            filter: Some("songs".into()),
+            continuation: Some("search||4qmF".into()),
+        };
+        assert_eq!(
+            request,
+            search_request_from_proto(&search_request_to_proto(&request))
+        );
+        assert_eq!(
+            api::SearchRequest::new("q"),
+            search_request_from_proto(&search_request_to_proto(&api::SearchRequest::new("q")))
+        );
+
+        let results = api::SearchResults {
+            shelves: vec![api::CatalogShelf {
+                title: "Songs".into(),
+                layout: api::ShelfLayout::List,
+                search_filter: Some("songs".into()),
+                ..Default::default()
+            }],
+            continuation: Some("next".into()),
+            correction: Some("daft punk".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            results,
+            search_results_from_proto(&search_results_to_proto(&results))
+        );
+
+        for suggestion in [
+            api::SearchSuggestion {
+                text: "daft punk".into(),
+                from_history: true,
+                item: None,
+            },
+            api::SearchSuggestion {
+                text: "Daft Punk".into(),
+                from_history: false,
+                item: Some(api::CatalogItem {
+                    kind: api::CatalogItemKind::Artist,
+                    id: "UC".into(),
+                    title: "Daft Punk".into(),
+                    ..Default::default()
+                }),
+            },
+        ] {
+            assert_eq!(
+                suggestion,
+                search_suggestion_from_proto(&search_suggestion_to_proto(&suggestion))
+            );
+        }
+    }
 
     /// A track row is what every listing renders, down to the file details a
     /// row shows, so all of it has to survive the wire.

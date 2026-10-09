@@ -44,10 +44,20 @@ fn db_error(error: db::DbError) -> ApiError {
     ApiError::internal(format!("database error: {error}"))
 }
 
-/// The in-process capability struct, as the wire describes it.
-fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
-    use api::{AlbumPresentation, ArtistPresentation, FavoritesSyncMode, PlaylistCapability};
-    use server::source::{AlbumType, ArtistView, FavoritesSync, PlaylistOps};
+pub(crate) fn playlist_capability(ops: server::source::PlaylistOps) -> api::PlaylistCapability {
+    use server::source::PlaylistOps;
+    match ops {
+        PlaylistOps::None => api::PlaylistCapability::None,
+        PlaylistOps::AddRemove => api::PlaylistCapability::AddRemove,
+        PlaylistOps::Reorder => api::PlaylistCapability::Reorder,
+    }
+}
+
+/// What a built source can do, as the wire describes it.
+fn capabilities(source: &dyn server::source::MediaSource) -> SourceCapabilities {
+    use api::{AlbumPresentation, ArtistPresentation, FavoritesSyncMode};
+    use server::source::{AlbumType, ArtistView, FavoritesSync};
+    let caps = source.capabilities();
     SourceCapabilities {
         edit_tags: caps.edit_tags,
         delete_from_disk: caps.delete_from_disk,
@@ -60,14 +70,15 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
         downloads: caps.downloads,
         discover: caps.discover,
         dont_recommend: caps.dont_recommend,
+        rate: caps.library_actions.rate,
+        follow: caps.library_actions.follow,
+        save: caps.library_actions.save,
+        remove_from_history: caps.library_actions.remove_from_history,
+        playlist_details: caps.library_actions.playlist_details,
         track_radio: caps.radio.track,
         playlist_radio: caps.radio.playlist,
         search_radio: caps.radio.track && caps.radio.search,
-        playlists: match caps.playlists {
-            PlaylistOps::None => PlaylistCapability::None,
-            PlaylistOps::AddRemove => PlaylistCapability::AddRemove,
-            PlaylistOps::Reorder => PlaylistCapability::Reorder,
-        },
+        playlists: playlist_capability(caps.playlists),
         artists: match caps.artist_view {
             ArtistView::Library => ArtistPresentation::Library,
             ArtistView::Remote => ArtistPresentation::Remote,
@@ -80,6 +91,23 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
             FavoritesSync::Instant => FavoritesSyncMode::Instant,
             FavoritesSync::Paginated => FavoritesSyncMode::Paginated,
         },
+        pages: source
+            .catalog_pages()
+            .into_iter()
+            .map(|page| api::PageEntry {
+                id: page.id,
+                label: api::Text::key(page.label),
+                icon: api::Icon::Class(page.icon.to_string()),
+            })
+            .collect(),
+        search_filters: source
+            .search_filters()
+            .into_iter()
+            .map(|filter| api::SearchFilter {
+                id: filter.id.to_string(),
+                label: api::Text::key(filter.label),
+            })
+            .collect(),
     }
 }
 
@@ -185,7 +213,7 @@ impl SourceService {
         let mut info = SourceInfo {
             id: key.as_str().to_string(),
             active: current.active_source.as_str() == key.as_str(),
-            capabilities: capabilities(source.capabilities()),
+            capabilities: capabilities(source.as_ref()),
             state: self.status(key.as_str()),
             ..Default::default()
         };

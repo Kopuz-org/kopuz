@@ -1,7 +1,9 @@
 use reader::models::{Track, TrackId};
 use serde_json::Value;
 
+pub mod actions;
 pub mod botguard;
+pub mod browse;
 pub mod clients;
 pub mod cookies;
 pub mod decipher;
@@ -15,6 +17,9 @@ pub mod player;
 pub mod playlists;
 pub mod search;
 pub mod verify_session_keepalive;
+
+#[cfg(test)]
+mod fixture_tests;
 
 pub use player::YtStreamInfo;
 
@@ -153,7 +158,7 @@ impl YouTubeMusicClient {
         &self,
         playlist_id: &str,
         continuation: Option<&str>,
-    ) -> Result<(Vec<Track>, Option<String>), String> {
+    ) -> Result<playlists::PlaylistPage, String> {
         playlists::playlist_page(
             playlist_id,
             self.cookies.as_deref().unwrap_or(""),
@@ -197,6 +202,55 @@ impl YouTubeMusicClient {
     pub async fn create_playlist(&self, title: &str, video_ids: &[&str]) -> Result<String, String> {
         let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::create_playlist(title, video_ids, cookies).await
+    }
+
+    /// `item_ref` is one [`actions`] handed out, or a video id.
+    pub async fn rate(&self, item_ref: &str, rating: discover::Rating) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        let target = actions::read_ref(item_ref).ok_or("nothing to rate")?;
+        mutations::rate(target, rating, cookies).await
+    }
+
+    pub async fn save(&self, item_ref: &str, saved: bool) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        let target = actions::read_ref(item_ref).ok_or("nothing to save")?;
+        mutations::save(target, saved, cookies).await
+    }
+
+    pub async fn subscribe(&self, channel_id: &str, subscribed: bool) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        mutations::subscribe(channel_id, subscribed, cookies).await
+    }
+
+    pub async fn remove_from_history(&self, token: &str) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        mutations::remove_from_history(token, cookies).await
+    }
+
+    pub async fn edit_playlist(
+        &self,
+        playlist_id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+        privacy: Option<discover::Privacy>,
+    ) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        mutations::edit_playlist(playlist_id, name, description, privacy, cookies).await
+    }
+
+    pub async fn move_playlist_item(
+        &self,
+        playlist_id: &str,
+        set_video_id: &str,
+        successor: Option<&str>,
+    ) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        mutations::move_playlist_item(playlist_id, set_video_id, successor, cookies).await
+    }
+
+    pub async fn delete_playlist(&self, playlist_id: &str) -> Result<(), String> {
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
+        mutations::delete_playlist(playlist_id, cookies).await
     }
 
     /// Stream the user's full Liked Music playlist page by page. The
@@ -325,6 +379,35 @@ impl YouTubeMusicClient {
         token: &str,
     ) -> Result<discover::DiscoverHome, String> {
         discover::fetch_continuation(token, self.cookies.as_deref().unwrap_or("")).await
+    }
+
+    /// Any browse page by its page id. The library tabs and history need a
+    /// session; anonymously they come back without shelves.
+    pub async fn browse_page(&self, id: &str) -> Result<discover::BrowsePage, String> {
+        browse::fetch_page(id, self.cookies.as_deref()).await
+    }
+
+    pub async fn browse_continuation(&self, token: &str) -> Result<discover::BrowsePage, String> {
+        browse::fetch_continuation(token, self.cookies.as_deref()).await
+    }
+
+    pub async fn related(&self, video_id: &str) -> Result<discover::BrowsePage, String> {
+        browse::fetch_related(video_id, self.cookies.as_deref()).await
+    }
+
+    pub async fn search_page(
+        &self,
+        query: &str,
+        filter: Option<&'static browse::search::Filter>,
+    ) -> Result<browse::search::SearchPage, String> {
+        browse::fetch_search(query, filter, self.cookies.as_deref()).await
+    }
+
+    pub async fn search_suggestions(
+        &self,
+        query: &str,
+    ) -> Result<Vec<browse::search::Suggestion>, String> {
+        browse::fetch_suggestions(query, self.cookies.as_deref()).await
     }
 
     pub async fn fetch_album_tracks(&self, browse_id: &str) -> Result<Vec<Track>, String> {

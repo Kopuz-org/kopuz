@@ -31,8 +31,7 @@ pub fn PlaylistDetail(
     let tracks_res = use_tracks_by_keys(active_partition, track_refs);
 
     // Affordances follow the source's capabilities, not what kind of source it is.
-    let caps = *hooks::sources::use_capabilities().read();
-    let can_reorder = caps.playlists == api::PlaylistCapability::Reorder;
+    let caps = hooks::sources::use_capabilities().read().clone();
 
     // A server playlist's contents are refreshed by the daemon, a page at a
     // time, and every page invalidates -- so the list fills in as it arrives
@@ -56,17 +55,23 @@ pub fn PlaylistDetail(
     let store = playlists_res.read().clone().unwrap_or_default();
     // The daemon already walked the picked cover, the server's image tag and
     // the first track's art, so the ref it hands back is the whole answer.
-    let (playlist_name, playlist_cover) =
+    let (playlist_name, playlist_cover, edits) =
         if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
             (
                 p.name.clone(),
                 hooks::artwork::url(p.artwork.as_ref(), hooks::artwork::Size::Full),
+                // A playlist the account only follows takes no edits, even on
+                // a source whose own playlists do.
+                p.capability.unwrap_or(caps.playlists),
             )
         } else if store_loading {
             return rsx! { div {} };
         } else {
             return rsx! { div { "{i18n::t(\"playlist_not_found\")}" } };
         };
+
+    let can_reorder = edits == api::PlaylistCapability::Reorder;
+    let can_remove = edits != api::PlaylistCapability::None;
 
     let tracks_val = tracks_res.read().clone().unwrap_or_default();
     let track_count = tracks_val.len();
@@ -130,9 +135,12 @@ pub fn PlaylistDetail(
             // No optimistic edit: the daemon invalidates as it writes, and the
             // query hook's coalescing window is shorter than the round trip
             // that produced it.
-            on_remove_from_playlist: move |idx: usize| {
-                hooks::playlist_actions::remove_track(pid_for_remove.clone(), idx);
-            },
+            on_remove_from_playlist: can_remove
+                .then(|| {
+                    EventHandler::new(move |idx: usize| {
+                        hooks::playlist_actions::remove_track(pid_for_remove.clone(), idx);
+                    })
+                }),
             is_reorderable: can_reorder,
             on_move_up: move |idx: usize| {
                 if idx > 0 && can_reorder {

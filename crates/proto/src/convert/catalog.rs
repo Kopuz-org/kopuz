@@ -8,6 +8,10 @@ pub fn catalog_item_kind_to_proto(value: api::CatalogItemKind) -> CatalogItemKin
         api::CatalogItemKind::Playlist => CatalogItemKind::CatalogItemPlaylist,
         api::CatalogItemKind::Artist => CatalogItemKind::CatalogItemArtist,
         api::CatalogItemKind::Mood => CatalogItemKind::CatalogItemMood,
+        api::CatalogItemKind::Podcast => CatalogItemKind::CatalogItemPodcast,
+        api::CatalogItemKind::Episode => CatalogItemKind::CatalogItemEpisode,
+        api::CatalogItemKind::Video => CatalogItemKind::CatalogItemVideo,
+        api::CatalogItemKind::Page => CatalogItemKind::CatalogItemPage,
         api::CatalogItemKind::Unknown => CatalogItemKind::CatalogItemUnknown,
     }
 }
@@ -19,7 +23,127 @@ pub fn catalog_item_kind_from_proto(value: i32) -> api::CatalogItemKind {
         Ok(CatalogItemKind::CatalogItemPlaylist) => api::CatalogItemKind::Playlist,
         Ok(CatalogItemKind::CatalogItemArtist) => api::CatalogItemKind::Artist,
         Ok(CatalogItemKind::CatalogItemMood) => api::CatalogItemKind::Mood,
+        Ok(CatalogItemKind::CatalogItemPodcast) => api::CatalogItemKind::Podcast,
+        Ok(CatalogItemKind::CatalogItemEpisode) => api::CatalogItemKind::Episode,
+        Ok(CatalogItemKind::CatalogItemVideo) => api::CatalogItemKind::Video,
+        Ok(CatalogItemKind::CatalogItemPage) => api::CatalogItemKind::Page,
         Ok(CatalogItemKind::CatalogItemUnknown) | Err(_) => api::CatalogItemKind::Unknown,
+    }
+}
+
+pub fn shelf_layout_to_proto(value: api::ShelfLayout) -> ShelfLayout {
+    match value {
+        api::ShelfLayout::Carousel => ShelfLayout::Carousel,
+        api::ShelfLayout::Grid => ShelfLayout::Grid,
+        api::ShelfLayout::List => ShelfLayout::List,
+        api::ShelfLayout::TrackGrid => ShelfLayout::TrackGrid,
+        api::ShelfLayout::Hero => ShelfLayout::Hero,
+    }
+}
+
+pub fn shelf_layout_from_proto(value: i32) -> api::ShelfLayout {
+    match ShelfLayout::try_from(value) {
+        Ok(ShelfLayout::Grid) => api::ShelfLayout::Grid,
+        Ok(ShelfLayout::List) => api::ShelfLayout::List,
+        Ok(ShelfLayout::TrackGrid) => api::ShelfLayout::TrackGrid,
+        Ok(ShelfLayout::Hero) => api::ShelfLayout::Hero,
+        Ok(ShelfLayout::Carousel) | Err(_) => api::ShelfLayout::Carousel,
+    }
+}
+
+pub fn catalog_header_to_proto(value: api::CatalogHeader) -> CatalogHeader {
+    match value {
+        api::CatalogHeader::None => CatalogHeader::None,
+        api::CatalogHeader::Title => CatalogHeader::Title,
+        api::CatalogHeader::Detail => CatalogHeader::Detail,
+        api::CatalogHeader::Artist => CatalogHeader::Artist,
+    }
+}
+
+pub fn catalog_header_from_proto(value: i32) -> api::CatalogHeader {
+    match CatalogHeader::try_from(value) {
+        Ok(CatalogHeader::Title) => api::CatalogHeader::Title,
+        Ok(CatalogHeader::Detail) => api::CatalogHeader::Detail,
+        Ok(CatalogHeader::Artist) => api::CatalogHeader::Artist,
+        Ok(CatalogHeader::None) | Err(_) => api::CatalogHeader::None,
+    }
+}
+
+pub fn catalog_chip_to_proto(value: &api::CatalogChip) -> CatalogChip {
+    CatalogChip {
+        id: value.id.clone(),
+        label: value.label.clone(),
+        selected: value.selected,
+    }
+}
+
+pub fn catalog_chip_from_proto(value: &CatalogChip) -> api::CatalogChip {
+    api::CatalogChip {
+        id: value.id.clone(),
+        label: value.label.clone(),
+        selected: value.selected,
+    }
+}
+
+pub fn rating_to_proto(value: api::Rating) -> Rating {
+    match value {
+        api::Rating::None => Rating::None,
+        api::Rating::Like => Rating::Like,
+        api::Rating::Dislike => Rating::Dislike,
+    }
+}
+
+/// `None` for a rating the peer did not set or this build does not know.
+pub fn rating_from_proto(value: i32) -> Option<api::Rating> {
+    match Rating::try_from(value) {
+        Ok(Rating::None) => Some(api::Rating::None),
+        Ok(Rating::Like) => Some(api::Rating::Like),
+        Ok(Rating::Dislike) => Some(api::Rating::Dislike),
+        Ok(Rating::Unspecified) | Err(_) => None,
+    }
+}
+
+pub fn playlist_privacy_to_proto(value: api::PlaylistPrivacy) -> PlaylistPrivacy {
+    match value {
+        api::PlaylistPrivacy::Private => PlaylistPrivacy::Private,
+        api::PlaylistPrivacy::Unlisted => PlaylistPrivacy::Unlisted,
+        api::PlaylistPrivacy::Public => PlaylistPrivacy::Public,
+    }
+}
+
+pub fn playlist_privacy_from_proto(value: i32) -> Option<api::PlaylistPrivacy> {
+    match PlaylistPrivacy::try_from(value) {
+        Ok(PlaylistPrivacy::Private) => Some(api::PlaylistPrivacy::Private),
+        Ok(PlaylistPrivacy::Unlisted) => Some(api::PlaylistPrivacy::Unlisted),
+        Ok(PlaylistPrivacy::Public) => Some(api::PlaylistPrivacy::Public),
+        Ok(PlaylistPrivacy::Unspecified) | Err(_) => None,
+    }
+}
+
+pub fn catalog_actions_to_proto(value: &api::CatalogActions) -> CatalogActions {
+    CatalogActions {
+        rate_ref: value.rate_ref.clone(),
+        rating: value.rating.map(|rating| rating_to_proto(rating) as i32),
+        save_ref: value.save_ref.clone(),
+        saved: value.saved,
+        follow_ref: value.follow_ref.clone(),
+        followed: value.followed,
+        history_token: value.history_token.clone(),
+    }
+}
+
+pub fn catalog_actions_from_proto(value: Option<&CatalogActions>) -> api::CatalogActions {
+    let Some(value) = value else {
+        return api::CatalogActions::default();
+    };
+    api::CatalogActions {
+        rate_ref: value.rate_ref.clone(),
+        rating: value.rating.and_then(rating_from_proto),
+        save_ref: value.save_ref.clone(),
+        saved: value.saved,
+        follow_ref: value.follow_ref.clone(),
+        followed: value.followed,
+        history_token: value.history_token.clone(),
     }
 }
 
@@ -31,6 +155,8 @@ pub fn catalog_item_to_proto(value: &api::CatalogItem) -> CatalogItem {
         subtitle: value.subtitle.clone(),
         artwork: value.artwork.as_ref().map(artwork_ref_to_proto),
         track: value.track.as_ref().map(track_info_to_proto),
+        accent: value.accent.clone(),
+        actions: Some(catalog_actions_to_proto(&value.actions)),
     }
 }
 
@@ -42,6 +168,8 @@ pub fn catalog_item_from_proto(value: &CatalogItem) -> api::CatalogItem {
         subtitle: value.subtitle.clone(),
         artwork: value.artwork.as_ref().and_then(artwork_ref_from_proto),
         track: value.track.as_ref().map(track_info_from_proto),
+        accent: value.accent.clone(),
+        actions: catalog_actions_from_proto(value.actions.as_ref()),
     }
 }
 
@@ -52,6 +180,10 @@ pub fn catalog_shelf_to_proto(value: &api::CatalogShelf) -> CatalogShelf {
         items: value.items.iter().map(catalog_item_to_proto).collect(),
         more_ref: value.more_ref.clone(),
         list: value.list,
+        layout: shelf_layout_to_proto(value.layout) as i32,
+        more_kind: catalog_item_kind_to_proto(value.more_kind) as i32,
+        continuation: value.continuation.clone(),
+        search_filter: value.search_filter.clone(),
     }
 }
 
@@ -62,6 +194,10 @@ pub fn catalog_shelf_from_proto(value: &CatalogShelf) -> api::CatalogShelf {
         items: value.items.iter().map(catalog_item_from_proto).collect(),
         more_ref: value.more_ref.clone(),
         list: value.list,
+        layout: shelf_layout_from_proto(value.layout),
+        more_kind: catalog_item_kind_from_proto(value.more_kind),
+        continuation: value.continuation.clone(),
+        search_filter: value.search_filter.clone(),
     }
 }
 
@@ -111,6 +247,12 @@ pub fn catalog_detail_to_proto(value: &api::CatalogDetail) -> CatalogDetail {
         shelves: value.shelves.iter().map(catalog_shelf_to_proto).collect(),
         continuation: value.continuation.clone(),
         artist_key: value.artist_key.as_ref().map(ToString::to_string),
+        header: catalog_header_to_proto(value.header) as i32,
+        chips: value.chips.iter().map(catalog_chip_to_proto).collect(),
+        actions: Some(catalog_actions_to_proto(&value.actions)),
+        privacy: value
+            .privacy
+            .map(|privacy| playlist_privacy_to_proto(privacy) as i32),
     }
 }
 
@@ -128,6 +270,10 @@ pub fn catalog_detail_from_proto(value: &CatalogDetail) -> api::CatalogDetail {
         shelves: value.shelves.iter().map(catalog_shelf_from_proto).collect(),
         continuation: value.continuation.clone(),
         artist_key: value.artist_key.clone(),
+        header: catalog_header_from_proto(value.header),
+        chips: value.chips.iter().map(catalog_chip_from_proto).collect(),
+        actions: catalog_actions_from_proto(value.actions.as_ref()),
+        privacy: value.privacy.and_then(playlist_privacy_from_proto),
     }
 }
 
@@ -257,11 +403,91 @@ mod tests {
                         version: 77,
                     }),
                     track: None,
+                    accent: None,
+                    actions: api::CatalogActions {
+                        rate_ref: Some("playlist:OLAK1".into()),
+                        rating: Some(api::Rating::Dislike),
+                        save_ref: Some("playlist:OLAK1".into()),
+                        saved: Some(true),
+                        follow_ref: None,
+                        followed: None,
+                        history_token: Some("HISTORY".into()),
+                    },
                 }],
+                ..Default::default()
             }],
             continuation: Some("NEXT".into()),
         };
         assert_eq!(page, catalog_page_from_proto(&catalog_page_to_proto(&page)));
+
+        let detail = api::CatalogDetail {
+            kind: api::CatalogItemKind::Page,
+            id: "FEmusic_moods".into(),
+            title: "Moods".into(),
+            actions: api::CatalogActions {
+                follow_ref: Some("UCabc".into()),
+                followed: Some(false),
+                rating: Some(api::Rating::None),
+                ..Default::default()
+            },
+            privacy: Some(api::PlaylistPrivacy::Unlisted),
+            header: api::CatalogHeader::Title,
+            chips: vec![api::CatalogChip {
+                id: "FEmusic_home?p".into(),
+                label: "Relax".into(),
+                selected: true,
+            }],
+            shelves: vec![api::CatalogShelf {
+                title: "Genres".into(),
+                layout: api::ShelfLayout::Grid,
+                more_ref: Some("FEmusic_moods_and_genres".into()),
+                more_kind: api::CatalogItemKind::Page,
+                continuation: Some("MORE".into()),
+                items: [
+                    api::CatalogItemKind::Podcast,
+                    api::CatalogItemKind::Episode,
+                    api::CatalogItemKind::Video,
+                    api::CatalogItemKind::Page,
+                ]
+                .into_iter()
+                .map(|kind| api::CatalogItem {
+                    kind,
+                    id: format!("{kind:?}"),
+                    accent: Some("#ff8800".into()),
+                    ..Default::default()
+                })
+                .collect(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            detail,
+            catalog_detail_from_proto(&catalog_detail_to_proto(&detail))
+        );
+        for layout in [
+            api::ShelfLayout::Carousel,
+            api::ShelfLayout::Grid,
+            api::ShelfLayout::List,
+            api::ShelfLayout::TrackGrid,
+            api::ShelfLayout::Hero,
+        ] {
+            assert_eq!(
+                layout,
+                shelf_layout_from_proto(shelf_layout_to_proto(layout) as i32)
+            );
+        }
+        for header in [
+            api::CatalogHeader::None,
+            api::CatalogHeader::Title,
+            api::CatalogHeader::Detail,
+            api::CatalogHeader::Artist,
+        ] {
+            assert_eq!(
+                header,
+                catalog_header_from_proto(catalog_header_to_proto(header) as i32)
+            );
+        }
 
         let station = api::RadioStationInfo {
             id: "st-1".into(),

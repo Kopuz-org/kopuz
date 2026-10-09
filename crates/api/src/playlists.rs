@@ -7,6 +7,11 @@ pub struct PlaylistInfo {
     pub name: String,
     pub track_keys: Vec<String>,
     pub artwork: Option<crate::ArtworkRef>,
+    /// What this playlist allows, never more than the source does: one the
+    /// account only follows takes no edits. `None` where the source does not
+    /// tell its playlists apart, so [`crate::SourceCapabilities::playlists`]
+    /// decides.
+    pub capability: Option<crate::PlaylistCapability>,
 }
 
 /// A user-made grouping of playlists. Organised here only -- no source
@@ -31,4 +36,20 @@ pub struct PlaylistCatalog {
 pub struct PlaylistReorder {
     pub from: u32,
     pub to: u32,
+}
+
+/// Who can see a playlist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaylistPrivacy {
+    Private,
+    Unlisted,
+    Public,
+}
+
+/// Changes to one playlist. A field left `None` keeps its value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlaylistEdit {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub privacy: Option<PlaylistPrivacy>,
 }

@@ -146,6 +146,43 @@ impl FavoritesService {
         Ok(())
     }
 
+    /// Rate a song, an album or a playlist. A song's like is its favorite,
+    /// so when the ref is a track the daemon knows, the local heart is set
+    /// to match. Pessimistic like `dont_recommend`: the source answers first.
+    pub async fn rate(&self, item_ref: &str, rating: api::Rating) -> Result<(), ApiError> {
+        use server::ytmusic::discover::Rating;
+        if item_ref.trim().is_empty() {
+            return Err(ApiError::invalid_input("nothing to rate"));
+        }
+        let source = self.active_source();
+        if !source.capabilities().library_actions.rate {
+            return Err(ApiError::unsupported("rating"));
+        }
+        let remote = match rating {
+            api::Rating::None => Rating::Indifferent,
+            api::Rating::Like => Rating::Like,
+            api::Rating::Dislike => Rating::Dislike,
+        };
+        source.rate(item_ref, remote).await.map_err(source_error)?;
+
+        let Ok(track) = self.resolve_track(item_ref).await else {
+            // An album or a playlist: rating one saves it or takes it out.
+            self.session.invalidate(Table::Albums);
+            self.session.invalidate(Table::Playlists);
+            return Ok(());
+        };
+        let favorite = rating == api::Rating::Like;
+        if source.is_favorite(item_ref).await != favorite {
+            source
+                .record_favorite(&track, favorite)
+                .await
+                .map_err(source_error)?;
+            self.bump(Table::Favorites);
+            self.bump(Table::Tracks);
+        }
+        Ok(())
+    }
+
     /// Ask the reconciler to run soon without the after-mutation marker
     /// (the app window regained focus).
     pub fn nudge_activate(&self) {

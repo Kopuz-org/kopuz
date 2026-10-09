@@ -183,12 +183,58 @@ pub struct ArtistPage {
     pub total: u32,
 }
 
+/// A search. With no `filter` it is the source's plain search, answered with
+/// `tracks` and `albums`; with one of [`crate::SourceCapabilities::search_filters`]
+/// it is answered with `shelves`. `continuation` asks for more of a filtered
+/// search.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchRequest {
+    pub query: String,
+    pub filter: Option<String>,
+    pub continuation: Option<String>,
+}
+
+impl SearchRequest {
+    pub fn new(query: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn filtered(query: impl Into<String>, filter: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            filter: Some(filter.into()),
+            continuation: None,
+        }
+    }
+}
+
 /// What a search turned up. Remote sources answer over the network, so this
 /// is one call rather than a filter the caller composes.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SearchResults {
     pub tracks: Vec<TrackInfo>,
     pub albums: Vec<AlbumInfo>,
+    /// A filtered search's results: a top result and a shelf per kind for an
+    /// "all" filter, one shelf for any other.
+    pub shelves: Vec<crate::CatalogShelf>,
+    /// More of a filtered search: pass it back in the request, and the
+    /// answer's one shelf continues the last one.
+    pub continuation: Option<String>,
+    /// What the source searched for instead, when it corrected the query.
+    pub correction: Option<String>,
+}
+
+/// One completion under a search box: a query to run, or, with `item`, a
+/// direct hit to open.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SearchSuggestion {
+    pub text: String,
+    /// A query the account searched for before.
+    pub from_history: bool,
+    pub item: Option<crate::CatalogItem>,
 }
 
 impl TrackInfo {

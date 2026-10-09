@@ -534,6 +534,91 @@ async fn dont_recommend_is_refused_by_a_source_without_it() {
     assert!(!caps.dont_recommend);
 }
 
+/// A local library has no account to rate, follow, save or keep a history
+/// for. Each op refuses as `Unsupported` on both transports, and the
+/// capabilities that would draw its button are off.
+#[tokio::test]
+async fn library_actions_are_refused_by_a_source_without_them() {
+    let pair = spawn_pair().await;
+    for side in [&pair.local as &dyn KopuzApi, &pair.wire] {
+        let refusals = [
+            side.rate("/lib/seed-0.flac".into(), api::Rating::Dislike)
+                .await
+                .expect_err("no rating"),
+            side.follow("artist".into(), true)
+                .await
+                .expect_err("no following"),
+            side.save("/lib/seed-0.flac".into(), true)
+                .await
+                .expect_err("no saving"),
+            side.remove_from_history("token".into())
+                .await
+                .expect_err("no history"),
+        ];
+        for refusal in refusals {
+            assert_eq!(refusal.code, ErrorCode::Unsupported, "{refusal:?}");
+        }
+    }
+
+    let caps = pair
+        .wire
+        .sources()
+        .await
+        .expect("sources")
+        .into_iter()
+        .find(|source| source.active)
+        .expect("an active source")
+        .capabilities;
+    assert!(!caps.rate && !caps.follow && !caps.save);
+    assert!(!caps.remove_from_history && !caps.playlist_details);
+}
+
+/// An edit naming only a name is a rename, held locally like any other; one
+/// naming a description needs a source that keeps one, and is refused whole
+/// rather than renaming half of it.
+#[tokio::test]
+async fn a_playlist_edit_needs_details_to_push_them() {
+    let pair = spawn_pair().await;
+    let id = pair
+        .wire
+        .create_playlist("Edited".into(), Vec::new())
+        .await
+        .expect("create");
+
+    pair.wire
+        .edit_playlist(
+            id.clone(),
+            api::PlaylistEdit {
+                name: Some("Edited over the wire".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("a name alone is a rename");
+    for side in [&pair.local as &dyn KopuzApi, &pair.wire] {
+        let refused = side
+            .edit_playlist(
+                id.clone(),
+                api::PlaylistEdit {
+                    name: Some("Never applied".into()),
+                    description: Some("notes".into()),
+                    privacy: Some(api::PlaylistPrivacy::Private),
+                },
+            )
+            .await
+            .expect_err("a local playlist has no details");
+        assert_eq!(refused.code, ErrorCode::Unsupported);
+    }
+
+    let catalog = pair.local.playlists().await.expect("catalog");
+    let playlist = catalog
+        .playlists
+        .iter()
+        .find(|playlist| playlist.id == id)
+        .expect("still there");
+    assert_eq!(playlist.name, "Edited over the wire");
+}
+
 /// Scan the library and wait for the job to finish.
 async fn run_scan(pair: &Pair) {
     let job = pair
@@ -1274,6 +1359,81 @@ async fn catalog_and_radio_report_absence_identically() {
             .err()
             .map(|e| e.code),
     );
+}
+
+/// A source's pages are its navigation, so the list a client renders has to
+/// be the one the daemon declared, and opening a page a source does not have
+/// has to fail the same way on both transports.
+#[tokio::test]
+async fn catalog_pages_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    let active = |sources: Vec<api::SourceInfo>| {
+        sources
+            .into_iter()
+            .find(|source| source.active)
+            .expect("an active source")
+            .capabilities
+    };
+    let local = active(pair.local.sources().await.expect("local sources"));
+    let wire = active(pair.wire.sources().await.expect("wire sources"));
+    assert_eq!(local, wire);
+    assert!(local.pages.is_empty(), "a local library declares no pages");
+
+    let request = api::CatalogDetailRequest::page("FEmusic_home");
+    let local = pair.local.catalog_detail(request.clone()).await;
+    let wire = pair.wire.catalog_detail(request).await;
+    assert_eq!(
+        local.as_ref().err().map(|e| e.code),
+        Some(ErrorCode::Unsupported)
+    );
+    assert_eq!(local.err().map(|e| e.code), wire.err().map(|e| e.code));
+}
+
+/// A search with no filter is the plain search on both transports; a filter
+/// the source never offered, and a suggestion it cannot give, fail the same
+/// way on both rather than one of them answering empty.
+#[tokio::test]
+async fn search_filters_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    let plain = api::SearchRequest::new("seed");
+    let local = pair
+        .local
+        .search(plain.clone())
+        .await
+        .expect("local search");
+    let wire = pair.wire.search(plain).await.expect("wire search");
+    assert_eq!(local, wire);
+    assert!(
+        !local.tracks.is_empty(),
+        "the plain search still finds rows"
+    );
+    assert!(local.shelves.is_empty() && local.continuation.is_none());
+
+    let caps = pair
+        .wire
+        .sources()
+        .await
+        .expect("sources")
+        .into_iter()
+        .find(|source| source.active)
+        .expect("an active source")
+        .capabilities;
+    assert!(caps.search_filters.is_empty());
+
+    let filtered = api::SearchRequest::filtered("seed", "songs");
+    assert_eq!(
+        pair.local
+            .search(filtered.clone())
+            .await
+            .err()
+            .map(|e| e.code),
+        pair.wire.search(filtered).await.err().map(|e| e.code),
+    );
+    let local = pair.local.search_suggestions("se".into()).await;
+    let wire = pair.wire.search_suggestions("se".into()).await;
+    assert_eq!(local.map_err(|e| e.code), wire.map_err(|e| e.code));
 }
 
 /// Deleting from disk is the one API call that destroys something outside

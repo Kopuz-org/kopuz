@@ -48,6 +48,7 @@ service Kopuz {
   rpc GetGenreTracks(GenreTracksRequest) returns (TrackPage);
   rpc GetRecentTracks(Page) returns (TrackPage);
   rpc Search(SearchRequest) returns (SearchResults);
+  rpc GetSearchSuggestions(SearchSuggestionsRequest) returns (SearchSuggestions);
   rpc GetTrackWebUrl(TrackWebUrlRequest) returns (WebUrl);
   rpc GetAlbumWebUrl(AlbumWebUrlRequest) returns (WebUrl);
   rpc GetCatalog(CatalogRequest) returns (CatalogPage);
@@ -83,6 +84,10 @@ service Kopuz {
   rpc SelectExternalDevice(SelectExternalDeviceRequest) returns (Unit);
   rpc SetFavorite(FavoriteRequest) returns (SetFavoriteResponse);
   rpc DontRecommend(DontRecommendRequest) returns (Unit);
+  rpc Rate(RateRequest) returns (Unit);
+  rpc Follow(FollowRequest) returns (Unit);
+  rpc Save(SaveRequest) returns (Unit);
+  rpc RemoveFromHistory(RemoveFromHistoryRequest) returns (Unit);
   rpc UpdateTrackMetadata(TrackMetadataPatch) returns (TrackInfo);
   rpc DeleteTracks(DeleteTracksRequest) returns (Unit);
   rpc DeleteAlbum(DeleteAlbumRequest) returns (Unit);
@@ -147,6 +152,20 @@ message GetConfigRequest {}
 message SetFavoriteResponse {}
 // Stop recommending one track, by its library key.
 message DontRecommendRequest { string key = 1; }
+// Rate by a CatalogActions.rate_ref or a track's key.
+message RateRequest {
+  string item_ref = 1;
+  Rating rating = 2;
+}
+message FollowRequest {
+  string artist_ref = 1;
+  bool follow = 2;
+}
+message SaveRequest {
+  string item_ref = 1;
+  bool saved = 2;
+}
+message RemoveFromHistoryRequest { string token = 1; }
 message CancelJobResponse {}
 message RemoveDownloadResponse {}
 
@@ -571,6 +590,24 @@ message GenreTracksRequest {
 
 message SearchRequest {
   string query = 1;
+  // One of the source's search filters; absent is its plain search.
+  optional string filter = 2;
+  optional string continuation = 3;
+}
+
+message SearchSuggestionsRequest {
+  string query = 1;
+}
+
+// A query to run, or with item, a direct hit to open.
+message SearchSuggestion {
+  string text = 1;
+  bool from_history = 2;
+  optional CatalogItem item = 3;
+}
+
+message SearchSuggestions {
+  repeated SearchSuggestion suggestions = 1;
 }
 
 message TrackWebUrlRequest {
@@ -594,6 +631,10 @@ message RefreshArtistArtworkRequest {
 message SearchResults {
   repeated TrackInfo tracks = 1;
   repeated AlbumInfo albums = 2;
+  // A filtered search's results.
+  repeated CatalogShelf shelves = 3;
+  optional string continuation = 4;
+  optional string correction = 5;
 }
 
 // ---------------- settings schema ----------------
@@ -739,6 +780,30 @@ message SourceCapabilities {
   // Playing a search result starts a track radio from it rather than
   // queueing the results.
   bool search_radio = 18;
+  // The catalog pages it offers, in the order to list them.
+  repeated PageEntry pages = 19;
+  // It takes a like, a dislike or neither for a song, album or playlist.
+  bool rate = 20;
+  bool follow = 21;
+  // Albums, playlists and songs can be saved to its library.
+  bool save = 22;
+  bool remove_from_history = 23;
+  // A playlist has a description and a privacy to edit.
+  bool playlist_details = 24;
+  // The filters its search takes, in the order to offer them.
+  repeated SearchFilter search_filters = 25;
+}
+
+message SearchFilter {
+  string id = 1;
+  Text label = 2;
+}
+
+// A catalog page a frontend can link to; opened as CATALOG_ITEM_PAGE with id.
+message PageEntry {
+  string id = 1;
+  Text label = 2;
+  Icon icon = 3;
 }
 
 // What making a source usable takes.
@@ -960,6 +1025,53 @@ enum CatalogItemKind {
   CATALOG_ITEM_PLAYLIST = 3;
   CATALOG_ITEM_ARTIST = 4;
   CATALOG_ITEM_MOOD = 5;
+  CATALOG_ITEM_PODCAST = 6;
+  CATALOG_ITEM_EPISODE = 7;
+  CATALOG_ITEM_VIDEO = 8;
+  CATALOG_ITEM_PAGE = 9;
+}
+
+enum ShelfLayout {
+  SHELF_LAYOUT_CAROUSEL = 0;
+  SHELF_LAYOUT_GRID = 1;
+  SHELF_LAYOUT_LIST = 2;
+  SHELF_LAYOUT_TRACK_GRID = 3;
+  SHELF_LAYOUT_HERO = 4;
+}
+
+enum CatalogHeader {
+  CATALOG_HEADER_NONE = 0;
+  CATALOG_HEADER_TITLE = 1;
+  CATALOG_HEADER_DETAIL = 2;
+  CATALOG_HEADER_ARTIST = 3;
+}
+
+enum Rating {
+  RATING_UNSPECIFIED = 0;
+  RATING_NONE = 1;
+  RATING_LIKE = 2;
+  RATING_DISLIKE = 3;
+}
+
+enum PlaylistPrivacy {
+  PLAYLIST_PRIVACY_UNSPECIFIED = 0;
+  PLAYLIST_PRIVACY_PRIVATE = 1;
+  PLAYLIST_PRIVACY_UNLISTED = 2;
+  PLAYLIST_PRIVACY_PUBLIC = 3;
+}
+
+// What the account has done to an entity, and the opaque refs that change
+// it. A ref is absent where the source offers no such action, a state where
+// the page did not say.
+message CatalogActions {
+  optional string rate_ref = 1;
+  optional Rating rating = 2;
+  optional string save_ref = 3;
+  optional bool saved = 4;
+  optional string follow_ref = 5;
+  optional bool followed = 6;
+  // Only on a row of the listening history.
+  optional string history_token = 7;
 }
 
 message CatalogItem {
@@ -968,8 +1080,12 @@ message CatalogItem {
   string title = 3;
   optional string subtitle = 4;
   optional ArtworkRef artwork = 5;
-  // Set for tracks, so a shelf of songs is playable without a second call.
+  // Set for tracks, videos and episodes, so a shelf of them is playable
+  // without a second call.
   optional TrackInfo track = 6;
+  // The tile's own colour, as #rrggbb.
+  optional string accent = 7;
+  CatalogActions actions = 8;
 }
 
 message CatalogShelf {
@@ -978,6 +1094,20 @@ message CatalogShelf {
   repeated CatalogItem items = 3;
   optional string more_ref = 4;
   bool list = 5;
+  ShelfLayout layout = 6;
+  // The kind that opens more_ref.
+  CatalogItemKind more_kind = 7;
+  // More items for this shelf.
+  optional string continuation = 8;
+  // On a search's "all" results, the filter showing every result of its kind.
+  optional string search_filter = 9;
+}
+
+// A filter over a page; id opens the filtered page as CATALOG_ITEM_PAGE.
+message CatalogChip {
+  string id = 1;
+  string label = 2;
+  bool selected = 3;
 }
 
 message CatalogRequest {
@@ -1010,6 +1140,11 @@ message CatalogDetail {
   optional string continuation = 11;
   // For an album, the artist its header opens; absent when it bills nobody.
   optional string artist_key = 12;
+  CatalogHeader header = 13;
+  repeated CatalogChip chips = 14;
+  CatalogActions actions = 15;
+  // Set for a playlist the account owns.
+  optional PlaylistPrivacy privacy = 16;
 }
 
 // ---------------- radio ----------------
@@ -1067,6 +1202,8 @@ message PlaylistInfo {
   // Library refs, in playlist order; resolve with GetTracksByKeys.
   repeated string track_keys = 3;
   optional ArtworkRef artwork = 4;
+  // Unset where the source's own playlist capability decides.
+  optional PlaylistCapability capability = 5;
 }
 
 message PlaylistFolderInfo {
@@ -1096,6 +1233,10 @@ message CreatePlaylistRequest {
 message RenamePlaylistRequest {
   string id = 1;
   string name = 2;
+  // Either of these makes it an edit: the source is sent the description,
+  // the privacy and a non-empty name together.
+  optional string description = 3;
+  optional PlaylistPrivacy privacy = 4;
 }
 
 message AddPlaylistTracksRequest {

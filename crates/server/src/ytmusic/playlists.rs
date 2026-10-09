@@ -11,6 +11,7 @@
 use reader::models::Track;
 use serde_json::Value;
 
+use super::discover::BrowsePage;
 use super::innertube;
 use super::search::walk_playlist_shelf;
 
@@ -177,11 +178,12 @@ where
 /// subsequent page (`None` once exhausted). Stateless — cross-page dedup is the
 /// caller's job — so it can back a `Send`-safe source method that a UI loop pulls
 /// at its own pace (vs. `stream_playlist_entries`' non-`Send` callback).
+/// The first page also answers with the playlist's header.
 pub async fn playlist_page(
     playlist_id: &str,
     cookies: &str,
     continuation: Option<&str>,
-) -> Result<(Vec<Track>, Option<String>), String> {
+) -> Result<PlaylistPage, String> {
     let auth = if cookies.is_empty() {
         None
     } else {
@@ -195,15 +197,21 @@ pub async fn playlist_page(
                 format!("VL{playlist_id}")
             };
             let resp: Value = innertube::browse_maybe_auth(&browse_id, auth).await?;
-            walk_playlist_shelf(&resp)
+            let (tracks, next) = walk_playlist_shelf(&resp);
+            (tracks, next, super::browse::page_header(&resp))
         }
         Some(token) => {
             let resp = innertube::browse_continuation_maybe_auth(token, auth).await?;
-            super::search::walk_playlist_continuation(&resp)
+            let (tracks, next) = super::search::walk_playlist_continuation(&resp);
+            (tracks, next, None)
         }
     };
     Ok(page)
 }
+
+/// One page of a playlist: its tracks, the token for the next, and on the
+/// first page its header.
+pub type PlaylistPage = (Vec<Track>, Option<String>, Option<BrowsePage>);
 
 /// Recursively look for a `signInEndpoint` object key in the response.
 /// Cheaper and structurally correct vs. serialising the whole tree and

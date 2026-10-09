@@ -11,8 +11,8 @@ use crate::{
 };
 
 use super::{
-    AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, LibrarySnapshot, MediaSource,
-    PlaylistOps, RadioSeeds, SourceError, StreamInfo,
+    AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, LibraryActions,
+    LibrarySnapshot, MediaSource, PlaylistOps, RadioSeeds, SourceError, StreamInfo,
 };
 
 /// Item ids are remote paths: oc:fileid survives renames but needs a lookup to
@@ -60,6 +60,7 @@ const CAPABILITIES: Capabilities = Capabilities {
     artist_view: ArtistView::Library,
     albums: AlbumType::Standard,
     favorites_sync: FavoritesSync::Instant,
+    library_actions: LibraryActions::NONE,
 };
 
 /// Art fetches in flight at once, enough to hide the round trips without
