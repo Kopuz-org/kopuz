@@ -135,6 +135,7 @@ pub enum MusicService {
     SoundCloud,
     Spotify,
     Nextcloud,
+    Clippsly,
 }
 
 impl MusicService {
@@ -147,6 +148,7 @@ impl MusicService {
         MusicService::AppleMusic,
         MusicService::Spotify,
         MusicService::Nextcloud,
+        MusicService::Clippsly,
     ];
 
     /// The stable slug a client names a service by. Unlike the enum, this
@@ -161,6 +163,7 @@ impl MusicService {
             Self::SoundCloud => "soundcloud",
             Self::Spotify => "spotify",
             Self::Nextcloud => "nextcloud",
+            Self::Clippsly => "clippsly",
         }
     }
 
@@ -178,6 +181,7 @@ impl MusicService {
             Self::SoundCloud => "SoundCloud",
             Self::Spotify => "Spotify",
             Self::Nextcloud => "Nextcloud",
+            Self::Clippsly => "Clippsly",
         }
     }
 

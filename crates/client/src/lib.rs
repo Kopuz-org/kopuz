@@ -1119,6 +1119,48 @@ impl api::PlaylistApi for GrpcApi {
 
 #[async_trait::async_trait]
 impl api::SourceApi for GrpcApi {
+    async fn storage_quota(&self, id: String) -> Result<api::StorageQuota, ApiError> {
+        let quota = self
+            .client()
+            .get_storage_quota(Request::new(proto::SourceId { id }))
+            .await
+            .map_err(wire_error)?
+            .into_inner();
+        Ok(api::StorageQuota {
+            used_bytes: quota.used_bytes,
+            quota_bytes: quota.quota_bytes,
+            remaining_bytes: quota.remaining_bytes,
+        })
+    }
+
+    async fn upload_track(&self, upload: api::TrackUpload) -> Result<(), ApiError> {
+        if upload.content.is_empty() || upload.content.len() > api::MAX_MUSIC_UPLOAD_BYTES {
+            return Err(ApiError::invalid_input(
+                "audio files must be between 1 byte and 500 MiB",
+            ));
+        }
+        let header = proto::TrackUploadChunk {
+            source_id: upload.source_id,
+            filename: upload.filename,
+            total_bytes: upload.content.len() as u64,
+            content: Vec::new(),
+        };
+        let mut bytes = upload.content.into_iter();
+        let chunks = std::iter::from_fn(move || {
+            let content: Vec<u8> = bytes.by_ref().take(256 * 1024).collect();
+            (!content.is_empty()).then_some(proto::TrackUploadChunk {
+                content,
+                ..Default::default()
+            })
+        });
+        let stream = futures_util::stream::iter(std::iter::once(header).chain(chunks));
+        self.client()
+            .upload_track(Request::new(stream))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
     async fn sources(&self) -> Result<Vec<api::SourceInfo>, ApiError> {
         let list = self
             .client()

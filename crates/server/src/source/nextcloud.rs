@@ -53,6 +53,8 @@ const CAPABILITIES: Capabilities = Capabilities {
     browser_playback: false,
     sync: true,
     downloads: true,
+    uploads: false,
+    storage_quota: false,
     discover: false,
     dont_recommend: false,
     radio: RadioSeeds::NONE,

@@ -87,6 +87,8 @@ service Kopuz {
   rpc DeleteTracks(DeleteTracksRequest) returns (Unit);
   rpc DeleteAlbum(DeleteAlbumRequest) returns (Unit);
   rpc UploadArtwork(ArtworkUpload) returns (Unit);
+  rpc GetStorageQuota(SourceId) returns (StorageQuota);
+  rpc UploadTrack(stream TrackUploadChunk) returns (Unit);
   rpc RemoveArtwork(ArtworkTarget) returns (Unit);
   rpc StartJob(StartJobRequest) returns (JobRef);
   rpc CancelJob(JobId) returns (CancelJobResponse);
@@ -739,6 +741,8 @@ message SourceCapabilities {
   // Playing a search result starts a track radio from it rather than
   // queueing the results.
   bool search_radio = 18;
+  bool uploads = 19;
+  bool storage_quota = 20;
 }
 
 // What making a source usable takes.
@@ -1796,4 +1800,18 @@ enum NoticeLevel {
   NOTICE_LEVEL_INFO = 1;
   NOTICE_LEVEL_WARNING = 2;
   NOTICE_LEVEL_ERROR = 3;
+}
+
+message StorageQuota {
+  uint64 used_bytes = 1;
+  uint64 quota_bytes = 2;
+  uint64 remaining_bytes = 3;
+}
+
+// Metadata appears in the first message only; content follows in bounded chunks.
+message TrackUploadChunk {
+  string source_id = 1;
+  string filename = 2;
+  uint64 total_bytes = 3;
+  bytes content = 4;
 }

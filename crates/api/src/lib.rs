@@ -22,6 +22,8 @@ mod radio;
 pub mod schema;
 mod sources;
 
+pub use sources::{MAX_MUSIC_UPLOAD_BYTES, StorageQuota, TrackUpload};
+
 pub use artwork::{ArtworkData, ArtworkRef, ArtworkRequest, ArtworkTarget};
 pub use catalog::{
     CatalogDetail, CatalogDetailRequest, CatalogItem, CatalogItemKind, CatalogPage, CatalogShelf,
@@ -393,6 +395,11 @@ pub trait JobApi: Send + Sync {
 /// here for the same reason: it spawns a browser and ends holding a token.
 #[async_trait::async_trait]
 pub trait SourceApi: Send + Sync {
+    async fn storage_quota(&self, id: String) -> Result<StorageQuota, ApiError>;
+
+    /// Upload one audio file. Refresh the library after a batch has finished.
+    async fn upload_track(&self, upload: TrackUpload) -> Result<(), ApiError>;
+
     async fn sources(&self) -> Result<Vec<SourceInfo>, ApiError>;
 
     /// Every service this daemon can be pointed at, each with the form that

@@ -213,6 +213,9 @@ pub fn SourceSettings(
                                     message: i18n::t("browser_playback_needs_host").to_string(),
                                 }
                             }
+                            if is_active && srv.authenticated && srv.capabilities.storage_quota {
+                                CloudStorage { source_id: srv.id.clone(), uploads: srv.capabilities.uploads }
+                            }
                             if !settings.is_empty() {
                                 div { class: "border-t border-white/10 pt-2",
                                     crate::forms::schema_form::SchemaForm {
@@ -235,6 +238,99 @@ pub fn SourceSettings(
                 onclick: move |_| on_add.call(()),
                 class: "app-button-tonal bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
                 "{i18n::t(\"add_source\")}"
+            }
+        }
+    }
+}
+
+#[component]
+fn CloudStorage(source_id: String, uploads: bool) -> Element {
+    let api = hooks::api::use_api();
+    let quota_api = api.clone();
+    let quota_id = source_id.clone();
+    let mut quota = use_resource(move || {
+        let api = quota_api.clone();
+        let id = quota_id.clone();
+        async move { api.storage_quota(id).await }
+    });
+    let mut uploading = use_signal(|| false);
+    let mut current_file = use_signal(String::new);
+    let mut picker_version = use_signal(|| 0_u64);
+    let quota_value = quota.read().clone();
+    rsx! {
+        div { class: "flex flex-col gap-2 border-t border-white/10 pt-2",
+            match quota_value {
+                Some(Ok(value)) => {
+                    let used = format!("{:.1} MiB", value.used_bytes as f64 / 1_048_576.0);
+                    let total = format!("{:.1} MiB", value.quota_bytes as f64 / 1_048_576.0);
+                    rsx! { p { class: "text-xs text-white/60", "{i18n::t_with(\"cloud_storage_usage\", &[(\"used\", used.clone()), (\"total\", total.clone())])}" } }
+                }
+                Some(Err(error)) => rsx! { p { class: "text-xs text-red-400", "{error}" } },
+                None => rsx! { p { class: "text-xs text-white/60", "{i18n::t(\"cloud_storage_loading\")}" } },
+            }
+            if uploads {
+                label { class: "app-button-tonal self-start px-3 py-1 rounded text-sm text-white bg-white/10",
+                    "{i18n::t(\"upload_music\")}"
+                    input {
+                        key: "{picker_version}",
+                        class: "hidden",
+                        r#type: "file",
+                        accept: ".mp3,.m4a,.flac,.wav,.ogg,.opus,.wma,.aiff",
+                        multiple: true,
+                        disabled: uploading(),
+                        onchange: move |event| {
+                            if uploading() { return; }
+                            let files = event.files();
+                            if files.is_empty() { return; }
+                            let api = api.clone();
+                            let id = source_id.clone();
+                            uploading.set(true);
+                            spawn(async move {
+                                let mut uploaded = 0;
+                                for file in files {
+                                    let filename = file.name();
+                                    current_file.set(filename.clone());
+                                    if file.size() > api::MAX_MUSIC_UPLOAD_BYTES as u64 {
+                                        hooks::toast::toast_error(&i18n::t("music_upload_too_large"));
+                                        break;
+                                    }
+                                    let content = match file.read_bytes().await {
+                                        Ok(bytes) => bytes.to_vec(),
+                                        Err(error) => {
+                                            hooks::toast::toast_error(&error.to_string());
+                                            break;
+                                        }
+                                    };
+                                    let upload = api::TrackUpload { source_id: id.clone(), filename, content };
+                                    if let Err(error) = api.upload_track(upload).await {
+                                        hooks::toast::toast_error(&error.to_string());
+                                        break;
+                                    }
+                                    uploaded += 1;
+                                }
+                                if uploaded > 0 {
+                                    hooks::toast::toast(&i18n::t_with("music_uploaded", &[("count", uploaded.to_string())]));
+                                    match api.sources().await {
+                                        Ok(sources) if sources.iter().any(|source| source.id == id && source.active) => {
+                                            if let Err(error) = api.start_job(api::JobKind::LibrarySync).await {
+                                                hooks::toast::toast_error(&error.to_string());
+                                            }
+                                        }
+                                        Err(error) => hooks::toast::toast_error(&error.to_string()),
+                                        _ => {},
+                                    }
+                                }
+                                quota.restart();
+                                uploading.set(false);
+                                current_file.set(String::new());
+                                picker_version += 1;
+                            });
+                        },
+                    }
+                }
+            }
+            if uploading() {
+                p { class: "text-xs text-white/60", "{i18n::t_with(\"uploading_music\", &[(\"name\", current_file())])}" }
             }
         }
     }

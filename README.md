@@ -87,6 +87,12 @@ one gRPC schema on a local socket, documented in [docs/api.md](docs/api.md).
   exposed through one unified `MediaSource` layer, and the UI adapts to each
   source's capabilities (search, downloads, radio, discover, favorites sync,
   etc.) rather than hardcoding per-service behavior.
+- **Clippsly Listener**: Add Clippsly in source settings, then sign in with your
+  username and an App Password created at [clippsly.app](https://clippsly.app).
+  Browse and stream your locker, download tracks, and upload audio files from
+  the active source's settings card. The card shows your account's storage
+  usage; quotas and any free allowance are managed by Clippsly. Uploads refresh
+  the library after the batch finishes. Remote playlists are not yet supported.
 - **YouTube Music**: Full streaming backend with a Spotify-style **Discover**
   page (recommended songs, playlists, albums, artists, and moods), rich **artist
   profiles** (banner, top songs, albums, singles, related artists),
