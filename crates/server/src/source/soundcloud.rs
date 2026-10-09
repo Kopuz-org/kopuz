@@ -50,7 +50,7 @@ impl MediaSource for SoundcloudSource {
             discover: false,
             dont_recommend: false,
             radio: RadioSeeds::NONE,
-            // No write side wired (api-v2 playlist mutation is DataDome-gated).
+
             playlists: PlaylistOps::None,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
@@ -60,10 +60,8 @@ impl MediaSource for SoundcloudSource {
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
         let url = match crate::soundcloud::resolve_stream(item_id, self.token.as_deref()).await? {
-            // Progressive MP3 streams straight through the normal HTTP path.
             crate::soundcloud::ResolvedStream::Progressive(u) => u,
-            // HLS (Go+ AAC) is tagged so the player assembles its fMP4 segments
-            // (Symphonia has no HLS demuxer) instead of streaming the .m3u8.
+
             crate::soundcloud::ResolvedStream::HlsAac(u) => format!("__SC_HLS:{u}"),
         };
         Ok(StreamInfo {
@@ -78,12 +76,10 @@ impl MediaSource for SoundcloudSource {
 
     async fn validate(&self) -> AuthOutcome {
         match self.token.as_deref() {
-            // Anonymous mode is always usable (public search + play).
             None => AuthOutcome::Valid,
             Some(token) => match crate::soundcloud::get_me(token).await {
                 Ok(_) => AuthOutcome::Valid,
-                // Can't cleanly tell expired-token from a network blip, so don't
-                // force a re-sign-in: treat any failure as unreachable.
+
                 Err(_) => AuthOutcome::Unreachable,
             },
         }

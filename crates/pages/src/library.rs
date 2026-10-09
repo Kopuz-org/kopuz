@@ -51,8 +51,6 @@ pub fn LibraryPage(
 
     let library_sort = use_signal(|| config.peek().library_sort.clone());
     let filter = use_memo(move || {
-        // The source is the daemon's; naming it here only keeps the memo
-        // re-running across a switch.
         let _ = source();
         TrackFilter {
             sort: TrackSort::Fields(library_sort.read().clone()),
@@ -99,9 +97,6 @@ pub fn LibraryPage(
         }
     });
 
-    // Remote sync. A source that scans folders never calls this — its refresh is `on_rescan`.
-    // The daemon runs it, single-flight, so a second request while one is in
-    // flight is its business rather than a generation counter kept here.
     let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::LibrarySync);
     let is_loading = use_memo(move || sync_job.read().running);
     let mut has_fetched = use_signal(|| false);
@@ -109,9 +104,9 @@ pub fn LibraryPage(
         has_fetched.set(true);
         hooks::jobs::start(hooks::JobKind::LibrarySync);
     };
-    // First visit with an empty server library → auto-pull once.
+
     use_effect(move || {
-        if !caps().sync {
+        if !caps().sync || window.rows.error().is_some() {
             return;
         }
         if !*has_fetched.read()
@@ -136,8 +131,7 @@ pub fn LibraryPage(
     let total_tracks = total_rows();
     let is_empty = total_tracks == 0;
     let window_rows = window.rows.read().clone().unwrap_or_default();
-    // The resource retains the previous rows while fetching. Moving their pad
-    // to the requested offset would shift those rows until the fetch completes.
+
     let (top_pad, bottom_pad) = window_padding(total_tracks, &window_rows);
     let all_selected = !is_empty && selected_tracks.read().len() >= total_tracks;
     let currently_playing_idx: Option<usize> = {
@@ -148,7 +142,6 @@ pub fn LibraryPage(
 
     let tracks_nodes = {
         let cap = caps();
-        let conf = config.read();
         let row_offset = window_rows.offset as usize;
         window_rows
             .rows
@@ -174,14 +167,8 @@ pub fn LibraryPage(
                 let is_selected = selected_tracks.read().contains(&track_path);
                 let cover_url = hooks::artwork::for_track(&track, hooks::artwork::Size::Thumb);
 
-                // Download state (servers only).
                 let item_id: String = track.key.clone();
-                let is_downloaded = cap.downloads
-                    && conf
-                        .offline_tracks
-                        .get(&item_id)
-                        .map(|p| std::path::Path::new(p).exists())
-                        .unwrap_or(false);
+                let is_downloaded = cap.downloads && downloads.read().is_stored(&item_id);
                 let is_downloading = cap.downloads && downloads.read().is_active(&item_id);
                 let item_id_dl = item_id.clone();
 
@@ -477,7 +464,13 @@ pub fn LibraryPage(
                 onscroll: move |scroll| {
                     scroll_positions.write().insert(Route::Library, scroll);
                 },
-                if is_empty {
+                if let Some(error) = window.rows.error() {
+                    components::common::query_error::QueryError {
+                        message: error.to_string(),
+                        onretry: move |_| { let mut query = window.rows; query.restart(); },
+                    }
+                }
+                if is_empty && window.rows.error().is_none() {
                     if window.total.read().is_none() || *is_loading.read() {
                         div { class: "flex items-center justify-center py-12",
                             i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
@@ -485,7 +478,7 @@ pub fn LibraryPage(
                     } else {
                         p { class: "text-slate-500 italic", "{i18n::t(\"no_tracks_found\")}" }
                     }
-                } else {
+                } else if !is_empty {
                     {tracks_nodes.into_iter()}
                     if *is_loading.read() {
                         div { class: "flex items-center justify-center py-4",
@@ -504,6 +497,7 @@ mod tests {
 
     fn window(offset: u32, count: usize) -> WindowRows {
         WindowRows {
+            total: count as u32,
             offset,
             rows: vec![api::TrackInfo::default(); count],
         }
@@ -519,7 +513,6 @@ mod tests {
         let next = window(requested.start_index as u32, requested.items_to_render);
         let (after, _) = window_padding(100, &next);
 
-        // Track 40 is in both windows and must stay at 2400px as rows arrive.
         assert_eq!(before + (40 - loaded.offset) as f64 * ITEM_HEIGHT, 2_400.0);
         assert_eq!(after + (40 - next.offset) as f64 * ITEM_HEIGHT, 2_400.0);
     }

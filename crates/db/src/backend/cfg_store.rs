@@ -24,7 +24,7 @@ pub async fn load_config(
     )
     .fetch_optional(pool)
     .await?;
-    // Nothing saved and no settings file either: never configured.
+
     if state.is_none() && !layers.has_overrides() {
         return Ok(None);
     }
@@ -98,12 +98,11 @@ pub async fn load_config(
             .or_default()
             .push(row.path);
     }
-    // The in-memory shape migrations the legacy file load used to run.
+
     cfg.migrate_home_sections();
     cfg.migrate_sidebar_order();
     cfg.migrate_registry_paths();
 
-    // Hydrate servers from their tables (creds included for the active one).
     let servers = stored_servers(pool, None).await?;
     cfg.servers = servers.iter().map(StoredServer::saved).collect();
     cfg.server = cfg.active_source.server_id().and_then(|active| {
@@ -113,7 +112,6 @@ pub async fn load_config(
             .map(StoredServer::music_server)
     });
 
-    // Hydrate play counts under the uid keys every reader of the map looks them up by.
     let counts = sqlx::query!(
         "SELECT lc.source, lc.track_key, lc.count, s.service \
            FROM listen_counts lc LEFT JOIN servers s ON s.id = lc.source"
@@ -221,7 +219,6 @@ pub async fn save_config(
     cfg: &AppConfig,
     settings_path: &Path,
 ) -> Result<(), DbError> {
-    // It can read before it writes, and a deferred BEGIN then fails at once against a write that landed meanwhile.
     let mut tx = super::begin_immediate(pool).await?;
     let active = sync_servers(&mut tx, cfg).await?;
     write_state(&mut tx, cfg, &active).await?;
@@ -232,7 +229,7 @@ pub async fn save_config(
 /// Sync the saved servers and the active one's creds; answers the active source with any resolved server id stamped in.
 async fn sync_servers(tx: &mut sqlx::SqliteConnection, cfg: &AppConfig) -> Result<Source, DbError> {
     let now = now_secs();
-    // Non-cred fields only: the in-memory config carries no other server's creds to write.
+
     for s in &cfg.servers {
         upsert_server_row(tx, &s.id, &s.name, &s.url, service_str(s.service), now).await?;
         let browser = s.yt_browser.map(browser_str);
@@ -272,7 +269,6 @@ async fn sync_servers(tx: &mut sqlx::SqliteConnection, cfg: &AppConfig) -> Resul
         active_id = Some(id);
     }
 
-    // Drop server rows the user removed (keep the active one regardless).
     let keep: HashSet<&str> = cfg
         .servers
         .iter()
@@ -419,7 +415,7 @@ pub(crate) async fn write_state(
     for (server, paths) in &cfg.server_folders {
         for (position, path) in paths.iter().enumerate() {
             let position = position as i64;
-            // A folder list for a server the app no longer has would name nothing.
+
             sqlx::query!(
                 "INSERT INTO server_folders (server_id, position, path) \
                  SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM servers WHERE id = ?1)",
@@ -695,10 +691,7 @@ pub async fn recently_played(
 pub async fn push_recent(pool: &SqlitePool, source: &Source, key: &str) -> Result<(), DbError> {
     let src = source.as_str();
     let mut tx = pool.begin().await?;
-    // The next position is computed inside the INSERT rather than SELECTed
-    // first: a deferred transaction that reads before it writes holds a shared
-    // lock it then cannot upgrade if anyone commits in between -- SQLite
-    // answers SQLITE_BUSY at once, busy_timeout notwithstanding.
+
     sqlx::query(
         "INSERT INTO recently_played (source, track_key, played_at) \
          VALUES (?1, ?2, (SELECT COALESCE(MAX(played_at), 0) + 1 \

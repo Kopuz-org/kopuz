@@ -1,4 +1,4 @@
-//! Batch upsert + scan-reconcile prune (issue #347, step 7).
+//! Batch upserts and scan reconciliation.
 
 use std::path::PathBuf;
 
@@ -6,8 +6,6 @@ use db::{Page, Source, TrackFilter};
 use reader::models::{Album, Track, TrackId};
 
 fn unique_db() -> PathBuf {
-    // pid + counter, not just clock: macOS's µs clock let parallel tests
-    // collide on a nanos-only name and delete each other's live DB.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
@@ -58,14 +56,11 @@ async fn upsert_then_prune() {
     let filter = TrackFilter::new(Source::default());
     assert_eq!(db.tracks_count(&filter).await.unwrap(), 3);
 
-    // Upsert is idempotent on identity: re-inserting "A" with a new title updates
-    // the existing row rather than adding one.
     let mut a2 = a.clone();
     a2.title = "A (remastered)".into();
     db.upsert_tracks(&Source::default(), &[a2]).await.unwrap();
     assert_eq!(db.tracks_count(&filter).await.unwrap(), 3);
 
-    // Round-trip preserves the typed fields.
     let page = db
         .tracks_page(
             &filter,
@@ -83,8 +78,6 @@ async fn upsert_then_prune() {
     assert_eq!(got.artists, vec!["Artist".to_string(), "Feat".to_string()]);
     assert!(matches!(got.id, TrackId::Local(_)));
 
-    // Prune the local source keeping "a.flac" + "c.flac" → "b.flac" goes (the
-    // scan-reconcile step: anything not in the last scan's keep-set).
     let keep = vec!["/music/a.flac".to_string(), "/other/c.flac".to_string()];
     db.prune_source(&Source::default(), &keep, &[])
         .await
@@ -211,13 +204,9 @@ async fn meta_keys_since_windows_by_kind_and_age() {
         .unwrap();
     assert_eq!(fresh, vec!["artist a".to_string()], "same kind, in window");
 
-    // `fetched_at` can't be backdated through the public API, so expiry is
-    // simulated with a negative window: `fetched_at >= unixepoch() + 1` never
-    // matches a just-written row.
     let expired = db.meta_keys_since("artist_photo_miss", -1).await.unwrap();
     assert!(expired.is_empty(), "an aged-out row stops matching");
 
-    // Re-putting refreshes the stamp — the row is fresh again by upsert.
     db.meta_put("artist a", "artist_photo_miss", "")
         .await
         .unwrap();
@@ -245,7 +234,6 @@ async fn a_blank_album_id_does_not_erase_a_known_one() {
         .await
         .unwrap();
 
-    // The same track written again by a path that didn't resolve the album.
     let mut album_less = linked.clone();
     album_less.album_id = String::new();
     album_less.title = "A (from a playlist)".into();
@@ -264,7 +252,6 @@ async fn a_blank_album_id_does_not_erase_a_known_one() {
         "everything the later write did know still lands"
     );
 
-    // A non-empty id is still authoritative — this must not become write-once.
     let mut moved = linked.clone();
     moved.album_id = "alb2".into();
     db.upsert_tracks(&Source::default(), &[moved])
@@ -316,8 +303,6 @@ async fn replay_gain_round_trips_and_clears() {
         .unwrap();
     assert_eq!(stored[0].replay_gain, track.replay_gain);
 
-    // A re-sync from a server that stopped reporting gain must clear the row,
-    // not leave the old values to level a re-encoded file.
     track.replay_gain = config::ReplayGainInfo::default();
     db.upsert_tracks(&Source::default(), std::slice::from_ref(&track))
         .await
@@ -332,8 +317,7 @@ async fn replay_gain_round_trips_and_clears() {
         )
         .await
         .unwrap();
-    assert!(stored[0].replay_gain.is_empty());
-    assert_eq!(stored[0].replay_gain.track_peak, None);
+    assert_eq!(stored[0].replay_gain, config::ReplayGainInfo::default());
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

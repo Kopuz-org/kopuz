@@ -6,8 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const MAX_ATTEMPTS: u32 = 6;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
-// playing_now is ephemeral: the next heartbeat replaces it, so retrying a
-// stale submission only delays everything queued behind it.
+
 const PLAYING_NOW_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Serialize)]
@@ -72,6 +71,16 @@ pub async fn submit_listens(
 
         let result = client
             .post(url)
+            .header(
+                "User-Agent",
+                concat!(
+                    "kopuz/",
+                    env!("CARGO_PKG_VERSION"),
+                    " (",
+                    env!("CARGO_PKG_REPOSITORY"),
+                    ")"
+                ),
+            )
             .header("Authorization", auth.as_str())
             .json(&body)
             .send()
@@ -157,12 +166,22 @@ fn error_kind(error: &reqwest::Error) -> &'static str {
 }
 
 async fn read_body(resp: reqwest::Response) -> String {
+    let is_html = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/html"));
     let text = resp.text().await.unwrap_or_default();
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return String::new();
     }
-    let snippet: String = trimmed.chars().take(300).collect();
+    if is_html {
+        return "body=<HTML response omitted>".to_string();
+    }
+    let single_line = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+    let snippet: String = single_line.chars().take(300).collect();
     format!("body={snippet}")
 }
 

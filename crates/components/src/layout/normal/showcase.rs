@@ -8,7 +8,6 @@ use crate::reorder_buttons::ReorderButtons;
 use crate::showcase::{self, ShowcaseProps};
 use crate::track_row::TrackRow;
 use api::TrackInfo as Track;
-use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -24,23 +23,14 @@ struct ShowcaseDerived {
 
 #[component]
 pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
+    let downloads = hooks::downloads::use_downloads();
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
     let _nav_ctrl = use_context::<NavigationController>();
     let total_seconds: u64 = props.tracks.iter().filter_map(|t| t.duration_secs()).sum();
     let duration_min = total_seconds / 60;
 
-    // Per-track cover resolver (source dispatch + album lookup live in the
-    // source layer; no partition decision here).
-
-    let offline_tracks = config.read().offline_tracks.clone();
     let sort_state = use_signal(|| None);
 
-    // The body re-renders on every scroll tick (it reads `scroll_stat`), but
-    // the clone + sort below depends only on the tracks and sort order.
-    // Memoize on `(tracks, sort)` so scrolling doesn't re-clone and re-sort
-    // the whole library. Borrowed deps keep the per-render change-check from
-    // cloning `tracks` itself.
     let sort = *sort_state.read();
     let derived = use_memo(use_reactive(
         (&props.tracks, &sort),
@@ -91,15 +81,10 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let selected_queue_tracks_arc = Arc::new(selected_queue_tracks);
 
     let all_downloaded = !props.tracks.is_empty()
-        && props.tracks.iter().all(|t| {
-            let p = t.uid.clone();
-            let id = p.split(':').nth(1).unwrap_or(&p);
-            if let Some(path_str) = offline_tracks.get(id) {
-                std::path::Path::new(path_str).exists()
-            } else {
-                false
-            }
-        });
+        && props
+            .tracks
+            .iter()
+            .all(|t| downloads.read().is_stored(&t.key));
 
     let columns = if props.is_album {
         COLUMNS_NORMAL_ALBUM
@@ -299,13 +284,8 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              let can_move_up = props.is_reorderable && idx > 0;
                              let can_move_down = props.is_reorderable && idx + 1 < track_count;
 
-                             let path_str = track.uid.clone();
-                             let item_id_str: String = path_str.split(':').nth(1).unwrap_or(&path_str).to_string();
-                             let is_downloaded = if let Some(path_str) = offline_tracks.get(&item_id_str) {
-                                 std::path::Path::new(path_str).exists()
-                             } else {
-                                 false
-                             };
+                             let item_id_str = track.key.clone();
+                             let is_downloaded = downloads.read().is_stored(&item_id_str);
                              let is_downloading = false;
                              let play_queue = std::sync::Arc::clone(&sorted_tracks_arc);
 

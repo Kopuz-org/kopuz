@@ -67,8 +67,15 @@ pub struct ConfigView {
     pub revision: u64,
 }
 
+/// Settings edited from a specific daemon snapshot.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigUpdate {
+    pub config: config::AppConfig,
+    pub expected_revision: u64,
+}
+
 /// What this build speaks: bump it with any wire change a mismatched peer would misread, never for an added field.
-pub const WIRE_REVISION: u32 = 1;
+pub const WIRE_REVISION: u32 = 2;
 
 /// What a daemon says it is, for a frontend that was not built beside it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -480,7 +487,7 @@ pub trait ConfigApi: Send + Sync {
     /// want, send it back. Credential fields are ignored (the daemon keeps
     /// its own), and a locked key whose value actually differs is refused
     /// with `invalid_input`.
-    async fn set_config(&self, config: config::AppConfig) -> Result<ConfigView, ApiError>;
+    async fn set_config(&self, update: ConfigUpdate) -> Result<ConfigView, ApiError>;
 
     /// Hear an equalizer setting without keeping it. The engine applies it
     /// live; nothing is written, so cancelling a preview is doing nothing.
@@ -501,8 +508,6 @@ pub trait ConfigApi: Send + Sync {
             },
         })
     }
-
-    // Switching sources lives on `SourceApi`, which is where sources are.
 }
 
 /// What a connect found: a daemon to talk to, or one whose fields this build would misread.
@@ -573,7 +578,7 @@ mod handshake_tests {
         async fn config(&self) -> Result<ConfigView, ApiError> {
             unreachable!()
         }
-        async fn set_config(&self, _: config::AppConfig) -> Result<ConfigView, ApiError> {
+        async fn set_config(&self, _: ConfigUpdate) -> Result<ConfigView, ApiError> {
             unreachable!()
         }
         async fn preview_equalizer(&self, _: config::EqualizerSettings) -> Result<(), ApiError> {
@@ -592,7 +597,6 @@ mod handshake_tests {
         let ready = Daemon(Ok(WIRE_REVISION)).handshake().await.unwrap();
         assert!(matches!(ready, Handshake::Ready(_)));
 
-        // A daemon that predates the field sends nothing, which reads as revision 0.
         for daemon in [0, WIRE_REVISION + 1] {
             assert_eq!(
                 Daemon(Ok(daemon)).handshake().await.unwrap(),

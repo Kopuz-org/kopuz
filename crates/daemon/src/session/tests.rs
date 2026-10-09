@@ -364,10 +364,17 @@ async fn replay_gain_settings_reach_playing_audio_through_config_api() {
         (config::ReplayGainMode::Off, -12.0, 0.0),
         (config::ReplayGainMode::Auto, -12.0, -12.0),
     ] {
-        let mut next = harness.api.config().await.unwrap().config;
-        next.replay_gain.mode = mode;
-        next.replay_gain.preamp_db = preamp;
-        harness.api.set_config(next).await.unwrap();
+        let mut next = harness.api.config().await.unwrap();
+        next.config.replay_gain.mode = mode;
+        next.config.replay_gain.preamp_db = preamp;
+        harness
+            .api
+            .set_config(api::ConfigUpdate {
+                config: next.config,
+                expected_revision: next.revision,
+            })
+            .await
+            .unwrap();
         wait_replay_gain(&harness, expected).await;
     }
 }
@@ -431,9 +438,6 @@ async fn drive_until(
 ) -> PlayerState {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
-        // Keep the fake callback close enough to wall-clock pacing that
-        // the actor can observe crossfade arming before the synthetic
-        // decoder reaches EOF under parallel test load.
         harness.sink.pull(2048);
         let state = harness.api.player_state().await.expect("player state");
         if predicate(&state) {
@@ -610,8 +614,7 @@ async fn replacing_with_an_empty_queue_stops_playback() {
 async fn set_mode_and_events_flow_through() {
     let harness = harness(|_| {});
     let mut events = harness.api.events();
-    // The stream greets with Resync, same as Subscribe does over the wire,
-    // so a consumer knows it is attached and its mirror is empty.
+
     assert!(matches!(events.next().await, Some(ApiEvent::Resync)));
 
     harness
@@ -1182,7 +1185,6 @@ fn the_playing_row_carries_both_the_library_ref_and_the_source_qualified_id() {
     assert_eq!(now.uid, "ytmusic:abc123", "uid is source-qualified");
     assert_ne!(now.key, now.uid, "the two must not be conflated");
 
-    // Local tracks are the case that hides the mistake: both are the path.
     let local = test_track(&"/music/a.flac".to_string());
     let now = track_info(&local, &config::AppConfig::default());
     assert_eq!(now.key, now.uid);
@@ -2082,8 +2084,6 @@ async fn playback_moves_between_the_engine_and_an_integration() {
         stub.calls()
     );
 
-    // Ending the remote track advances kopuz's queue, which lands on a track
-    // the engine plays -- so the integration is told to stop.
     harness.api.session.report_external(crate::ExternalReport {
         track: Some(external_track("spotify:remote")),
         playing: true,

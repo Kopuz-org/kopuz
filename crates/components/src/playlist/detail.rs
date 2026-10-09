@@ -14,9 +14,6 @@ pub fn PlaylistDetail(
 ) -> Element {
     let playlists_res = use_playlists();
 
-    // The playlist's track refs, resolved from the library. One query, live:
-    // the daemon's refresh invalidates as each page lands, so this is both the
-    // instant cached view and the progressive one.
     let pid_for_refs = playlist_id.clone();
     let track_refs = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
@@ -30,14 +27,9 @@ pub fn PlaylistDetail(
     let active_partition = hooks::use_db_queries::use_active_source();
     let tracks_res = use_tracks_by_keys(active_partition, track_refs);
 
-    // Affordances follow the source's capabilities, not what kind of source it is.
     let caps = *hooks::sources::use_capabilities().read();
     let can_reorder = caps.playlists == api::PlaylistCapability::Reorder;
 
-    // A server playlist's contents are refreshed by the daemon, a page at a
-    // time, and every page invalidates -- so the list fills in as it arrives
-    // through the query hook above, without this component owning a copy of
-    // it or knowing the walk exists. The daemon gates the staleness.
     let pid_for_refresh = playlist_id.clone();
     use_effect(move || {
         if !caps.sync {
@@ -54,8 +46,7 @@ pub fn PlaylistDetail(
 
     let store_loading = playlists_res.read().is_none();
     let store = playlists_res.read().clone().unwrap_or_default();
-    // The daemon already walked the picked cover, the server's image tag and
-    // the first track's art, so the ref it hands back is the whole answer.
+
     let (playlist_name, playlist_cover) =
         if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
             (
@@ -93,9 +84,7 @@ pub fn PlaylistDetail(
                 #[cfg(not(target_os = "android"))]
                 {
                     let pid = pid_for_cover.clone();
-                    // The daemon decides what "set a cover" means -- a server
-                    // pushes the image upstream, everyone else records it --
-                    // so the bytes go across and the policy stays there.
+
                     spawn(async move {
                         let Some(file) = AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
@@ -127,9 +116,7 @@ pub fn PlaylistDetail(
             on_selection_delete: move |keys: Vec<String>| {
                 hooks::library_actions::delete_tracks(keys, caps.delete_from_disk);
             },
-            // No optimistic edit: the daemon invalidates as it writes, and the
-            // query hook's coalescing window is shorter than the round trip
-            // that produced it.
+
             on_remove_from_playlist: move |idx: usize| {
                 hooks::playlist_actions::remove_track(pid_for_remove.clone(), idx);
             },

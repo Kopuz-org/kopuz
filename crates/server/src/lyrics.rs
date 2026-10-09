@@ -68,9 +68,7 @@ mod musixmatch;
 mod paxsenix;
 
 use musixmatch::fetch_from_musixmatch_enhanced;
-use paxsenix::{
-    extract_youtube_video_id, fetch_from_paxsenix_apple_music, fetch_from_paxsenix_youtube,
-};
+use paxsenix::fetch_from_paxsenix_apple_music;
 
 #[derive(Debug, Deserialize)]
 struct LrcLibResponse {
@@ -79,8 +77,6 @@ struct LrcLibResponse {
     #[serde(rename = "plainLyrics")]
     plain_lyrics: Option<String>,
 }
-
-// --- Apple Music lyrics types ---
 
 #[derive(Debug, Deserialize)]
 struct ItunesSearchResponse {
@@ -132,33 +128,9 @@ struct PaxsenixAppleLyricPart {
     part: bool,
 }
 
-// --- YouTube lyrics types ---
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PaxsenixYoutubeSearchResult {
-    video_id: String,
-    title: String,
-    author: String,
-    duration: String,
-}
-
-// --- Public API ---
-
-/// Fetch lyrics for a track, trying sources in priority order while preferring
-/// word-timed lyrics over line-only matches:
-/// 1. Local .lrc file alongside the audio file (local tracks only)
-/// 2. Jellyfin or Subsonic server lyrics API (server tracks)
-/// 3. Paxsenix Apple Music lyrics (syllable/line synced fallback for all tracks)
-/// 4. Paxsenix YouTube lyrics (direct video-id LRC for YouTube Music tracks)
-/// 5. Optional Musixmatch richsync fallback
-/// 6. lrclib.net (fallback for all tracks)
-///
-/// For Jellyfin: `server_token` = access token, `server_user_id` = user_id (unused for lyrics)
-/// For Subsonic: `server_token` = password, `server_user_id` = username
-// skip_all, not skip(track_path): a bare skip auto-records every other arg
-// as a span field, which would leak server_token (and url/user_id) into the
-// trace + log. Record only artist/title, explicitly.
+/// Fetch lyrics from local files, source APIs and external providers, preferring
+/// word timing over line timing and plain text. Source-specific lyrics precede
+/// the concurrent Apple Music, Musixmatch and LRCLIB fallbacks.
 #[tracing::instrument(name = "lyrics.fetch", skip_all, fields(artist = %request.artist, title = %request.title))]
 pub async fn fetch_lyrics_for_request(request: &LyricsRequest) -> LyricsFetch {
     let reach = ProviderReach::default();
@@ -237,7 +209,7 @@ where
         );
         let wait_start = Instant::now();
         while wait_start.elapsed() < LYRICS_INFLIGHT_WAIT_TIMEOUT {
-            utils::sleep(LYRICS_INFLIGHT_POLL_INTERVAL).await;
+            tokio::time::sleep(LYRICS_INFLIGHT_POLL_INTERVAL).await;
             if let Some(cached) = lyrics_cache()
                 .lock()
                 .ok()
@@ -285,13 +257,9 @@ where
         }
     };
 
-    // Anything not backed by a file on disk. Missing a prefix here costs twice:
-    // the `.lrc` lookup below runs against a path that was never a path, and
-    // `prefer_local` returns before the remote providers are ever reached.
     let is_server = is_remote_track(track_path);
     let mut fallback: Option<Lyrics> = None;
 
-    // 1. Local .lrc file (only for local tracks)
     if !is_server {
         let started = Instant::now();
         let local = fetch_local_lrc(track_path).await;
@@ -347,7 +315,6 @@ where
         return fallback;
     }
 
-    // 2. Server lyrics
     if let Some(server_url) = server_url {
         if track_path.starts_with("jellyfin:") {
             if let (Some(item_id), Some(token)) =
@@ -497,24 +464,17 @@ where
         }
     }
 
-    // 3/4/5. Apple Music and direct YouTube lyrics are the primary remote
-    // providers. Optional Musixmatch starts with them, but can only replace
-    // the primary result when it returns strictly better timing quality.
     let apple_started = Instant::now();
-    let youtube_started = Instant::now();
     let musixmatch_started = Instant::now();
     let lrclib_started = Instant::now();
     let apple = fetch_from_paxsenix_apple_music(artist, title, duration, reach);
-    let youtube = fetch_from_paxsenix_youtube(artist, title, duration, track_path, reach);
     let musixmatch = fetch_from_musixmatch_enhanced(artist, title, reach);
     let lrclib = fetch_from_lrclib(artist, title, album, duration, reach);
     tokio::pin!(apple);
-    tokio::pin!(youtube);
     tokio::pin!(musixmatch);
     tokio::pin!(lrclib);
 
     let mut apple_done = false;
-    let mut youtube_done = false;
     let mut musixmatch_done = !enable_musixmatch;
     let mut lrclib_done = !allow_lrclib;
     let mut progressed: Option<Lyrics> = None;
@@ -528,7 +488,6 @@ where
     }
 
     while !apple_done
-        || !youtube_done
         || (!musixmatch_done && primary_quality < 2)
         || (!lrclib_done
             && lyrics_quality_option(fallback.as_ref())
@@ -562,39 +521,6 @@ where
                     let should_progress = progressed
                         .as_ref()
                         .map(|current| lyrics_quality(&lyrics) >= lyrics_quality(current))
-                        .unwrap_or(true);
-                    if should_progress {
-                        progressed = Some(lyrics.clone());
-                        on_progress(lyrics);
-                    }
-                }
-            }
-            result = &mut youtube, if !youtube_done => {
-                youtube_done = true;
-                tracing::info!(
-                    target: "kopuz::lyrics",
-                    "paxsenix_youtube key_hash={} elapsed_ms={} kind={}",
-                    log_lyrics_key_hash(&cache_key),
-                    youtube_started.elapsed().as_millis(),
-                    lyrics_kind(result.as_ref())
-                );
-                lyrics_debug!(
-                    "provider=paxsenix_youtube elapsed_ms={} kind={}",
-                    youtube_started.elapsed().as_millis(),
-                    lyrics_kind(result.as_ref())
-                );
-                if let Some(lyrics) = result {
-                    let should_replace = fallback
-                        .as_ref()
-                        .map(|current| lyrics_quality(&lyrics) > lyrics_quality(current))
-                        .unwrap_or(true);
-                    if should_replace {
-                        fallback = Some(lyrics.clone());
-                    }
-                    primary_quality = primary_quality.max(lyrics_quality(&lyrics));
-                    let should_progress = progressed
-                        .as_ref()
-                        .map(|current| lyrics_quality(&lyrics) > lyrics_quality(current))
                         .unwrap_or(true);
                     if should_progress {
                         progressed = Some(lyrics.clone());
@@ -718,6 +644,14 @@ fn is_remote_track(track_path: &str) -> bool {
     ]
     .iter()
     .any(|prefix| track_path.starts_with(prefix))
+}
+
+fn extract_youtube_video_id(track_path: &str) -> Option<String> {
+    track_path
+        .strip_prefix("ytmusic:")
+        .and_then(|rest| rest.split(':').next())
+        .filter(|video_id| !video_id.trim().is_empty())
+        .map(|video_id| video_id.to_string())
 }
 
 /// The song's own lyrics from YouTube Music, for a track it streams. A
@@ -1000,10 +934,7 @@ fn extract_from_lrclib_response(data: &LrcLibResponse) -> Option<Lyrics> {
 #[cfg(test)]
 mod tests {
     use super::musixmatch::musixmatch_richsync_to_lrc;
-    use super::paxsenix::{
-        best_itunes_song, best_youtube_result, extract_youtube_video_id, parse_colon_duration,
-        paxsenix_apple_to_lyrics,
-    };
+    use super::paxsenix::{best_itunes_song, paxsenix_apple_to_lyrics};
     use super::*;
 
     #[test]
@@ -1138,37 +1069,6 @@ mod tests {
         }
         assert!(!super::is_remote_track("/music/song.flac"));
         assert!(!super::is_remote_track(r"C:\Music\song.flac"));
-    }
-
-    #[test]
-    fn parses_youtube_duration() {
-        assert_eq!(parse_colon_duration("3:28"), Some(208));
-        assert_eq!(parse_colon_duration("1:02:03"), Some(3723));
-        assert_eq!(parse_colon_duration(""), None);
-        assert_eq!(parse_colon_duration("nope"), None);
-    }
-
-    #[test]
-    fn youtube_selector_checks_duration() {
-        let results = vec![
-            PaxsenixYoutubeSearchResult {
-                video_id: "wrong-duration".to_string(),
-                title: "90210".to_string(),
-                author: "blackbear".to_string(),
-                duration: "5:40".to_string(),
-            },
-            PaxsenixYoutubeSearchResult {
-                video_id: "right-duration".to_string(),
-                title: "90210".to_string(),
-                author: "blackbear".to_string(),
-                duration: "3:28".to_string(),
-            },
-        ];
-
-        let selected = best_youtube_result(&results, "90210 blackbear", 208)
-            .expect("a duration-matched result should be selected");
-
-        assert_eq!(selected.video_id, "right-duration");
     }
 
     #[test]

@@ -63,20 +63,19 @@ pub fn HomeBody(
     on_select_playlist: EventHandler<String>,
     on_open_artist: EventHandler<String>,
 ) -> Element {
+    let downloads = hooks::downloads::use_downloads();
     let is_offline = use_context::<Signal<bool>>();
     let mut config = use_context::<Signal<AppConfig>>();
     let source = use_active_source();
     let caps = hooks::sources::use_capabilities();
     let mut has_fetched = use_signal(|| false);
-    // Which card has its overflow menu open, keyed by track uid / playlist id.
-    // Owned here because the section renderers are plain functions, so they
-    // cannot hold hook state of their own.
+
     let active_card_menu = use_signal(|| None::<String>);
 
     let albums_res = use_albums(source);
     let recently_added_res = use_recently_added_albums(source, RECENTLY_ADDED_WINDOW);
     let artists_res = use_artists(source);
-    // Photos by artist key, so the Top Artists row shows the picture the daemon holds for each.
+
     let artist_covers = use_memo(move || {
         artists_res
             .read()
@@ -95,21 +94,14 @@ pub fn HomeBody(
         if !(caps().downloads && *is_offline.read()) {
             return Vec::new();
         }
-        config
-            .read()
-            .offline_tracks
-            .iter()
-            .filter(|(_, path)| std::path::Path::new(path).exists())
-            .map(|(id, _)| id.clone())
-            .collect()
+        downloads.read().keys().to_vec()
     });
     let offline_tracks_res = use_tracks_by_keys(source, offline_keys);
-    // Recently-played for the active source (each source keeps its own history).
+
     let recent_tracks_res = hooks::use_db_queries::use_recently_played(source);
     let top_genre_res = use_top_genre(source);
     let artist_samples_res = use_artist_sample_tracks(source, 30);
 
-    // Catalog sources fill an empty cache by syncing; folder sources are populated by the scan.
     let mut fetch_remote = move || {
         has_fetched.set(true);
         hooks::jobs::start(hooks::JobKind::LibrarySync);
@@ -221,7 +213,6 @@ pub fn HomeBody(
     });
 
     let recently_added = use_memo(move || -> Vec<AlbumCard> {
-        // Already newest-first from the daemon, so this only de-duplicates.
         let all_albums = recently_added_res.read().clone().unwrap_or_default();
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -341,8 +332,6 @@ pub fn HomeBody(
         let mut unique_artists = std::collections::HashSet::new();
         let mut artist_list = Vec::new();
         for track in &tracks {
-            // The row's own credit, so the tile is the artist the source named
-            // rather than the billed string it happens to show.
             let Some(credit) = track.primary_credit() else {
                 continue;
             };
@@ -353,8 +342,6 @@ pub fn HomeBody(
                 continue;
             };
             if unique_artists.insert(key.clone()) {
-                // The daemon walks override, then photo, then an album cover
-                // for a library source; no picture renders the placeholder.
                 let cover_url = artist_covers
                     .read()
                     .get(key)
@@ -370,7 +357,6 @@ pub fn HomeBody(
 
     let recent_playlists = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
-        let conf = config.read();
         let offline = caps().downloads && *is_offline.read();
         store
             .playlists
@@ -380,20 +366,14 @@ pub fn HomeBody(
                     return true;
                 }
                 !p.track_keys.is_empty()
-                    && p.track_keys.iter().all(|tid| {
-                        if let Some(path_str) = conf.offline_tracks.get(tid) {
-                            std::path::Path::new(path_str).exists()
-                        } else {
-                            false
-                        }
-                    })
+                    && p.track_keys
+                        .iter()
+                        .all(|tid| downloads.read().is_stored(tid))
             })
             .rev()
             .take(10)
             .cloned()
             .map(|p| {
-                // The daemon walked the playlist's own cover, its server's and
-                // the first track's, so the row's reference is the whole answer.
                 let cover_url =
                     hooks::artwork::url(p.artwork.as_ref(), hooks::artwork::Size::Thumb)
                         .map(|cover| cover.to_string());
@@ -405,9 +385,7 @@ pub fn HomeBody(
     let hero_cover = use_memo(move || {
         let entry = hero_entry.read();
         let (track, album_opt, _) = entry.as_ref()?;
-        // The album's own art first, but fall back to the track's — the albums
-        // query lags the recently-played one, and not every album has a cover
-        // path, which otherwise left the hero on the 384px card thumbnail.
+
         let cover = album_opt
             .as_ref()
             .and_then(|album| hooks::artwork::for_album(album, hooks::artwork::Size::Full))

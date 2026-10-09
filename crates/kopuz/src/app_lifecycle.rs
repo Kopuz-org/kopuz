@@ -42,8 +42,7 @@ pub fn use_webview_script_engine() {
 pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signal<bool> {
     let mut is_offline = use_signal(|| false);
     use_context_provider(|| is_offline);
-    // Only a remote source makes reachability a thing worth watching, and
-    // which is active is the daemon's answer.
+
     let active = hooks::sources::use_active_source_info();
     use_future(move || async move {
         let Ok(client) = reqwest::Client::builder()
@@ -63,7 +62,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
                     is_offline.set(false);
                 }
                 misses = 0;
-                utils::sleep(std::time::Duration::from_secs(30)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 continue;
             }
             let online = client
@@ -84,7 +83,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
                 }
             }
             let secs = if *is_offline.peek() { 10 } else { 30 };
-            utils::sleep(std::time::Duration::from_secs(secs)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
         }
     });
 
@@ -94,7 +93,7 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
         } else if network_banner.peek().as_ref() == Some(&true) {
             network_banner.set(Some(false));
             spawn(async move {
-                utils::sleep(std::time::Duration::from_secs(4)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
                 if network_banner.read().as_ref() == Some(&false) {
                     network_banner.set(None);
                 }

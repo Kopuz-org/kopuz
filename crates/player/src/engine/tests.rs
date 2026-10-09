@@ -85,8 +85,6 @@ struct FakeSink(FakeSinkHandle);
 
 impl AudioSink for FakeSink {
     fn probe_config(&mut self, desired_sample_rate: Option<u32>) -> Result<SinkConfig, String> {
-        // Mirror CpalSink: the probe prefers the source's rate. (open() still
-        // returns TEST_CONFIG — a device is free to not honor the request.)
         Ok(SinkConfig {
             channels: TEST_CONFIG.channels,
             sample_rate: desired_sample_rate.unwrap_or(TEST_CONFIG.sample_rate),
@@ -256,8 +254,6 @@ fn load_plays_and_position_advances() {
 
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
 
-    // Expect real samples (worker feeding the ring), then pull ~1s of audio;
-    // the ring fills asynchronously, so keep pulling until position moved.
     wait_until("non-silent audio", || {
         sink.pull(4410).iter().any(|s| *s != 0.0)
     });
@@ -289,8 +285,6 @@ fn replay_gain_settings_scale_the_playing_track() {
         ungained > 0.0
     });
 
-    // The WAV carries no tags, so the fallback gain is what a track without
-    // ReplayGain data gets. -6 dB halves the amplitude.
     engine.send(Command::SetReplayGain(config::ReplayGainSettings {
         mode: config::ReplayGainMode::Track,
         prevent_clipping: false,
@@ -321,8 +315,6 @@ fn service_replay_gain_levels_a_stream_without_tags() {
         fallback_gain_db: 0.0,
     }));
 
-    // A bare WAV, as a transcoding server would serve it: no tags at all, so
-    // only what the server reported is left to level by.
     let (factory, duration) = wav_factory(5.0);
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     engine.send(Command::Load(LoadRequest {
@@ -353,7 +345,6 @@ fn service_replay_gain_levels_a_stream_without_tags() {
         peak > 0.0
     });
 
-    // The WAV's own peak is 10_000/32_768; -6 dB halves it.
     let expected = (10_000.0 / 32_768.0) * 0.5;
     assert!(
         (peak - expected).abs() < expected * 0.1,
@@ -425,13 +416,15 @@ fn opus_header_gain_is_independent_of_replay_gain_and_survives_seek() {
     }
 }
 
+/// Fixture: a 0.125-peak tone with -6 dB header gain and -6/-12 dB track/album gains.
+/// Regenerate with:
+/// ```sh
+/// ffmpeg -f lavfi -i sine=frequency=440:duration=0.25 -c:a libopus \
+///   -metadata R128_TRACK_GAIN=-2816 -metadata R128_ALBUM_GAIN=-4352 \
+///   -bsf:a opus_metadata=gain=-1536 tone_replaygain.opus
+/// ```
 #[test]
 fn opus_replay_gain_tags_reach_the_audio_output() {
-    // ffmpeg -f lavfi -i sine=frequency=440:duration=0.25 -c:a libopus
-    // -metadata R128_TRACK_GAIN=-2816 -metadata R128_ALBUM_GAIN=-4352
-    // -bsf:a opus_metadata=gain=-1536 tone_replaygain.opus
-    // The tone peaks at 0.125 before encoding. Header: -6 dB; tags, after
-    // the R128 reference offset: track -6 dB and album -12 dB.
     for (mode, total_db) in [
         (config::ReplayGainMode::Off, -6.0_f32),
         (config::ReplayGainMode::Track, -12.0),
@@ -516,21 +509,15 @@ fn album_context_updates_both_sessions_during_a_crossfade() {
 
 #[test]
 fn resampled_source_plays_full_duration() {
-    // The worker must resample from the buffer's own declared rate. With the old
-    // unwrap_or(device_rate) fallback a 22.05kHz source on a 44.1kHz device was
-    // pushed through un-resampled, so it played at half speed and the position
-    // clock reached only half the real duration.
     let (sink, engine) = spawn_engine();
 
-    let frames = 11_025; // 0.5s at 22_050 Hz
+    let frames = 11_025;
     let bytes = wav_bytes(frames, 22_050, TEST_CONFIG.channels as u16);
     let factory: SourceFactory =
         Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
     load(&engine, 1, factory, Duration::from_millis(500));
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
 
-    // Drain to the natural end at the device rate; the position clock must reach
-    // the full ~0.5s (44.1kHz), not the ~0.25s the un-resampled path produced.
     wait_until("phase Ended", || {
         sink.pull(4096);
         engine.status().phase == Phase::Ended
@@ -546,8 +533,6 @@ fn resampled_source_plays_full_duration() {
 
 #[test]
 fn subscribe_composes_multiple_consumers() {
-    // A second subscriber must not steal the first's stream: both receive every
-    // event, and dropping one prunes it without disturbing the other.
     let (_sink, engine) = spawn_engine();
     let mut a = engine_subscribe(&engine);
     let mut b = engine_subscribe(&engine);
@@ -568,8 +553,6 @@ fn subscribe_composes_multiple_consumers() {
                 .any(|e| matches!(e, Event::Loaded { token: 1 }))
     });
 
-    // Drop one receiver; the surviving subscriber keeps receiving after the
-    // dropped sender is pruned on the next emit.
     drop(b);
     let (factory2, duration2) = wav_factory(0.25);
     load(&engine, 2, factory2, duration2);
@@ -594,13 +577,11 @@ fn eof_emits_ended_once_and_seek_revives() {
     load(&engine, 7, factory, duration);
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
 
-    // Drain the whole track.
     wait_until("phase Ended", || {
         sink.pull(4096);
         engine.status().phase == Phase::Ended
     });
 
-    // Keep pulling; Ended must not fire again.
     for _ in 0..10 {
         sink.pull(4096);
         std::thread::sleep(Duration::from_millis(20));
@@ -612,7 +593,6 @@ fn eof_emits_ended_once_and_seek_revives() {
         .count();
     assert_eq!(ended_count, 1, "Ended must fire exactly once: {seen:?}");
 
-    // The 4aedd347 scenario: seek after natural end must revive playback.
     engine.send(Command::Seek {
         position: Duration::from_millis(50),
         token: None,
@@ -624,7 +604,6 @@ fn eof_emits_ended_once_and_seek_revives() {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
 
-    // And it can end again.
     wait_until("second Ended", || {
         sink.pull(4096);
         engine.status().phase == Phase::Ended
@@ -669,15 +648,6 @@ impl std::io::Seek for GatedReader {
 
 #[test]
 fn stale_eof_after_seek_does_not_end_session() {
-    // A worker Eof that crosses a seek carries the pre-seek ring epoch. If the
-    // actor honored it, it would re-latch `eof` on the freshly-seeked session
-    // whose new ring reads played == written == 0, and the next tick would fire
-    // a spurious Ended that auto-advances mid-track. The fix drops the stale Eof
-    // by ring epoch.
-    //
-    // Determinism: the gate holds the worker inside a blocked read once closed,
-    // so after the seek installs a fresh (empty) ring the worker cannot write to
-    // it — played == written == 0 is pinned while the stale Eof is delivered.
     let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
     let frames = 5 * TEST_CONFIG.sample_rate as usize;
     let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
@@ -699,8 +669,6 @@ fn stale_eof_after_seek_does_not_end_session() {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
 
-    // Close the gate, then seek: the worker will block before it can write any
-    // post-seek audio, pinning the fresh ring at played == written == 0.
     *gate.0.lock().unwrap() = true;
     engine.send(Command::Seek {
         position: Duration::from_secs(1),
@@ -710,8 +678,6 @@ fn stale_eof_after_seek_does_not_end_session() {
         super::worker::WorkerMsg::Eof { token: 1, epoch: 0 },
     ));
 
-    // Several ticks pass with the ring pinned empty; without the epoch guard the
-    // stale Eof would end the session here (0 >= 0). It must not.
     std::thread::sleep(Duration::from_millis(300));
     drain_events(&mut events, &mut seen);
     assert!(
@@ -724,8 +690,6 @@ fn stale_eof_after_seek_does_not_end_session() {
         "session must still be playing after a dropped stale Eof"
     );
 
-    // Reopen the gate: the seeked session resumes and ends normally at its real
-    // EOF, whose Eof carries the current epoch (1) and is honored.
     {
         *gate.0.lock().unwrap() = false;
         gate.1.notify_all();
@@ -748,10 +712,6 @@ fn stale_eof_after_seek_does_not_end_session() {
 
 #[test]
 fn seek_after_eof_reprobes_webm_and_resumes() {
-    // WebM/Opus (all YouTube audio): symphonia's Matroska demuxer errors on a
-    // seek once the reader has passed EOF ("element is not an ancestor"), so
-    // the parked-worker revive must re-probe from the buffered bytes. Without
-    // that, the seek yields silence.
     let (sink, engine) = spawn_engine();
 
     let (factory, duration) = webm_live_factory();
@@ -776,10 +736,6 @@ fn seek_after_eof_reprobes_webm_and_resumes() {
 
 #[test]
 fn seek_after_end_of_queue_pause_resumes_playback() {
-    // End-of-queue: the track drains to Ended, then the controller pauses the
-    // device to stop the idle stream while keeping the parked worker alive.
-    // Scrubbing back into the track must resume playback, not sit silently
-    // paused at the seek position.
     let (sink, engine) = spawn_engine();
 
     let (factory, duration) = wav_factory(0.25);
@@ -791,9 +747,6 @@ fn seek_after_end_of_queue_pause_resumes_playback() {
         engine.status().phase == Phase::Ended
     });
 
-    // The end-of-queue pause (player_controller_queue.rs) quiesces the device;
-    // the `ended` latch keeps phase == Ended, so the pause only shows up as a
-    // device pause_calls bump.
     let pauses_before = sink.pause_calls();
     engine.send(Command::Pause);
     wait_until("device paused at end of queue", || {
@@ -830,7 +783,6 @@ fn pause_freezes_drain_and_blocks_ended() {
     wait_until("phase Paused", || engine.status().phase == Phase::Paused);
     assert!(sink.pause_calls() >= 1, "device must be paused");
 
-    // Paused: pulls yield silence and the track must not drain to Ended.
     let position = engine.status().position();
     for _ in 0..10 {
         assert!(sink.pull(4096).iter().all(|s| *s == 0.0));
@@ -872,8 +824,6 @@ fn crossfade_mixes_and_emits_track_switched() {
     );
     wait_until("status switches to token 2", || engine.status().token == 2);
 
-    // Pull well past the fade length; the actor should observe fade completion
-    // and emit TrackSwitched.
     wait_until("TrackSwitched", || {
         sink.pull(8192);
         drain_events(&mut events, &mut seen);
@@ -887,10 +837,6 @@ fn crossfade_mixes_and_emits_track_switched() {
 
 #[test]
 fn crossfade_across_sample_rates_still_fades() {
-    // YT mixes 48kHz Opus and 44.1kHz AAC itags freely. A crossfade between
-    // tracks of different source rates must fade at the live output config
-    // (the incoming worker resamples to it), not silently fall back to a hard
-    // cut because the probe would prefer a different device rate.
     let (sink, engine) = spawn_engine();
     let mut events = engine_subscribe(&engine);
     let mut seen = Vec::new();
@@ -900,7 +846,6 @@ fn crossfade_across_sample_rates_still_fades() {
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
     wait_until("audio from A", || sink.pull(4096).iter().any(|s| *s != 0.0));
 
-    // Incoming track at half the device rate.
     let frames = 30 * 22_050;
     let bytes = wav_bytes(frames, 22_050, TEST_CONFIG.channels as u16);
     let factory_b: SourceFactory =
@@ -940,9 +885,6 @@ fn crossfade_across_sample_rates_still_fades() {
 
 #[test]
 fn system_mode_keeps_device_rate_across_track_rates() {
-    // Default mode: the device stays at its rate; a track at a different
-    // native rate is resampled by the worker instead of reopening the stream
-    // (which would switch the DAC's rate and glitch the EQ chain).
     let (sink, engine) = spawn_engine();
 
     let (factory_a, duration_a) = wav_factory(5.0);
@@ -1004,9 +946,6 @@ fn status_reports_pending_and_fading() {
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
     wait_until("audio from A", || sink.pull(4096).iter().any(|s| *s != 0.0));
 
-    // ── pending ──────────────────────────────────────────────────────────
-    // A load that blocks in its factory is reported as a pending transition
-    // while the current session keeps playing.
     let (gate_tx, gate_rx) = std::sync::mpsc::channel::<()>();
     let frames = TEST_CONFIG.sample_rate as usize;
     let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
@@ -1030,7 +969,6 @@ fn status_reports_pending_and_fading() {
     });
     assert_eq!(engine.status().token, 1, "current session still token 1");
 
-    // Release: the pending load lands and the pending flag clears.
     let _ = gate_tx.send(());
     wait_until("pending cleared, token 2 current", || {
         let s = engine.status();
@@ -1041,7 +979,6 @@ fn status_reports_pending_and_fading() {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
 
-    // ── fading ───────────────────────────────────────────────────────────
     let (factory_c, duration_c) = wav_factory(30.0);
     load_with(
         &engine,
@@ -1058,14 +995,12 @@ fn status_reports_pending_and_fading() {
     });
     assert!(engine.status().transition_in_flight());
 
-    // The outgoing position ticks while the fade mixes.
     let fpos_before = engine.status().fading_position().unwrap_or_default();
     wait_until("fading position advances", || {
         sink.pull(8192);
         engine.status().fading_position().unwrap_or_default() > fpos_before
     });
 
-    // Fade completion carries both tokens and clears the fading state.
     wait_until("TrackSwitched to 3 from 2", || {
         sink.pull(8192);
         drain_events(&mut events, &mut seen);
@@ -1114,9 +1049,6 @@ fn idle_engine_stops_republishing_and_wakes_on_load() {
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
     wait_until("audio", || sink.pull(4096).iter().any(|s| *s != 0.0));
 
-    // Steady playback: the position advances off the shared atomic, so the
-    // status is NOT republished every tick — the same Arc is handed out while
-    // the position still moves. Span several actor ticks of wall-clock time.
     let s1 = engine.status();
     let p1 = s1.position();
     for _ in 0..6 {
@@ -1133,8 +1065,6 @@ fn idle_engine_stops_republishing_and_wakes_on_load() {
         "position still advances off the live atomic without a republish"
     );
 
-    // Stop to a genuinely idle state, then a fresh load must wake the parked
-    // actor and play.
     engine.send(Command::Stop {
         pause_device: false,
     });
@@ -1161,7 +1091,6 @@ fn engine_subscribe(engine: &EngineHandle) -> tokio::sync::mpsc::UnboundedReceiv
 fn superseding_load_drops_stale_session() {
     let (sink, engine) = spawn_engine();
 
-    // First load's factory blocks until released — a probe stuck on network.
     let (gate_tx, gate_rx) = std::sync::mpsc::channel::<()>();
     let frames = TEST_CONFIG.sample_rate as usize;
     let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
@@ -1181,10 +1110,9 @@ fn superseding_load_drops_stale_session() {
         reply: Some(reply_tx),
     }));
 
-    // Supersede while the first is still "probing".
     let (factory, duration) = wav_factory(5.0);
     load(&engine, 2, factory, duration);
-    // Cancellation resolves as a dropped reply channel, not an error.
+
     wait_until("superseded reply dropped", || {
         matches!(
             reply_rx.try_recv(),
@@ -1192,7 +1120,6 @@ fn superseding_load_drops_stale_session() {
         )
     });
 
-    // Release the stale worker; the engine must stay on token 2.
     let _ = gate_tx.send(());
     wait_until("playing token 2", || {
         let status = engine.status();
@@ -1247,29 +1174,23 @@ fn factory_error_reports_and_keeps_prior_audio() {
     );
     assert!(result.is_err(), "broken factory must fail the load");
 
-    // Prior session is untouched: still token 1, still playing real audio.
+    let mut seen = Vec::new();
+    wait_until("Error event carrying failed token 2", || {
+        drain_events(&mut events, &mut seen);
+        seen.iter()
+            .any(|e| matches!(e, Event::Error { token: 2, .. }))
+    });
+
     assert_eq!(engine.status().token, 1);
     assert_eq!(engine.status().phase, Phase::Playing);
     wait_until("audio from token 1", || {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
-    let mut seen = Vec::new();
-    drain_events(&mut events, &mut seen);
-    assert!(
-        seen.iter()
-            .any(|e| matches!(e, Event::Error { token: 2, .. })),
-        "Error event carries the failed token: {seen:?}"
-    );
-
     engine.shutdown();
 }
 
 #[test]
 fn panicking_worker_fails_the_load_instead_of_hanging() {
-    // Symphonia can panic on malformed streams. A panic on the decode worker
-    // must surface as a failed load (the thread-boundary guard reports it);
-    // without the guard the pending load never resolves and the reply below
-    // blocks forever.
     let (sink, engine) = spawn_engine();
 
     let (factory, duration) = wav_factory(10.0);
@@ -1289,7 +1210,6 @@ fn panicking_worker_fails_the_load_instead_of_hanging() {
         "a worker panic must resolve the load as an error"
     );
 
-    // Prior session is untouched.
     assert_eq!(engine.status().token, 1);
     assert_eq!(engine.status().phase, Phase::Playing);
     wait_until("audio from token 1", || {
@@ -1318,7 +1238,6 @@ fn seek_moves_position_immediately_on_fresh_counters() {
         engine.status().position() == target
     });
 
-    // Playback continues from the fresh ring.
     wait_until("audio after seek", || {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
@@ -1403,9 +1322,6 @@ fn seek_during_crossfade_resumes_the_outgoing_track() {
     assert!(outcome.crossfaded);
     wait_until("status on incoming token 2", || engine.status().token == 2);
 
-    // A seek mid-crossfade targets the outgoing (visible) track: the engine
-    // promotes the outgoing session (token 1) back to active, cancels the fade,
-    // and seeks it in place — no re-load, and no TrackSwitched.
     engine.send(Command::Seek {
         position: Duration::from_secs(10),
         token: None,
@@ -1432,9 +1348,6 @@ fn seek_during_crossfade_resumes_the_outgoing_track() {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
 
-    // The promotion updated the event identity too: phase changes after the
-    // fade-cancel must name the revived session (1), not the retired incoming
-    // one (2) that was never audibly committed.
     engine.send(Command::Pause);
     wait_until("PhaseChanged names the revived session", || {
         drain_events(&mut events, &mut seen);
@@ -1464,15 +1377,9 @@ fn seek_during_crossfade_resumes_the_outgoing_track() {
 
 #[test]
 fn seek_during_crossfade_from_radio_is_ignored() {
-    // Seeking out of a crossfade whose outgoing (visible) source is non-seekable
-    // (radio) must be a no-op. The old ordering retired the incoming session and
-    // only then early-returned on !seekable, stranding the RT mid-fade into a
-    // stopped ring — silence with the status wedged. The fix checks the visible
-    // session's seekability before any teardown.
     let (sink, engine) = spawn_engine();
     let mut events = engine_subscribe(&engine);
 
-    // Outgoing: a long non-seekable stream, like internet radio.
     let frames = 30 * TEST_CONFIG.sample_rate as usize;
     let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
     let radio: SourceFactory = Box::new(move || {
@@ -1487,7 +1394,6 @@ fn seek_during_crossfade_from_radio_is_ignored() {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
 
-    // Incoming: a seekable file, crossfaded in.
     let (factory_b, duration_b) = wav_factory(30.0);
     let outcome = load_with(
         &engine,
@@ -1499,14 +1405,11 @@ fn seek_during_crossfade_from_radio_is_ignored() {
     assert!(outcome.crossfaded);
     wait_until("status on incoming token 2", || engine.status().token == 2);
 
-    // Seek mid-fade — ignored, because the visible (outgoing) source is radio.
     engine.send(Command::Seek {
         position: Duration::from_secs(10),
         token: None,
     });
 
-    // The fade runs to completion normally: TrackSwitched for the incoming, which
-    // becomes the sole session; audio never goes silent.
     let mut seen = Vec::new();
     wait_until("fade completes to token 2", || {
         sink.pull(8192);
@@ -1531,7 +1434,6 @@ fn seek_during_crossfade_from_radio_is_ignored() {
 fn radio_source_ignores_seek_and_ends_at_eof() {
     let (sink, engine) = spawn_engine();
 
-    // Non-seekable source, like internet radio.
     let frames = (0.25 * TEST_CONFIG.sample_rate as f64) as usize;
     let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
     let factory: SourceFactory = Box::new(move || {
@@ -1540,7 +1442,7 @@ fn radio_source_ignores_seek_and_ends_at_eof() {
             "wav",
         ))
     });
-    // Radio uses the u64::MAX duration sentinel.
+
     load(&engine, 1, factory, Duration::from_secs(u64::MAX / 2));
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
     wait_until("audio flowing", || {
@@ -1572,7 +1474,7 @@ fn device_error_rebuilds_stream_and_resumes_position() {
     let (factory, duration) = wav_factory(30.0);
     load(&engine, 1, factory, duration);
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
-    // Play a couple of seconds in (the ring fills asynchronously).
+
     wait_until("played two seconds", || {
         sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels);
         engine.status().position() >= Duration::from_secs(2)
@@ -1586,7 +1488,7 @@ fn device_error_rebuilds_stream_and_resumes_position() {
     wait_until("still playing after rebuild", || {
         engine.status().phase == Phase::Playing
     });
-    // Position resumed near where the device died (seek-to-current protocol).
+
     let resumed = engine.status().position();
     assert!(
         resumed >= position_before.saturating_sub(Duration::from_millis(500)),
@@ -1601,11 +1503,6 @@ fn device_error_rebuilds_stream_and_resumes_position() {
 
 #[test]
 fn device_rebuild_to_new_rate_retargets_the_decode() {
-    // A device rebuild can land on a different sample rate (unplug a 44.1kHz
-    // DAC, fall back to a 22.05kHz device here). The revived session's worker
-    // must retarget its conversion to the new config — with stale targets it
-    // writes unresampled audio that plays at the wrong pitch, observable as
-    // roughly twice the samples for the remaining content.
     let (sink, engine, actor_tx) = spawn_engine_with_tx();
     let (factory, duration) = wav_factory(1.0);
     load(&engine, 1, factory, duration);
@@ -1617,7 +1514,6 @@ fn device_rebuild_to_new_rate_retargets_the_decode() {
     let position_before = engine.status().position();
     let opens_before = sink.open_calls();
 
-    // The "new device" runs at half the rate.
     sink.set_device_config(SinkConfig {
         channels: TEST_CONFIG.channels,
         sample_rate: TEST_CONFIG.sample_rate / 2,
@@ -1625,9 +1521,6 @@ fn device_rebuild_to_new_rate_retargets_the_decode() {
     let _ = actor_tx.send(super::actor::ActorMsg::DeviceError { device_lost: true });
     wait_until("stream rebuilt", || sink.open_calls() > opens_before);
 
-    // Drain the rest of the track at the new rate, counting real (non-pad)
-    // samples. Remaining ~0.75s must come out as ~0.75s * 22050 * 2 ≈ 33k
-    // samples; a stale-target worker skips resampling and produces ~66k.
     let mut real_samples = 0usize;
     wait_until("track drains to Ended", || {
         real_samples += sink.pull(2048).iter().filter(|s| **s != 0.0).count();
@@ -1646,10 +1539,6 @@ fn device_rebuild_to_new_rate_retargets_the_decode() {
 
 #[test]
 fn live_worker_failure_retires_the_session_and_reports() {
-    // A started session's worker can fail after Ready — a post-EOF seek whose
-    // re-probe errors sends Failed and exits. That must retire the session and
-    // surface an Error, not leave a dead worker under a permanent silent
-    // Playing phase.
     let (sink, engine, actor_tx) = spawn_engine_with_tx();
     let mut events = engine_subscribe(&engine);
     let mut seen = Vec::new();
@@ -1789,7 +1678,6 @@ fn device_change_pause_behavior_holds_after_migration() {
         "position preserved while paused"
     );
 
-    // Resume continues where the migration left off.
     engine.send(Command::Resume);
     wait_until("phase Playing after resume", || {
         engine.status().phase == Phase::Playing
@@ -1803,10 +1691,6 @@ fn device_change_pause_behavior_holds_after_migration() {
 
 #[test]
 fn stream_stall_rebuild_keeps_playing_under_pause_behavior() {
-    // A stall (unrecoverable xrun / invalidated stream) rebuilds onto the SAME
-    // device — the pause-on-device-change behavior is about not blasting audio
-    // out of an unexpected NEW output, so it must not apply here. This was the
-    // "randomly paused, didn't change any devices" bug.
     let (sink, engine, actor_tx) = spawn_engine_with_tx();
     engine.send(Command::SetDeviceChangeBehavior(
         config::DeviceChangeBehavior::Pause,
@@ -1858,10 +1742,7 @@ impl std::io::Read for DecryptPacedReader {
         if pos >= total || buf.is_empty() {
             return Ok(0);
         }
-        // Serve what the frontier has reached and block only while it has
-        // reached nothing — a short read is the honest answer while the
-        // decryptor works on the rest, and waiting for the *whole* buffer would
-        // hang at EOF, where the frontier can never pass the file's length.
+
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let ready = self
@@ -1910,7 +1791,7 @@ fn load_paced_source(
     let frontier = Arc::new(std::sync::atomic::AtomicUsize::new(prebuffer.min(total)));
     let filler = frontier.clone();
     std::thread::spawn(move || {
-        let step = fill_rate / 100; // advance every 10ms
+        let step = fill_rate / 100;
         loop {
             let now = filler.load(std::sync::atomic::Ordering::Relaxed);
             if now >= total {
@@ -1953,9 +1834,6 @@ fn silent_pulls_against_paced_source(prebuffer: usize, fill_rate: usize) -> usiz
     let (sink, engine) = load_paced_source(prebuffer, fill_rate).expect("load ok");
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
 
-    // Drain at realtime: 4410 interleaved samples is exactly 50ms at 44.1kHz
-    // stereo. Pulling faster than realtime would empty the ring by itself and
-    // report a starvation that playback never sees.
     let mut silent = 0;
     for _ in 0..DRAIN_ROUNDS {
         std::thread::sleep(Duration::from_millis(50));
@@ -1975,7 +1853,6 @@ fn silent_pulls_against_paced_source(prebuffer: usize, fill_rate: usize) -> usiz
 /// though the producer never catches up.
 #[test]
 fn a_prebuffered_slow_source_does_not_starve_the_ring() {
-    // 3s of cushion, against a producer running at 0.8x realtime.
     let silent = silent_pulls_against_paced_source(
         3 * TEST_AUDIO_BYTES_PER_SEC,
         TEST_AUDIO_BYTES_PER_SEC * 8 / 10,

@@ -19,30 +19,7 @@ use super::clients::{VISIONOS, WEB_REMIX, YouTubeClient};
 use super::decipher;
 use super::innertube::{self, PlayerExtras};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AudioFormat {
-    Webm,
-    M4a,
-}
-
-impl AudioFormat {
-    pub fn extension(self) -> &'static str {
-        match self {
-            AudioFormat::Webm => "webm",
-            AudioFormat::M4a => "m4a",
-        }
-    }
-
-    fn from_mime(mime: &str) -> Option<AudioFormat> {
-        if mime.contains("webm") {
-            Some(AudioFormat::Webm)
-        } else if mime.contains("mp4") {
-            Some(AudioFormat::M4a)
-        } else {
-            None
-        }
-    }
-}
+use crate::stream::AudioFormat;
 
 #[derive(Clone, Debug)]
 pub struct YtStreamInfo {
@@ -90,9 +67,9 @@ async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
         {
             return Ok(saved);
         }
-        // Any stable id will do for stability's sake, so a signed-in fetch
-        // that yields none falls back to an anonymous one filed under the
-        // account: the point is that the same id comes back next launch.
+
+
+
         let fresh = match innertube::visitor_id(cookies).await {
             Ok(id) => id,
             Err(error) if cookies.is_some() => {
@@ -117,15 +94,6 @@ async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
 /// pot if the plain request was refused.
 #[tracing::instrument(name = "yt.resolve", skip(cookies), fields(video_id = %video_id, anon = cookies.is_none()))]
 pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
-    // A Premium *subscription* — not merely being signed in — is what exempts a
-    // stream from a PO token. The signal is the itag: subscribers get 774-class
-    // Opus; a signed-in *free* account gets the same 251 as anon and still 403s
-    // on deep ranges without a content pot. So only short-circuit on a Premium
-    // itag; otherwise fall through to the pot path (which ignores cookies — free
-    // accounts cap at 251 regardless, so nothing is lost).
-    // Hold a non-Premium decipher result as a graceful fallback: if no pot can
-    // be minted (e.g. minter not running / unported platform), this still plays
-    // from the start — only deep seeks 403 — which beats total failure.
     let mut decipher_fallback: Option<YtStreamInfo> = None;
     let mut decipher_err: Option<String> = None;
     if let Some(c) = cookies {
@@ -133,10 +101,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         if let Some(u) = &uid {
             seed_tier_from_db(u).await;
         }
-        // Skip the Premium decipher attempt for accounts already known to be
-        // non-Premium — but only when a pot can actually be minted (the decipher
-        // stream is our fallback when it can't). Saves a /player round-trip per
-        // track once the account's tier is learned.
+
         let skip = uid.as_deref().is_some_and(known_non_premium) && botguard::is_available();
         if !skip {
             match signed_in_with_retry(video_id, cookies).await {
@@ -154,9 +119,6 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
                     decipher_fallback = Some(info);
                 }
                 Err(e) => {
-                    // Warn, not debug: for a signed-in account this is the
-                    // path that was supposed to work, and every path after it
-                    // is an anonymous one YouTube is entitled to refuse.
                     tracing::warn!(error = %e, "signed-in stream path failed — falling back");
                     decipher_err = Some(e);
                 }
@@ -164,7 +126,6 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         }
     }
 
-    // Anonymous: VISIONOS with the kept visitor id. Plain URLs, no token.
     let visitor = match visitor_data(None).await {
         Ok(visitor) => Some(visitor),
         Err(error) => {
@@ -182,10 +143,6 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
     };
     tracing::debug!(%anonymous_err, "anonymous path failed");
 
-    // The same client with a content-bound token. yt-dlp marks it neither
-    // required nor recommended for this client, so it is asked for only
-    // once the plain request was refused: that is the one case the token
-    // can change the answer, and minting is a V8 round trip.
     let with_pot_err = if innertube::is_google_block(&anonymous_err) {
         "not attempted behind Google's abuse page".to_string()
     } else {
@@ -280,14 +237,6 @@ fn all_paths_failed(decipher: Option<&str>, anonymous: &str, with_pot: &str) -> 
 /// lesser itag (251, etc.) — even from a signed-in account — needs a content
 /// pot for deep ranges, exactly like anonymous.
 fn is_premium_itag(itag: Option<u32>) -> bool {
-    // Formats only a paid subscription unlocks: 774 (Opus ~256k), 141 (AAC
-    // 256k), 256/258 (AAC 192/384k). A free/anon account never sees these — it
-    // caps at 251/140 (~128k) — so any of them proves the account is Premium
-    // and the deciphered stream is served directly, no content pot. Only the
-    // free-tier itags fall through to the anonymous path. (Crucially:
-    // without 141 here, a Premium user playing a video that has no Opus format
-    // gets mis-tagged as free, poisoning the per-account tier cache — and with
-    // a flaky minter that breaks playback for the whole 5-min TTL window.)
     matches!(itag, Some(774 | 141 | 256 | 258))
 }
 
@@ -306,9 +255,7 @@ fn is_premium_itag(itag: Option<u32>) -> bool {
 static ACCOUNT_PREMIUM: OnceLock<Mutex<HashMap<String, (Instant, bool)>>> = OnceLock::new();
 static TIER_DB: OnceLock<db::Db> = OnceLock::new();
 const FREE_TIER_TTL: Duration = Duration::from_secs(30 * 60);
-// v2: "yt_tier" rows were poisoned by the 774-only is_premium_itag (a Premium
-// account deciphering an AAC-only track got a persisted "free" verdict, pinning
-// it to anonymous 251 for a day). New kind orphans those rows.
+
 const TIER_META_KIND: &str = "yt_tier_v2";
 
 /// Register the database used to persist account tiers. Called once at startup.
@@ -354,7 +301,7 @@ async fn seed_tier_from_db(user_id: &str) {
         .unwrap_or(0);
     let age = Duration::from_secs(now.saturating_sub(ts));
     if !premium && age >= FREE_TIER_TTL {
-        return; // stale free verdict — let the probe re-learn
+        return;
     }
     let seeded_at = Instant::now().checked_sub(age).unwrap_or_else(Instant::now);
     if let Ok(mut m) = account_premium().lock() {
@@ -364,9 +311,6 @@ async fn seed_tier_from_db(user_id: &str) {
 
 fn remember_tier(user_id: &str, premium: bool) {
     if !premium {
-        // Asymmetric trust (see ACCOUNT_PREMIUM): a known-premium account is
-        // never downgraded by a single non-premium itag — the track may just
-        // lack premium encodes. The pot path still serves THIS stream fine.
         let was_premium = account_premium()
             .lock()
             .ok()
@@ -482,8 +426,6 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         }
     }
 
-    // Prefer webm (symphonia + libopus path) over m4a (symphonia fMP4
-    // probe walks the whole file which kills startup latency).
     let (fmt, bitrate) = best_webm.or(best_m4a)?;
     let url = fmt.get("url")?.as_str()?.to_string();
     let mime = fmt.get("mimeType")?.as_str()?;
@@ -494,7 +436,7 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         .and_then(|v| v.as_str())
         .unwrap_or("?");
     tracing::info!(video_id = %vid, itag = itag.unwrap_or(0), kbps = bitrate / 1000, mime, client = client.client_name, "stream resolved (plain)");
-    // `contentLength` ships as a numeric string in adaptiveFormats.
+
     let content_length = fmt
         .get("contentLength")
         .and_then(|v| v.as_str())
@@ -621,12 +563,10 @@ async fn try_native_decipher(
     cookies: Option<&str>,
 ) -> Result<YtStreamInfo, String> {
     let player = decipher::player_js(video_id).await?;
-    // The same device identity a browser would present with these cookies;
-    // a signed-in request with none is the odd one out.
+
     let visitor = match visitor_data(cookies).await {
         Ok(visitor) => Some(visitor),
-        // Proceeding without one is the state that draws challenges, so it
-        // is not something to do quietly.
+
         Err(error) => {
             tracing::warn!(%error, "no visitor id for the signed-in player call");
             None

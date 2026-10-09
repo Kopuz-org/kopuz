@@ -1,5 +1,6 @@
-//! FavoritesService: the optimistic toggle and the background reconciler,
-//! ported from `hooks/src/favorites.rs` and `hooks/src/use_sync_task.rs`.
+//! Optimistic favorite updates and background reconciliation with the source.
+
+use crate::error::source_error;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -16,17 +17,6 @@ mod pull;
 
 const NUDGE_DEBOUNCE: Duration = Duration::from_secs(2);
 const BACKOFF_CAP_SECS: u64 = 30 * 60;
-
-fn source_error(error: server::source::SourceError) -> ApiError {
-    use server::source::SourceError;
-    match &error {
-        SourceError::Unsupported(what) => ApiError::unsupported(*what),
-        SourceError::Auth => ApiError::new(ErrorCode::SourceAuthExpired, error.to_string()),
-        SourceError::Connectivity => ApiError::new(ErrorCode::SourceUnreachable, error.to_string()),
-        SourceError::InvalidInput(message) => ApiError::invalid_input(message.clone()),
-        SourceError::Backend(message) => ApiError::internal(message.clone()),
-    }
-}
 
 pub struct FavoritesService {
     db: db::Db,
@@ -165,14 +155,13 @@ impl FavoritesService {
                 .active_source
                 .clone();
             ctx.progress("reconciling", None, None, None);
-            let reconciled = service.reconcile(SyncReason::Manual).await;
-            // An explicit sync imports even when the staleness gate would
-            // have skipped it; that is what the user asked for.
+            service.reconcile(SyncReason::Manual).await?;
+
             service.pull(Some(&ctx), true).await?;
             if !ctx.cancelled() {
                 crate::auto_sync::mark_synced(&service.db, JobKind::FavoritesSync, &source).await;
             }
-            reconciled
+            Ok(())
         })
     }
 
@@ -207,9 +196,7 @@ impl FavoritesService {
         tokio::spawn(async move {
             let mut config_rx = service.session.config_watch();
             let mut consecutive_failures: u32 = 0;
-            // Switching source is the one config change worth waking for: the
-            // new source's favorites have never been imported, and waiting out
-            // an interval to notice would leave the page empty for minutes.
+
             let mut last_source = config_rx.borrow().active_source.clone();
             loop {
                 let (has_server, base_secs) = {
@@ -244,8 +231,8 @@ impl FavoritesService {
                         let current = config_rx.borrow().active_source.clone();
                         let switched = current != last_source;
                         last_source = current;
-                        // Any other config change goes back round to re-read
-                        // the interval rather than costing a network call.
+
+
                         if !switched {
                             continue;
                         }
@@ -268,9 +255,7 @@ impl FavoritesService {
                 match service.reconcile(reason).await {
                     Ok(()) => {
                         consecutive_failures = 0;
-                        // Import what the remote holds, if that has not
-                        // happened yet: a fresh sign-in should fill the
-                        // favorites page without anyone asking it to.
+
                         if let Err(error) = service.pull_unattended().await {
                             tracing::debug!(%error, "favorites import skipped");
                         }

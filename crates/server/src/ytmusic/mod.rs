@@ -82,10 +82,6 @@ impl YouTubeMusicClient {
     }
 
     pub fn with_cookies(cookies: String) -> Self {
-        // Normalize the empty string (anonymous-mode marker, stored as
-        // access_token: Some("")) to None so every `self.cookies` check
-        // — auth-only guards, is_anonymous, the public-surface
-        // unwrap_or("") — treats anonymous consistently.
         Self {
             cookies: (!cookies.is_empty()).then_some(cookies),
         }
@@ -162,9 +158,6 @@ impl YouTubeMusicClient {
         .await
     }
 
-    // Mutations are inherently auth-only — keep the explicit "not
-    // signed in" error so callers (favorite toggle, add-to-playlist
-    // modal) can surface a clear "sign in to enable" message.
     pub async fn like_video(&self, video_id: &str) -> Result<(), String> {
         let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::like_video(video_id, cookies).await
@@ -209,9 +202,6 @@ impl YouTubeMusicClient {
     where
         F: FnMut(Vec<Track>),
     {
-        // Liked Music is auth-only — anonymous callers get an empty
-        // list rather than an error so favorites views render the
-        // standard empty state without surfacing a stack trace.
         let Some(cookies) = self.cookies.as_deref() else {
             let _ = &mut on_page;
             return Ok(());
@@ -220,9 +210,7 @@ impl YouTubeMusicClient {
         if !has_playlist_shelf(&resp) {
             return Err("Sign-in prompt returned — cookies expired".to_string());
         }
-        // YT's continuation pagination commonly repeats one or more tracks at page
-        // boundaries; dedup against a video-id set across the entire stream so the
-        // callback always sees unique tracks.
+
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         let dedup =
             |page: Vec<Track>, seen: &mut std::collections::HashSet<String>| -> Vec<Track> {
@@ -243,10 +231,7 @@ impl YouTubeMusicClient {
             let page = innertube::browse_continuation(&token, cookies).await?;
             let (more, next_token) = search::walk_playlist_continuation(&page);
             let more = dedup(more, &mut seen);
-            // An empty page after dedup means YT either gave us only
-            // duplicates of already-seen tracks or no new content. Even
-            // if it returned a continuation token, looping again would
-            // hammer the same endpoint without progress, so stop.
+
             if more.is_empty() {
                 break;
             }
@@ -289,11 +274,6 @@ impl YouTubeMusicClient {
         player::resolve(video_id, self.cookies.as_deref()).await
     }
 
-    // Public surfaces — work anonymously. `cookies.as_deref().unwrap_or("")`
-    // hands an empty header to the parser, which the lower-level
-    // discover/mix `post` and innertube::browse now interpret as "skip
-    // SAPISID auth headers" (see browse_maybe_auth / discover::post).
-
     /// Whether this client has cookies — i.e. the user is signed in rather than
     /// browsing YT anonymously.
     pub fn is_authenticated(&self) -> bool {
@@ -316,14 +296,14 @@ impl YouTubeMusicClient {
         .await
     }
 
-    pub async fn discover_home(&self) -> Result<discover::DiscoverHome, String> {
+    pub async fn discover_home(&self) -> Result<crate::catalog::DiscoverHome, String> {
         discover::fetch_home(self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn discover_continuation(
         &self,
         token: &str,
-    ) -> Result<discover::DiscoverHome, String> {
+    ) -> Result<crate::catalog::DiscoverHome, String> {
         discover::fetch_continuation(token, self.cookies.as_deref().unwrap_or("")).await
     }
 
@@ -339,7 +319,10 @@ impl YouTubeMusicClient {
         discover::fetch_album(browse_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
-    pub async fn fetch_artist(&self, channel_id: &str) -> Result<discover::YtArtist, String> {
+    pub async fn fetch_artist(
+        &self,
+        channel_id: &str,
+    ) -> Result<crate::catalog::CatalogArtist, String> {
         discover::fetch_artist(channel_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
@@ -349,8 +332,6 @@ impl YouTubeMusicClient {
     /// callers and real playlist content for signed-in ones.
     #[tracing::instrument(name = "yt.validate", skip_all)]
     pub async fn validate_cookies(&self) -> Result<(), String> {
-        // Anonymous mode has no cookies to validate — succeed silently
-        // so callers (settings probe, keepalive) treat it as healthy.
         let Some(cookies) = self.cookies.as_deref() else {
             return Ok(());
         };

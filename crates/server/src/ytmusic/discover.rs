@@ -4,58 +4,14 @@
 //! back per page; the section-list-level continuation token feeds the
 //! next three.
 
+use crate::catalog::{CatalogArtist, DiscoverHome, DiscoverItem, DiscoverShelf};
+
 use reader::models::{ArtistCredit, Track};
 use serde_json::{Value, json};
 
 use super::clients::{ORIGIN_YOUTUBE_MUSIC, WEB_REMIX};
 use super::innertube::{http_client, sapisid_hash};
 use super::search::synthesize_album_id;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DiscoverHome {
-    pub shelves: Vec<DiscoverShelf>,
-    pub continuation: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct DiscoverShelf {
-    pub title: String,
-    pub strapline: Option<String>,
-    pub more_browse_id: Option<String>,
-    pub items: Vec<DiscoverItem>,
-    /// Render as a vertical song list (with row numbers / duration)
-    /// instead of a horizontal tile carousel. Only set true for the
-    /// artist-page "Top songs" shelf — discover-home shelves stay
-    /// horizontal.
-    pub is_song_list: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum DiscoverItem {
-    Song(Box<Track>),
-    Playlist {
-        playlist_id: String,
-        title: String,
-        subtitle: String,
-        thumbnail: Option<String>,
-    },
-    Album {
-        browse_id: String,
-        title: String,
-        subtitle: String,
-        thumbnail: Option<String>,
-    },
-    Artist {
-        channel_id: String,
-        name: String,
-        thumbnail: Option<String>,
-    },
-    Mood {
-        browse_id: String,
-        title: String,
-        thumbnail: Option<String>,
-    },
-}
 
 #[tracing::instrument(name = "yt.discover_home", skip(cookies))]
 pub async fn fetch_home(cookies: &str) -> Result<DiscoverHome, String> {
@@ -111,28 +67,8 @@ pub async fn fetch_album_tracks(browse_id: &str, cookies: &str) -> Result<Vec<Tr
     fetch_album(browse_id, cookies).await.map(|a| a.tracks)
 }
 
-/// Verified against /tmp/yt-artist-UC*.json via yttools/artist_probe.
-///
-/// `/browse?browseId=UC…` returns a `musicImmersiveHeaderRenderer` at
-/// /header (with banner + subscribers + a shuffle play button) and a
-/// section list whose entries are either `musicShelfRenderer` (the
-/// "Top songs" list) or `musicCarouselShelfRenderer` (Albums / Singles
-/// & EPs / Videos / Playlists / From your library / Fans might also
-/// like). Carousel tiles are the same `musicTwoRowItemRenderer` shape
-/// used in Discover home, so we reuse the existing tile classifier.
-#[derive(Debug, Clone, PartialEq)]
-pub struct YtArtist {
-    pub channel_id: String,
-    pub name: String,
-    pub subscribers: Option<String>,
-    pub description: Option<String>,
-    pub banner_thumbnail: Option<String>,
-    pub shuffle_playlist_id: Option<String>,
-    pub sections: Vec<DiscoverShelf>,
-}
-
 #[tracing::instrument(name = "yt.fetch_artist", skip(cookies), fields(channel_id = %channel_id))]
-pub async fn fetch_artist(channel_id: &str, cookies: &str) -> Result<YtArtist, String> {
+pub async fn fetch_artist(channel_id: &str, cookies: &str) -> Result<CatalogArtist, String> {
     let body = build_browse_body(Some(channel_id));
     let resp = post(
         &format!("{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"),
@@ -141,16 +77,14 @@ pub async fn fetch_artist(channel_id: &str, cookies: &str) -> Result<YtArtist, S
     )
     .await?;
     let artist = parse_artist(channel_id, &resp);
-    // Ghost channels exist: songs (and even the artists search, typed
-    // MUSIC_PAGE_TYPE_UNKNOWN) link them, but the browse returns an empty
-    // shell — no header, no contents. Failing beats rendering a blank page.
+
     if artist.name.is_empty() && artist.sections.is_empty() {
         return Err("YouTube Music has no page for this artist".to_string());
     }
     Ok(artist)
 }
 
-fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
+fn parse_artist(channel_id: &str, resp: &Value) -> CatalogArtist {
     let header = find_artist_header(resp);
 
     let name = header
@@ -185,7 +119,7 @@ fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
         }
     }
 
-    YtArtist {
+    CatalogArtist {
         channel_id: channel_id.to_string(),
         name,
         subscribers,
@@ -197,7 +131,6 @@ fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
 }
 
 fn find_artist_header(resp: &Value) -> Option<&Value> {
-    // The immersive header sits at the root, not in the section list.
     if let Some(h) = resp.pointer("/header/musicImmersiveHeaderRenderer") {
         return Some(h);
     }
@@ -341,11 +274,6 @@ fn parse_artist_song_list(section: &Value) -> Option<DiscoverShelf> {
 }
 
 fn parse_artist_song_row(row: &Value) -> Option<Track> {
-    // Classify every flex column by what it actually carries — the
-    // artist Top Songs shelf has 4 columns in order title/artist/
-    // play-count/album, NOT the title/artist/album layout my old
-    // positional parser assumed. We pick out each role by tag, so
-    // future re-orderings or extra columns just work.
     let cols = classify_flex_columns(row);
     let mut video_id: Option<String> = None;
     let mut title = String::new();
@@ -470,9 +398,7 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
             let Some(row) = item.get("musicResponsiveListItemRenderer") else {
                 continue;
             };
-            // OLAK… playlist id lives on the Title column's watch
-            // endpoint — `classify_flex_columns` pulls it out by name,
-            // no /flexColumns/N positional dive.
+
             if audio_pid_from_rows.is_none() {
                 for c in classify_flex_columns(row) {
                     if let RowColumn::Title {
@@ -541,12 +467,6 @@ fn album_section_contents(resp: &Value) -> Vec<&Value> {
 }
 
 fn find_album_header<'a>(resp: &'a Value, sections: &[&'a Value]) -> Option<&'a Value> {
-    // Two-pass: prefer the vaxry Responsive header across all
-    // sections before falling back to the legacy Detail header. A
-    // single-pass interleaved scan would let a stray Detail in
-    // section[0] win over a Responsive in section[1] during a YT
-    // layout-migration window, silently dropping artist / audio
-    // playlist id (Detail header has neither).
     for section in sections {
         if let Some(h) = section.get("musicResponsiveHeaderRenderer") {
             return Some(h);
@@ -557,7 +477,7 @@ fn find_album_header<'a>(resp: &'a Value, sections: &[&'a Value]) -> Option<&'a 
             return Some(h);
         }
     }
-    // Legacy layout puts the header object at the response root.
+
     if let Some(header_obj) = resp.pointer("/header").and_then(|v| v.as_object()) {
         for (key, value) in header_obj {
             if key.ends_with("HeaderRenderer") {
@@ -570,8 +490,7 @@ fn find_album_header<'a>(resp: &'a Value, sections: &[&'a Value]) -> Option<&'a 
 
 fn pick_album_artist(header: Option<&Value>) -> Option<ArtistCredit> {
     let header = header?;
-    // New layout splits these: straplineTextOne is the artist (with a
-    // UC… browseEndpoint), subtitle is "<Kind> • <Year>" with no artist.
+
     let strapline = header
         .pointer("/straplineTextOne/runs")
         .and_then(|v| v.as_array());
@@ -588,10 +507,7 @@ fn pick_album_artist(header: Option<&Value>) -> Option<ArtistCredit> {
             return Some(ArtistCredit::unlinked(name));
         }
     }
-    // Legacy layout crammed "<Kind> • <Artist> • <Year>" into subtitle.
-    // Use `let else continue` instead of `?` so a single empty/structural
-    // run in the middle doesn't abort the whole scan and miss the real
-    // artist later in the array.
+
     let arr = header
         .pointer("/subtitle/runs")
         .and_then(|v| v.as_array())?;
@@ -730,7 +646,6 @@ fn parse_album_row(
     let duration = fixed_columns_duration(row).or(flex_duration).unwrap_or(0);
     let track_number = row_index_text(row).and_then(|s| s.parse::<u32>().ok());
 
-    // A row with no artist column of its own belongs to the album's artist.
     let credits: Vec<ArtistCredit> = match (row_credits.is_empty(), album_artist) {
         (false, _) => row_credits,
         (true, Some(credit)) => vec![credit.clone()],
@@ -813,18 +728,11 @@ async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
     let client = WEB_REMIX;
     let mut req = http_client()
         .post(url)
-        .header("User-Agent", client.user_agent)
-        .header("Content-Type", "application/json")
-        .header("X-Goog-Api-Format-Version", "1")
-        .header("X-YouTube-Client-Name", client.client_id)
-        .header("X-YouTube-Client-Version", client.client_version)
-        .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
-        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
-    // Attach auth only when we have cookies that actually yield a
-    // SAPISIDHASH. Empty cookies (anonymous mode) or a partial/expired
-    // jar with no SAPISID both fall through to an anonymous request —
-    // discover still returns generic recommendations rather than
-    // hard-failing with "SAPISID missing".
+        .headers(super::innertube::request_headers(
+            client,
+            ORIGIN_YOUTUBE_MUSIC,
+        ));
+
     if !cookies.is_empty()
         && let Some(auth) = sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC)
     {
@@ -987,9 +895,6 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
 }
 
 fn build_song_track(video_id: &str, title: &str, subtitle: &str, thumbnail: Option<&str>) -> Track {
-    // Subtitle for songs/videos is typically "Artist • N views" — take
-    // the first run as the primary artist; everything after the first
-    // dot is metadata that doesn't belong in the artist field.
     let primary_artist = subtitle.split('•').next().unwrap_or("").trim().to_string();
     let artists = if primary_artist.is_empty() {
         Vec::new()
@@ -1030,14 +935,6 @@ fn best_thumbnail(r: &Value) -> Option<String> {
         .and_then(|t| t.get("url").and_then(|u| u.as_str()))
         .map(|s| s.to_string())
 }
-
-// ============================================================
-//  Iterate-by-name helpers. Every positional /N/ pointer in this
-//  module goes through one of these so the parser doesn't break the
-//  moment YT reorders a column, a tab, or a run. Verified end-to-end
-//  via yttools/parser_v2_probe against live home/album/artist
-//  responses before porting.
-// ============================================================
 
 /// Join every `text` fragment in a runs array. Replaces
 /// `.pointer("…/runs/0/text")` reads that silently drop multi-run text.
@@ -1152,13 +1049,7 @@ fn classify_flex_columns(row: &Value) -> Vec<RowColumn> {
             out.push(RowColumn::Empty);
             continue;
         }
-        // Title check FIRST against runs[0] specifically — that's where
-        // the watchEndpoint lives in every observed shape. Looking at
-        // any run's navigationEndpoint (the prior `find_map` approach)
-        // lost rows whose title was multi-run with an inline artist
-        // mention: run[0] had the title text but no nav endpoint, and
-        // run[1]'s UC… browseEndpoint won, tagging the column as Artist
-        // and silently dropping the entire row.
+
         let first_nav = runs.first().and_then(|r| r.get("navigationEndpoint"));
         if let Some(nav) = first_nav
             && let Some(vid) = nav
@@ -1176,10 +1067,7 @@ fn classify_flex_columns(row: &Value) -> Vec<RowColumn> {
             });
             continue;
         }
-        // Artist / Album: any run carrying a typed browseEndpoint
-        // wins. Also recognise the album column's OLAK5uy_… audio
-        // playlist endpoint (some artist Top Songs rows link the
-        // album cell to its playlist instead of the MPRE browseId).
+
         let mut classified = false;
         for r in runs {
             let Some(nav) = r.get("navigationEndpoint") else {
@@ -1238,9 +1126,6 @@ fn is_play_count_text(s: &str) -> bool {
 fn fixed_columns_duration(row: &Value) -> Option<u64> {
     let cols = row.get("fixedColumns").and_then(|v| v.as_array())?;
     for col in cols {
-        // `let else continue` — a textless column (e.g. a like-toggle
-        // fixedColumn before the duration column) must not abort the
-        // whole scan; iterate until we find one that parses as mm:ss.
         let Some(text) = runs_text(col, "/musicResponsiveListItemFixedColumnRenderer/text/runs")
         else {
             continue;
@@ -1260,10 +1145,6 @@ fn row_index_text(row: &Value) -> Option<String> {
 }
 
 fn normalize_yt_thumbnail(url: String) -> String {
-    // Photo-CDN URLs end with =wNNN-hNNN-... and accept rewriting to a
-    // bigger size. Mix-art URLs (music.youtube.com/image/mixart?r=…)
-    // and any other token-style URL can't take that suffix; appending
-    // it breaks the request.
     if let Some(idx) = url.rfind("=w")
         && url[idx + 2..]
             .chars()

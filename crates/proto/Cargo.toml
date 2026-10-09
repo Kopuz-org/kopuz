@@ -20,7 +20,6 @@ api = { workspace = true }
 config = { workspace = true }
 tonic = { workspace = true }
 prost = { workspace = true }
-serde_json = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 tokio = { workspace = true, features = ["net", "time"] }

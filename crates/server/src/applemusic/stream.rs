@@ -78,7 +78,6 @@ fn select_asset(song: &serde_json::Value) -> Result<Asset, String> {
 
     let assets = song["assets"].as_array().ok_or("no assets")?;
 
-    // A lone flavourless asset is an upload rather than one of Apple's encodes.
     if let [only] = assets.as_slice()
         && only["flavor"].as_str().is_none()
         && let Some(url) = only["URL"].as_str().filter(|u| !u.is_empty())
@@ -157,9 +156,7 @@ pub async fn get_web_playback(
                 .ok_or("catalog asset carried no Widevine KEY")?;
             Ok(WebPlayback::Encrypted(info))
         }
-        // Uploaded audio has no encode behind it, so it may be the file itself
-        // rather than a playlist. Try to read it as one; if there's no KEY there
-        // is no DRM to unwrap and the URL is already what we want to play.
+
         Asset::Uploaded(url) => match read_encrypted_playlist(&client, &url).await? {
             Some(info) => {
                 tracing::info!("am.webplayback: uploaded asset is encrypted");
@@ -199,7 +196,6 @@ async fn read_encrypted_playlist(
         return Ok(None);
     };
 
-    // KEY URI is "uriPrefix,kidBase64".
     let key_uri = media_playlist
         .segments
         .first()
@@ -212,7 +208,6 @@ async fn read_encrypted_playlist(
 
     tracing::debug!("am.webplayback: uri_prefix = {uri_prefix}, kid = {kid_base64}");
 
-    // Build the file download URL from the MAP URI
     let base_url = asset_url
         .rsplit_once('/')
         .map(|(base, _)| base)
@@ -319,9 +314,6 @@ async fn load_license(
     if let Some(err_code) = license_json["errorCode"].as_i64()
         && err_code != 0
     {
-        // Apple answers 200 with the failure in the body, and these codes aren't
-        // documented anywhere — so log the whole thing rather than just the
-        // number, which on its own says nothing about what to fix.
         tracing::warn!(
             "am.license: rejected with errorCode {err_code} for adamId={adam_id} \
              (isLibrary={}), body: {resp_body}",
@@ -369,7 +361,7 @@ pub async fn resolve_and_decrypt(
     progress: Option<crate::stream::stream_buffer::BufferProgressCallback>,
 ) -> Result<super::progressive::ProgressiveTrack, String> {
     let bearer_token = auth::get_bearer_token().await?;
-    // Resolve the id to a catalog Adam id if needed (library ids don't work with web playback)
+
     let api = crate::applemusic::AppleMusicApi::new(
         Some(media_user_token.to_string()),
         storefront,
@@ -395,8 +387,6 @@ pub async fn resolve_and_decrypt(
             }
         }
         CachePolicy::Ciphertext => {
-            // Only a hit when both halves are present: ciphertext without its key
-            // info can't be licensed, and would have to re-resolve everything.
             if let Some(key) = read_sidecar(&cache_path)
                 && let Ok(cached) = tokio::fs::read(&cache_path).await
                 && !cached.is_empty()
@@ -423,8 +413,7 @@ pub async fn resolve_and_decrypt(
 
     let playback = match get_web_playback(&adam_id, &bearer_token, media_user_token).await? {
         WebPlayback::Encrypted(info) => info,
-        // An uploaded library track: the user's own audio, no licence to fetch
-        // and nothing to decrypt. Cache it like any other so a replay is local.
+
         WebPlayback::Plain { file_url } => {
             tracing::info!("am.stream: downloading unencrypted library asset from {file_url}");
             let bytes = download_asset(&file_url, media_user_token).await?;
@@ -452,10 +441,6 @@ pub async fn resolve_and_decrypt(
         playback.kid_base64
     );
 
-    // The bytes don't depend on the licence — the asset URL is already in hand and
-    // the CDM is only needed to *read* what arrives — so the body streams into the
-    // track's buffer while the licence round-trip is in flight. Playback starts on
-    // the first fragment rather than the last.
     let track = match open_asset_stream(&playback.file_url, media_user_token).await? {
         AssetStream::Sized { response, total } => {
             let (track, sink) = super::progressive::ProgressiveTrack::streaming(total);
@@ -466,8 +451,7 @@ pub async fn resolve_and_decrypt(
             tokio::spawn(pump(response, sink, total, tee));
             track
         }
-        // No Content-Length: nothing to size a buffer with, so fall back to
-        // downloading the whole body before starting, as this used to do.
+
         AssetStream::Unsized { response } => {
             let bytes = read_whole_body(response).await?;
             let total = bytes.len() as u64;
@@ -479,8 +463,6 @@ pub async fn resolve_and_decrypt(
         }
     };
 
-    // Borrow the CDM from an installed browser. Its device key stays sealed, so
-    // no key material ships with kopuz.
     let phase = std::time::Instant::now();
     let cdm = super::widevine::Cdm::open_system().await?;
     tracing::info!(
@@ -488,11 +470,9 @@ pub async fn resolve_and_decrypt(
         phase.elapsed().as_secs_f64()
     );
     let phase = std::time::Instant::now();
-    // Held only for challenge → licence → update. Decryption runs without it, so
-    // a track already playing never blocks the next one from starting.
+
     let license = cdm.begin_license().await;
-    // The session outlives the licence exchange: it holds the content keys, so it
-    // travels with the track and is closed when the track is done with it.
+
     let (license_request, cdm_session) = cdm.challenge(&license, &init_data)?;
     tracing::info!(
         "am.timing: challenge in {:.2}s (includes waiting for the licence lock)",
@@ -530,12 +510,8 @@ pub async fn resolve_and_decrypt(
         tracing::debug!("am.stream: could not write the cache sidecar ({e})");
     }
 
-    // Hands over the keys and waits only for the init segment plus the prebuffer,
-    // which by now has usually had the whole licence round-trip to arrive in.
     let plaintext_cache = (cache_policy() == CachePolicy::Decrypted).then_some(cache_path);
     track.begin_decrypt(cdm, cdm_session, key_id, progress, move |decrypted| {
-        // Under the ciphertext policy the download already teed itself to disk;
-        // writing the plaintext too would defeat the point of it.
         if let Some(path) = plaintext_cache {
             store_decrypted_blocking(&path, &decrypted);
         }
@@ -581,7 +557,7 @@ async fn licence_and_decrypt(
     let (track, sink) = super::progressive::ProgressiveTrack::streaming(total);
     sink.push(&encrypted);
     sink.finish();
-    // Already cached, so nothing to write when it finishes.
+
     track.begin_decrypt(cdm, cdm_session, key_id, progress, |_| {})?;
     Ok(track)
 }
@@ -607,8 +583,6 @@ pub async fn download_decrypted(
         .await
         .map_err(|e| format!("resolve for download: {e}"))?;
 
-    // Decryption is CPU-bound and the wait is a blocking one, so neither belongs
-    // on a runtime worker.
     tokio::task::spawn_blocking(move || {
         track.request_all();
         track.wait_until_decrypted()
@@ -669,15 +643,10 @@ async fn pump(
 ) {
     let started = std::time::Instant::now();
     let mut got = 0u64;
-    // `.part` until the body completes, so an interrupted download can't be
-    // mistaken for a cache entry.
+
     let staging = tee.as_ref().map(|p| p.with_extension("part"));
     let mut file = match &staging {
         Some(path) => {
-            // Nothing else on this policy creates the directory — the plaintext
-            // path does it in `store_decrypted_blocking`, which this one skips
-            // by design. Without it every write here fails on a fresh install
-            // and the cache silently never populates.
             if let Some(dir) = path.parent()
                 && let Err(e) = tokio::fs::create_dir_all(dir).await
             {
@@ -718,11 +687,6 @@ async fn pump(
         }
     }
 
-    // A body that simply stops is not an error on the connection, so the loop
-    // above ends the same way a complete one does. The buffer was sized to
-    // `total` and zero-filled, so finishing here would publish the missing tail
-    // as silence — and on the decrypted-cache platforms that silence is then
-    // written to disk and replayed on every later listen.
     if got < total {
         sink.fail(format!("asset truncated: {got}/{total} bytes"));
         if let Some(path) = &staging {
@@ -835,8 +799,7 @@ fn write_sidecar(audio: &std::path::Path, info: &CachedKeyInfo) -> std::io::Resu
 fn read_sidecar(audio: &std::path::Path) -> Option<CachedKeyInfo> {
     let raw = std::fs::read(sidecar_path(audio)).ok()?;
     let info: CachedKeyInfo = serde_json::from_slice(&raw).ok()?;
-    // A half-written sidecar is worse than none: it would send a licence request
-    // that can't decrypt anything.
+
     (!info.kid_base64.is_empty() && !info.uri_prefix.is_empty()).then_some(info)
 }
 
@@ -952,8 +915,6 @@ mod tests {
         let audio = dir.join("1234.m4a");
         let (_track, sink) = super::super::progressive::ProgressiveTrack::streaming(1024);
 
-        // Stand in for `pump`'s tee: write a staging file, then discard it because
-        // the body never reached `total`.
         let staging = audio.with_extension("part");
         std::fs::write(&staging, b"partial").unwrap();
         sink.fail("connection reset".to_string());
@@ -966,7 +927,6 @@ mod tests {
 
     #[test]
     fn library_ids_are_told_apart_from_catalog_ids() {
-        // The id that sent us down the wrong dispatch.
         assert!(is_library_id("i.ZOMr5KaurEbG7lz"));
         assert!(is_library_id("l.abc123"));
         assert!(is_library_id("p.playlist-1"));

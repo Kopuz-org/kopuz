@@ -81,13 +81,13 @@ pub(super) fn SettingsNavigation(
         nav {
             class: "settings-fan",
             aria_label: i18n::t("settings"),
-            // The category strip owns its scroll gesture, including at its edge.
+
             ontouchstart: move |evt| evt.stop_propagation(),
             div { class: "settings-fan-disc",
                 SettingsFanItem {
                     category: SettingsCategory::General,
                     selected,
-                    label: i18n::t("general").to_string(),
+                    label: SettingsCategory::General.title(),
                     icon: "fa-sliders",
                     angle: "-78.75deg",
                     label_x: "12.92%",
@@ -98,7 +98,7 @@ pub(super) fn SettingsNavigation(
                 SettingsFanItem {
                     category: SettingsCategory::Customization,
                     selected,
-                    label: i18n::t("appearance").to_string(),
+                    label: SettingsCategory::Customization.title(),
                     icon: "fa-paintbrush",
                     angle: "-56.25deg",
                     label_x: "36.81%",
@@ -109,7 +109,7 @@ pub(super) fn SettingsNavigation(
                 SettingsFanItem {
                     category: SettingsCategory::Library,
                     selected,
-                    label: i18n::t("library").to_string(),
+                    label: SettingsCategory::Library.title(),
                     icon: "fa-music",
                     angle: "-33.75deg",
                     label_x: "55.08%",
@@ -120,7 +120,7 @@ pub(super) fn SettingsNavigation(
                 SettingsFanItem {
                     category: SettingsCategory::Connectivity,
                     selected,
-                    label: i18n::t("connectivity").to_string(),
+                    label: SettingsCategory::Connectivity.title(),
                     icon: "fa-satellite-dish",
                     angle: "-11.25deg",
                     label_x: "64.98%",
@@ -131,7 +131,7 @@ pub(super) fn SettingsNavigation(
                 SettingsFanItem {
                     category: SettingsCategory::Downloads,
                     selected,
-                    label: i18n::t("offline_downloads").to_string(),
+                    label: SettingsCategory::Downloads.title(),
                     icon: "fa-cloud-arrow-down",
                     angle: "11.25deg",
                     label_x: "64.98%",
@@ -142,7 +142,7 @@ pub(super) fn SettingsNavigation(
                 SettingsFanItem {
                     category: SettingsCategory::Metadata,
                     selected,
-                    label: i18n::t("metadata").to_string(),
+                    label: SettingsCategory::Metadata.title(),
                     icon: "fa-tags",
                     angle: "33.75deg",
                     label_x: "55.08%",
@@ -153,7 +153,7 @@ pub(super) fn SettingsNavigation(
                 SettingsFanItem {
                     category: SettingsCategory::Player,
                     selected,
-                    label: i18n::t("player_settings").to_string(),
+                    label: SettingsCategory::Player.title(),
                     icon: "fa-wave-square",
                     angle: "56.25deg",
                     label_x: "36.81%",
@@ -165,7 +165,7 @@ pub(super) fn SettingsNavigation(
                     SettingsFanItem {
                         category: SettingsCategory::Tools,
                         selected,
-                        label: i18n::t("logs").to_string(),
+                        label: SettingsCategory::Tools.title(),
                         icon: "fa-screwdriver-wrench",
                         angle: "78.75deg",
                         label_x: "12.92%",

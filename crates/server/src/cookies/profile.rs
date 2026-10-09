@@ -16,9 +16,6 @@ pub fn profile_dir(prefix: &str, server_id: &str) -> PathBuf {
     };
     directories::ProjectDirs::from("moe", "kopuz", "kopuz")
         .map(|d| {
-            // Windows: profiles must live in Local AppData, not Roaming
-            // (`config_dir()`) — a OneDrive-synced Roaming profile locks the
-            // browser's files and every page hangs.
             #[cfg(target_os = "windows")]
             let base = d.data_local_dir();
             #[cfg(not(target_os = "windows"))]

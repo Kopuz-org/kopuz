@@ -126,10 +126,6 @@ pub fn VirtualScrollView(
     #[props(default)] on_mouse_move: Option<EventHandler<MouseEvent>>,
     #[props(default)] bottom_content: Option<Element>,
 ) -> Element {
-    // The mount-time restore below can race the async row count: at mount the
-    // list height is ~0, so the browser clamps scrollTop to 0, and once the
-    // spacer grows the viewport sits on a blank pad. Re-apply the restore once
-    // when the spacer-driving pads first become non-zero.
     let mut mounted = use_signal(|| false);
     let mut restored = use_signal(|| false);
     let pad_total = use_memo(use_reactive!(|(top_pad, bottom_pad)| top_pad + bottom_pad));
@@ -149,8 +145,7 @@ pub fn VirtualScrollView(
         div {
             id: "{id}",
             class: "{class}",
-            // Spacer and row replacement already preserve absolute positions.
-            // Browser anchoring can otherwise turn those edits into more scrolls.
+
             style: "overflow-anchor: none;",
             onmounted: move |event| {
                 spawn(async move {

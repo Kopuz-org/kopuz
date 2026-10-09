@@ -65,8 +65,7 @@ pub fn start() -> Result<&'static Core, String> {
                 };
                 serve_socket(core).await;
             });
-            // The audio engine owns threads that never finish, so dropping the
-            // runtime here would block forever on teardown.
+
             runtime.shutdown_background();
         })
         .map_err(|error| format!("could not start the core thread: {error}"))?;
@@ -128,7 +127,7 @@ pub fn shutdown() {
     };
     let session = core.session.clone();
     let config = core.config_service.clone();
-    // Dioxus forbids block_on inside its runtime, so the flush gets a thread.
+
     let flush = std::thread::spawn(move || {
         let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
             .enable_all()

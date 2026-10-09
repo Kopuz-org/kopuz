@@ -53,8 +53,6 @@ pub fn DiscoverPage(
     let mut error = use_signal(|| None::<String>);
 
     use_effect(move || {
-        // Read inside the effect: capabilities arrive with the source list, so
-        // the first render can say "no" and the load has to follow the answer.
         if !caps().discover {
             initial_loading.set(false);
             return;
@@ -266,7 +264,7 @@ fn SongListShelf(
                     button {
                         class: "text-xs font-bold text-white/60 hover:text-white cursor-pointer transition-colors",
                         onclick: move |_| {
-                            // A song list's "show all" opens more of the same songs.
+
                             on_select_playlist.call((
                                 CatalogItemKind::Playlist,
                                 more.clone(),
@@ -279,7 +277,7 @@ fn SongListShelf(
             }
             div { class: "flex flex-col",
                 {
-                    // Shared menu / playing state across the rows.
+
                     let mut active_menu_key = use_signal(|| None::<String>);
                     let mut current_playing_key = use_signal(|| None::<String>);
                     let keys = keys_of(&songs);
@@ -304,9 +302,7 @@ fn SongListShelf(
                                         hide_delete: true,
                                         on_play: move |_| {
                                             current_playing_key.set(Some(key_for_play.clone()));
-                                            // Top songs is a preview: clear the tile
-                                            // tag so no album or playlist card claims
-                                            // the pause overlay while one of these plays.
+
                                             now_playing.set(None);
                                             ctrl.set_queue_keys(
                                                 keys.clone(),
@@ -483,8 +479,7 @@ fn play_catalog(
                     }
                 }
             }
-            // A run that broke mid-way leaves a truncated list; caching it
-            // would poison every later click on the same tile.
+
             if complete && started {
                 cache.write().insert(id, collected);
             }
@@ -529,15 +524,13 @@ fn Card(
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut cache = use_context::<DiscoverPrefetchCache>().0;
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
-    // Per-tile hover gate that survives across renders, so the prefetch task
-    // can tell whether the cursor is still here after the debounce.
+
     let mut hover_armed = use_signal(|| false);
     let is_this_source = match (&source_id, now_playing.read().as_ref()) {
         (Some(sid), Some(active)) => sid == active,
         _ => false,
     };
-    // Three icon states: play, spinner while this tile is fetching, pause once
-    // audio is actually running.
+
     let is_playing = *ctrl.is_playing.read();
     let is_loading = *ctrl.is_loading.read();
     let show_loading = is_this_source && is_loading;
@@ -556,8 +549,7 @@ fn Card(
                 let prefetch_span = tracing::info_span!("discover.prefetch", id = %id);
                 let api = hooks::consume_api();
                 spawn(async move {
-                    // Short delay so a cursor crossing a shelf does not fire a
-                    // dozen requests; leaving the tile disarms it.
+
                     tokio::time::sleep(Duration::from_millis(250)).await;
                     if !*hover_armed.peek() {
                         return;
@@ -651,7 +643,7 @@ fn SongCard(item: CatalogItem, track: TrackInfo) -> Element {
     let thumbnail = hooks::artwork::url(item.artwork.as_ref(), hooks::artwork::Size::Thumb);
     let subtitle = item.subtitle.clone().unwrap_or_default();
     let key = track.key.clone();
-    let start_radio = components::track_row::radio_handler(key.clone());
+    let start_radio = components::radio_actions::track_radio_handler(key.clone());
 
     let is_this_source = now_playing.read().as_deref() == Some(key.as_str());
     let is_playing = *ctrl.is_playing.read();
@@ -664,8 +656,6 @@ fn SongCard(item: CatalogItem, track: TrackInfo) -> Element {
 
     rsx! {
         div {
-            // A transformed card is the containing block for the menu's fixed
-            // panel and playlist overlay, so the hover lift is off while it is open.
             class: if menu_open() {
                 "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out group"
             } else {
@@ -769,8 +759,6 @@ pub fn DiscoverPlaylistDetail(
         .clone()
         .unwrap_or_else(String::new);
 
-    // Bumped on every effect run; a spawned fetch checks it before committing,
-    // so a slow load for A cannot overwrite B after the user navigated on.
     let mut fetch_gen = use_signal(|| 0u64);
     use_effect(move || {
         let Some(id) = selected_playlist_id.read().clone() else {
@@ -786,9 +774,7 @@ pub fn DiscoverPlaylistDetail(
         error.set(None);
         let load_span = tracing::info_span!("playlist.load", playlist_id = %id);
         let api = api.clone();
-        // This read an `MPRE` prefix off the id to tell an album from a playlist,
-        // which is one service's id format decided in a page. The caller that had
-        // the id knew what it was.
+
         let kind = *selected_playlist_kind.read();
         spawn(
             async move {
@@ -827,8 +813,6 @@ pub fn DiscoverPlaylistDetail(
         };
     }
 
-    // Loading and error keep a lightweight header; the loaded state hands off
-    // to the shared track list so a catalog list looks like every other one.
     if *loading.read() {
         return rsx! {
             div { class: "p-6 md:p-10 max-w-[1600px] mx-auto",
@@ -893,7 +877,6 @@ pub fn DiscoverArtistPage(
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    // Generation guard: drop a late answer when the user has moved on.
     let mut fetch_gen = use_signal(|| 0u64);
     use_effect(move || {
         let Some(selected) = selected_artist.read().clone() else {
@@ -931,7 +914,6 @@ pub fn DiscoverArtistPage(
         };
     }
 
-    // An artist the source issued no id for has no page of its own, so the daemon answers with the library's tracks.
     let loaded = artist.read().clone();
     if let Some(detail) = loaded
         && !detail.tracks.is_empty()

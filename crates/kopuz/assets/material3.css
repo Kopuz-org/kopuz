@@ -1,8 +1,4 @@
-/* Material 3 UI style. Values follow the Material 3 baseline specs
-   (m3.material.io): colour roles, the type scale, shape, elevation and state
-   layers as tokens below, then one block per component. Under the System colors
-   theme the roles come from material3/mod.rs; under any other theme they are
-   approximated from the theme's own vars so the style still reads. */
+/* Material 3 role defaults; System colors supplies its own generated palette. */
 
 [data-ui-style="material3"] {
     --md-sys-color-primary: color-mix(in srgb, var(--color-indigo-500) 65%, var(--color-white));
@@ -24,9 +20,7 @@
     --md-sys-color-error: var(--color-red-400);
     --md-sys-color-shadow: #000000;
 
-    /* Secondary copy is written as Tailwind slate, which is blue-grey under
-       the fixed themes; read it as the neutral variant roles instead. System
-       colors sets these from its own scheme (a more specific selector). */
+    /* Map Tailwind slate text to neutral roles; System colors overrides these defaults. */
     --color-slate-300: var(--md-sys-color-on-surface-variant);
     --color-slate-400: var(--md-sys-color-on-surface-variant);
     --color-slate-500: var(--md-sys-color-on-surface-variant);
@@ -52,7 +46,6 @@
     --md-sys-motion-duration-short: 150ms;
     --md-sys-motion-duration-medium: 300ms;
 
-    /* Body medium. */
     font-family: "Roboto", "Noto Sans", system-ui, sans-serif, "nasin-nanpa";
     font-size: 14px;
     line-height: 20px;
@@ -60,7 +53,6 @@
     color: var(--md-sys-color-on-surface);
 }
 
-/* Focus indicator: 3dp, secondary, 2dp outside the component. */
 [data-ui-style="material3"] :is(button, a, input, select, textarea, [tabindex]):focus-visible {
     outline: 3px solid var(--md-sys-color-secondary);
     outline-offset: 2px;
@@ -69,8 +61,6 @@
 [data-ui-style="material3"] * {
     scrollbar-color: var(--md-sys-color-outline-variant) transparent;
 }
-
-/* ── Layout ─────────────────────────────────────────────────────────────── */
 
 [data-ui-style="material3"] .app-content {
     gap: 8px;
@@ -88,7 +78,6 @@
     min-width: 0;
 }
 
-/* Headline large; the showcase title is display small at full width. */
 [data-ui-style="material3"] h1 {
     font-size: 32px;
     line-height: 40px;
@@ -103,10 +92,6 @@
     letter-spacing: 0;
     margin-bottom: 16px;
 }
-
-/* ── Navigation drawer (standard) ───────────────────────────────────────── */
-/* Sits on the surface with no container of its own. Items are 56dp, flush,
-   fully rounded; the active indicator is secondary container. */
 
 [data-ui-style="material3"] .app-sidebar {
     background: transparent;
@@ -157,7 +142,6 @@
     height: 24px;
 }
 
-/* Label large. */
 [data-ui-style="material3"] .app-sidebar-label {
     margin-inline: 12px 0;
     font-size: 14px;
@@ -170,10 +154,6 @@
 [data-ui-style="material3"] .app-sidebar-indicator {
     display: none;
 }
-
-/* ── Navigation bar ─────────────────────────────────────────────────────── */
-/* 80dp, surface container; 64x32 pill indicator; label medium, prominent
-   when active. */
 
 [data-ui-style="material3"] .app-tabbar {
     background: var(--md-sys-color-surface-container);
@@ -229,10 +209,6 @@
     font-weight: 700;
 }
 
-/* ── Top app bar (Android) ──────────────────────────────────────────────── */
-/* Center-aligned small top app bar: 64dp on surface, title large; the
-   navigation icon is a standard icon button with a 48dp target. */
-
 [data-ui-style="material3"] .app-topbar {
     height: 64px;
     padding-inline: 4px;
@@ -250,7 +226,7 @@
     color: var(--md-sys-color-on-surface);
 }
 
-/* Balances the 48dp navigation icon so the title stays centred. */
+/* Balance the navigation icon to keep the title centred. */
 [data-ui-style="material3"] .app-topbar > div:has(> .app-topbar-title) {
     padding-right: 48px;
 }
@@ -263,8 +239,6 @@
     text-transform: none;
     color: var(--md-sys-color-on-surface);
 }
-
-/* ── Player bar ─────────────────────────────────────────────────────────── */
 
 [data-ui-style="material3"] .player-bar {
     --md-slider-gap: var(--md-sys-color-surface-container);
@@ -292,7 +266,6 @@
     width: auto;
 }
 
-/* Standard icon buttons: 40dp, full shape, on-surface-variant, state layer. */
 [data-ui-style="material3"] :is(.playback-controls, .player-tools, .player-track) button:not(.playback-play) {
     color: var(--md-sys-color-on-surface-variant);
     border-radius: var(--md-sys-shape-corner-full);
@@ -311,8 +284,6 @@
     gap: 8px;
 }
 
-/* Filled icon button, medium size with the square shape; the corners round
-   off on hover and tighten on press. */
 [data-ui-style="material3"] .playback-play {
     width: 56px;
     height: 48px;
@@ -341,11 +312,7 @@
     border-radius: var(--md-sys-shape-corner-extra-large);
 }
 
-/* ── Slider ─────────────────────────────────────────────────────────────── */
-/* 16dp track: active primary, inactive secondary container, full shape with
-   2dp inner corners. 4x44dp bar handle with a 6dp gap either side, and a 4dp
-   stop indicator at the end. The gap is painted in --md-slider-gap, the colour
-   of whatever the slider sits on. */
+/* --md-slider-gap must match the surface beneath the slider. */
 
 [data-ui-style="material3"] .playback-slider {
     height: 16px;
@@ -408,7 +375,6 @@
     right: -1px;
 }
 
-/* Body small, with tabular figures so the time doesn't jitter. */
 [data-ui-style="material3"] .playback-time {
     width: auto;
     min-width: 40px;
@@ -431,9 +397,7 @@
     outline-offset: 2px;
 }
 
-/* The full-screen seek bar is the same slider. It sits on the cover-art
-   backdrop, so the gaps beside the handle are clipped out of the track and
-   fill instead of painted over. */
+/* Clip gaps around the handle so the cover-art backdrop remains visible. */
 [data-ui-style="material3"] .playback-seek {
     height: 44px;
 }
@@ -492,8 +456,6 @@
     outline-offset: 2px;
 }
 
-/* ── Showcase header ────────────────────────────────────────────────────── */
-
 [data-ui-style="material3"] .showcase-hero {
     background: var(--md-sys-color-surface-container);
     border-radius: var(--md-sys-shape-corner-extra-large);
@@ -509,8 +471,6 @@
     border-radius: var(--md-sys-shape-corner-large);
 }
 
-/* ── Lists ──────────────────────────────────────────────────────────────── */
-
 [data-ui-style="material3"] .track-row {
     border-radius: var(--md-sys-shape-corner-medium);
 }
@@ -518,9 +478,6 @@
 [data-ui-style="material3"] .track-row:hover {
     background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), transparent);
 }
-
-/* ── Cards ──────────────────────────────────────────────────────────────── */
-/* Filled card: surface container highest, medium corners. */
 
 [data-ui-style="material3"] .settings-section {
     background: var(--md-sys-color-surface-container-highest);
@@ -535,7 +492,6 @@
     color: var(--md-sys-color-primary);
 }
 
-/* Title medium. */
 [data-ui-style="material3"] .settings-section-header h2 {
     font-size: 16px;
     line-height: 24px;
@@ -545,7 +501,6 @@
     color: var(--md-sys-color-on-surface);
 }
 
-/* Title small. */
 [data-ui-style="material3"] .settings-subsection-label {
     font-size: 14px;
     line-height: 20px;
@@ -563,9 +518,7 @@
     background: transparent;
 }
 
-/* A row isn't itself interactive, only its control, so it takes no state
-   layer. The base rule is !important; without this the hover fill matches
-   the outline of any card inside the row and the outline vanishes. */
+/* Override the important base hover fill, which hides nested card outlines. */
 [data-ui-style="material3"] .settings-row:hover {
     background: transparent !important;
 }
@@ -573,10 +526,6 @@
 [data-ui-style="material3"] .settings-category-content {
     scroll-margin-top: 80px;
 }
-
-/* ── Tabs (secondary) ───────────────────────────────────────────────────── */
-/* Icon and label inline, so secondary tabs: 48dp, title small, a 2dp primary
-   indicator across the tab, on-surface when active, a divider underneath. */
 
 [data-ui-style="material3"] .settings-fan {
     background: var(--md-sys-color-surface-container-low);
@@ -612,11 +561,6 @@
     font-weight: 500;
     letter-spacing: 0.1px;
 }
-
-/* ── Buttons ────────────────────────────────────────────────────────────── */
-/* Filled and filled tonal: 40dp, full shape, label large, 24dp side padding,
-   state layers in the label colour. A destructive action keeps the tonal
-   container with an error label. */
 
 [data-ui-style="material3"] :is(.app-button-filled, .app-button-tonal) {
     min-height: 40px;
@@ -658,7 +602,6 @@
     background: color-mix(in srgb, var(--md-button-label) var(--md-sys-state-pressed-opacity), var(--md-button-container));
 }
 
-/* Text button: 40dp, full shape, 12dp side padding, primary label. */
 [data-ui-style="material3"] .app-button-text {
     --md-button-label: var(--md-sys-color-primary);
     min-height: 40px;
@@ -686,7 +629,6 @@
     background: color-mix(in srgb, var(--md-button-label) var(--md-sys-state-pressed-opacity), transparent);
 }
 
-/* Disabled buttons: 38% label, 12% container, no state layer. */
 [data-ui-style="material3"] :is(.app-button-filled, .app-button-tonal, .app-button-text):disabled {
     background: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
     color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
@@ -698,7 +640,6 @@
     background: transparent;
 }
 
-/* Standard icon button: 40dp circle, on-surface-variant. */
 [data-ui-style="material3"] .app-icon-button {
     display: inline-flex;
     align-items: center;
@@ -718,12 +659,10 @@
     background: color-mix(in srgb, var(--md-sys-color-on-surface-variant) var(--md-sys-state-hover-opacity), transparent);
 }
 
-/* A toggle icon button that is on: primary icon. */
 [data-ui-style="material3"] .app-icon-button[aria-pressed="true"] {
     color: var(--md-sys-color-primary);
 }
 
-/* Outlined button: as the text button, plus a 1dp outline. */
 [data-ui-style="material3"] .app-button-outlined {
     --md-button-label: var(--md-sys-color-primary);
     display: inline-flex;
@@ -751,14 +690,10 @@
     background: color-mix(in srgb, var(--md-button-label) var(--md-sys-state-pressed-opacity), transparent);
 }
 
-/* The markup sizes these icons inline. */
+/* Override icon sizes set inline by the markup. */
 [data-ui-style="material3"] :is(.app-button-filled, .app-button-tonal, .app-button-text, .app-button-outlined) > i {
     font-size: 14px !important;
 }
-
-/* ── Segmented buttons ──────────────────────────────────────────────────── */
-/* 40dp, full shape, 1dp outline between and around segments; the selected
-   segment is secondary container with a leading check. */
 
 [data-ui-style="material3"] .settings-toggle {
     min-width: 192px;
@@ -817,7 +752,6 @@
     background: transparent;
 }
 
-/* Icon-only segments (grid / list): the icon stays, no check. */
 [data-ui-style="material3"] .app-segmented-icons button {
     width: 48px;
 }
@@ -826,15 +760,10 @@
     content: none;
 }
 
-/* The markup sizes these icons inline. */
+/* Override icon sizes set inline by the markup. */
 [data-ui-style="material3"] .app-segmented-icons button > i {
     font-size: 16px !important;
 }
-
-/* ── Chips ──────────────────────────────────────────────────────────────── */
-/* Assist / filter chips: 32dp, small corners, 1dp outline variant, label
-   large. A selected filter chip fills with secondary container and drops the
-   outline. */
 
 [data-ui-style="material3"] .app-chip {
     display: inline-flex;
@@ -853,7 +782,7 @@
     transition: background-color var(--md-sys-motion-duration-short) linear;
 }
 
-/* Leading icon in primary; the markup sizes it inline. */
+/* Override icon sizes set inline by the markup. */
 [data-ui-style="material3"] .app-chip > i {
     color: var(--md-sys-color-primary);
     font-size: 14px !important;
@@ -883,10 +812,6 @@
     color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
 }
 
-/* ── Nested cards, list items and badges ───────────────────────────────── */
-/* Inside a filled card, a nested group is an outlined card: medium corners,
-   1dp outline variant, no fill. List items carry no shape of their own. */
-
 [data-ui-style="material3"] .app-card {
     background: transparent;
     border: 1px solid var(--md-sys-color-outline-variant);
@@ -894,12 +819,10 @@
     padding: 16px;
 }
 
-/* A card that is one row of controls (Customize Home) keeps its height. */
 [data-ui-style="material3"] .app-card.app-card-row {
     padding: 4px 4px 4px 16px;
 }
 
-/* Section headings in a page: title small, no caps (colour is set inline). */
 [data-ui-style="material3"] .app-section-label {
     font-size: 14px;
     line-height: 20px;
@@ -909,7 +832,6 @@
     color: var(--md-sys-color-on-surface-variant) !important;
 }
 
-/* Linear progress: 4dp, primary on secondary container. */
 [data-ui-style="material3"] .app-progress-track {
     height: 4px;
     background: var(--md-sys-color-secondary-container);
@@ -925,7 +847,6 @@
     background: color-mix(in srgb, var(--md-sys-color-on-surface) var(--md-sys-state-hover-opacity), transparent);
 }
 
-/* A status label reads as a large badge: 16dp, full shape, label small. */
 [data-ui-style="material3"] .app-badge {
     display: inline-flex;
     align-items: center;
@@ -940,10 +861,7 @@
     letter-spacing: 0.5px;
 }
 
-/* ── Settings sliders ──────────────────────────────────────────────────── */
-/* Same spec as the playback slider, on a native range input: the active
-   track is painted to --fill (set inline from the value), the handle is a
-   4x44dp bar with a 6dp gap in the colour underneath. */
+/* --fill is the current value as a percentage, supplied by the range input. */
 
 [data-ui-style="material3"] .settings-section {
     --md-slider-gap: var(--md-sys-color-surface-container-highest);
@@ -992,10 +910,6 @@
     opacity: 0.38;
     cursor: default;
 }
-
-/* ── Dialogs ───────────────────────────────────────────────────────────── */
-/* Surface container high, extra-large corners, 24dp padding, headline small,
-   text-button actions, 32% scrim. */
 
 [data-ui-style="material3"] .overlay {
     background-color: rgb(0 0 0 / 0.32);
@@ -1073,11 +987,6 @@
     filter: none;
 }
 
-/* ── Menus and text fields ──────────────────────────────────────────────── */
-/* Exposed dropdowns are outlined text fields: 56dp, extra-small corners, 1dp
-   outline that turns 2dp primary on focus. Menus: surface container,
-   extra-small corners, elevation 2, 48dp items in label large. */
-
 [data-ui-style="material3"] .app-select-trigger {
     min-height: 56px;
     padding-inline: 16px 12px;
@@ -1110,7 +1019,6 @@
     box-shadow: var(--md-sys-elevation-level2);
 }
 
-/* Free-standing menus (the sort editor). */
 [data-ui-style="material3"] .app-menu {
     padding: 8px 12px;
     background: var(--md-sys-color-surface-container);
@@ -1120,7 +1028,6 @@
     box-shadow: var(--md-sys-elevation-level2);
 }
 
-/* Label small. */
 [data-ui-style="material3"] .app-menu-label {
     width: auto;
     min-width: 40px;
@@ -1132,7 +1039,6 @@
     color: var(--md-sys-color-on-surface-variant);
 }
 
-/* A native <select> inside a menu: a 40dp outlined field. */
 [data-ui-style="material3"] .app-native-select {
     height: 40px;
     padding-inline: 12px;
@@ -1169,7 +1075,6 @@
     color: var(--md-sys-color-on-secondary-container);
 }
 
-/* Free-text settings fields are outlined text fields too. */
 [data-ui-style="material3"] .app-text-field {
     display: flex;
     align-items: center;
@@ -1204,9 +1109,6 @@
     color: var(--md-sys-color-on-surface-variant);
 }
 
-/* ── Search bar ─────────────────────────────────────────────────────────── */
-/* 56dp, full shape, surface container high, body large. */
-
 [data-ui-style="material3"] .app-search-field {
     min-height: 56px;
     background: var(--md-sys-color-surface-container-high);
@@ -1231,8 +1133,6 @@
     color: var(--md-sys-color-on-surface);
 }
 
-/* ── Compact player ─────────────────────────────────────────────────────── */
-
 [data-ui-style="material3"] .material3-compact {
     --md-slider-gap: var(--md-sys-color-surface-container);
     background: var(--md-sys-color-surface-container);
@@ -1243,8 +1143,6 @@
     display: none;
 }
 
-/* ── Android ────────────────────────────────────────────────────────────── */
-
 [data-ui-style="material3"][data-platform="android"] .app-content {
     padding: 0;
     gap: 0;
@@ -1254,8 +1152,6 @@
     border-radius: 0;
 }
 
-/* The modal drawer: surface container low, large corners on its open edge,
-   elevation 1. */
 [data-ui-style="material3"][data-platform="android"] .app-sidebar {
     border-radius: 0 var(--md-sys-shape-corner-large) var(--md-sys-shape-corner-large) 0;
     margin-inline-start: 0;

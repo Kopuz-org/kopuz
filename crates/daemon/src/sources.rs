@@ -1,14 +1,7 @@
-//! Configured sources, their credentials, and switching between them.
-//!
-//! This is where a media source is constructed, which is the whole point: a
-//! frontend used to build one, hand it to the daemon, and hold every token it
-//! took to sign in. Now it reads rows and calls methods, and no credential
-//! ever reaches it -- `SourceInfo` says whether a source is authenticated,
-//! never with what.
-//!
-//! Browser sign-in lives here too. It spawns a browser, drives an isolated
-//! profile or a loopback listener, and ends holding a secret, which makes it
-//! system-level work regardless of who triggered it.
+//! Source construction, credentials, switching, and browser sign-in.
+//! Clients receive `SourceInfo` with authentication status, never credentials.
+
+use crate::error::db_error;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -38,10 +31,6 @@ pub struct SourceService {
     /// Each source's last probe answer, tagged with the probe that wrote it.
     status: Mutex<HashMap<String, (u64, SourceState)>>,
     probes: AtomicU64,
-}
-
-fn db_error(error: db::DbError) -> ApiError {
-    ApiError::internal(format!("database error: {error}"))
 }
 
 /// The in-process capability struct, as the wire describes it.
@@ -216,11 +205,10 @@ impl SourceService {
                 info.name = server.name.clone();
                 info.needs_network = true;
                 info.service = crate::services::service_ref(server.service);
-                // An anonymous source needs no token to be usable, which is
-                // why this is not simply "has a token".
+
                 info.authenticated = server.access_token.is_some() || server.yt_anonymous;
                 info.sign_in = crate::services::sign_in(&view, info.authenticated);
-                // What signing in again takes, for credentials that went stale.
+
                 info.reauth = crate::services::sign_in(&view, false);
                 info.detail = crate::services::detail(&view);
                 info.anonymous = server.yt_anonymous;
@@ -341,7 +329,7 @@ impl SourceService {
         }
         let was_active = current.active_source.local_library_id() == Some(id);
         let id_owned = id.to_string();
-        // The session drops this source's queue itself once its pending saves land, so none outlives the purge.
+
         self.config
             .mutate_state(&["local_sources", "active_source"], move |config| {
                 config.remove_local_source(&id_owned)
@@ -461,9 +449,7 @@ impl SourceService {
             .filter(|secret| !secret.is_empty())
             .map(str::to_string);
         let current = self.current().await;
-        // Changing where the active server points invalidates whatever is
-        // loaded from it, so playback stops rather than carrying on against
-        // the old backend.
+
         let backend_changed = current.active_source.server_id() == Some(id.as_str())
             && current
                 .server
@@ -496,8 +482,7 @@ impl SourceService {
             self.session.reset_playback().await?;
         }
         self.session.invalidate(Table::Servers);
-        // A secret answered in the form is stored the same way one obtained
-        // any other way is, and never travels back out.
+
         if let Some(secret) = secret {
             return self
                 .provision_credentials(api::CredentialProvision {
@@ -602,8 +587,7 @@ impl SourceService {
         } else {
             self.session.invalidate(Table::Servers);
         }
-        // The browser profile is this server's, so it goes with it rather
-        // than being left behind holding a session.
+
         #[cfg(not(target_os = "android"))]
         match service {
             Some(config::MusicService::YtMusic) => {
@@ -672,8 +656,7 @@ impl SourceService {
             .set_server_credentials(&provision.server_id, token.as_deref(), user.as_deref())
             .await
             .map_err(db_error)?;
-        // A different account is a different library, so what is loaded
-        // from the old one stops.
+
         if active && previous_user != server.user_id {
             self.session.reset_playback().await?;
         }
@@ -775,9 +758,7 @@ impl SourceService {
                 .await
                 .map_err(db_error)?
                 .ok_or_else(|| ApiError::not_found("no such server"))?;
-            // No stored choice means "the system default", resolved here and
-            // persisted with the credential below, so a later cookie read goes
-            // back to the browser that actually holds the session.
+
             let browser = server::cookies::resolve_browser(server.yt_browser).await;
             let (secret, user_id) = match server.service {
                 config::MusicService::YtMusic => {
@@ -811,8 +792,7 @@ impl SourceService {
                     .map_err(ApiError::internal)?;
                     (secret, "me".to_string())
                 }
-                // Spotify's "URL" field holds the client id its PKCE flow
-                // needs, not an address.
+
                 config::MusicService::Spotify => {
                     let auth = server::spotify::auth::launch_signin_and_extract(server.url)
                         .await
@@ -916,7 +896,7 @@ impl SourceService {
                 if moved || unsettled {
                     let fresh = probed.as_ref().is_none_or(|(source, _)| *source != next.0);
                     probed = Some(next);
-                    // Spawned, so a slow unreachable server cannot hold up probing the next source.
+
                     let service = service.clone();
                     tokio::spawn(async move {
                         if let Err(error) = service.probe(&id, fresh).await {
@@ -943,8 +923,6 @@ impl SourceService {
     pub fn spawn_credential_upkeep(self: &Arc<Self>) {
         let service = self.clone();
         tokio::spawn(async move {
-            // Long enough not to hammer either provider, short enough that a
-            // session does not lapse between checks.
             let mut ticker = tokio::time::interval(Duration::from_secs(300));
             let mut since_spotify = 0u32;
             loop {

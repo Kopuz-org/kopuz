@@ -72,8 +72,6 @@ struct ServerEntry {
 fn http_client() -> Result<reqwest::Client, BrowserError> {
     reqwest::Client::builder()
         .user_agent(format!("Kopuz/{}", env!("CARGO_PKG_VERSION")))
-        // Short connect timeout so a dead address family
-        // (mirrors publish AAAA records) falls back within the request budget.
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))
         .build()
@@ -118,7 +116,6 @@ async fn discover_base() -> Option<String> {
         }
     };
 
-    // Spread load across mirrors without pulling in a rand dependency.
     let count = candidates.len();
     if count > 1 {
         let nanos = std::time::SystemTime::now()
@@ -191,7 +188,6 @@ async fn fetch_stations_from(
         .await
         .map_err(|e| BrowserError::Network(e.to_string()))?;
 
-    // HLS stations would only fail at play time; drop them up front.
     let before = stations.len();
     stations.retain(|s| !is_hls(s));
     if stations.len() < before {
@@ -208,7 +204,6 @@ async fn fetch_stations(
     match fetch_stations_from(&base, path, query).await {
         Ok(stations) => Ok(stations),
         Err(first_err) => {
-            // The cached mirror may have died; rediscover once and retry.
             invalidate_base();
             let retry_base = base_url().await.map_err(|_| first_err)?;
             fetch_stations_from(&retry_base, path, query).await
@@ -284,8 +279,6 @@ pub fn to_manifest(station: &BrowserStation) -> StationManifest {
         station.url_resolved.clone()
     };
 
-    // Favicons double as cover art;
-    // only https survives the static-metadata contract, and mixed-content rules on webviews.
     let cover_url = Some(station.favicon.clone()).filter(|f| f.starts_with("https://"));
 
     let artist = if station.country.is_empty() {

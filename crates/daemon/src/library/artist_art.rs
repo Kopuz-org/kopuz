@@ -44,7 +44,7 @@ impl LibraryService {
                 let wanted: std::collections::HashSet<&str> =
                     artists.iter().map(String::as_str).collect();
                 let scope = source.source();
-                // A search wants the name the library calls them, which only the listing holds.
+
                 let named = self
                     .db
                     .artists(scope)
@@ -104,7 +104,7 @@ impl LibraryService {
             .unwrap_or_default()
             .into_iter()
             .collect();
-        // The same lookup names a linked artist, so one wearing a credit's text is looked up though it has a photo.
+
         let unnamed = self
             .db
             .artist_keys_unnamed_by_source(source.source())
@@ -142,11 +142,7 @@ impl LibraryService {
         }
 
         let queue = Arc::new(Mutex::new(pending.into_iter()));
-        // Announce as they land rather than once at the end: a grid of a few
-        // hundred artists takes a while to search, and holding every photo
-        // until the last one resolves is a page of placeholders for all of it.
-        // Every announcement re-runs every track-keyed read in every frontend, so a
-        // batch that finds a photo every few milliseconds announces on a timer.
+
         let found = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let last_announced = Arc::new(Mutex::new(std::time::Instant::now()));
         let workers: Vec<_> = (0..WORKERS)
@@ -171,8 +167,7 @@ impl LibraryService {
             })
             .collect();
         futures_util::future::join_all(workers).await;
-        // A last one, in case the tail of the batch landed inside a window the
-        // frontend had already coalesced away.
+
         if found.load(std::sync::atomic::Ordering::Relaxed) > 0 {
             self.invalidate(Table::Tracks);
         }
@@ -215,7 +210,7 @@ async fn resolve_one(source: &ActiveSource, artist: &reader::ArtistCredit) -> bo
     };
     let found = match source.fetch_artist_image(artist).await {
         Ok(found) => found,
-        // A transient error isn't remembered, since a miss would hide the artist for a whole day over a blip.
+
         Err(error) => {
             tracing::debug!(%error, artist = %artist.name, "artist photo lookup failed");
             return false;

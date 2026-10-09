@@ -1,14 +1,7 @@
-//! The source's browse catalog, as the API serves it.
-//!
-//! Every network call the discover surface used to make from the UI process
-//! happens here, and every song it returns is registered with the library, so
-//! a client can queue, heart or ask for the artwork of a browse row by key
-//! exactly as it would a library track.
-//!
-//! Tile images are public URLs, but they are not handed over: the daemon
-//! remembers them and serves the bytes through `ArtworkApi`, so a frontend has
-//! exactly one way to get a picture and one that cannot fetch a URL itself
-//! still works.
+//! Browse catalogs from the active source. Tracks are registered in the library
+//! so clients can queue them by key; tile images are served through `ArtworkApi`.
+
+use crate::error::source_error;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -17,7 +10,7 @@ use api::{
     ApiError, ArtworkRef, ArtworkTarget, CatalogDetail, CatalogDetailRequest, CatalogItem,
     CatalogItemKind, CatalogPage, CatalogShelf,
 };
-use server::ytmusic::discover::{DiscoverHome, DiscoverItem};
+use server::catalog::{DiscoverHome, DiscoverItem};
 
 use crate::library::LibraryService;
 use crate::session::SessionHandle;
@@ -36,18 +29,6 @@ pub struct CatalogService {
 struct Thumbnails {
     by_id: HashMap<String, String>,
     order: VecDeque<String>,
-}
-
-fn source_error(error: server::source::SourceError) -> ApiError {
-    use api::ErrorCode;
-    use server::source::SourceError;
-    match &error {
-        SourceError::Unsupported(what) => ApiError::unsupported(*what),
-        SourceError::Auth => ApiError::new(ErrorCode::SourceAuthExpired, error.to_string()),
-        SourceError::Connectivity => ApiError::new(ErrorCode::SourceUnreachable, error.to_string()),
-        SourceError::InvalidInput(message) => ApiError::invalid_input(message.clone()),
-        SourceError::Backend(message) => ApiError::internal(message.clone()),
-    }
 }
 
 impl CatalogService {
@@ -139,8 +120,6 @@ impl CatalogService {
 
     fn item(&self, item: DiscoverItem, config: &config::AppConfig) -> CatalogItem {
         match item {
-            // A song's artwork is the track's own, so the tile and the queue
-            // row cannot disagree about which picture belongs to it.
             DiscoverItem::Song(track) => CatalogItem {
                 kind: CatalogItemKind::Track,
                 id: track.id.key().into_owned(),
@@ -223,10 +202,6 @@ impl CatalogService {
         let source = self.source();
         match request.kind {
             CatalogItemKind::Album => {
-                // An album reached by its own browse id resolves directly; one
-                // reached by a library ref needs the lookup first; and a saved
-                // album from a source that stores no browse id is found by what
-                // it is called, which is why the id alone is enough here.
                 let mut album = match source
                     .fetch_album_by_ref(&request.id)
                     .await
@@ -299,7 +274,7 @@ impl CatalogService {
             CatalogItemKind::Artist => {
                 let key = request.id;
                 let filed = crate::artist_row::find(&self.db, source.source(), &key).await?;
-                // An artist the library hasn't filed is one the source just listed, by the id it issued.
+
                 let channel_id = match filed {
                     Some(row) => match row.source_id {
                         Some(id) => id,

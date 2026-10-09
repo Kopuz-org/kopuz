@@ -1,9 +1,5 @@
-//! The album counterpart of [`crate::track_actions::TrackActionsMenu`].
-//!
-//! Home renders albums as bare cards rather than through a row component, so
-//! until now they carried no actions at all. The set is deliberately the subset
-//! that needs nothing but an album id: deleting or editing an album belongs to
-//! the album page, which has the state for it.
+//! Shared album actions for cards and album pages.
+//! Callers supply download and deletion handlers when available.
 
 use crate::NavigationController;
 use crate::dots_menu::{DotsMenu, MenuAction};
@@ -132,8 +128,7 @@ pub fn AlbumActionsMenu(props: AlbumActionsMenuProps) -> Element {
         ));
     }
 
-    let dispatch: Vec<Action> = entries.iter().map(|(action, _)| *action).collect();
-    let actions: Vec<MenuAction> = entries.into_iter().map(|(_, item)| item).collect();
+    let (dispatch, actions): (Vec<Action>, Vec<MenuAction>) = entries.into_iter().unzip();
 
     let dispatch_album = props.album_id.clone();
     let dispatch_artist = props.artist_key.clone();
@@ -167,9 +162,6 @@ pub fn AlbumActionsMenu(props: AlbumActionsMenuProps) -> Element {
                         } else {
                             api::QueueMode::Append
                         };
-                        // The daemon hands the album back in its own order and
-                        // reports a failed read itself, so the menu only has to
-                        // say where the keys go.
                         with_album_keys(dispatch_album.clone(), move |keys| {
                             ctrl.set_queue_keys(keys, mode, None);
                         });
@@ -181,9 +173,6 @@ pub fn AlbumActionsMenu(props: AlbumActionsMenuProps) -> Element {
                         }
                     }
                     Action::Download => {
-                        // "Downloading..." is a status row, not an action. The
-                        // queue discards a repeat request, but the menu should
-                        // not be leaning on that to stay correct.
                         if !is_downloading
                             && let Some(handler) = on_download
                         {

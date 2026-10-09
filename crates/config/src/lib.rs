@@ -359,9 +359,6 @@ where
     let mut out = [0.0_f32; 10];
 
     if values.len() == LEGACY_EQ_BAND_SLOTS.len() {
-        // Migrate a saved 5-band custom preset onto the nearest 10-band slots so
-        // existing boosts keep their original frequencies instead of shifting
-        // down (e.g. a 1 kHz boost must not be reinterpreted as a 125 Hz boost).
         for (&slot, value) in LEGACY_EQ_BAND_SLOTS.iter().zip(values.iter().copied()) {
             out[slot] = value;
         }
@@ -469,12 +466,6 @@ pub struct ReplayGainInfo {
     pub album_peak: Option<f32>,
 }
 
-impl ReplayGainInfo {
-    pub fn is_empty(&self) -> bool {
-        self.track_gain_db.is_none() && self.album_gain_db.is_none()
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct ReplayGainSettings {
     #[serde(default)]
@@ -506,20 +497,14 @@ impl Default for ReplayGainSettings {
     }
 }
 
-/// Gains outside this range are a broken tag, not a mastering choice; ±15 dB
-/// already covers everything ReplayGain scanners emit in practice.
+/// Maximum magnitude for tag gains, fallback gain, and preamp adjustments.
 const GAIN_LIMIT_DB: f32 = 15.0;
 
 impl ReplayGainSettings {
-    /// Linear factor to scale a track's samples by. `album_context` says the
-    /// queue is currently walking an album, which is what [`ReplayGainMode::Auto`]
-    /// switches on.
-    pub fn linear_gain(&self, info: ReplayGainInfo, album_context: bool) -> f32 {
-        self.linear_gain_with_fallback(info, ReplayGainInfo::default(), album_context)
-    }
-
     /// Prefer stream tags to service metadata for each gain, keeping the peak
     /// from the same analysis even when falling back between track and album.
+    /// Auto mode selects album gain when `album_context` is true. An album peak
+    /// can substitute for a track peak, but a track peak cannot bound an album.
     pub fn linear_gain_with_fallback(
         &self,
         stream: ReplayGainInfo,
@@ -533,8 +518,6 @@ impl ReplayGainSettings {
             ReplayGainMode::Auto => album_context,
         };
 
-        // An album peak bounds every track on the album, so it can stand in for a
-        // missing track peak; a track peak is too low to bound the album gain.
         let album = |info: ReplayGainInfo| info.album_gain_db.map(|db| (Some(db), info.album_peak));
         let track = |info: ReplayGainInfo| {
             info.track_gain_db
@@ -1158,18 +1141,7 @@ impl AppConfig {
         }
     }
 
-    pub fn find_saved_server(&self, id: &str) -> Option<&SavedServer> {
-        self.servers.iter().find(|s| s.id == id)
-    }
-
     pub fn migrate_sidebar_order(&mut self) {
-        // The downloads entry was keyed by the tool that fetches; a stored
-        // order still names it that way.
-        for key in self.sidebar_order.iter_mut() {
-            if key == "downloader" {
-                *key = "downloader".to_string();
-            }
-        }
         let all_keys = default_sidebar_order();
         for key in &all_keys {
             if !self.sidebar_order.iter().any(|k| k == key) {
@@ -1180,7 +1152,6 @@ impl AppConfig {
     }
 
     pub fn migrate_registry_paths(&mut self) {
-        // Ensure the default registry entry is always present
         if !self.radio_registries.iter().any(|r| r.is_default) {
             self.radio_registries.insert(
                 0,
@@ -1266,7 +1237,10 @@ mod tests {
     fn off_leaves_the_signal_alone() {
         let settings = ReplayGainSettings::default();
         assert_eq!(settings.mode, ReplayGainMode::Off);
-        assert_close(settings.linear_gain(tagged(), true), 1.0);
+        assert_close(
+            settings.linear_gain_with_fallback(tagged(), ReplayGainInfo::default(), true),
+            1.0,
+        );
     }
 
     #[test]
@@ -1281,11 +1255,11 @@ mod tests {
             ..track
         };
         assert_close(
-            track.linear_gain(tagged(), false),
+            track.linear_gain_with_fallback(tagged(), ReplayGainInfo::default(), false),
             10.0_f32.powf(-6.0 / 20.0),
         );
         assert_close(
-            album.linear_gain(tagged(), false),
+            album.linear_gain_with_fallback(tagged(), ReplayGainInfo::default(), false),
             10.0_f32.powf(-3.0 / 20.0),
         );
     }
@@ -1298,11 +1272,11 @@ mod tests {
             ..Default::default()
         };
         assert_close(
-            settings.linear_gain(tagged(), true),
+            settings.linear_gain_with_fallback(tagged(), ReplayGainInfo::default(), true),
             10.0_f32.powf(-3.0 / 20.0),
         );
         assert_close(
-            settings.linear_gain(tagged(), false),
+            settings.linear_gain_with_fallback(tagged(), ReplayGainInfo::default(), false),
             10.0_f32.powf(-6.0 / 20.0),
         );
     }
@@ -1316,7 +1290,11 @@ mod tests {
             fallback_gain_db: -4.0,
         };
         assert_close(
-            settings.linear_gain(ReplayGainInfo::default(), false),
+            settings.linear_gain_with_fallback(
+                ReplayGainInfo::default(),
+                ReplayGainInfo::default(),
+                false,
+            ),
             10.0_f32.powf(-2.0 / 20.0),
         );
     }
@@ -1334,7 +1312,10 @@ mod tests {
             prevent_clipping: true,
             ..Default::default()
         };
-        assert_close(settings.linear_gain(info, false), 10.0_f32.powf(6.0 / 20.0));
+        assert_close(
+            settings.linear_gain_with_fallback(info, ReplayGainInfo::default(), false),
+            10.0_f32.powf(6.0 / 20.0),
+        );
     }
 
     #[test]
@@ -1369,7 +1350,10 @@ mod tests {
             mode: ReplayGainMode::Track,
             ..Default::default()
         };
-        assert_close(settings.linear_gain(stream, false), 1.25);
+        assert_close(
+            settings.linear_gain_with_fallback(stream, ReplayGainInfo::default(), false),
+            1.25,
+        );
         assert_close(
             settings.linear_gain_with_fallback(ReplayGainInfo::default(), stream, false),
             1.25,
@@ -1388,21 +1372,23 @@ mod tests {
             prevent_clipping: true,
             ..Default::default()
         };
-        assert_close(settings.linear_gain(info, false), 1.25);
+        assert_close(
+            settings.linear_gain_with_fallback(info, ReplayGainInfo::default(), false),
+            1.25,
+        );
 
         let unclamped = ReplayGainSettings {
             prevent_clipping: false,
             ..settings
         };
         assert_close(
-            unclamped.linear_gain(info, false),
+            unclamped.linear_gain_with_fallback(info, ReplayGainInfo::default(), false),
             10.0_f32.powf(6.0 / 20.0),
         );
     }
 
     #[test]
     fn legacy_five_band_custom_eq_migrates_to_nearest_slots() {
-        // A custom preset saved by the old 5-band UI: boosts at 60/250/1k/4k/12k Hz.
         let json = r#"{
             "enabled": true,
             "preset": "Custom",
@@ -1412,8 +1398,6 @@ mod tests {
 
         let eq: EqualizerSettings = serde_json::from_str(json).unwrap();
 
-        // Each legacy value lands on the nearest 10-band slot (64/250/1k/4k/16k Hz),
-        // not the first five slots (which are now 32/64/125/250/500 Hz).
         assert_eq!(
             eq.bands,
             [0.0, 3.0, 0.0, 0.0, 0.0, 5.0, 0.0, -2.0, 0.0, 4.0]
@@ -1489,7 +1473,6 @@ mod tests {
         config.set_folders_for("srv", vec!["/Music".to_string()]);
         assert_eq!(config.folders_for("srv"), vec!["/Music".to_string()]);
 
-        // Emptying drops the entry, so the backend auto-detects again.
         config.set_folders_for("srv", Vec::new());
         assert!(config.folders_for("srv").is_empty());
         assert!(!config.server_folders.contains_key("srv"));

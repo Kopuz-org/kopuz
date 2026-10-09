@@ -1,8 +1,6 @@
-//! Scrobbling, ported from `hooks/src/scrobble_scheduler.rs`: on each track
-//! commit, announce now-playing, wait for the Last.fm threshold (240 s or
-//! half the track) while the same session keeps playing, then submit to the
-//! native source, Last.fm, Libre.fm, and ListenBrainz, with the transient
-//! failure queue and its drain-on-success behavior intact.
+//! Announce now-playing on track commit and scrobble after 240 seconds or half
+//! the track's duration, provided the same session keeps playing. Transient
+//! failures are queued and retried after a successful submission.
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -82,8 +80,7 @@ impl Scrobbler {
         session.state().phase == Phase::Playing
     }
 
-    /// Wall-clock accumulation of playing time, aborted when the session
-    /// moves on, mirroring the hooks `wait_for_playtime`.
+    /// Accumulate playing time until the threshold or a session change.
     async fn wait_for_playtime(session: &SessionHandle, threshold: Duration, token: u64) -> bool {
         let tick = Duration::from_secs(1);
         let mut played = Duration::ZERO;
@@ -106,7 +103,7 @@ impl Scrobbler {
         };
         let config = session.config_watch().borrow().clone();
         let uid = track.id.uid();
-        let item_ref = PlaybackItemRef::parse(&uid);
+        let item_ref = PlaybackItemRef::from_id(&track.id);
         if item_ref.is_radio() {
             return;
         }
@@ -208,11 +205,10 @@ impl Scrobbler {
             return;
         }
 
-        if let (Some(source), Some(id)) = (&source, item_id.as_deref()) {
-            match source.scrobble(id).await {
-                Ok(_) => tracing::info!("scrobbled: {} - {}", track.artist, track.title),
-                Err(error) => tracing::warn!(%error, "scrobble failed"),
-            }
+        if let (Some(source), Some(id)) = (&source, item_id.as_deref())
+            && let Err(error) = source.scrobble(id).await
+        {
+            tracing::warn!(%error, "source scrobble failed");
         }
 
         let mut scrobble_ok = false;
@@ -307,10 +303,10 @@ impl Scrobbler {
             match scrobble::musicbrainz::submit_listens(&token_mb, vec![listen], "single").await {
                 Ok(_) => {
                     scrobble_ok = true;
-                    tracing::info!("MusicBrainz scrobbled: {} - {}", track.artist, track.title);
+                    tracing::info!("ListenBrainz scrobbled: {} - {}", track.artist, track.title);
                 }
                 Err(error) => {
-                    tracing::warn!(%error, "MusicBrainz scrobble failed");
+                    tracing::warn!(%error, "ListenBrainz scrobble failed");
                     if scrobble::queue::is_transient(&error) {
                         scrobble::queue::enqueue(
                             &self.db,

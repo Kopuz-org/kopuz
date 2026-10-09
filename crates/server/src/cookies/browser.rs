@@ -49,7 +49,7 @@ pub(crate) fn browser_flatpak_ids(browser: Browser) -> &'static [&'static str] {
         Browser::Chromium => &["org.chromium.Chromium"],
         Browser::Edge => &["com.microsoft.Edge"],
         Browser::Vivaldi => &["com.vivaldi.Vivaldi"],
-        // Helium ships .deb/AppImage/tarball upstream, no flatpak.
+
         Browser::Helium => &[],
         Browser::Firefox => &["org.mozilla.firefox"],
         Browser::LibreWolf => &["io.gitlab.librewolf-community"],
@@ -351,10 +351,7 @@ pub(crate) fn signin_command(
                 .arg(url);
         }
     }
-    // Windows: kopuz's WebView2 UI runs us inside a job object whose sandbox
-    // quota (1 active process) stops a spawned browser from creating the nested
-    // jobs its renderer/GPU need — the window opens but the content is dead.
-    // CREATE_BREAKAWAY_FROM_JOB detaches the child so its own sandbox works.
+
     #[cfg(target_os = "windows")]
     cmd.creation_flags(0x0100_0000);
     cmd.stdout(std::process::Stdio::null())
@@ -502,8 +499,7 @@ pub async fn resolve_browser(preferred: Option<Browser>) -> Browser {
             return browser;
         }
     }
-    // Nothing is installed. Name the default anyway, so the launch failure
-    // names the browser the user actually set.
+
     detected.unwrap_or(Browser::Firefox)
 }
 
@@ -525,8 +521,6 @@ mod tests {
 
     #[test]
     fn a_path_with_spaces_is_never_split() {
-        // The #513 shape: a macOS app-bundle binary. Splitting it spawned
-        // "/Applications/Google" and failed with ENOENT.
         let bin = BrowserBin::Path(
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".to_string(),
         );
@@ -568,8 +562,7 @@ mod tests {
     #[test]
     fn a_gecko_sign_in_is_isolated_from_the_running_browser() {
         let args = signin_args(Browser::Firefox);
-        // Without --no-remote the URL is handed to the user's own Firefox,
-        // which signs them in outside the profile kopuz reads back.
+
         assert!(args.contains(&"--no-remote".to_string()));
         assert!(args.contains(&"--profile".to_string()));
         assert!(args.contains(&"/tmp/kopuz-profile".to_string()));
@@ -587,7 +580,6 @@ mod tests {
 
     #[test]
     fn a_default_handler_names_the_browser_it_belongs_to() {
-        // Desktop ids, bundle ids and Windows ProgIds for the same browser.
         for handler in ["firefox.desktop", "org.mozilla.firefox", "FirefoxURL"] {
             assert_eq!(browser_from_handler(handler), Some(Browser::Firefox));
         }
@@ -595,7 +587,7 @@ mod tests {
             browser_from_handler("io.gitlab.librewolf-community.desktop"),
             Some(Browser::LibreWolf)
         );
-        // "chromium" must not read as Chrome.
+
         assert_eq!(
             browser_from_handler("org.chromium.Chromium"),
             Some(Browser::Chromium)

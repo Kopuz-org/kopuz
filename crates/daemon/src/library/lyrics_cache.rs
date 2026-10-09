@@ -27,7 +27,7 @@ fn now_unix() -> i64 {
 fn answer(cached: CachedLyrics, now: i64) -> Option<Option<Lyrics>> {
     match cached {
         CachedLyrics::Found(lyrics) => Some(Some(lyrics)),
-        // An expired miss reads as "nothing stored", so the providers run again.
+
         CachedLyrics::Missing { at } => {
             (now.saturating_sub(at) < NEGATIVE_TTL_SECS).then_some(None)
         }

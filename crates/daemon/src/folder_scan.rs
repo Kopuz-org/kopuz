@@ -82,7 +82,7 @@ pub(crate) fn spawn_with(
                 }
                 event = events.recv() => match event {
                     Ok(ApiEvent::JobFinished { kind: JobKind::Scan, .. }) => retry = true,
-                    // The lost events may have held the finish this was waiting on, so try again.
+
                     Err(broadcast::error::RecvError::Lagged(_)) => retry = true,
                     Err(broadcast::error::RecvError::Closed) => return,
                     _ => {}

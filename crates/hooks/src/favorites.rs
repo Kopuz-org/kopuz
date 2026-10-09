@@ -1,9 +1,5 @@
-//! Favourite toggling.
-//!
-//! The optimistic write, the background push and the revert-on-rejection all
-//! live in the daemon now: `set_favorite` records the change, reflects it, and
-//! pushes to the remote, reverting if the remote refuses. What is left here is
-//! which track, and reporting a refusal in words the person can act on.
+//! Favorite commands and error notifications. The daemon owns optimistic updates
+//! and remote reconciliation.
 
 use dioxus::prelude::*;
 
@@ -24,8 +20,6 @@ pub fn toggle_favorite(key: String) {
             }
         };
         if let Err(error) = api.set_favorite(key.clone(), favorite).await {
-            // The daemon says what refused it, so a heart that snaps back
-            // does not read as a broken button.
             crate::toast::toast_error(&error.to_string());
         }
     });

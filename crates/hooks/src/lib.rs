@@ -16,6 +16,7 @@ pub mod jobs;
 pub mod library_actions;
 pub mod lyrics;
 pub mod playlist_actions;
+pub mod query;
 pub mod recommendations;
 mod session_projector;
 pub mod sort;
@@ -32,6 +33,4 @@ pub use use_player_controller::*;
 pub use use_player_task::*;
 pub use use_search_data::*;
 
-// The query types the UI composes, re-exported here (the query layer) so
-// `pages`/`components` depend on `hooks`, not on the wire crate directly.
 pub use ::api::{JobKind, Page, TrackFilter, TrackSort};

@@ -79,8 +79,6 @@ impl Player {
     }
 
     pub fn try_new() -> Result<Self, PlayerInitError> {
-        // Android initialises the JNI media session + classloader cache here; the desktop
-        // platforms set up their system integration from the app entry point instead.
         #[cfg(target_os = "android")]
         systemint::init();
 
@@ -147,10 +145,7 @@ impl Player {
             reply,
         }));
         self.now_playing = Some(meta);
-        // Push the OS now-playing display now only for an immediate switch (the
-        // UI hydrates to the new track at the same time). A crossfade keeps
-        // showing the outgoing track until the fade completes, so its metadata
-        // is pushed then, via `commit_now_playing`.
+
         if matches!(transition, Transition::Immediate) {
             self.push_now_playing(start_at.unwrap_or(Duration::ZERO), true);
         }
@@ -179,8 +174,6 @@ impl Player {
     }
 
     pub fn seek(&self, time: Duration) {
-        // Mirror the engine's end-guard clamp so the system position display
-        // matches what will actually play.
         const END_GUARD: Duration = Duration::from_millis(2000);
         let time = if let Some(meta) = &self.now_playing {
             if meta.duration > END_GUARD {
@@ -210,8 +203,7 @@ impl Player {
     pub fn stop(&mut self) {
         self.engine.send(Command::Stop { pause_device: true });
         self.now_playing = None;
-        // Tear down the Android foreground service + media notification so the OS can
-        // reclaim the process; otherwise the dismissed-notification state lingers.
+
         #[cfg(target_os = "android")]
         systemint::stop_session();
     }

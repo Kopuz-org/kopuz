@@ -1,9 +1,5 @@
-//! Playback integrations ported from the event pump: the Jellyfin session
-//! reporter and the Discord presence projector, plus the source-backed
-//! [`PlaybackRecorder`].
-//!
-//! Both tasks are event-driven off the session's state stream with their
-//! timers gated on activity, so an idle daemon takes no wakeups from them.
+//! Jellyfin session reporting, Discord presence, and source-backed playback records.
+//! Reporters follow session events and run timers only while active.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,8 +18,7 @@ const JELLYFIN_REPORT_SECS: u64 = 5;
 const JELLYFIN_KEEPALIVE_TICKS: u32 = 6;
 const DISCORD_TICK_SECS: u64 = 30;
 
-/// Durable recents + listen counts over the active source, matching the
-/// pump: recents record under the DB key, listen counts under the uid.
+/// Record recents under the track's DB key and listen counts under its uid.
 pub struct SourceRecorder {
     source: server::source::ActiveSource,
 }
@@ -199,9 +194,8 @@ impl Drop for DiscordState {
     }
 }
 
-/// Discord presence projection, ported from the pump: now-playing on play,
-/// paused card when enabled, cleared when disabled, with async cover-art
-/// resolution keyed by song so a late result never stamps the wrong track.
+/// Update Discord presence from playback state and preferences. Cover results
+/// are keyed by track so late responses cannot overwrite the current picture.
 pub fn spawn_discord_presence(
     session: &SessionHandle,
     config: watch::Receiver<config::AppConfig>,
@@ -472,7 +466,7 @@ fn lastfm(config: &config::AppConfig) -> IntegrationInfo {
         id: LASTFM.to_string(),
         name: Text::key("lastfm"),
         icon: Icon::Class("fa-brands fa-lastfm".into()),
-        // A session key is what scrobbles; the api key alone only reaches the sign-in page.
+
         configured: !config.lastfm_session_key.trim().is_empty(),
         connect: ConnectKind::WebSignIn,
         fields: vec![
@@ -499,7 +493,7 @@ fn librefm(config: &config::AppConfig) -> IntegrationInfo {
         icon: Icon::Class("fa-brands fa-lastfm".into()),
         configured: !config.librefm_session_key.trim().is_empty(),
         connect: ConnectKind::WebSignIn,
-        // Its api key and secret are compiled in, so there is nothing to fill in.
+
         fields: Vec::new(),
     }
 }
@@ -507,7 +501,7 @@ fn librefm(config: &config::AppConfig) -> IntegrationInfo {
 /// What this build publishes, in the order a settings page lists it.
 fn all(config: &config::AppConfig) -> Vec<IntegrationInfo> {
     let mut published = Vec::new();
-    // Android has no Discord client to talk to, so the row is not offered there.
+
     if !cfg!(target_os = "android") {
         published.push(discord(config));
     }
@@ -583,7 +577,6 @@ fn clear_keys(id: &str) -> Vec<&'static str> {
 
 fn clear_stored(id: &str, config: &mut config::AppConfig) {
     match id {
-        // Discord holds no credential, so unconfigured means presence off.
         DISCORD => config.discord_presence = Some(false),
         LISTENBRAINZ => config.musicbrainz_token.clear(),
         LASTFM => {

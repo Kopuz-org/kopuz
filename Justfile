@@ -5,7 +5,7 @@ tailwind:
     npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css
 
 serve: tailwind
-    dx serve
+    dx serve --package kopuz
 
 build: tailwind
     dx build --package kopuz --release
@@ -19,7 +19,7 @@ run *FLAGS: tailwind
 
 # The daemon on its own, for attaching to or poking with grpcurl.
 daemon *FLAGS:
-    cargo run {{FLAGS}} -p kopuz-daemon --features kopuzd --bin kopuzd
+    cargo run {{FLAGS}} -p kopuz-kopuzd --bin kopuzd
 
 run-release: build
     target/dx/kopuz/release/linux/app/kopuz

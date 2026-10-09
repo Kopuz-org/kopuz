@@ -5,6 +5,8 @@
 //! and the track list never round-trips through a client. Scan, sync, and
 //! write paths move in with the job runner.
 
+use crate::error::db_error;
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -57,10 +59,6 @@ fn normalize_album_id(id: &str) -> String {
     }
 }
 
-fn db_error(error: db::DbError) -> ApiError {
-    ApiError::internal(format!("database error: {error}"))
-}
-
 fn map_sort(sort: api::TrackSort) -> db::TrackSort {
     match sort {
         api::TrackSort::Default => db::TrackSort::ArtistAlbum,
@@ -103,13 +101,6 @@ fn lyrics_view(lyrics: server::lyrics::Lyrics) -> api::LyricsView {
                 .collect(),
         },
     }
-}
-
-fn matches_search(track: &Track, needle: &str) -> bool {
-    let needle = needle.to_lowercase();
-    [&track.title, &track.artist, &track.album]
-        .into_iter()
-        .any(|field| field.to_lowercase().contains(&needle))
 }
 
 impl LibraryService {
@@ -239,53 +230,13 @@ impl LibraryService {
         filter: TrackFilter,
         page: Page,
     ) -> Result<(u32, Vec<Track>), ApiError> {
-        let narrowed = if let Some(album) = filter.album.as_deref() {
-            Some(
-                self.db
-                    .album_tracks(&self.query_source(), album)
-                    .await
-                    .map_err(db_error)?,
-            )
-        } else if let Some(genre) = filter.genre.as_deref() {
-            Some(
-                self.db
-                    .genre_tracks(&self.query_source(), genre)
-                    .await
-                    .map_err(db_error)?,
-            )
-        } else {
-            None
-        };
-
-        if let Some(mut rows) = narrowed {
-            if let Some(search) = filter.search.as_deref().filter(|s| !s.is_empty()) {
-                rows.retain(|track| matches_search(track, search));
-            }
-            if let Some(favorite) = filter.favorite {
-                let source = self.query_source();
-                let favorites: std::collections::HashSet<String> = self
-                    .db
-                    .favorites(source.as_str())
-                    .await
-                    .map_err(db_error)?
-                    .into_iter()
-                    .collect();
-                rows.retain(|track| favorites.contains(track.id.key().as_ref()) == favorite);
-            }
-            let total = rows.len() as u32;
-            let items = rows
-                .into_iter()
-                .skip(page.offset as usize)
-                .take(page.limit as usize)
-                .collect();
-            return Ok((total, items));
-        }
-
         let db_filter = db::TrackFilter {
             source: self.query_source(),
             sort: map_sort(filter.sort),
             search: filter.search.unwrap_or_default(),
             favorite: filter.favorite,
+            album: filter.album,
+            genre: filter.genre,
         };
         let items = self
             .db
@@ -358,8 +309,7 @@ impl LibraryService {
             .next()
         {
             Some(track) => track,
-            // A row played straight from a browse listing has no database
-            // entry, and is exactly the one someone wants the words to.
+
             None => self
                 .transient_track(key)
                 .ok_or_else(|| ApiError::not_found("unknown track key"))?,
@@ -383,8 +333,7 @@ impl LibraryService {
                 server.access_token.as_deref(),
                 server.user_id.as_deref(),
             );
-            // Apple Music's own words need the account's token and a bearer
-            // fetched for the session -- both credentials, so both are here.
+
             if server.service == config::MusicService::AppleMusic
                 && let Some(token) = server.access_token.clone()
                 && let Some(catalog_id) = key.strip_prefix("applemusic:")
@@ -402,9 +351,6 @@ impl LibraryService {
             }
         }
 
-        // Three layers, cheapest first: this process's cache, the library's
-        // stored answer, then the providers -- whose answer is stored so the
-        // next open, in any frontend, skips the network.
         let cache_key = request.cache_key();
         let lyrics = match server::lyrics::cached_lyrics_for_request(&request) {
             Some(cached) => cached,
@@ -523,8 +469,7 @@ impl QueueMaterializer for LibraryService {
                     .into_iter()
                     .map(|track| (track.id.key().to_string(), track))
                     .collect();
-                // A key the database does not hold is either a row from a
-                // live listing this session saw, or a file on disk.
+
                 let missing: Vec<String> = keys
                     .iter()
                     .filter(|key| !by_key.contains_key(*key))
@@ -591,8 +536,6 @@ impl QueueMaterializer for LibraryService {
                 station_id,
                 stream_id,
             } => {
-                // A station that came from the public directory gets its play
-                // reported back to it, which is how that directory ranks.
                 if stream_id == radio::browser::BROWSER_STREAM_ID {
                     radio::browser::count_click(station_id);
                 }

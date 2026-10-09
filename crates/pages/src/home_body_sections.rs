@@ -121,9 +121,7 @@ fn ServerHeroBanner(
     let mut start_h = use_signal(|| 0_u32);
 
     let source = use_active_source();
-    // The track's own `album_id` (not the resolved `Album`, which lags behind a
-    // separate albums query) — so the play button and the favorite-state heart
-    // work the instant the hero track renders, not only once albums load.
+
     let hero_album_id_val = hero_entry
         .as_ref()
         .map(|(t, _, _)| t.album_id.clone())
@@ -185,9 +183,6 @@ fn ServerHeroBanner(
         .as_ref()
         .map(|(track, _, _)| track.title.clone())
         .unwrap_or_default();
-    // The banner's headline is the track's own title and artist, so its
-    // overflow menu acts on that track even though the play button and the
-    // heart cover the whole album.
     let hero_track = hero_entry.as_ref().map(|(track, _, _)| track.clone());
     let hero_artist = hero_entry
         .as_ref()
@@ -302,8 +297,6 @@ fn ServerHeroBanner(
                                 on_open: Some(EventHandler::new(move |_| hero_menu_open.set(true))),
                                 on_close: Some(EventHandler::new(move |_| hero_menu_open.set(false))),
                                 button_class: "w-11 h-11 bg-white/10 border border-white/20 text-white hover:bg-white/20".to_string(),
-                                // The banner's controls sit at its left edge, so
-                                // the panel has to open towards the middle.
                                 anchor: "left".to_string(),
                             }
                         }
@@ -742,8 +735,7 @@ fn render_playlists(
     if recent_playlists.is_empty() {
         return rsx! { div {} };
     }
-    // Radio is the one playlist action a home card can offer without the
-    // playlists page's folder/rename state, so the whole menu rides its gate.
+
     let can_radio = consume_context::<Signal<api::SourceCapabilities>>()
         .read()
         .playlist_radio;

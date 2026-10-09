@@ -10,11 +10,12 @@ use server::playback_ref::PlaybackItemRef;
 pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo {
     let key = track.id.key().to_string();
     let uid = track.id.uid();
-    let item_ref = PlaybackItemRef::parse(&uid);
+    let item_ref = PlaybackItemRef::from_id(&track.id);
     let radio = track.duration == u64::MAX;
     let offline = item_ref
         .primary_id()
-        .is_some_and(|id| config.offline_tracks.contains_key(id));
+        .and_then(|id| config.offline_tracks.get(id))
+        .is_some_and(|path| std::path::Path::new(path).is_file());
     TrackInfo {
         key,
         uid,

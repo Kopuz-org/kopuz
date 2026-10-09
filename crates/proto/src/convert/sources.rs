@@ -302,8 +302,7 @@ mod tests {
             active: true,
             authenticated: true,
             sign_in: api::SignInKind::Password,
-            // Signed in already, so `sign_in` would be None on the wire while a
-            // re-sign-in still takes a password: the two are not the same answer.
+
             reauth: api::SignInKind::Password,
             capabilities: api::SourceCapabilities {
                 edit_tags: false,

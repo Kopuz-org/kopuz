@@ -46,14 +46,11 @@ pub fn FavoritesBody(
             );
         }
     });
-    // The import runs in the daemon, so what is in flight is a job: the page
-    // follows it rather than counting anything itself, and revisiting the page
-    // mid-sync shows the sync instead of a blank slate.
+
     let sync_job = hooks::jobs::use_job_progress(hooks::JobKind::FavoritesSync);
     let is_syncing = use_memo(move || sync_job.read().running);
     let synced_so_far = use_memo(move || sync_job.read().current.unwrap_or(0) as usize);
 
-    // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(HashSet::<String>::new);
     let sort_state = use_signal(|| None);
@@ -85,8 +82,6 @@ pub fn FavoritesBody(
     let sorted_displayed_tracks =
         showcase::sorted_track_pairs(&displayed_tracks, *sort_state.read());
 
-    // Rc, not a Vec clone per row: the play handler needs the whole sorted
-    // list as the queue, and cloning 800+ tracks × 800+ rows was quadratic.
     let queue_tracks: Rc<Vec<api::TrackInfo>> = Rc::new(
         sorted_displayed_tracks
             .iter()
@@ -103,9 +98,6 @@ pub fn FavoritesBody(
     let is_empty = displayed_tracks.is_empty();
     let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
 
-    // Window the rows: only the visible slice (plus buffer) exists in the
-    // DOM — the full 800+ row list made every scroll frame repaint a huge
-    // layer and re-run per-row work.
     let scroll_info = use_virtual_scroll(
         *scroll_stat.read(),
         *container_height.read(),
@@ -134,13 +126,7 @@ pub fn FavoritesBody(
             let matches_current_path = currently_playing_path.as_ref() == Some(&track.uid);
 
             let item_id: String = track.key.clone();
-            let is_downloaded = cap.downloads
-                && config
-                    .read()
-                    .offline_tracks
-                    .get(&item_id)
-                    .map(|p| std::path::Path::new(p).exists())
-                    .unwrap_or(false);
+            let is_downloaded = cap.downloads && downloads.read().is_stored(&item_id);
             let is_downloading = cap.downloads && downloads.read().is_active(&item_id);
             let item_id_dl = item_id.clone();
 
@@ -216,6 +202,17 @@ pub fn FavoritesBody(
     rsx! {
         div {
             class: "flex-1 min-h-0 flex flex-col",
+            if let Some(error) = favorites_res.error().or_else(|| fav_tracks_res.error()) {
+                components::common::query_error::QueryError {
+                    message: error.to_string(),
+                    onretry: move |_| {
+                        let mut favorites = favorites_res;
+                        let mut tracks = fav_tracks_res;
+                        favorites.restart();
+                        tracks.restart();
+                    },
+                }
+            }
             if *show_playlist_modal.read() {
                 PlaylistModal {
                     on_close: move |_| {
@@ -315,9 +312,6 @@ pub fn FavoritesBody(
                 }
             }
 
-            // Generic "Syncing with server" spinner for instant-sync sources.
-            // Paginated sources have their own progress row below with a
-            // track counter + refresh button — don't double-render.
             if *is_syncing.read() && caps().favorites_sync == api::FavoritesSyncMode::Instant {
                 div {
                     class: "flex items-center gap-2 text-slate-400 text-sm mb-4",
@@ -326,10 +320,6 @@ pub fn FavoritesBody(
                 }
             }
 
-            // Sync status row with a force-refresh button — shown for sources whose
-            // favorites arrive page-by-page (the counter ticks up as pages stream
-            // in). Sources with instant favorites have nothing to page, so it stays
-            // out of the way.
             {
                 let is_paginated_sync =
                     caps().favorites_sync == api::FavoritesSyncMode::Paginated;
@@ -377,10 +367,7 @@ pub fn FavoritesBody(
                     }
                 } else {
                     {
-                        // An anonymous source shows a sign-in prompt; otherwise the
-                        // standard empty state with a source-appropriate hint.
-                        // A source usable without an account has nothing to show
-                        // until someone signs in; the daemon says which it is.
+
                         let anonymous = active_source_info
                             .read()
                             .as_ref()

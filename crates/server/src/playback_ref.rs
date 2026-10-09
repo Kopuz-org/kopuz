@@ -1,14 +1,14 @@
-//! The shape of a track key: which source it came from, what it names
-//! there, and what a stream ref resolves to once a source hands one back.
-//! Daemon-side -- a frontend passes a key around as an opaque string.
+//! Playback classification from domain identities and resolved stream markers.
+
+use std::path::Path;
+
+use reader::TrackId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaybackItemRef<'a> {
-    Local(&'a str),
+    Local(&'a Path),
     Server {
-        service: &'a str,
         item_id: &'a str,
-        extra: Option<&'a str>,
     },
     Radio {
         station_id: &'a str,
@@ -17,21 +17,20 @@ pub enum PlaybackItemRef<'a> {
 }
 
 impl<'a> PlaybackItemRef<'a> {
-    pub fn parse(value: &'a str) -> Self {
-        let mut parts = value.split(':');
-        let scheme = parts.next().unwrap_or_default();
-        match scheme {
-            "radio" => Self::Radio {
-                station_id: parts.next().unwrap_or_default(),
-                stream_id: parts.next().unwrap_or_default(),
+    pub fn from_id(id: &'a TrackId) -> Self {
+        match id {
+            TrackId::Server { item_id, .. } => Self::Server { item_id },
+            TrackId::Local(path) => match path
+                .to_str()
+                .and_then(|value| value.strip_prefix("radio:"))
+                .and_then(|value| value.split_once(':'))
+            {
+                Some((station_id, stream_id)) => Self::Radio {
+                    station_id,
+                    stream_id,
+                },
+                None => Self::Local(path),
             },
-            "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "applemusic"
-            | "spotify" => Self::Server {
-                service: scheme,
-                item_id: parts.next().unwrap_or_default(),
-                extra: parts.next(),
-            },
-            _ => Self::Local(value),
         }
     }
 
@@ -54,8 +53,7 @@ impl<'a> PlaybackItemRef<'a> {
     pub fn stream_id(self) -> Option<&'a str> {
         match self {
             Self::Radio { stream_id, .. } => Some(stream_id),
-            Self::Server { extra, .. } => extra,
-            Self::Local(_) => None,
+            Self::Server { .. } | Self::Local(_) => None,
         }
     }
 }
@@ -117,7 +115,7 @@ mod tests {
     #[test]
     fn parses_radio_item_refs() {
         assert_eq!(
-            PlaybackItemRef::parse("radio:station:stream"),
+            PlaybackItemRef::from_id(&reader::TrackId::Local("radio:station:stream".into())),
             PlaybackItemRef::Radio {
                 station_id: "station",
                 stream_id: "stream",
@@ -126,14 +124,37 @@ mod tests {
     }
 
     #[test]
-    fn parses_server_item_refs() {
+    fn server_item_ids_are_opaque_for_every_service() {
+        use config::MusicService;
+        for service in [
+            MusicService::Jellyfin,
+            MusicService::Subsonic,
+            MusicService::Custom,
+            MusicService::YtMusic,
+            MusicService::SoundCloud,
+            MusicService::AppleMusic,
+            MusicService::Spotify,
+            MusicService::Nextcloud,
+        ] {
+            let id = reader::TrackId::Server {
+                service,
+                item_id: "folder:item:42".into(),
+            };
+            assert_eq!(
+                PlaybackItemRef::from_id(&id),
+                PlaybackItemRef::Server {
+                    item_id: "folder:item:42"
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn local_paths_are_not_reclassified_as_services() {
+        let id = reader::TrackId::Local("nextcloud:track.flac".into());
         assert_eq!(
-            PlaybackItemRef::parse("ytmusic:video_id:extra"),
-            PlaybackItemRef::Server {
-                service: "ytmusic",
-                item_id: "video_id",
-                extra: Some("extra"),
-            }
+            PlaybackItemRef::from_id(&id),
+            PlaybackItemRef::Local(std::path::Path::new("nextcloud:track.flac"))
         );
     }
 }

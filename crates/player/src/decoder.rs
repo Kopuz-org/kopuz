@@ -69,9 +69,7 @@ pub fn from_stream_with_len(
 ) -> (Box<dyn MediaSource>, Hint) {
     let source: Box<dyn MediaSource> = match len {
         Some(len) => Box::new(ReadSeekSource::new(Box::new(stream), Some(len))),
-        // Without a total length, end-relative seeks cannot be implemented
-        // correctly while the HTTP body is still arriving. Treat the source as
-        // progressive instead of making a probe wait for the full download.
+
         None => Box::new(ReadOnlySource {
             inner: Box::new(stream),
         }),

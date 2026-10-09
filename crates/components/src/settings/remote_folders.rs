@@ -45,7 +45,7 @@ pub fn RemoteFolderPicker(settings: RemoteFolderSettings) -> Element {
         let id = source_id.clone();
         let at = path();
         let open = browsing();
-        // Closed means nothing to list, not an empty server.
+
         async move {
             if !open {
                 return Ok(Vec::new());

@@ -137,7 +137,7 @@ pub fn player_state_from_proto(value: &PlayerState) -> api::PlayerState {
         queue: queue_summary_from_proto(value.queue.as_ref()),
         volume: value.volume,
         buffered: value.buffered.iter().map(buffered_from_proto).collect(),
-        // A fade with no outgoing track has nothing to keep on screen.
+
         fading: value.fading.as_ref().and_then(|fading| {
             Some(api::FadingState {
                 from_token: fading.from_token,

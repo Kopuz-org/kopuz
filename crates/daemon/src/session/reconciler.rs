@@ -35,9 +35,6 @@ impl Session {
                         );
                     }
                 } else if phase == EnginePhase::Playing && self.player.session_token() == token {
-                    // A session no longer intended is audibly live. Guard on
-                    // the live token so a revert seek that outran this event
-                    // is not stopped.
                     self.player.stop_for_transition();
                 }
             }
@@ -45,9 +42,6 @@ impl Session {
                 token,
                 phase: EnginePhase::Idle,
             } if token == self.intent.token() => {
-                // Idle from a superseded session must not flicker the state
-                // while the intended session keeps playing; the stale-session
-                // arms above already handle tearing those down.
                 self.phase = ApiPhase::Idle;
                 self.publish(state_tx, false);
             }
@@ -79,8 +73,6 @@ impl Session {
             EngineEvent::Loaded { token }
                 if token != self.intent.token() && self.player.session_token() == token =>
             {
-                // A promoted load was superseded or cancelled (including the
-                // end-of-queue race). Stop only if it is still the live token.
                 self.player.stop_for_transition();
             }
             EngineEvent::Error { token, message } if token == self.intent.token() => {

@@ -45,9 +45,7 @@ const LYRIC_LINE_ASSUMED_MAX_SECONDS: f64 = 7.0;
 const INTERLUDE_LYRIC_CLASS: &str = "flex w-full items-center py-2 opacity-40 hover:opacity-80 cursor-pointer transition-opacity duration-300";
 const INTERLUDE_ACTIVE_LYRIC_CLASS: &str =
     "flex w-full items-center py-2 opacity-100 cursor-pointer transition-opacity duration-300";
-// Depth-of-field blur, keyed by layout since the rightbar's smaller type
-// turns mushy at the fullscreen step. Roughly a third of the font size at
-// full clamp keeps the farthest lines legible instead of a smear.
+
 const FULLSCREEN_DEPTH_BLUR_STEP_PX: f64 = 1.5;
 const FULLSCREEN_DEPTH_BLUR_MAX_PX: f64 = 8.0;
 const RIGHTBAR_DEPTH_BLUR_STEP_PX: f64 = 1.1;
@@ -348,14 +346,9 @@ fn build_display_lines(
         let (current, next) = (pair[0], pair[1]);
         let current_start = lines[current].start_time;
         let next_start = lines[next].start_time;
-        // Provider rows can overlap or arrive out of timestamp order. Only a
-        // finite, forward interval can contain an instrumental gap; keep the
-        // original row order so background-parent references remain valid.
         if !current_start.is_finite() || !next_start.is_finite() || next_start <= current_start {
             continue;
         }
-        // Background lines sit after their parent in the list and can outlast
-        // it, so the gap starts once every line in the run has finished.
         let gap_start = lines[current..next]
             .iter()
             .map(line_end_estimate)
@@ -406,6 +399,8 @@ fn build_display_lines(
     (display, interludes)
 }
 
+/// Render synchronized lyrics. Blur transitions use explicit pixel lengths;
+/// WebKit does not reliably interpolate between `none` and a blur filter.
 #[component]
 pub fn LyricsView(
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
@@ -416,15 +411,12 @@ pub fn LyricsView(
     let mut ctrl = use_context::<PlayerController>();
     let mut auto_sync = use_signal(|| true);
 
-    // Clear functions when the component is dropped
     use_drop(move || {
         let _cleanup = eval(&format!(
             "for (const [key, type] of [['lineOver', 'mouseover'], ['lineOut', 'mouseout']]) {{ const fn = window[`__{layout}_${{key}}`]; if (fn) document.removeEventListener(type, fn); }} for (const key of ['updateLyrics', 'resetLyrics', 'setAutoSync', 'autoSync', 'lineOver', 'lineOut']) delete window[`__{layout}_${{key}}`];"
         ));
     });
 
-    // Take over on real input, not on scroll events: line growth and the browser's
-    // own scroll anchoring move scrollTop on their own. The sync button re-arms.
     use_future(move || async move {
         let mut listener = eval(&format!(
             r#"
@@ -483,9 +475,6 @@ pub fn LyricsView(
                 let lastBlurLit = null;
                 let lastBlurEnabled = null;
                 let lastBlurStrength = null;
-                // An intro before the first line, and any gap between rows, report
-                // no active line. Holding the last anchor keeps the ramp in place
-                // instead of flattening the whole list until the next line lands.
                 let hoveredLine = null;
                 const BLUR_STEP_PX = {depth_blur_step_px};
                 const BLUR_MAX_PX = {depth_blur_max_px};
@@ -727,22 +716,9 @@ pub fn LyricsView(
                 const depthBlurPx = (distance, scale) =>
                     Math.min(distance * BLUR_STEP_PX * scale, BLUR_MAX_PX * scale);
 
-                // A filter hands the line its own compositing layer and backing
-                // store. Half pixels land on a device pixel at 2x and a blur under
-                // one is not visible anyway, so quantise and let the __lyricBlur
-                // guard drop the write once a line has settled on the clamp.
-                // macOS 27 betas paint unpainted backing store as magenta
-                // (WebKit 303157), so the write count is worth keeping down.
                 const BLUR_QUANTUM_PX = 0.5;
 
-                // Lit lines (the active one plus any background or overlapping
-                // line) stay sharp. Everything else rides distance alone, which
-                // depthBlurPx clamps, so a long list converges on one value at the
-                // far end instead of hitting a cutoff and snapping back to sharp
-                // partway down.
                 const applyDepthBlur = (mainIndex, litIndices, enabled, strengthPercent) => {{
-                    // -1 only ever means the intro before the first line, so the
-                    // ramp starts at the first row, including after a seek back.
                     const anchorIndex = mainIndex >= 0
                         ? mainIndex
                         : (litIndices.size ? Math.max(...litIndices) : 0);
@@ -763,11 +739,6 @@ pub fn LyricsView(
                             : 0;
                         const rawBlurPx = distance > 0 ? depthBlurPx(distance, scale) : 0;
                         const blurPx = Math.round(rawBlurPx / BLUR_QUANTUM_PX) * BLUR_QUANTUM_PX;
-                        // Always an explicit length, never ''. Clearing the
-                        // declaration drops the line back to the computed `none`,
-                        // and `transition: filter` has to interpolate a blur list
-                        // against a keyword; WebKit does that badly and the whole
-                        // ramp reads as unblurred for the length of the switch.
                         const nextFilter = `blur(${{blurPx.toFixed(2)}}px)`;
                         if (lineEl.__lyricBlur === nextFilter) return;
                         lineEl.__lyricBlur = nextFilter;
@@ -775,10 +746,6 @@ pub fn LyricsView(
                     }});
                 }};
 
-                // Hover lifts a line clear of the depth of field so it can be read
-                // before it is clicked, and the ramp's own value comes back on
-                // leave. The sweep keeps writing __lyricBlur underneath, so a line
-                // whose distance moved under the cursor leaves on the new value.
                 const setHovered = (lineEl) => {{
                     if (hoveredLine === lineEl) return;
                     if (hoveredLine) {{
@@ -916,7 +883,6 @@ pub fn LyricsView(
     use_resource(move || {
         let lyrics = lyrics.read().clone();
 
-        // a fresh track re-arms auto-scroll
         auto_sync.set(true);
 
         let _reset = eval(&format!(
@@ -931,7 +897,6 @@ pub fn LyricsView(
                 let main_line_indices = main_line_indices(&lines);
 
                 loop {
-                    // The clock runs ahead of the speakers; hold the lyrics back.
                     let (offset_secs, depth_blur_enabled, depth_blur_strength) = {
                         let cfg = config.peek();
                         let offset_secs = if cfg.lyrics_offset_auto {
@@ -973,7 +938,6 @@ pub fn LyricsView(
                             })
                             .unwrap_or(50);
                     } else {
-                        // we are before the first line, invalidate current line
                         let active_secondary_lines = active_secondary_lines(
                             &lines,
                             &main_line_indices,
@@ -987,7 +951,7 @@ pub fn LyricsView(
                         sleep_duration_ms = 50;
                     }
 
-                    utils::sleep(std::time::Duration::from_millis(sleep_duration_ms)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(sleep_duration_ms)).await;
                 }
             }
         }
@@ -1219,8 +1183,6 @@ mod tests {
 
     #[test]
     fn background_line_stays_lit_when_the_next_main_line_starts() {
-        // Apple's rows for The Chain: the next main line begins while the
-        // backing vocal of the previous one is still running.
         let lines = vec![
             line(63.167, Some(67.299)),
             background_line(65.48, Some(67.299), 0),
@@ -1322,7 +1284,7 @@ mod tests {
 
         assert!(rightbar_step < fullscreen_step);
         assert!(rightbar_max < fullscreen_max);
-        // At least a couple of lines of headroom before the clamp kicks in.
+
         assert!(fullscreen_max > fullscreen_step * 2.0);
         assert!(rightbar_max > rightbar_step * 2.0);
     }

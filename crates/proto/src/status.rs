@@ -10,25 +10,19 @@ use tonic::{Code, Status};
 pub fn to_status(error: api::ApiError) -> Status {
     let grpc_code = match error.code {
         api::ErrorCode::InvalidInput => Code::InvalidArgument,
-        // Not UNAUTHENTICATED: that says the caller's own token failed,
-        // and a client answers it by re-reading the discovery file. An
-        // expired source login is a precondition the user must fix.
+
         api::ErrorCode::SourceAuthExpired => Code::FailedPrecondition,
         api::ErrorCode::NotFound => Code::NotFound,
         api::ErrorCode::Conflict => Code::AlreadyExists,
         api::ErrorCode::Unsupported => Code::Unimplemented,
         api::ErrorCode::SourceUnreachable => Code::Unavailable,
-        // Never sent: the daemon is the thing that would be missing.
+
         api::ErrorCode::DaemonGone | api::ErrorCode::Internal => Code::Internal,
     };
     Status::new(grpc_code, error.message)
 }
 
 pub fn from_status(status: &Status) -> api::ApiError {
-    // tonic raises UNAVAILABLE for a transport failure of its own and
-    // attaches the cause; a status the daemon actually sent arrives with
-    // none. That is the only thing separating "the daemon is not there"
-    // from "a media server did not answer", which the daemon does send.
     let from_transport = std::error::Error::source(status).is_some();
     let code = match status.code() {
         Code::InvalidArgument => api::ErrorCode::InvalidInput,

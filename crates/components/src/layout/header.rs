@@ -38,10 +38,6 @@ pub fn Header(
         COLUMNS_NORMAL
     };
 
-    // Phones get sort chips instead of a column header. The Android track row
-    // is artwork plus two lines, so a "# / Title / Artist / Album / clock"
-    // strip labels columns that are not on screen — and the sort it carries is
-    // the only sort affordance the album and playlist pages have.
     if cfg!(target_os = "android") {
         if sort_state.is_none() && !is_selection_mode {
             return rsx! {};

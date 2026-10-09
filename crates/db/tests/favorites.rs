@@ -1,10 +1,8 @@
-//! Per-server favorites with optimistic dirty tracking (issue #347, step 8).
+//! Per-server favorites with optimistic dirty tracking.
 
 use std::path::PathBuf;
 
 fn unique_db() -> PathBuf {
-    // pid + counter, not just clock: macOS's µs clock let parallel tests
-    // collide on a nanos-only name and delete each other's live DB.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
@@ -22,7 +20,6 @@ async fn favorites_dirty_and_reconcile() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
 
-    // A local like writes a dirty row, visible immediately.
     db.set_favorite("local", "/music/a.flac", true)
         .await
         .unwrap();
@@ -32,21 +29,17 @@ async fn favorites_dirty_and_reconcile() {
         vec!["/music/a.flac".to_string()]
     );
 
-    // Idempotent re-like.
     db.set_favorite("local", "/music/a.flac", true)
         .await
         .unwrap();
     assert_eq!(db.favorites("local").await.unwrap().len(), 1);
 
-    // Pushed to remote → no longer dirty, still a favorite.
     db.clear_favorite_dirty("local", "/music/a.flac")
         .await
         .unwrap();
     assert!(db.dirty_favorites("local").await.unwrap().is_empty());
     assert!(db.is_favorite("local", "/music/a.flac").await.unwrap());
 
-    // Unlike of a SYNCED favorite hides it immediately but leaves a
-    // pending-unlike tombstone for the reconciler to push.
     db.set_favorite("local", "/music/a.flac", false)
         .await
         .unwrap();
@@ -61,13 +54,12 @@ async fn favorites_dirty_and_reconcile() {
         db.dirty_unlikes("local").await.unwrap(),
         vec!["/music/a.flac".to_string()]
     );
-    // Pushing the unlike resolves the tombstone away.
+
     db.clear_favorite_dirty("local", "/music/a.flac")
         .await
         .unwrap();
     assert!(db.dirty_unlikes("local").await.unwrap().is_empty());
 
-    // Unlike of a NEVER-PUSHED like just disappears (nothing to push).
     db.set_favorite("local", "/music/x.flac", true)
         .await
         .unwrap();
@@ -77,19 +69,18 @@ async fn favorites_dirty_and_reconcile() {
     assert!(db.dirty_unlikes("local").await.unwrap().is_empty());
     assert!(db.dirty_favorites("local").await.unwrap().is_empty());
 
-    // Re-like of a tombstone resurrects it as a pending-like.
     db.set_favorite("local", "/music/y.flac", true)
         .await
         .unwrap();
     db.clear_favorite_dirty("local", "/music/y.flac")
         .await
-        .unwrap(); // synced
+        .unwrap();
     db.set_favorite("local", "/music/y.flac", false)
         .await
-        .unwrap(); // tombstone
+        .unwrap();
     db.set_favorite("local", "/music/y.flac", true)
         .await
-        .unwrap(); // re-like
+        .unwrap();
     assert!(db.is_favorite("local", "/music/y.flac").await.unwrap());
     assert_eq!(
         db.dirty_favorites("local").await.unwrap(),
@@ -99,21 +90,18 @@ async fn favorites_dirty_and_reconcile() {
         .await
         .unwrap();
 
-    // Per-server isolation: a YT like doesn't touch local.
     db.set_favorite("srv-1", "VID9", true).await.unwrap();
     assert!(db.is_favorite("srv-1", "VID9").await.unwrap());
     assert!(!db.is_favorite("local", "VID9").await.unwrap());
 
-    // Reconcile pull: clean rows absent remotely go; dirty rows survive (not
-    // pushed yet); the remote set is added clean.
-    db.set_favorite("srv-1", "VID_dirty", true).await.unwrap(); // dirty, not in remote
-    db.clear_favorite_dirty("srv-1", "VID9").await.unwrap(); // VID9 now clean
+    db.set_favorite("srv-1", "VID_dirty", true).await.unwrap();
+    db.clear_favorite_dirty("srv-1", "VID9").await.unwrap();
     db.replace_favorites_clean("srv-1", &["VID9".into(), "VID_new".into()])
         .await
         .unwrap();
     let mut favs = db.favorites("srv-1").await.unwrap();
     favs.sort();
-    assert_eq!(favs, vec!["VID9", "VID_dirty", "VID_new"]); // dirty kept, new added, none clean-dropped
+    assert_eq!(favs, vec!["VID9", "VID_dirty", "VID_new"]);
     assert_eq!(
         db.dirty_favorites("srv-1").await.unwrap(),
         vec!["VID_dirty".to_string()]

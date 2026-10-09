@@ -29,12 +29,7 @@ impl SubsonicSource {
     }
 }
 
-/// Convert a Subsonic song into a `Track`, resolving its own cover and album
-/// instead of a preloaded one. Shared by playlist entries and radio results,
-/// where each song can belong to a different album.
-/// The artists a song credits. An OpenSubsonic server lists them one by one, so
-/// a collaboration files under each artist; a plain Subsonic server only names
-/// the joined `billed` string, which stays one credit.
+/// Use OpenSubsonic's individual artist credits, falling back to the billed name.
 fn credits_of(song: &crate::subsonic::SubsonicSong, billed: &str) -> Vec<reader::ArtistCredit> {
     let listed: Vec<reader::ArtistCredit> = song
         .artists
@@ -54,6 +49,7 @@ fn credits_of(song: &crate::subsonic::SubsonicSong, billed: &str) -> Vec<reader:
     }
 }
 
+/// Convert a playlist or radio song, resolving its own cover and album.
 fn song_to_track(
     client: &SubsonicClient,
     service: MusicService,
@@ -425,9 +421,7 @@ impl MediaSource for SubsonicSource {
             .into_iter()
             .filter(|song| song.id != seed_ref)
             .collect();
-        // Nothing similar means no radio. Returning the seed on its own would
-        // read as success and replace the queue with the one song already
-        // playing, so hand back empty and let the caller say so.
+
         if similar.is_empty() {
             return Ok(Vec::new());
         }

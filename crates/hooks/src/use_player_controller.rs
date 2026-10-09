@@ -21,7 +21,6 @@ pub struct PlayerController {
     pub is_playing: Signal<bool>,
     pub is_loading: Memo<bool>,
     pub(crate) loading: Signal<bool>,
-    pub history: Signal<Vec<usize>>,
     pub queue: Signal<Vec<Track>>,
     pub shuffle: Signal<bool>,
     pub shuffle_order: Signal<Vec<usize>>,
@@ -480,7 +479,6 @@ pub fn use_player_controller(
     let loading = use_signal(|| false);
     let browse_loading = use_signal(|| false);
     let is_loading = use_memo(move || *loading.read() || *browse_loading.read());
-    let history = use_signal(Vec::new);
     let shuffle = use_signal(|| false);
     let shuffle_order = use_signal(Vec::<usize>::new);
     let loop_mode = use_signal(|| LoopMode::None);
@@ -497,7 +495,6 @@ pub fn use_player_controller(
         is_playing,
         is_loading,
         loading,
-        history,
         queue,
         shuffle,
         shuffle_order,

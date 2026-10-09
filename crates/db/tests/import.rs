@@ -1,9 +1,5 @@
-//! Legacy-JSON → SQLite importer tests (issue #347, step 3).
-//!
-//! `imports_synthetic_fixture` runs in CI against hand-built fixtures. `smoke_real`
-//! is `#[ignore]` and imports a copy of a real `~/.config/kopuz` when
-//! `KOPUZ_IMPORT_DIR` points at one — handy for validating against live data
-//! without committing it.
+//! Legacy JSON import using synthetic fixtures.
+//! The ignored `smoke_real` test reads a copied config directory from `KOPUZ_IMPORT_DIR`.
 
 use std::path::{Path, PathBuf};
 
@@ -11,8 +7,6 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Row, SqliteConnection};
 
 fn unique_dir(tag: &str) -> PathBuf {
-    // pid + counter, not just clock: macOS's µs clock let parallel tests
-    // collide on a nanos-only name and delete each other's live DB.
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
@@ -131,13 +125,11 @@ async fn imports_synthetic_fixture() {
     assert_eq!(report.favorites, 3, "1 local + 2 server favorites");
     assert_eq!(report.servers, 1);
 
-    // Import leaves the JSONs in place; only finalize moves them aside.
     assert!(dir.join("config.json").exists());
     assert!(!dir.join("config.json.bak").exists());
 
     let mut conn = open(&db_path).await;
 
-    // Server track: key is the bare id, cover lifted out of the path, service set.
     let row = sqlx::query(
         "SELECT source, track_key, path, service, cover_path FROM tracks WHERE title = 'Yt One'",
     )
@@ -153,7 +145,6 @@ async fn imports_synthetic_fixture() {
         Some("urlhex_68747470733a2f2f78")
     );
 
-    // Local track: path preserved, no service, key is the path.
     let row = sqlx::query("SELECT source, track_key, path, service FROM tracks WHERE title = 'A'")
         .fetch_one(&mut conn)
         .await
@@ -166,7 +157,6 @@ async fn imports_synthetic_fixture() {
     );
     assert_eq!(row.get::<Option<String>, _>("service"), None);
 
-    // Creds landed beside the server row (not in the config blob).
     let token: String =
         sqlx::query_scalar("SELECT access_token FROM server_credentials WHERE server_id = 'srv-1'")
             .fetch_one(&mut conn)
@@ -174,7 +164,6 @@ async fn imports_synthetic_fixture() {
             .unwrap();
     assert_eq!(token, "SECRET_COOKIE");
 
-    // The legacy config lands as state rows and a settings file that carries no creds.
     let active: String = sqlx::query_scalar("SELECT active_source FROM app_state WHERE id = 1")
         .fetch_one(&mut conn)
         .await
@@ -186,7 +175,6 @@ async fn imports_synthetic_fixture() {
         "no token leaked into the settings file"
     );
 
-    // The YT sync time becomes the YT server's favorites stamp, or its first open would re-stream the liked library.
     let stamp: Option<String> = sqlx::query_scalar(
         "SELECT value FROM kv WHERE name = 'synced:favorites' AND kind = 'srv-1'",
     )
@@ -195,7 +183,6 @@ async fn imports_synthetic_fixture() {
     .unwrap();
     assert_eq!(stamp.as_deref(), Some("1700000000"));
 
-    // listen_counts keyed by source and track (cover dropped from the legacy key).
     let c: i64 = sqlx::query_scalar(
         "SELECT count FROM listen_counts WHERE source = 'srv-1' AND track_key = 'VID1'",
     )
@@ -204,7 +191,6 @@ async fn imports_synthetic_fixture() {
     .unwrap();
     assert_eq!(c, 5);
 
-    // Liked-songs playlist membership preserved.
     let n: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM playlist_tracks pt JOIN playlists p ON p.rowid_pk = pt.playlist_pk \
          WHERE p.source_pl_id = 'LM'",
@@ -214,18 +200,14 @@ async fn imports_synthetic_fixture() {
     .unwrap();
     assert_eq!(n, 1);
 
-    // Re-running is a no-op (this DB already has data).
     let again = db.import_legacy_json(&dir).await.unwrap();
     assert!(!again.ran);
 
-    // Finalize renames the JSONs aside (kept as .bak for downgrade).
     let renamed = db.finalize_migration(&dir).await.unwrap();
     assert_eq!(renamed, 5);
     assert!(!dir.join("config.json").exists());
     assert!(dir.join("config.json.bak").exists());
 
-    // A SECOND database (the debug/release split) finds only the .bak files and
-    // still imports — the gate is per-DB emptiness, not a shared sentinel.
     let db2_path = dir.join("kopuz-second.db");
     let db2 = db::init(&db2_path).await.unwrap();
     let second = db2.import_legacy_json(&dir).await.unwrap();
@@ -268,7 +250,6 @@ async fn smoke_real() {
 async fn corrupt_file_skipped_rest_imports_and_finalize_leaves_it() {
     let dir = unique_dir("corrupt");
 
-    // Truncated queue (the power-loss case) + valid favorites + valid library.
     std::fs::write(dir.join("queue_state.json"), r#"{"queue": [{"path": "/m"#).unwrap();
     std::fs::write(
         dir.join("favorites.json"),
@@ -291,7 +272,6 @@ async fn corrupt_file_skipped_rest_imports_and_finalize_leaves_it() {
     assert_eq!(report.tracks, 1);
     assert_eq!(report.favorites, 1);
 
-    // Finalize renames only what was consumed; the corrupt file stays put.
     let renamed = db.finalize_migration(&dir).await.unwrap();
     assert_eq!(renamed, 2);
     assert!(dir.join("library.json.bak").exists());
@@ -312,8 +292,7 @@ async fn finalize_is_inert_when_no_import_ran() {
 
     let db_path = dir.join("kopuz.db");
     let db = db::init(&db_path).await.unwrap();
-    // Simulate "import failed, runtime wrote data anyway": no import, but the
-    // DB becomes non-empty.
+
     db.save_config(&config::AppConfig::default()).await.unwrap();
 
     let renamed = db.finalize_migration(&dir).await.unwrap();

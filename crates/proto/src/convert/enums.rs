@@ -181,7 +181,7 @@ pub fn track_sort_to_proto(value: &api::TrackSort) -> TrackSort {
         api::TrackSort::Album => TrackSort::Album,
         api::TrackSort::DateAdded => TrackSort::DateAdded,
         api::TrackSort::PlayCount => TrackSort::PlayCount,
-        // The criteria themselves ride TrackFilter.sort_fields.
+
         api::TrackSort::Fields(_) => TrackSort::Fields,
     }
 }

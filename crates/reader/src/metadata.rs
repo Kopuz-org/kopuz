@@ -256,10 +256,7 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
     }
 
     let artist = edits.artist.trim();
-    // Compare against the same representation the editor seeds from (structured
-    // TrackArtists joined with ", ", else the single artist field). Only rewrite
-    // the artist tags when it actually changed, so editing unrelated fields keeps
-    // the structured multi-artist data intact.
+
     let existing_track_artists: Vec<String> = tag
         .get_strings(ItemKey::TrackArtists)
         .flat_map(|s| s.split(';').map(|a| a.trim().to_string()))
@@ -276,7 +273,7 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
         } else {
             tag.set_artist(artist.to_string());
         }
-        // Drop the now-stale structured split; re-derived from `artist` on scan.
+
         tag.remove_key(ItemKey::TrackArtists);
     }
 
@@ -299,8 +296,6 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
     match &edits.cover {
         CoverChange::Keep => {}
         CoverChange::Remove => {
-            // Clear every embedded picture, not just CoverFront — read_cover()
-            // falls back to any picture type, so a leftover would reappear.
             while !tag.pictures().is_empty() {
                 tag.remove_picture(0);
             }
@@ -318,20 +313,6 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
     tagged
         .save_to_path(track_path, WriteOptions::default())
         .map_err(|e| e.to_string())
-}
-
-/// Read the embedded front-cover picture (or best available) as raw bytes plus
-/// its MIME type, for previewing in the metadata editor. `None` if the file has
-/// no embedded artwork.
-pub fn read_cover(track_path: &Path) -> Option<(Vec<u8>, String)> {
-    let tagged = Probe::open(track_path).ok()?.read().ok()?;
-    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
-    let picture = extract_embedded_cover(&tagged, tag)?;
-    let mime = picture
-        .mime_type()
-        .map(|m| m.as_str().to_string())
-        .unwrap_or_else(|| "image/jpeg".to_string());
-    Some((picture.data().to_vec(), mime))
 }
 
 fn is_matroska_audio(track_path: &Path) -> bool {
