@@ -212,11 +212,18 @@ impl YoutubeDownloader {
             playlist_item_id: None,
             replay_gain: config::ReplayGainInfo::default(),
             credits: Vec::new(),
+            explicit: false,
+            plays: None,
         })
     }
 
     pub async fn stream(&self, video_id: &str) -> Result<YtStreamInfo, String> {
-        crate::ytmusic::probe_stream(video_id, self.cookies.as_deref()).await
+        crate::ytmusic::probe_stream(
+            video_id,
+            self.cookies.as_deref(),
+            config::StreamQuality::High,
+        )
+        .await
     }
 }
 

@@ -434,13 +434,30 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::track_page_from_proto(tracks.get_ref()))
     }
 
-    async fn search(&self, query: String) -> Result<api::SearchResults, ApiError> {
+    async fn search(&self, request: api::SearchRequest) -> Result<api::SearchResults, ApiError> {
         let results = self
             .client()
-            .search(Request::new(proto::SearchRequest { query }))
+            .search(Request::new(convert::search_request_to_proto(&request)))
             .await
             .map_err(wire_error)?;
         Ok(convert::search_results_from_proto(results.get_ref()))
+    }
+
+    async fn search_suggestions(
+        &self,
+        query: String,
+    ) -> Result<Vec<api::SearchSuggestion>, ApiError> {
+        let suggestions = self
+            .client()
+            .get_search_suggestions(Request::new(proto::SearchSuggestionsRequest { query }))
+            .await
+            .map_err(wire_error)?;
+        Ok(suggestions
+            .get_ref()
+            .suggestions
+            .iter()
+            .map(convert::search_suggestion_from_proto)
+            .collect())
     }
 
     async fn track_web_url(&self, key: String) -> Result<Option<String>, ApiError> {

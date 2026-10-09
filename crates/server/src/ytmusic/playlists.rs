@@ -172,16 +172,40 @@ where
     Ok(())
 }
 
+/// What heads a playlist's first page; the track walk reads past it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlaylistHeader {
+    pub title: String,
+    pub owner: Option<String>,
+    pub description: Option<String>,
+    pub thumbnail: Option<String>,
+    pub plays: Option<String>,
+}
+
+impl PlaylistHeader {
+    pub(super) fn parse(response: &Value) -> Option<Self> {
+        let page = super::browse::parse_page(response)?;
+        (!page.title.trim().is_empty()).then_some(Self {
+            title: page.title,
+            owner: page.owner,
+            description: page.description,
+            thumbnail: page.thumbnail,
+            plays: page.plays,
+        })
+    }
+}
+
 /// One page of a playlist walk: pass `continuation = None` for the first page
 /// (an initial browse of `VL{playlist_id}`) and the returned token for each
 /// subsequent page (`None` once exhausted). Stateless — cross-page dedup is the
 /// caller's job — so it can back a `Send`-safe source method that a UI loop pulls
-/// at its own pace (vs. `stream_playlist_entries`' non-`Send` callback).
+/// at its own pace (vs. `stream_playlist_entries`' non-`Send` callback). Only
+/// the first page has a header.
 pub async fn playlist_page(
     playlist_id: &str,
     cookies: &str,
     continuation: Option<&str>,
-) -> Result<(Vec<Track>, Option<String>), String> {
+) -> Result<(Vec<Track>, Option<String>, Option<PlaylistHeader>), String> {
     let auth = if cookies.is_empty() {
         None
     } else {
@@ -195,11 +219,13 @@ pub async fn playlist_page(
                 format!("VL{playlist_id}")
             };
             let resp: Value = innertube::browse_maybe_auth(&browse_id, auth).await?;
-            walk_playlist_shelf(&resp)
+            let (tracks, next) = walk_playlist_shelf(&resp);
+            (tracks, next, PlaylistHeader::parse(&resp))
         }
         Some(token) => {
             let resp = innertube::browse_continuation_maybe_auth(token, auth).await?;
-            super::search::walk_playlist_continuation(&resp)
+            let (tracks, next) = super::search::walk_playlist_continuation(&resp);
+            (tracks, next, None)
         }
     };
     Ok(page)

@@ -1,7 +1,7 @@
 use components::settings_items::{
     AppSelect, ChannelModeSelector, DeviceChangeBehaviorSelector, EqualizerPanel, GainSlider,
     ReplayGainModeSelector, SampleRateModeSelector, SettingItem, SettingsGroup, SettingsSection,
-    ToggleSetting,
+    StreamQualitySelector, ToggleSetting,
 };
 use config::{AppConfig, LYRICS_OFFSET_LIMIT_MS, OfflineQuality, ReplayGainMode};
 use dioxus::prelude::*;
@@ -188,6 +188,8 @@ pub(super) fn MetadataSection(mut config: Signal<AppConfig>) -> Element {
 
 #[component]
 pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
+    let caps = hooks::sources::use_capabilities();
+    let caps = caps.read().clone();
     let crossfade_label = if config.read().crossfade_seconds == 0 {
         i18n::t("crossfade_off")
     } else {
@@ -249,6 +251,57 @@ pub(super) fn PlayerSection(mut config: Signal<AppConfig>) -> Element {
                                 class: "text-xs font-mono text-white/80 w-16 text-right",
                                 "{(config.read().volume_scroll_step * 100.0).round() as i32}%"
                             }
+                        }
+                    }
+                }
+            }
+            if caps.track_radio {
+                SettingItem {
+                    title: i18n::t("autoplay_radio").to_string(),
+                    config_key: "autoplay_radio",
+                    control: rsx! {
+                        ToggleSetting {
+                            enabled: config.read().autoplay_radio,
+                            on_change: move |val| config.write().autoplay_radio = val,
+                        }
+                    }
+                }
+            }
+            if caps.explicit_flags {
+                SettingItem {
+                    title: i18n::t("skip_explicit").to_string(),
+                    config_key: "skip_explicit",
+                    control: rsx! {
+                        ToggleSetting {
+                            enabled: config.read().skip_explicit,
+                            on_change: move |val| config.write().skip_explicit = val,
+                        }
+                    }
+                }
+            }
+            if caps.stream_quality || caps.watch_history {
+                SettingsGroup { label: i18n::t("settings_group_streaming") }
+            }
+            if caps.stream_quality {
+                SettingItem {
+                    title: i18n::t("stream_quality").to_string(),
+                    config_key: "stream_quality",
+                    control: rsx! {
+                        StreamQualitySelector {
+                            current: config.read().stream_quality,
+                            on_change: move |quality| config.write().stream_quality = quality,
+                        }
+                    }
+                }
+            }
+            if caps.watch_history {
+                SettingItem {
+                    title: i18n::t("pause_watch_history").to_string(),
+                    config_key: "pause_watch_history",
+                    control: rsx! {
+                        ToggleSetting {
+                            enabled: config.read().pause_watch_history,
+                            on_change: move |val| config.write().pause_watch_history = val,
                         }
                     }
                 }

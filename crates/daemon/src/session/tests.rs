@@ -100,6 +100,16 @@ impl QueueMaterializer for StubLibrary {
     async fn materialize(&self, context: &QueueContext) -> Result<Vec<Track>, ApiError> {
         match context {
             QueueContext::Tracks { keys } => Ok(keys.iter().map(test_track).collect()),
+            // The way a source answers: the seed among its mix.
+            QueueContext::TrackRadio { key } => Ok([
+                key.as_str(),
+                "radio-short-1",
+                "radio-short-explicit-2",
+                "radio-short-3",
+            ]
+            .iter()
+            .map(|key| test_track(&key.to_string()))
+            .collect()),
             _ => Err(ApiError::unsupported("stub resolves raw tracks only")),
         }
     }
@@ -148,6 +158,8 @@ fn test_track(key: &String) -> Track {
         },
         artists: vec![],
         replay_gain: config::ReplayGainInfo::default(),
+        explicit: key.contains("explicit"),
+        plays: None,
     }
 }
 
@@ -1813,6 +1825,8 @@ fn external_track(title: &str) -> Track {
         credits: Vec::new(),
         artists: Vec::new(),
         replay_gain: config::ReplayGainInfo::default(),
+        explicit: false,
+        plays: None,
     }
 }
 
@@ -2296,4 +2310,251 @@ async fn stored_volume(database: &db::Db) -> f32 {
         .expect("load")
         .expect("stored config")
         .volume
+}
+
+/// A source with track radio and nothing else, for the autoplay gate.
+struct RadioSource {
+    db: db::Db,
+    source: config::Source,
+}
+
+#[async_trait::async_trait]
+impl server::source::MediaSource for RadioSource {
+    fn source(&self) -> &config::Source {
+        &self.source
+    }
+    fn db(&self) -> &db::Db {
+        &self.db
+    }
+    fn capabilities(&self) -> server::source::Capabilities {
+        use server::source::{AlbumType, ArtistView, FavoritesSync, PlaylistOps, RadioSeeds};
+        server::source::Capabilities {
+            edit_tags: false,
+            delete_from_disk: false,
+            scan_folders: false,
+            folders: false,
+            browse_folders: false,
+            external_devices: false,
+            browser_playback: false,
+            sync: false,
+            downloads: false,
+            discover: false,
+            dont_recommend: false,
+            radio: RadioSeeds {
+                track: true,
+                ..RadioSeeds::NONE
+            },
+            playlists: PlaylistOps::None,
+            artist_view: ArtistView::Library,
+            albums: AlbumType::Standard,
+            favorites_sync: FavoritesSync::Instant,
+            account_avatar: false,
+            stream_quality: false,
+            explicit_flags: true,
+            watch_history: false,
+        }
+    }
+    async fn add_to_playlist(
+        &self,
+        _: &str,
+        _: &[String],
+    ) -> Result<Vec<String>, server::source::SourceError> {
+        Err(server::source::SourceError::unsupported("playlists"))
+    }
+    async fn create_playlist(
+        &self,
+        _: &str,
+        _: &[String],
+    ) -> Result<String, server::source::SourceError> {
+        Err(server::source::SourceError::unsupported("playlists"))
+    }
+    async fn remove_from_playlist(
+        &self,
+        _: &str,
+        _: &reader::Track,
+        _: usize,
+    ) -> Result<(), server::source::SourceError> {
+        Err(server::source::SourceError::unsupported("playlists"))
+    }
+    async fn resolve_stream(
+        &self,
+        _: &str,
+        _: config::StreamQuality,
+    ) -> Result<server::source::StreamInfo, server::source::SourceError> {
+        Err(server::source::SourceError::unsupported("streams"))
+    }
+    async fn validate(&self) -> server::source::AuthOutcome {
+        server::source::AuthOutcome::Valid
+    }
+    async fn fetch_favorites(&self) -> Result<Vec<String>, server::source::SourceError> {
+        Ok(Vec::new())
+    }
+    async fn push_favorite(&self, _: &str, _: bool) -> Result<(), server::source::SourceError> {
+        Ok(())
+    }
+}
+
+struct PlaybackSettingsHarness {
+    harness: Harness,
+    session: SessionHandle,
+    _dir: tempfile::TempDir,
+}
+
+/// A session over a source that has track radio, with `configure` applied.
+async fn radio_harness(configure: impl FnOnce(&mut config::AppConfig)) -> PlaybackSettingsHarness {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("radio.db")).await.expect("db");
+    let sink = FakeSinkHandle::default();
+    let player =
+        Player::try_with_sink(Box::new(FakeSink(sink.clone()))).expect("headless player starts");
+    let mut services = PlaybackServices::default();
+    services.config.crossfade_seconds = 0;
+    configure(&mut services.config);
+    services.active_source = Some(Arc::new(RadioSource {
+        db: database,
+        source: config::Source::default(),
+    }));
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    PlaybackSettingsHarness {
+        harness: Harness {
+            api: LocalApi::new(session.clone()),
+            sink,
+        },
+        session,
+        _dir: dir,
+    }
+}
+
+#[tokio::test]
+async fn skipping_explicit_tracks_leaves_them_out_of_a_new_queue() {
+    let harness = harness(|config| config.skip_explicit = true);
+    let mut request = replace(&["track-0", "explicit-1", "track-2"]);
+    request.start_index = Some(1);
+    harness.api.set_queue(request).await.expect("set queue");
+    assert_eq!(queue_titles(&harness.api).await, ["track-0", "track-2"]);
+    let state = wait_committed(&harness.api).await;
+    assert_eq!(
+        state.track.map(|track| track.title),
+        Some("track-2".to_string()),
+        "a start on an explicit track moves to the next clean one"
+    );
+
+    harness
+        .api
+        .set_queue(enqueue(QueueMode::Append, &["explicit-3", "track-4"]))
+        .await
+        .expect("append");
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        ["track-0", "track-2", "track-4"]
+    );
+
+    let refused = harness
+        .api
+        .set_queue(replace(&["explicit-5"]))
+        .await
+        .expect_err("a queue of only explicit tracks");
+    assert_eq!(refused.code, ErrorCode::InvalidInput);
+    assert_eq!(
+        queue_titles(&harness.api).await.len(),
+        3,
+        "the queue is untouched"
+    );
+}
+
+#[tokio::test]
+async fn skipping_explicit_tracks_steps_over_ones_already_queued() {
+    let PlaybackSettingsHarness {
+        harness, session, ..
+    } = radio_harness(|_| {}).await;
+    harness
+        .api
+        .set_queue(replace(&["short-0", "short-explicit-1", "short-2"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+    let mut config = session.config_watch().borrow().clone();
+    config.skip_explicit = true;
+    session.set_config(config, vec!["skip_explicit".into()]);
+
+    let state = drive_until(&harness, "the track after the explicit one", |state| {
+        state.queue.index != Some(0) && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    assert_eq!(state.queue.index, Some(2));
+    assert_eq!(
+        state.track.map(|track| track.title),
+        Some("short-2".to_string())
+    );
+    assert_eq!(
+        queue_titles(&harness.api).await.len(),
+        3,
+        "the queue keeps it"
+    );
+}
+
+#[tokio::test]
+async fn a_run_out_queue_goes_on_as_a_radio_when_autoplay_is_on() {
+    let PlaybackSettingsHarness { harness, .. } = radio_harness(|config| {
+        config.autoplay_radio = true;
+        config.skip_explicit = true;
+    })
+    .await;
+    harness
+        .api
+        .set_queue(replace(&["short-seed"]))
+        .await
+        .expect("set queue");
+    wait_committed(&harness.api).await;
+
+    let state = drive_until(&harness, "the radio after the seed", |state| {
+        state.queue.index == Some(1) && matches!(state.intent, Intent::Committed { .. })
+    })
+    .await;
+    assert_eq!(
+        state.track.map(|track| track.title),
+        Some("radio-short-1".to_string())
+    );
+    assert_eq!(
+        queue_titles(&harness.api).await,
+        ["short-seed", "radio-short-1", "radio-short-3"],
+        "the seed is not queued twice and the explicit pick is skipped"
+    );
+}
+
+#[tokio::test]
+async fn a_run_out_queue_stops_without_autoplay_or_without_track_radio() {
+    for (autoplay, with_radio) in [(false, true), (true, false)] {
+        let (harness, _keep) = if with_radio {
+            let PlaybackSettingsHarness {
+                harness,
+                session,
+                _dir,
+            } = radio_harness(|config| config.autoplay_radio = autoplay).await;
+            (harness, Some((session, _dir)))
+        } else {
+            (harness(|config| config.autoplay_radio = autoplay), None)
+        };
+        harness
+            .api
+            .set_queue(replace(&["short-seed"]))
+            .await
+            .expect("set queue");
+        wait_committed(&harness.api).await;
+        drive_until(&harness, "end-of-queue stop", |state| {
+            state.intent == Intent::Stopped && state.phase == ApiPhase::Ended
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            queue_titles(&harness.api).await,
+            ["short-seed"],
+            "autoplay {autoplay}, track radio {with_radio}"
+        );
+    }
 }

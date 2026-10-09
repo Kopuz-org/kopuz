@@ -292,9 +292,11 @@ impl MutationService {
                     .map(|_| Table::Playlists)
             }
             ArtworkTarget::Track(_) => unreachable!("handled above"),
-            ArtworkTarget::Catalog(_) | ArtworkTarget::Station(_) => Err(ApiError::unsupported(
-                "catalog and station artwork is not ours to set",
-            )),
+            ArtworkTarget::Catalog(_) | ArtworkTarget::Station(_) | ArtworkTarget::Account(_) => {
+                Err(ApiError::unsupported(
+                    "catalog, station and account artwork is not ours to set",
+                ))
+            }
         };
         match result {
             Ok(table) => {
@@ -345,9 +347,9 @@ impl MutationService {
                 Table::Playlists
             }
             ArtworkTarget::Track(_) => unreachable!("handled above"),
-            ArtworkTarget::Catalog(_) | ArtworkTarget::Station(_) => {
+            ArtworkTarget::Catalog(_) | ArtworkTarget::Station(_) | ArtworkTarget::Account(_) => {
                 return Err(ApiError::unsupported(
-                    "catalog and station artwork is not ours to remove",
+                    "catalog, station and account artwork is not ours to remove",
                 ));
             }
         };

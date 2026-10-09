@@ -14,6 +14,8 @@ pub enum ArtworkTarget {
     Playlist(String),
     Catalog(String),
     Station(String),
+    /// The picture of the account a source is signed in as, by the source's id.
+    Account(String),
 }
 
 impl ArtworkTarget {
@@ -25,7 +27,8 @@ impl ArtworkTarget {
             | Self::Album(id)
             | Self::Playlist(id)
             | Self::Catalog(id)
-            | Self::Station(id) => id,
+            | Self::Station(id)
+            | Self::Account(id) => id,
         }
     }
 
@@ -38,6 +41,7 @@ impl ArtworkTarget {
             Self::Playlist(_) => "playlist",
             Self::Catalog(_) => "catalog",
             Self::Station(_) => "station",
+            Self::Account(_) => "account",
         }
     }
 }

@@ -1,5 +1,6 @@
 use config::{
     AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, ReplayGainMode, SampleRateMode,
+    StreamQuality,
 };
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -559,6 +560,25 @@ pub fn ReplayGainModeSelector(
             value: current.value_str().to_string(),
             options,
             on_change: move |value: String| on_change.call(ReplayGainMode::from_value_str(&value)),
+            class: "settings-select",
+        }
+    }
+}
+
+#[component]
+pub fn StreamQualitySelector(
+    current: StreamQuality,
+    on_change: EventHandler<StreamQuality>,
+) -> Element {
+    let options = StreamQuality::ALL
+        .iter()
+        .map(|quality| (quality.value_str().to_string(), i18n::t(quality.i18n_key())))
+        .collect();
+    rsx! {
+        AppSelect {
+            value: current.value_str().to_string(),
+            options,
+            on_change: move |value: String| on_change.call(StreamQuality::from_value_str(&value)),
             class: "settings-select",
         }
     }

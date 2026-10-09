@@ -73,10 +73,18 @@ impl MediaSource for SpotifySource {
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Paginated,
+            account_avatar: false,
+            stream_quality: false,
+            explicit_flags: false,
+            watch_history: false,
         }
     }
 
-    async fn resolve_stream(&self, _item_id: &str) -> Result<StreamInfo, SourceError> {
+    async fn resolve_stream(
+        &self,
+        _item_id: &str,
+        _: config::StreamQuality,
+    ) -> Result<StreamInfo, SourceError> {
         Err(SourceError::unsupported(
             "Spotify playback (handled by the browser player)",
         ))

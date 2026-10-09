@@ -60,6 +60,10 @@ const CAPABILITIES: Capabilities = Capabilities {
     artist_view: ArtistView::Library,
     albums: AlbumType::Standard,
     favorites_sync: FavoritesSync::Instant,
+    account_avatar: false,
+    stream_quality: false,
+    explicit_flags: false,
+    watch_history: false,
 };
 
 /// Art fetches in flight at once, enough to hide the round trips without
@@ -227,6 +231,8 @@ impl MediaSource for NextcloudSource {
                     credits: Vec::new(),
                     artists: vec![track.artist],
                     replay_gain: config::ReplayGainInfo::default(),
+                    explicit: false,
+                    plays: None,
                 }
             })
             .collect();
@@ -238,7 +244,11 @@ impl MediaSource for NextcloudSource {
         })
     }
 
-    async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
+    async fn resolve_stream(
+        &self,
+        item_id: &str,
+        _: config::StreamQuality,
+    ) -> Result<StreamInfo, SourceError> {
         Ok(StreamInfo {
             url: self.client()?.stream_url(item_id),
             format: None,

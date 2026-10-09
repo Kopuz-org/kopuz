@@ -29,7 +29,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cookies = read_kopuz_cookies()?;
 
     println!("Probing stream for {video_id}…");
-    let info = server::ytmusic::probe_stream(&video_id, Some(&cookies)).await?;
+    let info =
+        server::ytmusic::probe_stream(&video_id, Some(&cookies), config::StreamQuality::High)
+            .await?;
     println!(
         "✓ url             = {}…",
         info.url.chars().take(80).collect::<String>()

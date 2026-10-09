@@ -74,6 +74,23 @@ pub fn channel_mode_from_proto(value: i32) -> config::ChannelMode {
     }
 }
 
+pub fn stream_quality_to_proto(value: config::StreamQuality) -> StreamQuality {
+    match value {
+        config::StreamQuality::Low => StreamQuality::Low,
+        config::StreamQuality::Normal => StreamQuality::Normal,
+        config::StreamQuality::High => StreamQuality::High,
+    }
+}
+
+pub fn stream_quality_from_proto(value: i32) -> config::StreamQuality {
+    match StreamQuality::try_from(value).unwrap_or(StreamQuality::Unspecified) {
+        StreamQuality::Low => config::StreamQuality::Low,
+        StreamQuality::Normal => config::StreamQuality::Normal,
+        StreamQuality::High => config::StreamQuality::High,
+        StreamQuality::Unspecified => config::StreamQuality::default(),
+    }
+}
+
 pub fn device_change_behavior_to_proto(
     value: config::DeviceChangeBehavior,
 ) -> DeviceChangeBehavior {
@@ -616,6 +633,10 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
         sample_rate_mode: sample_rate_mode_to_proto(value.sample_rate_mode) as i32,
         titlebar_mode: titlebar_mode_to_proto(value.titlebar_mode) as i32,
         offline_quality: offline_quality_to_proto(value.offline_quality) as i32,
+        stream_quality: stream_quality_to_proto(value.stream_quality) as i32,
+        autoplay_radio: value.autoplay_radio,
+        skip_explicit: value.skip_explicit,
+        pause_watch_history: value.pause_watch_history,
         player_bar_position: player_bar_position_to_proto(value.player_bar_position) as i32,
         ui_style: ui_style_to_proto(value.ui_style) as i32,
         settings_layout: settings_layout_to_proto(value.settings_layout) as i32,
@@ -720,6 +741,10 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
         sample_rate_mode: sample_rate_mode_from_proto(value.sample_rate_mode),
         titlebar_mode: titlebar_mode_from_proto(value.titlebar_mode),
         offline_quality: offline_quality_from_proto(value.offline_quality),
+        stream_quality: stream_quality_from_proto(value.stream_quality),
+        autoplay_radio: value.autoplay_radio,
+        skip_explicit: value.skip_explicit,
+        pause_watch_history: value.pause_watch_history,
         player_bar_position: player_bar_position_from_proto(value.player_bar_position),
         ui_style: ui_style_from_proto(value.ui_style),
         settings_layout: settings_layout_from_proto(value.settings_layout),
@@ -772,5 +797,27 @@ mod tests {
         }
         assert_eq!(ui_style_from_proto(1), config::UiStyle::Normal);
         assert_eq!(ui_style_from_proto(2), config::UiStyle::Vaxry);
+    }
+
+    #[test]
+    fn playback_settings_survive_the_wire_round_trip() {
+        for stream_quality in config::StreamQuality::ALL.iter().copied() {
+            let original = config::AppConfig {
+                stream_quality,
+                autoplay_radio: true,
+                skip_explicit: true,
+                pause_watch_history: true,
+                ..Default::default()
+            };
+            let bytes = config_to_proto(&original).encode_to_vec();
+            let restored = config_from_proto(&Config::decode(bytes.as_slice()).unwrap());
+            assert_eq!(restored.stream_quality, stream_quality);
+            assert!(restored.autoplay_radio && restored.skip_explicit);
+            assert!(restored.pause_watch_history);
+        }
+        // A peer that predates the field sends nothing, which reads as today's behaviour.
+        let restored = config_from_proto(&Config::default());
+        assert_eq!(restored.stream_quality, config::StreamQuality::High);
+        assert!(!restored.autoplay_radio && !restored.skip_explicit);
     }
 }

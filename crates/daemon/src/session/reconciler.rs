@@ -127,7 +127,11 @@ impl Session {
     }
 
     fn arm_crossfade(&mut self) {
-        let NextOutcome::Play(idx) = self.model.peek_next() else {
+        let skip = self.config.skip_explicit;
+        let NextOutcome::Play(idx) = self
+            .model
+            .peek_next_where(|track| !(skip && track.explicit))
+        else {
             return;
         };
         self.start_load(idx, true);

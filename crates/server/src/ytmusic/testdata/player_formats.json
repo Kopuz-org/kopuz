@@ -1,0 +1,16 @@
+{
+  "playabilityStatus": { "status": "OK" },
+  "videoDetails": { "videoId": "fixture0001", "lengthSeconds": "212" },
+  "streamingData": {
+    "adaptiveFormats": [
+      { "itag": 137, "mimeType": "video/mp4; codecs=\"avc1.640028\"", "bitrate": 4329848, "averageBitrate": 2210325, "url": "https://r.googlevideo.com/v?itag=137" },
+      { "itag": 139, "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"", "bitrate": 49981, "averageBitrate": 48782, "contentLength": "1293408", "url": "https://r.googlevideo.com/v?itag=139" },
+      { "itag": 140, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 130498, "averageBitrate": 129478, "contentLength": "3432734", "url": "https://r.googlevideo.com/v?itag=140" },
+      { "itag": 141, "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"", "bitrate": 261144, "averageBitrate": 255816, "contentLength": "6782271", "signatureCipher": "s=SIG&sp=sig&url=https%3A%2F%2Fr.googlevideo.com%2Fv%3Fitag%3D141" },
+      { "itag": 249, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 58602, "averageBitrate": 52451, "contentLength": "1390603", "url": "https://r.googlevideo.com/v?itag=249" },
+      { "itag": 250, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 76329, "averageBitrate": 68632, "contentLength": "1819610", "url": "https://r.googlevideo.com/v?itag=250" },
+      { "itag": 251, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 163474, "averageBitrate": 131468, "contentLength": "3485515", "url": "https://r.googlevideo.com/v?itag=251" },
+      { "itag": 774, "mimeType": "audio/webm; codecs=\"opus\"", "bitrate": 291876, "averageBitrate": 256117, "contentLength": "6790218", "signatureCipher": "s=SIG&sp=sig&url=https%3A%2F%2Fr.googlevideo.com%2Fv%3Fitag%3D774" }
+    ]
+  }
+}

@@ -109,6 +109,12 @@ enum SessionCmd {
         changed: Vec<String>,
     },
     QueueUnread,
+    /// The radio a run-out queue continues into, built off the actor.
+    AutoplayRadio {
+        queue_rev: u64,
+        seed: String,
+        result: Result<Vec<Track>, ApiError>,
+    },
     PreviewEqualizer(config::EqualizerSettings),
     Emit(Box<ApiEvent>),
     AttachExternal(crate::external::SharedExternalPlayer),
@@ -187,6 +193,7 @@ impl SessionHandle {
             armed_transition: None,
             load_task: None,
             radio_task: None,
+            autoplay_task: None,
             phase: ApiPhase::Idle,
             position: None,
             position_token: None,
@@ -501,6 +508,7 @@ struct Session {
     armed_transition: Option<u64>,
     load_task: Option<(u64, JoinHandle<()>)>,
     radio_task: Option<JoinHandle<()>>,
+    autoplay_task: Option<JoinHandle<()>>,
     phase: ApiPhase,
     position: Option<PositionAnchor>,
     position_token: Option<u64>,
@@ -607,6 +615,11 @@ impl Session {
                 self.apply_config(*config, changed, state_tx);
             }
             SessionCmd::QueueUnread => self.queue_unread = true,
+            SessionCmd::AutoplayRadio {
+                queue_rev,
+                seed,
+                result,
+            } => self.handle_autoplay_radio(queue_rev, &seed, result, state_tx),
             SessionCmd::PreviewEqualizer(equalizer) => self.player.set_equalizer(equalizer),
             SessionCmd::Emit(event) => self.emit(*event),
             SessionCmd::AttachExternal(player) => {
@@ -790,6 +803,7 @@ impl Session {
                 if tracks.is_empty() {
                     return Err(ApiError::not_found("none of those keys are in the library"));
                 }
+                let (tracks, _) = self.allowed(tracks, None)?;
                 self.model.insert_at(index, tracks);
                 Ok(self.publish(state_tx, true))
             }
@@ -901,6 +915,8 @@ impl Session {
                 "queue materialization timed out",
             )
         })??;
+        let (tracks, start_index) =
+            self.allowed(tracks, request.start_index.map(|index| index as usize))?;
         match request.mode {
             QueueMode::Replace => {
                 let mut candidate = self.model.clone();
@@ -910,7 +926,7 @@ impl Session {
                 }
                 let len = candidate.len();
                 if len > 0 {
-                    let start = request.start_index.map(|i| i as usize).unwrap_or_else(|| {
+                    let start = start_index.unwrap_or_else(|| {
                         if candidate.shuffle() {
                             use rand::RngExt;
                             rand::rng().random_range(0..len)
@@ -944,8 +960,9 @@ impl Session {
         allow_crossfade: bool,
         state_tx: &watch::Sender<PlayerState>,
     ) -> Result<(), ApiError> {
+        let playable = playable(self.config.skip_explicit);
         if allow_crossfade {
-            if let NextOutcome::Play(idx) = self.model.peek_next()
+            if let NextOutcome::Play(idx) = self.model.peek_next_where(playable)
                 && !self.start_load(idx, true)
             {
                 return Err(Self::unavailable_track_error());
@@ -957,7 +974,7 @@ impl Session {
             let _ = self.revert_transition();
         }
         let mut candidate = self.model.clone();
-        match candidate.advance_next() {
+        match candidate.advance_next_where(playable) {
             NextOutcome::Play(idx) => {
                 self.start_immediate_load(candidate, idx)?;
             }
@@ -973,10 +990,125 @@ impl Session {
                     self.phase = ApiPhase::Paused;
                 }
                 self.publish_position_anchor(state_tx, None, None, false);
+                self.start_autoplay();
             }
             NextOutcome::Empty => {}
         }
         Ok(())
+    }
+
+    /// `tracks` as the queue may take them: less the explicit ones while those
+    /// are skipped, with `start` moved to match. Refused when nothing is left,
+    /// since an empty queue would read as a stop the caller never asked for.
+    fn allowed(
+        &self,
+        tracks: Vec<Track>,
+        start: Option<usize>,
+    ) -> Result<(Vec<Track>, Option<usize>), ApiError> {
+        if !self.config.skip_explicit || tracks.is_empty() {
+            return Ok((tracks, start));
+        }
+        let (kept, start) = crate::queue_model::without_explicit(tracks, start);
+        if kept.is_empty() {
+            return Err(ApiError::invalid_input(
+                "every track here is explicit, and explicit tracks are skipped",
+            ));
+        }
+        Ok((kept, start))
+    }
+
+    /// With autoplay on, a queue that ran out goes on as a radio of its last
+    /// track, where the source has track radio. The mix is a network round
+    /// trip, so it is fetched off the actor and lands as a command.
+    fn start_autoplay(&mut self) {
+        let radio = self
+            .active_source
+            .as_ref()
+            .is_some_and(|source| source.capabilities().radio.track);
+        if !self.config.autoplay_radio
+            || !radio
+            || self.current_track_is_radio()
+            || self
+                .autoplay_task
+                .as_ref()
+                .is_some_and(|task| !task.is_finished())
+        {
+            return;
+        }
+        let Some(seed) = self
+            .model
+            .current_track()
+            .map(|track| track.id.key().into_owned())
+        else {
+            return;
+        };
+        let materializer = self.materializer.clone();
+        let tx = self.cmd_tx.clone();
+        let queue_rev = self.queue_rev;
+        self.autoplay_task = Some(tokio::spawn(async move {
+            let context = QueueContext::TrackRadio { key: seed.clone() };
+            let result =
+                match tokio::time::timeout(MATERIALIZE_TIMEOUT, materializer.materialize(&context))
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(_) => Err(ApiError::new(
+                        api::ErrorCode::SourceUnreachable,
+                        "timed out building the autoplay radio",
+                    )),
+                };
+            let _ = tx.send(SessionCmd::AutoplayRadio {
+                queue_rev,
+                seed,
+                result,
+            });
+        }));
+    }
+
+    /// Append the radio and play on into it, unless the queue changed or
+    /// something started playing while it was fetched.
+    fn handle_autoplay_radio(
+        &mut self,
+        queue_rev: u64,
+        seed: &str,
+        result: Result<Vec<Track>, ApiError>,
+        state_tx: &watch::Sender<PlayerState>,
+    ) {
+        self.autoplay_task = None;
+        if queue_rev != self.queue_rev
+            || self.intent != PlaybackIntent::Stopped
+            || self
+                .model
+                .current_track()
+                .map(|track| track.id.key())
+                .as_deref()
+                != Some(seed)
+        {
+            return;
+        }
+        let tracks = match result {
+            Ok(tracks) => tracks,
+            Err(error) => {
+                tracing::warn!(%error, "autoplay radio failed; the queue stays ended");
+                return;
+            }
+        };
+        let skip = self.config.skip_explicit;
+        let tracks: Vec<Track> = tracks
+            .into_iter()
+            .filter(|track| track.id.key() != seed && !(skip && track.explicit))
+            .collect();
+        if tracks.is_empty() {
+            return;
+        }
+        self.model.add(tracks);
+        let mut candidate = self.model.clone();
+        if let NextOutcome::Play(idx) = candidate.advance_next_where(playable(skip))
+            && let Err(error) = self.start_immediate_load(candidate, idx)
+        {
+            tracing::warn!(%error, "autoplay radio would not start");
+        }
+        self.publish(state_tx, true);
     }
 
     fn play_previous(&mut self, state_tx: &watch::Sender<PlayerState>) -> Result<(), ApiError> {
@@ -1090,6 +1222,9 @@ impl Session {
     fn stop_playback(&mut self) {
         self.cancel_load_task();
         self.cancel_radio_task();
+        if let Some(task) = self.autoplay_task.take() {
+            task.abort();
+        }
         self.pending_transition = None;
         self.armed_transition = None;
         self.pending_resume = None;
@@ -1716,6 +1851,12 @@ struct ExternalState {
 }
 
 /// Tell clients play history moved, sent after the write so a re-read sees it.
+/// What auto-advance may land on: anything, or only clean tracks while
+/// explicit ones are skipped.
+fn playable(skip_explicit: bool) -> impl Fn(&Track) -> bool + Copy {
+    move |track| !(skip_explicit && track.explicit)
+}
+
 fn announce_history(events: &broadcast::Sender<ApiEvent>) {
     let _ = events.send(ApiEvent::LibraryInvalidated {
         table: api::Table::Recents,

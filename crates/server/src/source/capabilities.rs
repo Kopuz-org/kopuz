@@ -26,7 +26,11 @@ where
 
 #[async_trait]
 pub trait PlayableSource: SourceIdentity + Send + Sync {
-    async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError>;
+    async fn resolve_stream(
+        &self,
+        item_id: &str,
+        quality: config::StreamQuality,
+    ) -> Result<StreamInfo, SourceError>;
     async fn validate(&self) -> AuthOutcome;
     fn web_url(&self, track: &reader::Track) -> Option<String>;
 }
@@ -36,8 +40,12 @@ impl<T> PlayableSource for T
 where
     T: MediaSource + ?Sized,
 {
-    async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
-        <T as MediaSource>::resolve_stream(self, item_id).await
+    async fn resolve_stream(
+        &self,
+        item_id: &str,
+        quality: config::StreamQuality,
+    ) -> Result<StreamInfo, SourceError> {
+        <T as MediaSource>::resolve_stream(self, item_id, quality).await
     }
 
     async fn validate(&self) -> AuthOutcome {

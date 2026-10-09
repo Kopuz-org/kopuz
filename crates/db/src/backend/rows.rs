@@ -78,6 +78,8 @@ impl TrackRow {
                 album_gain_db: self.rg_album_gain.map(|v| v as f32),
                 album_peak: self.rg_album_peak.map(|v| v as f32),
             },
+            explicit: false,
+            plays: None,
         }
     }
 }
@@ -173,6 +175,8 @@ impl QueueTrackRow {
                 album_gain_db: self.rg_album_gain.map(|v| v as f32),
                 album_peak: self.rg_album_peak.map(|v| v as f32),
             },
+            explicit: false,
+            plays: None,
         }
     }
 }

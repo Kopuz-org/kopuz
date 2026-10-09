@@ -862,6 +862,72 @@ mod tests {
     }
 
     #[test]
+    fn playback_settings_travel_through_every_layer_and_lock_when_pinned() {
+        use crate::StreamQuality;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.toml");
+        let cfg = AppConfig {
+            stream_quality: StreamQuality::Low,
+            autoplay_radio: true,
+            skip_explicit: true,
+            pause_watch_history: true,
+            ..Default::default()
+        };
+        save_settings_file(
+            &path,
+            &serde_json::to_value(&cfg).unwrap(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("stream_quality = \"Low\"\n"), "{text}");
+
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        let restored = layers.merge_and_parse(serde_json::json!({})).unwrap();
+        assert_eq!(restored.stream_quality, StreamQuality::Low);
+        assert!(restored.autoplay_radio && restored.skip_explicit && restored.pause_watch_history);
+        assert!(!layers.is_locked("skip_explicit"));
+
+        // A drop-in and an env var each outrank the file and lock what they pin.
+        let dropin_dir = dropin_dir_for(&path);
+        std::fs::create_dir_all(&dropin_dir).unwrap();
+        std::fs::write(
+            dropin_dir.join("10-play.toml"),
+            "stream_quality = \"Normal\"\n",
+        )
+        .unwrap();
+        let env = vec![(
+            "KOPUZ_CONFIG_AUTOPLAY_RADIO".to_string(),
+            "false".to_string(),
+        )];
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, env.into_iter());
+        let restored = layers.merge_and_parse(serde_json::json!({})).unwrap();
+        assert_eq!(restored.stream_quality, StreamQuality::Normal);
+        assert!(!restored.autoplay_radio);
+        assert!(restored.skip_explicit);
+        assert!(layers.is_locked("stream_quality"));
+        assert!(layers.is_locked("autoplay_radio"));
+        assert!(!layers.is_locked("pause_watch_history"));
+        std::fs::remove_dir_all(&dropin_dir).unwrap();
+
+        // A read-only (hjem-managed) file locks every key it sets.
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&path, perms).unwrap();
+        let layers = FileLayers::read_inner(&path, NIX_STORE_PREFIX, empty_env());
+        assert!(layers.managed);
+        for key in [
+            "stream_quality",
+            "autoplay_radio",
+            "skip_explicit",
+            "pause_watch_history",
+        ] {
+            assert!(layers.is_locked(key), "{key} is not locked");
+        }
+    }
+
+    #[test]
     fn f32_fields_are_written_short_and_reload_identically() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.toml");

@@ -192,6 +192,8 @@ impl MediaSource for JellyfinSource {
                             .artists
                             .unwrap_or_else(|| item.album_artist.into_iter().collect()),
                         replay_gain,
+                        explicit: false,
+                        plays: None,
                     });
                 }
                 start += count;
@@ -274,6 +276,10 @@ impl MediaSource for JellyfinSource {
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Instant,
+            account_avatar: false,
+            stream_quality: false,
+            explicit_flags: false,
+            watch_history: false,
         }
     }
 
@@ -319,7 +325,11 @@ impl MediaSource for JellyfinSource {
         self.remove_playlist_entry(playlist_id, position).await
     }
 
-    async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
+    async fn resolve_stream(
+        &self,
+        item_id: &str,
+        _: config::StreamQuality,
+    ) -> Result<StreamInfo, SourceError> {
         Ok(StreamInfo {
             url: self.client.stream_url(item_id),
             format: None,
@@ -439,6 +449,8 @@ impl MediaSource for JellyfinSource {
                     credits: credits_of(item.artist_items.as_deref()),
                     artists: item.artists.unwrap_or_default(),
                     replay_gain,
+                    explicit: false,
+                    plays: None,
                 }
             })
             .collect())

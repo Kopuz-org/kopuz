@@ -170,6 +170,8 @@ mod tests {
             artists: vec!["a".into()],
             replay_gain: config::ReplayGainInfo::default(),
             credits: Vec::new(),
+            explicit: false,
+            plays: None,
         };
         db.upsert_tracks(&server(), &[track]).await.expect("upsert");
     }

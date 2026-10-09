@@ -19,6 +19,22 @@ pub enum NextOutcome {
     Empty,
 }
 
+/// `tracks` less the explicit ones, and where a start index lands among the
+/// rest: on the same track when it stays, else on the next one kept (the last,
+/// when nothing after it is).
+pub fn without_explicit(tracks: Vec<Track>, start: Option<usize>) -> (Vec<Track>, Option<usize>) {
+    let start = start.map(|start| {
+        tracks
+            .iter()
+            .take(start)
+            .filter(|track| !track.explicit)
+            .count()
+    });
+    let kept: Vec<Track> = tracks.into_iter().filter(|track| !track.explicit).collect();
+    let start = start.map(|start| start.min(kept.len().saturating_sub(1)));
+    (kept, start)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct QueueModel {
     items: Vec<Track>,
@@ -140,7 +156,13 @@ impl QueueModel {
     /// chosen this way, because the queue must keep reading as the outgoing
     /// track until the engine actually switches.
     pub fn peek_next(&mut self) -> NextOutcome {
-        let idx = self.current;
+        self.peek_next_where(|_| true)
+    }
+
+    /// [`Self::peek_next`], stepping over every track `playable` refuses. A
+    /// queue whose remaining tracks are all refused ends here, and one that
+    /// loops comes round to the current track again.
+    pub fn peek_next_where(&mut self, playable: impl Fn(&Track) -> bool) -> NextOutcome {
         let queue_len = if self.shuffle {
             self.repair_shuffle_order();
             self.shuffle_order.len()
@@ -153,18 +175,31 @@ impl QueueModel {
         }
 
         if self.loop_mode == LoopMode::Track {
-            return NextOutcome::Play(idx);
+            return NextOutcome::Play(self.current);
         }
-        if !Self::has_following_track(idx, queue_len, self.loop_mode) {
-            return NextOutcome::EndOfQueue;
+        let mut idx = self.current;
+        for _ in 0..queue_len {
+            if !Self::has_following_track(idx, queue_len, self.loop_mode) {
+                return NextOutcome::EndOfQueue;
+            }
+            idx = if idx + 1 < queue_len { idx + 1 } else { 0 };
+            if self.track_at(idx).is_some_and(&playable) {
+                return NextOutcome::Play(idx);
+            }
         }
-        NextOutcome::Play(if idx + 1 < queue_len { idx + 1 } else { 0 })
+        NextOutcome::EndOfQueue
     }
 
     /// The Next decision, taken: on `Play`, history is pushed and `current`
     /// moves to the position [`Self::peek_next`] reported.
     pub fn advance_next(&mut self) -> NextOutcome {
-        let outcome = self.peek_next();
+        self.advance_next_where(|_| true)
+    }
+
+    /// [`Self::advance_next`] over [`Self::peek_next_where`]; the tracks
+    /// stepped over stay out of history.
+    pub fn advance_next_where(&mut self, playable: impl Fn(&Track) -> bool) -> NextOutcome {
+        let outcome = self.peek_next_where(playable);
         if let NextOutcome::Play(idx) = outcome {
             self.push_history_dedup();
             self.current = idx;
@@ -625,6 +660,8 @@ mod tests {
             credits: Vec::new(),
             artists: vec![],
             replay_gain: config::ReplayGainInfo::default(),
+            explicit: false,
+            plays: None,
         }
     }
 
@@ -953,5 +990,51 @@ mod tests {
         let mut physical: Vec<usize> = m.shuffle_order().to_vec();
         physical.sort_unstable();
         assert_eq!(physical, vec![0, 1, 2, 3, 4]);
+    }
+
+    fn explicit(n: usize) -> Track {
+        Track {
+            explicit: true,
+            ..track(n)
+        }
+    }
+
+    #[test]
+    fn next_steps_over_refused_tracks_and_ends_when_only_they_remain() {
+        let mut m = QueueModel::default();
+        m.replace(vec![track(0), explicit(1), track(2), explicit(3)]);
+        m.jump_to(0);
+        let clean = |t: &Track| !t.explicit;
+
+        assert_eq!(m.advance_next_where(clean), NextOutcome::Play(2));
+        assert_eq!(m.history(), &[0]);
+        assert_eq!(m.peek_next_where(clean), NextOutcome::EndOfQueue);
+        assert_eq!(m.advance_next_where(clean), NextOutcome::EndOfQueue);
+        assert_eq!(m.current_position(), 2);
+        assert_eq!(
+            m.peek_next(),
+            NextOutcome::Play(3),
+            "the plain decision is unchanged"
+        );
+
+        m.set_loop_mode(LoopMode::Queue);
+        assert_eq!(m.peek_next_where(clean), NextOutcome::Play(0));
+    }
+
+    #[test]
+    fn without_explicit_keeps_the_start_on_the_track_it_named() {
+        let tracks = vec![explicit(0), track(1), explicit(2), track(3)];
+        let (kept, start) = without_explicit(tracks.clone(), Some(3));
+        assert_eq!(
+            kept.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(),
+            ["t1", "t3"]
+        );
+        assert_eq!(start, Some(1));
+        // An explicit start moves to the next kept track.
+        assert_eq!(without_explicit(tracks.clone(), Some(2)).1, Some(1));
+        assert_eq!(without_explicit(tracks.clone(), Some(0)).1, Some(0));
+        assert_eq!(without_explicit(tracks, None).1, None);
+        let (kept, _) = without_explicit(vec![explicit(0)], Some(0));
+        assert!(kept.is_empty());
     }
 }

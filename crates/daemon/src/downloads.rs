@@ -266,9 +266,12 @@ impl DownloadsService {
                 self.publish_bytes(&path, &bytes).await?
             }
             Err(server::source::SourceError::Unsupported(_)) => {
-                let info = source.resolve_stream(&item_id).await.map_err(|error| {
-                    ApiError::internal(format!("stream resolve failed: {error}"))
-                })?;
+                let info = source
+                    .resolve_stream(&item_id, config::StreamQuality::High)
+                    .await
+                    .map_err(|error| {
+                        ApiError::internal(format!("stream resolve failed: {error}"))
+                    })?;
                 if ctx.cancelled() {
                     return Ok(());
                 }

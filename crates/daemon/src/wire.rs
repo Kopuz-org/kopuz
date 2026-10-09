@@ -40,6 +40,8 @@ pub(crate) fn track_info(track: &Track, config: &config::AppConfig) -> TrackInfo
         musicbrainz_track_id: track.musicbrainz_track_id.clone(),
         artwork: crate::artwork::track_ref(track),
         credits: credits(track),
+        explicit: track.explicit,
+        plays: track.plays.clone(),
     }
 }
 
@@ -128,6 +130,8 @@ mod tests {
             artists: vec!["Ada".into()],
             replay_gain: config::ReplayGainInfo::default(),
             credits,
+            explicit: false,
+            plays: None,
         }
     }
 

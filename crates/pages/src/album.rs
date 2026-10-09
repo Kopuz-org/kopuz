@@ -360,6 +360,9 @@ fn AlbumDetail(
                             artist: remote.subtitle.unwrap_or_default(),
                             artist_key: remote.artist_key,
                             year: remote.year,
+                            album_type: remote.album_type,
+                            description: remote.description,
+                            web_url: remote.web_url,
                             album_id: Some(remote.id),
                             remote_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
                             tracks,
@@ -661,6 +664,9 @@ fn RemoteAlbumDetail(
     artist: String,
     artist_key: Option<String>,
     year: Option<String>,
+    album_type: Option<String>,
+    description: Option<String>,
+    web_url: Option<String>,
     album_id: Option<String>,
     remote_cover: Option<utils::CoverUrl>,
     tracks: Vec<api::TrackInfo>,
@@ -707,28 +713,10 @@ fn RemoteAlbumDetail(
 
     let tracks_play_all = tracks.clone();
     let tracks_download_all = tracks.clone();
-    // Prefer the provider's album page; fall back to its first track page.
-    // The daemon knows which sources have web pages and how they spell them;
-    // an id and a key are all that leave here.
-    let share_api = hooks::use_api();
-    let share_id = album_id.clone();
-    let share_key = tracks.first().map(|track| track.key.clone());
-    let share_url = use_resource(move || {
-        let api = share_api.clone();
-        let (id, key) = (share_id.clone(), share_key.clone());
-        async move {
-            if let Some(id) = id
-                && let Ok(Some(url)) = api.album_web_url(id).await
-            {
-                return Some(url);
-            }
-            match key {
-                Some(key) => api.track_web_url(key).await.ok().flatten(),
-                None => None,
-            }
-        }
-    });
-    let share_url = share_url.read().clone().flatten();
+    let play_id = album_id.clone();
+    let kind_label = album_type
+        .clone()
+        .or_else(|| year.is_some().then(|| i18n::t("album").to_string()));
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
@@ -741,7 +729,7 @@ fn RemoteAlbumDetail(
             div { class: "flex-1 min-h-0 flex flex-col md:flex-row gap-10 overflow-hidden",
 
                 // Left meta column.
-                div { class: "md:w-[320px] shrink-0 flex flex-col items-center md:items-start text-center md:text-left gap-5 md:pt-2",
+                div { class: "md:w-[320px] shrink-0 md:min-h-0 md:overflow-y-auto md:overflow-x-hidden flex flex-col items-center md:items-start text-center md:text-left gap-5 md:pt-2 md:pb-4",
                     div {
                         class: "w-full max-w-[300px] aspect-square rounded-lg bg-stone-800 overflow-hidden relative shrink-0 shadow-2xl shadow-black/40",
                         if let Some(url) = &remote_cover {
@@ -760,8 +748,8 @@ fn RemoteAlbumDetail(
                         }
                         h1 { class: "text-3xl font-semibold tracking-tight text-white leading-[1.1] break-words", "{title}" }
                         div { class: "text-sm text-slate-400 flex flex-wrap items-center gap-x-2 justify-center md:justify-start",
-                            if year.is_some() {
-                                span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{i18n::t(\"album\")}" }
+                            if let Some(kind) = kind_label {
+                                span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{kind}" }
                                 span { class: "text-white/30", "•" }
                             }
                             span { "{i18n::t_with(\"showcase_song_count\", &[(\"count\", song_count.to_string())])}" }
@@ -811,12 +799,12 @@ fn RemoteAlbumDetail(
                         button {
                             class: "w-16 h-16 rounded-full bg-indigo-500 hover:bg-indigo-400 text-black flex items-center justify-center transition-transform hover:scale-105 shadow-lg shadow-black/30",
                             title: i18n::t("play").to_string(),
-                            onclick: move |_| {
-                                if *ctrl.shuffle.peek() {
+                            onclick: move |_| match play_id.clone() {
+                                Some(id) => ctrl.play_context(api::QueueContext::Album { id }),
+                                None if *ctrl.shuffle.peek() => {
                                     ctrl.play_queue_shuffled(tracks_play_all.clone());
-                                } else {
-                                    ctrl.play_queue_linear(tracks_play_all.clone());
                                 }
+                                None => ctrl.play_queue_linear(tracks_play_all.clone()),
                             },
                             i { class: "fa-solid fa-play text-2xl ml-1" }
                         }
@@ -828,13 +816,20 @@ fn RemoteAlbumDetail(
                             i { class: "fa-solid fa-shuffle" }
                         }
                         // Share.
-                        if let Some(url) = share_url {
+                        if let Some(url) = web_url {
                             button {
                                 class: "w-11 h-11 rounded-full border border-white/15 flex items-center justify-center text-slate-300 hover:text-white hover:border-white/30 transition-colors",
                                 title: i18n::t("share").to_string(),
                                 onclick: move |_| copy_album_link(url.clone()),
                                 i { class: "fa-solid fa-arrow-up-from-bracket" }
                             }
+                        }
+                    }
+                    if let Some(about) = description {
+                        p {
+                            class: "w-full text-sm text-white/50 leading-relaxed line-clamp-4 break-words",
+                            title: "{about}",
+                            "{about}"
                         }
                     }
                 }

@@ -59,6 +59,8 @@ fn track(key: &str) -> Track {
         artists: vec![],
         replay_gain: config::ReplayGainInfo::default(),
         credits: vec![],
+        explicit: false,
+        plays: None,
     }
 }
 
@@ -473,6 +475,42 @@ async fn config_view_and_set_agree_across_transports() {
     // possible below the API, so the depth test lives in config_service.)
     assert!(written.config.lastfm_session_key.is_empty());
     assert!(written.config.servers.is_empty());
+}
+
+/// The four playback settings cross the wire both ways, and a source that
+/// has none of what they act on says so identically on both transports.
+#[tokio::test]
+async fn playback_settings_and_their_capabilities_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    let mut next = pair.wire.config().await.expect("wire view").config;
+    assert_eq!(next.stream_quality, config::StreamQuality::High);
+    assert!(!next.autoplay_radio && !next.skip_explicit && !next.pause_watch_history);
+    next.stream_quality = config::StreamQuality::Low;
+    next.autoplay_radio = true;
+    next.skip_explicit = true;
+    next.pause_watch_history = true;
+    let written = pair.wire.set_config(next).await.expect("set over the wire");
+    assert_eq!(written.config.stream_quality, config::StreamQuality::Low);
+    assert!(written.config.autoplay_radio && written.config.skip_explicit);
+    assert!(written.config.pause_watch_history);
+    let local = pair.local.config().await.expect("local view after set");
+    assert_eq!(local.config, written.config);
+
+    let active = |rows: Vec<api::SourceInfo>| {
+        rows.into_iter()
+            .find(|source| source.active)
+            .expect("an active source")
+            .capabilities
+    };
+    let local = active(pair.local.sources().await.expect("local sources"));
+    let wire = active(pair.wire.sources().await.expect("wire sources"));
+    assert_eq!(local, wire);
+    assert!(!wire.stream_quality && !wire.explicit_flags && !wire.watch_history);
+    assert!(
+        !wire.track_radio,
+        "a folder library has no radio to autoplay"
+    );
 }
 
 #[tokio::test]
@@ -1216,6 +1254,61 @@ async fn queue_snapshot_and_edits_agree_across_transports() {
     );
 }
 
+/// Playing an album or playlist by an id the queue cannot resolve fails, and
+/// fails the same way on both transports, rather than one of them queueing
+/// nothing and answering success.
+#[tokio::test]
+async fn a_queue_from_an_unresolved_id_is_refused_identically() {
+    let pair = spawn_pair().await;
+
+    for context in [
+        QueueContext::Album {
+            id: "MPREunknown".into(),
+        },
+        QueueContext::Playlist {
+            id: "PLunsaved".into(),
+        },
+    ] {
+        let request = SetQueueRequest {
+            mode: QueueMode::Replace,
+            context: context.clone(),
+            start_index: Some(0),
+            shuffle: Some(false),
+        };
+        let local = pair.local.set_queue(request.clone()).await.err();
+        let wire = pair.wire.set_queue(request).await.err();
+        assert!(local.is_some(), "{context:?}");
+        assert_eq!(local.map(|e| e.code), wire.map(|e| e.code), "{context:?}");
+    }
+    let snapshot = pair.local.queue_snapshot().await.expect("snapshot");
+    assert!(snapshot.items.is_empty(), "nothing was queued");
+}
+
+/// A local library has no account, so neither transport lists a picture for
+/// one, and asking for it anyway fails the same way on both.
+#[tokio::test]
+async fn an_account_picture_is_absent_identically_without_an_account() {
+    let pair = spawn_pair().await;
+
+    let local = pair.local.sources().await.expect("local sources");
+    let wire = pair.wire.sources().await.expect("wire sources");
+    assert!(local.iter().all(|source| source.avatar.is_none()));
+    assert_eq!(
+        local.iter().map(|s| &s.avatar).collect::<Vec<_>>(),
+        wire.iter().map(|s| &s.avatar).collect::<Vec<_>>()
+    );
+
+    let active = local.iter().find(|s| s.active).expect("an active source");
+    let request = api::ArtworkRequest {
+        target: api::ArtworkTarget::Account(active.id.clone()),
+        hq: false,
+    };
+    let local = pair.local.artwork(request.clone()).await.err();
+    let wire = pair.wire.artwork(request).await.err();
+    assert_eq!(local.as_ref().map(|e| e.code), Some(ErrorCode::NotFound));
+    assert_eq!(local.map(|e| e.code), wire.map(|e| e.code));
+}
+
 /// Neither service is configured in this harness, so both transports must
 /// agree on saying so rather than one erroring and the other answering
 /// empty -- the failure mode a second implementation would inherit.
@@ -1274,6 +1367,81 @@ async fn catalog_and_radio_report_absence_identically() {
             .err()
             .map(|e| e.code),
     );
+}
+
+/// A source's pages are its navigation, so the list a client renders has to
+/// be the one the daemon declared, and opening a page a source does not have
+/// has to fail the same way on both transports.
+#[tokio::test]
+async fn catalog_pages_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    let active = |sources: Vec<api::SourceInfo>| {
+        sources
+            .into_iter()
+            .find(|source| source.active)
+            .expect("an active source")
+            .capabilities
+    };
+    let local = active(pair.local.sources().await.expect("local sources"));
+    let wire = active(pair.wire.sources().await.expect("wire sources"));
+    assert_eq!(local, wire);
+    assert!(local.pages.is_empty(), "a local library declares no pages");
+
+    let request = api::CatalogDetailRequest::page("FEmusic_home");
+    let local = pair.local.catalog_detail(request.clone()).await;
+    let wire = pair.wire.catalog_detail(request).await;
+    assert_eq!(
+        local.as_ref().err().map(|e| e.code),
+        Some(ErrorCode::Unsupported)
+    );
+    assert_eq!(local.err().map(|e| e.code), wire.err().map(|e| e.code));
+}
+
+/// A search with no filter is the plain search on both transports; a filter
+/// the source never offered, and a suggestion it cannot give, fail the same
+/// way on both rather than one of them answering empty.
+#[tokio::test]
+async fn search_filters_agree_across_transports() {
+    let pair = spawn_pair().await;
+
+    let plain = api::SearchRequest::new("seed");
+    let local = pair
+        .local
+        .search(plain.clone())
+        .await
+        .expect("local search");
+    let wire = pair.wire.search(plain).await.expect("wire search");
+    assert_eq!(local, wire);
+    assert!(
+        !local.tracks.is_empty(),
+        "the plain search still finds rows"
+    );
+    assert!(local.shelves.is_empty() && local.continuation.is_none());
+
+    let caps = pair
+        .wire
+        .sources()
+        .await
+        .expect("sources")
+        .into_iter()
+        .find(|source| source.active)
+        .expect("an active source")
+        .capabilities;
+    assert!(caps.search_filters.is_empty());
+
+    let filtered = api::SearchRequest::filtered("seed", "songs");
+    assert_eq!(
+        pair.local
+            .search(filtered.clone())
+            .await
+            .err()
+            .map(|e| e.code),
+        pair.wire.search(filtered).await.err().map(|e| e.code),
+    );
+    let local = pair.local.search_suggestions("se".into()).await;
+    let wire = pair.wire.search_suggestions("se".into()).await;
+    assert_eq!(local.map_err(|e| e.code), wire.map_err(|e| e.code));
 }
 
 /// Deleting from disk is the one API call that destroys something outside

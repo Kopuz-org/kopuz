@@ -199,6 +199,28 @@ impl PlayerController {
         });
     }
 
+    /// Replace the queue with whatever the daemon resolves `context` to, such
+    /// as a catalog album or playlist by its id, so a long list is never
+    /// shipped back as keys. Shuffle stays as the user set it.
+    pub fn play_context(&mut self, context: api::QueueContext) {
+        let handle = self.handle();
+        let mut loading = self.browse_loading;
+        loading.set(true);
+        spawn(async move {
+            let request = api::SetQueueRequest {
+                mode: api::QueueMode::Replace,
+                context,
+                start_index: None,
+                shuffle: None,
+            };
+            if let Err(error) = handle.set_queue(request).await {
+                tracing::warn!(%error, "playing by id failed");
+                crate::toast::toast_error(&error.message);
+            }
+            loading.set(false);
+        });
+    }
+
     /// Queue rows by key. Library tracks and the catalog rows the daemon
     /// registered when it served them resolve the same way, so a browse tile
     /// plays without the client shipping a track list back.

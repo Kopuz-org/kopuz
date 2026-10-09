@@ -632,6 +632,47 @@ impl OfflineQuality {
     }
 }
 
+/// Which of a streaming source's formats to play. A source with only one
+/// format per track ignores it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum StreamQuality {
+    /// The smallest format, to save data.
+    Low,
+    /// Standard formats only, never the ones a subscription unlocks.
+    Normal,
+    /// The best format the account is offered.
+    #[default]
+    High,
+}
+
+impl StreamQuality {
+    pub const ALL: &'static [Self] = &[Self::Low, Self::Normal, Self::High];
+
+    pub const fn value_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Normal => "normal",
+            Self::High => "high",
+        }
+    }
+
+    pub fn from_value_str(value: &str) -> Self {
+        match value {
+            "low" => Self::Low,
+            "normal" => Self::Normal,
+            _ => Self::High,
+        }
+    }
+
+    pub const fn i18n_key(self) -> &'static str {
+        match self {
+            Self::Low => "stream_quality_low",
+            Self::Normal => "stream_quality_normal",
+            Self::High => "stream_quality_high",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub enum TitlebarMode {
     #[default]
@@ -874,6 +915,19 @@ pub struct AppConfig {
     #[serde(default)]
     pub offline_tracks: HashMap<String, String>,
     #[serde(default)]
+    pub stream_quality: StreamQuality,
+    /// When the queue runs out, start a radio from its last track instead of
+    /// stopping. Only a source with track radio can.
+    #[serde(default)]
+    pub autoplay_radio: bool,
+    /// Leave tracks the source marks explicit out of the queue.
+    #[serde(default)]
+    pub skip_explicit: bool,
+    /// Stop telling the source what was played, for a source that keeps a
+    /// watch history of its own.
+    #[serde(default)]
+    pub pause_watch_history: bool,
+    #[serde(default)]
     pub player_bar_position: PlayerBarPosition,
     #[serde(default)]
     pub ui_style: UiStyle,
@@ -1094,6 +1148,10 @@ impl Default for AppConfig {
             titlebar_mode: TitlebarMode::Custom,
             offline_quality: OfflineQuality::default(),
             offline_tracks: HashMap::new(),
+            stream_quality: StreamQuality::High,
+            autoplay_radio: false,
+            skip_explicit: false,
+            pause_watch_history: false,
             player_bar_position: PlayerBarPosition::Bottom,
             ui_style: UiStyle::Normal,
             settings_layout: SettingsLayout::Cd,

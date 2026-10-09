@@ -94,6 +94,8 @@ fn song_to_track(
         artists: credits.iter().map(|credit| credit.name.clone()).collect(),
         credits,
         replay_gain,
+        explicit: false,
+        plays: None,
     }
 }
 
@@ -249,6 +251,8 @@ impl MediaSource for SubsonicSource {
                         artists: credits.iter().map(|credit| credit.name.clone()).collect(),
                         credits,
                         replay_gain,
+                        explicit: false,
+                        plays: None,
                     });
                 }
             }
@@ -283,6 +287,10 @@ impl MediaSource for SubsonicSource {
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Instant,
+            account_avatar: false,
+            stream_quality: false,
+            explicit_flags: false,
+            watch_history: false,
         }
     }
 
@@ -324,7 +332,11 @@ impl MediaSource for SubsonicSource {
         self.remove_playlist_entry(playlist_id, position).await
     }
 
-    async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
+    async fn resolve_stream(
+        &self,
+        item_id: &str,
+        _: config::StreamQuality,
+    ) -> Result<StreamInfo, SourceError> {
         Ok(StreamInfo {
             url: self.client.stream_url(item_id)?,
             format: None,

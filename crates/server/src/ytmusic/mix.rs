@@ -118,7 +118,20 @@ pub(super) async fn fetch(seed: MixSeed<'_>, cookies: &str) -> Result<Vec<Track>
     Ok(walk_queue(&resp))
 }
 
-fn walk_queue(resp: &Value) -> Vec<Track> {
+/// One track by its video id, as its watch page lists it.
+#[tracing::instrument(name = "yt.watch_track", skip(cookies))]
+pub(super) async fn watch_track(
+    video_id: &str,
+    cookies: Option<&str>,
+) -> Result<Option<Track>, String> {
+    let payload = json!({ "videoId": video_id, "isAudioOnly": true });
+    let resp = super::innertube::post(WEB_REMIX, "next", payload, cookies).await?;
+    Ok(walk_queue(&resp)
+        .into_iter()
+        .find(|track| track.id.key() == video_id))
+}
+
+pub(super) fn walk_queue(resp: &Value) -> Vec<Track> {
     // Iterate the watchNext tabs by tabRenderer presence rather than
     // assuming the queue lives at tabs[0]. YT A/B-tests the tab order
     // (Up next vs Lyrics vs Related) and the positional dive
@@ -254,6 +267,8 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
         credits: Vec::new(),
         artists,
         replay_gain: config::ReplayGainInfo::default(),
+        explicit: super::has_explicit_badge(row),
+        plays: None,
     })
 }
 

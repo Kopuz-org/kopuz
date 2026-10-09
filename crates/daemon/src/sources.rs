@@ -44,10 +44,11 @@ fn db_error(error: db::DbError) -> ApiError {
     ApiError::internal(format!("database error: {error}"))
 }
 
-/// The in-process capability struct, as the wire describes it.
-fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
+/// What a built source can do, as the wire describes it.
+fn capabilities(source: &dyn server::source::MediaSource) -> SourceCapabilities {
     use api::{AlbumPresentation, ArtistPresentation, FavoritesSyncMode, PlaylistCapability};
     use server::source::{AlbumType, ArtistView, FavoritesSync, PlaylistOps};
+    let caps = source.capabilities();
     SourceCapabilities {
         edit_tags: caps.edit_tags,
         delete_from_disk: caps.delete_from_disk,
@@ -56,6 +57,9 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
         browse_folders: caps.browse_folders,
         external_devices: caps.external_devices,
         browser_playback: caps.browser_playback,
+        stream_quality: caps.stream_quality,
+        explicit_flags: caps.explicit_flags,
+        watch_history: caps.watch_history,
         sync: caps.sync,
         downloads: caps.downloads,
         discover: caps.discover,
@@ -80,6 +84,23 @@ fn capabilities(caps: server::source::Capabilities) -> SourceCapabilities {
             FavoritesSync::Instant => FavoritesSyncMode::Instant,
             FavoritesSync::Paginated => FavoritesSyncMode::Paginated,
         },
+        pages: source
+            .catalog_pages()
+            .into_iter()
+            .map(|page| api::PageEntry {
+                id: page.id,
+                label: api::Text::key(page.label),
+                icon: api::Icon::Class(page.icon.to_string()),
+            })
+            .collect(),
+        search_filters: source
+            .search_filters()
+            .into_iter()
+            .map(|filter| api::SearchFilter {
+                id: filter.id.to_string(),
+                label: api::Text::key(filter.label),
+            })
+            .collect(),
     }
 }
 
@@ -185,7 +206,7 @@ impl SourceService {
         let mut info = SourceInfo {
             id: key.as_str().to_string(),
             active: current.active_source.as_str() == key.as_str(),
-            capabilities: capabilities(source.capabilities()),
+            capabilities: capabilities(source.as_ref()),
             state: self.status(key.as_str()),
             ..Default::default()
         };
@@ -225,6 +246,20 @@ impl SourceService {
                 info.detail = crate::services::detail(&view);
                 info.anonymous = server.yt_anonymous;
                 info.settings = crate::services::settings(&view, &current);
+                let signed_in = server
+                    .access_token
+                    .as_deref()
+                    .is_some_and(|t| !t.is_empty());
+                if info.active
+                    && signed_in
+                    && !server.yt_anonymous
+                    && source.capabilities().account_avatar
+                {
+                    info.avatar = Some(crate::artwork::account_ref(
+                        &info.id,
+                        server.user_id.as_deref().unwrap_or_default(),
+                    ));
+                }
                 if info.capabilities.browse_folders {
                     info.settings.push(crate::services::directories_field(
                         &resolved.folders_for(server_id),
