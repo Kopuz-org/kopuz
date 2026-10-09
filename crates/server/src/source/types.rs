@@ -118,6 +118,55 @@ pub struct FavoritesPage {
 pub struct PlaylistPage {
     pub tracks: Vec<reader::Track>,
     pub next: Option<String>,
+    /// What the first page's header says about the playlist, where the
+    /// source reads one.
+    pub header: Option<crate::ytmusic::discover::BrowsePage>,
+    /// What this one playlist allows, where the source can tell it apart
+    /// from its others; read off the first page. `None` leaves
+    /// [`Capabilities::playlists`] to say.
+    pub ops: Option<PlaylistOps>,
+}
+
+/// The account actions a source takes beyond favorites, each backing one
+/// optional [`MediaSource`](super::MediaSource) op.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LibraryActions {
+    /// Backs [`MediaSource::rate`](super::MediaSource::rate).
+    pub rate: bool,
+    /// Backs [`MediaSource::follow`](super::MediaSource::follow).
+    pub follow: bool,
+    /// Backs [`MediaSource::save`](super::MediaSource::save).
+    pub save: bool,
+    /// Backs [`MediaSource::remove_from_history`](super::MediaSource::remove_from_history).
+    pub remove_from_history: bool,
+    /// Backs [`MediaSource::edit_playlist`](super::MediaSource::edit_playlist).
+    pub playlist_details: bool,
+}
+
+impl LibraryActions {
+    pub const NONE: Self = Self {
+        rate: false,
+        follow: false,
+        save: false,
+        remove_from_history: false,
+        playlist_details: false,
+    };
+
+    pub const ALL: Self = Self {
+        rate: true,
+        follow: true,
+        save: true,
+        remove_from_history: true,
+        playlist_details: true,
+    };
+}
+
+/// A playlist's details to push. A field left `None` keeps its value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlaylistDetails {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub privacy: Option<crate::ytmusic::discover::Privacy>,
 }
 
 /// What looking one artist up found: a photo, and the name the source's own record gives when the lookup went by id.
@@ -158,6 +207,24 @@ pub struct Capabilities {
     pub artist_view: ArtistView,
     pub albums: AlbumType,
     pub favorites_sync: FavoritesSync,
+    pub library_actions: LibraryActions,
+}
+
+/// A catalog page a source declares: the id that opens it, the translation
+/// key of its label, and its icon class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogPageEntry {
+    pub id: String,
+    pub label: &'static str,
+    pub icon: &'static str,
+}
+
+/// A search filter a source offers: the id a client passes back and the
+/// translation key of its label.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchFilterEntry {
+    pub id: &'static str,
+    pub label: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,6 +259,7 @@ pub struct RemoteAlbum {
     pub thumbnail: Option<String>,
     pub audio_playlist_id: Option<String>,
     pub tracks: Vec<reader::Track>,
+    pub actions: crate::ytmusic::discover::ItemActions,
 }
 
 impl From<crate::ytmusic::discover::YtAlbum> for RemoteAlbum {
@@ -205,6 +273,7 @@ impl From<crate::ytmusic::discover::YtAlbum> for RemoteAlbum {
             thumbnail: a.thumbnail,
             audio_playlist_id: a.audio_playlist_id,
             tracks: a.tracks,
+            actions: a.actions,
         }
     }
 }

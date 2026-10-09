@@ -1,3 +1,4 @@
+pub mod catalog_actions;
 pub mod constants;
 pub mod controls;
 pub mod gestures;

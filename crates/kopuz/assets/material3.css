@@ -877,6 +877,21 @@
     font-size: 12px;
 }
 
+/* A single-choice chip (role radio) reads as a selected filter chip. */
+[data-ui-style="material3"] .app-chip[aria-checked="true"] {
+    background: var(--md-sys-color-secondary-container);
+    border-color: transparent;
+    color: var(--md-sys-color-on-secondary-container);
+}
+
+/* A chip that is one of a row of page links: the open page is lit like a
+   selected chip, without the check mark. */
+[data-ui-style="material3"] .app-chip[aria-current="page"] {
+    background: var(--md-sys-color-secondary-container);
+    border-color: transparent;
+    color: var(--md-sys-color-on-secondary-container);
+}
+
 [data-ui-style="material3"] .app-chip:disabled {
     opacity: 1;
     border-color: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);

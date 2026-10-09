@@ -371,6 +371,7 @@ impl LibraryService {
                 .map(|track| crate::wire::track_info(track, &config))
                 .collect(),
             albums: albums.iter().map(album_info).collect(),
+            ..Default::default()
         })
     }
 }

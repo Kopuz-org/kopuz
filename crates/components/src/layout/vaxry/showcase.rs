@@ -367,11 +367,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                                         handler.call(idx);
                                                     }
                                                 },
-                                                on_remove_from_playlist: move |_| {
-                                                    if let Some(handler) = &props.on_remove_from_playlist {
-                                                        handler.call(idx);
-                                                    }
-                                                },
+                                                on_remove_from_playlist: props.on_remove_from_playlist.map(|h| EventHandler::new(move |_| h.call(idx))),
                                                 on_view_metadata: props.on_view_metadata.map(|h| EventHandler::new(move |_| h.call(idx))),
                                                 on_download: move |_| {
                                                     if let Some(handler) = &props.on_download_track {

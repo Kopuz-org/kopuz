@@ -364,6 +364,7 @@ fn AlbumDetail(
                             remote_cover: hooks::artwork::url(remote.artwork.as_ref(), hooks::artwork::Size::Thumb),
                             tracks,
                             on_close,
+                            catalog_actions: Some(remote.actions),
                         }
                     }
                 };
@@ -557,6 +558,7 @@ fn AlbumDetail(
                     remote_cover: cover_url_remote,
                     tracks: tracks(),
                     on_close,
+                    catalog_actions: remote_album.as_ref().map(|album| album.actions.clone()),
                 }
             } else {
             TrackListView {
@@ -665,8 +667,14 @@ fn RemoteAlbumDetail(
     remote_cover: Option<utils::CoverUrl>,
     tracks: Vec<api::TrackInfo>,
     on_close: EventHandler<()>,
+    /// The album's rating and library state, once the catalog answered.
+    #[props(default)]
+    catalog_actions: Option<api::CatalogActions>,
 ) -> Element {
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    // Follows the prop until a button changes it here.
+    let mut changed_actions = use_signal(|| None::<api::CatalogActions>);
+    let shown_actions = changed_actions.read().clone().or(catalog_actions);
     let nav_ctrl = use_context::<components::NavigationController>();
     let downloads = hooks::downloads::use_downloads();
     let cap = hooks::sources::use_capabilities();
@@ -770,6 +778,15 @@ fn RemoteAlbumDetail(
                             if let Some(y) = year {
                                 span { class: "text-white/30", "•" }
                                 span { "{y}" }
+                            }
+                        }
+                    }
+                    if let Some(state) = shown_actions {
+                        div { class: "flex items-center gap-3",
+                            components::catalog_actions::CatalogActionButtons {
+                                actions: state,
+                                outlined: true,
+                                on_change: move |next| changed_actions.set(Some(next)),
                             }
                         }
                     }

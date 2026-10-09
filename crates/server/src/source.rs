@@ -153,6 +153,53 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("don't recommend"))
     }
 
+    /// Rate a song, an album or a playlist, by a ref this source handed out
+    /// or a track's key. Only sources whose [`LibraryActions::rate`] is set
+    /// override this; the rest inherit the unsupported default.
+    async fn rate(
+        &self,
+        _item_ref: &str,
+        _rating: crate::ytmusic::discover::Rating,
+    ) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("rating"))
+    }
+
+    /// Follow an artist, or stop, by a ref this source handed out. Gated by
+    /// [`LibraryActions::follow`].
+    async fn follow(&self, _artist_ref: &str, _follow: bool) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("following"))
+    }
+
+    /// Save an album, a playlist or a song to the source's library, or take
+    /// it out, by a ref this source handed out. Gated by [`LibraryActions::save`].
+    async fn save(&self, _item_ref: &str, _saved: bool) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("saving to the library"))
+    }
+
+    /// Take one row out of the source's listening history. Gated by
+    /// [`LibraryActions::remove_from_history`].
+    async fn remove_from_history(&self, _token: &str) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("history removal"))
+    }
+
+    /// Push a playlist's name, description and privacy. Gated by
+    /// [`LibraryActions::playlist_details`].
+    async fn edit_playlist(
+        &self,
+        _playlist_id: &str,
+        _details: &PlaylistDetails,
+    ) -> Result<(), SourceError> {
+        Err(SourceError::unsupported("playlist details"))
+    }
+
+    /// Take a playlist off the remote before its local copy is deleted.
+    /// The default does nothing, which leaves the delete local; it is not
+    /// [`delete_playlist`](Self::delete_playlist), which the sync's sweep
+    /// also calls for playlists the remote has already dropped.
+    async fn delete_remote_playlist(&self, _playlist_id: &str) -> Result<(), SourceError> {
+        Ok(())
+    }
+
     /// Start a radio/mix seeded from a track, returning the generated queue. Only
     /// sources whose [`Capabilities::radio`] is set override this; the rest
     /// inherit the unsupported default.
@@ -203,6 +250,33 @@ pub trait MediaSource: Send + Sync {
         Ok(search::filter(&q, tracks, albums))
     }
 
+    /// The filters [`search_shelves`](Self::search_shelves) takes. Default none.
+    fn search_filters(&self) -> Vec<SearchFilterEntry> {
+        Vec::new()
+    }
+
+    /// Search results as the source lays them out, under one of its
+    /// [`search_filters`](Self::search_filters): shelves for its "all"
+    /// filter, one long shelf under any other, and `continuation` for more of
+    /// that. Default unsupported; a source without filters has nothing to
+    /// add to [`search`](Self::search).
+    async fn search_shelves(
+        &self,
+        _query: &str,
+        _filter: &str,
+        _continuation: Option<&str>,
+    ) -> Result<crate::ytmusic::browse::search::SearchPage, SourceError> {
+        Err(SourceError::unsupported("search filters"))
+    }
+
+    /// Completions for what has been typed so far. Default none.
+    async fn search_suggestions(
+        &self,
+        _query: &str,
+    ) -> Result<Vec<crate::ytmusic::browse::search::Suggestion>, SourceError> {
+        Ok(Vec::new())
+    }
+
     /// The discover/home feed. Default unsupported — gated by
     /// [`Capabilities::discover`]; only catalog remotes (YT) override.
     async fn discover_home(&self) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
@@ -216,6 +290,32 @@ pub trait MediaSource: Send + Sync {
         _token: &str,
     ) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
         Err(SourceError::unsupported("discover"))
+    }
+
+    /// The catalog pages this source offers a frontend's navigation, in order.
+    /// Default none; only catalog remotes (YT) declare any.
+    fn catalog_pages(&self) -> Vec<CatalogPageEntry> {
+        Vec::new()
+    }
+
+    /// One catalog page by an id [`catalog_pages`](Self::catalog_pages), a
+    /// chip or a link on another page handed out; `continuation` pages it.
+    /// Default unsupported.
+    async fn browse_page(
+        &self,
+        _id: &str,
+        _continuation: Option<&str>,
+    ) -> Result<crate::ytmusic::discover::BrowsePage, SourceError> {
+        Err(SourceError::unsupported("catalog pages"))
+    }
+
+    /// What the source relates to one of its tracks: similar songs, artists
+    /// and albums, as a page. Default unsupported.
+    async fn related(
+        &self,
+        _item_id: &str,
+    ) -> Result<crate::ytmusic::discover::BrowsePage, SourceError> {
+        Err(SourceError::unsupported("related"))
     }
 
     /// The tracks of a remote album / browse id. Standard library remotes use
@@ -322,6 +422,8 @@ pub trait MediaSource: Send + Sync {
         Ok(PlaylistPage {
             tracks: self.fetch_playlist_entries(playlist_id).await?,
             next: None,
+            header: None,
+            ops: None,
         })
     }
 

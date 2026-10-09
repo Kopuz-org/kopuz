@@ -29,9 +29,11 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
         .as_deref()
         .unwrap_or(DEFAULT_OVERLAY_CLASS);
 
+    // A playlist the account only follows cannot take a track.
     let playlists: Vec<(String, String, String)> = store
         .playlists
         .iter()
+        .filter(|p| p.capability != Some(api::PlaylistCapability::None))
         .map(|p| {
             let track_text = if p.track_keys.len() == 1 {
                 i18n::t("track_count_singular").to_string()

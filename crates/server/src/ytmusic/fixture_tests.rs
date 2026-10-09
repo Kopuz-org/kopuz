@@ -1,0 +1,767 @@
+//! Every parser against a response recorded from music.youtube.com with
+//! hl=en, gl=US and no session, in `testdata/`.
+
+use reader::models::Track;
+use serde_json::Value;
+
+use super::browse::{self, parse_continuation, parse_page};
+use super::discover::{
+    self, BrowsePage, DiscoverItem, DiscoverShelf, LinkKind, PageHeader, ShelfLayout,
+};
+use super::search::synthesize_album_id;
+
+macro_rules! fixture {
+    ($name:literal) => {
+        serde_json::from_str::<Value>(include_str!(concat!("testdata/", $name, ".json")))
+            .expect(concat!($name, " is JSON"))
+    };
+}
+
+fn page(response: &Value) -> BrowsePage {
+    parse_page(response).expect("a browse page")
+}
+
+fn titled<'a>(page: &'a BrowsePage, title: &str) -> &'a DiscoverShelf {
+    page.shelves
+        .iter()
+        .find(|shelf| shelf.title == title)
+        .unwrap_or_else(|| {
+            let titles: Vec<&str> = page.shelves.iter().map(|s| s.title.as_str()).collect();
+            panic!("no shelf {title:?} in {titles:?}")
+        })
+}
+
+fn tracks(shelf: &DiscoverShelf) -> Vec<&Track> {
+    shelf.items.iter().filter_map(track_of).collect()
+}
+
+fn track_of(item: &DiscoverItem) -> Option<&Track> {
+    match item {
+        DiscoverItem::Song(track, _) | DiscoverItem::Video(track, _) => Some(track),
+        DiscoverItem::Episode { track, .. } => Some(track),
+        _ => None,
+    }
+}
+
+fn assert_track(track: &Track) {
+    assert_eq!(track.id.key().len(), 11, "video id of {:?}", track.title);
+    assert!(!track.title.trim().is_empty());
+    assert!(
+        track
+            .cover
+            .as_deref()
+            .is_some_and(|c| c.starts_with("https://")),
+        "{} has no cover",
+        track.title
+    );
+}
+
+/// Every shelf has something in it, and every playable item is a real track.
+fn assert_shelves(page: &BrowsePage) {
+    assert!(!page.shelves.is_empty(), "no shelves");
+    for shelf in &page.shelves {
+        assert!(
+            !shelf.items.is_empty() || shelf.continuation.is_some(),
+            "empty shelf {:?}",
+            shelf.title
+        );
+        shelf
+            .items
+            .iter()
+            .filter_map(track_of)
+            .for_each(assert_track);
+    }
+}
+
+fn all_tracks(page: &BrowsePage) -> Vec<&Track> {
+    page.shelves.iter().flat_map(tracks).collect()
+}
+
+#[test]
+fn home() {
+    let home = page(&fixture!("home"));
+    assert!(home.chips.len() >= 5, "chips: {:?}", home.chips);
+    assert!(home.chips.iter().all(|chip| {
+        chip.page_id.starts_with(&format!("{}?", discover::HOME)) && !chip.title.is_empty()
+    }));
+    assert!(home.continuation.is_some());
+    assert_shelves(&home);
+    assert!(
+        home.shelves
+            .iter()
+            .all(|s| !s.title.is_empty() && s.layout == ShelfLayout::Carousel)
+    );
+}
+
+#[test]
+fn home_continuation() {
+    let more = parse_continuation(&fixture!("home_continuation"));
+    assert_shelves(&more);
+    let quick_picks = titled(&more, "Quick picks");
+    assert_eq!(quick_picks.layout, ShelfLayout::TrackGrid);
+    let picks = tracks(quick_picks);
+    assert!(picks.len() >= 8);
+    assert!(
+        picks
+            .iter()
+            .all(|t| !t.credits.is_empty() && !t.album.is_empty())
+    );
+}
+
+/// The hand-written home parser the Discover page reads keeps its carousels.
+#[test]
+fn legacy_home_and_its_continuation() {
+    let home = discover::parse_initial(&fixture!("home"));
+    assert!(!home.shelves.is_empty());
+    assert!(home.continuation.is_some());
+    assert!(
+        home.shelves
+            .iter()
+            .all(|s| s.layout == ShelfLayout::Carousel)
+    );
+
+    let more = discover::parse_continuation(&fixture!("home_continuation"));
+    assert!(!more.shelves.is_empty());
+}
+
+#[test]
+fn explore() {
+    let explore = page(&fixture!("explore"));
+    assert_shelves(&explore);
+    let buttons: Vec<&str> = explore.shelves[0]
+        .items
+        .iter()
+        .map(|item| match item {
+            DiscoverItem::Page { page_id, .. } => page_id.as_str(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    let browse_ids: Vec<&str> = buttons
+        .iter()
+        .map(|id| browse::split_page_id(id).0)
+        .collect();
+    assert_eq!(
+        browse_ids,
+        [browse::NEW_RELEASES, browse::CHARTS, browse::MOODS]
+    );
+    let moods = titled(&explore, "Moods & genres");
+    assert_eq!(moods.layout, ShelfLayout::Grid);
+    assert_eq!(
+        moods
+            .more
+            .as_ref()
+            .map(|more| (more.kind, more.id.as_str())),
+        Some((LinkKind::Page, browse::MOODS))
+    );
+    assert!(moods.items.iter().all(|item| matches!(
+        item,
+        DiscoverItem::Mood { accent: Some(_), browse_id, .. }
+            if browse_id.starts_with(&format!("{}?", browse::MOOD_CATEGORY))
+    )));
+    let albums = titled(&explore, "New albums & singles");
+    assert!(
+        albums
+            .items
+            .iter()
+            .all(|item| matches!(item, DiscoverItem::Album { .. }))
+    );
+    assert_eq!(titled(&explore, "Trending").layout, ShelfLayout::TrackGrid);
+}
+
+#[test]
+fn charts() {
+    let charts = page(&fixture!("charts"));
+    assert_eq!(charts.header, PageHeader::Title);
+    assert_eq!(charts.title, "Charts");
+    assert_shelves(&charts);
+    let artists = titled(&charts, "Top artists");
+    assert!(artists.items.len() >= 10);
+    assert!(artists.items.iter().all(|item| matches!(
+        item,
+        DiscoverItem::Artist {
+            subtitle: Some(_),
+            ..
+        }
+    )));
+}
+
+#[test]
+fn moods_and_genres() {
+    let moods = page(&fixture!("moods"));
+    assert_eq!(moods.shelves.len(), 2);
+    assert!(moods.shelves.iter().all(|s| s.layout == ShelfLayout::Grid));
+    let tiles: Vec<&DiscoverItem> = moods.shelves.iter().flat_map(|s| &s.items).collect();
+    assert!(tiles.len() >= 20);
+    assert!(
+        tiles
+            .iter()
+            .all(|item| matches!(item, DiscoverItem::Mood { .. }))
+    );
+}
+
+#[test]
+fn mood_category() {
+    let category = page(&fixture!("mood_category"));
+    assert_eq!(category.header, PageHeader::Title);
+    assert_eq!(category.title, "Blues");
+    assert_shelves(&category);
+    let songs = titled(&category, "Songs");
+    assert_eq!(songs.layout, ShelfLayout::TrackGrid);
+    assert!(tracks(songs).iter().all(|t| !t.credits.is_empty()));
+}
+
+#[test]
+fn new_releases() {
+    let releases = page(&fixture!("new_releases"));
+    assert_shelves(&releases);
+    let albums = titled(&releases, "Albums & singles");
+    assert!(albums.items.len() >= 10);
+    assert_eq!(
+        albums.more.as_ref().map(|more| more.kind),
+        Some(LinkKind::Page)
+    );
+}
+
+#[test]
+fn legacy_artist() {
+    let artist = discover::parse_artist("UCRr1xG_2WIDs18a6cIiCxeA", &fixture!("artist"));
+    assert_eq!(artist.name, "Daft Punk");
+    assert!(artist.subscribers.is_some() && artist.banner_thumbnail.is_some());
+    assert!(artist.sections.len() >= 6);
+    let top = artist
+        .sections
+        .iter()
+        .find(|s| s.title == "Top songs")
+        .expect("top songs");
+    assert_eq!(top.layout, ShelfLayout::List);
+    assert_eq!(
+        top.more.as_ref().map(|more| more.kind),
+        Some(LinkKind::Playlist)
+    );
+    // "Show all" on a carousel picks the shelf with params, so it opens as a page.
+    let singles = artist
+        .sections
+        .iter()
+        .find(|s| s.title == "Singles & EPs")
+        .expect("singles");
+    let more = singles.more.as_ref().expect("a show-all link");
+    assert_eq!(more.kind, LinkKind::Page);
+    assert!(more.id.contains('?'), "{}", more.id);
+}
+
+/// An artist's "show all", opened from the link above.
+#[test]
+fn artist_shelf() {
+    let shelf = page(&fixture!("artist_singles"));
+    assert_eq!(shelf.shelves.len(), 1);
+    assert_eq!(shelf.shelves[0].layout, ShelfLayout::Grid);
+    assert!(shelf.shelves[0].items.len() >= 10);
+    assert!(
+        shelf.shelves[0]
+            .items
+            .iter()
+            .all(|item| matches!(item, DiscoverItem::Album { .. }))
+    );
+}
+
+#[test]
+fn legacy_album_and_single() {
+    let album = discover::parse_album("MPREb_K8qWMWVqXGi", &fixture!("album"));
+    assert_eq!(album.title, "Random Access Memories");
+    assert_eq!(album.artist.as_deref(), Some("Daft Punk"));
+    assert!(
+        album
+            .artist_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("UC"))
+    );
+    assert!(
+        album
+            .audio_playlist_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("OLAK5uy_"))
+    );
+    assert_eq!(album.tracks.len(), 13);
+    album.tracks.iter().for_each(assert_track);
+
+    let single = discover::parse_album("MPREb_X1DQ1j0PPrX", &fixture!("single"));
+    assert_eq!(single.tracks.len(), 3);
+}
+
+#[test]
+fn legacy_playlist_and_its_continuation() {
+    // A row YouTube has made unplayable carries no video id and is left out.
+    let (first, next) = super::search::walk_playlist_shelf(&fixture!("playlist_large"));
+    assert!(first.len() >= 95, "{} rows", first.len());
+    assert!(next.is_some());
+    let (more, next) =
+        super::search::walk_playlist_continuation(&fixture!("playlist_continuation"));
+    assert!(more.len() >= 95, "{} rows", more.len());
+    assert!(next.is_some());
+    first.iter().chain(&more).for_each(assert_track);
+
+    let (chart, _) = super::search::walk_playlist_shelf(&fixture!("playlist"));
+    assert_eq!(chart.len(), 100);
+}
+
+/// A playlist row carries its entry id, which a move names; a continuation
+/// page's rows carry theirs too.
+#[test]
+fn playlist_rows_carry_their_set_video_ids() {
+    let (first, _) = super::search::walk_playlist_shelf(&fixture!("playlist"));
+    assert_eq!(first[0].id.key(), "mw3kSNIxjqo");
+    assert_eq!(
+        first[0].playlist_item_id.as_deref(),
+        Some("88615E2C2FA7059D")
+    );
+    assert_eq!(
+        first[1].playlist_item_id.as_deref(),
+        Some("9527BD8A13B1658B")
+    );
+    let (more, _) = super::search::walk_playlist_continuation(&fixture!("playlist_continuation"));
+    assert!(!more.is_empty());
+    assert!(more.iter().all(|track| track.playlist_item_id.is_some()));
+    assert_eq!(
+        more[0].playlist_item_id.as_deref(),
+        Some("BC50DB7391B7A3A4")
+    );
+}
+
+/// More of one shelf comes back as that shelf's items and next token, not
+/// as more of the page.
+#[test]
+fn a_shelf_continuation_continues_the_shelf() {
+    let more = parse_continuation(&fixture!("playlist_continuation"));
+    assert!(more.continuation.is_none());
+    assert_eq!(more.shelves.len(), 1);
+    assert_eq!(tracks(&more.shelves[0]).len(), 100);
+    assert!(more.shelves[0].continuation.is_some());
+}
+
+#[test]
+fn a_playlist_page_continues_both_its_tracks_and_its_shelves() {
+    let playlist = page(&fixture!("playlist_large"));
+    assert_eq!(playlist.header, PageHeader::Detail);
+    let list = &playlist.shelves[0];
+    assert_eq!(tracks(list).len(), 100);
+    assert!(list.continuation.is_some(), "track continuation");
+    assert!(
+        playlist.continuation.is_some(),
+        "related shelves continuation"
+    );
+}
+
+#[test]
+fn podcast() {
+    let podcast = page(&fixture!("podcast"));
+    assert_eq!(podcast.header, PageHeader::Detail);
+    assert!(!podcast.title.is_empty() && podcast.description.is_some());
+    let episodes = &podcast.shelves[0];
+    assert!(episodes.items.len() >= 10);
+    for item in &episodes.items {
+        let DiscoverItem::Episode {
+            track,
+            browse_id,
+            published,
+        } = item
+        else {
+            panic!("{item:?}");
+        };
+        assert_track(track);
+        assert!(track.duration > 0, "{}", track.title);
+        assert!(published.is_some(), "{} has no release date", track.title);
+        assert_eq!(browse_id, &format!("MPED{}", track.id.key()));
+    }
+    assert!(episodes.continuation.is_some());
+}
+
+/// An episode card's subtitle is "6 min 18 sec • Channel": its length is the
+/// first part, not left at zero.
+#[test]
+fn episode_cards_carry_their_length() {
+    let mut seen = 0;
+    for page in [
+        page(&fixture!("explore")),
+        page(&fixture!("mood_category")),
+        page(&fixture!("new_releases")),
+    ] {
+        for item in page.shelves.iter().flat_map(|shelf| &shelf.items) {
+            let DiscoverItem::Episode { track, .. } = item else {
+                continue;
+            };
+            seen += 1;
+            assert!(track.duration > 0, "{} has no length", track.title);
+            assert!(!track.artist.is_empty(), "{} has no channel", track.title);
+        }
+    }
+    assert!(seen > 0, "no episode cards in the fixtures");
+}
+
+#[test]
+fn episode() {
+    let episode = page(&fixture!("episode"));
+    assert_eq!(episode.header, PageHeader::Detail);
+    assert!(episode.description.is_some());
+    assert!(!episode.title.is_empty());
+}
+
+#[test]
+fn related() {
+    let related = page(&fixture!("related"));
+    assert_shelves(&related);
+    assert_eq!(
+        titled(&related, "You might also like").layout,
+        ShelfLayout::TrackGrid
+    );
+    assert!(
+        titled(&related, "Similar artists")
+            .items
+            .iter()
+            .all(|item| matches!(item, DiscoverItem::Artist { .. }))
+    );
+}
+
+#[test]
+fn the_watch_page_names_the_related_tab_and_the_mix() {
+    let watch = fixture!("next_radio");
+    assert!(
+        browse::related_browse_id(&watch).is_some_and(|id| id.starts_with("MPTR")),
+        "related tab"
+    );
+    let mix = super::mix::walk_queue(&watch);
+    assert!(mix.len() >= 10, "{} tracks", mix.len());
+    mix.iter().for_each(assert_track);
+}
+
+/// Saved library rows are keyed by this id, so its output is pinned on a
+/// real album, and every track any parser builds from the fixtures keys its
+/// album the same way: by browse id where the row links one, else by name.
+#[test]
+fn album_ids_are_what_saved_rows_hold() {
+    assert_eq!(
+        synthesize_album_id("Random Access Memories", "Daft Punk"),
+        "ytmusic:album:72616e646f6d20616363657373206d656d6f726965737c646166742070756e6b"
+    );
+    assert_eq!(
+        synthesize_album_id("", "Daft Punk"),
+        "ytmusic:album:singles"
+    );
+    let album = discover::parse_album("MPREb_K8qWMWVqXGi", &fixture!("album"));
+    let solo: Vec<&Track> = album
+        .tracks
+        .iter()
+        .filter(|t| t.artist == "Daft Punk")
+        .collect();
+    assert!(!solo.is_empty());
+    assert!(solo.iter().all(|t| t.album_id
+        == "ytmusic:album:72616e646f6d20616363657373206d656d6f726965737c646166742070756e6b"));
+
+    let pages = [
+        page(&fixture!("home")),
+        parse_continuation(&fixture!("home_continuation")),
+        page(&fixture!("explore")),
+        page(&fixture!("charts")),
+        page(&fixture!("mood_category")),
+        page(&fixture!("new_releases")),
+        page(&fixture!("podcast")),
+        page(&fixture!("related")),
+        page(&fixture!("playlist")),
+    ];
+    let legacy: Vec<Track> = discover::parse_artist("UC", &fixture!("artist"))
+        .sections
+        .into_iter()
+        .chain(discover::parse_initial(&fixture!("home")).shelves)
+        .flat_map(|shelf| shelf.items)
+        .filter_map(|item| match item {
+            DiscoverItem::Song(track, _) => Some(*track),
+            _ => None,
+        })
+        .chain(album.tracks.iter().cloned())
+        .chain(super::search::walk_playlist_shelf(&fixture!("playlist")).0)
+        .collect();
+    let built: Vec<&Track> = pages.iter().flat_map(all_tracks).chain(&legacy).collect();
+    assert!(built.len() > 300, "{} tracks", built.len());
+    for track in built {
+        let by_name = synthesize_album_id(&track.album, &track.artist);
+        assert!(
+            track.album_id == by_name || track.album_id.starts_with("ytmusic:album:MPRE"),
+            "{:?} by {:?} on {:?} keyed {}",
+            track.title,
+            track.artist,
+            track.album,
+            track.album_id
+        );
+    }
+}
+
+/// The refs and states the library actions take, as a page signed out still
+/// draws them: like states on rows, save toggles on albums and playlists, and
+/// the channel a subscribe button names. Signed out, no song carries a library
+/// token, so none may claim one.
+#[test]
+fn library_action_refs_ride_on_the_items_and_headers() {
+    use super::actions::{ItemRef, read_ref};
+    use super::discover::Rating;
+
+    let artist = discover::parse_artist("UC_kRDKYrUlrbtrSiyu5Tflg", &fixture!("artist"));
+    assert_eq!(
+        artist.actions.follow_ref.as_deref(),
+        Some("UC_kRDKYrUlrbtrSiyu5Tflg")
+    );
+    assert_eq!(artist.actions.followed, Some(false));
+
+    let album = discover::parse_album("MPREb_K8qWMWVqXGi", &fixture!("album"));
+    let audio = album
+        .audio_playlist_id
+        .as_deref()
+        .expect("an audio playlist");
+    assert_eq!(
+        album.actions.save_ref.as_deref().and_then(read_ref),
+        Some(ItemRef::Playlist(audio))
+    );
+    assert_eq!(album.actions.saved, Some(false));
+
+    let playlist = browse::page_header(&fixture!("playlist")).expect("a header");
+    assert!(!playlist.title.is_empty());
+    assert_eq!(
+        playlist.actions.save_ref.as_deref(),
+        Some("playlist:PL4fGSI1pDJn6O1LS0XSdF3RyO0Rq_LDeI")
+    );
+    assert_eq!(playlist.actions.saved, Some(false));
+    assert_eq!(playlist.privacy, None, "someone else's playlist");
+
+    let playlist_page = page(&fixture!("playlist"));
+    let rows: Vec<(&Track, &discover::ItemActions)> = playlist_page
+        .shelves
+        .iter()
+        .flat_map(|shelf| &shelf.items)
+        .filter_map(|item| match item {
+            DiscoverItem::Song(track, actions) | DiscoverItem::Video(track, actions) => {
+                Some((&**track, actions))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(rows.len() >= 50);
+    for (track, actions) in &rows {
+        assert_eq!(actions.rate_ref.as_deref(), Some(track.id.key().as_ref()));
+        assert_eq!(actions.save_ref, None);
+        assert_eq!(actions.history_token, None);
+    }
+    assert!(
+        rows.iter()
+            .any(|(_, actions)| actions.rating == Some(Rating::Indifferent))
+    );
+
+    let releases = page(&fixture!("new_releases"));
+    let albums: Vec<&discover::ItemActions> = releases
+        .shelves
+        .iter()
+        .flat_map(|shelf| &shelf.items)
+        .filter_map(|item| match item {
+            DiscoverItem::Album { actions, .. } => Some(actions),
+            _ => None,
+        })
+        .collect();
+    assert!(!albums.is_empty());
+    for actions in albums {
+        let save_ref = actions.save_ref.as_deref().expect("an album saves");
+        assert!(save_ref.starts_with("playlist:OLAK5uy_"), "{save_ref}");
+        assert_eq!(actions.saved, Some(false));
+    }
+
+    let charts = page(&fixture!("charts"));
+    for item in &titled(&charts, "Top artists").items {
+        let DiscoverItem::Artist {
+            channel_id,
+            actions,
+            ..
+        } = item
+        else {
+            panic!("not an artist: {item:?}");
+        };
+        assert_eq!(actions.follow_ref.as_ref(), Some(channel_id));
+    }
+}
+
+#[test]
+fn search_all() {
+    use super::browse::search::{FILTERS, parse_search};
+    let results = parse_search(None, &fixture!("search_all"));
+    assert!(results.continuation.is_none());
+    let top = &results.shelves[0];
+    assert_eq!(top.layout, ShelfLayout::Hero);
+    assert!(matches!(&top.items[0], DiscoverItem::Artist { name, .. } if name == "Daft Punk"));
+    assert!(tracks(top).len() >= 2);
+
+    // YouTube sends the rest as one untitled row per result; they come back
+    // as one shelf per kind, in the web app's order.
+    let shelves: Vec<(&str, ShelfLayout, Option<&str>)> = results.shelves[1..]
+        .iter()
+        .map(|s| (s.title.as_str(), s.layout, s.search_filter))
+        .collect();
+    let expected: Vec<(&str, ShelfLayout, Option<&str>)> = [
+        ("Songs", ShelfLayout::List, "songs"),
+        ("Videos", ShelfLayout::List, "videos"),
+        ("Albums", ShelfLayout::Carousel, "albums"),
+        ("Artists", ShelfLayout::Carousel, "artists"),
+        (
+            "Community playlists",
+            ShelfLayout::Carousel,
+            "community_playlists",
+        ),
+        (
+            "Featured playlists",
+            ShelfLayout::Carousel,
+            "featured_playlists",
+        ),
+        ("Episodes", ShelfLayout::List, "episodes"),
+        ("Profiles", ShelfLayout::Carousel, "profiles"),
+        ("Podcasts", ShelfLayout::Carousel, "podcasts"),
+    ]
+    .into_iter()
+    .map(|(title, layout, id)| (title, layout, Some(id)))
+    .collect();
+    assert_eq!(shelves, expected);
+    assert!(
+        expected
+            .iter()
+            .all(|(_, _, id)| FILTERS.iter().any(|f| Some(f.id) == *id))
+    );
+
+    let page = BrowsePage {
+        shelves: results.shelves,
+        ..BrowsePage::default()
+    };
+    assert_shelves(&page);
+    let kinds = |title: &str, check: fn(&DiscoverItem) -> bool| {
+        assert!(titled(&page, title).items.iter().all(check), "{title}");
+    };
+    kinds(
+        "Songs",
+        |i| matches!(i, DiscoverItem::Song(t, _) if !t.credits.is_empty()),
+    );
+    kinds("Videos", |i| matches!(i, DiscoverItem::Video(..)));
+    kinds("Episodes", |i| matches!(i, DiscoverItem::Episode { .. }));
+    kinds("Albums", |i| matches!(i, DiscoverItem::Album { .. }));
+    kinds(
+        "Featured playlists",
+        |i| matches!(i, DiscoverItem::Playlist { playlist_id, .. } if playlist_id.starts_with("RDCLAK")),
+    );
+    kinds(
+        "Profiles",
+        |i| matches!(i, DiscoverItem::Artist { subtitle: Some(s), .. } if s.starts_with("Profile")),
+    );
+    kinds("Podcasts", |i| matches!(i, DiscoverItem::Podcast { .. }));
+}
+
+/// Each filter answers with one shelf of its own kind, and most continue.
+#[test]
+fn search_filters() {
+    use super::browse::search::{filter, parse_search};
+    type IsKind = fn(&DiscoverItem) -> bool;
+    let cases: [(&str, Value, IsKind); 9] = [
+        (
+            "songs",
+            fixture!("search_songs"),
+            |i| matches!(i, DiscoverItem::Song(t, _) if t.duration > 0 && !t.album.is_empty()),
+        ),
+        (
+            "videos",
+            fixture!("search_videos"),
+            |i| matches!(i, DiscoverItem::Video(t, _) if t.duration > 0),
+        ),
+        ("albums", fixture!("search_albums"), |i| {
+            matches!(i, DiscoverItem::Album { .. })
+        }),
+        ("artists", fixture!("search_artists"), |i| {
+            matches!(i, DiscoverItem::Artist { .. })
+        }),
+        (
+            "community_playlists",
+            fixture!("search_community_playlists"),
+            |i| matches!(i, DiscoverItem::Playlist { .. }),
+        ),
+        (
+            "featured_playlists",
+            fixture!("search_featured_playlists"),
+            |i| matches!(i, DiscoverItem::Playlist { playlist_id, .. } if playlist_id.starts_with("RDCLAK")),
+        ),
+        ("podcasts", fixture!("search_podcasts"), |i| {
+            matches!(i, DiscoverItem::Podcast { .. })
+        }),
+        // An episode row gives its release date and show, but no length.
+        (
+            "episodes",
+            fixture!("search_episodes"),
+            |i| matches!(i, DiscoverItem::Episode { track, published: Some(_), .. } if !track.artist.is_empty()),
+        ),
+        ("profiles", fixture!("search_profiles"), |i| {
+            matches!(i, DiscoverItem::Artist { .. })
+        }),
+    ];
+    for (id, response, is_kind) in cases {
+        let results = parse_search(filter(id), &response);
+        assert_eq!(results.shelves.len(), 1, "{id}");
+        let shelf = &results.shelves[0];
+        assert_eq!(shelf.layout, ShelfLayout::List, "{id}");
+        assert!(shelf.items.len() >= 5, "{id}");
+        assert!(shelf.items.iter().all(is_kind), "{id}");
+        shelf
+            .items
+            .iter()
+            .filter_map(track_of)
+            .for_each(assert_track);
+        // The one shelf's continuation is the results', so nothing is left on it.
+        assert!(shelf.continuation.is_none(), "{id}");
+        // Artists and featured playlists fit on one page.
+        if !matches!(id, "artists" | "featured_playlists") {
+            assert!(results.continuation.is_some(), "{id}");
+        }
+    }
+}
+
+#[test]
+fn search_continuation() {
+    let more =
+        super::browse::search::continued(parse_continuation(&fixture!("search_continuation")));
+    assert_eq!(more.shelves.len(), 1);
+    assert!(more.shelves[0].items.len() >= 10);
+    more.shelves[0]
+        .items
+        .iter()
+        .filter_map(track_of)
+        .for_each(assert_track);
+    assert!(more.continuation.is_some());
+}
+
+#[test]
+fn suggestions() {
+    use super::browse::search::{Suggestion, parse_suggestions};
+    let suggestions = parse_suggestions(&fixture!("suggestions"));
+    let queries = suggestions
+        .iter()
+        .filter(|s| matches!(s, Suggestion::Query { .. }))
+        .count();
+    let items = suggestions
+        .iter()
+        .filter(|s| matches!(s, Suggestion::Item(_)))
+        .count();
+    assert!(queries >= 3 && items >= 3, "{suggestions:?}");
+    assert!(
+        matches!(&suggestions[0], Suggestion::Query { text, .. } if text.starts_with("daft p"))
+    );
+}
+
+/// What the legacy search reads out of the same answers: tracks, which the
+/// Discover search and the library sync still use.
+#[test]
+fn search_tracks_and_their_album_ids() {
+    let songs = super::search::walk_tracks(&fixture!("search_songs"));
+    assert!(songs.len() >= 10);
+    songs.iter().for_each(assert_track);
+    for track in &songs {
+        let by_name = synthesize_album_id(&track.album, &track.artist);
+        assert!(track.album_id == by_name || track.album_id.starts_with("ytmusic:album:MPRE"));
+    }
+}

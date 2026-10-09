@@ -16,6 +16,14 @@ pub enum CatalogItemKind {
     Artist,
     /// A curated mood or genre page.
     Mood,
+    Podcast,
+    /// One podcast episode; it carries a track, so it plays like one.
+    Episode,
+    /// A music video; it carries a track, so it plays like one.
+    Video,
+    /// Any other page the source can open, such as a chart or a shortcut
+    /// to one of its [`crate::PageEntry`] pages. Opened with this kind.
+    Page,
     #[default]
     Unknown,
 }
@@ -28,21 +36,79 @@ pub struct CatalogItem {
     pub title: String,
     pub subtitle: Option<String>,
     pub artwork: Option<crate::ArtworkRef>,
-    /// Present for [`CatalogItemKind::Track`], so a shelf of songs is
-    /// playable without a second round trip.
+    /// Present for the kinds that play as one song ([`CatalogItemKind::Track`],
+    /// `Video`, `Episode`), so a shelf of them is playable without a second
+    /// round trip.
     pub track: Option<TrackInfo>,
+    /// The tile's own colour, as `#rrggbb`, where the source gives one (mood tiles).
+    pub accent: Option<String>,
+    pub actions: CatalogActions,
+}
+
+/// How the account rates a song, an album or a playlist.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Rating {
+    #[default]
+    None,
+    Like,
+    Dislike,
+}
+
+/// What the account has done to an entity, and the refs that change it. A
+/// ref is opaque: a client passes it back as it came. A ref is absent where
+/// the source offers no such action for the entity, and a state is absent
+/// where the page did not say.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatalogActions {
+    /// Taken by [`crate::LibraryApi::rate`].
+    pub rate_ref: Option<String>,
+    pub rating: Option<Rating>,
+    /// Taken by [`crate::LibraryApi::save`].
+    pub save_ref: Option<String>,
+    pub saved: Option<bool>,
+    /// Taken by [`crate::LibraryApi::follow`].
+    pub follow_ref: Option<String>,
+    pub followed: Option<bool>,
+    /// Taken by [`crate::LibraryApi::remove_from_history`]; only a row of the
+    /// listening history has one.
+    pub history_token: Option<String>,
+}
+
+/// How a shelf is laid out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ShelfLayout {
+    /// A horizontal row of square tiles.
+    #[default]
+    Carousel,
+    /// A wrapping grid of tiles.
+    Grid,
+    /// A vertical list of track rows.
+    List,
+    /// Track rows in columns of four that scroll sideways ("Quick picks").
+    TrackGrid,
+    /// One large tile with a few rows under it ("Top result").
+    Hero,
 }
 
 /// A row of tiles. `list` marks the shelves a source renders as a track list
-/// rather than a carousel.
+/// rather than a carousel; `layout` says the same with more choices.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CatalogShelf {
     pub title: String,
     pub strapline: Option<String>,
     pub items: Vec<CatalogItem>,
-    /// Opens the shelf's own page, when it has one.
+    /// Opens the shelf's own page, when it has one, with [`Self::more_kind`].
     pub more_ref: Option<String>,
     pub list: bool,
+    pub layout: ShelfLayout,
+    /// The kind [`CatalogDetailRequest`] takes to open `more_ref`.
+    pub more_kind: CatalogItemKind,
+    /// More items for this shelf: pass it back as the request's
+    /// `continuation`, and the answer's one shelf continues this one.
+    pub continuation: Option<String>,
+    /// On the results of a search's "all" filter, the filter that shows
+    /// every result of this shelf's kind.
+    pub search_filter: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -72,6 +138,34 @@ impl CatalogDetailRequest {
     pub fn artist(artist: &str) -> Self {
         Self::new(CatalogItemKind::Artist, artist)
     }
+
+    /// One of the source's pages: a [`crate::PageEntry`], a chip or a `Page` tile.
+    pub fn page(id: impl Into<String>) -> Self {
+        Self::new(CatalogItemKind::Page, id)
+    }
+}
+
+/// How a detail page's header is drawn.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CatalogHeader {
+    /// No header: the shelves are the page.
+    #[default]
+    None,
+    /// The title alone.
+    Title,
+    /// Artwork beside the title, as an album, playlist or podcast has.
+    Detail,
+    /// A full-width banner, as an artist has.
+    Artist,
+}
+
+/// A filter over a page, as the mood chips over a home feed. `id` opens the
+/// filtered page with [`CatalogItemKind::Page`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CatalogChip {
+    pub id: String,
+    pub label: String,
+    pub selected: bool,
 }
 
 /// One catalog entity opened: its tracks, or its own shelves, or both.
@@ -91,4 +185,9 @@ pub struct CatalogDetail {
     pub continuation: Option<String>,
     /// For an album, the artist its header opens; absent when it bills nobody.
     pub artist_key: Option<String>,
+    pub header: CatalogHeader,
+    pub chips: Vec<CatalogChip>,
+    pub actions: CatalogActions,
+    /// Set for a playlist the account owns.
+    pub privacy: Option<crate::PlaylistPrivacy>,
 }

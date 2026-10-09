@@ -187,7 +187,8 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     // Discover is a capability of the active source, not a config flag —
     // hide the tab when the active source has no discover surface.
     let caps = hooks::sources::use_capabilities();
-    let has_discover = use_memo(move || caps().discover);
+    // A source that declares catalog pages is browsed there even without a feed of its own.
+    let has_discover = use_memo(move || caps().discover || !caps().pages.is_empty());
     let ordered_items: Vec<SidebarItem> = {
         let order = config.read().sidebar_order.clone();
         let mut items: Vec<SidebarItem> = order
@@ -296,7 +297,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                             key: "{item.key}",
                             item: item.clone(),
                             collapsed: is_collapsed,
-                            active: *props.current_route.read() == item.route,
+                            active: props.current_route.read().sidebar_entry() == item.route,
                             is_rtl,
                             can_move_up: idx > 0 && idx < order_len,
                             can_move_down: idx + 1 < order_len,
@@ -327,7 +328,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                         SidebarLink {
                             item: item.clone(),
                             collapsed: is_collapsed,
-                            active: *props.current_route.read() == item.route,
+                            active: props.current_route.read().sidebar_entry() == item.route,
                             is_rtl,
                             can_move_up: false,
                             can_move_down: false,

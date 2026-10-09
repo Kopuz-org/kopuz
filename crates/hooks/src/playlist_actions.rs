@@ -53,6 +53,20 @@ pub fn rename(playlist_id: String, name: String) {
     });
 }
 
+/// Change a playlist's name, description or privacy; `then` runs once it took.
+pub fn edit(playlist_id: String, edit: api::PlaylistEdit, then: impl FnOnce() + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        match api.edit_playlist(playlist_id, edit).await {
+            Ok(()) => then(),
+            Err(error) => {
+                tracing::warn!(%error, "editing a playlist failed");
+                toast_error(&error.to_string());
+            }
+        }
+    });
+}
+
 pub fn delete(playlist_id: String) {
     let api = consume_api();
     spawn(async move {

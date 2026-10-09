@@ -2297,3 +2297,143 @@ async fn stored_volume(database: &db::Db) -> f32 {
         .expect("stored config")
         .volume
 }
+
+/// A YouTube Music playlist moves an entry by its set id, so the rows a
+/// refresh stores keep theirs where the reorder reads them; Liked Music
+/// has no order to edit and refuses before reaching YouTube.
+#[tokio::test]
+async fn a_youtube_music_playlist_keeps_the_set_ids_a_reorder_names() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("playlists.db"))
+        .await
+        .expect("db");
+    let mut services = PlaybackServices::default();
+    services.config.server = Some(config::MusicServer {
+        name: "YouTube Music".into(),
+        url: String::new(),
+        service: config::MusicService::YtMusic,
+        access_token: Some("SAPISID=test".into()),
+        user_id: None,
+        id: Some("yt-test".into()),
+        ..Default::default()
+    });
+    services.config.active_source = config::Source::Server("yt-test".into());
+    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
+        .expect("headless player starts");
+    let config = services.config.clone();
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let source = server::source::active(database.clone(), &config);
+    assert_eq!(
+        source.capabilities().playlists,
+        server::source::PlaylistOps::Reorder,
+        "a signed-in account reorders its playlists"
+    );
+
+    let page: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../server/src/ytmusic/testdata/playlist.json"
+    ))
+    .expect("fixture");
+    let (tracks, _) = server::ytmusic::search::walk_playlist_shelf(&page);
+    let tracks = &tracks[..4];
+    let entries: Vec<reader::PlaylistEntry> = tracks
+        .iter()
+        .map(reader::PlaylistEntry::from_track)
+        .collect();
+    source.upsert_tracks(tracks).await.expect("tracks");
+    for id in ["PLtest", "LM"] {
+        source
+            .upsert_playlist_meta(id, id, None, None)
+            .await
+            .expect("playlist");
+        source
+            .upsert_playlist_tracks_page(id, &entries, 0, 1)
+            .await
+            .expect("entries");
+    }
+
+    let stored = database
+        .playlist_entries(&config.active_source, "PLtest")
+        .await
+        .expect("entries");
+    assert_eq!(stored, entries);
+    assert!(stored.iter().all(|entry| entry.item_id.is_some()));
+
+    let playlists = crate::PlaylistService::new(database.clone(), session);
+    let refused = playlists
+        .reorder("LM", api::PlaylistReorder { from: 3, to: 0 })
+        .await
+        .expect_err("Liked Music has no order to edit");
+    assert_eq!(refused.code, ErrorCode::InvalidInput, "{refused:?}");
+    let liked = database
+        .playlist_entries(&config.active_source, "LM")
+        .await
+        .expect("entries");
+    assert_eq!(liked, entries, "a refused move leaves the order alone");
+}
+
+/// A playlist allows what the source last said of it, never more than the
+/// source itself: Liked Music takes adds and removes but no reorder, a
+/// followed playlist takes nothing, and one never pulled is left to the
+/// source's own capability.
+#[tokio::test]
+async fn a_playlist_carries_what_its_source_said_it_allows() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("playlists.db"))
+        .await
+        .expect("db");
+    let mut services = PlaybackServices::default();
+    services.config.server = Some(config::MusicServer {
+        name: "YouTube Music".into(),
+        url: String::new(),
+        service: config::MusicService::YtMusic,
+        access_token: Some("SAPISID=test".into()),
+        id: Some("yt-test".into()),
+        ..Default::default()
+    });
+    services.config.active_source = config::Source::Server("yt-test".into());
+    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
+        .expect("headless player starts");
+    let config = services.config.clone();
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        services,
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    let source = server::source::active(database.clone(), &config);
+    for id in ["LM", "PLfollowed", "PLnew"] {
+        source
+            .upsert_playlist_meta(id, id, None, None)
+            .await
+            .expect("playlist");
+    }
+    source
+        .set_meta("pl_ops", "PLfollowed", "none")
+        .await
+        .expect("meta");
+
+    let playlists = crate::PlaylistService::new(database.clone(), session);
+    // Liked Music is read from the favorites, so this pull never leaves the DB.
+    playlists.refresh("LM").await.expect("refresh");
+
+    let catalog = playlists.catalog().await.expect("catalog");
+    let capability = |id: &str| {
+        catalog
+            .playlists
+            .iter()
+            .find(|playlist| playlist.id == id)
+            .expect("listed")
+            .capability
+    };
+    assert_eq!(capability("LM"), Some(api::PlaylistCapability::AddRemove));
+    assert_eq!(
+        capability("PLfollowed"),
+        Some(api::PlaylistCapability::None)
+    );
+    assert_eq!(capability("PLnew"), None);
+}

@@ -8,6 +8,7 @@
 //! mid-session.
 
 use crate::NavigationController;
+use crate::catalog_actions::{self, CatalogAction};
 use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::radio_actions::{RADIO_ICON, radio_label, track_radio_handler};
 use crate::track_row::share_track;
@@ -25,6 +26,7 @@ enum Action {
     StartRadio,
     GoToArtist,
     GoToAlbum,
+    Catalog(CatalogAction),
     Download,
     Share,
     ViewMetadata,
@@ -83,6 +85,13 @@ pub struct TrackActionsMenuProps {
     pub on_view_metadata: Option<EventHandler<()>>,
     #[props(default)]
     pub on_delete: Option<EventHandler<()>>,
+    /// What the account can do to this entity in the source's catalog, and
+    /// what it has done; set by catalog surfaces, absent for library rows.
+    #[props(default)]
+    pub catalog_actions: Option<api::CatalogActions>,
+    /// The entity's new state once a catalog action went through.
+    #[props(default)]
+    pub on_catalog_actions: Option<EventHandler<api::CatalogActions>>,
     #[props(default = false)]
     pub is_downloaded: bool,
     #[props(default = false)]
@@ -97,7 +106,7 @@ pub fn TrackActionsMenu(props: TrackActionsMenuProps) -> Element {
     let mut local_open = use_signal(|| false);
     let mut show_playlist_modal = use_signal(|| false);
 
-    let capabilities = *caps.read();
+    let capabilities = caps.read().clone();
     let on_start_radio = track_radio_handler(props.track.key.clone());
     let is_open = props.is_open.unwrap_or_else(|| *local_open.read());
 
@@ -177,6 +186,14 @@ pub fn TrackActionsMenu(props: TrackActionsMenuProps) -> Element {
             MenuAction::new(i18n::t("go_to_album"), "fa-solid fa-compact-disc"),
         ));
     }
+
+    if let Some(state) = props.catalog_actions.as_ref() {
+        for (action, entry) in catalog_actions::menu_entries(state, &capabilities) {
+            entries.push((Action::Catalog(action), entry));
+        }
+    }
+    let catalog_state = props.catalog_actions.clone();
+    let on_catalog_actions = props.on_catalog_actions;
 
     // `on_download` is only wired by sources that support downloads, so its
     // presence is the gate: no separate capability check needed here.
@@ -271,6 +288,11 @@ pub fn TrackActionsMenu(props: TrackActionsMenuProps) -> Element {
                         }
                     }
                     Action::GoToAlbum => nav_ctrl.navigate_to_album(track.album_id.clone()),
+                    Action::Catalog(catalog) => {
+                        if let Some(state) = catalog_state.as_ref() {
+                            catalog_actions::run(catalog, state, on_catalog_actions);
+                        }
+                    }
                     Action::Download => {
                         // "Downloading..." is a status row, not an action. The
                         // queue discards a repeat request, but the menu should

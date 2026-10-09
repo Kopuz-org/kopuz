@@ -434,13 +434,30 @@ impl api::LibraryApi for GrpcApi {
         Ok(convert::track_page_from_proto(tracks.get_ref()))
     }
 
-    async fn search(&self, query: String) -> Result<api::SearchResults, ApiError> {
+    async fn search(&self, request: api::SearchRequest) -> Result<api::SearchResults, ApiError> {
         let results = self
             .client()
-            .search(Request::new(proto::SearchRequest { query }))
+            .search(Request::new(convert::search_request_to_proto(&request)))
             .await
             .map_err(wire_error)?;
         Ok(convert::search_results_from_proto(results.get_ref()))
+    }
+
+    async fn search_suggestions(
+        &self,
+        query: String,
+    ) -> Result<Vec<api::SearchSuggestion>, ApiError> {
+        let suggestions = self
+            .client()
+            .get_search_suggestions(Request::new(proto::SearchSuggestionsRequest { query }))
+            .await
+            .map_err(wire_error)?;
+        Ok(suggestions
+            .get_ref()
+            .suggestions
+            .iter()
+            .map(convert::search_suggestion_from_proto)
+            .collect())
     }
 
     async fn track_web_url(&self, key: String) -> Result<Option<String>, ApiError> {
@@ -608,6 +625,41 @@ impl api::LibraryApi for GrpcApi {
     async fn dont_recommend(&self, key: String) -> Result<(), ApiError> {
         self.client()
             .dont_recommend(Request::new(proto::DontRecommendRequest { key }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn rate(&self, item_ref: String, rating: api::Rating) -> Result<(), ApiError> {
+        self.client()
+            .rate(Request::new(proto::RateRequest {
+                item_ref,
+                rating: convert::rating_to_proto(rating) as i32,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn follow(&self, artist_ref: String, follow: bool) -> Result<(), ApiError> {
+        self.client()
+            .follow(Request::new(proto::FollowRequest { artist_ref, follow }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn save(&self, item_ref: String, saved: bool) -> Result<(), ApiError> {
+        self.client()
+            .save(Request::new(proto::SaveRequest { item_ref, saved }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn remove_from_history(&self, token: String) -> Result<(), ApiError> {
+        self.client()
+            .remove_from_history(Request::new(proto::RemoveFromHistoryRequest { token }))
             .await
             .map_err(wire_error)?;
         Ok(())
@@ -1016,7 +1068,30 @@ impl api::PlaylistApi for GrpcApi {
 
     async fn rename_playlist(&self, id: String, name: String) -> Result<(), ApiError> {
         self.client()
-            .rename_playlist(Request::new(proto::RenamePlaylistRequest { id, name }))
+            .rename_playlist(Request::new(proto::RenamePlaylistRequest {
+                id,
+                name,
+                description: None,
+                privacy: None,
+            }))
+            .await
+            .map_err(wire_error)?;
+        Ok(())
+    }
+
+    async fn edit_playlist(&self, id: String, edit: api::PlaylistEdit) -> Result<(), ApiError> {
+        if edit.name.is_none() && edit.description.is_none() && edit.privacy.is_none() {
+            return Ok(());
+        }
+        self.client()
+            .rename_playlist(Request::new(proto::RenamePlaylistRequest {
+                id,
+                name: edit.name.unwrap_or_default(),
+                description: edit.description,
+                privacy: edit
+                    .privacy
+                    .map(|privacy| convert::playlist_privacy_to_proto(privacy) as i32),
+            }))
             .await
             .map_err(wire_error)?;
         Ok(())

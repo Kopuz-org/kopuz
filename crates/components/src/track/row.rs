@@ -46,6 +46,8 @@ pub fn TrackRow(
     #[props(default = false)] is_currently_playing: bool,
     #[props(default = Vec::new())] selected_queue_tracks: Vec<Track>,
     #[props(default = None)] row_num: Option<usize>,
+    #[props(default)] catalog_actions: Option<api::CatalogActions>,
+    #[props(default)] on_catalog_actions: Option<EventHandler<api::CatalogActions>>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
     let nav_ctrl = use_context::<NavigationController>();
@@ -97,7 +99,13 @@ pub fn TrackRow(
     };
 
     let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
-    let duration_str = fmt_dur(track.duration_secs().unwrap_or_default());
+    // A row whose length is unknown (YouTube search rows for podcast episodes
+    // carry none) shows no duration rather than 0:00.
+    let duration_str = track
+        .duration_secs()
+        .filter(|secs| *secs > 0)
+        .map(fmt_dur)
+        .unwrap_or_default();
 
     // The container a file is in, which the daemon works out: a row
     // that came from a service names no file, so it has none.
@@ -173,8 +181,10 @@ pub fn TrackRow(
                     }
                     span { class: "text-[11px] text-white/45 truncate leading-tight",
                         span { dir: "auto", "{track.artist}" }
-                        " • "
-                        span { dir: "ltr", "{duration_str}" }
+                        if !duration_str.is_empty() {
+                            " • "
+                            span { dir: "ltr", "{duration_str}" }
+                        }
                     }
                 }
 
@@ -182,6 +192,8 @@ pub fn TrackRow(
                     div { class: "shrink-0",
                         crate::track_actions::TrackActionsMenu {
                             track: menu_track_android.clone(),
+                            catalog_actions: catalog_actions.clone(),
+                            on_catalog_actions,
                             is_open: Some(is_menu_open),
                             on_open: Some(EventHandler::new(move |_| {
                                 context_menu_position.set(None);
@@ -438,6 +450,8 @@ pub fn TrackRow(
                         if !is_selection_mode {
                             crate::track_actions::TrackActionsMenu {
                                 track: menu_track.clone(),
+                                catalog_actions: catalog_actions.clone(),
+                                on_catalog_actions,
                                 is_open: Some(is_menu_open),
                                 position: *context_menu_position.read(),
                                 on_open: Some(EventHandler::new(move |_| {
@@ -689,6 +703,8 @@ pub fn TrackRow(
                 if !is_selection_mode {
                     crate::track_actions::TrackActionsMenu {
                         track: menu_track_normal.clone(),
+                        catalog_actions: catalog_actions.clone(),
+                        on_catalog_actions,
                         is_open: Some(is_menu_open),
                         position: *context_menu_position.read(),
                         on_open: Some(EventHandler::new(move |_| {

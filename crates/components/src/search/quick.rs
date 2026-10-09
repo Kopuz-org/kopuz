@@ -192,7 +192,9 @@ pub fn QuickSearch(
                                             span { class: "text-sm text-white/90 truncate", "{track.title}" }
                                             span { class: "text-xs text-slate-400 truncate", "{track.artist}" }
                                         }
-                                        span { class: "text-xs text-slate-500 font-mono shrink-0", "{fmt_time(track.duration_secs().unwrap_or_default())}" }
+                                        if let Some(secs) = track.duration_secs().filter(|secs| *secs > 0) {
+                                            span { class: "text-xs text-slate-500 font-mono shrink-0", "{fmt_time(secs)}" }
+                                        }
                                     }
                                 }
                             }

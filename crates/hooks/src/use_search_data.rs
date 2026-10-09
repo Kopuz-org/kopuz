@@ -56,7 +56,11 @@ pub fn use_search_data(search_query: Signal<String>) -> SearchData {
                 return None;
             }
             let span = tracing::info_span!("query.search");
-            let results = api.search(query).instrument(span).await.ok()?;
+            let results = api
+                .search(api::SearchRequest::new(query))
+                .instrument(span)
+                .await
+                .ok()?;
             Some((results.tracks, results.albums))
         }
     });

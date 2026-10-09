@@ -127,3 +127,57 @@ pub fn with_album_keys(album_id: String, then: impl FnOnce(Vec<String>) + 'stati
         then(tracks.into_iter().map(|track| track.key).collect());
     });
 }
+
+/// Like, dislike or clear the rating of a song, an album or a playlist.
+/// `then` runs once the source took it, so a button flips only on success.
+pub fn rate(item_ref: String, rating: api::Rating, then: impl FnOnce() + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        match api.rate(item_ref, rating).await {
+            Ok(()) => then(),
+            Err(error) => {
+                tracing::warn!(%error, "rating failed");
+                toast_error(&error.to_string());
+            }
+        }
+    });
+}
+
+pub fn follow(artist_ref: String, follow: bool, then: impl FnOnce() + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        match api.follow(artist_ref, follow).await {
+            Ok(()) => then(),
+            Err(error) => {
+                tracing::warn!(%error, "following failed");
+                toast_error(&error.to_string());
+            }
+        }
+    });
+}
+
+pub fn save(item_ref: String, saved: bool, then: impl FnOnce() + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        match api.save(item_ref, saved).await {
+            Ok(()) => then(),
+            Err(error) => {
+                tracing::warn!(%error, "saving to the library failed");
+                toast_error(&error.to_string());
+            }
+        }
+    });
+}
+
+pub fn remove_from_history(token: String, then: impl FnOnce() + 'static) {
+    let api = consume_api();
+    spawn(async move {
+        match api.remove_from_history(token).await {
+            Ok(()) => then(),
+            Err(error) => {
+                tracing::warn!(%error, "removing from history failed");
+                toast_error(&error.to_string());
+            }
+        }
+    });
+}

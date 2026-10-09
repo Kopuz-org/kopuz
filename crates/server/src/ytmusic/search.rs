@@ -45,14 +45,14 @@ impl MusicVideoType {
 }
 
 #[derive(Debug, Clone)]
-struct ParsedRow {
-    video_id: String,
-    title: String,
-    artists: Vec<ArtistCredit>,
-    album: Option<String>,
-    album_browse_id: Option<String>,
-    duration: u64,
-    thumbnail_url: Option<String>,
+pub(super) struct ParsedRow {
+    pub video_id: String,
+    pub title: String,
+    pub artists: Vec<ArtistCredit>,
+    pub album: Option<String>,
+    pub album_browse_id: Option<String>,
+    pub duration: u64,
+    pub thumbnail_url: Option<String>,
 }
 
 #[tracing::instrument(name = "yt.search", skip(cookies), fields(query = %query))]
@@ -333,7 +333,7 @@ async fn do_search(
     Ok(walk_tracks(&resp))
 }
 
-fn walk_tracks(resp: &Value) -> Vec<Track> {
+pub(super) fn walk_tracks(resp: &Value) -> Vec<Track> {
     let shelves = resp
         .pointer("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
         .and_then(|v| v.as_array());
@@ -609,7 +609,7 @@ fn runs_with_browse(runs: Option<&Value>) -> Vec<(String, Option<String>)> {
         .unwrap_or_default()
 }
 
-fn parsed_to_track(p: ParsedRow) -> Track {
+pub(super) fn parsed_to_track(p: ParsedRow) -> Track {
     let primary_artist = p
         .artists
         .first()
@@ -680,7 +680,14 @@ fn walk_items(items: &[Value]) -> (Vec<Track>, Option<String>) {
             continue;
         }
         if let Some(parsed) = parse_row(item) {
-            tracks.push(parsed_to_track(parsed));
+            let mut track = parsed_to_track(parsed);
+            // The entry's own id, which a move or a removal names: the video
+            // id is not one, a playlist can hold the same video twice.
+            track.playlist_item_id = item
+                .pointer("/musicResponsiveListItemRenderer/playlistItemData/playlistSetVideoId")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            tracks.push(track);
         }
     }
     (tracks, continuation)

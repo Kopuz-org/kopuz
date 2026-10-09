@@ -12,7 +12,10 @@
 
 use std::sync::Arc;
 
-use api::{ApiError, PlaylistCatalog, PlaylistFolderInfo, PlaylistInfo, PlaylistReorder, Table};
+use api::{
+    ApiError, PlaylistCatalog, PlaylistEdit, PlaylistFolderInfo, PlaylistInfo, PlaylistPrivacy,
+    PlaylistReorder, Table,
+};
 
 use crate::session::SessionHandle;
 
@@ -30,6 +33,29 @@ fn source_error(error: server::source::SourceError) -> ApiError {
         SourceError::Connectivity => ApiError::new(ErrorCode::SourceUnreachable, error.to_string()),
         SourceError::InvalidInput(message) => ApiError::invalid_input(message.clone()),
         SourceError::Backend(message) => ApiError::internal(message.clone()),
+    }
+}
+
+/// The meta key one playlist's own [`PlaylistOps`](server::source::PlaylistOps)
+/// is kept under, as the source last read them.
+const PLAYLIST_OPS: &str = "pl_ops";
+
+fn ops_name(ops: server::source::PlaylistOps) -> &'static str {
+    use server::source::PlaylistOps;
+    match ops {
+        PlaylistOps::None => "none",
+        PlaylistOps::AddRemove => "add_remove",
+        PlaylistOps::Reorder => "reorder",
+    }
+}
+
+fn ops_from_name(name: &str) -> Option<server::source::PlaylistOps> {
+    use server::source::PlaylistOps;
+    match name {
+        "none" => Some(PlaylistOps::None),
+        "add_remove" => Some(PlaylistOps::AddRemove),
+        "reorder" => Some(PlaylistOps::Reorder),
+        _ => None,
     }
 }
 
@@ -72,11 +98,31 @@ impl PlaylistService {
             .into_iter()
             .map(|track| (track.id.key().into_owned(), track))
             .collect();
+        // A playlist allows what its source does, narrowed by what the source
+        // said of that one playlist when it was last pulled.
+        let source_ops = self.active_source().capabilities().playlists;
+        let mut capabilities = std::collections::HashMap::new();
+        for playlist in &store.playlists {
+            let stored = self
+                .db
+                .meta_get(PLAYLIST_OPS, &playlist.id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|name| ops_from_name(&name));
+            if let Some(ops) = stored {
+                capabilities.insert(
+                    playlist.id.clone(),
+                    crate::sources::playlist_capability(ops.min(source_ops)),
+                );
+            }
+        }
         Ok(PlaylistCatalog {
             playlists: store
                 .playlists
                 .into_iter()
                 .map(|playlist| PlaylistInfo {
+                    capability: capabilities.get(&playlist.id).copied(),
                     artwork: crate::artwork::playlist_ref(
                         &playlist,
                         &config,
@@ -154,11 +200,45 @@ impl PlaylistService {
         Ok(())
     }
 
+    /// A name alone is a rename, held here. A description or a privacy is
+    /// the source's to keep, so the whole edit goes to it first, name and all.
+    pub async fn edit(&self, id: &str, edit: PlaylistEdit) -> Result<(), ApiError> {
+        use server::ytmusic::discover::Privacy;
+        if edit.description.is_some() || edit.privacy.is_some() {
+            let source = self.active_source();
+            if !source.capabilities().library_actions.playlist_details {
+                return Err(ApiError::unsupported("playlist details"));
+            }
+            let details = server::source::PlaylistDetails {
+                name: edit.name.clone(),
+                description: edit.description,
+                privacy: edit.privacy.map(|privacy| match privacy {
+                    PlaylistPrivacy::Private => Privacy::Private,
+                    PlaylistPrivacy::Unlisted => Privacy::Unlisted,
+                    PlaylistPrivacy::Public => Privacy::Public,
+                }),
+            };
+            source
+                .edit_playlist(id, &details)
+                .await
+                .map_err(source_error)?;
+        }
+        match edit.name {
+            Some(name) => self.rename(id, &name).await,
+            None => {
+                self.session.invalidate(Table::Playlists);
+                Ok(())
+            }
+        }
+    }
+
     pub async fn delete(&self, id: &str) -> Result<(), ApiError> {
-        self.active_source()
-            .delete_playlist(id)
+        let source = self.active_source();
+        source
+            .delete_remote_playlist(id)
             .await
             .map_err(source_error)?;
+        source.delete_playlist(id).await.map_err(source_error)?;
         self.session.invalidate(Table::Playlists);
         // A deleted playlist leaves every folder that held it.
         self.session.invalidate(Table::Folders);
@@ -254,6 +334,9 @@ impl PlaylistService {
                 }
             };
             let next = page.next.clone();
+            if let Some(ops) = page.ops {
+                let _ = source.set_meta(PLAYLIST_OPS, id, ops_name(ops)).await;
+            }
             if page.tracks.is_empty() {
                 break;
             }

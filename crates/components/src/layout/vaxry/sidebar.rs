@@ -141,7 +141,8 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
 
     // Discover is a capability of the active source, not a config flag.
     let caps = hooks::sources::use_capabilities();
-    let has_discover = use_memo(move || caps().discover);
+    // A source that declares catalog pages is browsed there even without a feed of its own.
+    let has_discover = use_memo(move || caps().discover || !caps().pages.is_empty());
     let collapsed = if is_android {
         false
     } else {
@@ -261,7 +262,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                                 VaxryNavItem {
                                     key: "{item.key}",
                                     item: item.clone(),
-                                    active: current_route == item.route,
+                                    active: current_route.sidebar_entry() == item.route,
                                     collapsed,
                                     onclick: move |_| {
                                         props.on_navigate.call(item.route);
@@ -280,7 +281,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                     VaxryNavItem {
                         key: "{item.key}",
                         item: item.clone(),
-                        active: current_route == item.route,
+                        active: current_route.sidebar_entry() == item.route,
                         collapsed,
                         onclick: move |_| {
                             props.on_navigate.call(item.route);

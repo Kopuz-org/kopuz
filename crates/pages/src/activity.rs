@@ -240,7 +240,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                             }
 
                                             div { class: if cfg!(target_os = "android") { "hidden" } else { "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors" },
-                                                "{format_duration(track.duration_secs().unwrap_or_default())}"
+                                                "{track.duration_secs().filter(|secs| *secs > 0).map(format_duration).unwrap_or_default()}"
                                             }
 
                                             div { class: if cfg!(target_os = "android") { "w-14 shrink-0 text-right text-slate-400 text-sm tabular-nums flex items-center justify-end gap-2" } else { "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors flex items-center justify-end gap-2" },
