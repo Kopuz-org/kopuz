@@ -1,0 +1,11 @@
+[Unit]
+Description=Kopuz music daemon
+
+[Service]
+Type=simple
+ExecStart=kopuzd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -15,8 +15,7 @@ Two deployment shapes serve the same API:
 - **Headless**: run `kopuzd`. It owns the audio engine, the SQLite library,
   the configured sources and their credentials, scan/sync jobs, downloads,
   scrobbling, and OS media integration (MPRIS/SMTC/Now Playing). No window,
-  no webview. Build it with `cargo build --release -p kopuz-daemon --features
-  kopuzd --bin kopuzd`.
+  no webview. Build it with `cargo build --release -p kopuz-kopuzd`.
 - **Embedded**: the desktop app runs that same core in its own process and
   serves the identical API from it. This exists because SQLite is
   single-writer: `kopuzd` and the app must never run against one library at
@@ -29,6 +28,9 @@ Two deployment shapes serve the same API:
 Exclusive ownership is enforced with a lock file beside the database, so a
 second process pointed at the same library fails to start with a readable
 error rather than becoming a second writer.
+
+For an interactive command-line client, see [`kopuzctl`](cli.md).
+
 ## Connecting
 
 The daemon listens on a Unix domain socket, created `0600`:

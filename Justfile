@@ -17,9 +17,11 @@ build: tailwind
 run *FLAGS: tailwind
     cargo run {{FLAGS}} -p kopuz
 
-# The daemon on its own, for attaching to or poking with grpcurl.
 daemon *FLAGS:
-    cargo run {{FLAGS}} -p kopuz-daemon --features kopuzd --bin kopuzd
+    cargo run {{FLAGS}} -p kopuz-kopuzd --bin kopuzd
+
+ctl *ARGS:
+    cargo run -p kopuz-ctl -- {{ARGS}}
 
 run-release: build
     target/dx/kopuz/release/linux/app/kopuz

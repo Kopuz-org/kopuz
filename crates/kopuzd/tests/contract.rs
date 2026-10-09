@@ -371,6 +371,200 @@ async fn clippsly_wire_rejects_truncated_oversized_and_changed_upload_metadata()
     server.abort();
 }
 
+#[test]
+fn cli_default_address_matches_the_daemon() {
+    assert_eq!(client::default_socket_path(), kopuzd::default_socket_path());
+}
+
+#[tokio::test]
+async fn cli_playback_and_search_work_over_each_transport() {
+    let pair = spawn_pair().await;
+    for api in [&pair.local as &dyn KopuzApi, &pair.wire, &pair.tcp] {
+        let tracks = ctl::execute(
+            api,
+            ctl::Command::Search {
+                query: "seed".into(),
+                page: ctl::PageArgs {
+                    offset: 1,
+                    limit: 1,
+                },
+            },
+            None,
+        )
+        .await
+        .expect("search");
+        assert_eq!(tracks.as_array().unwrap().len(), 1);
+        let key = tracks[0]["key"].as_str().unwrap().to_string();
+        ctl::execute(
+            api,
+            ctl::Command::Play {
+                keys: vec![key.clone()],
+            },
+            None,
+        )
+        .await
+        .expect("play");
+        wait_state(api, "playing", |state| state.phase == Phase::Playing).await;
+        ctl::execute(api, ctl::Command::Pause, None)
+            .await
+            .expect("pause");
+        wait_state(api, "paused", |state| state.phase == Phase::Paused).await;
+        ctl::execute(api, ctl::Command::Volume { percent: 36 }, None)
+            .await
+            .expect("volume");
+        wait_state(api, "volume applied", |state| {
+            (state.volume - 0.36).abs() < f32::EPSILON
+        })
+        .await;
+        let status = ctl::execute(api, ctl::Command::Status, None)
+            .await
+            .expect("status");
+        assert_eq!(status["queue_length"], 1);
+        assert_eq!(status["volume_percent"], 36.0);
+        let queue = ctl::execute(
+            api,
+            ctl::Command::Queue(ctl::PageArgs {
+                offset: 0,
+                limit: 1,
+            }),
+            None,
+        )
+        .await
+        .expect("queue");
+        assert_eq!(queue[0]["key"], key);
+        ctl::execute(api, ctl::Command::Stop, None)
+            .await
+            .expect("stop");
+        let overflow = ctl::execute(api, ctl::Command::Seek { seconds: u64::MAX }, None)
+            .await
+            .expect_err("reject overflowing milliseconds");
+        assert_eq!(overflow.code, ErrorCode::InvalidInput);
+    }
+}
+
+#[tokio::test]
+async fn cli_source_credentials_are_write_only_over_each_transport() {
+    let pair = spawn_pair().await;
+    for api in [&pair.local as &dyn KopuzApi, &pair.wire, &pair.tcp] {
+        let added = ctl::execute(
+            api,
+            ctl::Command::Source {
+                command: ctl::SourceCommand::Add {
+                    service: "jellyfin".into(),
+                    name: "CLI server".into(),
+                    url: Some("https://jelly.example".into()),
+                    fields: Vec::new(),
+                    secret_stdin: None,
+                    activate: false,
+                },
+            },
+            None,
+        )
+        .await
+        .expect("add source");
+        let id = added["id"].as_str().unwrap().to_string();
+        let signed_in = ctl::execute(
+            api,
+            ctl::Command::Source {
+                command: ctl::SourceCommand::Token {
+                    id: id.clone(),
+                    user_id: Some("alice".into()),
+                    secret_stdin: true,
+                },
+            },
+            Some("cli-secret-never-printed".into()),
+        )
+        .await
+        .expect("provision token");
+        assert_eq!(signed_in["authenticated"], true);
+        assert!(!signed_in.to_string().contains("cli-secret-never-printed"));
+        let listed = ctl::execute(
+            api,
+            ctl::Command::Source {
+                command: ctl::SourceCommand::List,
+            },
+            None,
+        )
+        .await
+        .expect("list sources");
+        assert!(!listed.to_string().contains("cli-secret-never-printed"));
+        assert!(
+            listed
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|source| source["id"] == id)
+        );
+        ctl::execute(
+            api,
+            ctl::Command::Source {
+                command: ctl::SourceCommand::Logout { id: id.clone() },
+            },
+            None,
+        )
+        .await
+        .expect("logout");
+        assert!(
+            !api.sources()
+                .await
+                .unwrap()
+                .iter()
+                .find(|source| source.id == id)
+                .unwrap()
+                .authenticated
+        );
+        ctl::execute(
+            api,
+            ctl::Command::Source {
+                command: ctl::SourceCommand::Remove { id: id.clone() },
+            },
+            None,
+        )
+        .await
+        .expect("remove source");
+        assert!(
+            !api.sources()
+                .await
+                .unwrap()
+                .iter()
+                .any(|source| source.id == id)
+        );
+    }
+}
+
+#[tokio::test]
+async fn cli_rejects_secret_and_unknown_setup_fields_before_saving() {
+    let pair = spawn_pair().await;
+    let ids = |sources: Vec<api::SourceInfo>| {
+        sources
+            .into_iter()
+            .map(|source| source.id)
+            .collect::<Vec<_>>()
+    };
+    let before = ids(pair.wire.sources().await.unwrap());
+    for (service, key) in [("applemusic", "token"), ("jellyfin", "unknown")] {
+        let error = ctl::execute(
+            &pair.wire,
+            ctl::Command::Source {
+                command: ctl::SourceCommand::Add {
+                    service: service.into(),
+                    name: "Invalid".into(),
+                    url: None,
+                    fields: vec![api::FieldValue::new(key, "not-for-command-lines")],
+                    secret_stdin: None,
+                    activate: false,
+                },
+            },
+            None,
+        )
+        .await
+        .expect_err("invalid setup field");
+        assert_eq!(error.code, ErrorCode::InvalidInput);
+        assert!(!error.to_string().contains("not-for-command-lines"));
+    }
+    assert_eq!(ids(pair.wire.sources().await.unwrap()), before);
+}
+
 async fn panicking_job() -> Result<(), ApiError> {
     panic!("intentional test panic")
 }
