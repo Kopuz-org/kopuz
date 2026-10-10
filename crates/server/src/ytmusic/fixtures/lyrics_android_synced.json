@@ -1,0 +1,50 @@
+{
+  "contents": {
+    "elementRenderer": {
+      "newElement": {
+        "type": {
+          "componentType": {
+            "model": {
+              "timedLyricsModel": {
+                "lyricsData": {
+                  "timedLyricsData": [
+                    {
+                      "lyricLine": "Hey Jude, don't make it bad",
+                      "cueRange": {
+                        "startTimeMilliseconds": "80",
+                        "endTimeMilliseconds": "6200"
+                      }
+                    },
+                    {
+                      "lyricLine": "Take a sad song and make it better",
+                      "cueRange": {
+                        "startTimeMilliseconds": "6200",
+                        "endTimeMilliseconds": "13200"
+                      }
+                    },
+                    {
+                      "lyricLine": "Remember to let her into your heart",
+                      "cueRange": {
+                        "startTimeMilliseconds": "13200",
+                        "endTimeMilliseconds": "18360"
+                      }
+                    },
+                    {
+                      "lyricLine": "Then you can start to make it better",
+                      "cueRange": {
+                        "startTimeMilliseconds": "18360",
+                        "endTimeMilliseconds": "25530"
+                      }
+                    }
+                  ],
+                  "sourceMessage": "Source: Musixmatch",
+                  "staticLayout": null
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

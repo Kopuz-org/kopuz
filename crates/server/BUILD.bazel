@@ -14,6 +14,7 @@ kopuz_rust_library(
         "//crates/reader",
         "//crates/utils",
     ],
+    test_compile_data = glob(["src/ytmusic/fixtures/*"]),
 )
 
 rust_test(

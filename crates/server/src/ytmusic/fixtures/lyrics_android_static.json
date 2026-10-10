@@ -1,0 +1,34 @@
+{
+  "contents": {
+    "elementRenderer": {
+      "newElement": {
+        "type": {
+          "componentType": {
+            "model": {
+              "timedLyricsModel": {
+                "lyricsData": {
+                  "timedLyricsData": [
+                    {
+                      "lyricLine": "Let the music in tonight"
+                    },
+                    {
+                      "lyricLine": "Just turn on the music"
+                    },
+                    {
+                      "lyricLine": "Let the music of your life"
+                    },
+                    {
+                      "lyricLine": "Give life back to music"
+                    }
+                  ],
+                  "sourceMessage": "Source: LyricFind",
+                  "staticLayout": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

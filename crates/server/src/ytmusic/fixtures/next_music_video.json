@@ -1,0 +1,85 @@
+{
+  "contents": {
+    "singleColumnMusicWatchNextResultsRenderer": {
+      "tabbedRenderer": {
+        "watchNextTabbedResultsRenderer": {
+          "tabs": [
+            {
+              "tabRenderer": {
+                "title": "Up next",
+                "content": {
+                  "musicQueueRenderer": {
+                    "content": {
+                      "playlistPanelRenderer": {
+                        "contents": [
+                          {
+                            "playlistPanelVideoWrapperRenderer": {
+                              "primaryRenderer": {
+                                "playlistPanelVideoRenderer": {
+                                  "videoId": "kJQP7kiw5Fk",
+                                  "title": {
+                                    "runs": [
+                                      {
+                                        "text": "Despacito"
+                                      }
+                                    ]
+                                  }
+                                }
+                              },
+                              "counterpart": [
+                                {
+                                  "counterpartRenderer": {
+                                    "playlistPanelVideoRenderer": {
+                                      "videoId": "FXovf5dsRTw",
+                                      "title": {
+                                        "runs": [
+                                          {
+                                            "text": "Despacito"
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "tabRenderer": {
+                "title": "Lyrics",
+                "unselectable": true,
+                "endpoint": {
+                  "browseEndpoint": {
+                    "browseId": "MPLYt_0XNX5s8uBvI"
+                  }
+                }
+              }
+            },
+            {
+              "tabRenderer": {
+                "title": "Comments"
+              }
+            },
+            {
+              "tabRenderer": {
+                "title": "Related",
+                "endpoint": {
+                  "browseEndpoint": {
+                    "browseId": "MPTRt_0XNX5s8uBvI"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

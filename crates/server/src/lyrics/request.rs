@@ -32,6 +32,9 @@ pub struct LyricsRequest {
     /// track path starts with `applemusic:`, the lyrics chain fetches TTML
     /// directly from the amp-api instead of using the paxsenix proxy.
     pub apple_music_auth: Option<AppleMusicLyricsAuth>,
+    /// The YouTube Music session, which leads a music video to its song's
+    /// lyrics. Anonymous lookups still read the song's own.
+    pub youtube_music_cookies: Option<String>,
 }
 
 impl LyricsRequest {
@@ -52,6 +55,7 @@ impl LyricsRequest {
             prefer_local: false,
             enable_musixmatch: false,
             apple_music_auth: None,
+            youtube_music_cookies: None,
         }
     }
 
@@ -81,6 +85,11 @@ impl LyricsRequest {
 
     pub fn apple_music_auth(mut self, auth: AppleMusicLyricsAuth) -> Self {
         self.apple_music_auth = Some(auth);
+        self
+    }
+
+    pub fn youtube_music_cookies(mut self, cookies: String) -> Self {
+        self.youtube_music_cookies = Some(cookies);
         self
     }
 

@@ -400,6 +400,11 @@ impl LibraryService {
                     catalog_id: catalog_id.to_string(),
                 });
             }
+            if server.service == config::MusicService::YtMusic
+                && let Some(cookies) = server.access_token.clone()
+            {
+                request = request.youtube_music_cookies(cookies);
+            }
         }
 
         // Three layers, cheapest first: this process's cache, the library's

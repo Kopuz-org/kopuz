@@ -1,0 +1,26 @@
+{
+  "contents": {
+    "sectionListRenderer": {
+      "contents": [
+        {
+          "musicDescriptionShelfRenderer": {
+            "description": {
+              "runs": [
+                {
+                  "text": "Let the music in tonight\r\nJust turn on the music\r\nLet the music of your life\r\nGive life back to music"
+                }
+              ]
+            },
+            "footer": {
+              "runs": [
+                {
+                  "text": "Source: LyricFind"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
