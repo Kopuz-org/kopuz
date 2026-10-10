@@ -190,7 +190,7 @@ fn search_dirs() -> &'static [PathBuf] {
     })
 }
 
-fn find_binary(name: &str) -> Option<String> {
+pub(crate) fn find_binary(name: &str) -> Option<String> {
     let exe = if cfg!(target_os = "windows") {
         format!("{name}.exe")
     } else {

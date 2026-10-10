@@ -71,7 +71,9 @@ fn entries(sources: &[api::SourceInfo]) -> Vec<(String, String, api::Icon, Strin
     sources
         .iter()
         .map(|source| {
-            let sub = if source.needs_network {
+            let sub = if source.temporary {
+                i18n::t("removable_temporary").to_string()
+            } else if source.needs_network {
                 crate::forms::text(&source.service.name).to_uppercase()
             } else {
                 i18n::t("source_on_this_device").to_string()

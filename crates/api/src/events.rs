@@ -29,6 +29,7 @@ pub enum JobKind {
     PlaylistSync,
     Download,
     UrlDownload,
+    AudioRip,
     Unknown,
 }
 
