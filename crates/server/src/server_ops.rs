@@ -24,18 +24,23 @@ pub struct ServerConn {
 impl ServerConn {
     /// Build connection params from app config for the active server, or
     /// `None` when a field the active service requires is missing. An access
-    /// token is always required; Jellyfin/Subsonic/Custom additionally require
+    /// token is required except for a physical audio CD; Jellyfin/Subsonic/Custom additionally require
     /// a `user_id` (YouTube Music authenticates by cookie only and Spotify by
     /// OAuth token only, so a missing user_id is fine for both). Centralizing this stops every UI call site from
     /// coercing an absent user_id into `""` and firing a malformed
     /// authenticated request that silently fails.
     pub fn resolve(config: &config::AppConfig) -> Option<Self> {
         let server = config.server.as_ref()?;
-        let token = server.access_token.clone()?;
+        let token = if server.service == MusicService::AudioCd {
+            String::new()
+        } else {
+            server.access_token.clone()?
+        };
         let user_id = match server.service {
             MusicService::YtMusic
             | MusicService::AppleMusic
             | MusicService::Spotify
+            | MusicService::AudioCd
             | MusicService::Clippsly => server.user_id.clone().unwrap_or_default(),
             _ => server.user_id.clone()?,
         };
@@ -85,6 +90,13 @@ mod tests {
             server: Some(serde_json::from_value(server).unwrap()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn audio_cd_needs_no_credentials() {
+        let connection = ServerConn::resolve(&cfg("AudioCd", None, None)).unwrap();
+        assert_eq!(connection.service, MusicService::AudioCd);
+        assert!(connection.token.is_empty());
     }
 
     #[test]

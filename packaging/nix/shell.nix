@@ -12,6 +12,8 @@
   appstream,
   nodejs_22,
   ffmpeg,
+  libcdio,
+  libcdio-paranoia,
   glib-networking,
   glib,
   gtk3,
@@ -62,7 +64,12 @@ mkShell {
   env = lib.optionalAttrs stdenv.hostPlatform.isLinux {
     GIO_MODULE_DIR = "${glib-networking}/lib/gio/modules/";
     GSETTINGS_SCHEMA_DIR = "${glib.getSchemaPath gtk3}";
-    LD_LIBRARY_PATH = "${lib.makeLibraryPath kopuzPkg.buildInputs}:${libayatana-appindicator}/lib:$LD_LIBRARY_PATH";
+    LD_LIBRARY_PATH = "${
+      lib.makeLibraryPath [
+        libcdio
+        libcdio-paranoia
+      ]
+    }:${lib.makeLibraryPath kopuzPkg.buildInputs}:${libayatana-appindicator}/lib:$LD_LIBRARY_PATH";
     WEBKIT_DISABLE_COMPOSITING_MODE = "1";
     RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
   };

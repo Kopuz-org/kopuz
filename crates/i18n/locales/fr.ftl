@@ -879,3 +879,16 @@ cloud_storage_loading = Loading storage usage…
 smb_url_placeholder = smb://nas/Music
 smb_help = Connect to an SMB 2/3 share or subfolder, then sign in with your NAS account. Domain accounts can use DOMAIN\username. Files are read without mounting the share.
 invalid_smb_url = Enter smb://host/share or smb://host/share/folder, without credentials in the URL.
+
+# Audio CDs
+cd_rip_flac = Rip to FLAC
+cd_rip_help = Save all tracks as lossless FLAC files. Playback stops while ripping. Existing files are kept. Requires ffmpeg.
+cd_output_directory = Output folder (absolute path on the computer running Kopuz)
+cd_rip_finished = Ripping finished. You can add the output folder to a local library.
+cd_rip_cancelled = Ripping cancelled. Completed tracks have been kept.
+
+removable_found = Removable media found
+removable_listen_help = Switch to this disc and start listening? It stays available while inserted. Removing it returns you to your previous source with playback stopped.
+removable_later = Not now
+removable_listen = Listen
+removable_temporary = Temporary — until ejected

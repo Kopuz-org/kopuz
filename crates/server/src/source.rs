@@ -32,6 +32,7 @@ use db::Db;
 use crate::server_ops::ServerConn;
 
 mod apple_music;
+mod audio_cd;
 pub mod capabilities;
 mod clippsly;
 mod jellyfin;
@@ -75,6 +76,11 @@ pub trait MediaSource: Send + Sync {
 
     /// What this source supports — gated on by the UI (no `is_server()` split).
     fn capabilities(&self) -> Capabilities;
+
+    /// Extract physical audio tracks to permanent files.
+    fn rip_audio(&self) -> bool {
+        false
+    }
 
     // --- remote-reaching ops (required) -------------------------------------
 
@@ -871,6 +877,7 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         MusicService::Nextcloud => Box::new(NextcloudSource::new(db, source, conn)),
         MusicService::Clippsly => Box::new(ClippslySource::new(db, source, conn)),
         MusicService::Smb => Box::new(SmbSource::new(db, source, conn)),
+        MusicService::AudioCd => Box::new(audio_cd::AudioCdSource::new(db, source, &conn.url)),
     }
 }
 
@@ -915,4 +922,9 @@ pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSour
 /// The [`MediaSource`] for the app's active source.
 pub fn active(db: Db, config: &AppConfig) -> Box<dyn MediaSource> {
     resolve(db, config, &config.active_source)
+}
+
+/// Rows for an inserted disc, without another drive read.
+pub fn audio_cd_snapshot(disc: crate::audio_cd::Disc) -> LibrarySnapshot {
+    audio_cd::snapshot(disc)
 }

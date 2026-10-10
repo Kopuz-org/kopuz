@@ -784,6 +784,17 @@ impl api::JobApi for GrpcApi {
         })
     }
 
+    async fn rip_audio(&self, keys: Vec<String>, output_dir: String) -> Result<JobRef, ApiError> {
+        let job = self
+            .client()
+            .rip_audio(Request::new(proto::RipAudioRequest { keys, output_dir }))
+            .await
+            .map_err(wire_error)?;
+        Ok(JobRef {
+            job_id: job.get_ref().job_id.clone(),
+        })
+    }
+
     async fn downloads(&self) -> Result<Vec<String>, ApiError> {
         let list = self
             .client()

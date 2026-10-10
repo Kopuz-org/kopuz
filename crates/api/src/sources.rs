@@ -58,6 +58,7 @@ pub struct SourceCapabilities {
     pub browse_folders: bool,
     pub sync: bool,
     pub downloads: bool,
+    pub rip_audio: bool,
     pub uploads: bool,
     pub storage_quota: bool,
     pub discover: bool,
@@ -138,6 +139,8 @@ pub struct SourceInfo {
     pub needs_network: bool,
     /// Every install has it, so it cannot be deleted.
     pub permanent: bool,
+    /// Available only while the removable medium is inserted; offer to switch on discovery.
+    pub temporary: bool,
     /// What the daemon's last probe found; `None` until it has probed this source.
     pub state: Option<crate::SourceState>,
 }

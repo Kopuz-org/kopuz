@@ -31,6 +31,9 @@ impl DbQueueStore {
 #[async_trait]
 impl QueueStore for DbQueueStore {
     async fn load(&self, source: &config::Source) -> Result<db::QueueSnapshot, db::DbError> {
+        if source.as_str().starts_with("removable:") {
+            return Ok(db::QueueSnapshot::default());
+        }
         self.db.load_queue(source).await
     }
 
@@ -45,6 +48,9 @@ impl QueueStore for DbQueueStore {
     }
 
     async fn save(&self, source: &config::Source, snapshot: db::QueueSnapshot) {
+        if source.as_str().starts_with("removable:") {
+            return;
+        }
         // Held across the write, so two saves never interleave their rows.
         let mut written = self.written.lock().await;
         let unchanged = written.as_ref().is_some_and(|(at, queue, shuffle)| {

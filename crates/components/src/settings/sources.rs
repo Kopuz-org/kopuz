@@ -193,7 +193,7 @@ pub fn SourceSettings(
                                         "{switch_text}"
                                     }
                                 }
-                                if !srv.permanent {
+                                if !srv.permanent && !srv.temporary {
                                     button {
                                         onclick: move |_| on_delete.call(id_delete.clone()),
                                         class: "app-button-text app-button-danger text-red-400 hover:text-red-300 text-sm px-2 py-1 transition-colors",

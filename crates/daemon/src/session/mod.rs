@@ -126,6 +126,10 @@ enum SessionCmd {
     LoadPrepared(Box<Result<PreparedLoad, LoadFailure>>),
     LoadFinished(LoadFinished),
     BufferProgress(BufferProgressEvent),
+    TrackMetadata {
+        source: config::Source,
+        tracks: Vec<Track>,
+    },
     AlbumCovers {
         source: config::Source,
         covers: std::collections::HashMap<String, String>,
@@ -334,6 +338,13 @@ impl SessionHandle {
     /// goes through here, so there is one place to look for who dirties what.
     pub fn invalidate(&self, table: api::Table) {
         self.emit_event(ApiEvent::LibraryInvalidated { table });
+    }
+
+    pub(crate) fn update_track_metadata(&self, source: &config::Source, tracks: Vec<Track>) {
+        let _ = self.cmd_tx.send(SessionCmd::TrackMetadata {
+            source: source.clone(),
+            tracks,
+        });
     }
 
     pub fn update_album_covers(&self, source: &config::Source, albums: &[reader::Album]) {
@@ -681,6 +692,27 @@ impl Session {
             SessionCmd::LoadPrepared(result) => self.handle_prepared_load(*result, state_tx),
             SessionCmd::LoadFinished(result) => self.handle_load_finished(result, state_tx),
             SessionCmd::BufferProgress(event) => self.handle_buffer_progress(event, state_tx),
+            SessionCmd::TrackMetadata { source, tracks } => {
+                if source == self.config.active_source {
+                    for index in 0..self.model.len() {
+                        if let Some(queued) = self.model.track_at_mut(index)
+                            && let Some(updated) = tracks.iter().find(|track| track.id == queued.id)
+                        {
+                            *queued = updated.clone();
+                        }
+                    }
+                    if let Some(track) = self.model.current_track() {
+                        self.player.update_metadata(NowPlayingMeta {
+                            title: track.title.clone(),
+                            artist: track.artist.clone(),
+                            album: track.album.clone(),
+                            duration: Duration::from_secs(track.duration),
+                            artwork: load::now_playing_artwork(&self.config, track),
+                        });
+                    }
+                    self.publish(state_tx, true);
+                }
+            }
             SessionCmd::AlbumCovers { source, covers } => {
                 self.apply_album_covers(source, covers, state_tx)
             }

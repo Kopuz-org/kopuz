@@ -31,7 +31,7 @@ impl<'a> PlaybackItemRef<'a> {
                 stream_id: parts.next().unwrap_or_default(),
             },
             "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "applemusic"
-            | "spotify" | "nextcloud" | "clippsly" => Self::Server {
+            | "spotify" | "nextcloud" | "clippsly" | "cdda" => Self::Server {
                 service: scheme,
                 item_id: parts.next().unwrap_or_default(),
                 extra: parts.next(),

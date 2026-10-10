@@ -599,7 +599,9 @@ fn AlbumDetail(
                         );
                     });
                 })),
-                actions: cover_reset_action,
+                actions: if cap.rip_audio {
+                    Some(rsx! { components::album::rip::RipAudio { keys: tracks().iter().map(|track| track.key.clone()).collect::<Vec<_>>() } })
+                } else { cover_reset_action },
                 on_delete_track: cap.delete_from_disk.then(|| EventHandler::new(move |idx: usize| {
                     if let Some(track) = tracks_delete.get(idx) {
                         hooks::library_actions::delete_tracks(

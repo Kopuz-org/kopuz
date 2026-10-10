@@ -4837,6 +4837,8 @@ dependencies = [
  "kopuz-db",
  "kopuz-reader",
  "kopuz-utils",
+ "libc",
+ "libloading 0.9.0",
  "lofty",
  "m3u8-rs",
  "md5",

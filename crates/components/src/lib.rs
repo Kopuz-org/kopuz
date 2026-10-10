@@ -22,6 +22,7 @@ pub use layout::{
     stat_card, titlebar, vaxry,
 };
 pub use navigation::controller::{NavSnapshot, NavigationController};
+pub use navigation::removable_prompt::RemovablePrompt;
 pub use navigation::{back_button, controller as navigation_controller, source_switcher, tabbar};
 pub use playback::compact::{CompactMode, CompactPlayer};
 pub use playback::cover_background::CoverArtBackground;

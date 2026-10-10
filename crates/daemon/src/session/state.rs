@@ -111,7 +111,9 @@ impl Session {
     }
 
     pub(super) fn should_crossfade(&self) -> bool {
-        self.config.crossfade_seconds > 0
+        // A drive has one optical head; overlapping tracks cause competing seeks.
+        self.config.active_service() != Some(config::MusicService::AudioCd)
+            && self.config.crossfade_seconds > 0
             && self.phase == ApiPhase::Playing
             && self.player.can_resume()
     }
