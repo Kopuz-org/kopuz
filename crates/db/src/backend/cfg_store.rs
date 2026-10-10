@@ -733,6 +733,7 @@ fn parse_service(s: &str) -> MusicService {
         "Nextcloud" => MusicService::Nextcloud,
         "Clippsly" => MusicService::Clippsly,
         "Smb" => MusicService::Smb,
+        "AudioCd" => MusicService::AudioCd,
         _ => MusicService::Jellyfin,
     }
 }
@@ -749,6 +750,7 @@ fn service_str(s: MusicService) -> &'static str {
         MusicService::Nextcloud => "Nextcloud",
         MusicService::Clippsly => "Clippsly",
         MusicService::Smb => "Smb",
+        MusicService::AudioCd => "AudioCd",
     }
 }
 
@@ -785,6 +787,26 @@ pub async fn set_server_credentials(
 }
 
 /// Everything a source left behind: its rows name it by text, so nothing cascades from `servers`.
+/// Removable media are session-only; recover their cached rows after a crash too.
+pub(super) async fn purge_removable(pool: &SqlitePool) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    let sources = sqlx::query_scalar::<_, String>(
+        "SELECT source FROM tracks WHERE source GLOB 'removable:*' \
+         UNION SELECT source FROM albums WHERE source GLOB 'removable:*' \
+         UNION SELECT source FROM queue_state WHERE source GLOB 'removable:*' \
+         UNION SELECT source FROM recently_played WHERE source GLOB 'removable:*' \
+         UNION SELECT source FROM listen_counts WHERE source GLOB 'removable:*' \
+         UNION SELECT server_id FROM favorites WHERE server_id GLOB 'removable:*'",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    for source in sources {
+        purge_source(&mut tx, &source).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 pub(super) async fn purge_source(
     conn: &mut sqlx::SqliteConnection,
     source: &str,

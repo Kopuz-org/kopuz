@@ -103,6 +103,7 @@ service Kopuz {
   rpc GetDownloaderHistory(GetDownloaderHistoryRequest) returns (DownloadHistory);
   rpc ClearDownloaderHistory(ClearDownloaderHistoryRequest) returns (Unit);
   rpc GetDownloadStatuses(GetDownloadStatusesRequest) returns (DownloadStatusList);
+  rpc RipAudio(RipAudioRequest) returns (JobRef);
   rpc RemoveDownload(TrackRef) returns (RemoveDownloadResponse);
   rpc SetConfig(SetConfigRequest) returns (ConfigView);
   rpc PreviewEqualizer(EqualizerSettings) returns (Unit);
@@ -743,6 +744,7 @@ message SourceCapabilities {
   bool search_radio = 18;
   bool uploads = 19;
   bool storage_quota = 20;
+  bool rip_audio = 21;
 }
 
 // What making a source usable takes.
@@ -804,6 +806,7 @@ message SourceInfo {
   bool permanent = 19;
   // What the daemon's last probe found; absent until it has probed this source.
   optional SourceState state = 20;
+  bool temporary = 21;
 }
 
 message GetSourcesRequest {}
@@ -1777,6 +1780,7 @@ enum JobKind {
   JOB_KIND_PLAYLIST_SYNC = 4;
   JOB_KIND_DOWNLOAD = 5;
   JOB_KIND_URL_DOWNLOAD = 6;
+  JOB_KIND_AUDIO_RIP = 7;
 }
 
 enum JobState {
@@ -1814,4 +1818,9 @@ message TrackUploadChunk {
   string filename = 2;
   uint64 total_bytes = 3;
   bytes content = 4;
+}
+
+message RipAudioRequest {
+  repeated string keys = 1;
+  string output_dir = 2;
 }

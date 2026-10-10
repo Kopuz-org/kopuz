@@ -128,3 +128,50 @@ async fn record_favorite_writes_a_clean_local_row_and_reverts() {
     assert!(db.dirty_favorites("local").await.unwrap().is_empty());
     assert!(db.dirty_unlikes("local").await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn audio_cd_source_and_track_identity_round_trip_without_credentials() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = db::init(&directory.path().join("test.db")).await.unwrap();
+    let mut server = config::MusicServer::new_with_service(
+        "CD drive".into(),
+        "/dev/sr0".into(),
+        config::MusicService::AudioCd,
+    );
+    server.id = Some("cd-drive".into());
+    let config = config::AppConfig {
+        active_source: Source::Server("cd-drive".into()),
+        server: Some(server),
+        ..Default::default()
+    };
+    let source = source::active(db.clone(), &config);
+    assert_eq!(source.rip_audio(), server::audio_cd::supported());
+    assert!(!source.capabilities().sync);
+    assert!(!source.capabilities().downloads);
+    assert!(!source.capabilities().delete_from_disk);
+    let expected = track(TrackId::Server {
+        service: config::MusicService::AudioCd,
+        item_id: format!("{}-01", "a".repeat(64)),
+    });
+    source
+        .upsert_tracks(std::slice::from_ref(&expected))
+        .await
+        .unwrap();
+    let tracks = db
+        .tracks_by_keys(&config.active_source, &[expected.id.key().into_owned()])
+        .await
+        .unwrap();
+    assert_eq!(tracks.len(), 1);
+    assert_eq!(tracks[0].id, expected.id);
+    assert_eq!(
+        reader::TrackId::from_legacy_path(&tracks[0].id.uid()),
+        expected.id
+    );
+    assert!(matches!(
+        server::playback_ref::PlaybackItemRef::parse(&tracks[0].id.uid()),
+        server::playback_ref::PlaybackItemRef::Server {
+            service: "cdda",
+            ..
+        }
+    ));
+}

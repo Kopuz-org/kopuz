@@ -352,6 +352,12 @@ pub trait JobApi: Send + Sync {
     /// Cache server tracks for offline playback; returns the download job.
     async fn download(&self, keys: Vec<String>) -> Result<JobRef, ApiError>;
 
+    /// Rip tracks from the active optical source to FLAC files in an absolute
+    /// directory on the daemon host. Existing files are never overwritten.
+    async fn rip_audio(&self, _keys: Vec<String>, _output_dir: String) -> Result<JobRef, ApiError> {
+        Err(ApiError::unsupported("audio CD ripping"))
+    }
+
     /// Item ids with a registered offline copy.
     async fn downloads(&self) -> Result<Vec<String>, ApiError>;
 

@@ -10,6 +10,7 @@ pub fn capabilities_to_proto(value: &api::SourceCapabilities) -> SourceCapabilit
         folders: value.folders,
         sync: value.sync,
         downloads: value.downloads,
+        rip_audio: value.rip_audio,
         uploads: value.uploads,
         storage_quota: value.storage_quota,
         discover: value.discover,
@@ -51,6 +52,7 @@ pub fn capabilities_from_proto(value: Option<&SourceCapabilities>) -> api::Sourc
         folders: value.folders,
         sync: value.sync,
         downloads: value.downloads,
+        rip_audio: value.rip_audio,
         uploads: value.uploads,
         storage_quota: value.storage_quota,
         discover: value.discover,
@@ -168,6 +170,7 @@ pub fn source_info_to_proto(value: &api::SourceInfo) -> SourceInfo {
         settings: value.settings.iter().map(field_spec_to_proto).collect(),
         needs_network: value.needs_network,
         permanent: value.permanent,
+        temporary: value.temporary,
         state: value
             .state
             .map(|state| super::enums::source_state_to_proto(state) as i32),
@@ -193,6 +196,7 @@ pub fn source_info_from_proto(value: &SourceInfo) -> api::SourceInfo {
         settings: value.settings.iter().map(field_spec_from_proto).collect(),
         needs_network: value.needs_network,
         permanent: value.permanent,
+        temporary: value.temporary,
         state: value.state.map(super::enums::source_state_from_proto),
     }
 }
@@ -314,6 +318,7 @@ mod tests {
                 delete_from_disk: false,
                 sync: true,
                 downloads: true,
+                rip_audio: true,
                 uploads: true,
                 storage_quota: true,
                 browse_folders: true,
@@ -329,6 +334,7 @@ mod tests {
             settings: vec![url_field()],
             needs_network: true,
             permanent: true,
+            temporary: true,
             state: Some(api::SourceState::AuthExpired),
         };
         assert_eq!(info, source_info_from_proto(&source_info_to_proto(&info)));

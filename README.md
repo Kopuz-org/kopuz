@@ -285,6 +285,53 @@ layers, both of which out-rank `settings.toml`:
 
 `KOPUZ_CONFIG_PATH` relocates the settings file itself.
 
+### Audio CDs
+
+Desktop Kopuz can play physical audio CDs and rip them to lossless FLAC through
+[libcdio and libcdio-paranoia](https://libcdio.github.io/). Drive access happens
+on the computer running the daemon, including when controlling it remotely.
+
+1. Install the optional CD libraries and **ffmpeg** (needed for FLAC ripping).
+   The Linux Nix development shell and package include them. On macOS,
+   `brew install libcdio-paranoia ffmpeg` supplies the
+   [Homebrew libraries](https://formulae.brew.sh/formula/libcdio-paranoia). On
+   Windows, install the native libraries from
+   [MSYS2 UCRT64](https://packages.msys2.org/packages/mingw-w64-ucrt-x86_64-libcdio-paranoia)
+   and put its `bin` directory on `PATH`, or place the matching DLLs and their
+   dependencies beside Kopuz. Other Linux packages need the distribution's
+   libcdio and libcdio-paranoia runtime packages and permission to read the
+   drive.
+2. Insert an audio CD. Kopuz detects it and asks whether to switch to it and
+   start listening. **Not now** keeps your current music playing; the disc
+   remains available in the source switcher until it is removed.
+3. The CD is temporary: it is never saved as a configured source. Removing an
+   active CD restores your previous source with playback stopped. No filesystem
+   mount or manual sync is needed.
+4. Open the disc's album and choose **Rip to FLAC**. Enter an absolute output
+   folder on the daemon host. Playback stops while ripping. Completed files use
+   disc-specific names, carry track tags, and can be added to a local folder
+   library. Existing files are skipped; cancellation keeps completed tracks and
+   removes partial output.
+
+Playback reads ahead on a dedicated worker, keeping up to 30 seconds of PCM in
+memory to absorb brief drive stalls. Starts and seeks use a short reserve; an
+underrun refills five seconds before resuming. Switching tracks reuses the
+initialized reader after verifying the inserted disc. Longer stalls or damaged
+discs can still interrupt playback. CD tracks do not crossfade, so simultaneous
+readers do not compete for the optical head.
+
+Kopuz looks up the disc’s table of contents in MusicBrainz in the background.
+Recognized discs show album, artist, and track names, plus available front-cover
+art from the
+[Cover Art Archive](https://musicbrainz.org/doc/Cover_Art_Archive/API). FLAC
+rips include those tags, MusicBrainz identifiers, and embedded cover art.
+Artwork is cached; a missing cover does not stop playback or ripping. Offline,
+unknown, or conflicting matches keep numbered titles without blocking playback.
+CD-Text, drive-offset calibration, and AccurateRip verification are not
+implemented. Data tracks are excluded. Four-channel and pre-emphasized audio
+tracks return an unsupported error. The reader uses bounded paranoia correction
+and fails on unrecoverable sectors instead of silently filling them.
+
 ### Homebrew (macOS)
 
 Apple Silicon only. The cask lives in our tap:

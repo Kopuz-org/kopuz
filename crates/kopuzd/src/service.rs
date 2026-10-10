@@ -896,6 +896,20 @@ impl Kopuz for KopuzGrpc {
         Ok(Response::new(proto::CancelJobResponse {}))
     }
 
+    async fn rip_audio(
+        &self,
+        request: Request<proto::RipAudioRequest>,
+    ) -> Result<Response<proto::JobRef>, Status> {
+        let request = request.into_inner();
+        let job = self
+            .0
+            .api
+            .rip_audio(request.keys, request.output_dir)
+            .await
+            .map_err(failed)?;
+        Ok(Response::new(proto::JobRef { job_id: job.job_id }))
+    }
+
     async fn start_downloads(
         &self,
         request: Request<proto::DownloadRequest>,

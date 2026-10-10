@@ -41,6 +41,17 @@ pub struct ConfigService {
 struct Held {
     config: config::AppConfig,
     revision: u64,
+    temporary: Option<config::MusicServer>,
+}
+
+impl Held {
+    fn running(&self) -> config::AppConfig {
+        let mut config = self.config.clone();
+        if let Some(server) = &self.temporary {
+            config.set_active_server_snapshot(server.clone());
+        }
+        config
+    }
 }
 
 impl ConfigService {
@@ -56,6 +67,7 @@ impl ConfigService {
             current: RwLock::new(Held {
                 config: current,
                 revision,
+                temporary: None,
             }),
             session: OnceLock::new(),
         }
@@ -78,10 +90,10 @@ impl ConfigService {
         {
             session.set_active_source(Some(Arc::from(server::source::active(
                 self.db.clone(),
-                &held.config,
+                &held.running(),
             ))));
         }
-        session.set_config(held.config.clone(), changed);
+        session.set_config(held.running(), changed);
     }
 
     async fn save(&self, config: &config::AppConfig) -> Result<(), ApiError> {
@@ -134,6 +146,9 @@ impl ConfigService {
         mutate(&mut next);
         self.save(&next).await?;
         held.config = next;
+        if keys.contains(&"active_source") {
+            held.temporary = None;
+        }
         self.publish(&mut held, keys.iter().map(|key| key.to_string()).collect());
         Ok(held.config.clone())
     }
@@ -192,8 +207,30 @@ impl ConfigService {
         Ok(held.config.clone())
     }
 
+    /// A removable source is an overlay: volume/settings saves always use the saved source.
+    pub(crate) async fn set_temporary_source(&self, server: config::MusicServer) {
+        let mut held = self.current.write().await;
+        held.temporary = Some(server);
+        self.publish(&mut held, vec!["active_source".into(), "server".into()]);
+    }
+
+    pub(crate) async fn remove_temporary_source(&self, id: &str) -> bool {
+        let mut held = self.current.write().await;
+        if held
+            .temporary
+            .as_ref()
+            .and_then(|server| server.id.as_deref())
+            != Some(id)
+        {
+            return false;
+        }
+        held.temporary = None;
+        self.publish(&mut held, vec!["active_source".into(), "server".into()]);
+        true
+    }
+
     pub async fn snapshot(&self) -> config::AppConfig {
-        self.current.read().await.config.clone()
+        self.current.read().await.running()
     }
 
     pub async fn view(&self) -> Result<ConfigView, ApiError> {
@@ -203,7 +240,7 @@ impl ConfigService {
 
     fn view_of(&self, held: &Held) -> ConfigView {
         ConfigView {
-            config: stripped(&held.config),
+            config: stripped(&held.running()),
             locked_keys: self.locked_keys(),
             revision: held.revision,
         }
@@ -566,5 +603,48 @@ mod tests {
             config::FetchStrategy::LastFmOnly
         );
         assert_eq!(changed, vec!["theme".to_string()]);
+    }
+    #[tokio::test]
+    async fn audio_cd_overlay_survives_settings_saves_without_being_persisted() {
+        let root = tempfile::tempdir().unwrap();
+        let db = db::init(&root.path().join("config.db")).await.unwrap();
+        let saved = config::AppConfig::default();
+        let service =
+            ConfigService::new(db.clone(), root.path().join("settings.toml"), saved.clone());
+        let mut disc = config::MusicServer::new_with_service(
+            "Disc".into(),
+            "drive".into(),
+            config::MusicService::AudioCd,
+        );
+        disc.id = Some("removable:cd:test".into());
+        service.set_temporary_source(disc).await;
+        service.set_volume(0.42).await.unwrap();
+        let mut view = service.view().await.unwrap().config;
+        view.theme = "nord".into();
+        service.set(view).await.unwrap();
+        service
+            .mutate_state(&["crossfade_seconds"], |config| {
+                config.crossfade_seconds = 3
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            service.snapshot().await.active_source.as_str(),
+            "removable:cd:test"
+        );
+        let stored = db.load_config().await.unwrap().unwrap();
+        assert_eq!(stored.active_source, saved.active_source);
+        assert!(stored.server.is_none());
+        assert_eq!(stored.theme, "nord");
+        assert_eq!(stored.volume, 0.42);
+        assert!(
+            !std::fs::read_to_string(config::store::settings_path_for(root.path()))
+                .unwrap()
+                .contains("removable:")
+        );
+        assert!(!service.remove_temporary_source("another-disc").await);
+        assert!(service.remove_temporary_source("removable:cd:test").await);
+        assert_eq!(service.snapshot().await.active_source, saved.active_source);
+        assert_eq!(service.snapshot().await.crossfade_seconds, 3);
     }
 }

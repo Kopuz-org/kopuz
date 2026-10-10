@@ -611,7 +611,10 @@ impl api::JobApi for LocalApi {
             },
             // These carry their own request, so they start through their own
             // method rather than by kind.
-            api::JobKind::Download | api::JobKind::UrlDownload | api::JobKind::Unknown => {
+            api::JobKind::Download
+            | api::JobKind::UrlDownload
+            | api::JobKind::AudioRip
+            | api::JobKind::Unknown => {
                 Err(ApiError::unsupported("this job kind has no direct starter"))
             }
         }
@@ -663,6 +666,19 @@ impl api::JobApi for LocalApi {
             ));
         };
         service.spawn_download(runner, keys)
+    }
+
+    async fn rip_audio(
+        &self,
+        keys: Vec<String>,
+        output_dir: String,
+    ) -> Result<api::JobRef, ApiError> {
+        let (Some(service), Some(runner)) = (&self.downloads, &self.jobs) else {
+            return Err(ApiError::unsupported(
+                "this daemon runs without a downloads service",
+            ));
+        };
+        service.spawn_rip(runner, keys, output_dir).await
     }
 
     async fn downloads(&self) -> Result<Vec<String>, ApiError> {

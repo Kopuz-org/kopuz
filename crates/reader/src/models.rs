@@ -118,6 +118,7 @@ impl TrackId {
             ("nextcloud", config::MusicService::Nextcloud),
             ("clippsly", config::MusicService::Clippsly),
             ("smb", config::MusicService::Smb),
+            ("cdda", config::MusicService::AudioCd),
         ] {
             if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
                 let item_id = if svc == config::MusicService::Smb {
@@ -148,6 +149,7 @@ fn service_prefix(s: config::MusicService) -> &'static str {
         config::MusicService::Nextcloud => "nextcloud",
         config::MusicService::Clippsly => "clippsly",
         config::MusicService::Smb => "smb",
+        config::MusicService::AudioCd => "cdda",
     }
 }
 
@@ -300,6 +302,7 @@ impl CoverRef {
             | MusicService::Spotify
             | MusicService::Nextcloud
             | MusicService::Clippsly
+            | MusicService::AudioCd
             | MusicService::Smb => cover.map_or(Self::None, Self::parse),
         }
     }
@@ -355,6 +358,7 @@ impl CoverRef {
             | MusicService::Spotify
             | MusicService::Nextcloud
             | MusicService::Clippsly
+            | MusicService::AudioCd
             | MusicService::Smb => track.cover.as_deref().map_or(Self::None, Self::parse),
         }
     }

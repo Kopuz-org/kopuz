@@ -12,6 +12,8 @@
   dioxus-cli,
   # Runtime deps
   ffmpeg,
+  libcdio,
+  libcdio-paranoia,
   # Linux Deps
   wrapGAppsHook3,
   webkitgtk_4_1,
@@ -59,6 +61,8 @@ let
   ++ lib.optionals stdenv.isLinux [ wrapGAppsHook3 ];
 
   buildInputs = [
+    libcdio
+    libcdio-paranoia
     libopus
   ]
   ++ lib.optionals stdenv.isLinux [
@@ -188,10 +192,22 @@ craneLib.mkCargoDerivation (
         "''${gappsWrapperArgs[@]}" \
         --chdir $out/bin \
         --prefix PATH : ${lib.makeBinPath [ ffmpeg ]} \
-        --prefix LD_LIBRARY_PATH : ${libayatana-appindicator}/lib
+        --prefix LD_LIBRARY_PATH : ${
+          lib.makeLibraryPath [
+            libayatana-appindicator
+            libcdio
+            libcdio-paranoia
+          ]
+        }
       wrapProgram $out/bin/kopuzd \
         --prefix PATH : ${lib.makeBinPath [ ffmpeg ]} \
-        --prefix LD_LIBRARY_PATH : ${libayatana-appindicator}/lib
+        --prefix LD_LIBRARY_PATH : ${
+          lib.makeLibraryPath [
+            libayatana-appindicator
+            libcdio
+            libcdio-paranoia
+          ]
+        }
     '';
 
     meta = {
