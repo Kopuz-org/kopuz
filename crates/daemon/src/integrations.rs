@@ -21,6 +21,8 @@ const DISCORD_APP_ID: &str = "1470087339639443658";
 const JELLYFIN_REPORT_SECS: u64 = 5;
 const JELLYFIN_KEEPALIVE_TICKS: u32 = 6;
 const DISCORD_TICK_SECS: u64 = 30;
+/// Fine enough that a watchtime flush lands within a second of its mark.
+const YOUTUBE_REPORT_SECS: u64 = 1;
 
 /// Durable recents + listen counts over the active source, matching the
 /// pump: recents record under the DB key, listen counts under the uid.
@@ -167,6 +169,106 @@ pub fn spawn_jellyfin_reporter(
                         });
                     }
                     ticks_until_keepalive -= 1;
+                }
+            }
+        }
+    })
+}
+
+fn youtube_signed_in(config: &config::AppConfig) -> bool {
+    matches!(config.active_source, config::Source::Server(_))
+        && config.server.as_ref().is_some_and(|server| {
+            server.service == config::MusicService::YtMusic
+                && !server.yt_anonymous
+                && server
+                    .access_token
+                    .as_deref()
+                    .is_some_and(|t| !t.is_empty())
+        })
+}
+
+/// YouTube History reporting while a signed-in YouTube Music source is
+/// active: a play is reported once it is audible, its position every second
+/// while it plays and on every state change (which is how a seek arrives),
+/// and its end when another track takes over or playback stops. The source
+/// is built from the config at the start of each play, so a sign-out stops
+/// the reporting at the next state change.
+pub fn spawn_youtube_reporter(
+    session: &SessionHandle,
+    db: db::Db,
+    config: watch::Receiver<config::AppConfig>,
+) -> tokio::task::JoinHandle<()> {
+    let mut events = session.subscribe();
+    let session = session.clone();
+    tokio::spawn(async move {
+        let mut current: Option<(String, server::source::ActiveSource)> = None;
+        let mut last_state: Option<(Box<PlayerState>, Instant)> = None;
+        let mut report = tokio::time::interval(Duration::from_secs(YOUTUBE_REPORT_SECS));
+        report.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            let playing = last_state
+                .as_ref()
+                .is_some_and(|(state, _)| state.phase == Phase::Playing);
+
+            tokio::select! {
+                event = events.recv() => {
+                    // A missed state can be the one that started the clock,
+                    // and every position after it would read as stopped.
+                    let state = match event {
+                        Ok(ApiEvent::PlayerState(state)) => state,
+                        Ok(_) => continue,
+                        Err(broadcast::error::RecvError::Lagged(_)) => Box::new(session.state()),
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    };
+                    let received = Instant::now();
+                    let live_id = (youtube_signed_in(&config.borrow())
+                        && matches!(state.phase, Phase::Playing | Phase::Paused))
+                    .then(|| {
+                        state
+                            .track
+                            .as_ref()
+                            .and_then(|track| track.uid.strip_prefix("ytmusic:"))
+                            .map(str::to_string)
+                    })
+                    .flatten();
+
+                    if let Some((id, source)) =
+                        current.take_if(|(id, _)| live_id.as_deref() != Some(id.as_str()))
+                    {
+                        let ended_ms = last_state
+                            .as_ref()
+                            .map(|(state, received)| interpolated_ms(state, *received))
+                            .unwrap_or_default();
+                        let _ = source.report_playback_stopped(&id, ended_ms * 10_000).await;
+                    }
+                    if current.is_none()
+                        && state.phase == Phase::Playing
+                        && let Some(id) = live_id
+                    {
+                        let source: server::source::ActiveSource =
+                            Arc::from(server::source::active(db.clone(), &config.borrow()));
+                        let _ = source.report_playback_start(&id).await;
+                        current = Some((id, source));
+                    }
+                    if let Some((id, source)) = &current {
+                        let position_ms = interpolated_ms(&state, received);
+                        let paused = state.phase != Phase::Playing;
+                        let _ = source
+                            .report_playback_progress(id, position_ms * 10_000, paused)
+                            .await;
+                    }
+                    last_state = Some((state, received));
+                }
+                _ = report.tick(), if playing && current.is_some() => {
+                    let (Some((id, source)), Some((state, received))) = (&current, &last_state)
+                    else {
+                        continue;
+                    };
+                    let position_ms = interpolated_ms(state, *received);
+                    let _ = source
+                        .report_playback_progress(id, position_ms * 10_000, false)
+                        .await;
                 }
             }
         }
@@ -735,4 +837,33 @@ async fn web_sign_in(_id: &str, _api_key: &str, _api_secret: &str) -> Result<Str
     Err(ApiError::unsupported(
         "web sign-in runs in the app on Android",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn youtube(token: &str, anonymous: bool) -> config::AppConfig {
+        let mut config = config::AppConfig {
+            active_source: config::Source::Server("yt".into()),
+            ..Default::default()
+        };
+        config.server = Some(config::MusicServer {
+            service: config::MusicService::YtMusic,
+            access_token: Some(token.into()),
+            yt_anonymous: anonymous,
+            ..config::MusicServer::new("YouTube Music".into(), String::new())
+        });
+        config
+    }
+
+    #[test]
+    fn only_a_signed_in_youtube_source_reports_plays() {
+        assert!(youtube_signed_in(&youtube("SAPISID=abc", false)));
+        assert!(!youtube_signed_in(&youtube("", true)));
+        assert!(!youtube_signed_in(&youtube("", false)));
+        let mut local = youtube("SAPISID=abc", false);
+        local.active_source = config::Source::LocalLibrary("local".into());
+        assert!(!youtube_signed_in(&local));
+    }
 }

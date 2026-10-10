@@ -18,6 +18,7 @@ use super::botguard;
 use super::clients::{VISIONOS, WEB_REMIX, YouTubeClient};
 use super::decipher;
 use super::innertube::{self, PlayerExtras};
+use super::tracking::PlaybackTracking;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AudioFormat {
@@ -646,10 +647,72 @@ async fn try_native_decipher(
             playability_reason(&json)
         ));
     }
+    if let Some(cookies) = cookies {
+        remember_tracking(cookies, video_id, &json);
+    }
     let fmt = pick_best_audio(&json).ok_or("WEB_REMIX returned no audio format")?;
     let url = decipher::deciphered_url(&player.0, fmt).await?;
     stream_info_from(&json, fmt, url, WEB_REMIX)
         .ok_or_else(|| "deciphered format missing fields".to_string())
+}
+
+/// Tracking URLs from signed-in `player` responses the stream path already
+/// made, keyed by account and video, so reporting a play costs no extra call.
+/// Anonymous responses never land here: their URLs carry the anonymous
+/// identity.
+static TRACKING: OnceLock<Mutex<HashMap<String, PlaybackTracking>>> = OnceLock::new();
+const TRACKING_CACHE_LIMIT: usize = 64;
+
+fn tracking_key(cookies: &str, video_id: &str) -> Option<String> {
+    super::derive_user_id(cookies).map(|user| format!("{user}/{video_id}"))
+}
+
+fn remember_tracking(cookies: &str, video_id: &str, json: &Value) {
+    let (Some(key), Some(tracking)) = (
+        tracking_key(cookies, video_id),
+        PlaybackTracking::from_player(json),
+    ) else {
+        return;
+    };
+    if let Ok(mut cache) = TRACKING.get_or_init(Default::default).lock() {
+        if cache.len() >= TRACKING_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, tracking);
+    }
+}
+
+/// The URLs that report a play of `video_id` to the signed-in account's
+/// History: the ones the stream path already received, or a signed-in
+/// `player` call of their own when the stream came from elsewhere (the
+/// anonymous client, a download, a cached URL).
+pub async fn playback_tracking(video_id: &str, cookies: &str) -> Result<PlaybackTracking, String> {
+    let key = tracking_key(cookies, video_id).ok_or("SAPISID missing")?;
+    let cached = TRACKING
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .and_then(|mut cache| cache.remove(&key));
+    if let Some(tracking) = cached {
+        return Ok(tracking);
+    }
+    let extras = PlayerExtras {
+        signature_timestamp: decipher::player_js(video_id).await.ok().map(|js| js.1),
+        visitor_data: signed_in_visitor(cookies).await,
+        ..Default::default()
+    };
+    let json = innertube::player(WEB_REMIX, video_id, Some(cookies), extras).await?;
+    let status = PlayabilityStatus::from_response(&json);
+    if status != PlayabilityStatus::Ok {
+        return Err(format!("WEB_REMIX playability {}", status.as_str()));
+    }
+    PlaybackTracking::from_player(&json).ok_or_else(|| "no playbackTracking".to_string())
+}
+
+/// The visitor id kept for this account, never the anonymous one.
+pub async fn signed_in_visitor(cookies: &str) -> Option<&'static str> {
+    super::derive_user_id(cookies)?;
+    visitor_data(Some(cookies)).await.ok()
 }
 
 #[cfg(test)]

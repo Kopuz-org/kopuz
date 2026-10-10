@@ -1,8 +1,12 @@
+use std::sync::{Arc, Mutex};
+
 use async_trait::async_trait;
 use config::Source;
 use db::Db;
 
-use crate::{server_ops::ServerConn, ytmusic::YouTubeMusicClient};
+use crate::server_ops::ServerConn;
+use crate::ytmusic::tracking::{self, Watch};
+use crate::ytmusic::{YouTubeMusicClient, player};
 
 use super::{
     AlbumType, ArtistLookup, ArtistView, AuthOutcome, Capabilities, FavoritesPage, FavoritesSync,
@@ -18,10 +22,17 @@ use super::{
 /// source has such a playlist and the UI stays unaware of it.
 const LIKED_MUSIC_ID: &str = "LM";
 
+/// The play being reported to the account's History.
+struct Reported {
+    item_id: String,
+    watch: Watch,
+}
+
 pub(super) struct YtSource {
     db: Db,
     source: Source,
     client: YouTubeMusicClient,
+    reported: Arc<Mutex<Option<Reported>>>,
 }
 
 impl YtSource {
@@ -30,6 +41,7 @@ impl YtSource {
             db,
             source,
             client: YouTubeMusicClient::with_cookies(conn.token.clone()),
+            reported: Arc::default(),
         }
     }
 
@@ -376,6 +388,91 @@ impl MediaSource for YtSource {
         })
     }
 
+    /// Reports the play to YouTube History when signed in. Nothing here waits
+    /// on the network: the tracking URLs and every ping go out on their own
+    /// tasks, and a failed one only costs that ping.
+    async fn report_playback_start(&self, item_id: &str) -> Result<(), SourceError> {
+        let Some(cookies) = self.client.cookies() else {
+            return Ok(());
+        };
+        let watch = Watch::new(0);
+        let cpn = watch.cpn().to_owned();
+        if let Ok(mut reported) = self.reported.lock() {
+            *reported = Some(Reported {
+                item_id: item_id.to_owned(),
+                watch,
+            });
+        }
+        let (reported, cookies, video_id) = (
+            self.reported.clone(),
+            cookies.to_owned(),
+            item_id.to_owned(),
+        );
+        tokio::spawn(async move {
+            let tracking = match player::playback_tracking(&video_id, &cookies).await {
+                Ok(tracking) => tracking,
+                Err(error) => {
+                    tracing::debug!(%error, "no playback tracking; the play goes unreported");
+                    return;
+                }
+            };
+            let url = reported.lock().ok().and_then(|mut reported| {
+                reported
+                    .as_mut()
+                    .filter(|r| r.watch.cpn() == cpn)
+                    .map(|r| r.watch.attach(tracking))
+            });
+            if let Some(url) = url {
+                send_report(cookies, url);
+            }
+        });
+        Ok(())
+    }
+
+    async fn report_playback_progress(
+        &self,
+        item_id: &str,
+        position_ticks: u64,
+        _is_paused: bool,
+    ) -> Result<(), SourceError> {
+        let Some(cookies) = self.client.cookies() else {
+            return Ok(());
+        };
+        let url = self.reported.lock().ok().and_then(|mut reported| {
+            reported
+                .as_mut()
+                .filter(|r| r.item_id == item_id)
+                .and_then(|r| r.watch.on_position(position_ticks / 10_000))
+        });
+        if let Some(url) = url {
+            send_report(cookies.to_owned(), url);
+        }
+        Ok(())
+    }
+
+    async fn report_playback_stopped(
+        &self,
+        item_id: &str,
+        position_ticks: u64,
+    ) -> Result<(), SourceError> {
+        let Some(cookies) = self.client.cookies() else {
+            return Ok(());
+        };
+        let taken = self
+            .reported
+            .lock()
+            .ok()
+            .and_then(|mut reported| reported.take_if(|r| r.item_id == item_id));
+        let Some(Reported { mut watch, .. }) = taken else {
+            return Ok(());
+        };
+        let due = watch.on_position(position_ticks / 10_000);
+        for url in due.into_iter().chain(watch.finish()) {
+            send_report(cookies.to_owned(), url);
+        }
+        Ok(())
+    }
+
     async fn validate(&self) -> AuthOutcome {
         match self.client.validate_cookies().await {
             Ok(()) => AuthOutcome::Valid,
@@ -475,5 +572,64 @@ impl MediaSource for YtSource {
     ) -> Result<FavoritesPage, SourceError> {
         let (tracks, next) = self.client.liked_songs_page(cursor.as_deref()).await?;
         Ok(FavoritesPage { tracks, next })
+    }
+}
+
+fn send_report(cookies: String, url: String) {
+    tokio::spawn(async move {
+        let visitor = player::signed_in_visitor(&cookies).await;
+        let endpoint = url.split('?').next().unwrap_or_default();
+        match tracking::ping(&url, &cookies, visitor).await {
+            Ok(status) => tracing::debug!(endpoint, status, "reported playback"),
+            Err(error) => tracing::debug!(endpoint, %error, "playback report failed"),
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use config::MusicService;
+
+    async fn source(token: &str) -> (YtSource, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::init(&dir.path().join("kopuz.db")).await.unwrap();
+        let conn = ServerConn {
+            service: MusicService::YtMusic,
+            url: String::new(),
+            token: token.to_string(),
+            user_id: String::new(),
+            device_id: "test".to_string(),
+            apple_music_storefront: String::new(),
+            apple_music_language: String::new(),
+            folders: Vec::new(),
+        };
+        let src = YtSource::new(db, Source::Server("test".to_string()), &conn);
+        (src, dir)
+    }
+
+    /// Anonymous mode has no account to report to, and a ping as the
+    /// anonymous identity would only link it to whoever signs in next.
+    #[tokio::test]
+    async fn a_signed_out_source_reports_nothing() {
+        let (src, _dir) = source("").await;
+        src.report_playback_start("v").await.unwrap();
+        src.report_playback_progress("v", 15 * 10_000_000, false)
+            .await
+            .unwrap();
+        src.report_playback_stopped("v", 20 * 10_000_000)
+            .await
+            .unwrap();
+        assert!(src.reported.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_stop_for_another_track_leaves_the_play_running() {
+        let (src, _dir) = source("SAPISID=abc").await;
+        src.report_playback_start("v").await.unwrap();
+        src.report_playback_stopped("w", 0).await.unwrap();
+        assert!(src.reported.lock().unwrap().is_some());
+        src.report_playback_stopped("v", 0).await.unwrap();
+        assert!(src.reported.lock().unwrap().is_none());
     }
 }

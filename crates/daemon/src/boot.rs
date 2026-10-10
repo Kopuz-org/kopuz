@@ -172,6 +172,7 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
     spawn_volume_persistence(&session, config_service.clone());
     crate::os_media::spawn(&session);
     crate::integrations::spawn_jellyfin_reporter(&session, active_source, session.config_watch());
+    crate::integrations::spawn_youtube_reporter(&session, database.clone(), session.config_watch());
     crate::integrations::spawn_discord_presence(&session, session.config_watch());
     let restored_source = session.config_watch().borrow().active_source.clone();
     match queue_store.load(&restored_source).await {
