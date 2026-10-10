@@ -766,8 +766,8 @@ fn youtube_cookies(config: &config::AppConfig) -> Option<String> {
     config
         .server
         .as_ref()
-        .filter(|server| server.service == config::MusicService::YtMusic)
-        .and_then(|server| server.access_token.clone())
+        .and_then(|server| server.ytmusic_cookies())
+        .map(str::to_string)
 }
 
 fn toggle_field(key: &str, label: &str, on: bool) -> FieldSpec {
@@ -803,6 +803,29 @@ fn apply_options(values: &[FieldValue], options: &mut config::DownloaderOptions)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_anonymous_source_downloads_without_a_leftover_token() {
+        let mut server = config::MusicServer::new_with_service(
+            "YouTube Music".into(),
+            "https://music.youtube.com".into(),
+            config::MusicService::YtMusic,
+        );
+        server.access_token = Some("SAPISID=leftover".into());
+        server.yt_anonymous = true;
+        let mut config = config::AppConfig {
+            server: Some(server),
+            ..Default::default()
+        };
+        assert_eq!(youtube_cookies(&config), None);
+        if let Some(server) = config.server.as_mut() {
+            server.yt_anonymous = false;
+        }
+        assert_eq!(
+            youtube_cookies(&config).as_deref(),
+            Some("SAPISID=leftover")
+        );
+    }
 
     /// History written before the rename stored the label, and the yt-dlp
     /// downloader's video rows are still on disk.

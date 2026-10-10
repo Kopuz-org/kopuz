@@ -1005,18 +1005,7 @@ impl SourceService {
     }
 
     async fn rotate_ytmusic(&self) {
-        let config = self.current().await;
-        let Some(server) = config
-            .server
-            .as_ref()
-            .filter(|server| server.service == config::MusicService::YtMusic)
-        else {
-            return;
-        };
-        let (Some(cookies), Some(id)) = (
-            server.access_token.clone(),
-            config.active_source.server_id().map(str::to_string),
-        ) else {
+        let Some((cookies, id)) = ytmusic_rotation(&self.current().await) else {
             return;
         };
         match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
@@ -1072,6 +1061,14 @@ impl SourceService {
             Err(error) => tracing::debug!(%error, "Spotify token refresh failed"),
         }
     }
+}
+
+/// The active YouTube Music source's cookies and server id, when it has a
+/// signed-in session to keep alive.
+fn ytmusic_rotation(config: &config::AppConfig) -> Option<(String, String)> {
+    let cookies = config.server.as_ref()?.ytmusic_cookies()?.to_string();
+    let id = config.active_source.server_id()?.to_string();
+    Some((cookies, id))
 }
 
 /// Accept cookies that still validate, else try one keepalive rotation before
@@ -1137,5 +1134,32 @@ mod tests {
             assert_eq!(error.code, ErrorCode::InvalidInput);
         }
         assert!(SourceService::validate_server_id("jellyfin-1").is_ok());
+    }
+
+    fn youtube_music(anonymous: bool) -> config::AppConfig {
+        let mut server = config::MusicServer::new_with_service(
+            "YouTube Music".into(),
+            "https://music.youtube.com".into(),
+            config::MusicService::YtMusic,
+        );
+        server.id = Some("yt".into());
+        server.access_token = Some("SAPISID=leftover".into());
+        server.yt_anonymous = anonymous;
+        config::AppConfig {
+            server: Some(server),
+            active_source: config::Source::Server("yt".into()),
+            ..Default::default()
+        }
+    }
+
+    /// Switching to anonymous keeps the old sign-in's row, and rotating it
+    /// would keep that account's session alive behind the user's back.
+    #[test]
+    fn an_anonymous_source_never_rotates_a_leftover_token() {
+        assert_eq!(ytmusic_rotation(&youtube_music(true)), None);
+        assert_eq!(
+            ytmusic_rotation(&youtube_music(false)),
+            Some(("SAPISID=leftover".into(), "yt".into()))
+        );
     }
 }

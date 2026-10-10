@@ -24,14 +24,21 @@ pub struct ServerConn {
 impl ServerConn {
     /// Build connection params from app config for the active server, or
     /// `None` when a field the active service requires is missing. An access
-    /// token is always required; Jellyfin/Subsonic/Custom additionally require
+    /// token is required except by anonymous YouTube Music, which has no
+    /// credential row and runs on empty cookies (a token kept from an earlier
+    /// sign-in is ignored, so the mode the user picked is the one that runs);
+    /// Jellyfin/Subsonic/Custom additionally require
     /// a `user_id` (YouTube Music authenticates by cookie only and Spotify by
     /// OAuth token only, so a missing user_id is fine for both). Centralizing this stops every UI call site from
     /// coercing an absent user_id into `""` and firing a malformed
     /// authenticated request that silently fails.
     pub fn resolve(config: &config::AppConfig) -> Option<Self> {
         let server = config.server.as_ref()?;
-        let token = server.access_token.clone()?;
+        let token = if server.service == MusicService::YtMusic && server.yt_anonymous {
+            String::new()
+        } else {
+            server.access_token.clone()?
+        };
         let user_id = match server.service {
             MusicService::YtMusic
             | MusicService::AppleMusic
