@@ -315,8 +315,10 @@ fn AlbumDetail(
     // discovered album renders (header + full track list) instead of "not found".
     let direct_remote_res: Resource<Option<api::CatalogDetail>> = {
         let api = api.clone();
+        // Peeked, not read: going offline must not wipe an album that already
+        // loaded.
         use_resource(move || {
-            let want = !*is_offline.read();
+            let want = !*is_offline.peek();
             let db_has = album_res.read().clone().flatten().is_some();
             let id = album_id_memo();
             let api = api.clone();
@@ -426,7 +428,7 @@ fn AlbumDetail(
     let remote_album_res: Resource<Option<api::CatalogDetail>> = {
         let api = api.clone();
         use_resource(move || {
-            let want = caps().albums == api::AlbumPresentation::Remote && !*is_offline.read();
+            let want = caps().albums == api::AlbumPresentation::Remote && !*is_offline.peek();
             let album = album_res.read().clone().flatten();
             let api = api.clone();
             async move {

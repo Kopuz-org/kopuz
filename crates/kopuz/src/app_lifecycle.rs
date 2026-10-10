@@ -39,6 +39,62 @@ pub fn use_webview_script_engine() {
     });
 }
 
+/// Probe rounds that must fail in a row before the app calls itself offline.
+const OFFLINE_AFTER_MISSES: u8 = 3;
+
+/// Consecutive-miss bookkeeping for the connectivity probe, kept apart from the
+/// signal so the decision can be tested.
+#[derive(Debug, Default)]
+struct Reachability {
+    misses: u8,
+    offline: bool,
+}
+
+impl Reachability {
+    fn record(&mut self, reached: bool) -> bool {
+        if reached {
+            self.misses = 0;
+            self.offline = false;
+        } else {
+            self.misses = self.misses.saturating_add(1);
+            if self.misses >= OFFLINE_AFTER_MISSES {
+                self.offline = true;
+            }
+        }
+        self.offline
+    }
+
+    /// Any miss, online or offline, is rechecked after 10s: a real outage is
+    /// reported in about 30s and recovery is noticed as quickly.
+    fn next_probe(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(if self.misses > 0 { 10 } else { 30 })
+    }
+}
+
+/// Bare IPs so the probe never depends on DNS. Redirects are not followed:
+/// 1.1.1.1 redirects to one.one.one.one, which filtering resolvers such as
+/// Cisco Umbrella sinkhole as a DoH endpoint, failing TLS on a healthy network. Any HTTP answer from either host proves a route out.
+const PROBE_TARGETS: &[&str] = &["https://1.1.1.1", "https://8.8.8.8"];
+
+fn probe_targets() -> Vec<String> {
+    #[cfg(debug_assertions)]
+    if let Ok(list) = std::env::var("KOPUZ_CONNECTIVITY_PROBES") {
+        return list.split(',').map(|s| s.trim().to_string()).collect();
+    }
+    PROBE_TARGETS.iter().map(|s| s.to_string()).collect()
+}
+
+async fn probe(client: &reqwest::Client, targets: &[String]) -> bool {
+    let attempts = targets.iter().map(|url| {
+        Box::pin(async move {
+            client.get(url).send().await.map_err(|error| {
+                tracing::debug!(url, %error, "connectivity probe target failed");
+            })
+        })
+    });
+    futures_util::future::select_ok(attempts).await.is_ok()
+}
+
 pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signal<bool> {
     let mut is_offline = use_signal(|| false);
     use_context_provider(|| is_offline);
@@ -48,11 +104,13 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
     use_future(move || async move {
         let Ok(client) = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
         else {
             return;
         };
-        let mut misses: u8 = 0;
+        let targets = probe_targets();
+        let mut state = Reachability::default();
         loop {
             if !active
                 .peek()
@@ -62,29 +120,25 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
                 if *is_offline.peek() {
                     is_offline.set(false);
                 }
-                misses = 0;
+                state = Reachability::default();
                 utils::sleep(std::time::Duration::from_secs(30)).await;
                 continue;
             }
-            let online = client
-                .get("https://1.1.1.1")
-                .send()
+            let reached = probe(&client, &targets)
                 .instrument(tracing::info_span!("net.connectivity"))
-                .await
-                .is_ok();
-            if online {
-                misses = 0;
-                if *is_offline.peek() {
-                    is_offline.set(false);
-                }
-            } else {
-                misses = misses.saturating_add(1);
-                if misses >= 2 && !*is_offline.peek() {
-                    is_offline.set(true);
-                }
+                .await;
+            let offline = state.record(reached);
+            tracing::debug!(
+                reached,
+                misses = state.misses,
+                offline,
+                "connectivity probe"
+            );
+            if offline != *is_offline.peek() {
+                tracing::info!(offline, "connectivity changed");
+                is_offline.set(offline);
             }
-            let secs = if *is_offline.peek() { 10 } else { 30 };
-            utils::sleep(std::time::Duration::from_secs(secs)).await;
+            utils::sleep(state.next_probe()).await;
         }
     });
 
@@ -103,4 +157,51 @@ pub fn use_connectivity_probe(mut network_banner: Signal<Option<bool>>) -> Signa
     });
 
     is_offline
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_blip_stays_online() {
+        let mut state = Reachability::default();
+        assert!(!state.record(true));
+        assert!(!state.record(false));
+        assert!(!state.record(true));
+        assert!(!state.record(false));
+        assert!(!state.record(false));
+        assert!(!state.record(true));
+    }
+
+    #[test]
+    fn sustained_failure_goes_offline() {
+        let mut state = Reachability::default();
+        assert!(!state.record(false));
+        assert!(!state.record(false));
+        assert!(state.record(false));
+        assert!(state.record(false));
+    }
+
+    #[test]
+    fn recovery_goes_back_online() {
+        let mut state = Reachability::default();
+        for _ in 0..OFFLINE_AFTER_MISSES {
+            state.record(false);
+        }
+        assert!(state.offline);
+        assert!(!state.record(true));
+        assert_eq!(state.misses, 0);
+        assert!(!state.record(false));
+    }
+
+    #[test]
+    fn misses_are_rechecked_sooner() {
+        let mut state = Reachability::default();
+        assert_eq!(state.next_probe().as_secs(), 30);
+        state.record(false);
+        assert_eq!(state.next_probe().as_secs(), 10);
+        state.record(true);
+        assert_eq!(state.next_probe().as_secs(), 30);
+    }
 }
