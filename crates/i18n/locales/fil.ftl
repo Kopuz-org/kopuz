@@ -141,6 +141,11 @@ downloader_status_waiting = Naghihintay…
 update_available = May available na update
 update_banner_message = Available na ang Kopuz { $version }.
 view_release = Tingnan ang release
+update_install = I-update at i-restart
+update_downloading = Dina-download ang Kopuz { $version }…
+update_restarting = Nagre-restart para tapusin ang update…
+update_failed = Hindi ma-install ang Kopuz { $version }.
+update_retry = Subukang muli
 
 # UI Actions & Buttons
 add_to_favorites = Idagdag sa Paborito

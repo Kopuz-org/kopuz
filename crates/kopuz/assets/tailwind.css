@@ -22,6 +22,7 @@
     --color-emerald-300: oklch(84.5% 0.143 164.978);
     --color-emerald-400: oklch(76.5% 0.177 163.223);
     --color-emerald-500: oklch(69.6% 0.17 162.48);
+    --color-sky-100: oklch(95.1% 0.026 236.824);
     --color-sky-200: oklch(90.1% 0.058 230.902);
     --color-sky-500: oklch(68.5% 0.169 237.323);
     --color-blue-400: oklch(70.7% 0.165 254.624);
@@ -1437,6 +1438,12 @@
       background-color: color-mix(in oklab, var(--color-sky-500) 15%, transparent);
     }
   }
+  .bg-sky-500\/25 {
+    background-color: color-mix(in srgb, oklch(68.5% 0.169 237.323) 25%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-sky-500) 25%, transparent);
+    }
+  }
   .bg-stone-800 {
     background-color: var(--color-stone-800);
   }
@@ -2064,6 +2071,9 @@
   }
   .text-rose-400 {
     color: var(--color-rose-400);
+  }
+  .text-sky-100 {
+    color: var(--color-sky-100);
   }
   .text-sky-200 {
     color: var(--color-sky-200);
@@ -2717,6 +2727,16 @@
         background-color: color-mix(in srgb, oklch(63.7% 0.237 25.331) 70%, transparent);
         @supports (color: color-mix(in lab, red, red)) {
           background-color: color-mix(in oklab, var(--color-red-500) 70%, transparent);
+        }
+      }
+    }
+  }
+  .hover\:bg-sky-500\/40 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: color-mix(in srgb, oklch(68.5% 0.169 237.323) 40%, transparent);
+        @supports (color: color-mix(in lab, red, red)) {
+          background-color: color-mix(in oklab, var(--color-sky-500) 40%, transparent);
         }
       }
     }

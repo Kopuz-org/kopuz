@@ -472,6 +472,11 @@ minimize_to_tray = 最小化到系统托盘
 update_available = 有可用更新
 update_banner_message = Kopuz { $version } 现已可用。
 view_release = 查看发行版
+update_install = 更新并重启
+update_downloading = 正在下载 Kopuz { $version }…
+update_restarting = 正在重启以完成更新…
+update_failed = 无法安装 Kopuz { $version }。
+update_retry = 重试
 
 volume_scroll_step = 音量滚动步长
 

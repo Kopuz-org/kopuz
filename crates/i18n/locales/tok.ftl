@@ -472,6 +472,11 @@ minimize_to_tray = lili tawa poki ilo
 update_available = sin namako li lon
 update_banner_message = Kopuz { $version } li lon.
 view_release = o lukin e lipu pi sin namako
+update_install = o sin e ona o open sin
+update_downloading = mi kama jo e Kopuz { $version }…
+update_restarting = mi open sin tawa pini pi sin ni…
+update_failed = mi ken ala pana e Kopuz { $version }.
+update_retry = o pali sin
 
 volume_scroll_step = nasin tawa kalama
 

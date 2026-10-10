@@ -594,6 +594,7 @@ fn App() -> Element {
     let mut network_banner: Signal<Option<bool>> = use_signal(|| None);
     let mut update_banner: Signal<Option<updates::AvailableUpdate>> = use_signal(|| None);
     let mut did_check_updates = use_signal(|| false);
+    let mut update_progress: Signal<Option<updates::InstallProgress>> = use_signal(|| None);
     let mut ctrl = hooks::use_player_controller(
         core.api.clone() as Arc<dyn api::KopuzApi>,
         is_playing,
@@ -1244,6 +1245,52 @@ fn App() -> Element {
     let dir = if is_rtl { "rtl" } else { "ltr" };
     let content_row_class = "flex flex-1 overflow-hidden";
     let update_banner_state = update_banner.read().clone();
+    let update_progress_state = update_progress.read().clone();
+    let mut start_update = move |plan: updates::InstallPlan| {
+        update_progress.set(Some(updates::InstallProgress::Downloading {
+            done: 0,
+            total: None,
+        }));
+        spawn(
+            async move {
+                let mut progress = updates::install(plan);
+                let mut shown_percent = None;
+                loop {
+                    let state = progress.borrow_and_update().clone();
+                    match state {
+                        updates::InstallProgress::Downloading { done, total } => {
+                            let percent = total.filter(|total| *total > 0).map(|t| done * 100 / t);
+                            if percent != shown_percent {
+                                shown_percent = percent;
+                                update_progress.set(Some(state));
+                            }
+                        }
+                        updates::InstallProgress::Ready => {
+                            update_progress.set(Some(state));
+                            // The helper waits for this process to exit before it installs.
+                            #[cfg(not(target_os = "android"))]
+                            {
+                                let mut close_hides_window = close_hides_window;
+                                close_hides_window.set(false);
+                                let win = dioxus::desktop::window();
+                                win.set_close_behavior(
+                                    dioxus::desktop::WindowCloseBehaviour::WindowCloses,
+                                );
+                                win.close();
+                            }
+                            return;
+                        }
+                        updates::InstallProgress::Failed => break,
+                    }
+                    if progress.changed().await.is_err() {
+                        break;
+                    }
+                }
+                update_progress.set(Some(updates::InstallProgress::Failed));
+            }
+            .instrument(tracing::info_span!("app.update_install")),
+        );
+    };
     let update_banner_padding = if cfg!(target_os = "macos") {
         "pl-20 pr-4"
     } else {
@@ -1507,10 +1554,40 @@ fn App() -> Element {
                         class: "flex items-center justify-between gap-3 {update_banner_padding} py-2 bg-sky-500/15 border-b border-sky-500/20 text-sky-200 text-sm",
                         div {
                             class: "flex items-center gap-2",
-                            i { class: "fa-solid fa-download text-xs" }
-                            span { class: "font-medium", "{i18n::t(\"update_available\")} - " }
-                            span { "{i18n::t_with(\"update_banner_message\", &[(\"version\", update.version.clone())])}" }
-                            if !cfg!(target_os = "android") {
+                            match update_progress_state.clone() {
+                                None => rsx! {
+                                    i { class: "fa-solid fa-download text-xs" }
+                                    span { class: "font-medium", "{i18n::t(\"update_available\")} - " }
+                                    span { "{i18n::t_with(\"update_banner_message\", &[(\"version\", update.version.clone())])}" }
+                                },
+                                Some(updates::InstallProgress::Downloading { done, total }) => rsx! {
+                                    i { class: "fa-solid fa-circle-notch fa-spin text-xs" }
+                                    span { "{i18n::t_with(\"update_downloading\", &[(\"version\", update.version.clone())])}" }
+                                    if let Some(total) = total.filter(|total| *total > 0) {
+                                        span { class: "tabular-nums opacity-80", "{done * 100 / total}%" }
+                                    }
+                                },
+                                Some(updates::InstallProgress::Ready) => rsx! {
+                                    i { class: "fa-solid fa-rotate text-xs" }
+                                    span { "{i18n::t(\"update_restarting\")}" }
+                                },
+                                Some(updates::InstallProgress::Failed) => rsx! {
+                                    i { class: "fa-solid fa-triangle-exclamation text-xs" }
+                                    span { "{i18n::t_with(\"update_failed\", &[(\"version\", update.version.clone())])}" }
+                                },
+                            }
+                            if let (Some(plan), None | Some(updates::InstallProgress::Failed)) = (update.install.clone(), update_progress_state.clone()) {
+                                button {
+                                    class: "ml-2 px-2 py-0.5 rounded-md bg-sky-500/25 hover:bg-sky-500/40 text-sky-100 text-xs font-medium transition-colors",
+                                    onclick: move |_| start_update(plan.clone()),
+                                    if update_progress_state.is_some() {
+                                        "{i18n::t(\"update_retry\")}"
+                                    } else {
+                                        "{i18n::t(\"update_install\")}"
+                                    }
+                                }
+                            }
+                            if !cfg!(target_os = "android") && matches!(update_progress_state, None | Some(updates::InstallProgress::Failed)) {
                                 button {
                                     class: "ml-2 text-xs underline opacity-80 hover:opacity-100 transition-opacity",
                                     onclick: {
@@ -1528,10 +1605,12 @@ fn App() -> Element {
                                 }
                             }
                         }
-                        button {
-                            class: "opacity-50 hover:opacity-100 transition-opacity p-1",
-                            onclick: move |_| update_banner.set(None),
-                            i { class: "fa-solid fa-xmark text-xs" }
+                        if matches!(update_progress_state, None | Some(updates::InstallProgress::Failed)) {
+                            button {
+                                class: "opacity-50 hover:opacity-100 transition-opacity p-1",
+                                onclick: move |_| update_banner.set(None),
+                                i { class: "fa-solid fa-xmark text-xs" }
+                            }
                         }
                     }
                 }

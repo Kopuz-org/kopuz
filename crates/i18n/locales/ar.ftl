@@ -478,6 +478,11 @@ minimize_to_tray = تصغير إلى صينية النظام
 update_available = تحديث متوفر
 update_banner_message = إصدار Kopuz { $version } متوفر.
 view_release = عرض الإصدار
+update_install = التحديث وإعادة التشغيل
+update_downloading = جارٍ تنزيل Kopuz { $version }…
+update_restarting = جارٍ إعادة التشغيل لإكمال التحديث…
+update_failed = تعذّر تثبيت Kopuz { $version }.
+update_retry = أعد المحاولة
 
 volume_scroll_step = خطوة تمرير الصوت
 

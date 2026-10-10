@@ -141,6 +141,11 @@ downloader_status_waiting = Silahkan tunggu…
 update_available = Pembaruan tersedia
 update_banner_message = { $version } dari kopuz sudah tersedia.
 view_release = Lihat rilis
+update_install = Perbarui dan mulai ulang
+update_downloading = Mengunduh Kopuz { $version }…
+update_restarting = Memulai ulang untuk menyelesaikan pembaruan…
+update_failed = Tidak dapat memasang Kopuz { $version }.
+update_retry = Coba lagi
 
 # UI Actions & Buttons
 add_to_favorites = Tambahkan ke Favorit

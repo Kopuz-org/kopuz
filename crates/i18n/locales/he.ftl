@@ -472,6 +472,11 @@ minimize_to_tray = מזער למגש המערכת
 update_available = עדכון זמין
 update_banner_message = ‏Kopuz { $version } זמין.
 view_release = הצג גרסה
+update_install = עדכון והפעלה מחדש
+update_downloading = ‏מוריד את Kopuz { $version }…
+update_restarting = מופעל מחדש כדי להשלים את העדכון…
+update_failed = ‏לא ניתן להתקין את Kopuz { $version }.
+update_retry = נסה שוב
 
 volume_scroll_step = צעד גלילת עוצמה
 

@@ -472,6 +472,11 @@ minimize_to_tray = Sistem tepsisine küçült
 update_available = Güncelleme mevcut
 update_banner_message = Kopuz { $version } kullanılabilir.
 view_release = Sürümü görüntüle
+update_install = Güncelle ve yeniden başlat
+update_downloading = Kopuz { $version } indiriliyor…
+update_restarting = Güncellemeyi tamamlamak için yeniden başlatılıyor…
+update_failed = Kopuz { $version } yüklenemedi.
+update_retry = Tekrar dene
 
 volume_scroll_step = Ses kaydırma adımı
 

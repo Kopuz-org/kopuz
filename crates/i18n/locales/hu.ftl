@@ -472,6 +472,11 @@ minimize_to_tray = Kicsinyítés a tálcára
 update_available = Elérhető frissítés
 update_banner_message = A Kopuz { $version } elérhető.
 view_release = Kiadás megtekintése
+update_install = Frissítés és újraindítás
+update_downloading = A Kopuz { $version } letöltése…
+update_restarting = Újraindítás a frissítés befejezéséhez…
+update_failed = A Kopuz { $version } telepítése sikertelen.
+update_retry = Újrapróbálás
 
 volume_scroll_step = Hangerő görgetési lépés
 

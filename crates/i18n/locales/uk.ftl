@@ -472,6 +472,11 @@ minimize_to_tray = Згорнути в системний лоток
 update_available = Доступне оновлення
 update_banner_message = Доступна версія Kopuz { $version }.
 view_release = Переглянути реліз
+update_install = Оновити й перезапустити
+update_downloading = Завантаження Kopuz { $version }…
+update_restarting = Перезапуск для завершення оновлення…
+update_failed = Не вдалося встановити Kopuz { $version }.
+update_retry = Спробувати ще раз
 
 volume_scroll_step = Крок прокрутки гучності
 

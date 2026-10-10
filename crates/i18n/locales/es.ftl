@@ -473,6 +473,11 @@ minimize_to_tray = Minimizar a la bandeja del sistema
 update_available = Actualización disponible
 update_banner_message = Kopuz { $version } está disponible.
 view_release = Ver lanzamiento
+update_install = Actualizar y reiniciar
+update_downloading = Descargando Kopuz { $version }…
+update_restarting = Reiniciando para terminar la actualización…
+update_failed = No se pudo instalar Kopuz { $version }.
+update_retry = Reintentar
 
 volume_scroll_step = Paso de desplazamiento del volumen
 

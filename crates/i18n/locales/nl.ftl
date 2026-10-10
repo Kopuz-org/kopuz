@@ -141,6 +141,11 @@ downloader_status_waiting = Wachten…
 update_available = Update beschikbaar
 update_banner_message = Kopuz { $version } is beschikbaar.
 view_release = Release bekijken
+update_install = Bijwerken en herstarten
+update_downloading = Kopuz { $version } wordt gedownload…
+update_restarting = Herstarten om de update af te ronden…
+update_failed = Kopuz { $version } kon niet worden geïnstalleerd.
+update_retry = Opnieuw proberen
 
 # UI Actions & Buttons
 add_to_favorites = Aan favorieten toevoegen

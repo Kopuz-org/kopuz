@@ -152,6 +152,11 @@ downloader_status_waiting = Waiting…
 update_available = Update available
 update_banner_message = Kopuz { $version } is available.
 view_release = View release
+update_install = Update and restart
+update_downloading = Downloading Kopuz { $version }…
+update_restarting = Restarting to finish the update…
+update_failed = Unable to install Kopuz { $version }.
+update_retry = Try again
 
 # UI Actions & Buttons
 add_to_favorites = Add to Favorites

@@ -472,6 +472,11 @@ minimize_to_tray = Minimizează în bara de sistem
 update_available = Actualizare disponibilă
 update_banner_message = Kopuz { $version } este disponibil.
 view_release = Vezi lansarea
+update_install = Actualizează și repornește
+update_downloading = Se descarcă Kopuz { $version }…
+update_restarting = Se repornește pentru a finaliza actualizarea…
+update_failed = Kopuz { $version } nu a putut fi instalat.
+update_retry = Încearcă din nou
 
 volume_scroll_step = Pas de derulare a volumului
 

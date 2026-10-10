@@ -478,6 +478,11 @@ minimize_to_tray = システムトレイに最小化
 update_available = アップデートがあります
 update_banner_message = Kopuz { $version } が利用可能です。
 view_release = リリースを見る
+update_install = 更新して再起動
+update_downloading = Kopuz { $version } をダウンロード中…
+update_restarting = 更新を完了するために再起動しています…
+update_failed = Kopuz { $version } をインストールできませんでした。
+update_retry = 再試行
 
 volume_scroll_step = 音量スクロールステップ
 

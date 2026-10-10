@@ -141,6 +141,11 @@ downloader_status_waiting = Đang chờ...
 update_available = Có bản cập nhật
 update_banner_message = Kopuz { $version } đã có sẵn.
 view_release = Xem bản phát hành
+update_install = Cập nhật và khởi động lại
+update_downloading = Đang tải Kopuz { $version }…
+update_restarting = Đang khởi động lại để hoàn tất cập nhật…
+update_failed = Không thể cài đặt Kopuz { $version }.
+update_retry = Thử lại
 
 # UI Actions & Buttons
 add_to_favorites = Thêm vào yêu thích

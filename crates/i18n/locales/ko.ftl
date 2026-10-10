@@ -472,6 +472,11 @@ minimize_to_tray = 시스템 트레이로 최소화
 update_available = 업데이트가 있습니다
 update_banner_message = Kopuz { $version }을(를) 사용할 수 있습니다.
 view_release = 릴리스 보기
+update_install = 업데이트 후 다시 시작
+update_downloading = Kopuz { $version } 다운로드 중…
+update_restarting = 업데이트를 마치기 위해 다시 시작하는 중…
+update_failed = Kopuz { $version }을(를) 설치할 수 없습니다.
+update_retry = 다시 시도
 
 volume_scroll_step = 볼륨 스크롤 단계
 

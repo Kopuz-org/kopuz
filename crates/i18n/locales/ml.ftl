@@ -141,6 +141,11 @@ downloader_status_waiting = കാത്തിരിക്കുന്നു…
 update_available = അപ്‌ഡേറ്റ് ലഭ്യമാണ്
 update_banner_message = Kopuz { $version } ലഭ്യമാണ്.
 view_release = റിലീസ് കാണുക
+update_install = അപ്ഡേറ്റ് ചെയ്ത് റീസ്റ്റാർട്ട് ചെയ്യുക
+update_downloading = Kopuz { $version } ഡൗൺലോഡ് ചെയ്യുന്നു…
+update_restarting = അപ്ഡേറ്റ് പൂർത്തിയാക്കാൻ റീസ്റ്റാർട്ട് ചെയ്യുന്നു…
+update_failed = Kopuz { $version } ഇൻസ്റ്റാൾ ചെയ്യാനായില്ല.
+update_retry = വീണ്ടും ശ്രമിക്കുക
 
 # UI Actions & Buttons
 add_to_favorites = പ്രിയപ്പെട്ടവയിലേക്ക് ചേർക്കുക
