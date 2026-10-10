@@ -661,11 +661,15 @@ fn SongCard(item: CatalogItem, track: TrackInfo) -> Element {
 
     let menu_track = track.clone();
     let mut menu_open = use_signal(|| false);
+    let mut playlist_open = use_signal(|| false);
+    let add_key = key.clone();
+    let create_key = key.clone();
 
     rsx! {
         div {
             // A transformed card is the containing block for the menu's fixed
-            // panel and playlist overlay, so the hover lift is off while it is open.
+            // panel, so the hover lift is off while it is open. The playlist
+            // modal outlives the menu, so it renders beside the card instead.
             class: if menu_open() {
                 "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out group"
             } else {
@@ -727,6 +731,7 @@ fn SongCard(item: CatalogItem, track: TrackInfo) -> Element {
                         is_open: Some(menu_open()),
                         on_open: Some(EventHandler::new(move |_| menu_open.set(true))),
                         on_close: Some(EventHandler::new(move |_| menu_open.set(false))),
+                        on_add_to_playlist: Some(EventHandler::new(move |_| playlist_open.set(true))),
                         button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                     }
                 }
@@ -741,6 +746,19 @@ fn SongCard(item: CatalogItem, track: TrackInfo) -> Element {
             p {
                 class: "text-xs text-white/50 truncate h-4 mt-1",
                 "{subtitle}"
+            }
+        }
+        if playlist_open() {
+            components::playlist_modal::PlaylistModal {
+                on_close: move |_| playlist_open.set(false),
+                on_add_to_playlist: move |playlist_id: String| {
+                    hooks::playlist_actions::add_tracks(playlist_id, vec![add_key.clone()]);
+                    playlist_open.set(false);
+                },
+                on_create_playlist: move |name: String| {
+                    hooks::playlist_actions::create_with(name, vec![create_key.clone()]);
+                    playlist_open.set(false);
+                },
             }
         }
     }
