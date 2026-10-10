@@ -40,6 +40,10 @@ libc = { workspace = true }
 rand = { workspace = true }
 player = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_UI_Shell"] }
+windows-registry = { workspace = true }
+
 [dev-dependencies]
 ctl = { package = "kopuz-ctl", path = "../ctl" }
 client = { workspace = true }
