@@ -37,6 +37,8 @@ pub struct PlayerController {
     pub buffered_ranges: Signal<Vec<BufferedRange>>,
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
+    /// Output is silenced while `volume` keeps the level unmuting restores.
+    pub muted: Signal<bool>,
     pub config: Signal<AppConfig>,
     pub playback_error: Signal<Option<String>>,
     pub browse_loading: Signal<bool>,
@@ -297,7 +299,13 @@ impl PlayerController {
     /// slider responsive.
     pub fn set_volume(&mut self, value: f32) {
         self.volume.set(value);
+        self.muted.set(false);
         self.command(api::PlayerCommand::SetVolume { volume: value });
+    }
+
+    pub fn set_muted(&mut self, muted: bool) {
+        self.muted.set(muted);
+        self.command(api::PlayerCommand::SetMuted { muted });
     }
 
     /// Apply an equalizer preview to the engine without committing it to the
@@ -491,6 +499,7 @@ pub fn use_player_controller(
     let output_latency_ms = use_signal(|| 0u64);
     let current_artwork = use_signal(|| None::<api::ArtworkRef>);
     let external_device = use_signal(|| None::<String>);
+    let muted = use_signal(|| false);
 
     let ctrl = PlayerController {
         api,
@@ -513,6 +522,7 @@ pub fn use_player_controller(
         buffered_ranges,
         current_track_snapshot,
         volume,
+        muted,
         config,
         playback_error,
         browse_loading,

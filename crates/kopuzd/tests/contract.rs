@@ -733,6 +733,32 @@ async fn commands_and_errors_map_identically() {
 }
 
 #[tokio::test]
+async fn mute_round_trips_across_transports_and_keeps_the_volume() {
+    let pair = spawn_pair().await;
+    pair.wire
+        .player_command(PlayerCommand::SetVolume { volume: 0.6 })
+        .await
+        .expect("set volume over the wire");
+    pair.wire
+        .player_command(PlayerCommand::SetMuted { muted: true })
+        .await
+        .expect("mute over the wire");
+    let local = normalized(pair.local.player_state().await.expect("local state"));
+    let wire = normalized(pair.wire.player_state().await.expect("wire state"));
+    assert!(wire.muted);
+    assert_eq!(wire.volume, 0.6);
+    assert_eq!(local, wire);
+
+    pair.local
+        .player_command(PlayerCommand::SetMuted { muted: false })
+        .await
+        .expect("unmute locally");
+    let wire = pair.wire.player_state().await.expect("wire state");
+    assert!(!wire.muted);
+    assert_eq!(wire.volume, 0.6);
+}
+
+#[tokio::test]
 async fn subscribe_stream_delivers_typed_events() {
     use futures_util::StreamExt;
     let pair = spawn_pair().await;

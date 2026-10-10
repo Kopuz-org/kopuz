@@ -74,6 +74,7 @@ fn apply_state(ctrl: &mut PlayerController, state: PlayerState) -> DaemonClock {
         matches!(state.intent, Intent::Loading { .. }),
     );
     set_if_changed(&mut ctrl.volume, state.volume);
+    set_if_changed(&mut ctrl.muted, state.muted);
     set_if_changed(
         &mut ctrl.output_latency_ms,
         state.output_latency_ms.unwrap_or(0),

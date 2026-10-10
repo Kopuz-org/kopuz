@@ -841,6 +841,8 @@ pub struct AppConfig {
     pub sidebar_order: Vec<String>,
     #[serde(default = "default_volume")]
     pub volume: f32,
+    #[serde(default)]
+    pub muted: bool,
     #[serde(default = "default_volume_scroll_step")]
     pub volume_scroll_step: f32,
     #[serde(default = "default_crossfade_seconds")]
@@ -1079,6 +1081,7 @@ impl Default for AppConfig {
             show_row_images: true,
             sidebar_order: default_sidebar_order(),
             volume: default_volume(),
+            muted: false,
             volume_scroll_step: default_volume_scroll_step(),
             crossfade_seconds: default_crossfade_seconds(),
             custom_themes: HashMap::new(),

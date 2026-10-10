@@ -3,8 +3,8 @@
 use dioxus::prelude::*;
 use serde_json::{Map, Value};
 
-/// Volume rides the player state, so the settings copy never takes it from here.
-const SKIPPED: &[&str] = &["volume"];
+/// Volume and mute ride the player state, so the settings copy never takes them from here.
+const SKIPPED: &[&str] = &["volume", "muted"];
 
 /// The config this app last sent or adopted and the daemon revision it matches, which tells the echo of its own write from another writer's change.
 #[derive(Clone, Copy)]

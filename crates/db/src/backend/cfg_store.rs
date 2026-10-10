@@ -17,7 +17,7 @@ pub async fn load_config(
 ) -> Result<Option<AppConfig>, DbError> {
     let layers = config::store::FileLayers::read(settings_path);
     let state = sqlx::query!(
-        "SELECT device_id, active_source, source_explicitly_set, volume, discord_presence_paused, \
+        "SELECT device_id, active_source, source_explicitly_set, volume, muted, discord_presence_paused, \
                 fullscreen_tabs_collapsed, sort_order, album_view_mode, artist_album_view_mode, \
                 artists_view_mode, artist_view_order, listen_now_style, hero_height \
            FROM app_state WHERE id = 1"
@@ -35,6 +35,7 @@ pub async fn load_config(
         cfg.active_source = Source::from_column(&state.active_source);
         cfg.source_explicitly_set = state.source_explicitly_set != 0;
         cfg.volume = state.volume as f32;
+        cfg.muted = state.muted != 0;
         cfg.discord_presence_paused = state.discord_presence_paused.map(|paused| paused != 0);
         cfg.fullscreen_tabs_collapsed = state.fullscreen_tabs_collapsed != 0;
         read_variant(&state.sort_order, &mut cfg.sort_order);
@@ -305,6 +306,7 @@ pub(crate) async fn write_state(
     let active = active.as_str();
     let explicit = cfg.source_explicitly_set as i64;
     let volume = f64::from(cfg.volume);
+    let muted = cfg.muted as i64;
     let paused = cfg.discord_presence_paused.map(i64::from);
     let collapsed = cfg.fullscreen_tabs_collapsed as i64;
     let sort_order = variant(&cfg.sort_order)?;
@@ -317,12 +319,13 @@ pub(crate) async fn write_state(
     sqlx::query!(
         "INSERT INTO app_state (id, device_id, active_source, source_explicitly_set, volume, \
            discord_presence_paused, fullscreen_tabs_collapsed, sort_order, album_view_mode, \
-           artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height) \
-         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
+           artist_album_view_mode, artists_view_mode, artist_view_order, listen_now_style, hero_height, \
+           muted) \
+         VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) \
          ON CONFLICT(id) DO UPDATE SET device_id = ?1, active_source = ?2, source_explicitly_set = ?3, \
            volume = ?4, discord_presence_paused = ?5, fullscreen_tabs_collapsed = ?6, sort_order = ?7, \
            album_view_mode = ?8, artist_album_view_mode = ?9, artists_view_mode = ?10, \
-           artist_view_order = ?11, listen_now_style = ?12, hero_height = ?13",
+           artist_view_order = ?11, listen_now_style = ?12, hero_height = ?13, muted = ?14",
         cfg.device_id,
         active,
         explicit,
@@ -335,7 +338,8 @@ pub(crate) async fn write_state(
         artists_view_mode,
         artist_view_order,
         listen_now_style,
-        hero_height
+        hero_height,
+        muted
     )
     .execute(&mut *conn)
     .await?;

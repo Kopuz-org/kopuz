@@ -160,6 +160,16 @@ impl Kopuz for KopuzGrpc {
         .await
     }
 
+    async fn set_muted(
+        &self,
+        request: Request<proto::SetMuted>,
+    ) -> Result<Response<proto::MutationResult>, Status> {
+        self.player_mutation(api::PlayerCommand::SetMuted {
+            muted: request.get_ref().muted,
+        })
+        .await
+    }
+
     async fn set_mode(
         &self,
         request: Request<proto::SetMode>,

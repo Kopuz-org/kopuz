@@ -289,21 +289,22 @@ pub async fn assemble(args: &CoreArgs) -> Result<Core, Box<dyn std::error::Error
 /// one that remembers it; the debounce keeps a drag off the database.
 fn spawn_volume_persistence(session: &SessionHandle, config: Arc<ConfigService>) {
     let mut events = session.subscribe();
-    let mut last = session.state().volume;
+    let state = session.state();
+    let mut last = (state.volume, state.muted);
     tokio::spawn(async move {
         loop {
-            let volume = match events.recv().await {
-                Ok(api::ApiEvent::PlayerState(state)) => state.volume,
+            let (volume, muted) = match events.recv().await {
+                Ok(api::ApiEvent::PlayerState(state)) => (state.volume, state.muted),
                 Ok(_) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             };
-            if (volume - last).abs() < f32::EPSILON {
+            if (volume - last.0).abs() < f32::EPSILON && muted == last.1 {
                 continue;
             }
-            last = volume;
+            last = (volume, muted);
             tokio::time::sleep(std::time::Duration::from_millis(750)).await;
-            if let Err(error) = config.set_volume(last).await {
+            if let Err(error) = config.set_volume(last.0, last.1).await {
                 tracing::warn!(%error, "volume persist failed");
             }
         }
@@ -318,7 +319,8 @@ fn spawn_volume_persistence(session: &SessionHandle, config: Arc<ConfigService>)
 /// also where a whole-config write reads volume back from, which is why the
 /// frontend's own copy cannot stand in for this.
 pub async fn flush_volume(session: &SessionHandle, config: &ConfigService) {
-    if let Err(error) = config.set_volume(session.state().volume).await {
+    let state = session.state();
+    if let Err(error) = config.set_volume(state.volume, state.muted).await {
         tracing::warn!(%error, "flushing the volume on shutdown failed");
     }
 }

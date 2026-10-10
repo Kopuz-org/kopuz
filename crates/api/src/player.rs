@@ -116,7 +116,9 @@ pub struct PlayerState {
     pub track: Option<crate::TrackInfo>,
     pub position: Option<PositionAnchor>,
     pub queue: QueueSummary,
+    /// The level a client sets and shows; it stays put while muted.
     pub volume: f32,
+    pub muted: bool,
     pub buffered: Vec<BufferedRange>,
     pub fading: Option<FadingState>,
     pub external: Option<ExternalPlayback>,
@@ -136,8 +138,13 @@ pub enum PlayerCommand {
     Seek {
         position_ms: u64,
     },
+    /// Also unmutes.
     SetVolume {
         volume: f32,
+    },
+    /// Silence output without touching the volume, so unmuting brings it back.
+    SetMuted {
+        muted: bool,
     },
     SetMode {
         shuffle: Option<bool>,

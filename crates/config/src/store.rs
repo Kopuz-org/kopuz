@@ -42,6 +42,7 @@ pub const STATE_KEYS: &[&str] = &[
     "active_source",
     "source_explicitly_set",
     "volume",
+    "muted",
     "discord_presence_paused",
     "fullscreen_tabs_collapsed",
     "sort_order",

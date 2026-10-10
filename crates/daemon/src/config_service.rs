@@ -248,17 +248,18 @@ impl ConfigService {
         Ok((self.view_of(&held), updated, changed))
     }
 
-    /// Persist the engine's own volume. It is not a caller-set key -- the
-    /// session owns it and every frontend just reports what the user did --
-    /// so it skips the locked-key and secret machinery of [`Self::set`].
-    pub async fn set_volume(&self, volume: f32) -> Result<(), ApiError> {
+    /// Persist the engine's own volume and mute. They are not caller-set keys
+    /// -- the session owns them and every frontend just reports what the user
+    /// did -- so they skip the locked-key and secret machinery of [`Self::set`].
+    pub async fn set_volume(&self, volume: f32, muted: bool) -> Result<(), ApiError> {
         let mut held = self.current.write().await;
         let volume = volume.clamp(0.0, 1.0);
-        if (held.config.volume - volume).abs() < f32::EPSILON {
+        if (held.config.volume - volume).abs() < f32::EPSILON && held.config.muted == muted {
             return Ok(());
         }
         let mut next = held.config.clone();
         next.volume = volume;
+        next.muted = muted;
         // Saved under the guard: a snapshot saved after it drops could undo a server added meanwhile.
         self.save(&next).await?;
         held.config = next;
@@ -274,17 +275,18 @@ impl ConfigService {
 /// as field lists of its own. Both are absent from the surface a caller reads,
 /// so a caller writing that surface back must not be able to blank them.
 ///
-/// `volume` is here for the same reason even though it is on the wire: the
-/// session owns it and [`Self::set_volume`] is how it moves, so a whole-config
-/// write carrying a frontend's older copy must not roll the engine back. The
-/// two cover-lookup keys follow the same rule: `ArtworkApi` publishes them as
-/// a field list and writes them through `mutate_state`, so a frontend that
-/// changed one never saw it in the settings surface it holds.
+/// `volume` and `muted` are here for the same reason even though they are on
+/// the wire: the session owns them and [`Self::set_volume`] is how they move,
+/// so a whole-config write carrying a frontend's older copy must not roll the
+/// engine back. The two cover-lookup keys follow the same rule: `ArtworkApi`
+/// publishes them as a field list and writes them through `mutate_state`, so a
+/// frontend that changed one never saw it in the settings surface it holds.
 fn with_daemon_owned_fields(
     mut incoming: config::AppConfig,
     current: &config::AppConfig,
 ) -> config::AppConfig {
     incoming.volume = current.volume;
+    incoming.muted = current.muted;
     incoming.auto_fetch_covers = current.auto_fetch_covers;
     incoming.cover_fetch_strategy = current.cover_fetch_strategy;
     incoming.server = current.server.clone();
@@ -336,6 +338,7 @@ fn stripped(config: &config::AppConfig) -> config::AppConfig {
     let mut view = with_daemon_owned_fields(config.clone(), &config::AppConfig::default());
     view.offline_tracks = config.offline_tracks.clone();
     view.volume = config.volume;
+    view.muted = config.muted;
     view.auto_fetch_covers = config.auto_fetch_covers;
     view.cover_fetch_strategy = config.cover_fetch_strategy;
     view.active_source = config.active_source.clone();
@@ -485,7 +488,7 @@ mod tests {
             seeded.clone(),
         );
 
-        service.set_volume(0.42).await.expect("set volume");
+        service.set_volume(0.42, false).await.expect("set volume");
 
         let stored = database
             .load_config()
@@ -515,7 +518,7 @@ mod tests {
             ConfigService::new(database.clone(), dir.path().join("settings.toml"), seeded);
         let snapshot = service.view().await.expect("view").config;
 
-        service.set_volume(0.2).await.expect("set volume");
+        service.set_volume(0.2, false).await.expect("set volume");
         let (view, updated, changed) = service.set(snapshot).await.expect("set");
 
         assert_eq!(view.config.volume, 0.2, "the view reports the live volume");

@@ -44,6 +44,7 @@ pub(super) fn sample_state() -> api::PlayerState {
             loop_mode: api::LoopMode::Queue,
         },
         volume: 0.8,
+        muted: true,
         buffered: vec![api::BufferedRange {
             start: 0,
             end: 4096,

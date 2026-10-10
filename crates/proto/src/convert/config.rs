@@ -600,6 +600,7 @@ pub fn config_to_proto(value: &config::AppConfig) -> Config {
         show_row_images: value.show_row_images,
         sidebar_order: value.sidebar_order.clone(),
         volume: value.volume,
+        muted: value.muted,
         volume_scroll_step: value.volume_scroll_step,
         crossfade_seconds: u32::from(value.crossfade_seconds),
         custom_themes: value
@@ -705,6 +706,7 @@ pub fn config_from_proto(value: &Config) -> config::AppConfig {
         show_row_images: value.show_row_images,
         sidebar_order: value.sidebar_order.clone(),
         volume: value.volume,
+        muted: value.muted,
         volume_scroll_step: value.volume_scroll_step,
         crossfade_seconds: value.crossfade_seconds.min(u32::from(u8::MAX)) as u8,
         custom_themes: value

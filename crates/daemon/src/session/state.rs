@@ -154,6 +154,7 @@ impl Session {
                 loop_mode: self.model.loop_mode(),
             },
             volume: self.volume,
+            muted: self.muted,
             output_latency_ms: Some(self.player.output_latency().as_millis() as u64),
             buffered: self.buffered.clone(),
             fading,

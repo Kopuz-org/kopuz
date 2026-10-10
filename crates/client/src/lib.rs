@@ -212,6 +212,11 @@ impl api::PlayerApi for GrpcApi {
                     .set_volume(Request::new(proto::SetVolume { volume }))
                     .await
             }
+            PlayerCommand::SetMuted { muted } => {
+                self.client()
+                    .set_muted(Request::new(proto::SetMuted { muted }))
+                    .await
+            }
             PlayerCommand::SetMode { shuffle, loop_mode } => {
                 self.client()
                     .set_mode(Request::new(proto::SetMode {

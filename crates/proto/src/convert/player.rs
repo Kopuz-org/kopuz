@@ -111,6 +111,7 @@ pub fn player_state_to_proto(value: &api::PlayerState) -> PlayerState {
         position: value.position.as_ref().map(anchor_to_proto),
         queue: Some(queue_summary_to_proto(&value.queue)),
         volume: value.volume,
+        muted: value.muted,
         buffered: value.buffered.iter().map(buffered_to_proto).collect(),
         fading: value.fading.as_ref().map(|fading| FadingState {
             from_token: fading.from_token,
@@ -136,6 +137,7 @@ pub fn player_state_from_proto(value: &PlayerState) -> api::PlayerState {
         position: value.position.as_ref().map(anchor_from_proto),
         queue: queue_summary_from_proto(value.queue.as_ref()),
         volume: value.volume,
+        muted: value.muted,
         buffered: value.buffered.iter().map(buffered_from_proto).collect(),
         // A fade with no outgoing track has nothing to keep on screen.
         fading: value.fading.as_ref().and_then(|fading| {

@@ -411,6 +411,73 @@ async fn replay_gain_auto_follows_shuffle_and_queue_edits() {
 }
 
 #[tokio::test]
+async fn muting_silences_output_and_unmuting_restores_the_level() {
+    let harness = harness(|config| config.volume = 1.0);
+    harness.api.set_queue(replace(&["a"])).await.unwrap();
+    wait_committed(&harness.api).await;
+    wait_replay_gain(&harness, 0.0).await;
+
+    harness
+        .api
+        .player_command(PlayerCommand::SetMuted { muted: true })
+        .await
+        .unwrap();
+    let state = harness.api.player_state().await.unwrap();
+    assert!(state.muted);
+    assert_eq!(state.volume, 1.0, "muting leaves the level alone");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let peak = harness
+            .sink
+            .pull(1024)
+            .into_iter()
+            .fold(0.0_f32, |p, s| p.max(s.abs()));
+        if peak < 1e-4 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "still audible: {peak}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    harness
+        .api
+        .player_command(PlayerCommand::SetMuted { muted: false })
+        .await
+        .unwrap();
+    let state = harness.api.player_state().await.unwrap();
+    assert!(!state.muted);
+    wait_replay_gain(&harness, 0.0).await;
+
+    harness
+        .api
+        .player_command(PlayerCommand::SetMuted { muted: true })
+        .await
+        .unwrap();
+    harness
+        .api
+        .player_command(PlayerCommand::SetVolume { volume: 0.4 })
+        .await
+        .unwrap();
+    let state = harness.api.player_state().await.unwrap();
+    assert!(!state.muted, "a new level unmutes");
+    assert_eq!(state.volume, 0.4);
+}
+
+#[tokio::test]
+async fn a_session_starts_muted_when_the_config_says_so() {
+    let harness = harness(|config| {
+        config.volume = 0.7;
+        config.muted = true;
+    });
+    let state = harness.api.player_state().await.unwrap();
+    assert!(state.muted);
+    assert_eq!(state.volume, 0.7);
+}
+
+#[tokio::test]
 async fn replay_gain_settings_reach_playing_audio_through_config_api() {
     let mut harness = harness(|config| config.volume = 1.0);
     let dir = tempfile::tempdir().unwrap();
@@ -1928,6 +1995,42 @@ async fn transport_commands_reach_the_integration_that_owns_playback() {
     );
 }
 
+/// An integration has no mute of its own, so muting it is a volume of zero and unmuting sends the level back.
+#[tokio::test]
+async fn muting_an_integration_zeroes_its_volume_and_unmuting_restores_it() {
+    let harness = harness(|_| {});
+    let stub = Arc::new(StubExternal::default());
+    harness.api.session.attach_external(stub.clone());
+    harness.api.session.report_external(crate::ExternalReport {
+        track: Some(external_track("remote")),
+        position_ms: 1000,
+        playing: true,
+        ..Default::default()
+    });
+    wait_state(&harness.api, "external track shown", |state| {
+        state.external.is_some()
+    })
+    .await;
+
+    for command in [
+        PlayerCommand::SetVolume { volume: 0.4 },
+        PlayerCommand::SetMuted { muted: true },
+        PlayerCommand::SetMuted { muted: false },
+    ] {
+        harness
+            .api
+            .player_command(command)
+            .await
+            .expect("command accepted");
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(stub.calls(), vec!["volume:0.4", "volume:0", "volume:0.4"]);
+    let state = harness.api.player_state().await.expect("state");
+    assert!(!state.muted);
+    assert_eq!(state.volume, 0.4);
+}
+
 /// Switching source replaces what is playing, an integration's device included, so commands stop reaching it.
 #[tokio::test]
 async fn switching_source_releases_the_integration_that_owned_playback() {
@@ -2309,6 +2412,52 @@ async fn the_shutdown_flush_persists_the_volume_the_debounce_still_holds() {
         0.2,
         "the engine's volume reaches the database"
     );
+}
+
+#[tokio::test]
+async fn the_shutdown_flush_persists_mute_without_touching_the_volume() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = db::init(&dir.path().join("mute.db")).await.expect("db");
+    let service = crate::ConfigService::new(
+        database.clone(),
+        dir.path().join("settings.toml"),
+        config::AppConfig {
+            volume: 0.8,
+            ..Default::default()
+        },
+    );
+    let player = Player::try_with_sink(Box::new(FakeSink(FakeSinkHandle::default())))
+        .expect("headless player starts");
+    let session = SessionHandle::spawn_with_factory(
+        Arc::new(StubLibrary),
+        player,
+        PlaybackServices {
+            config: config::AppConfig {
+                volume: 0.8,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        Arc::new(|track| Some(wav_factory(track.duration.min(6)))),
+    );
+    service
+        .mutate_state(&[], |_| {})
+        .await
+        .expect("seed the database");
+    LocalApi::new(session.clone())
+        .player_command(api::PlayerCommand::SetMuted { muted: true })
+        .await
+        .expect("mute");
+
+    crate::boot::flush_volume(&session, &service).await;
+
+    let stored = database
+        .load_config()
+        .await
+        .expect("load")
+        .expect("stored config");
+    assert!(stored.muted);
+    assert_eq!(stored.volume, 0.8);
 }
 
 /// Concurrent writers each save then hand the session a config; the session must end on the one saved last, and every save moves the revision.
